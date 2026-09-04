@@ -88,6 +88,7 @@ class PersonalContextMaterializer:
                             "sha256:" + hashlib.sha256(canonical_bytes(value)).hexdigest()
                         ),
                         purge_generation=purge_generation,
+                        wire_entity_version=str(envelope.entity_version),
                     )
                 receipt = service.apply_sync_ingress(
                     identity=identity,
@@ -104,8 +105,7 @@ class PersonalContextMaterializer:
                     raise ValueError("Personal Context ingress receipt is invalid")
                 store.mark_personal_context_ingress_applied(
                     server_cursor=envelope.server_cursor,
-                    expected_client_envelope_id=envelope.client_envelope_id,
-                    canonical_receipt_id=receipt.receipt_id,
+                    receipt=receipt,
                 )
                 ingress_receipt_applied = True
             else:
@@ -233,7 +233,7 @@ def _valid_ingress_receipt(
         and receipt.canonical_payload_digest == identity.canonical_payload_digest
         and receipt.purge_generation == purge_generation
         and receipt.resulting_object_id == envelope.object_id
-        and receipt.resulting_version_id == str(envelope.entity_version)
+        and receipt.wire_entity_version == str(envelope.entity_version)
         and bool(receipt.publication_batch_id)
         and receipt.profile_publication_sequence > 0
         and receipt.manifest_revision >= 0

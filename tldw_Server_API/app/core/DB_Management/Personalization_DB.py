@@ -356,6 +356,7 @@ class PersonalizationDB:
                         client_envelope_id TEXT NOT NULL,
                         canonical_payload_digest TEXT NOT NULL,
                         purge_generation INTEGER NOT NULL CHECK (purge_generation >= 0),
+                        wire_entity_version TEXT NOT NULL,
                         resulting_object_id TEXT NOT NULL,
                         resulting_version_id TEXT NOT NULL,
                         resulting_manifest_revision INTEGER NOT NULL CHECK (resulting_manifest_revision >= 0),
@@ -447,6 +448,11 @@ class PersonalizationDB:
             ("companion_goals", "progress_mode", "TEXT NOT NULL DEFAULT 'manual'"),
             ("companion_goals", "derivation_key", "TEXT"),
             ("companion_goals", "evidence_json", "TEXT NOT NULL DEFAULT '[]'"),
+            (
+                "personal_context_ingress_receipts",
+                "wire_entity_version",
+                "TEXT NOT NULL DEFAULT ''",
+            ),
         ]
         with self._lock:
             conn = self._connect()

@@ -96,6 +96,7 @@ def _ingress(service: PersonalContextService, envelope_id: str) -> dict[str, obj
             client_envelope_id=envelope_id,
             canonical_payload_digest=_digest(record),
             purge_generation=0,
+            wire_entity_version=record.version_id,
         ),
         "domain": "personal_context.record",
         "value": record,
@@ -108,12 +109,20 @@ def _digest(value: object) -> str:
 
 
 def _identity(value: object, envelope_id: str) -> IngressIdentity:
+    wire_entity_version = getattr(value, "version_id", None) or getattr(
+        value, "current_version_id", None
+    )
+    if isinstance(value, ProfileProposal):
+        wire_entity_version = "sync-proposal-sha256:" + hashlib.sha256(
+            canonical_bytes(value)
+        ).hexdigest()
     return IngressIdentity(
         dataset_id="dataset-a",
         device_id="device-a",
         client_envelope_id=envelope_id,
         canonical_payload_digest=_digest(value),
         purge_generation=0,
+        wire_entity_version=str(wire_entity_version),
     )
 
 
@@ -301,6 +310,16 @@ def test_ingress_rejects_a_second_global_scope_and_accepts_pending_to_terminal_p
     )
 
     assert receipt.resulting_object_id == pending.proposal_id
+    expected_wire_version = "sync-proposal-sha256:" + hashlib.sha256(
+        canonical_bytes(terminal)
+    ).hexdigest()
+    assert receipt.wire_entity_version == expected_wire_version
+    assert service.apply_sync_ingress(
+        identity=_identity(terminal, "proposal-terminal"),
+        domain="personal_context.proposal",
+        value=terminal,
+        base_object_hash=_digest(pending),
+    ) == receipt
     assert service._repository.get_proposal(manifest.profile_id, pending.proposal_id) == terminal
 
 

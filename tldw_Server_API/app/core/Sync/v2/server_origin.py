@@ -51,10 +51,7 @@ def insert_personal_context_authority(
     )
     if stored.server_cursor is None:
         raise SyncStoreError("Personal Context authority receipt is unavailable")
-    return service.store.mark_envelope_apply_status(
-        stored.server_cursor,
-        apply_status="applied",
-    )
+    return stored
 
 
 class SyncServerOriginMaterializationError(SyncStoreError):

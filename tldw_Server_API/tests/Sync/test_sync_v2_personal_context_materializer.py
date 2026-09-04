@@ -65,6 +65,7 @@ class _RecordingService:
             device_id=identity.device_id,
             client_envelope_id=identity.client_envelope_id,
             canonical_payload_digest=identity.canonical_payload_digest,
+            wire_entity_version=identity.wire_entity_version,
         )
 
 
@@ -103,11 +104,10 @@ class _Store:
         self,
         *,
         server_cursor: int,
-        expected_client_envelope_id: str,
-        canonical_receipt_id: str,
+        receipt: CanonicalApplyReceipt,
     ) -> None:
-        assert expected_client_envelope_id == "device-a:record-a:1"
-        assert canonical_receipt_id == str(
+        assert receipt.client_envelope_id == "device-a:record-a:1"
+        assert receipt.receipt_id == str(
             uuid.uuid5(
                 uuid.NAMESPACE_URL,
                 "tldw:personal-context:ingress:dataset-a:device-a:device-a:record-a:1",

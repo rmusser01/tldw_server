@@ -423,6 +423,23 @@ CREATE TABLE IF NOT EXISTS sync_envelopes (
     applied_at TEXT,
     UNIQUE (dataset_id, client_envelope_id)
 );
+CREATE TABLE IF NOT EXISTS sync_personal_context_ingress_receipts (
+    server_sequence INTEGER PRIMARY KEY,
+    dataset_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    client_envelope_id TEXT NOT NULL,
+    canonical_payload_digest TEXT NOT NULL,
+    purge_generation INTEGER NOT NULL,
+    resulting_object_id TEXT NOT NULL,
+    resulting_internal_version_id TEXT NOT NULL,
+    manifest_revision INTEGER NOT NULL,
+    manifest_version_id TEXT NOT NULL,
+    publication_batch_id TEXT NOT NULL,
+    profile_publication_sequence INTEGER NOT NULL,
+    receipt_id TEXT NOT NULL UNIQUE,
+    wire_entity_version TEXT NOT NULL,
+    FOREIGN KEY (server_sequence) REFERENCES sync_envelopes(server_sequence)
+);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_sequence
     ON sync_envelopes(dataset_id, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_sequence
@@ -1016,6 +1033,22 @@ CREATE TABLE IF NOT EXISTS sync_envelopes (
     apply_error_message TEXT,
     applied_at TIMESTAMPTZ,
     UNIQUE (dataset_id, client_envelope_id)
+);
+CREATE TABLE IF NOT EXISTS sync_personal_context_ingress_receipts (
+    server_sequence BIGINT PRIMARY KEY REFERENCES sync_envelopes(server_sequence),
+    dataset_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    client_envelope_id TEXT NOT NULL,
+    canonical_payload_digest TEXT NOT NULL,
+    purge_generation INTEGER NOT NULL,
+    resulting_object_id TEXT NOT NULL,
+    resulting_internal_version_id TEXT NOT NULL,
+    manifest_revision BIGINT NOT NULL,
+    manifest_version_id TEXT NOT NULL,
+    publication_batch_id TEXT NOT NULL,
+    profile_publication_sequence BIGINT NOT NULL,
+    receipt_id TEXT NOT NULL UNIQUE,
+    wire_entity_version TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_sequence
     ON sync_envelopes(dataset_id, server_sequence);
@@ -7937,6 +7970,25 @@ class SyncDatabase:
         )
         return _envelope_from_row(row) if row is not None else None
 
+    def get_envelope_by_client_id(
+        self,
+        dataset_id: str,
+        client_envelope_id: str,
+        *,
+        connection: Any | None = None,
+    ) -> SyncEnvelope | None:
+        """Return one exact dataset-scoped idempotency envelope without a fingerprint guess."""
+
+        row = _first(
+            self.execute(
+                "SELECT * FROM sync_envelopes "
+                "WHERE dataset_id = ? AND client_envelope_id = ?",
+                (dataset_id, client_envelope_id),
+                connection=connection,
+            )
+        )
+        return _envelope_from_row(row) if row is not None else None
+
     def get_object_state(
         self,
         dataset_id: str,
@@ -8155,6 +8207,101 @@ class SyncDatabase:
             )
         if row is None:
             raise SyncStoreError(f"Sync envelope not found for server cursor: {server_cursor}")
+        return _envelope_from_row(row)
+
+    def mark_personal_context_ingress_applied(
+        self,
+        *,
+        server_cursor: int,
+        receipt: Mapping[str, Any],
+        connection: Any | None = None,
+    ) -> SyncEnvelope:
+        """Persist the exact canonical receipt and terminalize ingress atomically."""
+
+        fields = (
+            "dataset_id",
+            "device_id",
+            "client_envelope_id",
+            "canonical_payload_digest",
+            "purge_generation",
+            "resulting_object_id",
+            "resulting_version_id",
+            "manifest_revision",
+            "manifest_version_id",
+            "publication_batch_id",
+            "profile_publication_sequence",
+            "receipt_id",
+            "wire_entity_version",
+        )
+        values = tuple(receipt[name] for name in fields)
+        with self.backend.transaction(connection) as conn:
+            envelope = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (server_cursor,),
+                    connection=conn,
+                )
+            )
+            if (
+                envelope is None
+                or envelope["dataset_id"] != receipt["dataset_id"]
+                or envelope.get("device_id") != receipt["device_id"]
+                or envelope["client_envelope_id"] != receipt["client_envelope_id"]
+                or _version_from_storage(envelope.get("entity_version"))
+                != receipt["wire_entity_version"]
+            ):
+                raise SyncStoreError("personal_context_ingress_receipt_mismatch")
+            self.execute(
+                """
+                INSERT INTO sync_personal_context_ingress_receipts(
+                    server_sequence, dataset_id, device_id, client_envelope_id,
+                    canonical_payload_digest, purge_generation, resulting_object_id,
+                    resulting_internal_version_id, manifest_revision,
+                    manifest_version_id, publication_batch_id,
+                    profile_publication_sequence, receipt_id, wire_entity_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (server_sequence) DO NOTHING
+                """,
+                (server_cursor, *values),
+                connection=conn,
+            )
+            stored_receipt = _first(
+                self.execute(
+                    "SELECT * FROM sync_personal_context_ingress_receipts "
+                    "WHERE server_sequence = ?",
+                    (server_cursor,),
+                    connection=conn,
+                )
+            )
+            expected = (server_cursor, *values)
+            actual = tuple(stored_receipt.get(name) for name in ("server_sequence", *(
+                "dataset_id", "device_id", "client_envelope_id",
+                "canonical_payload_digest", "purge_generation", "resulting_object_id",
+                "resulting_internal_version_id", "manifest_revision", "manifest_version_id",
+                "publication_batch_id", "profile_publication_sequence", "receipt_id",
+                "wire_entity_version",
+            ))) if stored_receipt is not None else ()
+            if actual != expected:
+                raise SyncStoreError("personal_context_ingress_receipt_mismatch")
+            self.execute(
+                """
+                UPDATE sync_envelopes
+                   SET apply_status = 'applied', apply_error_code = NULL,
+                       apply_error_message = NULL, applied_at = ?
+                 WHERE server_sequence = ? AND apply_status IN ('pending', 'applied')
+                """,
+                (utcnow_iso(), server_cursor),
+                connection=conn,
+            )
+            row = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (server_cursor,),
+                    connection=conn,
+                )
+            )
+            if row is None or row.get("apply_status") != "applied":
+                raise SyncStoreError("personal_context_ingress_receipt_mismatch")
         return _envelope_from_row(row)
 
     def mark_bootstrap_envelope_verified(

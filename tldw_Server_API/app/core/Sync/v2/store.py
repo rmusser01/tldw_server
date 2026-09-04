@@ -978,21 +978,38 @@ class SyncV2Store:
         self,
         *,
         server_cursor: int,
-        expected_client_envelope_id: str,
-        canonical_receipt_id: str,
+        receipt: Any,
     ) -> SyncEnvelope:
         """Terminalize only the exact ingress whose canonical receipt was verified."""
 
         envelope = self.get_envelope_by_server_cursor(server_cursor)
         if (
             envelope is None
-            or envelope.client_envelope_id != expected_client_envelope_id
-            or not canonical_receipt_id.strip()
+            or envelope.client_envelope_id != receipt.client_envelope_id
+            or not receipt.receipt_id.strip()
             or envelope.authority is None
             or envelope.authority.role != "client_ingress"
         ):
             raise SyncStoreError("personal_context_ingress_receipt_mismatch")
-        return self.mark_envelope_apply_status(server_cursor, apply_status="applied")
+        return self.db.mark_personal_context_ingress_applied(
+            server_cursor=server_cursor,
+            receipt={
+                "dataset_id": receipt.dataset_id,
+                "device_id": receipt.device_id,
+                "client_envelope_id": receipt.client_envelope_id,
+                "canonical_payload_digest": receipt.canonical_payload_digest,
+                "purge_generation": receipt.purge_generation,
+                "resulting_object_id": receipt.resulting_object_id,
+                "resulting_version_id": receipt.resulting_version_id,
+                "manifest_revision": receipt.manifest_revision,
+                "manifest_version_id": receipt.manifest_version_id,
+                "publication_batch_id": receipt.publication_batch_id,
+                "profile_publication_sequence": receipt.profile_publication_sequence,
+                "receipt_id": receipt.receipt_id,
+                "wire_entity_version": receipt.wire_entity_version,
+            },
+            connection=self._connection,
+        )
 
     def summarize_domain_envelopes(
         self,
@@ -1079,6 +1096,19 @@ class SyncV2Store:
     def get_envelope_by_server_cursor(self, server_cursor: int) -> SyncEnvelope | None:
         return self.db.get_envelope_by_server_cursor(
             server_cursor,
+            connection=self._connection,
+        )
+
+    def get_envelope_by_client_id(
+        self,
+        dataset_id: str,
+        client_envelope_id: str,
+    ) -> SyncEnvelope | None:
+        """Resolve a deterministic envelope ID before reconstructing its original CAS base."""
+
+        return self.db.get_envelope_by_client_id(
+            dataset_id,
+            client_envelope_id,
             connection=self._connection,
         )
 

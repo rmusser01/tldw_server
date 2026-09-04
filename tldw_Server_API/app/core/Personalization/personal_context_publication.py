@@ -52,6 +52,7 @@ class IngressIdentity:
     client_envelope_id: str
     canonical_payload_digest: str
     purge_generation: int
+    wire_entity_version: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +81,7 @@ class CanonicalApplyReceipt:
     device_id: str
     client_envelope_id: str
     canonical_payload_digest: str
+    wire_entity_version: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -393,10 +395,24 @@ class PersonalContextPublicationRelayStore:
                 sync_server_cursor=server_cursor,
             )
 
-    def complete_if_acknowledged(self, batch: PublicationSourceBatch) -> bool:
+    def complete_if_acknowledged(
+        self,
+        batch: PublicationSourceBatch,
+        *,
+        lease: PublicationRelayLease,
+    ) -> bool:
         """Advance a batch terminally only once every row has a durable receipt."""
 
         with self._database.transaction(immediate=True) as connection:
+            lease_row = connection.execute(
+                """
+                SELECT 1 FROM personal_context_publication_relay_leases
+                WHERE profile_id = ? AND owner_token = ? AND expires_at_ns > ?
+                """,
+                (lease.profile_id, lease.owner_token, time.time_ns()),
+            ).fetchone()
+            if lease.profile_id != batch.profile_id or lease_row is None:
+                return False
             pending = connection.execute(
                 """
                 SELECT 1 FROM personal_context_publication_rows
@@ -408,7 +424,7 @@ class PersonalContextPublicationRelayStore:
             ).fetchone()
             if pending is not None:
                 return False
-            connection.execute(
+            updated = connection.execute(
                 """
                 UPDATE personal_context_publication_batches
                 SET status = 'complete', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
@@ -417,7 +433,7 @@ class PersonalContextPublicationRelayStore:
                 """,
                 (batch.profile_id, batch.profile_publication_sequence),
             )
-            return True
+            return updated.rowcount == 1
 
 
 class PersonalContextPublicationJournal:
@@ -630,12 +646,12 @@ class PersonalContextPublicationJournal:
                 """
                 INSERT INTO personal_context_ingress_receipts(
                     dataset_id, device_id, client_envelope_id,
-                    canonical_payload_digest, purge_generation,
+                    canonical_payload_digest, purge_generation, wire_entity_version,
                     resulting_object_id, resulting_version_id,
                     resulting_manifest_revision, resulting_manifest_version_id,
                     publication_batch_id, profile_publication_sequence, receipt_id,
                     created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     ingress.dataset_id,
@@ -643,6 +659,7 @@ class PersonalContextPublicationJournal:
                     ingress.client_envelope_id,
                     ingress.canonical_payload_digest,
                     ingress.purge_generation,
+                    ingress.wire_entity_version,
                     result.object_id,
                     result.version_id,
                     manifest.revision,
@@ -819,6 +836,7 @@ class PersonalContextPublicationJournal:
         if (
             str(row["canonical_payload_digest"]) != identity.canonical_payload_digest
             or int(row["purge_generation"]) != identity.purge_generation
+            or str(row["wire_entity_version"]) != identity.wire_entity_version
         ):
             raise ValueError("ingress identity reused with a different payload")
         return CanonicalApplyReceipt(
@@ -834,4 +852,5 @@ class PersonalContextPublicationJournal:
             device_id=str(row["device_id"]),
             client_envelope_id=str(row["client_envelope_id"]),
             canonical_payload_digest=str(row["canonical_payload_digest"]),
+            wire_entity_version=str(row["wire_entity_version"]),
         )

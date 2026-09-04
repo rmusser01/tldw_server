@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import sqlite3
 import uuid
 from dataclasses import replace
 from pathlib import Path
@@ -77,6 +78,7 @@ class _RecordingService:
             device_id=identity.device_id,
             client_envelope_id=identity.client_envelope_id,
             canonical_payload_digest=identity.canonical_payload_digest,
+            wire_entity_version=identity.wire_entity_version,
         )
 
 
@@ -229,6 +231,16 @@ def test_two_version_push_satisfies_sync_cas_and_encrypts_transport_history(
     assert replayed.conflicts == []
     assert replayed.accepted[0].server_sequence == first_cursor
     assert len(target.values) == 1
+    with sqlite3.connect(sqlite_path) as connection:
+        receipt = connection.execute(
+            "SELECT * FROM sync_personal_context_ingress_receipts "
+            "WHERE server_sequence = ?",
+            (first_cursor,),
+        ).fetchone()
+    assert receipt is not None
+    assert receipt[3] == "device-a:record:1"
+    assert receipt[7] == str(first_payload["version_id"])
+    assert receipt[13] == str(first_payload["version_id"])
     second_payload = preference_record(
         version_id="record-v2",
         parent_version_id=str(first_payload["version_id"]),

@@ -201,6 +201,7 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
             publication_service._repository.database
         ),
         stage_authority=service.stage_personal_context_authority,
+        finalize_authority=service.finalize_personal_context_authority,
     )
     def relay_after_commit(profile_id: str) -> None:
         """Best-effort recovery hook; durable journal debt survives all failures."""

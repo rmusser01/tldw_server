@@ -880,6 +880,14 @@ class PersonalContextRepository:
                 canonical_input = manifest
             if identity.canonical_payload_digest != self._canonical_digest(canonical_input):
                 raise ValueError("ingress canonical payload digest is invalid")
+            expected_wire_version = (
+                "sync-proposal-sha256:"
+                + hashlib.sha256(canonical_bytes(canonical_input)).hexdigest()
+                if object_type == "proposal"
+                else version_id
+            )
+            if identity.wire_entity_version != expected_wire_version:
+                raise ValueError("ingress wire entity version is invalid")
             replay = PersonalContextPublicationJournal.read_ingress_receipt(
                 connection, identity
             )
@@ -914,6 +922,7 @@ class PersonalContextRepository:
                     device_id=identity.device_id,
                     client_envelope_id=identity.client_envelope_id,
                     canonical_payload_digest=identity.canonical_payload_digest,
+                    wire_entity_version=identity.wire_entity_version,
                 )
             existing = self._head_row(connection, profile_id, object_type, object_id)
             expected_version = None if existing is None else str(existing["version_id"])
@@ -1076,6 +1085,7 @@ class PersonalContextRepository:
                 device_id=identity.device_id,
                 client_envelope_id=identity.client_envelope_id,
                 canonical_payload_digest=identity.canonical_payload_digest,
+                wire_entity_version=identity.wire_entity_version,
             )
 
     def get_scope(self, profile_id: str, scope_id: str) -> ProfileScope | None:
