@@ -1050,6 +1050,7 @@ class SyncV2Store:
                         integrity_key_id=integrity_key_id,
                         purge_generation=purge_generation,
                         authority_verifier=authority_verifier,
+                        budget=budget,
                     )
                     if not budget.deadline_open():
                         bounded = True
@@ -1092,12 +1093,13 @@ class SyncV2Store:
         integrity_key_id: str | None,
         purge_generation: int | None,
         authority_verifier: Callable[[SyncEnvelope], bool] | None = None,
+        budget: PersonalContextRecoveryBudget | None = None,
     ) -> Literal["hidden", "authority", "barrier"]:
         """Classify a raw Personal Context row using durable provenance facts."""
 
         if _personal_context_row_is_structurally_shredded(envelope):
             return "hidden"
-        if self._personal_context_ingress_is_attested(envelope):
+        if self._personal_context_ingress_is_attested(envelope, budget=budget):
             return "hidden"
 
         routing = envelope.routing_metadata
@@ -1135,14 +1137,23 @@ class SyncV2Store:
     def _personal_context_ingress_is_attested(
         self,
         envelope: SyncEnvelope,
+        *,
+        budget: PersonalContextRecoveryBudget | None = None,
     ) -> bool:
         cursor = envelope.server_cursor
         if cursor is None:
             return False
+        if budget is not None and not budget.can_inspect():
+            return False
         receipt = self.get_personal_context_ingress_receipt(cursor)
+        if budget is not None:
+            if receipt is not None and not budget.consume_returned():
+                return False
+            if not budget.deadline_open():
+                return False
         authority = envelope.authority
         return bool(
-            receipt is not None
+            isinstance(receipt, Mapping)
             and envelope.status == "accepted"
             and envelope.apply_status == "applied"
             and authority is not None

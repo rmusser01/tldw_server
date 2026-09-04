@@ -270,24 +270,6 @@ class PersonalContextPublicationRelayStore:
                         return None
                 return found
 
-            def unique_proof(
-                sql: str,
-                values: tuple[object, ...],
-            ) -> sqlite3.Row | None:
-                if budget is not None and (
-                    not budget.can_inspect() or budget.remaining_rows < 2
-                ):
-                    return None
-                found = connection.execute(sql, (*values, 2)).fetchall()
-                if budget is not None:
-                    deadline_open = True
-                    for _proof in found:
-                        if not budget.consume_returned():
-                            deadline_open = False
-                    if not deadline_open or not budget.deadline_open():
-                        return None
-                return found[0] if len(found) == 1 else None
-
             receipt = one_proof(
                 """
                 SELECT * FROM personal_context_ingress_receipts
@@ -304,15 +286,31 @@ class PersonalContextPublicationRelayStore:
             )
             if batch is None:
                 return None
+            # The table PK makes this exact ordinal lookup return at most one row;
+            # the anti-sibling clause retains fail-closed duplicate-role detection.
             manifest = (
                 row
                 if row.role == "manifest"
-                else unique_proof(
-                """SELECT * FROM personal_context_publication_rows
-                   WHERE profile_id = ? AND profile_publication_sequence = ?
-                     AND role = 'manifest'
-                   LIMIT ?""",
-                (row.profile_id, row.profile_publication_sequence),
+                else one_proof(
+                    """SELECT companion.*
+                       FROM personal_context_publication_rows AS companion
+                       WHERE companion.profile_id = ?
+                         AND companion.profile_publication_sequence = ?
+                         AND companion.batch_ordinal = ?
+                         AND NOT EXISTS (
+                             SELECT 1
+                             FROM personal_context_publication_rows AS sibling
+                             WHERE sibling.profile_id = companion.profile_id
+                               AND sibling.profile_publication_sequence =
+                                   companion.profile_publication_sequence
+                               AND sibling.role = 'manifest'
+                               AND sibling.batch_ordinal != companion.batch_ordinal
+                         )""",
+                    (
+                        row.profile_id,
+                        row.profile_publication_sequence,
+                        row.batch_size - 1,
+                    ),
                 )
             )
         if manifest is None:
@@ -328,6 +326,30 @@ class PersonalContextPublicationRelayStore:
         )
         manifest_matches = (
             (
+                manifest.role
+                if isinstance(manifest, PublicationSourceRow)
+                else str(manifest["role"])
+            )
+            == "manifest"
+            and (
+                manifest.profile_id
+                if isinstance(manifest, PublicationSourceRow)
+                else str(manifest["profile_id"])
+            )
+            == row.profile_id
+            and (
+                manifest.profile_publication_sequence
+                if isinstance(manifest, PublicationSourceRow)
+                else int(manifest["profile_publication_sequence"])
+            )
+            == row.profile_publication_sequence
+            and (
+                manifest.batch_ordinal
+                if isinstance(manifest, PublicationSourceRow)
+                else int(manifest["batch_ordinal"])
+            )
+            == row.batch_size - 1
+            and (
                 manifest.publication_batch_id
                 if isinstance(manifest, PublicationSourceRow)
                 else str(manifest["publication_batch_id"])

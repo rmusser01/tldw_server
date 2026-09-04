@@ -27,6 +27,7 @@ from tldw_Server_API.app.core.Sync.v2.service import (
 from tldw_Server_API.tests.Sync.test_sync_v2_personal_context_authority_identity import (
     AuthorityHarness,
     IngressHarness,
+    PurgeIngressHarness,
 )
 from tldw_Server_API.tests.Sync.test_sync_v2_personal_context_transport import (
     DATASET_ID,
@@ -49,7 +50,13 @@ class _ManualClock:
         return self.now_ns
 
 
-def _pull_cursor(service: Any, *, after: int, signed: bool) -> str | int:
+def _pull_cursor(
+    service: Any,
+    *,
+    after: int,
+    signed: bool,
+    domain: str = DOMAIN,
+) -> str | int:
     if not signed:
         return after
     service.settings = replace(
@@ -61,11 +68,17 @@ def _pull_cursor(service: Any, *, after: int, signed: bool) -> str | int:
         dataset_id="dataset-a",
         device_id="device-a",
         version_set=service._pull_version_set(device),
-        watermarks={(DOMAIN, 1): after},
+        watermarks={(domain, 1): after},
     )
 
 
-def _pulled_watermark(service: Any, result: Any, *, signed: bool) -> int:
+def _pulled_watermark(
+    service: Any,
+    result: Any,
+    *,
+    signed: bool,
+    domain: str = DOMAIN,
+) -> int:
     if not signed:
         return int(result.next_cursor)
     device = service._require_registered_device("user-a", "device-a")
@@ -74,9 +87,9 @@ def _pulled_watermark(service: Any, result: Any, *, signed: bool) -> int:
         dataset_id="dataset-a",
         device_id="device-a",
         version_set=service._pull_version_set(device),
-        streams=[(DOMAIN, 1)],
+        streams=[(domain, 1)],
     )
-    return decoded[(DOMAIN, 1)]
+    return decoded[(domain, 1)]
 
 
 def _complete_real_authority(runtime: AuthorityHarness) -> int:
@@ -158,6 +171,67 @@ def _ingress_authorities(runtime: IngressHarness) -> tuple[Any, Any]:
     return semantic, manifest
 
 
+def _complete_purge_authority(runtime: PurgeIngressHarness) -> Any:
+    key_id, _integrity_key = runtime.canonical.sync_integrity_key(
+        runtime.manifest.profile_id
+    )
+    runtime.service.register_device(
+        user_id="user-a",
+        display_name="device-a",
+        client_type="chatbook",
+        device_id="device-a",
+        capabilities={
+            "supported_adapter_versions": {
+                domain: [1]
+                for domain in runtime.store.get_dataset("dataset-a").domains
+            }
+        },
+    )
+    runtime.store.complete_personal_context_link_receipt(
+        user_id="user-a",
+        dataset_id="dataset-a",
+        device_id="device-a",
+        profile_id=runtime.manifest.profile_id,
+        integrity_key_id=key_id,
+        purge_generation=0,
+        bootstrap_cursor="fixture-cursor",
+    )
+    with runtime.publications.profile_lease(runtime.manifest.profile_id) as lease:
+        assert lease is not None
+        batch = runtime.publications.earliest_nonterminal_batch(
+            runtime.manifest.profile_id,
+            row_limit=100,
+        )
+        assert batch is not None
+        source = next(row for row in batch.rows if row.role == "purge_barrier")
+        row = replace(source, relay_owner_token=lease.owner_token)
+        receipt = runtime.service.stage_personal_context_authority(
+            row,
+            "dataset-a",
+            "user-a",
+        )
+        runtime.publications.record_staged_row(
+            row,
+            server_cursor=receipt.server_cursor,
+            lease=lease,
+        )
+        runtime.publications.acknowledge_row(
+            row,
+            server_cursor=receipt.server_cursor,
+            lease=lease,
+        )
+        runtime.service.finalize_personal_context_authority(
+            row,
+            receipt,
+            "dataset-a",
+            "user-a",
+        )
+    authority = runtime.store.get_envelope_by_server_cursor(receipt.server_cursor)
+    assert authority is not None
+    assert authority.server_cursor is not None
+    return authority
+
+
 class _ProofConnection:
     def __init__(self, connection: Any, tracker: _ProofQueryTracker) -> None:
         self._connection = connection
@@ -220,6 +294,7 @@ def _pull_one_ingress_authority(
     authority: Any,
     *,
     relay_rows: int,
+    signed: bool = False,
 ) -> tuple[Any, _BudgetConsumingRelay]:
     relay = _BudgetConsumingRelay(relay_rows)
     runtime.service.personal_context_relay = relay
@@ -233,7 +308,12 @@ def _pull_one_ingress_authority(
         dataset_id="dataset-a",
         device_id="device-a",
         domains=[authority.domain],
-        cursor=authority.server_cursor - 1,
+        cursor=_pull_cursor(
+            runtime.service,
+            after=authority.server_cursor - 1,
+            signed=signed,
+            domain=authority.domain,
+        ),
         include_own_changes=True,
         personal_context_exchange=EXCHANGE,
     )
@@ -301,6 +381,207 @@ class _BudgetConsumingRelay:
         )
 
 
+@pytest.mark.parametrize("signed", [False, True], ids=["legacy", "signed"])
+def test_attested_hidden_ingress_receipt_can_be_exact_row_one_hundred(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    signed: bool,
+) -> None:
+    """Raw row 99 plus its exact receipt row 100 is a safe inspected prefix."""
+
+    service, _target, _sqlite_path = _service(tmp_path)
+    relay = _BudgetConsumingRelay(98)
+    service.personal_context_relay = relay
+    service._recovery_clock_ns = _ManualClock()
+    hidden_cursor = _insert_hidden_ingress(service, ordinal=1)
+    original = service.store.get_personal_context_ingress_receipt
+    receipt_calls: list[int] = []
+
+    def record_receipt(cursor: int):
+        receipt_calls.append(cursor)
+        return original(cursor)
+
+    monkeypatch.setattr(
+        service.store,
+        "get_personal_context_ingress_receipt",
+        record_receipt,
+    )
+
+    pulled = service.pull(
+        user_id="user-a",
+        dataset_id=DATASET_ID,
+        device_id="device-a",
+        domains=[DOMAIN],
+        cursor=_pull_cursor(service, after=0, signed=signed),
+        include_own_changes=True,
+        personal_context_exchange=EXCHANGE,
+    )
+
+    assert _pulled_watermark(service, pulled, signed=signed) == hidden_cursor
+    assert pulled.envelopes == []
+    assert relay.budgets[0].remaining_rows == 0
+    assert receipt_calls == [hidden_cursor]
+
+
+@pytest.mark.parametrize("signed", [False, True], ids=["legacy", "signed"])
+def test_attested_hidden_ingress_receipt_row_one_hundred_one_is_not_queried(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    signed: bool,
+) -> None:
+    """Raw row 100 is a barrier when its receipt would exceed the allowance."""
+
+    service, _target, _sqlite_path = _service(tmp_path)
+    relay = _BudgetConsumingRelay(99)
+    service.personal_context_relay = relay
+    service._recovery_clock_ns = _ManualClock()
+    _insert_hidden_ingress(service, ordinal=1)
+    original = service.store.get_personal_context_ingress_receipt
+    receipt_calls: list[int] = []
+
+    def record_receipt(cursor: int):
+        receipt_calls.append(cursor)
+        return original(cursor)
+
+    monkeypatch.setattr(
+        service.store,
+        "get_personal_context_ingress_receipt",
+        record_receipt,
+    )
+
+    pulled = service.pull(
+        user_id="user-a",
+        dataset_id=DATASET_ID,
+        device_id="device-a",
+        domains=[DOMAIN],
+        cursor=_pull_cursor(service, after=0, signed=signed),
+        include_own_changes=True,
+        personal_context_exchange=EXCHANGE,
+    )
+
+    assert _pulled_watermark(service, pulled, signed=signed) == 0
+    assert pulled.envelopes == []
+    assert pulled.has_more is True
+    assert relay.budgets[0].remaining_rows == 0
+    assert receipt_calls == []
+
+
+@pytest.mark.parametrize("signed", [False, True], ids=["legacy", "signed"])
+@pytest.mark.parametrize("receipt_state", ["mismatched", "malformed"])
+def test_rejected_hidden_ingress_receipt_is_charged_and_remains_a_barrier(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    signed: bool,
+    receipt_state: str,
+) -> None:
+    """A returned but unusable receipt spends one row without advancing."""
+
+    service, _target, _sqlite_path = _service(tmp_path)
+    relay = _BudgetConsumingRelay(98)
+    service.personal_context_relay = relay
+    service._recovery_clock_ns = _ManualClock()
+    hidden_cursor = _insert_hidden_ingress(service, ordinal=1)
+    original = service.store.get_personal_context_ingress_receipt
+    receipt_calls: list[int] = []
+
+    if receipt_state == "mismatched":
+        with service.store.db.backend.transaction() as connection:
+            service.store.db.execute(
+                "UPDATE sync_personal_context_ingress_receipts "
+                "SET client_envelope_id = ? WHERE server_sequence = ?",
+                ("different-ingress", hidden_cursor),
+                connection=connection,
+            )
+
+    def returned_receipt(cursor: int):
+        receipt_calls.append(cursor)
+        if receipt_state == "malformed":
+            return {}
+        return original(cursor)
+
+    monkeypatch.setattr(
+        service.store,
+        "get_personal_context_ingress_receipt",
+        returned_receipt,
+    )
+
+    pulled = service.pull(
+        user_id="user-a",
+        dataset_id=DATASET_ID,
+        device_id="device-a",
+        domains=[DOMAIN],
+        cursor=_pull_cursor(service, after=0, signed=signed),
+        include_own_changes=True,
+        personal_context_exchange=EXCHANGE,
+    )
+
+    assert _pulled_watermark(service, pulled, signed=signed) == 0
+    assert pulled.envelopes == []
+    assert relay.budgets[0].remaining_rows == 0
+    assert receipt_calls == [hidden_cursor]
+
+
+@pytest.mark.parametrize("signed", [False, True], ids=["legacy", "signed"])
+@pytest.mark.parametrize("deadline", ["before-receipt", "after-receipt"])
+def test_hidden_ingress_receipt_obeys_incremental_deadline_fences(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    signed: bool,
+    deadline: str,
+) -> None:
+    """Receipt I/O is pre-fenced and any returned expired row is still charged."""
+
+    service, _target, _sqlite_path = _service(tmp_path)
+    relay = _BudgetConsumingRelay(98)
+    service.personal_context_relay = relay
+    clock = _ManualClock()
+    service._recovery_clock_ns = clock
+    hidden_cursor = _insert_hidden_ingress(service, ordinal=1)
+    original_receipt = service.store.get_personal_context_ingress_receipt
+    original_classify = service.store.classify_personal_context_recovery_row
+    receipt_calls: list[int] = []
+
+    def receipt(cursor: int):
+        receipt_calls.append(cursor)
+        result = original_receipt(cursor)
+        if deadline == "after-receipt":
+            clock.now_ns = 100_000_000
+        return result
+
+    def classify(*args: Any, **kwargs: Any):
+        if deadline == "before-receipt":
+            clock.now_ns = 100_000_000
+        return original_classify(*args, **kwargs)
+
+    monkeypatch.setattr(
+        service.store,
+        "get_personal_context_ingress_receipt",
+        receipt,
+    )
+    monkeypatch.setattr(
+        service.store,
+        "classify_personal_context_recovery_row",
+        classify,
+    )
+
+    pulled = service.pull(
+        user_id="user-a",
+        dataset_id=DATASET_ID,
+        device_id="device-a",
+        domains=[DOMAIN],
+        cursor=_pull_cursor(service, after=0, signed=signed),
+        include_own_changes=True,
+        personal_context_exchange=EXCHANGE,
+    )
+
+    assert _pulled_watermark(service, pulled, signed=signed) == 0
+    assert pulled.envelopes == []
+    assert relay.budgets[0].remaining_rows == (
+        1 if deadline == "before-receipt" else 0
+    )
+    assert receipt_calls == ([] if deadline == "before-receipt" else [hidden_cursor])
+
+
 def test_ingress_semantic_proof_rows_share_the_pull_budget(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -358,6 +639,199 @@ def test_ingress_semantic_defers_the_hundred_and_first_proof_row(
         "canonical-receipt",
         "publication-batch",
     ]
+
+
+@pytest.mark.parametrize("signed", [False, True], ids=["legacy", "signed"])
+@pytest.mark.parametrize("authority_role", ["semantic", "purge_barrier"])
+def test_companion_manifest_proof_can_be_exact_row_one_hundred(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    signed: bool,
+    authority_role: str,
+) -> None:
+    """The exact PK-constrained companion restores with one remaining slot."""
+
+    if authority_role == "semantic":
+        runtime: Any = IngressHarness(tmp_path, monkeypatch)
+        _complete_real_authority(runtime)
+        authority, _manifest = _ingress_authorities(runtime)
+    else:
+        runtime = PurgeIngressHarness(tmp_path, monkeypatch)
+        authority = _complete_purge_authority(runtime)
+    clock = _ManualClock()
+    tracker = _ProofQueryTracker(clock)
+    tracker.install(runtime, monkeypatch)
+
+    pulled, relay = _pull_one_ingress_authority(
+        runtime,
+        authority,
+        relay_rows=94,
+        signed=signed,
+    )
+
+    assert [item.server_cursor for item in pulled.envelopes] == [
+        authority.server_cursor
+    ]
+    assert _pulled_watermark(
+        runtime.service,
+        pulled,
+        signed=signed,
+        domain=authority.domain,
+    ) == authority.server_cursor
+    assert relay.budgets[0].remaining_rows == 0
+    assert tracker.queries == [
+        "acknowledged-source",
+        "canonical-receipt",
+        "publication-batch",
+        "manifest-source",
+    ]
+
+
+@pytest.mark.parametrize("signed", [False, True], ids=["legacy", "signed"])
+@pytest.mark.parametrize("authority_role", ["semantic", "purge_barrier"])
+def test_companion_manifest_proof_row_one_hundred_one_is_deferred(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    signed: bool,
+    authority_role: str,
+) -> None:
+    """The companion query is not issued when only proof row 101 remains."""
+
+    if authority_role == "semantic":
+        runtime: Any = IngressHarness(tmp_path, monkeypatch)
+        _complete_real_authority(runtime)
+        authority, _manifest = _ingress_authorities(runtime)
+    else:
+        runtime = PurgeIngressHarness(tmp_path, monkeypatch)
+        authority = _complete_purge_authority(runtime)
+    clock = _ManualClock()
+    tracker = _ProofQueryTracker(clock)
+    tracker.install(runtime, monkeypatch)
+
+    pulled, relay = _pull_one_ingress_authority(
+        runtime,
+        authority,
+        relay_rows=95,
+        signed=signed,
+    )
+
+    assert pulled.envelopes == []
+    assert _pulled_watermark(
+        runtime.service,
+        pulled,
+        signed=signed,
+        domain=authority.domain,
+    ) == authority.server_cursor - 1
+    assert pulled.has_more is True
+    assert relay.budgets[0].remaining_rows == 0
+    assert tracker.queries == [
+        "acknowledged-source",
+        "canonical-receipt",
+        "publication-batch",
+    ]
+
+
+def _insert_manifest_spoof(
+    runtime: AuthorityHarness,
+    authority: Any,
+    *,
+    replace_exact: bool,
+) -> None:
+    batch_id = authority.authority.publication_batch_id
+    with runtime.personal_db.transaction(immediate=True) as connection:
+        manifest = connection.execute(
+            """SELECT * FROM personal_context_publication_rows
+               WHERE publication_batch_id = ? AND role = 'manifest'""",
+            (batch_id,),
+        ).fetchone()
+        assert manifest is not None
+        if replace_exact:
+            connection.execute(
+                """DELETE FROM personal_context_publication_rows
+                   WHERE profile_id = ? AND profile_publication_sequence = ?
+                     AND batch_ordinal = ?""",
+                (
+                    manifest["profile_id"],
+                    manifest["profile_publication_sequence"],
+                    manifest["batch_ordinal"],
+                ),
+            )
+        connection.execute(
+            """INSERT INTO personal_context_publication_rows(
+                   profile_id, profile_publication_sequence, publication_batch_id,
+                   batch_ordinal, batch_size, purge_generation, role,
+                   opaque_object_id, opaque_version_id, operation, algorithm,
+                   key_version, nonce, wrapped_dek, wrapped_dek_nonce, ciphertext,
+                   integrity_tag, payload_size_bytes, deterministic_envelope_id,
+                   sync_server_cursor, row_state
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                manifest["profile_id"],
+                manifest["profile_publication_sequence"],
+                manifest["publication_batch_id"],
+                int(manifest["batch_size"]),
+                manifest["batch_size"],
+                manifest["purge_generation"],
+                manifest["role"],
+                manifest["opaque_object_id"],
+                manifest["opaque_version_id"],
+                manifest["operation"],
+                manifest["algorithm"],
+                manifest["key_version"],
+                manifest["nonce"],
+                manifest["wrapped_dek"],
+                manifest["wrapped_dek_nonce"],
+                manifest["ciphertext"],
+                manifest["integrity_tag"],
+                manifest["payload_size_bytes"],
+                str(manifest["deterministic_envelope_id"]) + "-spoof",
+                manifest["sync_server_cursor"],
+                manifest["row_state"],
+            ),
+        )
+
+
+@pytest.mark.parametrize("signed", [False, True], ids=["legacy", "signed"])
+@pytest.mark.parametrize("authority_role", ["semantic", "purge_barrier"])
+@pytest.mark.parametrize("spoof", ["substitute", "duplicate"])
+def test_companion_manifest_exact_identity_rejects_spoof_or_duplicate(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    signed: bool,
+    authority_role: str,
+    spoof: str,
+) -> None:
+    """A wrong-ordinal manifest cannot replace or duplicate the exact companion."""
+
+    if authority_role == "semantic":
+        runtime: Any = IngressHarness(tmp_path, monkeypatch)
+        _complete_real_authority(runtime)
+        authority, _manifest = _ingress_authorities(runtime)
+    else:
+        runtime = PurgeIngressHarness(tmp_path, monkeypatch)
+        authority = _complete_purge_authority(runtime)
+    _insert_manifest_spoof(
+        runtime,
+        authority,
+        replace_exact=spoof == "substitute",
+    )
+
+    pulled, relay = _pull_one_ingress_authority(
+        runtime,
+        authority,
+        relay_rows=94,
+        signed=signed,
+    )
+
+    assert pulled.envelopes == []
+    assert _pulled_watermark(
+        runtime.service,
+        pulled,
+        signed=signed,
+        domain=authority.domain,
+    ) == authority.server_cursor - 1
+    assert pulled.has_more is True
+    assert relay.budgets[0].remaining_rows == 1
 
 
 def test_ingress_manifest_proof_rows_share_the_pull_budget(
@@ -654,7 +1128,7 @@ def test_include_own_changes_returns_non_pc_row_with_null_device_id(
 
 @pytest.mark.parametrize(
     ("source_rows", "raw_rows", "expected_raw"),
-    [(100, 0, 0), (0, 100, 100), (40, 60, 60), (99, 1, 1), (100, 1, 0), (99, 2, 1)],
+    [(100, 0, 0), (0, 100, 50), (40, 60, 30), (99, 1, 0), (100, 1, 0), (99, 2, 0)],
 )
 def test_legacy_pull_spends_one_exact_source_plus_raw_budget(
     tmp_path,
@@ -684,10 +1158,13 @@ def test_legacy_pull_spends_one_exact_source_plus_raw_budget(
 
     assert len(relay.budgets) == 1
     budget = relay.budgets[0]
-    assert 100 - budget.remaining_rows == min(100, source_rows + raw_rows)
+    assert 100 - budget.remaining_rows == min(
+        100,
+        source_rows + 2 * expected_raw + (1 if raw_rows > expected_raw else 0),
+    )
     expected_cursor = raw_cursors[expected_raw - 1] if expected_raw else 0
     assert pulled.next_cursor == str(expected_cursor)
-    if source_rows + raw_rows > 100:
+    if raw_rows > expected_raw:
         assert pulled.has_more is True
 
 
@@ -736,9 +1213,9 @@ def test_mixed_pull_modes_share_the_same_relay_and_scan_budget(
             version_set=service._pull_version_set(device),
             streams=[(DOMAIN, 1)],
         )
-        assert decoded[(DOMAIN, 1)] == raw_cursors[59]
+        assert decoded[(DOMAIN, 1)] == raw_cursors[29]
     else:
-        assert pulled.next_cursor == str(raw_cursors[59])
+        assert pulled.next_cursor == str(raw_cursors[29])
     assert pulled.has_more is True
 
 
@@ -1308,10 +1785,10 @@ def test_raw_scan_rechecks_deadline_after_each_classification(
         purge_generation=0,
     )
 
-    assert scan.raw_rows_scanned == 2
+    assert scan.raw_rows_scanned == 4
     assert scan.raw_scan_watermark == cursors[0]
     assert scan.source_exhausted is False
-    assert budget.remaining_rows == 98
+    assert budget.remaining_rows == 96
 
 
 @pytest.mark.parametrize("signed", [False, True])
@@ -1699,11 +2176,11 @@ def test_conflict_barrier_advances_only_the_inspected_hidden_prefix(
         purge_generation=0,
     )
 
-    assert scan.raw_rows_scanned == 2
+    assert scan.raw_rows_scanned == 3
     assert scan.raw_scan_watermark == hidden_cursor
     assert scan.visible_envelopes == []
     assert scan.source_exhausted is False
-    assert budget.remaining_rows == 98
+    assert budget.remaining_rows == 97
 
 
 def _tampered_home_authority_routing(case: str) -> object:

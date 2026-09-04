@@ -9884,6 +9884,7 @@ class SyncV2Service:
                             budget=budget,
                         )
                     ),
+                    budget=budget,
                 )
                 if not budget.deadline_open() or classification == "barrier":
                     break

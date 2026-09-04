@@ -673,7 +673,7 @@ def test_recovery_scan_stops_at_100_hidden_rows_without_skipping_101(
     )
 
     assert first.raw_rows_scanned == 100
-    assert first.raw_scan_watermark == cursors[99]
+    assert first.raw_scan_watermark == cursors[49]
     assert first.visible_envelopes == []
     assert first.source_exhausted is False
 
@@ -687,9 +687,23 @@ def test_recovery_scan_stops_at_100_hidden_rows_without_skipping_101(
         adapter_versions=[1],
     )
 
-    assert second.raw_rows_scanned == 1
-    assert second.raw_scan_watermark == cursors[100]
-    assert second.source_exhausted is True
+    assert second.raw_rows_scanned == 100
+    assert second.raw_scan_watermark == cursors[99]
+    assert second.source_exhausted is False
+
+    third = service.store.scan_personal_context_authority(
+        DATASET_ID,
+        after_server_cursor=second.raw_scan_watermark,
+        limit=1,
+        row_budget=100,
+        deadline_ns=2**63 - 1,
+        domains=[DOMAIN],
+        adapter_versions=[1],
+    )
+
+    assert third.raw_rows_scanned == 2
+    assert third.raw_scan_watermark == cursors[100]
+    assert third.source_exhausted is True
 
 
 def test_legacy_authority_pull_stops_before_pending_barrier(
