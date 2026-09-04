@@ -1476,7 +1476,8 @@ class PersonalContextPublicationJournal:
         ).fetchone()
         if row is None:
             return None
-        if not self._has_exact_integer_fields(
+        stored_wire_version = str(row["wire_entity_version"])
+        if stored_wire_version == "" and not self._has_exact_integer_fields(
             row,
             (
                 "purge_generation",
@@ -1505,13 +1506,12 @@ class PersonalContextPublicationJournal:
             raise ValueError("ingress identity reused with a different payload") from None
         if not old_identity_matches:
             raise ValueError("ingress identity reused with a different payload")
-        source_wire_version = self._validate_legacy_receipt_source(
-            connection,
-            row,
-            identity,
-        )
-        stored_wire_version = str(row["wire_entity_version"])
         if stored_wire_version == "":
+            source_wire_version = self._validate_legacy_receipt_source(
+                connection,
+                row,
+                identity,
+            )
             stored_wire_version = source_wire_version
             updated = connection.execute(
                 """
@@ -1529,11 +1529,55 @@ class PersonalContextPublicationJournal:
             )
             if updated.rowcount != 1:
                 raise ValueError("ingress identity reused with a different payload")
-        if (
-            stored_wire_version != identity.wire_entity_version
-            or stored_wire_version != source_wire_version
-        ):
-            raise ValueError("ingress identity reused with a different payload")
+            if stored_wire_version != identity.wire_entity_version:
+                raise ValueError("ingress identity reused with a different payload")
+        else:
+            source_row = connection.execute(
+                """
+                SELECT result.*
+                FROM personal_context_publication_batches AS batch
+                JOIN personal_context_publication_rows AS result
+                  ON result.publication_batch_id = batch.publication_batch_id
+                 AND result.profile_publication_sequence = batch.profile_publication_sequence
+                WHERE batch.publication_batch_id = ?
+                  AND batch.profile_publication_sequence = ?
+                  AND batch.purge_generation = ?
+                  AND result.opaque_object_id = ?
+                  AND result.opaque_version_id = ?
+                  AND EXISTS (
+                        SELECT 1 FROM personal_context_publication_rows AS manifest
+                        WHERE manifest.publication_batch_id = batch.publication_batch_id
+                          AND manifest.profile_publication_sequence = batch.profile_publication_sequence
+                          AND manifest.role = 'manifest'
+                          AND manifest.opaque_version_id = ?
+                  )
+                LIMIT 1
+                """,
+                (
+                    row["publication_batch_id"],
+                    row["profile_publication_sequence"],
+                    row["purge_generation"],
+                    row["resulting_object_id"],
+                    row["resulting_version_id"],
+                    row["resulting_manifest_version_id"],
+                ),
+            ).fetchone()
+            if source_row is None:
+                raise ValueError("ingress identity reused with a different payload")
+            try:
+                _domain, canonical = self.decrypt_row(source_row)
+            except Exception as exc:  # noqa: BLE001 - replay must fail closed.
+                raise ValueError(
+                    "ingress identity reused with a different payload"
+                ) from exc
+            source_digest = "sha256:" + hashlib.sha256(canonical).hexdigest()
+            if not hmac.compare_digest(
+                source_digest,
+                identity.canonical_payload_digest,
+            ):
+                raise ValueError("ingress identity reused with a different payload")
+            if stored_wire_version != identity.wire_entity_version:
+                raise ValueError("ingress identity reused with a different payload")
         return CanonicalApplyReceipt(
             resulting_object_id=str(row["resulting_object_id"]),
             resulting_version_id=str(row["resulting_version_id"]),

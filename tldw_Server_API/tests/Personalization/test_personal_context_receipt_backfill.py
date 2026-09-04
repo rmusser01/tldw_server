@@ -4,14 +4,18 @@ import hashlib
 import hmac
 import json
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from tldw_profile_core import (
     AgentVisibility,
     ProfileControls,
     ProfileManifest,
+    ProfileProposal,
     ProfileRecord,
+    ProfileScope,
+    ProposalState,
+    ScopeKind,
     SyncMode,
     canonical_bytes,
 )
@@ -35,6 +39,7 @@ from tldw_Server_API.app.core.Personalization.personal_context_service import (
 )
 from tldw_Server_API.tests.Personalization.personal_context_test_support import (
     encoded_master_key,
+    proposal,
 )
 
 REPLAY_ERROR = "ingress identity reused with a different payload"
@@ -70,6 +75,11 @@ class LegacyReceiptHarness:
     profile_id: str
     identity: IngressIdentity
     receipt: CanonicalApplyReceipt
+    case: str
+    domain: str
+    canonical: bytes
+    source_role: str
+    expected_object_id: str
 
     @property
     def journal(self) -> PersonalContextPublicationJournal:
@@ -264,11 +274,22 @@ class LegacyReceiptHarness:
             )
         elif fact == "result_version":
             self.rewrite_row(
-                role="semantic", fields={"opaque_version_id": "version-tampered"}
+                role=self.source_role,
+                fields={"opaque_version_id": "version-tampered"},
             )
             self.execute(
                 f"UPDATE {receipt_table} SET resulting_version_id = ?{receipt_where}",
                 ("version-tampered", self.receipt.receipt_id),
+            )
+        elif fact == "receipt_result_version":
+            self.execute(
+                f"UPDATE {receipt_table} SET resulting_version_id = ?{receipt_where}",
+                ("version-tampered", self.receipt.receipt_id),
+            )
+        elif fact == "source_result_version":
+            self.rewrite_row(
+                role=self.source_role,
+                fields={"opaque_version_id": "version-tampered"},
             )
         elif fact == "manifest_revision":
             self.execute(
@@ -297,6 +318,8 @@ class LegacyReceiptHarness:
             self.rewrite_row(role="semantic", fields={"role": "purge_barrier"})
         elif fact == "source_domain":
             self.rewrite_row(role="semantic", domain="personal_context.scope")
+        elif fact == "source_domain_record":
+            self.rewrite_row(role=self.source_role, domain="personal_context.record")
         elif fact == "source_operation":
             self.rewrite_row(role="semantic", fields={"operation": "tombstone"})
         elif fact == "manifest_sibling":
@@ -355,8 +378,74 @@ class LegacyReceiptHarness:
         else:
             raise AssertionError(f"unknown test fact: {fact}")
 
+
+def _proposal(
+    service: PersonalContextService,
+    *,
+    proposal_id: str,
+) -> ProfileProposal:
+    profile_id = service.get_manifest().profile_id
+    return proposal(profile_id=profile_id, proposal_id=proposal_id).model_copy(
+        update={
+            "scope_id": service.list_scopes()[0].scope_id,
+            "proposed_record": _record(service, f"{proposal_id}-record"),
+        }
+    )
+
+
+def _ingress_case(
+    service: PersonalContextService,
+    case: str,
+) -> tuple[str, ProfileManifest | ProfileProposal | ProfileRecord | ProfileScope, str | None]:
+    if case == "record":
+        return "personal_context.record", _record(service, "record-ingress"), None
+    if case == "scope":
+        global_scope = service.list_scopes()[0]
+        return (
+            "personal_context.scope",
+            global_scope.model_copy(
+                update={
+                    "scope_id": "scope-ingress",
+                    "kind": ScopeKind.WORKSPACE,
+                    "version_id": "scope-ingress-v1",
+                }
+            ),
+            None,
+        )
+    if case == "manifest":
+        current = service.get_manifest()
+        return (
+            "personal_context.manifest",
+            current.model_copy(
+                update={
+                    "revision": current.revision + 1,
+                    "updated_at": current.updated_at + timedelta(seconds=1),
+                    "current_version_id": "manifest-ingress-v1",
+                }
+            ),
+            _digest(canonical_bytes(current)),
+        )
+    if case == "proposal-pending":
+        return (
+            "personal_context.proposal",
+            _proposal(service, proposal_id="proposal-pending-ingress"),
+            None,
+        )
+    if case == "proposal-terminal":
+        pending = _proposal(service, proposal_id="proposal-terminal-ingress")
+        service.create_proposal(pending)
+        terminal = pending.model_copy(
+            update={
+                "state": ProposalState.REJECTED,
+                "proposed_record": None,
+                "confidence": None,
+            }
+        )
+        return "personal_context.proposal", terminal, _digest(canonical_bytes(pending))
+    raise AssertionError(f"unknown legacy ingress case: {case}")
+
 @pytest.fixture()
-def harness(tmp_path, monkeypatch) -> LegacyReceiptHarness:
+def harness(request, tmp_path, monkeypatch) -> LegacyReceiptHarness:
     monkeypatch.setenv("TLDW_PERSONAL_CONTEXT_MASTER_KEY", encoded_master_key())
     database = PersonalizationDB.for_path(tmp_path / "personalization.db")
     counter: dict[str, int] = {}
@@ -372,20 +461,29 @@ def harness(tmp_path, monkeypatch) -> LegacyReceiptHarness:
         id_factory=identifiers,
     )
     manifest = service.create_profile()
-    record = _record(service, "record-ingress")
+    case = getattr(request, "param", "record")
+    domain, value, base_object_hash = _ingress_case(service, case)
+    canonical = canonical_bytes(value)
+    wire_version = (
+        "sync-proposal-sha256:" + hashlib.sha256(canonical).hexdigest()
+        if isinstance(value, ProfileProposal)
+        else value.current_version_id
+        if isinstance(value, ProfileManifest)
+        else value.version_id
+    )
     identity = IngressIdentity(
         dataset_id="dataset-a",
         device_id="device-a",
-        client_envelope_id="client-envelope-legacy",
-        canonical_payload_digest=_digest(canonical_bytes(record)),
+        client_envelope_id=f"client-envelope-legacy-{case}",
+        canonical_payload_digest=_digest(canonical),
         purge_generation=0,
-        wire_entity_version=record.version_id,
+        wire_entity_version=wire_version,
     )
     receipt = service.apply_sync_ingress(
         identity=identity,
-        domain="personal_context.record",
-        value=record,
-        base_object_hash=None,
+        domain=domain,
+        value=value,
+        base_object_hash=base_object_hash,
     )
     with database.transaction(immediate=True) as connection:
         connection.execute(
@@ -400,6 +498,19 @@ def harness(tmp_path, monkeypatch) -> LegacyReceiptHarness:
         profile_id=manifest.profile_id,
         identity=identity,
         receipt=receipt,
+        case=case,
+        domain=domain,
+        canonical=canonical,
+        source_role="manifest" if domain == "personal_context.manifest" else "semantic",
+        expected_object_id=(
+            value.profile_id
+            if isinstance(value, ProfileManifest)
+            else value.proposal_id
+            if isinstance(value, ProfileProposal)
+            else value.record_id
+            if isinstance(value, ProfileRecord)
+            else value.scope_id
+        ),
     )
 
 
@@ -415,6 +526,93 @@ def test_matching_legacy_receipt_backfills_only_wire_identity(
     before.pop("wire_entity_version")
     after.pop("wire_entity_version")
     assert after == before
+
+
+def test_modern_receipt_replay_does_not_enter_legacy_validation(
+    harness: LegacyReceiptHarness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness.execute(
+        "UPDATE personal_context_ingress_receipts SET wire_entity_version = ? "
+        "WHERE receipt_id = ?",
+        (harness.identity.wire_entity_version, harness.receipt.receipt_id),
+    )
+
+    def reject_legacy_path(*_args: object, **_kwargs: object) -> str:
+        raise AssertionError("modern replay entered legacy validation")
+
+    monkeypatch.setattr(
+        PersonalContextPublicationJournal,
+        "_validate_legacy_receipt_source",
+        reject_legacy_path,
+    )
+
+    assert harness.replay() == harness.receipt
+
+
+@pytest.mark.parametrize(
+    "harness",
+    ["record", "scope", "manifest", "proposal-pending", "proposal-terminal"],
+    indirect=True,
+)
+def test_supported_legacy_ingress_backfills_domain_specific_identity(
+    harness: LegacyReceiptHarness,
+) -> None:
+    replay = harness.replay()
+    source = harness.row(role=harness.source_role)
+    source_domain, source_canonical = harness.journal.decrypt_row(source)  # type: ignore[arg-type]
+
+    assert replay == harness.receipt
+    assert source_domain == harness.domain
+    assert source_canonical == harness.canonical
+    assert str(source["opaque_object_id"]) == harness.expected_object_id
+    assert replay.resulting_object_id == harness.expected_object_id
+    assert str(source["opaque_version_id"]) == replay.resulting_version_id
+    assert replay.wire_entity_version == harness.identity.wire_entity_version
+    if harness.domain == "personal_context.proposal":
+        assert replay.resulting_version_id != replay.wire_entity_version
+        stored_proposal = ProfileProposal.model_validate_json(source_canonical)
+        if harness.case == "proposal-pending":
+            assert stored_proposal.state is ProposalState.PENDING
+            assert stored_proposal.proposed_record is not None
+        else:
+            assert stored_proposal.state is ProposalState.REJECTED
+            assert stored_proposal.proposed_record is None
+            assert stored_proposal.confidence is None
+    else:
+        assert replay.resulting_version_id == replay.wire_entity_version
+
+
+@pytest.mark.parametrize(
+    ("harness", "fact"),
+    [
+        pytest.param("record", "source_operation", id="record-operation"),
+        pytest.param("scope", "source_domain_record", id="scope-domain"),
+        pytest.param("manifest", "manifest_sibling", id="manifest-revision"),
+        pytest.param(
+            "proposal-pending",
+            "receipt_result_version",
+            id="proposal-pending-receipt-version",
+        ),
+        pytest.param(
+            "proposal-terminal",
+            "source_result_version",
+            id="proposal-terminal-source-version",
+        ),
+    ],
+    indirect=["harness"],
+)
+def test_legacy_domain_binding_mismatch_is_content_free_and_mutation_free(
+    harness: LegacyReceiptHarness,
+    fact: str,
+) -> None:
+    harness.tamper(fact)
+
+    with pytest.raises(ValueError, match="identity reused") as error:
+        harness.replay()
+
+    assert str(error.value) == REPLAY_ERROR
+    assert harness.stored_wire_version() == ""
 
 
 @pytest.mark.parametrize(
@@ -476,6 +674,40 @@ def test_later_valid_manifest_head_keeps_exact_legacy_receipt_replayable(
     replay = harness.replay()
 
     assert replay == harness.receipt
+    assert harness.stored_wire_version() == harness.identity.wire_entity_version
+
+
+@pytest.mark.parametrize("harness", ["proposal-pending"], indirect=True)
+def test_later_terminal_proposal_keeps_pending_legacy_receipt_replayable(
+    harness: LegacyReceiptHarness,
+) -> None:
+    pending = ProfileProposal.model_validate_json(harness.canonical)
+    terminal = pending.model_copy(
+        update={
+            "state": ProposalState.REJECTED,
+            "proposed_record": None,
+            "confidence": None,
+        }
+    )
+    canonical = canonical_bytes(terminal)
+    terminal_identity = IngressIdentity(
+        dataset_id="dataset-a",
+        device_id="device-a",
+        client_envelope_id="client-envelope-terminal-after-pending",
+        canonical_payload_digest=_digest(canonical),
+        purge_generation=0,
+        wire_entity_version=(
+            "sync-proposal-sha256:" + hashlib.sha256(canonical).hexdigest()
+        ),
+    )
+    harness.service.apply_sync_ingress(
+        identity=terminal_identity,
+        domain="personal_context.proposal",
+        value=terminal,
+        base_object_hash=_digest(harness.canonical),
+    )
+
+    assert harness.replay() == harness.receipt
     assert harness.stored_wire_version() == harness.identity.wire_entity_version
 
 
