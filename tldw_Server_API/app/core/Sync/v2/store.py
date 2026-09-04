@@ -1237,6 +1237,19 @@ class SyncV2Store:
 
         return self.db.discard_pending_personal_context_authority(**identity)
 
+    def mark_personal_context_authority_applied(
+        self,
+        server_cursor: int,
+    ) -> SyncEnvelope:
+        """Apply one verified authority row inside its existing Sync guard."""
+
+        if self._connection is None:
+            raise SyncStoreError("Personal Context authority finalize requires a guard")
+        return self.db.mark_personal_context_authority_applied(
+            server_cursor,
+            connection=self._connection,
+        )
+
     def mark_bootstrap_envelope_verified(
         self,
         server_cursor: int,

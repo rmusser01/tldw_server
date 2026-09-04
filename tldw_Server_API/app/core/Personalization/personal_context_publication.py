@@ -141,60 +141,91 @@ class PersonalContextPublicationRelayStore:
     def canonical_ingress_receipt_for_source(
         self,
         row: PublicationSourceRow,
+        *,
+        dataset_id: str,
+        device_id: str,
+        client_envelope_id: str,
     ) -> CanonicalApplyReceipt | None:
         """Resolve the one canonical ingress receipt that produced a source row."""
 
         with self._database.transaction() as connection:
-            matches = connection.execute(
+            receipt = connection.execute(
                 """
-                SELECT receipt.*
-                FROM personal_context_ingress_receipts AS receipt
-                JOIN personal_context_publication_batches AS batch
-                  ON batch.publication_batch_id = receipt.publication_batch_id
-                 AND batch.profile_publication_sequence = receipt.profile_publication_sequence
-                JOIN personal_context_publication_rows AS source
-                  ON source.publication_batch_id = batch.publication_batch_id
-                 AND source.profile_publication_sequence = batch.profile_publication_sequence
-                WHERE batch.profile_id = ?
-                  AND batch.publication_batch_id = ?
-                  AND batch.profile_publication_sequence = ?
-                  AND batch.purge_generation = ?
-                  AND source.batch_ordinal = ?
-                  AND source.batch_size = ?
-                  AND source.role = ?
-                  AND source.opaque_object_id = ?
-                  AND source.opaque_version_id = ?
-                  AND source.operation = ?
-                  AND source.deterministic_envelope_id = ?
-                  AND receipt.resulting_object_id = source.opaque_object_id
-                  AND receipt.resulting_version_id = source.opaque_version_id
-                  AND EXISTS (
-                        SELECT 1
-                        FROM personal_context_publication_rows AS manifest
-                        WHERE manifest.publication_batch_id = batch.publication_batch_id
-                          AND manifest.profile_publication_sequence = batch.profile_publication_sequence
-                          AND manifest.role = 'manifest'
-                          AND manifest.opaque_version_id = receipt.resulting_manifest_version_id
-                  )
-                LIMIT 2
+                SELECT * FROM personal_context_ingress_receipts
+                WHERE dataset_id = ? AND device_id = ? AND client_envelope_id = ?
                 """,
+                (dataset_id, device_id, client_envelope_id),
+            ).fetchone()
+            if receipt is None:
+                return None
+            batch = connection.execute(
+                """SELECT * FROM personal_context_publication_batches
+                   WHERE profile_id = ? AND profile_publication_sequence = ?""",
+                (row.profile_id, row.profile_publication_sequence),
+            ).fetchone()
+            source = connection.execute(
+                """SELECT * FROM personal_context_publication_rows
+                   WHERE profile_id = ? AND profile_publication_sequence = ?
+                     AND batch_ordinal = ?""",
                 (
                     row.profile_id,
-                    row.publication_batch_id,
                     row.profile_publication_sequence,
-                    row.purge_generation,
                     row.batch_ordinal,
-                    row.batch_size,
-                    row.role,
-                    row.object_id,
-                    row.version_id,
-                    row.operation,
-                    row.deterministic_envelope_id,
                 ),
+            ).fetchone()
+            manifests = connection.execute(
+                """SELECT * FROM personal_context_publication_rows
+                   WHERE profile_id = ? AND profile_publication_sequence = ?
+                     AND role = 'manifest'
+                   LIMIT 2""",
+                (row.profile_id, row.profile_publication_sequence),
             ).fetchall()
-        if len(matches) != 1:
+        if batch is None or source is None or len(manifests) != 1:
             return None
-        receipt = matches[0]
+        manifest = manifests[0]
+        source_matches = (
+            str(source["publication_batch_id"]) == row.publication_batch_id
+            and int(source["batch_size"]) == row.batch_size
+            and int(source["purge_generation"]) == row.purge_generation
+            and str(source["role"]) == row.role
+            and str(source["opaque_object_id"]) == row.object_id
+            and str(source["opaque_version_id"]) == row.version_id
+            and str(source["operation"]) == row.operation
+            and str(source["deterministic_envelope_id"])
+            == row.deterministic_envelope_id
+        )
+        batch_matches = (
+            str(batch["publication_batch_id"]) == row.publication_batch_id
+            and int(batch["purge_generation"]) == row.purge_generation
+            and int(batch["batch_size"]) == row.batch_size
+            and str(receipt["publication_batch_id"]) == row.publication_batch_id
+            and int(receipt["profile_publication_sequence"])
+            == row.profile_publication_sequence
+            and int(receipt["purge_generation"]) == row.purge_generation
+        )
+        manifest_matches = (
+            str(manifest["publication_batch_id"]) == row.publication_batch_id
+            and int(manifest["batch_size"]) == row.batch_size
+            and int(manifest["purge_generation"]) == row.purge_generation
+            and str(manifest["opaque_version_id"])
+            == str(receipt["resulting_manifest_version_id"])
+        )
+        result_matches = (
+            row.role == "semantic"
+            and str(receipt["resulting_object_id"]) == row.object_id
+            and str(receipt["resulting_version_id"]) == row.version_id
+        ) or (
+            row.role == "manifest"
+            and str(receipt["resulting_manifest_version_id"]) == row.version_id
+        ) or (
+            row.role == "purge_barrier"
+            and str(receipt["resulting_object_id"])
+            == str(manifest["opaque_object_id"])
+            and str(receipt["resulting_version_id"])
+            == str(manifest["opaque_version_id"])
+        )
+        if not (source_matches and batch_matches and manifest_matches and result_matches):
+            return None
         return CanonicalApplyReceipt(
             resulting_object_id=str(receipt["resulting_object_id"]),
             resulting_version_id=str(receipt["resulting_version_id"]),
@@ -210,6 +241,44 @@ class PersonalContextPublicationRelayStore:
             canonical_payload_digest=str(receipt["canonical_payload_digest"]),
             wire_entity_version=str(receipt["wire_entity_version"]),
         )
+
+    def originating_authority_cursor_for_source(
+        self,
+        row: PublicationSourceRow,
+    ) -> int | None:
+        """Return the prior semantic/purge authority cursor for a companion row."""
+
+        if row.role != "manifest":
+            return None
+        with self._database.transaction() as connection:
+            matches = connection.execute(
+                """
+                SELECT sync_server_cursor
+                FROM personal_context_publication_rows
+                WHERE profile_id = ?
+                  AND profile_publication_sequence = ?
+                  AND publication_batch_id = ?
+                  AND purge_generation = ?
+                  AND batch_size = ?
+                  AND batch_ordinal < ?
+                  AND role IN ('semantic', 'purge_barrier')
+                  AND row_state = 'acknowledged'
+                  AND sync_server_cursor IS NOT NULL
+                ORDER BY batch_ordinal
+                LIMIT 2
+                """,
+                (
+                    row.profile_id,
+                    row.profile_publication_sequence,
+                    row.publication_batch_id,
+                    row.purge_generation,
+                    row.batch_size,
+                    row.batch_ordinal,
+                ),
+            ).fetchall()
+        if len(matches) != 1:
+            return None
+        return int(matches[0]["sync_server_cursor"])
 
     @contextmanager
     def profile_lease(self, profile_id: str) -> Iterator[PublicationRelayLease | None]:

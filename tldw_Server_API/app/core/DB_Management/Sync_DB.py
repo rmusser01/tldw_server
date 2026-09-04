@@ -8327,6 +8327,36 @@ class SyncDatabase:
                         raise SyncStoreError("personal_context_authority_cancel_raced")
             return True
 
+    def mark_personal_context_authority_applied(
+        self,
+        server_cursor: int,
+        *,
+        connection: Any,
+    ) -> SyncEnvelope:
+        """Apply one verified authority row with pending/applied CAS semantics."""
+
+        with self.backend.transaction(connection) as conn:
+            updated = self.execute(
+                """UPDATE sync_envelopes
+                   SET apply_status = 'applied', apply_error_code = NULL,
+                       apply_error_message = NULL, applied_at = ?
+                   WHERE server_sequence = ? AND apply_status = 'pending'""",
+                (utcnow_iso(), server_cursor),
+                connection=conn,
+            )
+            row = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (server_cursor,),
+                    connection=conn,
+                )
+            )
+            if row is None or (
+                updated.rowcount != 1 and row.get("apply_status") != "applied"
+            ):
+                raise SyncStoreError("personal_context_authority_finalize_raced")
+        return _envelope_from_row(row)
+
     def mark_personal_context_ingress_applied(
         self,
         *,
