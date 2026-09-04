@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from copy import copy
+from dataclasses import dataclass
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
@@ -58,6 +59,15 @@ from .models import (
     SyncObjectState,
     SyncRestoreManifestStats,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class PersonalContextAuthorityScan:
+    """Filtered egress with its independent raw scan checkpoint."""
+
+    raw_scan_watermark: int
+    visible_envelopes: list[SyncEnvelope]
+    has_visible_lookahead: bool
 
 
 class SyncV2Store:
@@ -891,6 +901,64 @@ class SyncV2Store:
             exclude_device_id=exclude_device_id,
             connection=self._connection,
         )
+
+    def scan_personal_context_authority(
+        self,
+        dataset_id: str,
+        *,
+        after_server_cursor: int,
+        limit: int,
+    ) -> PersonalContextAuthorityScan:
+        """Scan raw Personal Context history without promoting ingress to egress."""
+
+        raw = self.list_envelopes_after(
+            dataset_id,
+            after_server_cursor,
+            limit=limit + 1,
+            domains=(
+                "personal_context.manifest",
+                "personal_context.scope",
+                "personal_context.record",
+                "personal_context.proposal",
+                "personal_context.purge",
+            ),
+            status="accepted",
+        )
+        visible = [
+            envelope
+            for envelope in raw
+            if envelope.apply_status == "applied"
+            and envelope.authority is not None
+            and envelope.authority.role == "home_authority"
+        ]
+        return PersonalContextAuthorityScan(
+            raw_scan_watermark=max(
+                (item.server_cursor or after_server_cursor for item in raw),
+                default=after_server_cursor,
+            ),
+            visible_envelopes=visible[:limit],
+            has_visible_lookahead=len(visible) > limit,
+        )
+
+    def mark_personal_context_ingress_applied(
+        self,
+        *,
+        server_cursor: int,
+        expected_client_envelope_id: str,
+        canonical_receipt_id: str,
+    ) -> SyncEnvelope:
+        """Terminalize only the exact ingress whose canonical receipt was verified."""
+
+        envelope = self.get_envelope_by_server_cursor(server_cursor)
+        if (
+            envelope is None
+            or envelope.client_envelope_id != expected_client_envelope_id
+            or not canonical_receipt_id.strip()
+            or envelope.authority is None
+            or envelope.authority.role != "client_ingress"
+        ):
+            raise SyncStoreError("personal_context_ingress_receipt_mismatch")
+        return self.mark_envelope_apply_status(server_cursor, apply_status="applied")
 
     def summarize_domain_envelopes(
         self,

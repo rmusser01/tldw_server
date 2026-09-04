@@ -2,13 +2,17 @@ from __future__ import annotations
 
 """Materialize accepted Personal Context envelopes through the owner service."""
 
+import hashlib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from pydantic import ValidationError
-from tldw_profile_core import ProfileManifest, ProfileProposal, ProfileRecord, ProfileScope
+from tldw_profile_core import ProfileManifest, ProfileProposal, ProfileRecord, ProfileScope, canonical_bytes
 
+from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+    IngressIdentity,
+)
 from tldw_Server_API.app.core.Personalization.personal_context_service import (
     ProfileConflictError,
 )
@@ -58,6 +62,7 @@ class PersonalContextMaterializer:
                 store,
                 "personal_context_authorization_unavailable",
             )
+        ingress_receipt_applied = False
         try:
             value = _parse_value(self.domain, envelope.payload or envelope.payload_clear)
             current_state = store.get_object_state(
@@ -68,13 +73,39 @@ class PersonalContextMaterializer:
             service = self.service_resolver(str(dataset.owner_user_id))
             if service is None:
                 raise RuntimeError("service unavailable")
-            service.apply_sync_object(
-                domain=self.domain,
-                value=value,
-                actor_type="sync",
-                actor_id=envelope.device_id,
-                base_object_hash=envelope.base_object_hash,
-            )
+            authority = envelope.authority
+            if authority is not None and authority.role == "home_authority":
+                return MaterializationResult(status="skipped")
+            if authority is not None and authority.role == "client_ingress":
+                purge_generation = _purge_generation(dataset)
+                receipt = service.apply_sync_ingress(
+                    identity=IngressIdentity(
+                        dataset_id=envelope.dataset_id,
+                        device_id=str(envelope.device_id or ""),
+                        client_envelope_id=envelope.client_envelope_id,
+                        canonical_payload_digest=(
+                            "sha256:" + hashlib.sha256(canonical_bytes(value)).hexdigest()
+                        ),
+                        purge_generation=purge_generation,
+                    ),
+                    domain=self.domain,
+                    value=value,
+                    base_object_hash=envelope.base_object_hash,
+                )
+                store.mark_personal_context_ingress_applied(
+                    server_cursor=envelope.server_cursor,
+                    expected_client_envelope_id=envelope.client_envelope_id,
+                    canonical_receipt_id=receipt.receipt_id,
+                )
+                ingress_receipt_applied = True
+            else:
+                service.apply_sync_object(
+                    domain=self.domain,
+                    value=value,
+                    actor_type="sync",
+                    actor_id=envelope.device_id,
+                    base_object_hash=envelope.base_object_hash,
+                )
         except ProfileConflictError:
             store.mark_envelope_apply_status(
                 envelope.server_cursor,
@@ -115,7 +146,8 @@ class PersonalContextMaterializer:
                 deleted=envelope.operation == "tombstone",
             )
         )
-        store.mark_envelope_apply_status(envelope.server_cursor, apply_status="applied")
+        if not ingress_receipt_applied:
+            store.mark_envelope_apply_status(envelope.server_cursor, apply_status="applied")
         return MaterializationResult(status="applied")
 
     @staticmethod
@@ -151,6 +183,17 @@ def _parse_value(domain: str, payload: Mapping[str, Any]) -> Any:
     }:
         return dict(payload)
     raise ValueError("Unsupported Personal Context materializer payload")
+
+
+def _purge_generation(dataset: Any) -> int:
+    """Read only the content-free profile purge generation from enrollment."""
+
+    metadata = getattr(dataset, "metadata", {})
+    personal_context = metadata.get("personal_context") if isinstance(metadata, Mapping) else None
+    value = personal_context.get("purge_generation") if isinstance(personal_context, Mapping) else None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError("Personal Context purge generation is unavailable")
+    return value
 
 
 __all__ = ["PersonalContextMaterializer"]

@@ -143,6 +143,10 @@ from .notes_task_readiness import (
     notes_task_sync_is_ready,
     redact_notes_task_server_metadata,
 )
+from .personal_context_ongoing_contract import (
+    PersonalContextAuthorityMetadata,
+    PersonalContextRelayContinuation,
+)
 from .profile import (
     PersonalContextBootstrap,
     SyncNotesAttachmentBootstrapDiagnostics,
@@ -950,6 +954,7 @@ class SyncPullResult:
     envelopes: list[SyncEnvelope] = field(default_factory=list)
     next_cursor: str | None = None
     has_more: bool = False
+    personal_context_relay: PersonalContextRelayContinuation | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1130,6 +1135,7 @@ class SyncV2Service:
         personal_context_key_wrapper: Callable[..., str] | None = None,
         personal_context_key_fingerprint: Callable[..., str] | None = None,
         personal_context_authority_id: str = "tldw-server",
+        personal_context_relay: object | None = None,
     ) -> None:
         self.store = store
         self.adapters = adapters
@@ -1150,6 +1156,67 @@ class SyncV2Service:
         self.personal_context_authority_id = (
             str(personal_context_authority_id).strip() or "tldw-server"
         )
+        self.personal_context_relay = personal_context_relay
+
+    def stage_personal_context_authority(
+        self,
+        row: object,
+        dataset_id: str,
+        user_id: str,
+    ) -> int:
+        """Persist one authenticated journal row as internal home-authority egress."""
+
+        from .server_origin import insert_personal_context_authority
+
+        dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
+        domain = str(getattr(row, "domain", ""))
+        if domain not in PERSONAL_CONTEXT_SYNC_DOMAINS:
+            raise SyncStoreError("Personal Context authority source is invalid")
+        try:
+            payload = json.loads(bytes(row.canonical).decode("utf-8"))
+        except (TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise SyncStoreError("Personal Context authority source is invalid") from exc
+        if not isinstance(payload, dict):
+            raise SyncStoreError("Personal Context authority source is invalid")
+        head = self.store.get_current_head(
+            dataset_id,
+            domain,  # type: ignore[arg-type]
+            str(getattr(row, "object_id", "")),
+        )
+        envelope = SyncEnvelopeCreate(
+            dataset_id=dataset_id,
+            client_envelope_id=str(getattr(row, "deterministic_envelope_id", "")),
+            domain=domain,  # type: ignore[arg-type]
+            operation=str(getattr(row, "operation", "")),  # type: ignore[arg-type]
+            object_id=str(getattr(row, "object_id", "")),
+            device_id=_SERVER_ORIGIN_DEVICE_ID,
+            base_server_cursor=None if head is None else head.server_cursor,
+            base_object_revision=None if head is None else head.object_revision,
+            base_object_hash=None if head is None else head.payload_hash,
+            object_revision=1 if head is None or head.object_revision is None else head.object_revision + 1,
+            schema_version=1,
+            payload=payload,
+            payload_hash=str(getattr(row, "integrity_tag", "")),
+            payload_size_bytes=len(bytes(row.canonical)),
+            deleted=str(getattr(row, "operation", "")) == "tombstone",
+            encryption_metadata={"policy": "server_trusted_v1"},
+        )
+        protected = self._protect_personal_context_for_storage(dataset, envelope)
+        authority = PersonalContextAuthorityMetadata(
+            role="home_authority",
+            publication_batch_id=str(getattr(row, "publication_batch_id", "")),
+            profile_publication_sequence=int(getattr(row, "profile_publication_sequence", 0)),
+            batch_ordinal=int(getattr(row, "batch_ordinal", -1)),
+            batch_size=int(getattr(row, "batch_size", 0)),
+        )
+        stored = insert_personal_context_authority(
+            self,
+            envelope=protected,
+            authority=authority,
+        )
+        if stored.server_cursor is None:
+            raise SyncStoreError("Personal Context authority receipt is unavailable")
+        return stored.server_cursor
 
     def _notes_task_domains_ready(self, dataset: SyncDataset | None) -> bool:
         """Return the single service-level task/activity activation predicate."""
@@ -3116,6 +3183,23 @@ class SyncV2Service:
                     )
                 )
                 continue
+            if envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+                if "personal_context_authority" in envelope.routing_metadata:
+                    rejected.append(
+                        SyncPushRejected(
+                            client_envelope_id=envelope.client_envelope_id,
+                            error_code="reserved_routing_metadata",
+                            message="Sync envelope contains reserved routing metadata",
+                        )
+                    )
+                    continue
+                envelope = replace(
+                    envelope,
+                    routing_metadata={
+                        **envelope.routing_metadata,
+                        "personal_context_authority": {"role": "client_ingress"},
+                    },
+                )
             if envelope.domain not in dataset.domains:
                 rejected.append(
                     SyncPushRejected(
@@ -3497,6 +3581,57 @@ class SyncV2Service:
             )
         since_sequence = self._resolve_cursor(dataset_id, device_id, cursor, selected_domains)
         page_limit = min(page_size or self.settings.max_pull_page_size, self.settings.max_pull_page_size)
+        personal_context_pull = bool(selected_domains) and set(selected_domains).issubset(
+            PERSONAL_CONTEXT_SYNC_DOMAINS
+        )
+        relay_continuation: PersonalContextRelayContinuation | None = None
+        if personal_context_pull:
+            state = dataset.metadata.get("personal_context")
+            profile_id = state.get("profile_id") if isinstance(state, Mapping) else None
+            if self.personal_context_relay is not None and isinstance(profile_id, str):
+                relay_result = self.personal_context_relay.relay_profile(
+                    user_id=user_id,
+                    profile_id=profile_id,
+                    dataset_id=dataset_id,
+                    after_server_cursor=since_sequence,
+                    row_budget=100,
+                    wall_time_ms=100,
+                )
+                relay_continuation = PersonalContextRelayContinuation(
+                    state=relay_result.continuation,
+                    scan_watermark=str(since_sequence),
+                )
+            scan = self.store.scan_personal_context_authority(
+                dataset_id,
+                after_server_cursor=since_sequence,
+                limit=page_limit,
+            )
+            page = [
+                self._restore_personal_context_from_storage(dataset, envelope)
+                for envelope in scan.visible_envelopes
+            ]
+            next_sequence = (
+                page[-1].server_sequence
+                if scan.has_visible_lookahead and page
+                else scan.raw_scan_watermark
+            )
+            if next_sequence != since_sequence:
+                self._update_cursors(
+                    dataset_id,
+                    device_id,
+                    selected_domains,
+                    next_sequence if cursor is None else None,
+                    delivered=page,
+                )
+            return SyncPullResult(
+                dataset_id=dataset_id,
+                encryption_policy=dataset.encryption_policy,
+                envelopes=page,
+                next_cursor=str(next_sequence),
+                has_more=scan.has_visible_lookahead
+                or (relay_continuation is not None and relay_continuation.state != "complete"),
+                personal_context_relay=relay_continuation,
+            )
         raw_envelopes, visible = self._scan_pull_page(
             dataset_id=dataset_id,
             device_id=device_id,

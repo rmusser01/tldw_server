@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from types import SimpleNamespace
 
 import pytest
 
@@ -25,6 +26,7 @@ pytestmark = pytest.mark.unit
 @dataclass
 class _RecordingService:
     calls: list[dict[str, object]] = field(default_factory=list)
+    ingress_calls: list[dict[str, object]] = field(default_factory=list)
     conflict: bool = False
 
     def apply_sync_object(self, **values: object) -> object:
@@ -32,6 +34,10 @@ class _RecordingService:
             raise ProfileConflictError("changed")
         self.calls.append(values)
         return values["value"]
+
+    def apply_sync_ingress(self, **values: object) -> object:
+        self.ingress_calls.append(values)
+        return SimpleNamespace(receipt_id="receipt-0123456789abcdef")
 
 
 class _Store:
@@ -65,6 +71,17 @@ class _Store:
         del apply_error_message
         self.statuses.append((cursor, apply_status, apply_error_code))
 
+    def mark_personal_context_ingress_applied(
+        self,
+        *,
+        server_cursor: int,
+        expected_client_envelope_id: str,
+        canonical_receipt_id: str,
+    ) -> None:
+        assert expected_client_envelope_id == "device-a:record-a:1"
+        assert canonical_receipt_id == "receipt-0123456789abcdef"
+        self.statuses.append((server_cursor, "applied", None))
+
 
 def _dataset() -> SyncDataset:
     return SyncDataset(
@@ -74,7 +91,7 @@ def _dataset() -> SyncDataset:
         encryption_policy="server_trusted_v1",
         domains=["personal_context.record"],
         workspace_id=None,
-        metadata={"personal_context": {"profile_id": "profile-a"}},
+        metadata={"personal_context": {"profile_id": "profile-a", "purge_generation": 0}},
         created_at="2026-08-30T12:00:00Z",
         updated_at="2026-08-30T12:00:00Z",
     )
@@ -131,6 +148,26 @@ def test_materializer_maps_service_cas_failure_to_content_free_conflict() -> Non
     assert result.status == "conflict"
     assert result.conflict_type == "personal_context_base_conflict"
     assert "concise" not in (result.message or "")
+
+
+def test_materializer_applies_client_ingress_through_a_canonical_receipt() -> None:
+    service = _RecordingService()
+    store = _Store(_dataset())
+    materializer = PersonalContextMaterializer(
+        domain="personal_context.record",
+        service_resolver=lambda _user_id: service,
+    )
+    envelope = replace(
+        _envelope(),
+        routing_metadata={"personal_context_authority": {"role": "client_ingress"}},
+    )
+
+    result = materializer.apply(envelope, store=store)
+
+    assert result.status == "applied"
+    assert service.calls == []
+    assert service.ingress_calls[0]["identity"].client_envelope_id == "device-a:record-a:1"
+    assert store.statuses == [(1, "applied", None)]
 
 
 def test_materializer_fails_before_service_resolution_without_authorized_dataset() -> None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from uuid import uuid4
 
 from .adapters import AdapterAccepted, AdapterConflict, AdapterDeferred, AdapterRejected
@@ -21,9 +21,40 @@ from .models import (
     SyncOperation,
     server_frontend_mutation_enabled_for_policy,
 )
+from .personal_context_ongoing_contract import PersonalContextAuthorityMetadata
 from .service import SyncV2Service
 
 SERVER_ORIGIN_DEVICE_ID = "server-origin"
+
+
+def insert_personal_context_authority(
+    service: SyncV2Service,
+    *,
+    envelope: SyncEnvelopeCreate,
+    authority: PersonalContextAuthorityMetadata,
+) -> SyncEnvelope:
+    """Insert one internal-only already-canonical Personal Context egress row."""
+
+    if authority.role != "home_authority":
+        raise SyncStoreError("Personal Context authority role is required")
+    stored = service.store.insert_envelope(
+        replace(
+            envelope,
+            device_id=SERVER_ORIGIN_DEVICE_ID,
+            status="accepted",
+            apply_status="pending",
+            routing_metadata={
+                **envelope.routing_metadata,
+                "personal_context_authority": authority.model_dump(mode="json"),
+            },
+        )
+    )
+    if stored.server_cursor is None:
+        raise SyncStoreError("Personal Context authority receipt is unavailable")
+    return service.store.mark_envelope_apply_status(
+        stored.server_cursor,
+        apply_status="applied",
+    )
 
 
 class SyncServerOriginMaterializationError(SyncStoreError):
@@ -322,6 +353,7 @@ __all__ = [
     "SyncServerOriginMutationNotSupportedError",
     "SyncServerOriginRestoreConflictError",
     "canonical_payload_hash",
+    "insert_personal_context_authority",
     "capture_server_origin_note_restore",
     "capture_server_origin_mutation",
     "get_active_server_origin_sync_service_for_user",

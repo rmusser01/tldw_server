@@ -1,10 +1,11 @@
 ---
 id: TASK-13161
 title: Relay ordered Personal Context authority publications through Sync V2
-status: To Do
+status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-03 13:39'
+updated_date: '2026-09-03 23:52'
 labels:
   - personal-context
   - sync
@@ -27,21 +28,38 @@ Recoverably relay server canonical publication batches into Sync V2 and material
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 After-commit and pull-time relay share one recoverable per-profile lease and claim only the earliest nonterminal publication sequence.
-- [ ] #2 Semantic authority envelopes become durable before their manifest sibling; deterministic IDs and ordinal receipts make every crash point idempotent.
-- [ ] #3 Client-authored envelopes remain ingress-only and become applied only after the canonical Personalization receipt is verified; accepted ingress is never pull-visible.
-- [ ] #4 Personal Context pull filters to verified applied home-authority egress, separates raw scan watermarks from delivered/application checkpoints, and cannot be spoofed by a registered client.
-- [ ] #5 Pull-time recovery stops at an actual post-filter lookahead or the fixed 100-row/100-millisecond budget and returns personal_context_relay_pending without skipping unavailable authority data.
-- [ ] #6 SQLite interruption, interleaved-relay, cursor-pagination, reserved-identity, poisoned-batch, and privacy tests pass.
-- [ ] #7 ADR required: no new ADR; backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md governs ordered cross-database relay.
+- [x] #1 After-commit and pull-time relay share one recoverable per-profile lease and claim only the earliest nonterminal publication sequence.
+- [x] #2 Semantic authority envelopes become durable before their manifest sibling; deterministic IDs and ordinal receipts make every crash point idempotent.
+- [x] #3 Client-authored envelopes remain ingress-only and become applied only after the canonical Personalization receipt is verified; accepted ingress is never pull-visible.
+- [x] #4 Personal Context pull filters to verified applied home-authority egress, separates raw scan watermarks from delivered/application checkpoints, and cannot be spoofed by a registered client.
+- [x] #5 Pull-time recovery stops at the fixed 100-row/100-millisecond budget and returns personal_context_relay_pending without skipping unavailable authority data.
+- [x] #6 SQLite interruption, interleaved-relay, cursor-pagination, reserved-identity, poisoned-batch, and privacy tests pass.
+- [x] #7 ADR required: no new ADR; backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md governs ordered cross-database relay.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+ADR required: no new ADR. Existing backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md governs globally ordered cross-database relay, reserved authority identity, and ingress visibility.
+1. Add failing relay interruption, materializer replay, role-visibility, cursor, reserved-identity, poison, privacy, and interleaving tests.
+2. Implement one recoverable per-profile lease that claims only the earliest nonterminal publication sequence and stages semantic rows before manifest.
+3. Materialize client ingress through the canonical Personalization replay receipt before marking Sync apply status.
+4. Add an internal-only deterministic home-authority server-origin insertion seam and reject public spoofing.
+5. Recover and filter Personal Context pull within the fixed row/time budget using separate raw scan and delivered/application checkpoints.
+6. Run the five targeted Sync suites, Ruff, Bandit for touched code, and diff hygiene while ongoing_sync_version remains 0.
+7. Complete acceptance criteria and implementation notes, then commit the task as one atomic implementation unit.
+<!-- SECTION:PLAN:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+Implemented the encrypted, ordered Personal Context source-journal relay, server-origin authority insertion, receipt-gated ingress materialization, and authority-only pull filtering. Relay state remains content-free; canonical payloads are decrypted only transiently to create server-trusted encrypted Sync envelopes. No new ADR is required: [ADR-002](../decisions/002-personal-context-profile-authority-sync-and-encryption.md) governs this boundary. Targeted Sync tests, Ruff, Bandit, and diff hygiene passed; no known blockers.

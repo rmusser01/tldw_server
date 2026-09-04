@@ -4,6 +4,7 @@ import hashlib
 import hmac
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from tldw_profile_core.canonical import canonical_json_bytes
@@ -49,6 +50,10 @@ class _RecordingService:
     def apply_sync_object(self, **values):
         self.values.append(values["value"])
         return values["value"]
+
+    def apply_sync_ingress(self, **values):
+        self.values.append(values["value"])
+        return SimpleNamespace(receipt_id="receipt-0123456789abcdef")
 
 
 def _tag(payload: dict[str, object]) -> str:
@@ -232,10 +237,7 @@ def test_two_version_push_satisfies_sync_cas_and_encrypts_transport_history(
         device_id="device-b",
         domains=[DOMAIN],
     )
-    assert [item.payload["version_id"] for item in pulled.envelopes] == [
-        first_payload["version_id"],
-        "record-v2",
-    ]
+    assert pulled.envelopes == []
     durable = b"".join(
         path.read_bytes()
         for path in tmp_path.iterdir()

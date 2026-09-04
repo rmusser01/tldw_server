@@ -1366,6 +1366,22 @@ class SyncEnvelope:
         if self.object_revision is None and isinstance(self.entity_version, int):
             object.__setattr__(self, "object_revision", self.entity_version)
 
+    @property
+    def authority(self) -> Any | None:
+        """Return validated Personal Context role metadata from persisted routing."""
+
+        if self.domain not in PERSONAL_CONTEXT_SYNC_DOMAINS:
+            return None
+        raw = self.routing_metadata.get("personal_context_authority")
+        if not isinstance(raw, Mapping):
+            return None
+        from .personal_context_ongoing_contract import PersonalContextAuthorityMetadata
+
+        try:
+            return PersonalContextAuthorityMetadata.model_validate(raw)
+        except ValueError:
+            return None
+
 
 def _validate_mutation_group_metadata(
     *,

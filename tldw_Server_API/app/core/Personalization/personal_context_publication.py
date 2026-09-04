@@ -7,10 +7,12 @@ import hmac
 import json
 import secrets
 import sqlite3
+import threading
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from tldw_profile_core import ProfileManifest
 from tldw_profile_core.canonical import canonical_json_bytes
@@ -23,6 +25,9 @@ from tldw_Server_API.app.core.Personalization.personal_context_crypto import (
 from tldw_Server_API.app.core.Personalization.personal_context_repository_models import (
     ProfileKeyMaterial,
 )
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +75,184 @@ class CanonicalApplyReceipt:
     publication_batch_id: str
     profile_publication_sequence: int
     receipt_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class PublicationSourceRow:
+    """One authenticated, decrypted relay source row kept only in memory."""
+
+    profile_id: str
+    profile_publication_sequence: int
+    publication_batch_id: str
+    batch_ordinal: int
+    batch_size: int
+    purge_generation: int
+    role: Literal["semantic", "manifest", "purge_barrier"]
+    object_id: str
+    version_id: str
+    operation: Literal["upsert", "tombstone"]
+    deterministic_envelope_id: str
+    integrity_tag: str
+    domain: str
+    canonical: bytes
+    sync_server_cursor: int | None
+    row_state: str
+
+
+@dataclass(frozen=True, slots=True)
+class PublicationSourceBatch:
+    """Earliest nonterminal authority-publication batch for a profile."""
+
+    profile_id: str
+    profile_publication_sequence: int
+    publication_batch_id: str
+    rows: tuple[PublicationSourceRow, ...]
+
+
+class PersonalContextPublicationRelayStore:
+    """SQLite-backed source-journal access for the cross-database relay."""
+
+    _locks_guard = threading.Lock()
+    _profile_locks: dict[tuple[str, str], threading.RLock] = {}
+
+    def __init__(self, database: PersonalizationDB) -> None:
+        self._database = database
+
+    @contextmanager
+    def profile_lease(self, profile_id: str) -> Iterator[None]:
+        """Serialize all local relay entry points for one durable profile journal."""
+
+        key = (self._database.db_path, profile_id)
+        with self._locks_guard:
+            lock = self._profile_locks.setdefault(key, threading.RLock())
+        with lock:
+            yield
+
+    def earliest_nonterminal_batch(self, profile_id: str) -> PublicationSourceBatch | None:
+        """Claim and decrypt only the earliest incomplete sequence under SQLite lock."""
+
+        from tldw_Server_API.app.core.DB_Management.Personal_Context_Key_Store import (
+            ServerProfileKeyProvider,
+        )
+
+        with self._database.transaction(immediate=True) as connection:
+            batch = connection.execute(
+                """
+                SELECT * FROM personal_context_publication_batches
+                WHERE profile_id = ?
+                  AND status NOT IN ('complete', 'covered_by_activation', 'purge_terminal')
+                ORDER BY profile_publication_sequence ASC
+                LIMIT 1
+                """,
+                (profile_id,),
+            ).fetchone()
+            if batch is None:
+                return None
+            connection.execute(
+                """
+                UPDATE personal_context_publication_batches
+                SET status = 'relaying', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                WHERE profile_id = ? AND profile_publication_sequence = ?
+                  AND status IN ('pending', 'relaying')
+                """,
+                (profile_id, batch["profile_publication_sequence"]),
+            )
+            keys = ServerProfileKeyProvider(self._database).load(profile_id, connection=connection)
+            journal = PersonalContextPublicationJournal(keys)
+            rows = connection.execute(
+                """
+                SELECT * FROM personal_context_publication_rows
+                WHERE profile_id = ? AND profile_publication_sequence = ?
+                ORDER BY batch_ordinal ASC
+                """,
+                (profile_id, batch["profile_publication_sequence"]),
+            ).fetchall()
+            source_rows: list[PublicationSourceRow] = []
+            for row in rows:
+                domain, canonical = journal.decrypt_row(row)
+                source_rows.append(
+                    PublicationSourceRow(
+                        profile_id=profile_id,
+                        profile_publication_sequence=int(row["profile_publication_sequence"]),
+                        publication_batch_id=str(row["publication_batch_id"]),
+                        batch_ordinal=int(row["batch_ordinal"]),
+                        batch_size=int(row["batch_size"]),
+                        purge_generation=int(row["purge_generation"]),
+                        role=str(row["role"]),  # type: ignore[arg-type]
+                        object_id=str(row["opaque_object_id"]),
+                        version_id=str(row["opaque_version_id"]),
+                        operation=str(row["operation"]),  # type: ignore[arg-type]
+                        deterministic_envelope_id=str(row["deterministic_envelope_id"]),
+                        integrity_tag=str(row["integrity_tag"]),
+                        domain=domain,
+                        canonical=canonical,
+                        sync_server_cursor=(None if row["sync_server_cursor"] is None else int(row["sync_server_cursor"])),
+                        row_state=str(row["row_state"]),
+                    )
+                )
+            return PublicationSourceBatch(
+                profile_id=profile_id,
+                profile_publication_sequence=int(batch["profile_publication_sequence"]),
+                publication_batch_id=str(batch["publication_batch_id"]),
+                rows=tuple(source_rows),
+            )
+
+    def acknowledge_row(self, row: PublicationSourceRow, *, server_cursor: int) -> None:
+        """Record an exact durable Sync receipt without persisting canonical data."""
+
+        from tldw_Server_API.app.core.DB_Management.Personal_Context_Key_Store import (
+            ServerProfileKeyProvider,
+        )
+
+        with self._database.transaction(immediate=True) as connection:
+            current = connection.execute(
+                """
+                SELECT * FROM personal_context_publication_rows
+                WHERE profile_id = ? AND profile_publication_sequence = ? AND batch_ordinal = ?
+                """,
+                (row.profile_id, row.profile_publication_sequence, row.batch_ordinal),
+            ).fetchone()
+            if current is None:
+                raise RuntimeError("publication row is unavailable")
+            if current["row_state"] == "acknowledged":
+                if int(current["sync_server_cursor"]) != server_cursor:
+                    raise RuntimeError("publication receipt changed concurrently")
+                return
+            journal = PersonalContextPublicationJournal(
+                ServerProfileKeyProvider(self._database).load(row.profile_id, connection=connection)
+            )
+            journal.transition_row_state(
+                connection,
+                current,
+                row_state="acknowledged",
+                sync_server_cursor=server_cursor,
+            )
+
+    def complete_if_acknowledged(self, batch: PublicationSourceBatch) -> bool:
+        """Advance a batch terminally only once every row has a durable receipt."""
+
+        with self._database.transaction(immediate=True) as connection:
+            pending = connection.execute(
+                """
+                SELECT 1 FROM personal_context_publication_rows
+                WHERE profile_id = ? AND profile_publication_sequence = ?
+                  AND row_state != 'acknowledged'
+                LIMIT 1
+                """,
+                (batch.profile_id, batch.profile_publication_sequence),
+            ).fetchone()
+            if pending is not None:
+                return False
+            connection.execute(
+                """
+                UPDATE personal_context_publication_batches
+                SET status = 'complete', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                WHERE profile_id = ? AND profile_publication_sequence = ?
+                  AND status = 'relaying'
+                """,
+                (batch.profile_id, batch.profile_publication_sequence),
+            )
+            return True
 
 
 class PersonalContextPublicationJournal:
@@ -368,6 +551,7 @@ class PersonalContextPublicationJournal:
         row: sqlite3.Row,
         *,
         row_state: Literal["pending", "staged", "acknowledged", "shredded"],
+        sync_server_cursor: int | None = None,
     ) -> None:
         """Re-encrypt one row before changing authenticated relay state."""
 
@@ -388,10 +572,8 @@ class PersonalContextPublicationJournal:
             operation=str(row["operation"]),
             deterministic_envelope_id=str(row["deterministic_envelope_id"]),
             integrity_tag=str(row["integrity_tag"]),
-            sync_server_cursor=(
-                None
-                if row["sync_server_cursor"] is None
-                else int(row["sync_server_cursor"])
+            sync_server_cursor=sync_server_cursor if sync_server_cursor is not None else (
+                None if row["sync_server_cursor"] is None else int(row["sync_server_cursor"])
             ),
             row_state=row_state,
         )
@@ -403,7 +585,7 @@ class PersonalContextPublicationJournal:
             """
             UPDATE personal_context_publication_rows
             SET nonce = ?, wrapped_dek = ?, wrapped_dek_nonce = ?, ciphertext = ?,
-                key_version = ?, algorithm = ?, row_state = ?
+                key_version = ?, algorithm = ?, row_state = ?, sync_server_cursor = ?
             WHERE profile_id = ? AND profile_publication_sequence = ?
               AND batch_ordinal = ? AND row_state = ?
             """,
@@ -415,6 +597,7 @@ class PersonalContextPublicationJournal:
                 envelope.key_version,
                 envelope.algorithm,
                 row_state,
+                sync_server_cursor if sync_server_cursor is not None else row["sync_server_cursor"],
                 row["profile_id"],
                 row["profile_publication_sequence"],
                 row["batch_ordinal"],
