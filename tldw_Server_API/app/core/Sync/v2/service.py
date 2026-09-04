@@ -17,6 +17,7 @@ from uuid import RFC_4122, UUID, uuid4
 
 from loguru import logger
 from tldw_profile_core import SERIALIZED_SCHEMA_VERSION
+from tldw_profile_core.canonical import canonical_json_bytes
 
 from tldw_Server_API.app.core.Notes.attachment_policy import (
     NoteAttachmentPolicyError,
@@ -175,7 +176,7 @@ from .security import (
     server_trusted_encryption_status_from_env,
     validate_private_payload,
 )
-from .store import SyncV2Store
+from .store import PersonalContextAuthorityScan, SyncV2Store
 
 SYNC_PULL_TOKEN_MAX_ENCODED_BYTES = 32_768
 SYNC_PULL_TOKEN_MAX_DECODED_BYTES = 24_576
@@ -1178,11 +1179,47 @@ class SyncV2Service:
             raise SyncStoreError("Personal Context authority source is invalid") from exc
         if not isinstance(payload, dict):
             raise SyncStoreError("Personal Context authority source is invalid")
-        head = self.store.get_current_head(
-            dataset_id,
-            domain,  # type: ignore[arg-type]
-            str(getattr(row, "object_id", "")),
-        )
+        state = dataset.metadata.get("personal_context")
+        if not isinstance(state, Mapping):
+            raise SyncStoreError("Personal Context authority source is invalid")
+        profile_id = state.get("profile_id")
+        integrity_key_id = state.get("integrity_key_id")
+        purge_generation = state.get("purge_generation")
+        if (
+            not isinstance(profile_id, str)
+            or profile_id != getattr(row, "profile_id", None)
+            or not isinstance(integrity_key_id, str)
+            or type(purge_generation) is not int
+            or purge_generation != getattr(row, "purge_generation", None)
+        ):
+            raise SyncStoreError("Personal Context authority source binding is invalid")
+        try:
+            _key_id, integrity_key = self._personal_context_service_for_user(
+                user_id
+            ).sync_integrity_key(profile_id)
+        except (AttributeError, KeyError, RuntimeError, TypeError, ValueError) as exc:
+            raise SyncStoreError("Personal Context authority integrity is unavailable") from exc
+        if _key_id != integrity_key_id or len(integrity_key) != 32:
+            raise SyncStoreError("Personal Context authority integrity is unavailable")
+        canonical = canonical_json_bytes(payload)
+        payload_hash = "hmac-sha256-v1:" + hmac.new(
+            integrity_key, canonical, hashlib.sha256
+        ).hexdigest()
+        parent_id = payload.get("scope_id") if domain in {
+            "personal_context.scope",
+            "personal_context.record",
+            "personal_context.proposal",
+        } else None
+        if domain == "personal_context.manifest":
+            entity_version = payload.get("current_version_id")
+        elif domain == "personal_context.proposal":
+            entity_version = "sync-proposal-sha256:" + hashlib.sha256(canonical).hexdigest()
+        elif domain == "personal_context.purge":
+            entity_version = payload.get("purge_generation")
+        else:
+            entity_version = payload.get("version_id")
+        if parent_id is not None and not isinstance(parent_id, str):
+            raise SyncStoreError("Personal Context authority source is invalid")
         envelope = SyncEnvelopeCreate(
             dataset_id=dataset_id,
             client_envelope_id=str(getattr(row, "deterministic_envelope_id", "")),
@@ -1190,17 +1227,28 @@ class SyncV2Service:
             operation=str(getattr(row, "operation", "")),  # type: ignore[arg-type]
             object_id=str(getattr(row, "object_id", "")),
             device_id=_SERVER_ORIGIN_DEVICE_ID,
-            base_server_cursor=None if head is None else head.server_cursor,
-            base_object_revision=None if head is None else head.object_revision,
-            base_object_hash=None if head is None else head.payload_hash,
-            object_revision=1 if head is None or head.object_revision is None else head.object_revision + 1,
+            base_server_cursor=None,
+            base_object_revision=None,
+            base_object_hash=None,
+            object_revision=1,
+            parent_id=parent_id,
+            base_version=payload.get("parent_version_id"),
+            entity_version=entity_version,
             schema_version=1,
             payload=payload,
-            payload_hash=str(getattr(row, "integrity_tag", "")),
-            payload_size_bytes=len(bytes(row.canonical)),
+            payload_hash=payload_hash,
+            payload_size_bytes=len(canonical),
             deleted=str(getattr(row, "operation", "")) == "tombstone",
             encryption_metadata={"policy": "server_trusted_v1"},
+            routing_metadata={
+                "integrity_key_id": integrity_key_id,
+                "profile_id": profile_id,
+                "purge_generation": purge_generation,
+            },
         )
+        outcome = self._evaluate_envelope(dataset, envelope)
+        if not isinstance(outcome, AdapterAccepted):
+            raise SyncStoreError("Personal Context authority source is invalid")
         protected = self._protect_personal_context_for_storage(dataset, envelope)
         authority = PersonalContextAuthorityMetadata(
             role="home_authority",
@@ -3560,6 +3608,7 @@ class SyncV2Service:
         domains: Sequence[SyncDomain] | None = None,
         page_size: int | None = None,
         include_own_changes: bool = False,
+        personal_context_exchange: object | None = None,
     ) -> SyncPullResult:
         device = self._require_registered_device(user_id, device_id)
         if page_size is not None and page_size < 1:
@@ -3574,6 +3623,8 @@ class SyncV2Service:
             return self._pull_versioned(
                 dataset=dataset,
                 device=device,
+                user_id=user_id,
+                personal_context_exchange=personal_context_exchange,
                 cursor=cursor,
                 streams=streams,
                 page_size=page_size,
@@ -3588,7 +3639,20 @@ class SyncV2Service:
         if personal_context_pull:
             state = dataset.metadata.get("personal_context")
             profile_id = state.get("profile_id") if isinstance(state, Mapping) else None
-            if self.personal_context_relay is not None and isinstance(profile_id, str):
+            personal_context_egress_authorized = (
+                personal_context_exchange is not None
+                and _personal_context_link_is_complete(
+                    self.store,
+                    dataset,
+                    user_id=user_id,
+                    device_id=device_id,
+                )
+            )
+            if (
+                personal_context_egress_authorized
+                and self.personal_context_relay is not None
+                and isinstance(profile_id, str)
+            ):
                 relay_result = self.personal_context_relay.relay_profile(
                     user_id=user_id,
                     profile_id=profile_id,
@@ -3601,10 +3665,18 @@ class SyncV2Service:
                     state=relay_result.continuation,
                     scan_watermark=str(since_sequence),
                 )
-            scan = self.store.scan_personal_context_authority(
-                dataset_id,
-                after_server_cursor=since_sequence,
-                limit=page_limit,
+            scan = (
+                self.store.scan_personal_context_authority(
+                    dataset_id,
+                    after_server_cursor=since_sequence,
+                    limit=page_limit,
+                )
+                if personal_context_egress_authorized
+                else PersonalContextAuthorityScan(
+                    raw_scan_watermark=since_sequence,
+                    visible_envelopes=[],
+                    has_visible_lookahead=False,
+                )
             )
             page = [
                 self._restore_personal_context_from_storage(dataset, envelope)
@@ -3640,6 +3712,15 @@ class SyncV2Service:
             page_limit=page_limit,
             include_own_changes=include_own_changes,
             adapter_versions=[1],
+            personal_context_egress_authorized=(
+                personal_context_exchange is not None
+                and _personal_context_link_is_complete(
+                    self.store,
+                    dataset,
+                    user_id=user_id,
+                    device_id=device_id,
+                )
+            ),
         )
 
         page = [
@@ -8142,6 +8223,8 @@ class SyncV2Service:
         *,
         dataset: SyncDataset,
         device: SyncDevice,
+        user_id: str,
+        personal_context_exchange: object | None,
         cursor: str | int | None,
         streams: Sequence[tuple[SyncDomain, int]],
         page_size: int | None,
@@ -8183,6 +8266,15 @@ class SyncV2Service:
             watermarks=watermarks,
             page_limit=page_limit,
             include_own_changes=include_own_changes,
+            personal_context_egress_authorized=(
+                personal_context_exchange is not None
+                and _personal_context_link_is_complete(
+                    self.store,
+                    dataset,
+                    user_id=user_id,
+                    device_id=device.device_id,
+                )
+            ),
         )
         page = visible[:page_limit]
         has_visible_lookahead = len(visible) > page_limit
@@ -8252,6 +8344,7 @@ class SyncV2Service:
         watermarks: Mapping[tuple[SyncDomain, int], int],
         page_limit: int,
         include_own_changes: bool,
+        personal_context_egress_authorized: bool,
     ) -> tuple[list[SyncEnvelope], list[SyncEnvelope], int | None]:
         """Return raw and visible versioned candidates plus any blocking cursor."""
 
@@ -8283,6 +8376,10 @@ class SyncV2Service:
             for envelope in raw
             if envelope.apply_status not in {"conflict", "superseded"}
             and (blocker_cursor is None or envelope.server_sequence < blocker_cursor)
+            and _personal_context_pull_visible(
+                envelope,
+                authorized=personal_context_egress_authorized,
+            )
         ]
         return raw, visible, blocker_cursor
 
@@ -8532,6 +8629,7 @@ class SyncV2Service:
         page_limit: int,
         include_own_changes: bool,
         adapter_versions: Sequence[int] | None = None,
+        personal_context_egress_authorized: bool = False,
     ) -> tuple[list[SyncEnvelope], list[SyncEnvelope]]:
         raw = self.store.list_envelopes_after(
             dataset_id,
@@ -8557,6 +8655,10 @@ class SyncV2Service:
             and (
                 blocker_cursor is None
                 or envelope.server_sequence < blocker_cursor
+            )
+            and _personal_context_pull_visible(
+                envelope,
+                authorized=personal_context_egress_authorized,
             )
         ]
         return raw, visible
@@ -9147,6 +9249,24 @@ def _personal_context_link_is_complete(
             integrity_key_id=state["integrity_key_id"],
             purge_generation=state["purge_generation"],
         )
+    )
+
+
+def _personal_context_pull_visible(
+    envelope: SyncEnvelope,
+    *,
+    authorized: bool,
+) -> bool:
+    """Keep every Personal Context ingress row out of all pull cursor modes."""
+
+    if envelope.domain not in PERSONAL_CONTEXT_SYNC_DOMAINS:
+        return True
+    authority = envelope.authority
+    return bool(
+        authorized
+        and envelope.apply_status == "applied"
+        and authority is not None
+        and authority.role == "home_authority"
     )
 
 

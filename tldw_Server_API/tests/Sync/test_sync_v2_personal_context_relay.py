@@ -34,7 +34,10 @@ class _Publications:
 
     @contextmanager
     def profile_lease(self, _profile_id: str):
-        yield
+        yield True
+
+    def row_is_current(self, _row: PublicationSourceRow) -> bool:
+        return True
 
     def earliest_nonterminal_batch(self, _profile_id: str) -> PublicationSourceBatch:
         return PublicationSourceBatch("profile-a", 1, "batch-a", tuple(self.rows))

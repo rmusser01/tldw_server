@@ -292,6 +292,12 @@ class PersonalizationDB:
                         updated_at TEXT NOT NULL
                     );
 
+                    CREATE TABLE IF NOT EXISTS personal_context_publication_relay_leases (
+                        profile_id TEXT PRIMARY KEY,
+                        owner_token TEXT NOT NULL,
+                        expires_at_ns INTEGER NOT NULL
+                    );
+
                     CREATE TABLE IF NOT EXISTS personal_context_publication_batches (
                         profile_id TEXT NOT NULL,
                         profile_publication_sequence INTEGER NOT NULL,

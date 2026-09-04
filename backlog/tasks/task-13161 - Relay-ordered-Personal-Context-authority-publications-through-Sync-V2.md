@@ -1,7 +1,7 @@
 ---
 id: TASK-13161
 title: Relay ordered Personal Context authority publications through Sync V2
-status: Done
+status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-03 13:39'
@@ -28,12 +28,12 @@ Recoverably relay server canonical publication batches into Sync V2 and material
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [x] #1 After-commit and pull-time relay share one recoverable per-profile lease and claim only the earliest nonterminal publication sequence.
-- [x] #2 Semantic authority envelopes become durable before their manifest sibling; deterministic IDs and ordinal receipts make every crash point idempotent.
-- [x] #3 Client-authored envelopes remain ingress-only and become applied only after the canonical Personalization receipt is verified; accepted ingress is never pull-visible.
-- [x] #4 Personal Context pull filters to verified applied home-authority egress, separates raw scan watermarks from delivered/application checkpoints, and cannot be spoofed by a registered client.
-- [x] #5 Pull-time recovery stops at the fixed 100-row/100-millisecond budget and returns personal_context_relay_pending without skipping unavailable authority data.
-- [x] #6 SQLite interruption, interleaved-relay, cursor-pagination, reserved-identity, poisoned-batch, and privacy tests pass.
+- [ ] #1 After-commit and pull-time relay share one recoverable per-profile lease and claim only the earliest nonterminal publication sequence.
+- [ ] #2 Semantic authority envelopes become durable before their manifest sibling; deterministic IDs and ordinal receipts make every crash point idempotent.
+- [ ] #3 Client-authored envelopes remain ingress-only and become applied only after the canonical Personalization receipt is verified; accepted ingress is never pull-visible.
+- [ ] #4 Personal Context pull filters to verified applied home-authority egress, separates raw scan watermarks from delivered/application checkpoints, and cannot be spoofed by a registered client.
+- [ ] #5 Pull-time recovery stops at the fixed 100-row/100-millisecond budget and returns personal_context_relay_pending without skipping unavailable authority data.
+- [ ] #6 SQLite interruption, interleaved-relay, cursor-pagination, reserved-identity, poisoned-batch, and privacy tests pass.
 - [x] #7 ADR required: no new ADR; backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md governs ordered cross-database relay.
 <!-- AC:END -->
 
@@ -52,14 +52,14 @@ ADR required: no new ADR. Existing backlog/decisions/002-personal-context-profil
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
-- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
 
 ## Implementation Notes
 
-Implemented the encrypted, ordered Personal Context source-journal relay, server-origin authority insertion, receipt-gated ingress materialization, and authority-only pull filtering. Relay state remains content-free; canonical payloads are decrypted only transiently to create server-trusted encrypted Sync envelopes. No new ADR is required: [ADR-002](../decisions/002-personal-context-profile-authority-sync-and-encryption.md) governs this boundary. Targeted Sync tests, Ruff, Bandit, and diff hygiene passed; no known blockers.
+Initial implementation is under review remediation. No completion claim is made until signed/mixed pull filtering, durable leasing, strict envelope/receipt validation, crash recovery, bounded pagination, poison state, endpoint continuation, and after-commit triggering have evidence. No new ADR is required: [ADR-002](../decisions/002-personal-context-profile-authority-sync-and-encryption.md) governs this boundary.

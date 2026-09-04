@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
 
 import pytest
 
+from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+    CanonicalApplyReceipt,
+)
 from tldw_Server_API.app.core.Personalization.personal_context_service import (
     ProfileConflictError,
 )
@@ -28,6 +32,7 @@ class _RecordingService:
     calls: list[dict[str, object]] = field(default_factory=list)
     ingress_calls: list[dict[str, object]] = field(default_factory=list)
     conflict: bool = False
+    invalid_ingress_receipt: bool = False
 
     def apply_sync_object(self, **values: object) -> object:
         if self.conflict:
@@ -37,7 +42,26 @@ class _RecordingService:
 
     def apply_sync_ingress(self, **values: object) -> object:
         self.ingress_calls.append(values)
-        return SimpleNamespace(receipt_id="receipt-0123456789abcdef")
+        if self.invalid_ingress_receipt:
+            return SimpleNamespace(receipt_id="not-a-canonical-receipt")
+        identity = values["identity"]
+        value = values["value"]
+        return CanonicalApplyReceipt(
+            resulting_object_id=value.record_id,
+            resulting_version_id=value.version_id,
+            manifest_revision=1,
+            manifest_version_id="manifest-v1",
+            purge_generation=identity.purge_generation,
+            publication_batch_id="batch-1",
+            profile_publication_sequence=1,
+            receipt_id=str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    "tldw:personal-context:ingress:"
+                    f"{identity.dataset_id}:{identity.device_id}:{identity.client_envelope_id}",
+                )
+            ),
+        )
 
 
 class _Store:
@@ -79,7 +103,12 @@ class _Store:
         canonical_receipt_id: str,
     ) -> None:
         assert expected_client_envelope_id == "device-a:record-a:1"
-        assert canonical_receipt_id == "receipt-0123456789abcdef"
+        assert canonical_receipt_id == str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                "tldw:personal-context:ingress:dataset-a:device-a:device-a:record-a:1",
+            )
+        )
         self.statuses.append((server_cursor, "applied", None))
 
 
@@ -114,6 +143,7 @@ def _envelope() -> SyncEnvelope:
         payload=record.model_dump(mode="json"),
         payload_hash="hmac-sha256-v1:" + "a" * 64,
         object_revision=1,
+        entity_version=record.version_id,
         encryption_metadata={"policy": "server_trusted_v1"},
     )
 
@@ -182,3 +212,22 @@ def test_materializer_fails_before_service_resolution_without_authorized_dataset
     assert result.status == "failed"
     assert result.error_code == "personal_context_authorization_unavailable"
     assert resolver_calls == []
+
+
+def test_materializer_rejects_fake_ingress_receipts_before_sync_terminalization() -> None:
+    service = _RecordingService(invalid_ingress_receipt=True)
+    store = _Store(_dataset())
+    materializer = PersonalContextMaterializer(
+        domain="personal_context.record",
+        service_resolver=lambda _user_id: service,
+    )
+    envelope = replace(
+        _envelope(),
+        routing_metadata={"personal_context_authority": {"role": "client_ingress"}},
+    )
+
+    result = materializer.apply(envelope, store=store)
+
+    assert result.status == "failed"
+    assert result.error_code == "personal_context_payload_invalid"
+    assert store.statuses == [(1, "failed", "personal_context_payload_invalid")]

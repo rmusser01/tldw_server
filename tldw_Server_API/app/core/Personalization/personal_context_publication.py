@@ -8,6 +8,7 @@ import json
 import secrets
 import sqlite3
 import threading
+import time
 import uuid
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -119,14 +120,68 @@ class PersonalContextPublicationRelayStore:
         self._database = database
 
     @contextmanager
-    def profile_lease(self, profile_id: str) -> Iterator[None]:
-        """Serialize all local relay entry points for one durable profile journal."""
+    def profile_lease(self, profile_id: str) -> Iterator[bool]:
+        """Acquire a recoverable SQLite lease shared by every process entry point."""
 
         key = (self._database.db_path, profile_id)
         with self._locks_guard:
             lock = self._profile_locks.setdefault(key, threading.RLock())
         with lock:
-            yield
+            owner_token = uuid.uuid4().hex
+            now = time.time_ns()
+            with self._database.transaction(immediate=True) as connection:
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO personal_context_publication_relay_leases(
+                        profile_id, owner_token, expires_at_ns
+                    ) VALUES (?, ?, ?)
+                    """,
+                    (profile_id, owner_token, now),
+                )
+                claimed = connection.execute(
+                    """
+                    UPDATE personal_context_publication_relay_leases
+                    SET owner_token = ?, expires_at_ns = ?
+                    WHERE profile_id = ? AND expires_at_ns <= ?
+                    """,
+                    (owner_token, now + 120_000_000, profile_id, now),
+                ).rowcount == 1
+            try:
+                yield claimed
+            finally:
+                if claimed:
+                    with self._database.transaction(immediate=True) as connection:
+                        connection.execute(
+                            """
+                            UPDATE personal_context_publication_relay_leases
+                            SET expires_at_ns = ?
+                            WHERE profile_id = ? AND owner_token = ?
+                            """,
+                            (time.time_ns(), profile_id, owner_token),
+                        )
+
+    def row_is_current(self, row: PublicationSourceRow) -> bool:
+        """Recheck purge and terminal state immediately before external staging."""
+
+        with self._database.transaction(immediate=True) as connection:
+            current = connection.execute(
+                """
+                SELECT b.status, b.purge_generation, r.row_state
+                FROM personal_context_publication_batches b
+                JOIN personal_context_publication_rows r
+                  ON r.profile_id = b.profile_id
+                 AND r.profile_publication_sequence = b.profile_publication_sequence
+                WHERE r.profile_id = ? AND r.profile_publication_sequence = ?
+                  AND r.batch_ordinal = ?
+                """,
+                (row.profile_id, row.profile_publication_sequence, row.batch_ordinal),
+            ).fetchone()
+        return bool(
+            current is not None
+            and current["status"] not in {"complete", "covered_by_activation", "purge_terminal"}
+            and int(current["purge_generation"]) == row.purge_generation
+            and current["row_state"] in {"pending", "staged", "acknowledged"}
+        )
 
     def earliest_nonterminal_batch(self, profile_id: str) -> PublicationSourceBatch | None:
         """Claim and decrypt only the earliest incomplete sequence under SQLite lock."""
@@ -214,6 +269,12 @@ class PersonalContextPublicationRelayStore:
             ).fetchone()
             if current is None:
                 raise RuntimeError("publication row is unavailable")
+            profile = connection.execute(
+                "SELECT purge_generation FROM personal_context_publication_profiles WHERE profile_id = ?",
+                (row.profile_id,),
+            ).fetchone()
+            if profile is None or int(profile["purge_generation"]) != row.purge_generation:
+                raise RuntimeError("publication row is stale")
             if current["row_state"] == "acknowledged":
                 if int(current["sync_server_cursor"]) != server_cursor:
                     raise RuntimeError("publication receipt changed concurrently")

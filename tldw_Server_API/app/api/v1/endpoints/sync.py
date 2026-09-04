@@ -1687,7 +1687,7 @@ def pull_sync_v2_envelopes(
     user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
 ):
-    _validate_personal_context_query_proof(
+    personal_context_exchange = _validate_personal_context_query_proof(
         personal_context_activation_epoch,
         personal_context_continuity_token,
     )
@@ -1706,6 +1706,7 @@ def pull_sync_v2_envelopes(
             domains=domains,
             page_size=effective_page_size,
             include_own_changes=effective_include_own_changes,
+            personal_context_exchange=personal_context_exchange,
         )
     except Exception as exc:
         raise _safe_sync_v2_http_error(
@@ -1728,6 +1729,8 @@ def pull_sync_v2_envelopes(
         ],
         next_cursor=result.next_cursor,
         has_more=result.has_more,
+        personal_context_relay=result.personal_context_relay,
+        personal_context_exchange=personal_context_exchange,
     )
 
 

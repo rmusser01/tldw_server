@@ -51,7 +51,11 @@ class PersonalContextRelay:
         if row_budget < 1 or wall_time_ms < 1:
             raise ValueError("relay limits must be positive")
         deadline_ns = self.clock_ns() + wall_time_ms * 1_000_000
-        with self.publications.profile_lease(profile_id):
+        with self.publications.profile_lease(profile_id) as leased:
+            if not leased:
+                return PersonalContextRelayResult(
+                    0, False, False, "personal_context_relay_pending"
+                )
             batch = self.publications.earliest_nonterminal_batch(profile_id)
             if batch is None:
                 return PersonalContextRelayResult(0, True, False, "complete")
@@ -74,9 +78,17 @@ class PersonalContextRelay:
                     return PersonalContextRelayResult(
                         staged, False, False, "personal_context_relay_pending"
                     )
+                if not self.publications.row_is_current(row):
+                    return PersonalContextRelayResult(
+                        staged, False, False, "personal_context_relay_pending"
+                    )
                 cursor = self.stage_authority(row, dataset_id, user_id)
                 if isinstance(cursor, bool) or not isinstance(cursor, int) or cursor < 1:
                     raise RuntimeError("authority relay receipt is invalid")
+                if not self.publications.row_is_current(row):
+                    return PersonalContextRelayResult(
+                        staged, False, False, "personal_context_relay_pending"
+                    )
                 self.publications.acknowledge_row(row, server_cursor=cursor)
                 acknowledged_ordinals.add(row.batch_ordinal)
                 staged += 1

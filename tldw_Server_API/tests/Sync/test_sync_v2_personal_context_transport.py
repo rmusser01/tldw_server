@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import uuid
 from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from tldw_profile_core.canonical import canonical_json_bytes
 
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+    CanonicalApplyReceipt,
+)
 from tldw_Server_API.app.core.Sync.v2.adapters import SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.personal_context import (
     PersonalContextDomainAdapter,
@@ -53,7 +56,24 @@ class _RecordingService:
 
     def apply_sync_ingress(self, **values):
         self.values.append(values["value"])
-        return SimpleNamespace(receipt_id="receipt-0123456789abcdef")
+        identity = values["identity"]
+        value = values["value"]
+        return CanonicalApplyReceipt(
+            resulting_object_id=value.record_id,
+            resulting_version_id=value.version_id,
+            manifest_revision=1,
+            manifest_version_id="manifest-v1",
+            purge_generation=identity.purge_generation,
+            publication_batch_id="batch-1",
+            profile_publication_sequence=1,
+            receipt_id=str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    "tldw:personal-context:ingress:"
+                    f"{identity.dataset_id}:{identity.device_id}:{identity.client_envelope_id}",
+                )
+            ),
+        )
 
 
 def _tag(payload: dict[str, object]) -> str:
@@ -121,6 +141,7 @@ def _service(tmp_path: Path) -> tuple[SyncV2Service, _RecordingService, Path]:
             for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
         },
         settings=SyncV2Settings(
+            pull_token_signing_secret="test-only-pull-secret",
             server_trusted_encryption=server_trusted_encryption_status_from_config(
                 mode="managed_storage",
                 server_trusted_enabled=True,
@@ -244,6 +265,40 @@ def test_two_version_push_satisfies_sync_cas_and_encrypts_transport_history(
         if path.name.startswith(sqlite_path.name)
     )
     assert CANARY.encode() not in durable
+
+
+def test_signed_personal_context_pull_never_exposes_client_ingress(
+    tmp_path: Path,
+) -> None:
+    """A bootstrap-style signed cursor must retain the ingress egress gate."""
+
+    service, _target, _sqlite_path = _service(tmp_path)
+    payload = preference_record(value="private").model_dump(mode="json")
+    pushed = service.push(
+        user_id="user-a",
+        dataset_id=DATASET_ID,
+        device_id="device-a",
+        envelopes=[_envelope(payload, client_envelope_id="device-a:record:signed")],
+    )
+    assert pushed.accepted
+    device = service._require_registered_device("user-a", "device-b")
+    signed_cursor = service._encode_pull_token(
+        dataset_id=DATASET_ID,
+        device_id="device-b",
+        version_set=service._pull_version_set(device),
+        watermarks={(DOMAIN, 1): 0},
+    )
+
+    pulled = service.pull(
+        user_id="user-a",
+        dataset_id=DATASET_ID,
+        device_id="device-b",
+        domains=[DOMAIN],
+        cursor=signed_cursor,
+        include_own_changes=True,
+    )
+
+    assert pulled.envelopes == []
 
 
 def test_conflict_fails_closed_when_profile_storage_key_is_unavailable(

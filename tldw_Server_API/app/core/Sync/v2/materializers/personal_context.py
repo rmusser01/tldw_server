@@ -3,6 +3,7 @@ from __future__ import annotations
 """Materialize accepted Personal Context envelopes through the owner service."""
 
 import hashlib
+import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -11,6 +12,7 @@ from pydantic import ValidationError
 from tldw_profile_core import ProfileManifest, ProfileProposal, ProfileRecord, ProfileScope, canonical_bytes
 
 from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+    CanonicalApplyReceipt,
     IngressIdentity,
 )
 from tldw_Server_API.app.core.Personalization.personal_context_service import (
@@ -92,6 +94,12 @@ class PersonalContextMaterializer:
                     value=value,
                     base_object_hash=envelope.base_object_hash,
                 )
+                if not _valid_ingress_receipt(
+                    receipt,
+                    envelope=envelope,
+                    purge_generation=purge_generation,
+                ):
+                    raise ValueError("Personal Context ingress receipt is invalid")
                 store.mark_personal_context_ingress_applied(
                     server_cursor=envelope.server_cursor,
                     expected_client_envelope_id=envelope.client_envelope_id,
@@ -194,6 +202,34 @@ def _purge_generation(dataset: Any) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ValueError("Personal Context purge generation is unavailable")
     return value
+
+
+def _valid_ingress_receipt(
+    receipt: object,
+    *,
+    envelope: SyncEnvelope,
+    purge_generation: int,
+) -> bool:
+    """Bind a canonical receipt to this exact encrypted ingress envelope."""
+
+    if not isinstance(receipt, CanonicalApplyReceipt):
+        return False
+    expected_id = str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            "tldw:personal-context:ingress:"
+            f"{envelope.dataset_id}:{envelope.device_id or ''}:"
+            f"{envelope.client_envelope_id}",
+        )
+    )
+    return (
+        receipt.receipt_id == expected_id
+        and receipt.purge_generation == purge_generation
+        and receipt.resulting_object_id == envelope.object_id
+        and receipt.resulting_version_id == str(envelope.entity_version)
+        and bool(receipt.publication_batch_id)
+        and receipt.profile_publication_sequence > 0
+    )
 
 
 __all__ = ["PersonalContextMaterializer"]
