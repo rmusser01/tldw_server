@@ -151,7 +151,7 @@ class PersonalContextRelay:
                 cancellation = self._cancel(
                     claimed_identity, None, dataset_id, user_id
                 )
-                if cancellation == "failed":
+                if cancellation == "failed" or not budget.deadline_open():
                     return self._pending(staged)
                 try:
                     self.publications.retire_terminal_stage_identity(
@@ -235,10 +235,12 @@ class PersonalContextRelay:
                             lease=lease,
                         )
                     except Exception:  # noqa: BLE001 - classify uncertain commit state.
+                        if not budget.deadline_open():
+                            return self._pending(staged)
                         state = self.publications.stage_receipt_state(
                             claimed_row, receipt, lease=lease
                         )
-                        if state == "claimable":
+                        if state == "claimable" and budget.deadline_open():
                             self._cancel(
                                 claimed_row, receipt, dataset_id, user_id
                             )
@@ -280,9 +282,10 @@ class PersonalContextRelay:
         lease: Any,
         budget: PersonalContextRecoveryBudget,
     ) -> bool:
+        if not self.publications.renew_lease(lease) or not budget.deadline_open():
+            return False
         return bool(
-            self.publications.renew_lease(lease)
-            and self.publications.row_is_current(row, lease)
+            self.publications.row_is_current(row, lease)
             and budget.deadline_open()
         )
 

@@ -987,6 +987,7 @@ class SyncV2Store:
         profile_id: str | None = None,
         integrity_key_id: str | None = None,
         purge_generation: int | None = None,
+        authority_verifier: Callable[[SyncEnvelope], bool] | None = None,
     ) -> PersonalContextAuthorityScan:
         """Scan a mixed page without exposing or advancing past unsafe PC rows."""
 
@@ -1022,7 +1023,7 @@ class SyncV2Store:
                 domains=selected_domains,
                 adapter_versions=adapter_versions,
                 status="accepted",
-                exclude_device_id=exclude_device_id,
+                exclude_device_id=None,
             )
             if not raw:
                 source_exhausted = True
@@ -1048,6 +1049,7 @@ class SyncV2Store:
                         profile_id=profile_id,
                         integrity_key_id=integrity_key_id,
                         purge_generation=purge_generation,
+                        authority_verifier=authority_verifier,
                     )
                     if not budget.deadline_open():
                         bounded = True
@@ -1058,7 +1060,10 @@ class SyncV2Store:
                 raw_cursor = envelope.server_cursor or raw_cursor
                 safe_raw.append(envelope)
                 if envelope.domain not in PERSONAL_CONTEXT_SYNC_DOMAINS:
-                    if envelope.apply_status not in {"conflict", "superseded"}:
+                    if (
+                        envelope.device_id != exclude_device_id
+                        and envelope.apply_status not in {"conflict", "superseded"}
+                    ):
                         visible.append(envelope)
                 elif classification == "authority":
                     visible.append(envelope)
@@ -1083,6 +1088,7 @@ class SyncV2Store:
         profile_id: str | None,
         integrity_key_id: str | None,
         purge_generation: int | None,
+        authority_verifier: Callable[[SyncEnvelope], bool] | None = None,
     ) -> Literal["hidden", "authority", "barrier"]:
         """Classify a raw Personal Context row using durable provenance facts."""
 
@@ -1117,6 +1123,8 @@ class SyncV2Store:
             and authority is not None
             and authority.role == "home_authority"
             and envelope.apply_status == "applied"
+            and authority_verifier is not None
+            and authority_verifier(envelope)
         ):
             return "authority"
         return "barrier"
@@ -1129,8 +1137,13 @@ class SyncV2Store:
         if cursor is None:
             return False
         receipt = self.get_personal_context_ingress_receipt(cursor)
+        authority = envelope.authority
         return bool(
             receipt is not None
+            and envelope.status == "accepted"
+            and envelope.apply_status == "applied"
+            and authority is not None
+            and authority.role == "client_ingress"
             and receipt.get("server_sequence") == cursor
             and receipt.get("dataset_id") == envelope.dataset_id
             and receipt.get("device_id") == envelope.device_id

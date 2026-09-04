@@ -377,6 +377,75 @@ class PersonalContextPublicationRelayStore:
             wire_entity_version=str(receipt["wire_entity_version"]),
         )
 
+    def acknowledged_source_for_authority(
+        self,
+        *,
+        profile_id: str,
+        deterministic_envelope_id: str,
+        server_cursor: int,
+        budget: PersonalContextRecoveryBudget,
+    ) -> PublicationSourceRow | None:
+        """Read one exact acknowledged source under the caller's pull budget."""
+
+        if not budget.can_inspect():
+            return None
+        with self._database.transaction() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM personal_context_publication_rows
+                WHERE profile_id = ? AND deterministic_envelope_id = ?
+                LIMIT 1
+                """,
+                (profile_id, deterministic_envelope_id),
+            ).fetchone()
+        if row is None or not budget.consume():
+            return None
+        if (
+            str(row["row_state"]) != "acknowledged"
+            or type(row["sync_server_cursor"]) is not int
+            or int(row["sync_server_cursor"]) != server_cursor
+            or not budget.deadline_open()
+        ):
+            return None
+
+        from tldw_Server_API.app.core.DB_Management.Personal_Context_Key_Store import (
+            ServerProfileKeyProvider,
+        )
+
+        if not budget.deadline_open():
+            return None
+        with self._database.transaction() as connection:
+            keys = ServerProfileKeyProvider(self._database).load(
+                profile_id,
+                connection=connection,
+            )
+        if not budget.deadline_open():
+            return None
+        try:
+            domain, canonical = PersonalContextPublicationJournal(keys).decrypt_row(row)
+        except Exception:  # noqa: BLE001 - pull authentication fails closed.
+            return None
+        if not budget.deadline_open():
+            return None
+        return PublicationSourceRow(
+            profile_id=str(row["profile_id"]),
+            profile_publication_sequence=int(row["profile_publication_sequence"]),
+            publication_batch_id=str(row["publication_batch_id"]),
+            batch_ordinal=int(row["batch_ordinal"]),
+            batch_size=int(row["batch_size"]),
+            purge_generation=int(row["purge_generation"]),
+            role=str(row["role"]),  # type: ignore[arg-type]
+            object_id=str(row["opaque_object_id"]),
+            version_id=str(row["opaque_version_id"]),
+            operation=str(row["operation"]),  # type: ignore[arg-type]
+            deterministic_envelope_id=str(row["deterministic_envelope_id"]),
+            integrity_tag=str(row["integrity_tag"]),
+            domain=domain,
+            canonical=canonical,
+            sync_server_cursor=int(row["sync_server_cursor"]),
+            row_state="acknowledged",
+        )
+
     def originating_authority_cursor_for_source(
         self,
         row: PublicationSourceRow,

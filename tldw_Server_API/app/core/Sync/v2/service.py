@@ -1482,6 +1482,7 @@ class SyncV2Service:
         user_id: str,
         sync_store: SyncV2Store,
         source_claim_guarded: bool = False,
+        recovery_budget: _PersonalContextRecoveryBudget | None = None,
     ) -> int:
         """Verify one stored authority row against its live source and receipts."""
 
@@ -1491,6 +1492,8 @@ class SyncV2Service:
         )
 
         invalid = "Personal Context authority receipt is invalid"
+        if recovery_budget is not None and not recovery_budget.deadline_open():
+            raise SyncStoreError(invalid)
         domain = str(getattr(row, "domain", ""))
         if domain not in PERSONAL_CONTEXT_SYNC_DOMAINS:
             raise SyncStoreError(invalid)
@@ -1511,8 +1514,10 @@ class SyncV2Service:
             or not isinstance(integrity_key_id, str)
             or type(purge_generation) is not int
             or purge_generation != getattr(row, "purge_generation", None)
-            or not isinstance(relay_token, str)
-            or not relay_token
+            or (
+                not source_claim_guarded
+                and (not isinstance(relay_token, str) or not relay_token)
+            )
         ):
             raise SyncStoreError(invalid)
         try:
@@ -1523,6 +1528,8 @@ class SyncV2Service:
             publication_store = PersonalContextPublicationRelayStore(
                 canonical_service._repository.database
             )
+            if recovery_budget is not None and not recovery_budget.deadline_open():
+                raise SyncStoreError(invalid)
             if not source_claim_guarded and not publication_store.row_is_current(
                 row, PublicationRelayLease(profile_id, relay_token)
             ):
@@ -1578,14 +1585,21 @@ class SyncV2Service:
             authority_envelope=stored,
             publication_store=publication_store,
             sync_store=sync_store,
+            recovery_budget=recovery_budget,
         )
+        if recovery_budget is not None and not recovery_budget.deadline_open():
+            raise SyncStoreError(invalid)
         source_receipt_identity = _authority_source_receipt_identity(
             ingress_cursor=receipt_ingress_cursor,
             canonical_receipt=canonical_receipt,
             sync_receipt=sync_ingress_receipt,
         )
         try:
+            if recovery_budget is not None and not recovery_budget.deadline_open():
+                raise SyncStoreError(invalid)
             restored = self._restore_personal_context_from_storage(dataset, stored)
+            if recovery_budget is not None and not recovery_budget.deadline_open():
+                raise SyncStoreError(invalid)
             stored_canonical = canonical_json_bytes(restored.payload)
             expected_authority_tag = (
                 None
@@ -1646,6 +1660,8 @@ class SyncV2Service:
             != "sha256:" + hashlib.sha256(stored_canonical).hexdigest()
         ):
             raise SyncStoreError(invalid)
+        if recovery_budget is not None and not recovery_budget.deadline_open():
+            raise SyncStoreError(invalid)
         return stored.server_cursor
 
     def _personal_context_authority_source_receipts(
@@ -1656,6 +1672,7 @@ class SyncV2Service:
         authority_envelope: SyncEnvelope | SyncEnvelopeCreate,
         publication_store: PersonalContextPublicationRelayStore,
         sync_store: SyncV2Store,
+        recovery_budget: _PersonalContextRecoveryBudget | None = None,
     ) -> tuple[
         int | None,
         CanonicalApplyReceipt | None,
@@ -1663,11 +1680,16 @@ class SyncV2Service:
     ]:
         """Resolve any ingress receipt shared by one authority publication batch."""
 
+        if recovery_budget is not None and not recovery_budget.deadline_open():
+            raise SyncStoreError("Personal Context authority receipt is invalid")
+
         ingress_cursor = authority_envelope.base_server_cursor
         if getattr(row, "role", None) == "manifest":
             origin_cursor = publication_store.originating_authority_cursor_for_source(
                 row
             )
+            if recovery_budget is not None and not recovery_budget.deadline_open():
+                raise SyncStoreError("Personal Context authority receipt is invalid")
             origin = (
                 None
                 if origin_cursor is None
@@ -1735,6 +1757,8 @@ class SyncV2Service:
             if ingress_cursor is None
             else sync_store.get_personal_context_ingress_receipt(ingress_cursor)
         )
+        if recovery_budget is not None and not recovery_budget.deadline_open():
+            raise SyncStoreError("Personal Context authority receipt is invalid")
         canonical_receipt = (
             None
             if sync_receipt is None
@@ -1747,6 +1771,8 @@ class SyncV2Service:
                 ),
             )
         )
+        if recovery_budget is not None and not recovery_budget.deadline_open():
+            raise SyncStoreError("Personal Context authority receipt is invalid")
         if getattr(row, "role", None) == "manifest" and (
             canonical_receipt is None
             or sync_receipt is None
@@ -1756,9 +1782,17 @@ class SyncV2Service:
             raise SyncStoreError("Personal Context authority receipt is invalid")
         if getattr(row, "role", None) == "manifest":
             try:
+                if recovery_budget is not None and not recovery_budget.deadline_open():
+                    raise SyncStoreError(
+                        "Personal Context authority receipt is invalid"
+                    )
                 origin_canonical = canonical_json_bytes(
                     self._restore_personal_context_from_storage(dataset, origin).payload
                 )
+                if recovery_budget is not None and not recovery_budget.deadline_open():
+                    raise SyncStoreError(
+                        "Personal Context authority receipt is invalid"
+                    )
             except (SyncStoreError, TypeError, ValueError) as exc:
                 raise SyncStoreError(
                     "Personal Context authority receipt is invalid"
@@ -4846,6 +4880,14 @@ class SyncV2Service:
                         active_purge_generation
                         if type(active_purge_generation) is int
                         else None
+                    ),
+                    authority_verifier=lambda envelope: (
+                        self._verify_personal_context_pull_authority(
+                            dataset=dataset,
+                            user_id=user_id,
+                            envelope=envelope,
+                            budget=recovery,
+                        )
                     ),
                 )
                 if verified_exchange is not None and recovery.can_inspect()
@@ -9448,10 +9490,69 @@ class SyncV2Service:
                 and not budget.deadline_open()
             ):
                 return restored, envelope.server_sequence
-            restored.append(
-                self._restore_personal_context_from_storage(dataset, envelope)
-            )
+            clear = self._restore_personal_context_from_storage(dataset, envelope)
+            if (
+                envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+                and not budget.deadline_open()
+            ):
+                return restored, envelope.server_sequence
+            restored.append(clear)
         return restored, None
+
+    def _verify_personal_context_pull_authority(
+        self,
+        *,
+        dataset: SyncDataset,
+        user_id: str,
+        envelope: SyncEnvelope,
+        budget: _PersonalContextRecoveryBudget,
+    ) -> bool:
+        """Authenticate pull authority against its exact acknowledged source."""
+
+        if envelope.server_cursor is None or not budget.can_inspect():
+            return False
+        state = dataset.metadata.get("personal_context")
+        profile_id = state.get("profile_id") if isinstance(state, Mapping) else None
+        if not isinstance(profile_id, str):
+            return False
+        try:
+            from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+                PersonalContextPublicationRelayStore,
+            )
+
+            canonical_service = self._personal_context_service_for_user(user_id)
+            if not budget.deadline_open():
+                return False
+            publication_store = PersonalContextPublicationRelayStore(
+                canonical_service._repository.database
+            )
+            source = publication_store.acknowledged_source_for_authority(
+                profile_id=profile_id,
+                deterministic_envelope_id=envelope.client_envelope_id,
+                server_cursor=envelope.server_cursor,
+                budget=budget,
+            )
+            if source is None or not budget.deadline_open():
+                return False
+            self._verify_personal_context_authority_receipt(
+                dataset=dataset,
+                stored=envelope,
+                row=source,
+                user_id=user_id,
+                sync_store=self.store,
+                source_claim_guarded=True,
+                recovery_budget=budget,
+            )
+        except (
+            AttributeError,
+            KeyError,
+            RuntimeError,
+            SyncStoreError,
+            TypeError,
+            ValueError,
+        ):
+            return False
+        return budget.deadline_open()
 
     def _recovery_now_ns(self) -> int:
         """Read the injectable recovery clock without freezing the default."""
@@ -9545,6 +9646,8 @@ class SyncV2Service:
         personal_context_state = dataset.metadata.get("personal_context")
         raw_envelopes, visible, blocker_cursor, source_exhausted = (
             self._scan_versioned_pull_page(
+                dataset=dataset,
+                user_id=user_id,
                 dataset_id=dataset.dataset_id,
                 device_id=device.device_id,
                 watermarks=watermarks,
@@ -9655,6 +9758,8 @@ class SyncV2Service:
     def _scan_versioned_pull_page(
         self,
         *,
+        dataset: SyncDataset,
+        user_id: str,
         dataset_id: str,
         device_id: str,
         watermarks: Mapping[tuple[SyncDomain, int], int],
@@ -9693,7 +9798,12 @@ class SyncV2Service:
                 domains=[domain],
                 adapter_versions=[adapter_version],
                 status="accepted",
-                exclude_device_id=None if include_own_changes else device_id,
+                exclude_device_id=(
+                    None
+                    if include_own_changes
+                    or domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+                    else device_id
+                ),
             )
             if not rows:
                 exhausted_streams.add(stream)
@@ -9730,6 +9840,14 @@ class SyncV2Service:
                     profile_id=profile_id,
                     integrity_key_id=integrity_key_id,
                     purge_generation=purge_generation,
+                    authority_verifier=lambda candidate: (
+                        self._verify_personal_context_pull_authority(
+                            dataset=dataset,
+                            user_id=user_id,
+                            envelope=candidate,
+                            budget=budget,
+                        )
+                    ),
                 )
                 if not budget.deadline_open() or classification == "barrier":
                     break

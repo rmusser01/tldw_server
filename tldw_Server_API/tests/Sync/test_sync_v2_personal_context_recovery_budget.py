@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.Personalization.personal_context_publication impor
     PersonalContextPublicationJournal,
     PublicationSourceBatch,
     PublicationSourceRow,
+    PublicationStageIdentity,
 )
 from tldw_Server_API.app.core.Sync.v2.personal_context_relay import (
     PersonalContextRelay,
@@ -25,6 +26,7 @@ from tldw_Server_API.app.core.Sync.v2.service import (
 )
 from tldw_Server_API.tests.Sync.test_sync_v2_personal_context_authority_identity import (
     AuthorityHarness,
+    IngressHarness,
 )
 from tldw_Server_API.tests.Sync.test_sync_v2_personal_context_transport import (
     DATASET_ID,
@@ -44,6 +46,124 @@ class _ManualClock:
 
     def __call__(self) -> int:
         return self.now_ns
+
+
+def _pull_cursor(service: Any, *, after: int, signed: bool) -> str | int:
+    if not signed:
+        return after
+    service.settings = replace(
+        service.settings,
+        pull_token_signing_secret="test-only-pull-secret",
+    )
+    device = service._require_registered_device("user-a", "device-a")
+    return service._encode_pull_token(
+        dataset_id="dataset-a",
+        device_id="device-a",
+        version_set=service._pull_version_set(device),
+        watermarks={(DOMAIN, 1): after},
+    )
+
+
+def _pulled_watermark(service: Any, result: Any, *, signed: bool) -> int:
+    if not signed:
+        return int(result.next_cursor)
+    device = service._require_registered_device("user-a", "device-a")
+    decoded = service._decode_pull_token(
+        result.next_cursor,
+        dataset_id="dataset-a",
+        device_id="device-a",
+        version_set=service._pull_version_set(device),
+        streams=[(DOMAIN, 1)],
+    )
+    return decoded[(DOMAIN, 1)]
+
+
+def _complete_real_authority(runtime: AuthorityHarness) -> int:
+    key_id, _integrity_key = runtime.canonical.sync_integrity_key(
+        runtime.manifest.profile_id
+    )
+    runtime.service.register_device(
+        user_id="user-a",
+        display_name="device-a",
+        client_type="chatbook",
+        device_id="device-a",
+        capabilities={
+            "supported_adapter_versions": {
+                domain: [1]
+                for domain in runtime.store.get_dataset("dataset-a").domains
+            }
+        },
+    )
+    runtime.store.complete_personal_context_link_receipt(
+        user_id="user-a",
+        dataset_id="dataset-a",
+        device_id="device-a",
+        profile_id=runtime.manifest.profile_id,
+        integrity_key_id=key_id,
+        purge_generation=0,
+        bootstrap_cursor="fixture-cursor",
+    )
+    relay = PersonalContextRelay(
+        publications=runtime.publications,
+        stage_authority=runtime.service.stage_personal_context_authority,
+        finalize_authority=runtime.service.finalize_personal_context_authority,
+        cancel_authority=runtime.service.cancel_personal_context_authority,
+    )
+    for _ in range(10):
+        result = relay.relay_profile(
+            user_id="user-a",
+            profile_id=runtime.manifest.profile_id,
+            dataset_id="dataset-a",
+            after_server_cursor=None,
+            wall_time_ms=5_000,
+        )
+        if result.continuation == "complete":
+            break
+    assert result.continuation == "complete"
+    runtime.service.personal_context_relay = None
+    authority = runtime.store.list_envelopes_after(
+        "dataset-a", 0, limit=1, domains=[DOMAIN], status="accepted"
+    )[0]
+    assert authority.server_cursor is not None
+    return authority.server_cursor
+
+
+def _tamper_authority_metadata(
+    runtime: AuthorityHarness,
+    cursor: int,
+    mutation: str,
+) -> None:
+    if mutation == "origin_device":
+        runtime.update_sync(cursor, "device_id = ?", ("other-server-origin",))
+        return
+    with runtime.store.db.backend.transaction() as connection:
+        stored = runtime.store.db.execute(
+            "SELECT routing_metadata_json FROM sync_envelopes "
+            "WHERE server_sequence = ?",
+            (cursor,),
+            connection=connection,
+        ).rows[0]
+        routing = json.loads(stored["routing_metadata_json"])
+        if mutation == "profile":
+            routing["profile_id"] = "other-profile"
+        elif mutation == "generation":
+            routing["purge_generation"] = 1
+        elif mutation == "key":
+            routing["integrity_key_id"] = "other-integrity-key"
+        elif mutation == "batch":
+            routing["personal_context_authority"]["publication_batch_id"] = (
+                "other-publication-batch"
+            )
+        elif mutation == "role":
+            routing["personal_context_authority"]["role"] = "client_ingress"
+        else:  # pragma: no cover - parameter list and mutations remain paired.
+            raise AssertionError(f"unknown mutation: {mutation}")
+        runtime.store.db.execute(
+            "UPDATE sync_envelopes SET routing_metadata_json = ? "
+            "WHERE server_sequence = ?",
+            (json.dumps(routing, sort_keys=True, separators=(",", ":")), cursor),
+            connection=connection,
+        )
 
 
 class _BudgetConsumingRelay:
@@ -523,6 +643,122 @@ def test_relay_rechecks_deadline_before_completing_the_batch() -> None:
     ]
 
 
+class _RecoveryFenceSource(_ManyBatchSource):
+    def __init__(self, clock: _ManualClock, *, mode: str) -> None:
+        super().__init__(1)
+        self.clock = clock
+        self.mode = mode
+        self.actions: list[str] = []
+
+    def unfinished_stage_identities(self, *_args: Any, **kwargs: Any):
+        if self.mode != "orphan":
+            return ()
+        assert kwargs["budget"].consume()
+        return (
+            PublicationStageIdentity(
+                profile_id="profile-a",
+                deterministic_envelope_id="authority-orphan",
+                publication_batch_id="batch-orphan",
+                profile_publication_sequence=1,
+                batch_ordinal=0,
+                batch_size=1,
+                purge_generation=0,
+                sync_server_cursor=1,
+                relay_owner_token=None,
+            ),
+        )
+
+    def earliest_nonterminal_batch(self, *args: Any, **kwargs: Any):
+        if self.mode == "orphan":
+            return None
+        return super().earliest_nonterminal_batch(*args, **kwargs)
+
+    def renew_lease(self, _lease: object) -> bool:
+        self.actions.append("renew")
+        if self.mode == "renew":
+            self.clock.now_ns = 100
+        return True
+
+    def row_is_current(self, _row: object, _lease: object) -> bool:
+        self.actions.append("current")
+        return True
+
+    def record_staged_row(self, *_args: Any, **_kwargs: Any) -> None:
+        self.actions.append("record")
+        if self.mode == "record":
+            self.clock.now_ns = 100
+            raise RuntimeError("uncertain record")
+
+    def stage_receipt_state(self, *_args: Any, **_kwargs: Any) -> str:
+        self.actions.append("receipt-state")
+        return "claimable"
+
+    def retire_terminal_stage_identity(self, *_args: Any, **_kwargs: Any) -> None:
+        self.actions.append("retire")
+
+
+def _relay_with_recovery_fence_source(mode: str) -> tuple[Any, list[str]]:
+    clock = _ManualClock()
+    publications = _RecoveryFenceSource(clock, mode=mode)
+    budget = _PersonalContextRecoveryBudget(
+        deadline_ns=100,
+        remaining_rows=100,
+        clock_ns=clock,
+    )
+
+    def stage(row: PublicationSourceRow, *_args: Any) -> AuthorityStageReceipt:
+        publications.actions.append("stage")
+        return AuthorityStageReceipt(
+            server_cursor=1,
+            deterministic_envelope_id=row.deterministic_envelope_id,
+            publication_batch_id=row.publication_batch_id,
+            profile_publication_sequence=row.profile_publication_sequence,
+            batch_ordinal=row.batch_ordinal,
+            batch_size=row.batch_size,
+            purge_generation=row.purge_generation,
+        )
+
+    def cancel(*_args: Any) -> str:
+        publications.actions.append("cancel")
+        if mode == "orphan":
+            clock.now_ns = 100
+        return "removed"
+
+    result = PersonalContextRelay(
+        publications=publications,
+        stage_authority=stage,
+        cancel_authority=cancel,
+    ).relay_profile(
+        user_id="user-a",
+        profile_id="profile-a",
+        dataset_id="dataset-a",
+        after_server_cursor=None,
+        budget=budget,
+    )
+    return result, publications.actions
+
+
+def test_relay_does_not_check_current_after_renew_crosses_deadline() -> None:
+    result, actions = _relay_with_recovery_fence_source("renew")
+
+    assert result.continuation == "personal_context_relay_pending"
+    assert actions == ["renew"]
+
+
+def test_relay_does_not_retire_orphan_after_cancellation_crosses_deadline() -> None:
+    result, actions = _relay_with_recovery_fence_source("orphan")
+
+    assert result.continuation == "personal_context_relay_pending"
+    assert actions == ["cancel"]
+
+
+def test_relay_defers_uncertain_record_recovery_after_deadline() -> None:
+    result, actions = _relay_with_recovery_fence_source("record")
+
+    assert result.continuation == "personal_context_relay_pending"
+    assert actions == ["renew", "current", "stage", "renew", "current", "record"]
+
+
 def test_real_source_decryption_stops_when_deadline_expires_between_rows(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -695,20 +931,218 @@ def test_deadline_before_authority_decrypt_advances_only_hidden_prefix(
         assert pulled.next_cursor == str(hidden_cursor)
 
 
-def test_page_lookahead_cannot_borrow_a_hundred_and_first_row(tmp_path) -> None:
-    """Page-plus-one is recovery work and must fit the remaining allowance."""
+@pytest.mark.parametrize("signed", [False, True], ids=["legacy", "signed"])
+@pytest.mark.parametrize(
+    "mutation",
+    ["profile", "generation", "key", "batch", "origin_device", "role"],
+)
+def test_pull_never_trusts_mutable_authority_metadata(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    signed: bool,
+    mutation: str,
+) -> None:
+    runtime = IngressHarness(tmp_path, monkeypatch)
+    authority_cursor = _complete_real_authority(runtime)
+    _tamper_authority_metadata(runtime, authority_cursor, mutation)
+    after = authority_cursor - 1
 
+    pulled = runtime.service.pull(
+        user_id="user-a",
+        dataset_id="dataset-a",
+        device_id="device-a",
+        domains=[DOMAIN],
+        cursor=_pull_cursor(runtime.service, after=after, signed=signed),
+        include_own_changes=True,
+        personal_context_exchange=EXCHANGE,
+    )
+
+    assert pulled.envelopes == []
+    assert _pulled_watermark(runtime.service, pulled, signed=signed) == after
+
+
+@pytest.mark.parametrize("signed", [False, True], ids=["legacy", "signed"])
+def test_pull_does_not_skip_ingress_relabelled_as_current_authority(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    signed: bool,
+) -> None:
+    runtime = IngressHarness(tmp_path, monkeypatch)
+    runtime.service.personal_context_relay = None
+    ingress = runtime.store.get_envelope_by_server_cursor(runtime.ingress_cursor)
+    assert ingress is not None
+    routing = {
+        **ingress.routing_metadata,
+        "profile_id": runtime.manifest.profile_id,
+        "integrity_key_id": runtime.store.get_dataset("dataset-a").metadata[
+            "personal_context"
+        ]["integrity_key_id"],
+        "purge_generation": 0,
+        "personal_context_authority": {
+            "role": "home_authority",
+            "publication_batch_id": "well-formed-tampered-batch",
+            "profile_publication_sequence": 1,
+            "batch_ordinal": 0,
+            "batch_size": 1,
+        },
+    }
+    runtime.update_sync(
+        runtime.ingress_cursor,
+        "routing_metadata_json = ?, apply_status = ?",
+        (json.dumps(routing, sort_keys=True, separators=(",", ":")), "applied"),
+    )
+    after = runtime.ingress_cursor - 1
+
+    pulled = runtime.service.pull(
+        user_id="user-a",
+        dataset_id="dataset-a",
+        device_id="device-a",
+        domains=[DOMAIN],
+        cursor=_pull_cursor(runtime.service, after=after, signed=signed),
+        include_own_changes=True,
+        personal_context_exchange=EXCHANGE,
+    )
+
+    assert pulled.envelopes == []
+    assert _pulled_watermark(runtime.service, pulled, signed=signed) == after
+
+
+@pytest.mark.parametrize("signed", [False, True], ids=["legacy", "signed"])
+@pytest.mark.parametrize("own_row", ["pending", "tampered"])
+def test_excluded_own_personal_context_row_still_blocks_later_watermark(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    signed: bool,
+    own_row: str,
+) -> None:
     service, _target, _sqlite_path = _service(tmp_path)
-    relay = _BudgetConsumingRelay(99)
-    service.personal_context_relay = relay
-    service._recovery_clock_ns = _ManualClock()
-    first_cursor = _insert_authority(service, record_id="first", sequence=1)
-    _insert_authority(service, record_id="second", sequence=2)
+    service.personal_context_relay = _BudgetConsumingRelay(0)
+    own_cursor = _insert_hidden_ingress(
+        service,
+        ordinal=1,
+        attested=own_row == "tampered",
+    )
+    if own_row == "pending":
+        with service.store.db.backend.transaction() as connection:
+            service.store.db.execute(
+                "UPDATE sync_envelopes SET apply_status = 'pending' "
+                "WHERE server_sequence = ?",
+                (own_cursor,),
+                connection=connection,
+            )
+    else:
+        with service.store.db.backend.transaction() as connection:
+            service.store.db.execute(
+                "UPDATE sync_personal_context_ingress_receipts "
+                "SET client_envelope_id = ? WHERE server_sequence = ?",
+                ("tampered-own-envelope", own_cursor),
+                connection=connection,
+            )
+    later_cursor = _insert_hidden_ingress(service, ordinal=2)
+    with service.store.db.backend.transaction() as connection:
+        service.store.db.execute(
+            "UPDATE sync_envelopes SET device_id = 'device-b' "
+            "WHERE server_sequence = ?",
+            (later_cursor,),
+            connection=connection,
+        )
+        service.store.db.execute(
+            "UPDATE sync_personal_context_ingress_receipts "
+            "SET device_id = 'device-b' WHERE server_sequence = ?",
+            (later_cursor,),
+            connection=connection,
+        )
+    inspected: list[int] = []
+    original = service.store.classify_personal_context_recovery_row
+
+    def record_classification(envelope: Any, **kwargs: Any):
+        inspected.append(envelope.server_cursor)
+        return original(envelope, **kwargs)
+
+    monkeypatch.setattr(
+        service.store,
+        "classify_personal_context_recovery_row",
+        record_classification,
+    )
+    cursor = _pull_cursor(service, after=0, signed=signed)
 
     pulled = service.pull(
         user_id="user-a",
         dataset_id=DATASET_ID,
-        device_id="device-b",
+        device_id="device-a",
+        domains=[DOMAIN],
+        cursor=cursor,
+        include_own_changes=False,
+        personal_context_exchange=EXCHANGE,
+    )
+
+    assert inspected == [own_cursor]
+    assert pulled.envelopes == []
+    assert _pulled_watermark(service, pulled, signed=signed) == 0
+
+
+@pytest.mark.parametrize("signed", [False, True], ids=["legacy", "signed"])
+def test_successful_authority_restore_crossing_deadline_is_not_exposed(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    signed: bool,
+) -> None:
+    runtime = IngressHarness(tmp_path, monkeypatch)
+    authority_cursor = _complete_real_authority(runtime)
+    clock = _ManualClock()
+    runtime.service._recovery_clock_ns = clock
+    original = runtime.service._restore_personal_context_from_storage
+
+    def expire_after_restore(*args: Any, **kwargs: Any):
+        restored = original(*args, **kwargs)
+        clock.now_ns = 100_000_000
+        return restored
+
+    monkeypatch.setattr(
+        runtime.service,
+        "_restore_personal_context_from_storage",
+        expire_after_restore,
+    )
+    after = authority_cursor - 1
+
+    pulled = runtime.service.pull(
+        user_id="user-a",
+        dataset_id="dataset-a",
+        device_id="device-a",
+        domains=[DOMAIN],
+        cursor=_pull_cursor(runtime.service, after=after, signed=signed),
+        include_own_changes=True,
+        personal_context_exchange=EXCHANGE,
+    )
+
+    assert pulled.envelopes == []
+    assert _pulled_watermark(runtime.service, pulled, signed=signed) == after
+
+
+def test_page_lookahead_cannot_borrow_a_hundred_and_first_row(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Page-plus-one is recovery work and must fit the remaining allowance."""
+
+    runtime = IngressHarness(tmp_path, monkeypatch)
+    _complete_real_authority(runtime)
+    relay = _BudgetConsumingRelay(96)
+    runtime.service.personal_context_relay = relay
+    runtime.service.settings = replace(
+        runtime.service.settings,
+        pull_token_signing_secret="test-only-pull-secret",
+    )
+    runtime.service._recovery_clock_ns = _ManualClock()
+    first_cursor = runtime.store.list_envelopes_after(
+        "dataset-a", 0, limit=1, domains=[DOMAIN], status="accepted"
+    )[0].server_cursor
+    assert first_cursor is not None
+
+    pulled = runtime.service.pull(
+        user_id="user-a",
+        dataset_id="dataset-a",
+        device_id="device-a",
         domains=[DOMAIN],
         cursor=0,
         page_size=1,
@@ -718,7 +1152,7 @@ def test_page_lookahead_cannot_borrow_a_hundred_and_first_row(tmp_path) -> None:
 
     assert [item.server_cursor for item in pulled.envelopes] == [first_cursor]
     assert relay.budgets[0].remaining_rows == 0
-    assert pulled.next_cursor == str(first_cursor)
+    assert pulled.next_cursor == str(runtime.ingress_cursor)
     assert pulled.has_more is True
 
 
@@ -971,8 +1405,8 @@ def test_hidden_ingress_requires_an_exact_receipt_identity(
     assert scan.source_exhausted is False
 
 
-def test_attested_ingress_remains_safe_when_mutable_routing_is_stale(tmp_path) -> None:
-    """The exact canonical receipt, not mutable routing, proves client ingress."""
+def test_attested_ingress_with_mutable_role_removed_is_a_barrier(tmp_path) -> None:
+    """An ingress receipt cannot excuse a missing client-ingress role."""
 
     service, _target, _sqlite_path = _service(tmp_path)
     cursor = _insert_hidden_ingress(service, ordinal=1)
@@ -1001,9 +1435,9 @@ def test_attested_ingress_remains_safe_when_mutable_routing_is_stale(tmp_path) -
         purge_generation=1,
     )
 
-    assert scan.raw_scan_watermark == cursor
+    assert scan.raw_scan_watermark == 0
     assert scan.visible_envelopes == []
-    assert scan.source_exhausted is True
+    assert scan.source_exhausted is False
 
 
 def test_shredded_routing_marker_alone_cannot_hide_authority(tmp_path) -> None:
@@ -1040,8 +1474,8 @@ def test_shredded_routing_marker_alone_cannot_hide_authority(tmp_path) -> None:
         purge_generation=0,
     )
 
-    assert [item.server_cursor for item in scan.visible_envelopes] == [cursor]
-    assert scan.raw_scan_watermark == cursor
+    assert scan.visible_envelopes == []
+    assert scan.raw_scan_watermark == 0
 
 
 def test_structurally_shredded_authority_is_safe_to_skip(tmp_path) -> None:

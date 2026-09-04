@@ -6,13 +6,23 @@ import sqlite3
 import uuid
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from tldw_profile_core.canonical import canonical_json_bytes
 
+from tldw_Server_API.app.core.DB_Management.Personal_Context_Key_Store import (
+    ServerProfileKeyProvider,
+)
+from tldw_Server_API.app.core.DB_Management.Personalization_DB import (
+    PersonalizationDB,
+)
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Personalization.personal_context_publication import (
     CanonicalApplyReceipt,
+    PersonalContextPublicationJournal,
+    PersonalContextPublicationRelayStore,
+    PublicationObject,
 )
 from tldw_Server_API.app.core.Sync.v2.adapters import (
     AdapterAccepted,
@@ -35,6 +45,7 @@ from tldw_Server_API.app.core.Sync.v2.personal_context_ongoing_contract import (
     PersonalContextAuthorityMetadata,
     PersonalContextExchangeProof,
 )
+from tldw_Server_API.app.core.Sync.v2.personal_context_relay import PersonalContextRelay
 from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_config,
 )
@@ -44,6 +55,7 @@ from tldw_Server_API.app.core.Sync.v2.server_origin import (
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
 from tldw_Server_API.tests.Personalization.personal_context_test_support import (
+    encoded_master_key,
     preference_record,
 )
 
@@ -64,8 +76,14 @@ EXCHANGE = PersonalContextExchangeProof(
 
 
 class _RecordingService:
-    def __init__(self) -> None:
+    def __init__(self, database: PersonalizationDB | None = None) -> None:
         self.values = []
+        if database is not None:
+            self._repository = SimpleNamespace(database=database)
+
+    def sync_integrity_key(self, profile_id: str) -> tuple[str, bytes]:
+        assert profile_id == PROFILE_ID
+        return INTEGRITY_KEY_ID, INTEGRITY_KEY
 
     def apply_sync_object(self, **values):
         self.values.append(values["value"])
@@ -148,7 +166,11 @@ def _envelope(
 
 
 def _service(
-    tmp_path: Path, *, active_exchange: bool = True
+    tmp_path: Path,
+    *,
+    active_exchange: bool = True,
+    authority_source: bool = False,
+    monkeypatch: pytest.MonkeyPatch | None = None,
 ) -> tuple[SyncV2Service, _RecordingService, Path]:
     sqlite_path = tmp_path / "sync.db"
     store = SyncV2Store(SyncDatabase(sqlite_path=sqlite_path))
@@ -163,7 +185,23 @@ def _service(
         ]
         + [_LegacyNotesAdapter()]
     )
-    target = _RecordingService()
+    personal_database = None
+    if authority_source:
+        assert monkeypatch is not None
+        monkeypatch.setenv("TLDW_PERSONAL_CONTEXT_MASTER_KEY", encoded_master_key())
+        personal_database = PersonalizationDB.for_path(tmp_path / "personalization.db")
+        provider = ServerProfileKeyProvider(personal_database)
+        with personal_database.transaction(immediate=True) as connection:
+            created = provider.create(PROFILE_ID, connection=connection)
+            provider.replace_encryption_key(
+                PROFILE_ID,
+                encryption_key=ENCRYPTION_KEY,
+                integrity_key=INTEGRITY_KEY,
+                expected_key_version=created.key_version,
+                integrity_key_version=created.integrity_key_version,
+                connection=connection,
+            )
+    target = _RecordingService(personal_database)
     service = SyncV2Service(
         store=store,
         adapters=adapters,
@@ -174,6 +212,9 @@ def _service(
             )
             for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
         },
+        personal_context_service_resolver=(
+            (lambda _user_id: target) if personal_database is not None else None
+        ),
         settings=SyncV2Settings(
             pull_token_signing_secret="test-only-pull-secret",
             server_trusted_encryption=server_trusted_encryption_status_from_config(
@@ -294,6 +335,66 @@ def _insert_authority(
             apply_status="applied",
         )
     return stored.server_cursor
+
+
+def _insert_verified_authority(
+    service: SyncV2Service,
+    *,
+    record_id: str,
+    sequence: int,
+    applied: bool = True,
+) -> int:
+    payload = preference_record(
+        record_id=record_id,
+        version_id=f"{record_id}-version",
+        value=f"clear-{record_id}",
+    ).model_dump(mode="json")
+    canonical_service = service._personal_context_service_for_user("user-a")
+    database = canonical_service._repository.database
+    keys = ServerProfileKeyProvider(database).load(PROFILE_ID)
+    with database.transaction(immediate=True) as connection:
+        receipt = PersonalContextPublicationJournal(keys).append_batch(
+            connection,
+            profile_id=PROFILE_ID,
+            purge_generation=0,
+            objects=(
+                PublicationObject(
+                    domain=DOMAIN,
+                    object_id=record_id,
+                    version_id=str(payload["version_id"]),
+                    operation="upsert",
+                    role="semantic",
+                    canonical=canonical_json_bytes(payload),
+                ),
+            ),
+            now="2026-09-04T12:00:00Z",
+        )
+    assert receipt.profile_publication_sequence == sequence
+    publications = PersonalContextPublicationRelayStore(database)
+    relayed = PersonalContextRelay(
+        publications=publications,
+        stage_authority=service.stage_personal_context_authority,
+        finalize_authority=(
+            service.finalize_personal_context_authority if applied else None
+        ),
+        cancel_authority=service.cancel_personal_context_authority,
+    ).relay_profile(
+        user_id="user-a",
+        profile_id=PROFILE_ID,
+        dataset_id=DATASET_ID,
+        after_server_cursor=None,
+        wall_time_ms=5_000,
+    )
+    assert relayed.staged_rows == 1
+    with database.transaction() as connection:
+        source = connection.execute(
+            """SELECT sync_server_cursor FROM personal_context_publication_rows
+               WHERE profile_id = ? AND profile_publication_sequence = ?""",
+            (PROFILE_ID, sequence),
+        ).fetchone()
+    assert source is not None
+    assert type(source["sync_server_cursor"]) is int
+    return int(source["sync_server_cursor"])
 
 
 def _insert_hidden_ingress(
@@ -501,14 +602,17 @@ def test_signed_personal_context_pull_never_exposes_client_ingress(
 
 def test_signed_authority_pull_restores_clear_payload_and_retries_lookahead(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    service, _target, _sqlite_path = _service(tmp_path)
-    first_cursor = _insert_authority(
+    service, _target, _sqlite_path = _service(
+        tmp_path, authority_source=True, monkeypatch=monkeypatch
+    )
+    first_cursor = _insert_verified_authority(
         service,
         record_id="authority-first",
         sequence=1,
     )
-    second_cursor = _insert_authority(
+    second_cursor = _insert_verified_authority(
         service,
         record_id="authority-second",
         sequence=2,
@@ -590,20 +694,23 @@ def test_recovery_scan_stops_at_100_hidden_rows_without_skipping_101(
 
 def test_legacy_authority_pull_stops_before_pending_barrier(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    service, _target, _sqlite_path = _service(tmp_path)
-    first_cursor = _insert_authority(
+    service, _target, _sqlite_path = _service(
+        tmp_path, authority_source=True, monkeypatch=monkeypatch
+    )
+    first_cursor = _insert_verified_authority(
         service,
         record_id="before-barrier",
         sequence=1,
     )
-    pending_cursor = _insert_authority(
+    pending_cursor = _insert_verified_authority(
         service,
         record_id="pending-barrier",
         sequence=2,
         applied=False,
     )
-    _insert_authority(
+    _insert_verified_authority(
         service,
         record_id="after-barrier",
         sequence=3,
@@ -628,14 +735,17 @@ def test_legacy_authority_pull_stops_before_pending_barrier(
 
 def test_unattested_old_generation_authority_is_a_scan_barrier(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    service, _target, _sqlite_path = _service(tmp_path)
-    old_applied_cursor = _insert_authority(
+    service, _target, _sqlite_path = _service(
+        tmp_path, authority_source=True, monkeypatch=monkeypatch
+    )
+    old_applied_cursor = _insert_verified_authority(
         service,
         record_id="old-applied",
         sequence=1,
     )
-    pending_cursor = _insert_authority(
+    pending_cursor = _insert_verified_authority(
         service,
         record_id="old-pending",
         sequence=2,
@@ -662,11 +772,14 @@ def test_unattested_old_generation_authority_is_a_scan_barrier(
 
 def test_signed_mixed_pull_preserves_each_stream_watermark_without_duplicates(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    service, _target, _sqlite_path = _service(tmp_path)
+    service, _target, _sqlite_path = _service(
+        tmp_path, authority_source=True, monkeypatch=monkeypatch
+    )
     note_cursor = _insert_note(service, object_id="note-first")
     _insert_hidden_ingress(service, ordinal=1)
-    authority_cursor = _insert_authority(
+    authority_cursor = _insert_verified_authority(
         service,
         record_id="mixed-authority",
         sequence=1,
@@ -719,11 +832,14 @@ def test_signed_mixed_pull_preserves_each_stream_watermark_without_duplicates(
 
 def test_legacy_mixed_pull_retries_hidden_prefix_without_duplicate_delivery(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    service, _target, _sqlite_path = _service(tmp_path)
+    service, _target, _sqlite_path = _service(
+        tmp_path, authority_source=True, monkeypatch=monkeypatch
+    )
     note_cursor = _insert_note(service, object_id="legacy-note")
     _insert_hidden_ingress(service, ordinal=1)
-    authority_cursor = _insert_authority(
+    authority_cursor = _insert_verified_authority(
         service,
         record_id="legacy-authority",
         sequence=1,
@@ -770,9 +886,12 @@ def test_legacy_mixed_pull_retries_hidden_prefix_without_duplicate_delivery(
 def test_personal_context_domain_subset_does_not_advance_unrequested_stream(
     tmp_path: Path,
     signed: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    service, _target, _sqlite_path = _service(tmp_path)
-    authority_cursor = _insert_authority(
+    service, _target, _sqlite_path = _service(
+        tmp_path, authority_source=True, monkeypatch=monkeypatch
+    )
+    authority_cursor = _insert_verified_authority(
         service,
         record_id="subset-authority",
         sequence=1,
@@ -812,9 +931,12 @@ def test_personal_context_domain_subset_does_not_advance_unrequested_stream(
 
 def test_expired_absolute_recovery_deadline_does_not_advance_cursor(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    service, _target, _sqlite_path = _service(tmp_path)
-    _insert_authority(service, record_id="deadline-authority", sequence=1)
+    service, _target, _sqlite_path = _service(
+        tmp_path, authority_source=True, monkeypatch=monkeypatch
+    )
+    _insert_verified_authority(service, record_id="deadline-authority", sequence=1)
     ticks = iter((0, 100_000_000))
     service._recovery_clock_ns = lambda: next(ticks, 100_000_000)
 
