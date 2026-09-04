@@ -1808,12 +1808,26 @@ def resolve_sync_v2_conflicts(
     rejected: list[SyncConflictResolveRejectedItem] = []
     server_cursors: list[int] = []
     try:
-        verified_exchange = service.require_active_exchange_for_conflicts(
-            user_id=user_id,
-            dataset_id=request.dataset_id,
-            device_id=request.device_id,
-            conflict_ids=[item.conflict_id for item in request.resolutions],
-            exchange=request.personal_context_exchange,
+        decisions = [
+            (
+                resolution.conflict_id,
+                resolution.action,
+                (
+                    _core_envelope_from_api(resolution.resolution_envelope)
+                    if resolution.resolution_envelope is not None
+                    else None
+                ),
+            )
+            for resolution in request.resolutions
+        ]
+        resolution_results, rejected_indexes, verified_exchange = (
+            service.resolve_conflicts_batch(
+                user_id=user_id,
+                dataset_id=request.dataset_id,
+                device_id=request.device_id,
+                resolutions=decisions,
+                personal_context_exchange=request.personal_context_exchange,
+            )
         )
     except Exception as exc:
         raise _safe_sync_v2_http_error(
@@ -1822,42 +1836,25 @@ def resolve_sync_v2_conflicts(
             dataset_id=request.dataset_id,
             device_id=request.device_id,
         ) from exc
-    for resolution in request.resolutions:
-        resolution_envelope = (
-            _core_envelope_from_api(resolution.resolution_envelope)
-            if resolution.resolution_envelope is not None
-            else None
-        )
-        try:
-            conflict = service.resolve_conflict(
-                user_id=user_id,
-                dataset_id=request.dataset_id,
+    for index in rejected_indexes:
+        resolution = request.resolutions[index]
+        logger.bind(
+            user_id=user_id,
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+            conflict_id=resolution.conflict_id,
+        ).warning("Sync v2 conflict resolution item failed")
+        rejected.append(
+            SyncConflictResolveRejectedItem(
                 conflict_id=resolution.conflict_id,
                 action=resolution.action,
-                resolution_envelope=resolution_envelope,
-                resolved_by_device_id=request.device_id,
-                notes=None,
-                require_personal_context_conflict=request.personal_context_exchange is not None,
-                personal_context_exchange=request.personal_context_exchange,
+                error_code="sync_conflict_resolution_failed",
+                message="Conflict resolution could not be applied.",
+                retryable=False,
             )
-        except Exception as exc:
-            logger.bind(
-                error_type=type(exc).__name__,
-                user_id=user_id,
-                dataset_id=request.dataset_id,
-                device_id=request.device_id,
-                conflict_id=resolution.conflict_id,
-            ).warning("Sync v2 conflict resolution item failed")
-            rejected.append(
-                SyncConflictResolveRejectedItem(
-                    conflict_id=resolution.conflict_id,
-                    action=resolution.action,
-                    error_code="sync_conflict_resolution_failed",
-                    message="Conflict resolution could not be applied.",
-                    retryable=False,
-                )
-            )
-            continue
+        )
+    for index, conflict in resolution_results:
+        resolution = request.resolutions[index]
         if conflict.server_cursor is not None:
             server_cursors.append(conflict.server_cursor)
         resolved.append(

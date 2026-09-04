@@ -1371,48 +1371,66 @@ class SyncV2Service:
         user_id: str,
         exchange: object | None,
         device_id: str | None = None,
+        store: SyncV2Store | None = None,
     ) -> PersonalContextExchangeProof:
         """Return only a verified persisted version-one activation proof."""
 
+        active_store = store or self.store
         state = dataset.metadata.get("personal_context")
-        epoch = state.get("activation_epoch") if isinstance(state, Mapping) else None
-        token = state.get("continuity_token") if isinstance(state, Mapping) else None
-        supplied_epoch = getattr(exchange, "activation_epoch", None)
-        supplied_token = getattr(exchange, "continuity_token", None)
+        device = (
+            active_store.get_device(user_id, device_id)
+            if isinstance(device_id, str) and device_id
+            else None
+        )
+        try:
+            if not isinstance(state, Mapping):
+                raise ValueError("Personal Context activation state is unavailable")
+            if (
+                type(state.get("ongoing_sync_version")) is not int
+                or type(getattr(exchange, "ongoing_sync_version", None)) is not int
+            ):
+                raise ValueError("Personal Context activation version is invalid")
+            persisted = PersonalContextExchangeProof.model_validate(
+                {
+                    "ongoing_sync_version": state.get("ongoing_sync_version"),
+                    "activation_epoch": state.get("activation_epoch"),
+                    "continuity_token": state.get("continuity_token"),
+                }
+            )
+            supplied = PersonalContextExchangeProof.model_validate(
+                {
+                    "ongoing_sync_version": getattr(
+                        exchange, "ongoing_sync_version", None
+                    ),
+                    "activation_epoch": getattr(exchange, "activation_epoch", None),
+                    "continuity_token": getattr(exchange, "continuity_token", None),
+                }
+            )
+            proof_matches = hmac.compare_digest(
+                persisted.activation_epoch.encode("ascii"),
+                supplied.activation_epoch.encode("ascii"),
+            ) and hmac.compare_digest(
+                persisted.continuity_token.encode("ascii"),
+                supplied.continuity_token.encode("ascii"),
+            )
+        except (TypeError, UnicodeError, ValueError):
+            proof_matches = False
         if (
             not isinstance(state, Mapping)
-            or type(state.get("ongoing_sync_version")) is not int
-            or state.get("ongoing_sync_version") != 1
             or state.get("link_state") != "complete"
-            or not isinstance(device_id, str)
-            or not device_id
-            or type(getattr(exchange, "ongoing_sync_version", None)) is not int
-            or getattr(exchange, "ongoing_sync_version", None) != 1
-            or not isinstance(epoch, str)
-            or not isinstance(token, str)
-            or not isinstance(supplied_epoch, str)
-            or not isinstance(supplied_token, str)
-            or not hmac.compare_digest(
-                epoch.encode(errors="surrogatepass"),
-                supplied_epoch.encode(errors="surrogatepass"),
-            )
-            or not hmac.compare_digest(
-                token.encode(errors="surrogatepass"),
-                supplied_token.encode(errors="surrogatepass"),
-            )
+            or device is None
+            or device.status != "active"
+            or device.revoked_at is not None
+            or not proof_matches
             or not _personal_context_link_is_complete(
-                self.store,
+                active_store,
                 dataset,
                 user_id=user_id,
                 device_id=device_id,
             )
         ):
             raise SyncStoreError("personal_context_activation_required")
-        return PersonalContextExchangeProof(
-            ongoing_sync_version=1,
-            activation_epoch=epoch,
-            continuity_token=token,
-        )
+        return persisted
 
     def verified_active_exchange(
         self,
@@ -1446,33 +1464,6 @@ class SyncV2Service:
 
         dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
         if not any(domain in PERSONAL_CONTEXT_SYNC_DOMAINS for domain in dataset.domains):
-            return None
-        return self.require_active_exchange(
-            dataset=dataset,
-            user_id=user_id,
-            device_id=device_id,
-            exchange=exchange,
-        )
-
-    def require_active_exchange_for_conflicts(
-        self,
-        *,
-        user_id: str,
-        dataset_id: str,
-        device_id: str,
-        conflict_ids: Sequence[str],
-        exchange: object | None,
-    ) -> PersonalContextExchangeProof | None:
-        """Verify activation before a batch can mutate any PC conflict."""
-
-        dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
-        conflicts = [self.store.get_conflict(conflict_id) for conflict_id in conflict_ids]
-        if not any(
-            conflict is not None
-            and conflict.dataset_id == dataset_id
-            and conflict.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
-            for conflict in conflicts
-        ):
             return None
         return self.require_active_exchange(
             dataset=dataset,
@@ -4364,7 +4355,6 @@ class SyncV2Service:
                     for envelope in envelopes
                 ],
             )
-        device = self._require_registered_device(user_id, device_id)
         try:
             dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
         except SyncStoreError:
@@ -4393,6 +4383,7 @@ class SyncV2Service:
             )
             else None
         )
+        device = self._require_registered_device(user_id, device_id)
 
         accepted: list[SyncPushAccepted] = []
         rejected: list[SyncPushRejected] = []
@@ -4817,25 +4808,41 @@ class SyncV2Service:
         include_own_changes: bool = False,
         personal_context_exchange: object | None = None,
     ) -> SyncPullResult:
-        device = self._require_registered_device(user_id, device_id)
         if page_size is not None and page_size < 1:
             raise SyncStoreError("Sync pull page_size must be greater than zero")
         dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
 
-        selected_domains = self._selected_pull_domains(dataset, device, domains)
-        verified_exchange = (
+        candidate_device = self.store.get_device(user_id, device_id)
+        candidate_is_active = bool(
+            candidate_device is not None
+            and candidate_device.status == "active"
+            and candidate_device.revoked_at is None
+        )
+        selected_domains = (
+            self._selected_pull_domains(dataset, candidate_device, domains)
+            if candidate_is_active and candidate_device is not None
+            else ()
+        )
+        requested_domains = (
+            selected_domains
+            if candidate_is_active
+            else (domains if domains is not None else dataset.domains)
+        )
+        requested_personal_context = any(
+            domain in PERSONAL_CONTEXT_SYNC_DOMAINS for domain in requested_domains
+        )
+        preverified_exchange = (
             self.require_active_exchange(
                 dataset=dataset,
                 user_id=user_id,
                 device_id=device_id,
                 exchange=personal_context_exchange,
             )
-            if any(
-                domain in PERSONAL_CONTEXT_SYNC_DOMAINS
-                for domain in selected_domains
-            )
+            if requested_personal_context
             else None
         )
+        device = self._require_registered_device(user_id, device_id)
+        verified_exchange = preverified_exchange
         streams = self._pull_adapter_streams(device, selected_domains)
         versioned_mode = any(adapter_version != 1 for _domain, adapter_version in streams) or (
             isinstance(cursor, str) and "." in cursor
@@ -6513,6 +6520,84 @@ class SyncV2Service:
             )
         return conflicts, verified_exchange
 
+    def resolve_conflicts_batch(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str,
+        resolutions: Sequence[tuple[str, str, SyncEnvelopeCreate | None]],
+        personal_context_exchange: object | None = None,
+    ) -> tuple[
+        list[tuple[int, SyncConflict]],
+        list[int],
+        PersonalContextExchangeProof | None,
+    ]:
+        """Resolve one ordered batch from a single guarded conflict snapshot."""
+
+        with self.store.conflict_resolution_guard(dataset_id) as guarded_store:
+            dataset = self._require_dataset_access(
+                user_id=user_id,
+                dataset_id=dataset_id,
+                store=guarded_store,
+            )
+            selected: dict[str, SyncConflict | None] = {}
+            for conflict_id, _action, _envelope in resolutions:
+                if conflict_id not in selected:
+                    conflict = guarded_store.get_conflict(
+                        conflict_id,
+                        for_update=True,
+                    )
+                    selected[conflict_id] = (
+                        conflict
+                        if conflict is not None and conflict.dataset_id == dataset_id
+                        else None
+                    )
+            verified_exchange = None
+            if any(
+                conflict is not None
+                and conflict.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+                for conflict in selected.values()
+            ):
+                verified_exchange = self.require_active_exchange(
+                    dataset=dataset,
+                    user_id=user_id,
+                    device_id=device_id,
+                    exchange=personal_context_exchange,
+                    store=guarded_store,
+                )
+
+            resolved: list[tuple[int, SyncConflict]] = []
+            rejected: list[int] = []
+            for index, (conflict_id, action, resolution_envelope) in enumerate(
+                resolutions
+            ):
+                conflict = selected[conflict_id]
+                if conflict is None:
+                    rejected.append(index)
+                    continue
+                try:
+                    with guarded_store.conflict_resolution_savepoint():
+                        outcome = self.resolve_conflict(
+                            user_id=user_id,
+                            dataset_id=dataset_id,
+                            conflict_id=conflict_id,
+                            action=action,
+                            resolution_envelope=resolution_envelope,
+                            resolved_by_device_id=device_id,
+                            notes=None,
+                            personal_context_exchange=personal_context_exchange,
+                            _conflict=conflict,
+                            _store=guarded_store,
+                            _verified_personal_context_exchange=verified_exchange,
+                        )
+                except Exception:  # noqa: BLE001 - preserve per-item API outcomes.
+                    rejected.append(index)
+                    continue
+                selected[conflict_id] = outcome
+                resolved.append((index, outcome))
+            return resolved, rejected, verified_exchange
+
     def resolve_conflict(
         self,
         *,
@@ -6526,8 +6611,12 @@ class SyncV2Service:
         notes: str | None = None,
         require_personal_context_conflict: bool = False,
         personal_context_exchange: object | None = None,
+        _conflict: SyncConflict | None = None,
+        _store: SyncV2Store | None = None,
+        _verified_personal_context_exchange: PersonalContextExchangeProof | None = None,
     ) -> SyncConflict:
-        conflict = self.store.get_conflict(conflict_id)
+        active_store = _store or self.store
+        conflict = _conflict or active_store.get_conflict(conflict_id)
         if conflict is None:
             raise SyncStoreError("Sync conflict was not found or is not accessible")
         if dataset_id is not None and conflict.dataset_id != dataset_id:
@@ -6535,15 +6624,23 @@ class SyncV2Service:
         if require_personal_context_conflict and not conflict.domain.startswith("personal_context."):
             raise SyncStoreError("Personal Context conflict identity is not valid for this conflict")
         try:
-            dataset = self._require_dataset_access(user_id=user_id, dataset_id=conflict.dataset_id)
+            dataset = self._require_dataset_access(
+                user_id=user_id,
+                dataset_id=conflict.dataset_id,
+                store=active_store,
+            )
         except SyncStoreError as exc:
             raise SyncStoreError("Sync conflict was not found or is not accessible") from exc
-        if conflict.domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+        if (
+            conflict.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+            and _verified_personal_context_exchange is None
+        ):
             self.require_active_exchange(
                 dataset=dataset,
                 user_id=user_id,
                 device_id=resolved_by_device_id,
                 exchange=personal_context_exchange,
+                store=active_store,
             )
         if action not in {"overwrite", "duplicate_rename", "skip"}:
             raise SyncStoreError(f"Sync conflict resolution action is not supported: {action}")
@@ -6555,11 +6652,16 @@ class SyncV2Service:
                 resolved_by_envelope_id=resolved_by_envelope_id,
                 resolved_by_device_id=resolved_by_device_id,
                 notes=notes,
+                store=active_store,
             ):
                 return conflict
             raise SyncStoreError("Sync conflict is already resolved")
         if resolved_by_device_id is not None:
-            self._require_registered_device(user_id, resolved_by_device_id)
+            self._require_registered_device(
+                user_id,
+                resolved_by_device_id,
+                store=active_store,
+            )
         if action in {"overwrite", "duplicate_rename"} and resolution_envelope is None:
             raise SyncStoreError(f"Sync {action} requires a resolution envelope")
         if action == "skip" and resolution_envelope is not None:
@@ -6571,7 +6673,11 @@ class SyncV2Service:
                     "Sync resolution envelope contains reserved routing metadata"
                 )
             resolution_device_id = resolved_by_device_id or resolution_envelope.device_id
-            self._require_registered_device(user_id, resolution_device_id or "")
+            self._require_registered_device(
+                user_id,
+                resolution_device_id or "",
+                store=active_store,
+            )
             if resolution_envelope.dataset_id != dataset.dataset_id:
                 raise SyncStoreError("Sync resolution envelope dataset_id must match the conflict dataset")
             if resolution_envelope.domain != conflict.domain:
@@ -6592,7 +6698,7 @@ class SyncV2Service:
 
         if conflict.server_sequence is None:
             raise SyncStoreError("Sync conflict has no canonical source envelope")
-        source = self.store.get_envelope_by_server_cursor(conflict.server_sequence)
+        source = active_store.get_envelope_by_server_cursor(conflict.server_sequence)
         if (
             source is None
             or source.dataset_id != dataset.dataset_id
@@ -6602,7 +6708,7 @@ class SyncV2Service:
         ):
             raise SyncStoreError("Sync conflict source envelope was not found")
 
-        with self.store.materialization_guard(
+        with active_store.materialization_guard(
             [source],
             require_predecessors=False,
         ) as guarded_store:
@@ -6714,6 +6820,7 @@ class SyncV2Service:
         resolved_by_envelope_id: str | None,
         resolved_by_device_id: str | None,
         notes: str | None,
+        store: SyncV2Store | None = None,
     ) -> bool:
         if action != conflict.resolution_action or notes != conflict.resolution_notes:
             return False
@@ -6728,6 +6835,7 @@ class SyncV2Service:
                 conflict.dataset_id,
                 resolution_envelope,
                 effective_device_id=effective_device_id,
+                store=store,
             )
             if existing is None:
                 return False
@@ -6740,11 +6848,12 @@ class SyncV2Service:
         resolution_envelope: SyncEnvelopeCreate,
         *,
         effective_device_id: str | None,
+        store: SyncV2Store | None = None,
     ) -> SyncEnvelope | None:
         if resolution_envelope.dataset_id != dataset_id:
             return None
         try:
-            return self.store.get_existing_envelope_for_idempotency(
+            return (store or self.store).get_existing_envelope_for_idempotency(
                 replace(
                     resolution_envelope,
                     device_id=effective_device_id,
@@ -7304,10 +7413,16 @@ class SyncV2Service:
                 return tuple(heads)
             offset += page_size
 
-    def _require_registered_device(self, user_id: str, device_id: str) -> SyncDevice:
+    def _require_registered_device(
+        self,
+        user_id: str,
+        device_id: str,
+        *,
+        store: SyncV2Store | None = None,
+    ) -> SyncDevice:
         if not device_id:
             raise SyncStoreError("Sync device was not found or is not accessible")
-        device = self.store.get_device(user_id, device_id)
+        device = (store or self.store).get_device(user_id, device_id)
         if (
             device is not None
             and device.revoked_at is None
@@ -7316,8 +7431,14 @@ class SyncV2Service:
             return device
         raise SyncStoreError("Sync device was not found or is not accessible")
 
-    def _require_dataset_access(self, *, user_id: str, dataset_id: str) -> SyncDataset:
-        dataset = self.store.get_dataset(dataset_id)
+    def _require_dataset_access(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        store: SyncV2Store | None = None,
+    ) -> SyncDataset:
+        dataset = (store or self.store).get_dataset(dataset_id)
         if dataset is None or dataset.archived_at is not None:
             raise SyncStoreError("Sync dataset was not found or is not accessible")
         if dataset.scope_type == "personal":

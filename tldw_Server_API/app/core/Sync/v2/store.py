@@ -127,6 +127,14 @@ class SyncV2Store:
     ) -> Iterator[SyncV2Store]:
         """Hold the durable dataset lock and one Sync transaction for projection."""
 
+        if self._connection is not None:
+            if require_predecessors:
+                self.db.require_materialization_predecessors_applied(
+                    envelopes,
+                    connection=self._connection,
+                )
+            yield self
+            return
         keys = [
             (envelope.dataset_id, envelope.domain, envelope.object_id)
             for envelope in envelopes
@@ -148,6 +156,24 @@ class SyncV2Store:
                     connection=connection,
                 )
             yield guarded
+
+    @contextmanager
+    def conflict_resolution_guard(self, dataset_id: str) -> Iterator[SyncV2Store]:
+        """Hold one dataset snapshot and projection fence for a resolution batch."""
+
+        with self.db.conflict_resolution_transaction(dataset_id) as connection:
+            guarded = copy(self)
+            guarded._connection = connection
+            yield guarded
+
+    @contextmanager
+    def conflict_resolution_savepoint(self) -> Iterator[SyncV2Store]:
+        """Contain one resolution item inside an active batch transaction."""
+
+        if self._connection is None:
+            raise SyncStoreError("Sync conflict resolution guard is required")
+        with self.db.conflict_resolution_savepoint(connection=self._connection):
+            yield self
 
     @contextmanager
     def personal_context_authority_guard(
@@ -230,7 +256,11 @@ class SyncV2Store:
         )
 
     def get_device(self, user_id: str, device_id: str) -> SyncDevice | None:
-        return self.db.get_device(user_id, device_id)
+        return self.db.get_device(
+            user_id,
+            device_id,
+            connection=self._connection,
+        )
 
     def enroll_dataset(self, dataset: SyncDatasetCreate) -> SyncDataset:
         return self.db.enroll_dataset(dataset)
@@ -338,6 +368,7 @@ class SyncV2Store:
             profile_id=profile_id,
             integrity_key_id=integrity_key_id,
             purge_generation=purge_generation,
+            connection=self._connection,
         )
 
     def list_datasets_for_user(
@@ -1527,8 +1558,17 @@ class SyncV2Store:
             offset=offset,
         )
 
-    def get_conflict(self, conflict_id: str) -> SyncConflict | None:
-        return self.db.get_conflict(conflict_id, connection=self._connection)
+    def get_conflict(
+        self,
+        conflict_id: str,
+        *,
+        for_update: bool = False,
+    ) -> SyncConflict | None:
+        return self.db.get_conflict(
+            conflict_id,
+            connection=self._connection,
+            for_update=for_update,
+        )
 
     def get_unresolved_conflict_for_envelope(
         self,

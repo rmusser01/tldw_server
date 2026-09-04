@@ -2551,6 +2551,45 @@ class SyncDatabase:
                 raise SyncMaterializationBusyError() from exc
             raise
 
+    @contextmanager
+    def conflict_resolution_transaction(self, dataset_id: str) -> Iterator[Any]:
+        """Hold the dataset projection fence for one conflict-resolution batch."""
+
+        try:
+            with self.backend.transaction() as conn:
+                if self._get_dataset_row_for_update(dataset_id, connection=conn) is None:
+                    raise SyncDatasetNotFoundError(
+                        f"Sync dataset not found: {dataset_id}"
+                    )
+                self._lock_materialization_dataset(dataset_id, connection=conn)
+                yield conn
+        except Exception as exc:
+            if _is_materialization_lock_error(exc):
+                raise SyncMaterializationBusyError() from exc
+            raise
+
+    @contextmanager
+    def conflict_resolution_savepoint(self, *, connection: Any) -> Iterator[None]:
+        """Rollback one failed batch item without releasing the dataset fence."""
+
+        self.execute("SAVEPOINT sync_conflict_resolution_item", connection=connection)
+        try:
+            yield
+        except BaseException:  # noqa: BLE001 - contain every per-item failure.
+            self.execute(
+                "ROLLBACK TO SAVEPOINT sync_conflict_resolution_item",
+                connection=connection,
+            )
+            self.execute(
+                "RELEASE SAVEPOINT sync_conflict_resolution_item",
+                connection=connection,
+            )
+            raise
+        self.execute(
+            "RELEASE SAVEPOINT sync_conflict_resolution_item",
+            connection=connection,
+        )
+
     def commit_personal_context_authority_transaction(
         self,
         *,
@@ -3910,6 +3949,7 @@ class SyncDatabase:
         profile_id: str,
         integrity_key_id: str,
         purge_generation: int,
+        connection: Any | None = None,
     ) -> bool:
         """Return whether a device has the exact current Personal Context receipt."""
 
@@ -3918,6 +3958,7 @@ class SyncDatabase:
                WHERE user_id = ? AND dataset_id = ? AND device_id = ? AND profile_id = ?
                  AND integrity_key_id = ? AND purge_generation = ?""",
             (user_id, dataset_id, device_id, profile_id, integrity_key_id, purge_generation),
+            connection=connection,
         )
         return bool(result.rows)
 
@@ -4089,10 +4130,16 @@ class SyncDatabase:
         )
         return [_dataset_from_row(row) for row in result.rows]
 
-    def get_device(self, user_id: str, device_id: str) -> SyncDevice | None:
+    def get_device(
+        self,
+        user_id: str,
+        device_id: str,
+        *,
+        connection: Any | None = None,
+    ) -> SyncDevice | None:
         """Return one Sync v2 device for a user."""
 
-        row = self._get_device_row(user_id, device_id)
+        row = self._get_device_row(user_id, device_id, connection=connection)
         if row is None:
             return None
         return _device_from_row(row)
@@ -9565,12 +9612,19 @@ class SyncDatabase:
         conflict_id: str,
         *,
         connection: Any | None = None,
+        for_update: bool = False,
     ) -> SyncConflict | None:
         """Return a conflict by ID without scanning dataset conflict lists."""
 
+        suffix = (
+            " FOR UPDATE"
+            if for_update and self.backend_type == BackendType.POSTGRESQL
+            else ""
+        )
         row = _first(
             self.execute(
-                "SELECT * FROM sync_conflicts WHERE conflict_id = ?",
+                "SELECT * FROM sync_conflicts WHERE conflict_id = ?"
+                + suffix,  # nosec B608 - suffix is backend controlled.
                 (conflict_id,),
                 connection=connection,
             )

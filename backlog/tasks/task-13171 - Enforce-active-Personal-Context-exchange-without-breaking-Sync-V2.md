@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-04 03:34'
-updated_date: '2026-09-04 21:56'
+updated_date: '2026-09-04 22:41'
 labels:
   - personal-context
   - sync
@@ -51,6 +51,10 @@ Remediate TASK-13161 by applying one precise active-exchange proof gate to Perso
 
 <!-- SECTION:NOTES:BEGIN -->
 Implemented one selected-operation Personal Context exchange gate across push, pull, bounded conflict listing, and selected-ID resolution. Exact persisted activation proof and the explicit requesting device's completed link receipt are validated only by require_active_exchange; responses echo persisted verified proof. Added backward-compatible conflict-list domain/device_id queries and parameterized domain/status/order/limit/offset DB selection. Added a 51-case TestClient and service/store matrix covering exact, missing, stale, wrong-device, incomplete-link, tampered, version-zero, mixed Notes, pagination, non-leakage, and pre-effect behavior. ADR required: no new ADR; ADR-002 governs. Targeted endpoint/transport/service/conflict tests, Ruff, Bandit, and diff-check passed. The pre-existing PostgreSQL fake receipt-lock failure was reconfirmed on the predecessor baseline and excluded; this task does not modify link receipts. Details: .superpowers/sdd/2026-09-04-personal-context-relay-remediation/task-6-report.md.
+
+Review round 1 changes requested: require currently registered active device inside the sole exchange validator; resolve mixed Notes plus Personal Context batches per selected item; close the preflight-to-resolution TOCTOU gap with one service-owned transaction/snapshot; and fail closed for exact malformed persisted/request proof text. TDD review plan: reproduce every finding, report RED evidence and atomic coordinator design, implement minimally, rerun targeted endpoint/transport/service/conflict/concurrency/static checks, update this task and the task-6 report, then make one scoped review commit.
+
+Review round 1 completed: `require_active_exchange` now verifies that the explicit requesting device is currently active and non-revoked, strictly revalidates both persisted and supplied proof shapes, and fails closed for malformed Unicode and non-mapping stored state. Conflict resolution now uses one service-owned dataset transaction and selected-row snapshot, gates selected Personal Context before any savepoint or mutation, and contains ordinary per-item failures with backend-portable savepoints while preserving input order, duplicate replay, and missing/foreign/already-resolved behavior. Mixed exact-proof Notes plus Personal Context batches resolve normally; bad proof mutates neither. The expanded 84-case gate, endpoint/transport, conflict service/store, Personal Context service/contract, Ruff, Bandit, and diff checks passed. ADR required: no new ADR; ADR-002 remains the governing decision.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
