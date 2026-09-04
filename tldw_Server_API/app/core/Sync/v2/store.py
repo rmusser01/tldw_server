@@ -1061,7 +1061,10 @@ class SyncV2Store:
                 safe_raw.append(envelope)
                 if envelope.domain not in PERSONAL_CONTEXT_SYNC_DOMAINS:
                     if (
-                        envelope.device_id != exclude_device_id
+                        (
+                            exclude_device_id is None
+                            or envelope.device_id != exclude_device_id
+                        )
                         and envelope.apply_status not in {"conflict", "superseded"}
                     ):
                         visible.append(envelope)

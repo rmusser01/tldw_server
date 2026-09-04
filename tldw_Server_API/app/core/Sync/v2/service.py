@@ -1683,25 +1683,59 @@ class SyncV2Service:
         if recovery_budget is not None and not recovery_budget.deadline_open():
             raise SyncStoreError("Personal Context authority receipt is invalid")
 
+        def returned_proof(proof: object | None) -> object | None:
+            if recovery_budget is None:
+                return proof
+            if proof is not None and not recovery_budget.consume_returned():
+                raise SyncStoreError(
+                    "Personal Context authority receipt is invalid"
+                )
+            if not recovery_budget.deadline_open():
+                raise SyncStoreError(
+                    "Personal Context authority receipt is invalid"
+                )
+            return proof
+
+        def sync_envelope(cursor: int) -> SyncEnvelope | None:
+            if recovery_budget is not None and not recovery_budget.can_inspect():
+                raise SyncStoreError(
+                    "Personal Context authority receipt is invalid"
+                )
+            return returned_proof(
+                sync_store.get_envelope_by_server_cursor(cursor)
+            )  # type: ignore[return-value]
+
+        def sync_receipt(cursor: int) -> Mapping[str, object] | None:
+            if recovery_budget is not None and not recovery_budget.can_inspect():
+                raise SyncStoreError(
+                    "Personal Context authority receipt is invalid"
+                )
+            return returned_proof(
+                sync_store.get_personal_context_ingress_receipt(cursor)
+            )  # type: ignore[return-value]
+
         ingress_cursor = authority_envelope.base_server_cursor
+        origin_proof = None
         if getattr(row, "role", None) == "manifest":
-            origin_cursor = publication_store.originating_authority_cursor_for_source(
-                row
+            if (
+                int(getattr(row, "batch_size", 0)) == 1
+                and int(getattr(row, "batch_ordinal", -1)) == 0
+            ):
+                return None, None, None
+            origin_proof = publication_store.originating_authority_for_source(
+                row,
+                budget=recovery_budget,
             )
             if recovery_budget is not None and not recovery_budget.deadline_open():
                 raise SyncStoreError("Personal Context authority receipt is invalid")
-            origin = (
+            origin_cursor = (
                 None
-                if origin_cursor is None
-                else sync_store.get_envelope_by_server_cursor(origin_cursor)
+                if origin_proof is None
+                else origin_proof.sync_server_cursor
             )
+            origin = None if origin_cursor is None else sync_envelope(origin_cursor)
             origin_authority = None if origin is None else origin.authority
             if origin_cursor is None:
-                if (
-                    int(getattr(row, "batch_size", 0)) == 1
-                    and int(getattr(row, "batch_ordinal", -1)) == 0
-                ):
-                    return None, None, None
                 raise SyncStoreError("Personal Context authority receipt is invalid")
             if (
                 origin is None
@@ -1720,7 +1754,7 @@ class SyncV2Service:
             ingress_cursor = origin.base_server_cursor
             if ingress_cursor is None:
                 return None, None, None
-            origin_base = sync_store.get_envelope_by_server_cursor(ingress_cursor)
+            origin_base = sync_envelope(ingress_cursor)
             origin_base_authority = (
                 None if origin_base is None else origin_base.authority
             )
@@ -1752,30 +1786,32 @@ class SyncV2Service:
                 or origin_base_authority.role != "client_ingress"
             ):
                 raise SyncStoreError("Personal Context authority receipt is invalid")
-        sync_receipt = (
+        resolved_sync_receipt = (
             None
             if ingress_cursor is None
-            else sync_store.get_personal_context_ingress_receipt(ingress_cursor)
+            else sync_receipt(ingress_cursor)
         )
         if recovery_budget is not None and not recovery_budget.deadline_open():
             raise SyncStoreError("Personal Context authority receipt is invalid")
         canonical_receipt = (
             None
-            if sync_receipt is None
+            if resolved_sync_receipt is None
             else publication_store.canonical_ingress_receipt_for_source(
                 row,
-                dataset_id=str(sync_receipt.get("dataset_id", "")),
-                device_id=str(sync_receipt.get("device_id", "")),
+                dataset_id=str(resolved_sync_receipt.get("dataset_id", "")),
+                device_id=str(resolved_sync_receipt.get("device_id", "")),
                 client_envelope_id=str(
-                    sync_receipt.get("client_envelope_id", "")
+                    resolved_sync_receipt.get("client_envelope_id", "")
                 ),
+                origin_proof=origin_proof,
+                budget=recovery_budget,
             )
         )
         if recovery_budget is not None and not recovery_budget.deadline_open():
             raise SyncStoreError("Personal Context authority receipt is invalid")
         if getattr(row, "role", None) == "manifest" and (
             canonical_receipt is None
-            or sync_receipt is None
+            or resolved_sync_receipt is None
             or origin is None
             or ingress_cursor is None
         ):
@@ -1804,10 +1840,10 @@ class SyncV2Service:
                 canonical=origin_canonical,
                 source_row=row,
                 canonical_receipt=canonical_receipt,
-                sync_ingress_receipt=sync_receipt,
+                sync_ingress_receipt=resolved_sync_receipt,
             ):
                 raise SyncStoreError("Personal Context authority receipt is invalid")
-        return ingress_cursor, canonical_receipt, sync_receipt
+        return ingress_cursor, canonical_receipt, resolved_sync_receipt
 
     def stage_personal_context_authority(
         self,

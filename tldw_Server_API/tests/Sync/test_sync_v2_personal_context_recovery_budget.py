@@ -34,6 +34,7 @@ from tldw_Server_API.tests.Sync.test_sync_v2_personal_context_transport import (
     EXCHANGE,
     _insert_authority,
     _insert_hidden_ingress,
+    _insert_note,
     _service,
 )
 
@@ -128,6 +129,117 @@ def _complete_real_authority(runtime: AuthorityHarness) -> int:
     return authority.server_cursor
 
 
+def _ingress_authorities(runtime: IngressHarness) -> tuple[Any, Any]:
+    with runtime.personal_db.transaction() as connection:
+        receipt = connection.execute(
+            """SELECT publication_batch_id
+               FROM personal_context_ingress_receipts
+               WHERE dataset_id = ? AND device_id = ? AND client_envelope_id = ?""",
+            ("dataset-a", "device-a", "device-a:record:v2"),
+        ).fetchone()
+    assert receipt is not None
+    batch_id = str(receipt["publication_batch_id"])
+    authority = [
+        row
+        for row in runtime.store.list_envelopes_after(
+            "dataset-a",
+            0,
+            limit=100,
+            domains=["personal_context.record", "personal_context.manifest"],
+            status="accepted",
+        )
+        if row.authority is not None
+        and row.authority.publication_batch_id == batch_id
+    ]
+    semantic = next(row for row in authority if row.domain == DOMAIN)
+    manifest = next(
+        row for row in authority if row.domain == "personal_context.manifest"
+    )
+    return semantic, manifest
+
+
+class _ProofConnection:
+    def __init__(self, connection: Any, tracker: _ProofQueryTracker) -> None:
+        self._connection = connection
+        self._tracker = tracker
+
+    def execute(self, sql: str, *args: Any, **kwargs: Any) -> Any:
+        result = self._connection.execute(sql, *args, **kwargs)
+        normalized = " ".join(sql.split())
+        if "FROM personal_context_ingress_receipts" in normalized:
+            kind = "canonical-receipt"
+        elif "FROM personal_context_publication_batches" in normalized:
+            kind = "publication-batch"
+        elif "personal_context_publication_rows" not in normalized:
+            return result
+        elif "deterministic_envelope_id = ?" in normalized:
+            kind = "acknowledged-source"
+        elif "batch_ordinal < ?" in normalized:
+            kind = "origin-source"
+        elif "role = 'manifest'" in normalized:
+            kind = "manifest-source"
+        else:
+            kind = "source-reread"
+        self._tracker.queries.append(kind)
+        if kind == self._tracker.expire_after:
+            self._tracker.clock.now_ns = 100_000_000
+        return result
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._connection, name)
+
+
+class _ProofQueryTracker:
+    def __init__(
+        self,
+        clock: _ManualClock,
+        *,
+        expire_after: str | None = None,
+    ) -> None:
+        self.clock = clock
+        self.expire_after = expire_after
+        self.queries: list[str] = []
+
+    def install(
+        self,
+        runtime: IngressHarness,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        original = runtime.personal_db.transaction
+
+        @contextmanager
+        def tracked_transaction(*args: Any, **kwargs: Any):
+            with original(*args, **kwargs) as connection:
+                yield _ProofConnection(connection, self)
+
+        monkeypatch.setattr(runtime.personal_db, "transaction", tracked_transaction)
+
+
+def _pull_one_ingress_authority(
+    runtime: IngressHarness,
+    authority: Any,
+    *,
+    relay_rows: int,
+) -> tuple[Any, _BudgetConsumingRelay]:
+    relay = _BudgetConsumingRelay(relay_rows)
+    runtime.service.personal_context_relay = relay
+    runtime.service.settings = replace(
+        runtime.service.settings,
+        pull_token_signing_secret="test-only-pull-secret",
+    )
+    runtime.service._recovery_clock_ns = _ManualClock()
+    pulled = runtime.service.pull(
+        user_id="user-a",
+        dataset_id="dataset-a",
+        device_id="device-a",
+        domains=[authority.domain],
+        cursor=authority.server_cursor - 1,
+        include_own_changes=True,
+        personal_context_exchange=EXCHANGE,
+    )
+    return pulled, relay
+
+
 def _tamper_authority_metadata(
     runtime: AuthorityHarness,
     cursor: int,
@@ -187,6 +299,357 @@ class _BudgetConsumingRelay:
             continuation=("complete" if complete else "personal_context_relay_pending"),
             inspected_rows=consumed,
         )
+
+
+def test_ingress_semantic_proof_rows_share_the_pull_budget(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every returned receipt/source/manifest proof row spends one allowance."""
+
+    runtime = IngressHarness(tmp_path, monkeypatch)
+    _complete_real_authority(runtime)
+    semantic, _manifest = _ingress_authorities(runtime)
+    clock = _ManualClock()
+    tracker = _ProofQueryTracker(clock)
+    tracker.install(runtime, monkeypatch)
+    pulled, relay = _pull_one_ingress_authority(
+        runtime,
+        semantic,
+        relay_rows=90,
+    )
+
+    assert [item.server_cursor for item in pulled.envelopes] == [
+        semantic.server_cursor
+    ]
+    assert relay.budgets[0].remaining_rows == 4
+    assert tracker.queries == [
+        "acknowledged-source",
+        "canonical-receipt",
+        "publication-batch",
+        "manifest-source",
+    ]
+
+
+def test_ingress_semantic_defers_the_hundred_and_first_proof_row(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A manifest proof that would be row 101 is not queried or bypassed."""
+
+    runtime = IngressHarness(tmp_path, monkeypatch)
+    _complete_real_authority(runtime)
+    semantic, _manifest = _ingress_authorities(runtime)
+    clock = _ManualClock()
+    tracker = _ProofQueryTracker(clock)
+    tracker.install(runtime, monkeypatch)
+    pulled, relay = _pull_one_ingress_authority(
+        runtime,
+        semantic,
+        relay_rows=95,
+    )
+
+    assert pulled.envelopes == []
+    assert pulled.next_cursor == str(semantic.server_cursor - 1)
+    assert pulled.has_more is True
+    assert relay.budgets[0].remaining_rows == 0
+    assert tracker.queries == [
+        "acknowledged-source",
+        "canonical-receipt",
+        "publication-batch",
+    ]
+
+
+def test_ingress_manifest_proof_rows_share_the_pull_budget(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Manifest origin publication and Sync rows use the same allowance."""
+
+    runtime = IngressHarness(tmp_path, monkeypatch)
+    _complete_real_authority(runtime)
+    _semantic, manifest = _ingress_authorities(runtime)
+    clock = _ManualClock()
+    tracker = _ProofQueryTracker(clock)
+    tracker.install(runtime, monkeypatch)
+    pulled, relay = _pull_one_ingress_authority(
+        runtime,
+        manifest,
+        relay_rows=92,
+    )
+
+    assert [item.server_cursor for item in pulled.envelopes] == [
+        manifest.server_cursor
+    ]
+    assert relay.budgets[0].remaining_rows == 0
+    assert tracker.queries == [
+        "acknowledged-source",
+        "origin-source",
+        "canonical-receipt",
+        "publication-batch",
+    ]
+
+
+def test_ingress_manifest_defers_the_hundred_and_first_proof_row(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The final canonical origin proof cannot borrow row 101."""
+
+    runtime = IngressHarness(tmp_path, monkeypatch)
+    _complete_real_authority(runtime)
+    _semantic, manifest = _ingress_authorities(runtime)
+    clock = _ManualClock()
+    tracker = _ProofQueryTracker(clock)
+    tracker.install(runtime, monkeypatch)
+    pulled, relay = _pull_one_ingress_authority(
+        runtime,
+        manifest,
+        relay_rows=93,
+    )
+
+    assert pulled.envelopes == []
+    assert pulled.next_cursor == str(manifest.server_cursor - 1)
+    assert pulled.has_more is True
+    assert relay.budgets[0].remaining_rows == 0
+    assert tracker.queries == [
+        "acknowledged-source",
+        "origin-source",
+        "canonical-receipt",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("expire_after", "expected_queries", "expected_inspected"),
+    [
+        pytest.param(
+            "acknowledged-source",
+            ["acknowledged-source"],
+            2,
+            id="acknowledged-source",
+        ),
+        pytest.param(
+            "canonical-receipt",
+            ["acknowledged-source", "canonical-receipt"],
+            4,
+            id="canonical-receipt",
+        ),
+        pytest.param(
+            "publication-batch",
+            [
+                "acknowledged-source",
+                "canonical-receipt",
+                "publication-batch",
+            ],
+            5,
+            id="publication-batch",
+        ),
+        pytest.param(
+            "manifest-source",
+            [
+                "acknowledged-source",
+                "canonical-receipt",
+                "publication-batch",
+                "manifest-source",
+            ],
+            6,
+            id="manifest-source",
+        ),
+    ],
+)
+def test_ingress_semantic_deadline_stops_after_each_publication_proof_read(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    expire_after: str,
+    expected_queries: list[str],
+    expected_inspected: int,
+) -> None:
+    runtime = IngressHarness(tmp_path, monkeypatch)
+    _complete_real_authority(runtime)
+    semantic, _manifest = _ingress_authorities(runtime)
+    clock = _ManualClock()
+    tracker = _ProofQueryTracker(clock, expire_after=expire_after)
+    tracker.install(runtime, monkeypatch)
+    runtime.service.personal_context_relay = _BudgetConsumingRelay(0)
+    runtime.service.settings = replace(
+        runtime.service.settings,
+        pull_token_signing_secret="test-only-pull-secret",
+    )
+    runtime.service._recovery_clock_ns = clock
+
+    pulled = runtime.service.pull(
+        user_id="user-a",
+        dataset_id="dataset-a",
+        device_id="device-a",
+        domains=[semantic.domain],
+        cursor=semantic.server_cursor - 1,
+        include_own_changes=True,
+        personal_context_exchange=EXCHANGE,
+    )
+
+    budget = runtime.service.personal_context_relay.budgets[0]
+    assert pulled.envelopes == []
+    assert pulled.next_cursor == str(semantic.server_cursor - 1)
+    assert tracker.queries == expected_queries
+    assert 100 - budget.remaining_rows == expected_inspected
+
+
+def test_ingress_semantic_deadline_stops_after_sync_receipt_read(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = IngressHarness(tmp_path, monkeypatch)
+    _complete_real_authority(runtime)
+    semantic, _manifest = _ingress_authorities(runtime)
+    clock = _ManualClock()
+    tracker = _ProofQueryTracker(clock)
+    tracker.install(runtime, monkeypatch)
+    relay = _BudgetConsumingRelay(0)
+    runtime.service.personal_context_relay = relay
+    runtime.service.settings = replace(
+        runtime.service.settings,
+        pull_token_signing_secret="test-only-pull-secret",
+    )
+    runtime.service._recovery_clock_ns = clock
+    original = runtime.store.get_personal_context_ingress_receipt
+    returned_receipts = 0
+
+    def expire_after_returned_receipt(cursor: int):
+        nonlocal returned_receipts
+        result = original(cursor)
+        if result is not None:
+            returned_receipts += 1
+            clock.now_ns = 100_000_000
+        return result
+
+    monkeypatch.setattr(
+        runtime.store,
+        "get_personal_context_ingress_receipt",
+        expire_after_returned_receipt,
+    )
+
+    pulled = runtime.service.pull(
+        user_id="user-a",
+        dataset_id="dataset-a",
+        device_id="device-a",
+        domains=[semantic.domain],
+        cursor=semantic.server_cursor - 1,
+        include_own_changes=True,
+        personal_context_exchange=EXCHANGE,
+    )
+
+    assert pulled.envelopes == []
+    assert pulled.next_cursor == str(semantic.server_cursor - 1)
+    assert returned_receipts == 1
+    assert tracker.queries == ["acknowledged-source"]
+    assert 100 - relay.budgets[0].remaining_rows == 3
+
+
+@pytest.mark.parametrize(
+    ("expire_after_call", "expected_sync_calls"),
+    [
+        pytest.param(1, 1, id="origin-sync-envelope"),
+        pytest.param(2, 2, id="origin-base-sync-envelope"),
+    ],
+)
+def test_ingress_manifest_deadline_stops_after_each_sync_proof_read(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    expire_after_call: int,
+    expected_sync_calls: int,
+) -> None:
+    runtime = IngressHarness(tmp_path, monkeypatch)
+    _complete_real_authority(runtime)
+    _semantic, manifest = _ingress_authorities(runtime)
+    clock = _ManualClock()
+    tracker = _ProofQueryTracker(clock)
+    tracker.install(runtime, monkeypatch)
+    runtime.service.personal_context_relay = _BudgetConsumingRelay(0)
+    runtime.service.settings = replace(
+        runtime.service.settings,
+        pull_token_signing_secret="test-only-pull-secret",
+    )
+    runtime.service._recovery_clock_ns = clock
+    original_envelope = runtime.store.get_envelope_by_server_cursor
+    original_receipt = runtime.store.get_personal_context_ingress_receipt
+    sync_calls: list[int] = []
+    receipt_calls: list[int] = []
+
+    def expire_after_sync_read(cursor: int):
+        result = original_envelope(cursor)
+        sync_calls.append(cursor)
+        if len(sync_calls) == expire_after_call:
+            clock.now_ns = 100_000_000
+        return result
+
+    def record_receipt_read(cursor: int):
+        result = original_receipt(cursor)
+        if result is not None:
+            receipt_calls.append(cursor)
+        return result
+
+    monkeypatch.setattr(
+        runtime.store,
+        "get_envelope_by_server_cursor",
+        expire_after_sync_read,
+    )
+    monkeypatch.setattr(
+        runtime.store,
+        "get_personal_context_ingress_receipt",
+        record_receipt_read,
+    )
+
+    pulled = runtime.service.pull(
+        user_id="user-a",
+        dataset_id="dataset-a",
+        device_id="device-a",
+        domains=[manifest.domain],
+        cursor=manifest.server_cursor - 1,
+        include_own_changes=True,
+        personal_context_exchange=EXCHANGE,
+    )
+
+    assert pulled.envelopes == []
+    assert pulled.next_cursor == str(manifest.server_cursor - 1)
+    assert len(sync_calls) == expected_sync_calls
+    assert receipt_calls == []
+
+
+@pytest.mark.parametrize("signed", [False, True], ids=["legacy", "signed"])
+def test_include_own_changes_returns_non_pc_row_with_null_device_id(
+    tmp_path,
+    signed: bool,
+) -> None:
+    service, _target, _sqlite_path = _service(tmp_path)
+    service.personal_context_relay = _BudgetConsumingRelay(0)
+    note_cursor = _insert_note(service, object_id="null-device-note")
+    with service.store.db.backend.transaction() as connection:
+        service.store.db.execute(
+            "UPDATE sync_envelopes SET device_id = NULL WHERE server_sequence = ?",
+            (note_cursor,),
+            connection=connection,
+        )
+    cursor: str | int = 0
+    if signed:
+        device = service._require_registered_device("user-a", "device-a")
+        cursor = service._encode_pull_token(
+            dataset_id=DATASET_ID,
+            device_id="device-a",
+            version_set=service._pull_version_set(device),
+            watermarks={("notes.note", 1): 0, (DOMAIN, 1): 0},
+        )
+
+    pulled = service.pull(
+        user_id="user-a",
+        dataset_id=DATASET_ID,
+        device_id="device-a",
+        domains=["notes.note", DOMAIN],
+        cursor=cursor,
+        include_own_changes=True,
+        personal_context_exchange=EXCHANGE,
+    )
+
+    assert [item.server_cursor for item in pulled.envelopes] == [note_cursor]
 
 
 @pytest.mark.parametrize(

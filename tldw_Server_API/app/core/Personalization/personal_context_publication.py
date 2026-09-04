@@ -118,6 +118,16 @@ class PublicationSourceRow:
 
 
 @dataclass(frozen=True, slots=True)
+class PublicationOriginProof:
+    """Already-loaded source identity for a manifest's originating authority."""
+
+    sync_server_cursor: int
+    role: Literal["semantic", "purge_barrier"]
+    object_id: str
+    version_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class AuthorityStageReceipt:
     """Content-free identity of one durable hidden Sync authority row."""
 
@@ -240,74 +250,73 @@ class PersonalContextPublicationRelayStore:
         dataset_id: str,
         device_id: str,
         client_envelope_id: str,
+        origin_proof: PublicationOriginProof | None = None,
+        budget: PersonalContextRecoveryBudget | None = None,
     ) -> CanonicalApplyReceipt | None:
         """Resolve the one canonical ingress receipt that produced a source row."""
 
         with self._database.transaction() as connection:
-            receipt = connection.execute(
+            def one_proof(
+                sql: str,
+                values: tuple[object, ...],
+            ) -> sqlite3.Row | None:
+                if budget is not None and not budget.can_inspect():
+                    return None
+                found = connection.execute(sql, values).fetchone()
+                if budget is not None:
+                    if found is not None and not budget.consume_returned():
+                        return None
+                    if not budget.deadline_open():
+                        return None
+                return found
+
+            def unique_proof(
+                sql: str,
+                values: tuple[object, ...],
+            ) -> sqlite3.Row | None:
+                if budget is not None and (
+                    not budget.can_inspect() or budget.remaining_rows < 2
+                ):
+                    return None
+                found = connection.execute(sql, (*values, 2)).fetchall()
+                if budget is not None:
+                    deadline_open = True
+                    for _proof in found:
+                        if not budget.consume_returned():
+                            deadline_open = False
+                    if not deadline_open or not budget.deadline_open():
+                        return None
+                return found[0] if len(found) == 1 else None
+
+            receipt = one_proof(
                 """
                 SELECT * FROM personal_context_ingress_receipts
                 WHERE dataset_id = ? AND device_id = ? AND client_envelope_id = ?
                 """,
                 (dataset_id, device_id, client_envelope_id),
-            ).fetchone()
+            )
             if receipt is None:
                 return None
-            batch = connection.execute(
+            batch = one_proof(
                 """SELECT * FROM personal_context_publication_batches
                    WHERE profile_id = ? AND profile_publication_sequence = ?""",
                 (row.profile_id, row.profile_publication_sequence),
-            ).fetchone()
-            source = connection.execute(
-                """SELECT * FROM personal_context_publication_rows
-                   WHERE profile_id = ? AND profile_publication_sequence = ?
-                     AND batch_ordinal = ?""",
-                (
-                    row.profile_id,
-                    row.profile_publication_sequence,
-                    row.batch_ordinal,
-                ),
-            ).fetchone()
-            manifests = connection.execute(
+            )
+            if batch is None:
+                return None
+            manifest = (
+                row
+                if row.role == "manifest"
+                else unique_proof(
                 """SELECT * FROM personal_context_publication_rows
                    WHERE profile_id = ? AND profile_publication_sequence = ?
                      AND role = 'manifest'
-                   LIMIT 2""",
+                   LIMIT ?""",
                 (row.profile_id, row.profile_publication_sequence),
-            ).fetchall()
-            origins = (
-                connection.execute(
-                    """SELECT * FROM personal_context_publication_rows
-                       WHERE profile_id = ? AND profile_publication_sequence = ?
-                         AND batch_ordinal < ?
-                         AND role IN ('semantic', 'purge_barrier')
-                         AND row_state = 'acknowledged'
-                         AND sync_server_cursor IS NOT NULL
-                       ORDER BY batch_ordinal
-                       LIMIT 2""",
-                    (
-                        row.profile_id,
-                        row.profile_publication_sequence,
-                        row.batch_ordinal,
-                    ),
-                ).fetchall()
-                if row.role == "manifest"
-                else []
+                )
             )
-        if batch is None or source is None or len(manifests) != 1:
+        if manifest is None:
             return None
-        manifest = manifests[0]
-        source_matches = (
-            str(source["publication_batch_id"]) == row.publication_batch_id
-            and int(source["batch_size"]) == row.batch_size
-            and int(source["purge_generation"]) == row.purge_generation
-            and str(source["role"]) == row.role
-            and str(source["opaque_object_id"]) == row.object_id
-            and str(source["opaque_version_id"]) == row.version_id
-            and str(source["operation"]) == row.operation
-            and str(source["deterministic_envelope_id"])
-            == row.deterministic_envelope_id
-        )
         batch_matches = (
             str(batch["publication_batch_id"]) == row.publication_batch_id
             and int(batch["purge_generation"]) == row.purge_generation
@@ -318,32 +327,49 @@ class PersonalContextPublicationRelayStore:
             and int(receipt["purge_generation"]) == row.purge_generation
         )
         manifest_matches = (
-            str(manifest["publication_batch_id"]) == row.publication_batch_id
-            and int(manifest["batch_size"]) == row.batch_size
-            and int(manifest["purge_generation"]) == row.purge_generation
-            and str(manifest["opaque_version_id"])
+            (
+                manifest.publication_batch_id
+                if isinstance(manifest, PublicationSourceRow)
+                else str(manifest["publication_batch_id"])
+            )
+            == row.publication_batch_id
+            and (
+                manifest.batch_size
+                if isinstance(manifest, PublicationSourceRow)
+                else int(manifest["batch_size"])
+            )
+            == row.batch_size
+            and (
+                manifest.purge_generation
+                if isinstance(manifest, PublicationSourceRow)
+                else int(manifest["purge_generation"])
+            )
+            == row.purge_generation
+            and (
+                manifest.version_id
+                if isinstance(manifest, PublicationSourceRow)
+                else str(manifest["opaque_version_id"])
+            )
             == str(receipt["resulting_manifest_version_id"])
         )
-        manifest_origin_matches = False
-        if len(origins) == 1:
-            origin = origins[0]
-            manifest_origin_matches = (
-                str(origin["publication_batch_id"]) == row.publication_batch_id
-                and int(origin["batch_size"]) == row.batch_size
-                and int(origin["purge_generation"]) == row.purge_generation
-                and (
-                    str(origin["role"]) == "semantic"
-                    and str(receipt["resulting_object_id"])
-                    == str(origin["opaque_object_id"])
-                    and str(receipt["resulting_version_id"])
-                    == str(origin["opaque_version_id"])
-                    or str(origin["role"]) == "purge_barrier"
-                    and str(receipt["resulting_object_id"])
-                    == str(manifest["opaque_object_id"])
-                    and str(receipt["resulting_version_id"])
-                    == str(manifest["opaque_version_id"])
-                )
-            )
+        manifest_object_id = (
+            manifest.object_id
+            if isinstance(manifest, PublicationSourceRow)
+            else str(manifest["opaque_object_id"])
+        )
+        manifest_version_id = (
+            manifest.version_id
+            if isinstance(manifest, PublicationSourceRow)
+            else str(manifest["opaque_version_id"])
+        )
+        manifest_origin_matches = origin_proof is not None and (
+            origin_proof.role == "semantic"
+            and str(receipt["resulting_object_id"]) == origin_proof.object_id
+            and str(receipt["resulting_version_id"]) == origin_proof.version_id
+            or origin_proof.role == "purge_barrier"
+            and str(receipt["resulting_object_id"]) == manifest_object_id
+            and str(receipt["resulting_version_id"]) == manifest_version_id
+        )
         result_matches = (
             row.role == "semantic"
             and str(receipt["resulting_object_id"]) == row.object_id
@@ -355,11 +381,11 @@ class PersonalContextPublicationRelayStore:
         ) or (
             row.role == "purge_barrier"
             and str(receipt["resulting_object_id"])
-            == str(manifest["opaque_object_id"])
+            == manifest_object_id
             and str(receipt["resulting_version_id"])
-            == str(manifest["opaque_version_id"])
+            == manifest_version_id
         )
-        if not (source_matches and batch_matches and manifest_matches and result_matches):
+        if not (batch_matches and manifest_matches and result_matches):
             return None
         return CanonicalApplyReceipt(
             resulting_object_id=str(receipt["resulting_object_id"]),
@@ -398,7 +424,7 @@ class PersonalContextPublicationRelayStore:
                 """,
                 (profile_id, deterministic_envelope_id),
             ).fetchone()
-        if row is None or not budget.consume():
+        if row is None or not budget.consume_returned():
             return None
         if (
             str(row["row_state"]) != "acknowledged"
@@ -446,18 +472,25 @@ class PersonalContextPublicationRelayStore:
             row_state="acknowledged",
         )
 
-    def originating_authority_cursor_for_source(
+    def originating_authority_for_source(
         self,
         row: PublicationSourceRow,
-    ) -> int | None:
-        """Return the prior semantic/purge authority cursor for a companion row."""
+        *,
+        budget: PersonalContextRecoveryBudget | None = None,
+    ) -> PublicationOriginProof | None:
+        """Return the one prior semantic/purge proof for a companion row."""
 
         if row.role != "manifest":
+            return None
+        if budget is not None and (
+            not budget.can_inspect() or budget.remaining_rows < 2
+        ):
             return None
         with self._database.transaction() as connection:
             matches = connection.execute(
                 """
-                SELECT sync_server_cursor
+                SELECT sync_server_cursor, role, opaque_object_id,
+                       opaque_version_id
                 FROM personal_context_publication_rows
                 WHERE profile_id = ?
                   AND profile_publication_sequence = ?
@@ -469,7 +502,7 @@ class PersonalContextPublicationRelayStore:
                   AND row_state = 'acknowledged'
                   AND sync_server_cursor IS NOT NULL
                 ORDER BY batch_ordinal
-                LIMIT 2
+                LIMIT ?
                 """,
                 (
                     row.profile_id,
@@ -478,11 +511,25 @@ class PersonalContextPublicationRelayStore:
                     row.purge_generation,
                     row.batch_size,
                     row.batch_ordinal,
+                    2,
                 ),
             ).fetchall()
+        if budget is not None:
+            deadline_open = True
+            for _proof in matches:
+                if not budget.consume_returned():
+                    deadline_open = False
+            if not deadline_open or not budget.deadline_open():
+                return None
         if len(matches) != 1:
             return None
-        return int(matches[0]["sync_server_cursor"])
+        match = matches[0]
+        return PublicationOriginProof(
+            sync_server_cursor=int(match["sync_server_cursor"]),
+            role=str(match["role"]),  # type: ignore[arg-type]
+            object_id=str(match["opaque_object_id"]),
+            version_id=str(match["opaque_version_id"]),
+        )
 
     @contextmanager
     def profile_lease(self, profile_id: str) -> Iterator[PublicationRelayLease | None]:

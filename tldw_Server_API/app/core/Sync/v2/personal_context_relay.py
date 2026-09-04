@@ -55,6 +55,14 @@ class PersonalContextRecoveryBudget:
         self.remaining_rows -= 1
         return True
 
+    def consume_returned(self) -> bool:
+        """Charge a row returned by I/O, even if that I/O closed the deadline."""
+
+        if self.remaining_rows <= 0:
+            return False
+        self.remaining_rows -= 1
+        return self.deadline_open()
+
 
 AuthorityStager = Callable[[PublicationSourceRow, str, str], AuthorityStageReceipt]
 AuthorityFinalizer = Callable[
