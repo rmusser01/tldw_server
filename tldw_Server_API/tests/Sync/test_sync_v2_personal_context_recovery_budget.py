@@ -834,9 +834,11 @@ def test_companion_manifest_exact_identity_rejects_spoof_or_duplicate(
     assert relay.budgets[0].remaining_rows == 1
 
 
+@pytest.mark.parametrize("signed", [False, True], ids=["legacy", "signed"])
 def test_ingress_manifest_proof_rows_share_the_pull_budget(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    signed: bool,
 ) -> None:
     """Manifest origin publication and Sync rows use the same allowance."""
 
@@ -850,6 +852,7 @@ def test_ingress_manifest_proof_rows_share_the_pull_budget(
         runtime,
         manifest,
         relay_rows=92,
+        signed=signed,
     )
 
     assert [item.server_cursor for item in pulled.envelopes] == [
@@ -864,9 +867,11 @@ def test_ingress_manifest_proof_rows_share_the_pull_budget(
     ]
 
 
+@pytest.mark.parametrize("signed", [False, True], ids=["legacy", "signed"])
 def test_ingress_manifest_defers_the_hundred_and_first_proof_row(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    signed: bool,
 ) -> None:
     """The final canonical origin proof cannot borrow row 101."""
 
@@ -880,16 +885,115 @@ def test_ingress_manifest_defers_the_hundred_and_first_proof_row(
         runtime,
         manifest,
         relay_rows=93,
+        signed=signed,
     )
 
     assert pulled.envelopes == []
-    assert pulled.next_cursor == str(manifest.server_cursor - 1)
+    assert _pulled_watermark(
+        runtime.service,
+        pulled,
+        signed=signed,
+        domain=manifest.domain,
+    ) == manifest.server_cursor - 1
     assert pulled.has_more is True
     assert relay.budgets[0].remaining_rows == 0
     assert tracker.queries == [
         "acknowledged-source",
         "origin-source",
         "canonical-receipt",
+    ]
+
+
+@pytest.mark.parametrize("signed", [False, True], ids=["legacy", "signed"])
+def test_ingress_manifest_duplicate_sibling_is_a_common_proof_barrier(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    signed: bool,
+) -> None:
+    """Manifest authority cannot bypass the sibling-uniqueness proof."""
+
+    runtime = IngressHarness(tmp_path, monkeypatch)
+    _complete_real_authority(runtime)
+    _semantic, manifest = _ingress_authorities(runtime)
+    _insert_manifest_spoof(runtime, manifest, replace_exact=False)
+    clock = _ManualClock()
+    tracker = _ProofQueryTracker(clock)
+    tracker.install(runtime, monkeypatch)
+
+    pulled, relay = _pull_one_ingress_authority(
+        runtime,
+        manifest,
+        relay_rows=92,
+        signed=signed,
+    )
+
+    assert pulled.envelopes == []
+    assert _pulled_watermark(
+        runtime.service,
+        pulled,
+        signed=signed,
+        domain=manifest.domain,
+    ) == manifest.server_cursor - 1
+    assert pulled.has_more is True
+    assert relay.budgets[0].remaining_rows == 0
+    assert tracker.queries == [
+        "acknowledged-source",
+        "origin-source",
+        "canonical-receipt",
+        "publication-batch",
+    ]
+
+
+@pytest.mark.parametrize("signed", [False, True], ids=["legacy", "signed"])
+def test_ingress_manifest_batch_proof_expiry_charges_once_and_stops(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    signed: bool,
+) -> None:
+    """The common batch proof is charged once before its post-I/O fence."""
+
+    runtime = IngressHarness(tmp_path, monkeypatch)
+    _complete_real_authority(runtime)
+    _semantic, manifest = _ingress_authorities(runtime)
+    clock = _ManualClock()
+    tracker = _ProofQueryTracker(clock, expire_after="publication-batch")
+    tracker.install(runtime, monkeypatch)
+    runtime.service.personal_context_relay = _BudgetConsumingRelay(0)
+    runtime.service.settings = replace(
+        runtime.service.settings,
+        pull_token_signing_secret="test-only-pull-secret",
+    )
+    runtime.service._recovery_clock_ns = clock
+
+    pulled = runtime.service.pull(
+        user_id="user-a",
+        dataset_id="dataset-a",
+        device_id="device-a",
+        domains=[manifest.domain],
+        cursor=_pull_cursor(
+            runtime.service,
+            after=manifest.server_cursor - 1,
+            signed=signed,
+            domain=manifest.domain,
+        ),
+        include_own_changes=True,
+        personal_context_exchange=EXCHANGE,
+    )
+
+    budget = runtime.service.personal_context_relay.budgets[0]
+    assert pulled.envelopes == []
+    assert _pulled_watermark(
+        runtime.service,
+        pulled,
+        signed=signed,
+        domain=manifest.domain,
+    ) == manifest.server_cursor - 1
+    assert 100 - budget.remaining_rows == 8
+    assert tracker.queries == [
+        "acknowledged-source",
+        "origin-source",
+        "canonical-receipt",
+        "publication-batch",
     ]
 
 

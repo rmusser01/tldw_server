@@ -280,8 +280,18 @@ class PersonalContextPublicationRelayStore:
             if receipt is None:
                 return None
             batch = one_proof(
-                """SELECT * FROM personal_context_publication_batches
-                   WHERE profile_id = ? AND profile_publication_sequence = ?""",
+                """SELECT batch.*,
+                          (
+                              SELECT COUNT(*)
+                              FROM personal_context_publication_rows AS manifest
+                              WHERE manifest.profile_id = batch.profile_id
+                                AND manifest.profile_publication_sequence =
+                                    batch.profile_publication_sequence
+                                AND manifest.role = 'manifest'
+                          ) AS manifest_role_count
+                   FROM personal_context_publication_batches AS batch
+                   WHERE batch.profile_id = ?
+                     AND batch.profile_publication_sequence = ?""",
                 (row.profile_id, row.profile_publication_sequence),
             )
             if batch is None:
@@ -319,6 +329,8 @@ class PersonalContextPublicationRelayStore:
             str(batch["publication_batch_id"]) == row.publication_batch_id
             and int(batch["purge_generation"]) == row.purge_generation
             and int(batch["batch_size"]) == row.batch_size
+            and type(batch["manifest_role_count"]) is int
+            and batch["manifest_role_count"] == 1
             and str(receipt["publication_batch_id"]) == row.publication_batch_id
             and int(receipt["profile_publication_sequence"])
             == row.profile_publication_sequence
