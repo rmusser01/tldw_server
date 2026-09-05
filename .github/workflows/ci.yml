@@ -789,6 +789,7 @@ jobs:
               tldw_Server_API/tests/Usage
           - name: core-utils-tooling
             paths: >-
+              tldw_Server_API/tests/Supply_Chain
               tldw_Server_API/tests/Helper_Scripts
               tldw_Server_API/tests/Context_Integrity
               tldw_Server_API/tests/Utils
@@ -2287,6 +2288,7 @@ jobs:
               tldw_Server_API/tests/Usage
           - name: core-utils-tooling
             paths: >-
+              tldw_Server_API/tests/Supply_Chain
               tldw_Server_API/tests/Helper_Scripts
               tldw_Server_API/tests/Context_Integrity
               tldw_Server_API/tests/Utils
@@ -3656,6 +3658,7 @@ jobs:
               tldw_Server_API/tests/Usage
           - name: core-utils-tooling
             paths: >-
+              tldw_Server_API/tests/Supply_Chain
               tldw_Server_API/tests/Helper_Scripts
               tldw_Server_API/tests/Context_Integrity
               tldw_Server_API/tests/Utils
@@ -4948,6 +4951,7 @@ jobs:
               tldw_Server_API/tests/Usage
           - name: core-utils-tooling
             paths: >-
+              tldw_Server_API/tests/Supply_Chain
               tldw_Server_API/tests/Helper_Scripts
               tldw_Server_API/tests/Context_Integrity
               tldw_Server_API/tests/Utils
@@ -6246,6 +6250,7 @@ jobs:
               tldw_Server_API/tests/Usage
           - name: core-utils-tooling
             paths: >-
+              tldw_Server_API/tests/Supply_Chain
               tldw_Server_API/tests/Helper_Scripts
               tldw_Server_API/tests/Context_Integrity
               tldw_Server_API/tests/Utils
