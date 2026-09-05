@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
     LlamaCppProfileMode,
     LlamaCppRuntimeState,
 )
+from tldw_Server_API.app.core.Local_LLM.llamacpp_server_args import ServerArgs
 
 
 class LlamaCppSavedConfig(BaseModel):
@@ -327,7 +328,7 @@ class LlamaCppProfileCreateRequest(BaseModel):
     host: str = "127.0.0.1"
     port: int = Field(default=8080, ge=1, le=65535)
     port_policy: LlamaCppPortPolicy = LlamaCppPortPolicy.EXPLICIT
-    server_args: dict[str, object] = Field(default_factory=dict)
+    server_args: ServerArgs = Field(default_factory=dict)
     autostart: bool = False
     restart_policy: dict[str, object] = Field(default_factory=dict)
     provider_alias: str | None = None
@@ -350,7 +351,7 @@ class LlamaCppProfileUpdateRequest(BaseModel):
     host: str | None = None
     port: int | None = Field(default=None, ge=1, le=65535)
     port_policy: LlamaCppPortPolicy | None = None
-    server_args: dict[str, object] | None = None
+    server_args: ServerArgs | None = None
     autostart: bool | None = None
     restart_policy: dict[str, object] | None = None
     provider_alias: str | None = None

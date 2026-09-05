@@ -118,6 +118,12 @@ async def finish(service):
     await asyncio.gather(*list(service.tasks.values()))
 
 
+async def test_full_cache_option_is_admissible_without_model_name_policy(setup):
+    service, _, profile, runner, _ = setup
+    profile.server_args = {"swa_full": True}
+    assert await service.fingerprint(profile, runner) == runner.snapshot_fingerprint
+
+
 async def test_identical_token_dispatches_once_and_changed_input_conflicts(setup):
     service, store, profile, runner, transport = setup
     request, first = await submit(setup)

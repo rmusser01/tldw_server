@@ -114,6 +114,13 @@ production allowlist. It starts real processes on loopback, using CPU, context
 16384, parallelism 1 and synthetic public text. Allow sufficient RAM, disk and
 processing time for the supplied model.
 
+Optional environment settings are `TLDW_SNAPSHOT_SWA_FULL=0|1` (default 0)
+and `TLDW_SNAPSHOT_CTX_SIZE` (default 16384, positive integer up to 1048576).
+The upper bound is validation, not a memory recommendation: choose a context
+that fits your hardware and the model. Full SWA cache can substantially increase
+RAM. Both restored and cold processes use identical settings. Any supplied text
+model can be characterized; no filename, family or parameter-count branch exists.
+
 ```sh
 source /path/to/tldw_server/.venv/bin/activate
 TLDW_SNAPSHOT_LIVE=1 TLDW_SNAPSHOT_DISPOSABLE=YES \
@@ -218,11 +225,42 @@ at context 16384 the SWA allocation grew from 300 MiB to 3200 MiB (the separate
 non-SWA allocation remained 320 MiB). All diagnostic children stopped; neither
 the installed runtime nor production profile settings changed.
 
-The current tldw snapshot configuration gate does not accept `swa_full`, and the
-shared argument formatter does not expose it. Implementing this remedy requires
-a validated option included in compatibility identity, explicit memory/restart
-guidance, and a fresh managed end-to-end verification. Do not bypass the gate or
-admit the build based solely on this native experiment. TASK-13163 remains open.
+Managed profiles now accept `server_args: {"swa_full": true}` through the
+existing profile API. Only actual JSON booleans are accepted (not strings or
+numbers). True emits `--swa-full`; false or omission emits no flag. This is a
+generic runtime option, not a Gemma workaround selected by model name.
+Save profile changes, then explicitly stop/start to apply them; editing does not
+implicitly restart a runtime. Changing the effective cache mode changes snapshot
+compatibility identity: snapshots from the other mode cannot be restored.
+Check memory before enabling it; full cache is not a universal reuse guarantee.
+
+| Architecture/configuration | Verification policy |
+| --- | --- |
+| Standard attention | Test ordinary cache mode with a restart and cold control; currently unverified here. |
+| Sliding-window attention | Test default and explicit full cache separately; only the supplied Gemma case has evidence above. |
+| Hybrid/recurrent | Require separate restart/reuse evidence; do not infer that full SWA solves recurrent state persistence. |
+| Unknown or untested | Remain unverified; successful save/restore receipts alone are insufficient. |
+
+Reports retain measured warm/cold counters even when reuse assertions fail.
+Evidence applies to the exact model bytes, runtime bundle and effective options,
+not every model in an architecture. No production build was admitted by this
+configuration change. Admin/Chatbook acceptance remains separate; TASK-13163 is open.
+
+### Managed full-cache verification (2026-09-04)
+
+The real managed runner/store/coordinator harness passed on the same official
+b10816 bundle and supplied Gemma model identified above. Effective options were
+`-c 16384 -ngl 0 --parallel 1 --swa-full`. Save and restore retained 2770 tokens;
+the restarted request reused 2770 and processed 10, versus the separate cold
+control's 0 reused and 2780 processed. Executable and model hashes were unchanged.
+The live module completed with 15 passed (156.95 seconds); all disposable children
+were stopped. Local evidence: `/private/tmp/llamacpp-snapshot-managed-full.log`
+and `/private/tmp/llamacpp-snapshot-managed-full.xml`.
+
+This confirms the configuration through managed runtime components, not a
+production enablement or end-to-end Admin/Chatbook result. Standard-attention
+and hybrid/recurrent assets have not yet been supplied or tested. The production
+allowlist remains empty pending the remaining acceptance and compatibility review.
 
 Architecture: [ADR-043](../ADR/043-managed-llamacpp-manual-slot-snapshots.md).
 Approved workflow: [design](../Design/2026-09-04-llamacpp-manual-slot-snapshots.md).

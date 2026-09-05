@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Annotated, Any
+
+from pydantic import AfterValidator
 
 CORE_SERVER_ARG_KEYS: set[str] = {
     "threads",
@@ -40,7 +42,18 @@ def flatten_repeatable(flag: str, value: Any) -> list[str]:
     return command
 
 
+def validate_cache_options(server_args: dict[str, Any]) -> dict[str, Any]:
+    """Reject ambiguous full-cache settings before cleaning or launching."""
+    if "swa_full" in server_args and type(server_args["swa_full"]) is not bool:
+        raise ValueError("swa_full must be a boolean")
+    return server_args
+
+
+ServerArgs = Annotated[dict[str, object], AfterValidator(validate_cache_options)]
+
+
 def clean_server_args(server_args: dict[str, Any] | None) -> dict[str, Any]:
+    validate_cache_options(server_args or {})
     return {key: value for key, value in (server_args or {}).items() if value is not None and value != ""}
 
 
@@ -99,6 +112,7 @@ def server_arg_formatters() -> dict[str, Callable[[Any], list[str]]]:
         "lora_base": lambda v: ["--lora-base", str(v)],
         "control_vector": lambda v: ["--control-vector", str(v)],
         "cache_type_k": lambda v: ["--cache-type-k", str(v)],
+        "swa_full": lambda v: ["--swa-full"] if validate_cache_options({"swa_full": v})["swa_full"] else [],
         "cache_type_v": lambda v: ["--cache-type-v", str(v)],
         "cache_type": lambda v: ["--cache-type-k", str(v), "--cache-type-v", str(v)],
         "hf_repo": lambda v: ["--hf-repo", str(v)],

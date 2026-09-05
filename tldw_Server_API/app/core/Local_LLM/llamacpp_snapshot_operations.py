@@ -181,6 +181,7 @@ class SnapshotOperations:
             "ubatch_size",
             "cache_type_k",
             "cache_type_v",
+            "swa_full",
         }
         if set(profile.server_args) - allowed:
             raise SnapshotOperationError("unsupported_configuration", 422)

@@ -128,3 +128,18 @@ process control. No binary/model was available, so the live test remains skipped
 and the production build allowlist remains empty. Pin wire fixtures to their
 source, label source-derived versus live evidence, and never infer reuse from
 file existence, HTTP success, similar output, or final cache size.
+
+## Snapshot reuse evidence is configuration-specific
+
+**Incident (TASK-13163, 2026-09-04):** The supplied Gemma sliding-window model
+saved/restored 2770 tokens on llama.cpp b10816 but reused zero after restart.
+Native diagnostics reported missing cache coverage; a one-variable `--swa-full`
+test changed reuse to 2770 tokens with only 10 processed. The managed
+runner/store/coordinator subsequently reproduced 2770/10 versus a cold control
+of 0/2780. At context 16384 the native SWA allocation grew 300 to 3200 MiB.
+
+**Evidence and rule:** Treat cache mode as compatibility identity and explicit
+operator configuration, with memory/restart guidance. Do not infer another
+architecture's support from a model-family label or one successful configuration.
+Publish warm/cold measurements before reuse assertions so failures retain useful
+evidence. Managed runtime evidence does not substitute for live client acceptance.

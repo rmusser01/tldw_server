@@ -122,6 +122,27 @@ def test_runner_reports_defined_before_first_start(tmp_path: Path):
     assert runtime.warnings == []
 
 
+def test_full_cache_changes_snapshot_identity_but_false_matches_omitted(tmp_path):
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_compatibility import (
+        build_fingerprint,
+        compare_fingerprints,
+    )
+
+    config = make_config(tmp_path)
+    model = make_model(config, "arbitrary-text-model.gguf")
+    runner = LlamaCppProcessRunner(config, profile_id="cache-options")
+    identities = []
+    for args in ({}, {"swa_full": False}, {"swa_full": True}):
+        command = runner._build_command(config.executable_path, model, "127.0.0.1", 8181, args)
+        identities.append(
+            build_fingerprint(
+                model=model, executable=config.executable_path, effective_options=command[7:], adapters=[]
+            )
+        )
+    assert compare_fingerprints(identities[0], identities[1]) == []
+    assert compare_fingerprints(identities[0], identities[2]) == ["effective_options_sha256"]
+
+
 @pytest.mark.parametrize("host", ["127.0.0.1", "127.0.0.2", "::1", "[::1]"])
 async def test_snapshot_launch_generations_and_private_working_path(tmp_path, monkeypatch, host):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_process_runner as module

@@ -41,6 +41,17 @@ def free_local_port() -> int:
         return probe.getsockname()[1]
 
 
+def live_server_args() -> dict[str, object]:
+    """Explicit operator choices, independent of model names or architecture guesses."""
+    full = os.environ.get("TLDW_SNAPSHOT_SWA_FULL", "0")
+    if full not in {"0", "1"}:
+        raise ValueError("TLDW_SNAPSHOT_SWA_FULL must be 0 or 1")
+    context = int(os.environ.get("TLDW_SNAPSHOT_CTX_SIZE", "16384"))
+    if not 1 <= context <= 1048576:
+        raise ValueError("TLDW_SNAPSHOT_CTX_SIZE must be between 1 and 1048576; check memory before running")
+    return {"ctx_size": context, "parallel": 1, "n_gpu_layers": 0, "swa_full": full == "1"}
+
+
 @pytest.mark.skipif(
     os.environ.get("TLDW_SNAPSHOT_LIVE") != "1",
     reason="Set TLDW_SNAPSHOT_LIVE=1 with operator-supplied assets and disposable-profile consent",
@@ -61,6 +72,7 @@ async def test_real_snapshot_reuse_after_restart_against_cold_process(tmp_path: 
             pytest.fail(f"Supply an absolute regular non-symlink {label} path")
     if not os.access(executable, os.X_OK):
         pytest.fail("Supplied runtime is not executable")
+    server_args = live_server_args()
     executable_hash = hash_file_stable(executable)
     model_hash = hash_file_stable(model)
     config = LlamaCppConfig(
@@ -68,7 +80,7 @@ async def test_real_snapshot_reuse_after_restart_against_cold_process(tmp_path: 
         models_dir=model.parent,
         allowed_paths=[model.parent],
         default_host="127.0.0.1",
-        default_ctx_size=16384,
+        default_ctx_size=server_args["ctx_size"],
         default_n_gpu_layers=0,
         readiness_timeout=180,
         http_timeout=600,
@@ -83,7 +95,7 @@ async def test_real_snapshot_reuse_after_restart_against_cold_process(tmp_path: 
         snapshots_enabled=True,
         snapshot_retention=1,
         autostart=False,
-        server_args={"ctx_size": 16384, "parallel": 1, "n_gpu_layers": 0},
+        server_args=server_args,
     )
     store = SnapshotStore(tmp_path / "private-snapshots")
     service = SnapshotOperations(store, supported_builds={executable_hash})
@@ -153,13 +165,6 @@ async def test_real_snapshot_reuse_after_restart_against_cold_process(tmp_path: 
         await cold.start(model, cold_profile)
         assert cold.snapshot_options == effective_options
         cold_metrics = await completion(cold, prompt)
-        # Similar output, HTTP 200 or an artifact alone cannot satisfy these checks.
-        assert warm_metrics["cached_tokens"] >= saved.token_count * 0.8
-        assert warm_metrics["processed_tokens"] < cold_metrics["processed_tokens"] * 0.25
-        assert cold_metrics["processed_tokens"] >= 1024
-        assert warm_metrics["cached_tokens"] > cold_metrics["cached_tokens"]
-        assert hash_file_stable(executable) == executable_hash
-        assert hash_file_stable(model) == model_hash
         report = {
             "coverage": "candidate build, text, native /completion with id_slot=0; no Chatbook/Admin browser evidence",
             "executable_sha256": executable_hash,
@@ -172,6 +177,14 @@ async def test_real_snapshot_reuse_after_restart_against_cold_process(tmp_path: 
         }
         record_property("snapshot_live_evidence", json.dumps(report, sort_keys=True))
         print(json.dumps(report, sort_keys=True))
+        # Publish measured evidence before assertions, including negative results.
+        # Similar output, HTTP 200 or an artifact alone cannot satisfy these checks.
+        assert warm_metrics["cached_tokens"] >= saved.token_count * 0.8
+        assert warm_metrics["processed_tokens"] < cold_metrics["processed_tokens"] * 0.25
+        assert cold_metrics["processed_tokens"] >= 1024
+        assert warm_metrics["cached_tokens"] > cold_metrics["cached_tokens"]
+        assert hash_file_stable(executable) == executable_hash
+        assert hash_file_stable(model) == model_hash
     finally:
         await service.drain()
         await runner.stop()
@@ -205,3 +218,23 @@ def test_live_metrics_keep_measured_processed_and_cached_counts():
         "cached_tokens": 2048,
         "processed_tokens": 7,
     }
+
+
+@pytest.mark.parametrize("value", ["true", "false", "", "2"])
+def test_live_cache_mode_rejects_ambiguous_environment(monkeypatch, value):
+    monkeypatch.setenv("TLDW_SNAPSHOT_SWA_FULL", value)
+    with pytest.raises(ValueError):
+        live_server_args()
+
+
+def test_live_options_allow_explicit_cache_mode_and_context(monkeypatch):
+    monkeypatch.setenv("TLDW_SNAPSHOT_SWA_FULL", "1")
+    monkeypatch.setenv("TLDW_SNAPSHOT_CTX_SIZE", "8192")
+    assert live_server_args() == {"ctx_size": 8192, "parallel": 1, "n_gpu_layers": 0, "swa_full": True}
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "unbounded", "1048577"])
+def test_live_context_rejects_invalid_size(monkeypatch, value):
+    monkeypatch.setenv("TLDW_SNAPSHOT_CTX_SIZE", value)
+    with pytest.raises(ValueError):
+        live_server_args()
