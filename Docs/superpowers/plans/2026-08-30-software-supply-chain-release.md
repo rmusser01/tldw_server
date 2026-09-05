@@ -1476,6 +1476,51 @@ matrix, including all ten upstream PDF integration tests, passes 868 tests;
 workflow syntax, touched lint, offline lock freshness and diff checks pass.
 Other source-SBOM/E2E and vulnerability admission failures still block merge.
 
+2026-09-05 approved Source SBOM condition repair — Complete locally: latest run
+33972378502 again generated all three inventories successfully but skipped merge
+and scan after the intentionally skipped direct-PR admission ancestor. Add
+explicit cancellation-aware conditions requiring every direct prerequisite to
+succeed. First reproduce with conjunction-guard regressions for successful,
+failed, skipped and cancelled prerequisites, then repair both jobs and run the
+focused matrix, workflow lint, Bandit and independent review. Admission rules,
+source-result checks and vulnerability policy remain unchanged. Character Chat
+diagnostics remain paused.
+
+Condition repair verification checkpoint: both RED cases reproduced, all 16
+new guards pass, and the final SBOM/admission contract suite passes 49 tests.
+Updated only the two intermediate-job expectations in the existing admission
+contract; root admission and immutable-checkout assertions are unchanged.
+Independent re-review has no remaining findings. Ruff, actionlint, offline
+pinned uv lock freshness and diff checks pass. Bandit reports test assertions
+and seven non-assertion findings on verified unchanged baseline lines, with no
+new security findings.
+
+Earlier commit/push pause: the full matrix at seed 1189791922 reported 883 passed
+and one failure in the untouched schema warm-up guard. Its module passes all
+three tests in isolation, but warm-up spy calls are empty after earlier tests
+in both full runs. The likely boundary is a pre-warmed schema memo shared via
+the real app/user database; the guard installs its spy after fixture startup.
+No backend, PDF or schema-test edits were made. Request approval for a bounded
+test-only cache-isolation repair that preserves both cold-path and warm-path
+assertions before publishing. Current published HEAD remains `ffe625d078e13`;
+`dev` is still `2742468a19fd`. No vulnerability exception is approved.
+
+2026-09-05 approved schema cache-isolation repair — Complete: parameterized the
+existing HTTP guard with cold and deliberately pre-warmed starting states. The
+pre-warmed case reproduced the exact missing cold-verification failure before
+the fix. One call to the existing cache reset after spy installation and before
+measurement restores isolation; there is no reset between measured cold and
+warm requests. Both assertions and all HTTP checks remain intact, with no
+backend changes. All four module cases pass. Runtime-only mutation of the memo
+key to disable caching fails both variants at the warm-request assertion,
+confirming regression sensitivity. The full focused matrix at the previously
+failing seed now passes all 885 tests (26 warnings), including pinned Docker
+SBOM generation/validation and PDF integration. Independent review has no
+findings; touched Ruff, actionlint, pinned offline lock freshness and diff checks
+pass. Bandit has only test assertions and seven verified unchanged baseline
+findings. The combined approved CI fixes are ready to commit/push; live final-
+head admission and other existing PR blockers remain required before merge.
+
 Wait for all required checks and reviewer comments. Resolve every actionable thread with evidence, rerun affected tests, rebase again if `dev` moved, and merge only after:
 
 - all required checks pass;

@@ -467,6 +467,19 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     assert _normalized(job.get("if")) == _normalized(
                         "always() && !cancelled() && needs.changes.result == 'success'"
                     )
+                elif name == "sbom.yml" and job_name in {"merge-source", "scan-source"}:
+                    expected_condition = {
+                        "merge-source": (
+                            "always() && !cancelled() && "
+                            "needs.generate-python.result == 'success' && "
+                            "needs.generate-apps-workspace.result == 'success' && "
+                            "needs.generate-admin-ui.result == 'success'"
+                        ),
+                        "scan-source": (
+                            "always() && !cancelled() && needs.merge-source.result == 'success'"
+                        ),
+                    }[job_name]
+                    assert _normalized(job.get("if")) == _normalized(expected_condition), (name, job_name)
                 else:
                     assert job.get("if") is None, (name, job_name)
 
