@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-05 14:55'
-updated_date: '2026-09-05 15:58'
+updated_date: '2026-09-05 16:15'
 labels: []
 dependencies: []
 references:
@@ -35,6 +35,8 @@ Reproduce protected image loading through the renderer; use existing authenticat
 
 <!-- SECTION:NOTES:BEGIN -->
 Implemented authenticated binary asset loading and disposable object URLs in usePersonaVisualAssetUrls, SpriteFrameRenderer, and generated candidate thumbnails. Failures remain bounded across animation changes, requests abort and URLs revoke on cleanup/source change, and external asset origins never receive credentials. Red3/3 auth regressions failed; final renderer tests include source replacement and external-origin credential exclusion. Real advanced-mode Migu builder and Buddy decode96x96 frames from backend PNG200. Quickstart now passes readiness after13179, but its cookie-auth legacy user dependency blocks Persona; AC1 remains open pending that separate authentication repair. Bandit N/A TypeScript. Scoped ESLint0errors; standard img warning and preexisting editor dependency warnings remain. ADR not required: existing transport and lifetime contract repaired.
+
+Published in draft server PR https://github.com/rmusser01/tldw_server/pull/2884 against dev63358431d7. Rebased-tree targeted frontend265/backend54 tests pass; repository-wide typecheck remains80 unrelated errors. Draft also documents separate setup-task ID13174 collision awaiting manual-renumber exception.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
