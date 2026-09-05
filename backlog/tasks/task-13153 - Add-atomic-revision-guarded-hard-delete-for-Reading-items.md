@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-03 02:27'
-updated_date: '2026-09-05 04:57'
+updated_date: '2026-09-05 05:11'
 labels:
   - collections
   - reading-list
@@ -52,5 +52,5 @@ diagnostic-privacy behavior are covered.
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-ADR required: yes; ADR-003 amended with approved managed output file policy. API/scheduler checkpoint implemented: locked explicit file permission; metadata-only managed hard delete returns 409; false-option purges skip managed archives; committed path/ownership/shared-reference snapshot; post-commit generic unlink and durable managed cleanup; shared backend retention predicate with locked custom-grace/retention recheck; actual counts and post-delete TTS history; quota preserved. Shared references, legacy absolute aliases and sanitized resolver errors covered. Independent review findings fixed and re-review clear. Verification: 100 SQLite regression cases plus 42 real PostgreSQL route/deletion cases = 142 distinct targeted passes; final SQL correction rechecked across 20 SQLite routes. No PG skips, Docker provisioning or full sweep. Scoped Bandit zero; changed formatting/compilation/new-test lint/diff checks pass. Production Ruff 12 baseline findings and existing API test 4 baseline findings unchanged. Docs/spec/plan/ADR and SQL-placeholder lesson updated. Full plan in Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md. Remaining: other file mutators and internal purge callers, cleanup startup/readiness, reconciliation, production archive routing, aggregate/collection writers and DTOs. Capability remains absent; task In Progress.
+ADR required: yes; existing ADR-003 and approved explicit managed file policy apply. Automatic DB purge checkpoint implemented after 96076bb604: purge_expired_outputs defaults to preserving managed Reading archives; trusted callers must explicitly authorize their durable cleanup. Shared candidate discovery and transactional permission/retention checks cover Watchlist reads/create/download callers and late ownership registration without route-specific prechecks. Unowned expiry, aged soft deletion, actual counts and audiobook quota preserved. Verification: 26 SQLite deletion cases, 8 real PostgreSQL purge/Watchlist cases, 2 existing full-app Watchlist integration cases = 36 distinct targeted passes. Initial integration attempt timed out during app startup at 30s; unchanged cases passed with 90s. No PG skips, Docker provisioning or full sweep. Test lint/format, changed DB formatting, compilation/diff checks pass; scoped Bandit zero; nine baseline DB Ruff findings unchanged. Independent review clear. Both API docs and full plan updated. Remaining: rename/transcode/generated-output file operations, production archive routing, reconciliation, cleanup startup/readiness, aggregate/collection writers and DTOs. Capability absent; task In Progress.
 <!-- SECTION:PLAN:END -->

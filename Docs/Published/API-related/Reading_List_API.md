@@ -439,6 +439,8 @@ Explicit managed deletion commits durable file cleanup before removing metadata.
 The returned `file_deleted=false` means no file was synchronously unlinked, not
 that the logical deletion failed; do not repeat DELETE to finish cleanup. API and
 scheduled output purges with `delete_files=false` skip managed archives. Purge
+maintenance triggered automatically by Watchlist reads also preserves managed
+archives; reading a Watchlist does not authorize their file deletion. Purge
 counts include only records actually removed and files actually unlinked, not
 queued cleanup. Both retention and the selected soft-delete grace period are
 rechecked when deletion commits.

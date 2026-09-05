@@ -418,6 +418,41 @@ Run `python -m pytest tldw_Server_API/tests/Collections/test_reading_artifact_re
 
 ## Stage 3: Durable artifact staging, adoption and cleanup
 
+Automatic-purge follow-up (2026-09-05; existing ADR-003): Watchlist reads and
+generation routes call `purge_expired_outputs()` without file-deletion permission.
+Its default must skip managed Reading outputs under the same ownership fence,
+including ownership registered after the scan. Preserve automatic unowned output
+retention/grace cleanup and quota accounting. An explicit trusted managed-file
+opt-in retains the DB primitive's disposal capability. Add failing default/explicit,
+renewal, late-ownership and actual Watchlist-read regressions on both backends;
+then implement, run targeted regressions/static checks, review and checkpoint.
+This applies the approved policy; no new ADR or capability activation.
+
+Automatic-purge checkpoint (2026-09-05): the database maintenance helper now
+defaults to preserving managed archives, with an explicit trusted file-cleanup
+opt-in. It reuses candidate discovery and the existing transactional deletion
+primitive, so late ownership registration and retention renewal are rechecked
+under the clock. Watchlist callers need no individual prechecks. Unowned expiry
+and aged-soft-delete removal, actual counts and audiobook quota remain intact.
+Both API documentation copies now state that automatic Watchlist maintenance does
+not authorize managed archive deletion. Independent read-only review found no issues.
+
+Verification (existing Server venv):
+
+- Red: seven selected SQLite cases failed before the permission-default change;
+  the separate late-ownership regression also failed before implementation.
+- `TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_reading_output_deletion.py -k 'not postgres' --timeout=30 -q --tb=short`: 26 passed, 26 deselected.
+- Same module with `-k 'postgres and (purge or watchlist)' --timeout=30 -x`: 8 passed,
+  44 deselected on real PostgreSQL, no skips and no Docker provisioning.
+- `TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Watchlists/test_watchlists_api.py -k 'items_and_outputs_flow or outputs_pagination_excludes_mixed_origin_rows' --timeout=90 -q --tb=short`: 2 passed, 35 deselected. The first attempt timed out during full-app fixture startup with a 30-second limit, before requests. The unchanged tests passed with a 90-second limit.
+- Total: 36 distinct targeted passes; no full suite. Test Ruff/Black, changed DB
+  formatting, compilation and diff checks pass. Scoped Bandit: zero findings and
+  errors. DB Ruff retains its same nine baseline findings.
+
+Rename/transcode/generated-output file operations, production archive routing,
+reconciliation, cleanup startup/readiness and remaining aggregate writers/DTOs
+are still pending. Capability remains absent and TASK-13153 stays In Progress.
+
 **Status:** In Progress — local POSIX exclusion, staging/cleanup intents and guarded internal adoption implemented; owned-output disposal and production wiring remain.
 **Goal:** No lost cleanup after crashes and no unlink of shared/reused paths.
 **Success Criteria:** Retry/restart and writer/cleanup races pass; pending work remains observable.

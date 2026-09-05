@@ -8599,15 +8599,24 @@ class CollectionsDatabase:
         res = self.backend.execute(q, (_utcnow_iso(), consumer_name, lease_owner_id))
         return bool(res.rowcount and res.rowcount > 0)
 
-    def purge_expired_outputs(self) -> int:
-        """Hard delete expired/retained outputs. Returns number of rows removed."""
+    def purge_expired_outputs(self, *, delete_managed_files: bool = False) -> int:
+        """Remove expired rows; automatic callers cannot authorize managed unlink.
+
+        Watchlist reads invoke this metadata-maintenance helper. Managed archives
+        therefore survive unless a trusted caller explicitly permits durable file
+        cleanup. Unowned files are never unlinked by this database method.
+        """
         now = _utcnow_iso()
-        predicate, params = self._output_purge_predicate(now)
-        rows = self.backend.execute(
-            f"SELECT id FROM outputs WHERE user_id = ? AND ({predicate})",  # nosec B608: fixed predicate
-            (self.user_id, *params),
-        ).rows
-        return sum(self.delete_output_artifact(row["id"], hard=True, purge_before=now) for row in rows)
+        removed = 0
+        for output_id in self.find_outputs_to_purge(now):
+            try:
+                deleted = self.delete_output_artifact_record(
+                    output_id, hard=True, delete_managed_files=delete_managed_files, purge_before=now
+                )
+            except ReadingFileDeletionRequired:
+                continue
+            removed += int(deleted is not None)
+        return removed
 
     def find_outputs_to_purge(
         self, now: str, soft_deleted_grace_days: int = 30, include_retention: bool = True

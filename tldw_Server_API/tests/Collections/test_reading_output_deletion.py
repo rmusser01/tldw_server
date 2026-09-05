@@ -157,15 +157,15 @@ def test_db_retention_purge_rechecks_eligibility_and_uses_owned_cleanup(db, tmp_
     parent, namespace, output = archive(db, tmp_path)
     db.update_output_artifact(output.id, retention_until="2000-01-01T00:00:00+00:00")
     before = db.get_content_item(parent.id)
-    remove = db.delete_output_artifact
+    remove = db.delete_output_artifact_record
 
     def renew_before_fence(output_id, **kwargs):
         if renew:
             db.update_output_artifact(output_id, retention_until="2999-01-01T00:00:00+00:00")
         return remove(output_id, **kwargs)
 
-    monkeypatch.setattr(db, "delete_output_artifact", renew_before_fence)
-    assert db.purge_expired_outputs() == (0 if renew else 1)
+    monkeypatch.setattr(db, "delete_output_artifact_record", renew_before_fence)
+    assert db.purge_expired_outputs(delete_managed_files=True) == (0 if renew else 1)
     assert db.get_content_item(parent.id).revision == before.revision + 1
     if renew:
         assert db.get_output_artifact(output.id).id == output.id
@@ -215,6 +215,80 @@ def test_retention_purge_respects_soft_delete_grace(db, tmp_path, aged):
     before = db.get_content_item(parent.id)
     if aged:
         db.backend.execute("UPDATE outputs SET deleted_at = ? WHERE id = ?", ("2000-01-01T00:00:00+00:00", output.id))
-    assert db.purge_expired_outputs() == int(aged)
+    assert db.purge_expired_outputs(delete_managed_files=True) == int(aged)
     assert db.get_content_item(parent.id).revision == before.revision + int(aged)
     assert cleanup.drain_reading_artifact_cleanup(db, output_root=tmp_path, storage_namespace_id=namespace) == int(aged)
+
+
+@pytest.mark.parametrize("soft_deleted", [False, True])
+def test_automatic_purge_preserves_managed_archives_without_file_permission(db, tmp_path, soft_deleted):
+    parent, namespace, owned = archive(db, tmp_path)
+    generic = db.create_output_artifact(
+        type_="audiobook_mp3",
+        title="Expired book",
+        format_="mp3",
+        storage_path="old.mp3",
+        metadata_json='{"byte_size": 12}',
+    )
+    db.set_audiobook_output_usage(12)
+    for output in (owned, generic):
+        if soft_deleted:
+            db.delete_output_artifact(output.id)
+            db.backend.execute(
+                "UPDATE outputs SET deleted_at = ? WHERE id = ?", ("2000-01-01T00:00:00+00:00", output.id)
+            )
+        else:
+            db.update_output_artifact(output.id, retention_until="2000-01-01T00:00:00+00:00")
+    before = db.get_content_item(parent.id)
+    assert db.purge_expired_outputs() == 1
+    assert db.get_content_item(parent.id) == before
+    assert db.get_output_artifact(owned.id, include_deleted=True).id == owned.id
+    assert db.get_audiobook_output_usage() == 0
+    assert db.purge_expired_outputs() == 0
+    assert cleanup.drain_reading_artifact_cleanup(db, output_root=tmp_path, storage_namespace_id=namespace) == 0
+    assert (tmp_path / owned.storage_path).exists()
+
+
+@pytest.mark.asyncio
+async def test_watchlist_output_read_cannot_purge_a_managed_reading_archive(db, tmp_path):
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.api.v1.endpoints import watchlists
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    _, _, output = archive(db, tmp_path)
+    db.update_output_artifact(output.id, retention_until="2000-01-01T00:00:00+00:00")
+    before = snapshot(db)
+    with pytest.raises(HTTPException) as exc:
+        await watchlists.get_output(
+            output_id=output.id,
+            current_user=User(id=int(db.user_id), username="reader", email=None, is_active=True),
+            collections_db=db,
+        )
+    assert exc.value.status_code == 404
+    assert snapshot(db) == before
+    assert (tmp_path / output.storage_path).exists()
+
+
+def test_automatic_purge_checks_ownership_registered_after_candidate_scan(db, tmp_path, monkeypatch):
+    from tldw_Server_API.tests.Collections.test_reading_revision_mutations import make_reading
+
+    parent = make_reading(db)
+    namespace = cleanup.provision_reading_storage_namespace(tmp_path)
+    output = db.create_output_artifact(type_="reading_archive", title="Archive", format_="md", storage_path="late.md")
+    (tmp_path / output.storage_path).write_text("keep", encoding="utf-8")
+    db.update_output_artifact(output.id, retention_until="2000-01-01T00:00:00+00:00")
+    remove = db.delete_output_artifact_record
+
+    def register_before_fence(output_id, **kwargs):
+        db.register_reading_output_ownership(
+            parent.id, output.id, expected_revision=parent.revision, storage_namespace_id=namespace
+        )
+        return remove(output_id, **kwargs)
+
+    monkeypatch.setattr(db, "delete_output_artifact_record", register_before_fence)
+    assert db.purge_expired_outputs() == 0
+    assert db.get_output_artifact(output.id).id == output.id
+    assert db.get_content_item(parent.id).revision == parent.revision + 1
+    assert db.backend.execute("SELECT COUNT(*) FROM reading_artifact_paths", ()).scalar == 0
+    assert (tmp_path / output.storage_path).exists()
