@@ -1541,6 +1541,18 @@ restored without changing the shared Python environment. The final browser
 invocation uses canonical `/private/tmp` paths and CI minimal-startup settings.
 Publish after checking latest-dev integration; other PR merge gates remain open.
 
+Latest-dev integration checkpoint: rebasing onto `63358431d7` preserved all 11
+commits exactly. The existing inventory regression caught the new upstream EPUB
+test missing from the explicit shard lists. Added its exact path to documents
+on all five platforms and to the expected set without weakening exhaustive or
+disjoint coverage. Independent review is clean. Rebased verification: 898 focused
+tests pass (including EPUB and pinned Docker SBOM), 58 client/page tests pass,
+and real-backend JWT passes 26 with one expected skip. Ruff and actionlint pass.
+Bandit on the changed Python contract reports assertions plus the unchanged
+false positive on `--cov` at line 193; no new security finding. The next fetched
+dev `dc0b7455f2` changes only unrelated design notes and its task record; include
+it unchanged, verify patch preservation, and publish with an exact remote lease.
+
 Wait for all required checks and reviewer comments. Resolve every actionable thread with evidence, rerun affected tests, rebase again if `dev` moved, and merge only after:
 
 - all required checks pass;
