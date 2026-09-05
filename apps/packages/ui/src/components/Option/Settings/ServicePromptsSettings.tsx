@@ -162,6 +162,12 @@ const KNOWN_DEFINITIONS = {
     description:
       "Controls system instructions for synchronous EPUB analysis. Without a saved override, server defaults apply."
   },
+  "media.audio.analysis": {
+    key: "mediaAudioAnalysis",
+    label: "Audio summarization",
+    description:
+      "Controls system and user instructions for synchronous audio analysis. Without a saved override, server defaults apply."
+  },
   "media.email.summarization": {
     key: "mediaEmailSummarization",
     label: "Email summarization",
@@ -220,6 +226,10 @@ const KNOWN_WORKFLOWS: Record<string, { key: string; label: string }> = {
     key: "emailSummarization",
     label: "Synchronous email analysis"
   },
+  "media.audio.analysis": {
+    key: "audioAnalysis",
+    label: "Synchronous audio analysis"
+  },
   "notes.title.generate": {
     key: "automaticNotesTitles",
     label: "Automatic Notes titles"
@@ -229,6 +239,7 @@ const KNOWN_WORKFLOWS: Record<string, { key: string; label: string }> = {
 const KNOWN_PARTS: Record<string, { key: string; label: string }> = {
   template: { key: "template", label: "Template" },
   system: { key: "system", label: "System instructions" },
+  user: { key: "user", label: "User instructions" },
   system_semantics: {
     key: "systemSemantics",
     label: "Refinement guidance"

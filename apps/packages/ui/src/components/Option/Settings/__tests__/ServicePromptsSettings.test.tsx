@@ -249,6 +249,16 @@ const catalog: ServicePromptCatalogItem[] = [
     affected_workflows: [{ id: "media.email.summarization", label: "Server email workflow" }]
   },
   {
+    id: "media.audio.analysis",
+    label: "Server audio prompt",
+    description: "Server audio description",
+    parts: [
+      { key: "system", label: "System instructions", mode: "literal", required_variables: [] },
+      { key: "user", label: "Server user label", mode: "literal", required_variables: [] }
+    ],
+    affected_workflows: [{ id: "media.audio.analysis", label: "Server audio workflow" }]
+  },
+  {
     id: "notes.title.generate",
     label: "Server Notes title prompt",
     description: "Server Notes title prompt description",
@@ -280,7 +290,9 @@ const detailFor = (
     parts?: Record<string, string>
   } = {}
 ): ServicePromptDetail => {
-  const defaults = definition.id === "media.email.summarization"
+  const defaults = definition.id === "media.audio.analysis"
+    ? { system: "Audio system guidance.", user: "Audio user guidance." }
+    : definition.id === "media.email.summarization"
     ? { system: "Summarize the email clearly." }
     : definition.id === "media.ebook.summarization"
     ? { system: "Summarize the EPUB clearly." }
@@ -545,7 +557,7 @@ describe("ServicePromptsSettings", () => {
     renderSettings()
 
     expect(await screen.findAllByTestId("service-prompt-list-item"))
-      .toHaveLength(11)
+      .toHaveLength(12)
     expect(await screen.findByRole("heading", { name: "Text translation" }))
       .toBeInTheDocument()
     expect(screen.getByText("Server default")).toBeInTheDocument()
@@ -605,6 +617,22 @@ describe("ServicePromptsSettings", () => {
     expect(screen.getByText("Synchronous PDF analysis")).toBeVisible()
     expect(screen.getAllByText(/Without a saved override, server defaults apply/)[0]).toBeVisible()
     expect(screen.queryByText("Server PDF prompt")).not.toBeInTheDocument()
+  })
+
+  it("edits audio system and user instructions as one pair", async () => {
+    renderSettings()
+    await openPrompt("Audio summarization")
+    expect(screen.getByLabelText("System instructions")).toHaveValue("Audio system guidance.")
+    expect(screen.getByLabelText("User instructions")).toHaveValue("Audio user guidance.")
+    expect(screen.getByText("Synchronous audio analysis")).toBeVisible()
+    fireEvent.change(screen.getByLabelText("System instructions"), { target: { value: "Audio {system}" } })
+    fireEvent.change(screen.getByLabelText("User instructions"), { target: { value: "Audio {user}" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledWith(
+      "media.audio.analysis",
+      { parts: { system: "Audio {system}", user: "Audio {user}" }, expected_revision: null },
+      { signal: expect.any(AbortSignal), requestScope: scopeOne }
+    ))
   })
 
   it("exposes independent email system guidance and its synchronous scope", async () => {

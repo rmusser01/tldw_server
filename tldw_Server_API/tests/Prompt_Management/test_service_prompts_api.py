@@ -204,6 +204,16 @@ def test_service_prompt_catalog_returns_exact_metadata_without_prompt_bodies(
             "affected_workflows": [{"id": "media.email.summarization", "label": "Synchronous email analysis"}],
         },
         {
+            "id": "media.audio.analysis",
+            "label": "Audio summarization",
+            "description": "Controls system and user instructions for synchronous audio analysis. Without a saved override, server defaults apply.",
+            "parts": [
+                {"key": "system", "label": "System instructions", "mode": "literal", "required_variables": []},
+                {"key": "user", "label": "User instructions", "mode": "literal", "required_variables": []},
+            ],
+            "affected_workflows": [{"id": "media.audio.analysis", "label": "Synchronous audio analysis"}],
+        },
+        {
             "id": "media.text.translation",
             "label": "Text translation",
             "description": ("Controls the visible instructions used by synchronous text translation."),
@@ -258,6 +268,35 @@ def test_service_prompt_detail_returns_packaged_state_without_caching(api_contex
     assert body["saved_parts"] is None
     assert body["effective_parts"] == body["default_parts"]
     assert set(body["default_parts"]) == {"system", "user_template"}
+
+
+def test_audio_settings_save_pair_atomically_and_reset_deployment_defaults(
+    api_context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Partial writes cannot replace either half; reset returns effective audio file defaults."""
+    from tldw_Server_API.app.core.Utils import prompt_loader
+
+    (tmp_path / "audio.prompts.yaml").write_text(
+        "system_prompt: Deployment system\ntranscription_analysis_summary: Deployment user\n"
+    )
+    monkeypatch.setattr(prompt_loader, "_prompts_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(prompt_loader, "get_global_context_integrity_resolver", lambda: None)
+    path = "/api/v1/service-prompts/media.audio.analysis"
+    defaults = {"system": "Deployment system", "user": "Deployment user"}
+    detail = api_context.client.get(path)
+    assert detail.status_code == 200
+    assert detail.json()["effective_parts"] == defaults
+    parts = {"system": "System {literal}", "user": "User {literal}"}
+    saved = api_context.client.put(path, json={"parts": parts, "expected_revision": None})
+    assert saved.status_code == 200
+    assert saved.json()["effective_parts"] == parts
+    revision = saved.json()["revision"]
+    partial = api_context.client.put(path, json={"parts": {"system": "Incomplete"}, "expected_revision": revision})
+    assert partial.status_code == 422
+    assert api_context.client.get(path).json()["effective_parts"] == parts
+    reset = api_context.client.delete(path, params={"expected_revision": revision})
+    assert reset.status_code == 200
+    assert reset.json()["effective_parts"] == defaults
 
 
 @pytest.mark.parametrize(

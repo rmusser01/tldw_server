@@ -326,6 +326,22 @@ _DEFINITION_SEQUENCE = (
         ),
     ),
     ServicePromptDefinition(
+        id="media.audio.analysis",
+        label="Audio summarization",
+        description="Controls system and user instructions for synchronous audio analysis. Without a saved override, server defaults apply.",
+        parts=(
+            ServicePromptPart(key="system", label="System instructions", mode="literal", required_variables=()),
+            ServicePromptPart(key="user", label="User instructions", mode="literal", required_variables=()),
+        ),
+        default_parts=MappingProxyType(
+            {
+                "system": "You are a professional summarizer focused on extracting the most important information clearly and succinctly.",
+                "user": "Summarize the key topics and points found in the transcript. Use bullet points. Be concise and faithful to the transcript content.",
+            }
+        ),
+        affected_workflows=(ServicePromptWorkflow(id="media.audio.analysis", label="Synchronous audio analysis"),),
+    ),
+    ServicePromptDefinition(
         id="media.text.translation",
         label="Text translation",
         description="Controls the visible instructions used by synchronous text translation.",
@@ -561,6 +577,16 @@ def resolve_service_prompt_default(definition: ServicePromptDefinition) -> Resol
         from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import _resolve_default_system_prompt
 
         parts = MappingProxyType({"system": _resolve_default_system_prompt()})
+    elif definition.id == "media.audio.analysis":
+        from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import _resolve_default_system_prompt
+        from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
+
+        parts = MappingProxyType(
+            {
+                "system": load_prompt("audio", "System Prompt") or _resolve_default_system_prompt(),
+                "user": load_prompt("audio", "Transcription Analysis Summary") or "",
+            }
+        )
     return ResolvedServicePrompt(definition=definition, parts=parts, source="packaged", revision=None)
 
 
