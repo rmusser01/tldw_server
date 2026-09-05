@@ -6,7 +6,11 @@ import { tldwClient } from "@/services/tldw/TldwApiClient"
  * anything wrong?" at a glance while degrading to the static map whenever a
  * signal is unavailable.
  */
-export type AdminModuleSignalState = "healthy" | "attention" | "unavailable"
+export type AdminModuleSignalState =
+  | "healthy"
+  | "attention"
+  | "unavailable"
+  | "off"
 
 export interface AdminModuleSignal {
   state: AdminModuleSignalState
@@ -94,6 +98,21 @@ const SIGNAL_FETCHERS: Record<string, () => Promise<AdminModuleSignal>> = {
   }
 }
 
+/**
+ * A backend that answers "this module is not configured/enabled" is off on
+ * purpose - render it as a neutral "off" signal, not as an outage (#2894).
+ */
+const isNotConfiguredError = (reason: unknown): boolean => {
+  const message =
+    reason instanceof Error ? reason.message : String(reason ?? "")
+  return /not configured|not enabled|is disabled/i.test(message)
+}
+
+// One log line per route per session: unavailable signals are expected on
+// servers that leave optional modules off, and the overview reloads on every
+// visit (#2896).
+const loggedSignalFailures = new Set<string>()
+
 export const loadAdminModuleSignals = async (): Promise<
   Record<string, AdminModuleSignal>
 > => {
@@ -108,10 +127,17 @@ export const loadAdminModuleSignals = async (): Promise<
       signals[route] = result.value
       return
     }
-    console.warn(
-      `[admin-signals] signal for ${route} unavailable:`,
-      result.reason
-    )
+    if (isNotConfiguredError(result.reason)) {
+      signals[route] = { state: "off", detail: "Not configured" }
+      return
+    }
+    if (!loggedSignalFailures.has(route)) {
+      loggedSignalFailures.add(route)
+      console.warn(
+        `[admin-signals] signal for ${route} unavailable:`,
+        result.reason
+      )
+    }
     signals[route] = { state: "unavailable", detail: "Status unavailable" }
   })
   return signals

@@ -16,12 +16,21 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: apiMock
 }))
 
+const connectionMock = vi.hoisted(() => ({
+  serverUrl: "http://127.0.0.1:8000" as string | null
+}))
+
+vi.mock("@/hooks/useConnectionState", () => ({
+  useConnectionState: () => ({ serverUrl: connectionMock.serverUrl })
+}))
+
 import { AdminOperationsOverviewPage } from "../AdminOperationsOverviewPage"
 import { ADMIN_MODULES } from "../admin-modules"
 
 describe("AdminOperationsOverviewPage", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    connectionMock.serverUrl = "http://127.0.0.1:8000"
     apiMock.getSystemStats.mockResolvedValue({ users: { total: 1 } })
     apiMock.getSecurityAlertStatus.mockResolvedValue({ health: "ok" })
     apiMock.listBackups.mockResolvedValue({ backups: [] })
@@ -77,5 +86,48 @@ describe("AdminOperationsOverviewPage", () => {
       const badges = screen.getAllByTestId("admin-module-signal")
       expect(badges).toHaveLength(6)
     })
+  })
+
+  it("renders a deliberately-disabled backend as 'Not configured', not an outage (#2894)", async () => {
+    apiMock.getLlamacppStatus.mockRejectedValue(
+      new Error(
+        "Managed llama.cpp backend is not configured. Enable [LlamaCpp] enabled=true."
+      )
+    )
+
+    render(<AdminOperationsOverviewPage />)
+
+    expect(await screen.findByText("Not configured")).toBeInTheDocument()
+    expect(screen.queryByText("Status unavailable")).not.toBeInTheDocument()
+  })
+
+  it("links each signal badge to its module (#2899)", async () => {
+    render(<AdminOperationsOverviewPage />)
+
+    const badge = await screen.findByText("1 user")
+    expect(badge.closest("a")).toHaveAttribute("href", "/admin/server")
+  })
+
+  it("shows a connect-first banner when no server is configured (#2893)", async () => {
+    connectionMock.serverUrl = null
+
+    render(<AdminOperationsOverviewPage />)
+
+    const banner = screen.getByTestId("admin-not-connected-banner")
+    expect(banner).toHaveTextContent("Not connected to a tldw server")
+    expect(within(banner).getByRole("link", { name: "Connect" })).toHaveAttribute(
+      "href",
+      "/setup"
+    )
+    // The module map stays visible beneath the banner.
+    expect(screen.getByTestId("admin-operations-modules")).toBeInTheDocument()
+  })
+
+  it("omits the connect banner when a server is configured (#2893)", () => {
+    render(<AdminOperationsOverviewPage />)
+
+    expect(
+      screen.queryByTestId("admin-not-connected-banner")
+    ).not.toBeInTheDocument()
   })
 })
