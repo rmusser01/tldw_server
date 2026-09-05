@@ -1,5 +1,19 @@
 # Testing Evidence Lessons
 
+## A record conflict is not evidence for every Personal Context domain
+
+**Incident (TASK-13163, 2026-09-05):** A 316-test targeted checkpoint passed
+while the new conflict choices exercised records. Review found that linked
+client manifests could enter the same conflict path, although the approved
+contract forbids pushing those derivative checkpoints. An unrelated semantic
+write advanced the server manifest and stranded its immutable conflict review.
+New stale/current client-manifest rejection tests both failed before the fix.
+
+**Evidence and rule:** Check each domain's authority and lifecycle before applying
+a shared conflict handler. Cover both permitted semantic inputs and prohibited
+derived/control inputs; a broad existing regression count does not establish
+that the new behavior is valid for every domain.
+
 ## Exercise ordinary ingress after narrow storage repairs
 
 **Incident (TASK-13192, 2026-09-05):** The activation repair fixture seeded
