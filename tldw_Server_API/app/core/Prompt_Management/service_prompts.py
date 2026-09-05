@@ -265,6 +265,27 @@ _DEFINITION_SEQUENCE = (
         ),
     ),
     ServicePromptDefinition(
+        id="media.pdf.summarization",
+        label="PDF summarization",
+        description="Controls system instructions for synchronous PDF analysis. Without a saved override, server defaults apply.",
+        parts=(
+            ServicePromptPart(
+                key="system",
+                label="System instructions",
+                mode="literal",
+                required_variables=(),
+            ),
+        ),
+        # PDFs and documents share the analyzer's packaged default, not overrides.
+        default_parts=MappingProxyType({"system": _DOCUMENT_SUMMARY_SYSTEM_DEFAULT}),
+        affected_workflows=(
+            ServicePromptWorkflow(
+                id="media.pdf.summarization",
+                label="Synchronous PDF analysis",
+            ),
+        ),
+    ),
+    ServicePromptDefinition(
         id="media.text.translation",
         label="Text translation",
         description="Controls the visible instructions used by synchronous text translation.",

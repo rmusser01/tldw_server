@@ -150,6 +150,12 @@ const KNOWN_DEFINITIONS = {
     description:
       "Controls system instructions for synchronous document analysis. Without a saved override, server defaults apply."
   },
+  "media.pdf.summarization": {
+    key: "mediaPdfSummarization",
+    label: "PDF summarization",
+    description:
+      "Controls system instructions for synchronous PDF analysis. Without a saved override, server defaults apply."
+  },
   "notes.title.generate": {
     key: "notesTitleGenerate",
     label: "Notes title",
@@ -189,6 +195,10 @@ const KNOWN_WORKFLOWS: Record<string, { key: string; label: string }> = {
   "media.document.summarization": {
     key: "documentSummarization",
     label: "Synchronous document analysis"
+  },
+  "media.pdf.summarization": {
+    key: "pdfSummarization",
+    label: "Synchronous PDF analysis"
   },
   "notes.title.generate": {
     key: "automaticNotesTitles",

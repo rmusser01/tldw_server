@@ -182,6 +182,13 @@ def test_service_prompt_catalog_returns_exact_metadata_without_prompt_bodies(
             "affected_workflows": [{"id": "media.document.summarization", "label": "Synchronous document analysis"}],
         },
         {
+            "id": "media.pdf.summarization",
+            "label": "PDF summarization",
+            "description": "Controls system instructions for synchronous PDF analysis. Without a saved override, server defaults apply.",
+            "parts": [{"key": "system", "label": "System instructions", "mode": "literal", "required_variables": []}],
+            "affected_workflows": [{"id": "media.pdf.summarization", "label": "Synchronous PDF analysis"}],
+        },
+        {
             "id": "media.text.translation",
             "label": "Text translation",
             "description": ("Controls the visible instructions used by synchronous text translation."),
@@ -238,9 +245,10 @@ def test_service_prompt_detail_returns_packaged_state_without_caching(api_contex
     assert set(body["default_parts"]) == {"system", "user_template"}
 
 
-def test_document_summary_prompt_can_be_saved_and_reset(api_context: SimpleNamespace) -> None:
-    """Exercise document guidance save and reset through the generic API."""
-    path = "/api/v1/service-prompts/media.document.summarization"
+@pytest.mark.parametrize("prompt_id", ["media.document.summarization", "media.pdf.summarization"])
+def test_summary_prompt_can_be_saved_and_reset(api_context: SimpleNamespace, prompt_id: str) -> None:
+    """Exercise independent document/PDF guidance through the generic save/reset API."""
+    path = f"/api/v1/service-prompts/{prompt_id}"
     parts = {"system": "Summarize in French. Preserve literal {braces}."}
     saved = api_context.client.put(path, json={"parts": parts, "expected_revision": None})
     assert saved.status_code == 200
