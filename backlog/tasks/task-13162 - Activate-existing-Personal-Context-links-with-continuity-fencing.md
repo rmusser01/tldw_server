@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-03 13:40'
-updated_date: '2026-09-05 17:03'
+updated_date: '2026-09-05 19:06'
 labels:
   - personal-context
   - sync
@@ -64,12 +64,16 @@ PR 2886 review follow-up authorized 2026-09-05: user explicitly waived the human
 Independent specification review traced a remaining preexisting Sync-to-profile-lock path through production ingress after-commit relay. Extend the review remediation plan to reproduce that interleaving and make relay process-lock acquisition nonblocking, preserving ordinary activation lease acquisition, durable fencing and retryable pending debt. Verify a deterministic production callback regression plus existing recovery budgets. This is a bounded lock-order correction under ADR-002, not a new storage or protocol policy.
 
 Qodo remediation: core bootstrap now owns version dispatch; public activation contracts and fixture typing are explicit; activation errors use content-free domain subclasses with compatible HTTP translation. Activation takes profile lease before Sync and revalidates generation plus the exact link receipt inside the install guard. Production ingress after-commit relay skips a contended process lock before canonical SQL and retains durable publication debt. Deterministic regressions reproduced the races before the fixes and now pass, including later acknowledgment of the raced publication. Worker closing gate: 172 passed with PostgreSQL required; core dispatch gate: 124 passed. Independent specification and code/security review cleared the final behavioral changes. The two fixture suggestions were rebutted with concrete transaction and shared PostgreSQL fixture ownership evidence. Updated developer/published docs and regenerated the OpenAPI fingerprint; exact drift check passes (description-only difference, unchanged path/schema counts). Broad final targeted matrix and current-head CI/merge are still pending. Newly added activation files pass formatting; existing publication module has pre-existing whole-file formatter drift, so unrelated formatting is not bundled.
+
+Final targeted matrix completed: 673 passed, 53 warnings, zero failures/errors/skips, PostgreSQL required, 4739.07 seconds; /private/tmp/task13162-qodo-final.xml. All required CI gates passed and Qodo reported zero findings at 850ead03ee. Rebased onto dev 86eb9e517c after unrelated Buddy changes, preserving both testing-lessons additions in the sole documentation conflict. Range-diff confirms Personal Context code and tests unchanged; scoped Ruff passed again. Task remains In Progress until final rebased-head CI and remote merge complete. User explicitly approved unattended review fixes, rebases, pushes and merging PR 2886. ADR-002 and version-zero rollout remain unchanged.
+
+Latest-dev follow-up: rebased onto 53d683f0ed (merged llama.cpp snapshots). Preserved both appended testing-lessons entries and regenerated the combined OpenAPI fingerprint (2073 paths, 3140 schemas, sha256 53e1e9a2ef87a01fbefa8e1f5300578a6a127c8c97bcb22b14e861ab00cb3ffb). Range-diff preserves all Personal Context code/test patches; shared exceptions retain both domains. Fresh focused activation gate: 57 passed, 5 warnings, PostgreSQL required, 52.60 seconds, /private/tmp/task13162-latest-dev-activation.xml. Scoped Ruff, diff check and source/published developer-document comparison passed. Keep task In Progress until fresh remote checks and merge complete.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added replayable activation and canonical per-device continuity fencing for existing Personal Context links. Verified 659 distinct targeted cases, independent reviews, scoped Ruff/Bandit, and updated documentation. Ongoing-sync rollout remains disabled; separate PostgreSQL ordinary-ingress insertion issue is documented for follow-up.
+Implemented replayable Personal Context activation, exact per-device continuity, and failed-ingress repair. All eight Qodo findings addressed: six fixes and two verified fixture rebuttals. Final targeted matrix: 673 passed with PostgreSQL required and no skips. Independent reviews, scoped Ruff/Bandit and prior-head required CI passed. Final rebased-head CI and merge remain pending in PR 2886; task is not yet Done. Ongoing-sync rollout remains disabled; unrelated PostgreSQL ordinary-ingress insertion issue is documented.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
