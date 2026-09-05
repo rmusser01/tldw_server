@@ -864,9 +864,11 @@ describe("VisualPackEditor", () => {
     expect(screen.getByTestId("persona-visual-upload-button")).toBeInTheDocument()
     expect(screen.getByTestId("persona-visual-activate-button")).toBeInTheDocument()
     expect(screen.queryByText(/Unhandled path:/)).not.toBeInTheDocument()
-    expect(
-      screen.queryByTestId("persona-visual-management-attention-action")
-    ).not.toBeInTheDocument()
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId("persona-visual-management-attention-action")
+      ).not.toBeInTheDocument()
+    )
   })
 
   it("does not show setup choices before active pack state is known", async () => {
@@ -2697,6 +2699,10 @@ describe("VisualPackEditor", () => {
         "draft"
       )
     )
+    // Pack metadata renders before the manifest-derived controls initialize.
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-state-idle-select")).toHaveValue("idle")
+    )
     fireEvent.change(screen.getByTestId("persona-visual-state-speaking-select"), {
       target: { value: "idle" }
     })
@@ -2812,6 +2818,9 @@ describe("VisualPackEditor", () => {
 
     expect(await screen.findByTestId("buddy-state-configuration-panel")).toHaveTextContent(
       "Configure visual states"
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-state-idle-select")).toHaveValue("idle")
     )
     fireEvent.click(
       screen.getByRole("button", { name: "Save visual state configuration" })
@@ -3139,6 +3148,8 @@ describe("VisualPackEditor", () => {
         "POST /api/v1/persona/profiles/persona-1/visual-packs/pack-1/candidates/candidate-1/review"
       )
     )
+    // The request being sent does not mean AntD's loading buttons are ready.
+    expect(await screen.findByText("Candidate accepted.")).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("persona-visual-candidate-reject-candidate-1"))
     await waitFor(() =>
       expect(
@@ -3147,6 +3158,7 @@ describe("VisualPackEditor", () => {
         )
       ).toHaveLength(2)
     )
+    expect(await screen.findByText("Candidate rejected.")).toBeInTheDocument()
   })
 
   it("clamps stale generation target states after switching packs", async () => {
@@ -3224,6 +3236,13 @@ describe("VisualPackEditor", () => {
 
     await waitFor(() =>
       expect(screen.getByTestId("persona-visual-pack-select")).toHaveValue("pack-1")
+    )
+    // The selected pack ID is available before its custom-state options.
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId("persona-visual-generation-target-state-select"))
+          .getByRole("option", { name: "tool.notes_search" })
+      ).toHaveValue("tool.notes_search")
     )
     fireEvent.change(screen.getByTestId("persona-visual-generation-target-state-select"), {
       target: { value: "tool.notes_search" }
