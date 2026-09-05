@@ -418,6 +418,39 @@ Run `python -m pytest tldw_Server_API/tests/Collections/test_reading_artifact_re
 
 ## Stage 3: Durable artifact staging, adoption and cleanup
 
+### Generic file-operation boundary investigation (2026-09-05)
+
+After `2207a84fc1`, three isolated real-SQLite/direct-endpoint probes reproduced
+the explicitly deferred filesystem gaps. Each used temporary user databases and
+files, not a user's existing data; no production code changed during investigation.
+
+| Interleaving / alias | Observed response | File outcome |
+| --- | --- | --- |
+| Register ownership after managed-only dispatch returns unowned, before rename | 409 | Original owned path already moved |
+| Rename an unowned output referencing an owned source path | 200 | Managed source path moved |
+| Rename an unowned output onto an owned destination path | 200 | Managed destination bytes overwritten |
+
+Probe results: `/private/tmp/task-13153-file-fence-probes.log` (`PROBE` lines).
+The existing 146-case immutability checkpoint does not cover these interleavings
+and is not evidence that generic file operations are safe for rollout.
+
+Root cause: PATCH performs path normalization and filesystem rename/conversion
+before the final DB update. DB rollback cannot reverse a file operation, and an
+unowned dispatch result does not reserve either path. The existing POSIX lock is
+only used by Reading staging/adoption/cleanup; DB-only legacy ownership
+registration and generic output file writers do not share that storage boundary.
+Ownership/row mutations are centralized in Collections_DB.py, but coordinating
+their short transactions with external file I/O needs a durable operation boundary.
+
+Proposed next decision, **not yet approved or implemented**: preserve unmanaged
+rename/conversion by extending durable path reservations plus the existing storage
+lock to generic file mutations, with guarded ownership/attachment and crash
+recovery. This requires an ADR/spec amendment and bounded schema/lifecycle design.
+Do not insert another precheck, hold a DB mutation transaction across file I/O,
+or silently disable/change previously approved unmanaged behavior. A narrower
+behavioral restriction would instead require the user's explicit policy change.
+Capability remains absent; TASK-13153 remains In Progress.
+
 ### Managed archive immutability checkpoint (approved 2026-09-05)
 
 ADR required: yes. ADR path: `backlog/decisions/003-reading-atomic-hard-delete.md`.

@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-03 02:27'
-updated_date: '2026-09-05 05:36'
+updated_date: '2026-09-05 06:18'
 labels:
   - collections
   - reading-list
@@ -52,5 +52,5 @@ diagnostic-privacy behavior are covered.
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-ADR required: yes; ADR path: backlog/decisions/003-reading-atomic-hard-delete.md, amended for user-approved immutable managed archives. Implemented fenced managed-only output update dispatch before path resolution, metadata-only title/retention updates, atomic rejection of changed managed path/format, unchanged-value no-ops and sanitized update errors. Unowned archive/generic rename and conversion behavior preserved. Initial red reproduced nine policy failures; final verification: 92 SQLite/API plus 54 real PostgreSQL cases = 146 distinct targeted passes, no PG skips, no Docker provisioning, no full sweep. New/revised focused tests pass Ruff/Black; changed legacy/production formatting, compilation and diff checks pass; scoped Bandit zero findings/errors; 14 existing Ruff findings unchanged from HEAD. Independent plan/code review clear. ADR, spec, detailed plan and both API docs updated. Remaining: late ownership and shared-path exclusion for generic file mutations, generated output lifecycle, production archive routing, reconciliation, cleanup startup/readiness, collection writers and DTOs. Capability absent; task In Progress.
+ADR required: yes; existing ADR-003 applies; further storage-boundary amendment needs approval. Latest implementation checkpoint 2207a84fc1 keeps managed archive files immutable via DB/HTTP guards; verified 92 SQLite/API + 54 PostgreSQL cases, review clear. Follow-up investigation reproduced three deferred failures with isolated real SQLite and direct endpoint calls: late ownership returns 409 after source moved; shared managed source rename returns 200 and moves archive; managed destination collision returns 200 and overwrites bytes. No production changes this investigation. Evidence and root cause in Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md and /private/tmp/task-13153-file-fence-probes.log. Proposed next design: extend durable path reservations plus storage exclusion/crash recovery to generic file mutations, preserving unmanaged rename/conversion. Await user approval before the broader schema/lifecycle design; do not substitute prechecks or filesystem I/O under DB mutation locks. Remaining production routing/reconciliation/cleanup/readiness/collection-writer/DTO work unchanged. Capability absent; task In Progress.
 <!-- SECTION:PLAN:END -->
