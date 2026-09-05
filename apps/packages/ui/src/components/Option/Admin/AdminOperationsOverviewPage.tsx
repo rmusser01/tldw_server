@@ -5,13 +5,56 @@ import {
   ADMIN_MODULES,
   type AdminModuleGroup
 } from "./admin-modules"
+import {
+  loadAdminModuleSignals,
+  type AdminModuleSignal
+} from "./admin-module-signals"
 
 const groupedModules = ADMIN_MODULE_GROUPS.map((group: AdminModuleGroup) => ({
   group,
   modules: ADMIN_MODULES.filter((module) => module.group === group)
 })).filter((entry) => entry.modules.length > 0)
 
+const SIGNAL_DOT_COLOR: Record<AdminModuleSignal["state"], string> = {
+  healthy: "var(--state-ready, #2f9e6e)",
+  attention: "var(--state-degraded, #d98324)",
+  unavailable: "var(--state-unavailable, #8a8fa3)"
+}
+
+const ModuleSignalBadge: React.FC<{ signal: AdminModuleSignal | undefined }> = ({
+  signal
+}) => {
+  if (!signal) return null
+  return (
+    <p
+      className="mt-2 flex items-center gap-1.5 text-xs text-text-muted"
+      data-testid="admin-module-signal"
+    >
+      <span
+        aria-hidden="true"
+        className="inline-block h-2 w-2 shrink-0 rounded-full"
+        style={{ backgroundColor: SIGNAL_DOT_COLOR[signal.state] }}
+      />
+      {signal.detail}
+    </p>
+  )
+}
+
 export const AdminOperationsOverviewPage: React.FC = () => {
+  const [signals, setSignals] = React.useState<
+    Record<string, AdminModuleSignal>
+  >({})
+
+  React.useEffect(() => {
+    let cancelled = false
+    void loadAdminModuleSignals().then((loaded) => {
+      if (!cancelled) setSignals(loaded)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   return (
     <PageShell maxWidthClassName="max-w-6xl" className="py-8">
       <header className="space-y-3">
@@ -51,6 +94,7 @@ export const AdminOperationsOverviewPage: React.FC = () => {
                   <p className="mt-1.5 text-sm text-text-muted">
                     {module.description}
                   </p>
+                  <ModuleSignalBadge signal={signals[module.route]} />
                 </article>
               ))}
             </div>
