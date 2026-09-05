@@ -5329,12 +5329,90 @@ class CollectionsDatabase:
         """Recheck reservation and original parent after the caller acquires storage exclusion."""
         with self.transaction() as conn:
             self._lock_reading_revision_clock(conn)
-            row = self.get_reading_artifact(token, storage_namespace_id, connection=conn)
-            if row["state"] != "staged" or row["lease_until"] <= now:
-                raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
-            if self._get_reading_parent(row["item_id"], conn).revision != row["expected_revision"]:
-                raise ReadingRevisionConflict("reading_revision_conflict")
+            row, _ = self._validate_staged_reading_artifact(token, storage_namespace_id, now, conn)
             return row
+
+    def _validate_staged_reading_artifact(
+        self, token: str, storage_namespace_id: str, now: int, connection: Any
+    ) -> tuple[dict[str, Any], ContentItemRow]:
+        row = self.get_reading_artifact(token, storage_namespace_id, connection=connection)
+        # A caller's timestamp may precede a wait for the database clock fence.
+        now = max(now, int(datetime.now(timezone.utc).timestamp()))
+        if row["state"] != "staged" or row["lease_until"] <= now:
+            raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
+        parent = self._get_reading_parent(row["item_id"], connection)
+        if parent.revision != row["expected_revision"]:
+            raise ReadingRevisionConflict("reading_revision_conflict")
+        return row, parent
+
+    def adopt_reading_artifact(
+        self, token: str, storage_namespace_id: str, *, title: str, now: int, retention_until: str | None = None
+    ) -> CollectionsDatabase.OutputArtifactRow:
+        """Atomically replace trusted staging with archive ownership and one revision.
+
+        The caller must hold verified storage exclusion and have completed and
+        synced its exclusive write. This primitive performs no filesystem I/O
+        and is not authority to adopt an arbitrary preexisting file.
+        """
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            row, parent = self._validate_staged_reading_artifact(token, storage_namespace_id, now, conn)
+            if self._reading_artifact_has_output_reference(row["storage_path"], conn):
+                raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
+            result = self._execute_insert(
+                "INSERT INTO outputs (user_id, type, title, format, storage_path, metadata_json, created_at, media_item_id, retention_until, deleted) "
+                "VALUES (?, 'reading_archive', ?, 'md', ?, ?, ?, ?, ?, 0)",
+                (
+                    self.user_id,
+                    title,
+                    row["storage_path"],
+                    json.dumps({"item_id": parent.id, "url": parent.url}),
+                    _utcnow_iso(),
+                    parent.media_id,
+                    retention_until,
+                ),
+                connection=conn,
+            )
+            output_id = self._extract_lastrowid(result)
+            if not output_id:
+                raise DatabaseError("reading_artifact_adoption_failed")
+            self.backend.execute(
+                "INSERT INTO reading_output_ownership (user_id, item_id, output_id, storage_namespace_id) VALUES (?, ?, ?, ?)",
+                (self.user_id, parent.id, output_id, storage_namespace_id),
+                connection=conn,
+            )
+            metadata_json = json.dumps(
+                {**self._json_loads_dict(parent.metadata_json), "archive_output_id": output_id}, ensure_ascii=False
+            )
+            self.backend.execute(
+                "UPDATE content_items SET metadata_json = ? WHERE id = ? AND user_id = ? AND origin = 'reading'",
+                (metadata_json, parent.id, self.user_id),
+                connection=conn,
+            )
+            self._advance_reading_parent(parent.id, conn)
+            self._update_content_fts_entry(
+                parent.id,
+                title=parent.title,
+                summary=parent.summary,
+                notes=parent.notes,
+                tags=parent.tags,
+                metadata_json=metadata_json,
+                previous_title=parent.title,
+                previous_summary=parent.summary,
+                previous_notes=parent.notes,
+                previous_tags=parent.tags,
+                previous_metadata_json=parent.metadata_json,
+                has_previous_entry=True,
+                connection=conn,
+            )
+            removed = self.backend.execute(
+                "DELETE FROM reading_artifact_paths WHERE token = ? AND user_id = ? AND storage_namespace_id = ? AND state = 'staged'",
+                (token, self.user_id, storage_namespace_id),
+                connection=conn,
+            )
+            if removed.rowcount != 1:
+                raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
+            return self.get_output_artifact(output_id, connection=conn)
 
     def cancel_reading_artifact(self, token: str, storage_namespace_id: str) -> None:
         """Queue unadopted staging for cleanup; preserve existing failure/backoff state."""

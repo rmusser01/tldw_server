@@ -182,22 +182,58 @@ def write_staged_reading_artifact(
     before opening a file; any partially written file retains its durable intent.
     """
     with _validated_storage_directory(output_root, storage_namespace_id=storage_namespace_id) as (_, directory):
-        row = db.validate_reading_artifact_for_write(token, storage_namespace_id, now=int(time.time()))
+        _write_staged_artifact(db, token, storage_namespace_id, directory, body)
+
+
+def _write_staged_artifact(db: CollectionsDatabase, token: str, namespace: str, directory: int, body: str) -> None:
+    """Write only under the caller's existing verified storage lock."""
+    row = db.validate_reading_artifact_for_write(token, namespace, now=int(time.time()))
+    try:
+        filename = _artifact_filename(row["storage_path"])
+        fd = os.open(filename, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(body)
+            stream.flush()
+            os.fsync(stream.fileno())
+        _sync_directory(directory)
+    except (OSError, InvalidStoragePathError) as exc:
+        category = (
+            "invalid_path"
+            if isinstance(exc, InvalidStoragePathError)
+            else ("path_collision" if isinstance(exc, FileExistsError) else "io")
+        )
+        db.record_reading_artifact_error(token, namespace, category=category, now=int(time.time()))
+        raise
+
+
+def write_and_adopt_reading_artifact(
+    db: CollectionsDatabase,
+    token: str,
+    *,
+    output_root: Path,
+    storage_namespace_id: str,
+    body: str,
+    title: str,
+    retention_until: str | None = None,
+) -> CollectionsDatabase.OutputArtifactRow:
+    """Keep storage exclusion through exclusive write, sync and guarded adoption.
+
+    Failed adoption leaves a pending file rather than recreating the parent.
+    If scheduling itself fails, the durable staged lease still permits recovery.
+    This trusted service is not yet wired into production capture endpoints.
+    """
+    with _validated_storage_directory(output_root, storage_namespace_id=storage_namespace_id) as (_, directory):
         try:
-            filename = _artifact_filename(row["storage_path"])
-            fd = os.open(filename, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
-            with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                stream.write(body)
-                stream.flush()
-                os.fsync(stream.fileno())
-            _sync_directory(directory)
-        except (OSError, InvalidStoragePathError) as exc:
-            category = (
-                "invalid_path"
-                if isinstance(exc, InvalidStoragePathError)
-                else ("path_collision" if isinstance(exc, FileExistsError) else "io")
+            _write_staged_artifact(db, token, storage_namespace_id, directory, body)
+            return db.adopt_reading_artifact(
+                token,
+                storage_namespace_id,
+                title=title,
+                now=int(time.time()),
+                retention_until=retention_until,
             )
-            db.record_reading_artifact_error(token, storage_namespace_id, category=category, now=int(time.time()))
+        except Exception:
+            db.cancel_reading_artifact(token, storage_namespace_id)
             raise
 
 

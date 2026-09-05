@@ -362,7 +362,7 @@ Run `python -m pytest tldw_Server_API/tests/Collections/test_reading_artifact_re
 
 ## Stage 3: Durable artifact staging, adoption and cleanup
 
-**Status:** In Progress — local POSIX exclusion and unadopted staging/cleanup intents implemented; adoption, owned-output disposal and production wiring remain.
+**Status:** In Progress — local POSIX exclusion, staging/cleanup intents and guarded internal adoption implemented; owned-output disposal and production wiring remain.
 **Goal:** No lost cleanup after crashes and no unlink of shared/reused paths.
 **Success Criteria:** Retry/restart and writer/cleanup races pass; pending work remains observable.
 **Tests:** New artifact module, existing Reading archive/API tests and output-service regressions.
@@ -467,6 +467,51 @@ bypass the new generic guard casually. This slice does not implement adoption,
 legacy reconciliation, owned-output/hard-delete intent creation, purge routing or
 startup-worker readiness. The service helpers have no production callers and the
 capability remains absent. Existing ADR-003 applies; TASK-13153 remains In Progress.
+
+Guarded-adoption slice: add a trusted DB adoption primitive which rechecks the
+reservation's token, namespace, staged state, lease and original Reading revision
+under the clock. In one transaction create the archive output, insert structural
+ownership, merge the parent's archive reference, refresh its FTS entry, advance
+once and remove staging. Owned lifecycle state is represented by the existing
+output/ownership rows rather than a duplicate staged-table row. Add a combined
+write-and-adopt service operation holding the same verified storage lock throughout
+write/fsync and adoption or failed-adoption scheduling. Preserve failed/expired
+staging for cleanup; never recreate the parent. Test rollback at each mutation
+phase, stale/expired/cancelled completion, lock exclusion through commit and
+unchanged external links on SQLite/PostgreSQL. Production archive endpoints and
+purge remain unwired until owned-output disposal/readiness is complete. Existing
+ADR-003 applies; no new architecture decision.
+
+Guarded-adoption checkpoint (2026-09-04): a trusted database primitive rechecks
+staging token/user/namespace/state/lease and the original parent revision under
+the shared clock. It atomically inserts the archive output and structural
+ownership, merges the parent's archive reference, refreshes FTS, advances the
+parent once and removes staging. Existing fields, metadata, tags and external
+Media/Note associations are preserved. The owned state lives in the existing
+output/ownership tables, not a duplicate lifecycle record. The primitive itself
+performs no filesystem work; it requires the trusted caller's completed write.
+
+The combined write-and-adopt service holds the same verified storage lock and
+directory descriptor across exclusive file creation, file/directory sync, DB
+adoption and failed-adoption scheduling. Failure queues the private staged file;
+if scheduling fails, its durable staged lease remains a recovery path. No parent
+upsert or automatic newer-revision retry occurs. Repeating a successful consumed
+token returns missing staging, without creating another archive or revision.
+Production callers, owned-output disposal, reconciliation/purge integration and
+readiness are still absent; capability remains absent and TASK-13153 In Progress.
+
+The shared staged validator also refreshes wall time inside the DB fence, because
+a caller's timestamp can predate waiting for that lock. A failing stale-prelock-time
+regression preceded this correction. Independent scoped review found no actionable
+issues in the adoption slice. Existing ADR-003 applies without a new decision.
+
+Guarded-adoption verification (Server virtual environment):
+
+- Initial missing-adoption red run: 13 SQLite failures. Stale-prelock lease regression also failed before the shared validator correction.
+- `TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_reading_artifact_adoption.py tldw_Server_API/tests/Collections/test_reading_artifact_cleanup.py tldw_Server_API/tests/Collections/test_reading_artifact_storage.py tldw_Server_API/tests/Collections/test_reading_revision_mutations.py tldw_Server_API/tests/Collections/test_content_items_fts_contentless.py -k 'not postgres' --timeout=30 -q --tb=short`: 137 passed, 115 deselected.
+- New adoption module `-k postgres --timeout=30 -q --tb=short`: 15 passed, 15 deselected on the existing real PostgreSQL service, no skips and no Docker startup.
+- After strengthening the FTS rollback injection to perform the real index update before raising, reran the adoption module on SQLite: 15 passed, 15 deselected; PostgreSQL rollback cases: 6 passed, 24 deselected, no skips. These reruns overlap the 152 distinct targeted cases above.
+- Service/new tests pass Ruff/Black; changed DB ranges pass Black; compilation and diff checks pass. Scoped Bandit reports zero findings/errors. DB Ruff retains nine baseline findings. No full suite or production-readiness claim.
 
 - [ ] Write a failing unlink-retry test: create a real archive in `tmp_path`, delete its parent, force `Path.unlink` to raise `PermissionError`, and assert the intent persists. Reopen the database and retry with unlink restored; assert file and intent are absent. Also test already-missing files as successful cleanup.
 - [ ] Run `python -m pytest tldw_Server_API/tests/Collections/test_reading_artifact_cleanup.py -q` and verify missing lifecycle behavior.

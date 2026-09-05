@@ -1,5 +1,16 @@
 # Testing Evidence Lessons
 
+## Refresh lease time after acquiring the database fence
+
+**Incident (TASK-13153, 2026-09-04):** Reading staging validation compared its lease
+against a caller timestamp captured before acquiring the database clock lock.
+A writer delayed at that lock could use an obsolete time to accept an expired
+reservation. A regression supplied an earlier prelock time to reproduce the gap.
+
+**Evidence and rule:** Refreshing wall time inside the locked shared validator
+closed the gap for both staging writes and adoption. Time-based authorization
+must be evaluated after waits at its mutation boundary, not only before them.
+
 ## Namespace validation must stay bound to the directory used for I/O
 
 **Incident (TASK-13153, 2026-09-04):** Initial Reading staging/cleanup verified a
