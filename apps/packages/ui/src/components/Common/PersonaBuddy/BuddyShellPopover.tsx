@@ -71,7 +71,9 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
   const voiceState = String(liveControl?.voiceState ?? "").trim().toLowerCase()
   const isListening =
     liveControl?.voiceIsListening === true || voiceState === "listening"
-  const voiceActionLabel = isListening
+  const voiceActionLabel = !voiceCapable
+    ? t("personaBuddy.voiceSetup", "Set up voice")
+    : isListening
     ? t("personaBuddy.voiceStop", "Stop listening")
     : t("personaBuddy.voiceListen", "Listen")
 
@@ -203,7 +205,7 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
               Stop
             </button>
           </div>
-          {voiceCapable ? (
+          {focusedSession ? (
             <Link
               data-testid="persona-buddy-voice-link"
               to={liveRoute}

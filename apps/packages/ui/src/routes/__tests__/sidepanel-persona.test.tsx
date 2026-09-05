@@ -2722,6 +2722,59 @@ describe("SidepanelPersona", () => {
     expect(screen.getByRole("button", { name: "Finish with live session" })).toBeInTheDocument()
   })
 
+  it.each(["completed", "in_progress", "read_failed"])("preserves %s setup when choosing an existing persona", async (status) => {
+    mocks.location.search = "?persona_id=research_assistant&tab=live"
+    const savedSetup = {
+      status,
+      version: 1,
+      run_id: "existing-run",
+      current_step: "test",
+      completed_steps: ["persona", "voice", "commands", "safety"],
+      completed_at: status === "completed" ? "2026-09-05T10:00:00Z" : null,
+      last_test_type: status === "completed" ? "live_session" : null
+    }
+    const profilePatches: unknown[] = []
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      if (path.includes("/persona/catalog")) {
+        return Promise.resolve({ ok: true, json: async () => [
+          { id: "research_assistant", name: "Research Assistant" },
+          { id: "garden-helper", name: "Garden Helper" }
+        ] })
+      }
+      if (path === "/api/v1/persona/profiles/research_assistant") {
+        return Promise.resolve({ ok: true, json: async () => ({
+          id: "research_assistant", version: 1,
+          setup: { status: "not_started", current_step: "persona" }
+        }) })
+      }
+      if (path === "/api/v1/persona/profiles/garden-helper") {
+        if (init?.method === "PATCH") profilePatches.push(init.body)
+        if (status === "read_failed") {
+          return Promise.resolve({ ok: false, error: "Saved setup could not be loaded", json: async () => ({}) })
+        }
+        return Promise.resolve({ ok: true, json: async () => ({
+          id: "garden-helper", version: 5,
+          voice_defaults: { confirmation_mode: "always", tts_provider: "kokoro" },
+          setup: init?.body?.setup || savedSetup
+        }) })
+      }
+      return Promise.resolve({ ok: true, json: async () => [] })
+    })
+    render(<SidepanelPersona />)
+    fireEvent.click(await screen.findByRole("button", { name: "Use Garden Helper persona" }))
+    await waitFor(() => {
+      if (status === "read_failed") {
+        expect(screen.getByText("Saved setup could not be loaded")).toBeInTheDocument()
+        expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("persona")
+      } else if (status === "completed") {
+        expect(screen.queryByTestId("assistant-setup-overlay")).not.toBeInTheDocument()
+      } else {
+        expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("test")
+      }
+    })
+    expect(profilePatches).toEqual([])
+  })
+
   it("clears the setup live detour when setup is reset", async () => {
     mocks.location.search = "?persona_id=garden-helper&tab=live"
     mocks.getConfig.mockResolvedValue({
@@ -4677,7 +4730,7 @@ describe("SidepanelPersona", () => {
     expect(screen.getByTestId("live-wake-behavior")).toHaveTextContent("Continuous")
   })
 
-  it("stops wake listening when leaving the Live tab", async () => {
+  it("stops wake listening and pending voice preparation when leaving the Live tab", async () => {
     const originalSpeechRecognition = (window as any).SpeechRecognition
     class MockSpeechRecognition {
       continuous = false
@@ -4787,11 +4840,16 @@ describe("SidepanelPersona", () => {
       await waitFor(() => {
         expect(screen.getByTestId("live-wake-state")).toHaveTextContent("listening")
       })
+      fireEvent.click(screen.getByTestId("live-voice-start-stop"))
+      await waitFor(() => {
+        expect(getSentPayloads(ws).some((payload) => payload.type === "voice_prepare")).toBe(true)
+      })
       ws.send.mockClear()
 
       fireEvent.click(screen.getByRole("tab", { name: "Profiles" }))
 
       await waitFor(() => {
+        expect(getSentPayloads(ws).some((payload) => payload.type === "voice_stop")).toBe(true)
         expect(getSentPayloads(ws)).toEqual(
           expect.arrayContaining([
             expect.objectContaining({

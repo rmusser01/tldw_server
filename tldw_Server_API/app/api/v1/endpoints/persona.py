@@ -15,6 +15,7 @@ import threading
 import time
 import uuid
 from collections import defaultdict, deque
+from collections.abc import Callable
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,12 +24,30 @@ from urllib.parse import urljoin
 
 import aiofiles
 import aiofiles.os
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Response, UploadFile, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from loguru import logger
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import FileResponse
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, User, verify_jwt_and_fetch_user
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    User,
+    check_rate_limit,
+    get_request_user,
+    verify_jwt_and_fetch_user,
+)
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.schemas.persona import (
     PersonaBuddyResponse,
@@ -76,24 +95,19 @@ from tldw_Server_API.app.api.v1.schemas.persona import (
     PersonaSetupEventCreate,
     PersonaSetupEventWriteResponse,
     PersonaSetupState,
-    PersonaStateHistoryResponse,
     PersonaStateArchiveRequest,
+    PersonaStateHistoryResponse,
     PersonaStateResponse,
     PersonaStateRestoreRequest,
     PersonaStateUpdateRequest,
-    PersonaVoiceAnalyticsResponse,
-    PersonaVoiceAnalyticsSummary,
-    PersonaVoiceCommandAnalyticsItem,
-    PersonaVoiceDefaults,
-    PersonaVoiceFallbackAnalytics,
     PersonaVisualAssetResponse,
     PersonaVisualCandidateListResponse,
     PersonaVisualCandidateResponse,
     PersonaVisualCandidateReviewRequest,
     PersonaVisualDeactivateResponse,
     PersonaVisualGenerationJobResponse,
-    PersonaVisualGenerationRequest,
     PersonaVisualGenerationReadinessResponse,
+    PersonaVisualGenerationRequest,
     PersonaVisualImportCommitRequest,
     PersonaVisualImportCommitStartResponse,
     PersonaVisualImportPreviewResponse,
@@ -105,10 +119,10 @@ from tldw_Server_API.app.api.v1.schemas.persona import (
     PersonaVisualLibraryUpdateRequest,
     PersonaVisualLibraryUseRequest,
     PersonaVisualManifestUpdate,
-    PersonaVisualPackExportRequest,
-    PersonaVisualPackExportResponse,
     PersonaVisualPackCreate,
     PersonaVisualPackDuplicateRequest,
+    PersonaVisualPackExportRequest,
+    PersonaVisualPackExportResponse,
     PersonaVisualPackResponse,
     PersonaVisualPortabilityJobResponse,
     PersonaVisualRendererCapabilitiesResponse,
@@ -116,6 +130,11 @@ from tldw_Server_API.app.api.v1.schemas.persona import (
     PersonaVisualStarterPackCopyRequest,
     PersonaVisualStarterPackDetailResponse,
     PersonaVisualStarterPackListResponse,
+    PersonaVoiceAnalyticsResponse,
+    PersonaVoiceAnalyticsSummary,
+    PersonaVoiceCommandAnalyticsItem,
+    PersonaVoiceDefaults,
+    PersonaVoiceFallbackAnalytics,
 )
 from tldw_Server_API.app.api.v1.schemas.voice_assistant_schemas import (
     VoiceActionType,
@@ -130,24 +149,23 @@ from tldw_Server_API.app.core.AuthNZ.api_key_manager import (
     normalize_scope,
 )
 from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError, InvalidTokenError, TokenExpiredError
+from tldw_Server_API.app.core.AuthNZ.ip_allowlist import resolve_client_ip
+from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
+from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
     cookie_websocket_rejection_code,
     resolve_single_user_cookie_websocket,
 )
-from tldw_Server_API.app.core.AuthNZ.ip_allowlist import resolve_client_ip
-from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
-from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
     PersonaVisualPortabilityRepository,
 )
-from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.feature_flags import (
     is_mcp_hub_policy_enforcement_enabled,
     is_persona_enabled,
@@ -156,58 +174,15 @@ from tldw_Server_API.app.core.http_client import RetryPolicy, afetch
 from tldw_Server_API.app.core.Image_Generation.adapter_registry import (
     get_registry as get_image_generation_registry,
 )
+from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.MCP_unified import MCPRequest, get_mcp_server
 from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
 from tldw_Server_API.app.core.MCP_unified.persona_scope import normalize_persona_scope_payload
 from tldw_Server_API.app.core.Metrics import increment_counter
-from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Persona import live_conversation
 from tldw_Server_API.app.core.Persona.buddy import (
     build_persona_buddy_summary,
     ensure_persona_buddy_for_profile,
-)
-from tldw_Server_API.app.core.Persona.visual_renderer_capabilities import (
-    list_persona_visual_renderer_capabilities,
-)
-from tldw_Server_API.app.core.Persona.visual_jobs import (
-    create_generate_candidate_job,
-    create_visual_pack_export_job,
-    create_visual_pack_import_commit_job,
-    create_visual_pack_import_preview_job,
-    persona_visual_generation_queue,
-)
-from tldw_Server_API.app.core.Persona.visual_generation_recipes import (
-    PersonaVisualRecipeGenerationError,
-    build_persona_visual_recipe_generation_intent,
-    normalize_persona_visual_generation_request_id,
-)
-from tldw_Server_API.app.core.Persona.visual_portability.archive import (
-    DEFAULT_MAX_ARCHIVE_SIZE_BYTES,
-)
-from tldw_Server_API.app.core.Persona.visual_portability.commit_eligibility import (
-    import_preview_plan_from_stored_json,
-    is_import_preview_plan_committable,
-)
-from tldw_Server_API.app.core.Persona.visual_portability.constants import (
-    PERSONA_VISUAL_PACK_EXTENSION,
-)
-from tldw_Server_API.app.core.Persona.visuals import (
-    MAX_TRIGGER_DURATION_MS,
-    MIN_TRIGGER_DURATION_MS,
-    VISUAL_STATE_IDS,
-    custom_visual_state_id_error,
-)
-from tldw_Server_API.app.core.Persona.visual_service import (
-    MAX_VISUAL_UPLOAD_BYTES,
-    PersonaVisualService,
-    PersonaVisualServiceError,
-)
-from tldw_Server_API.app.core.Persona.visual_library_service import (
-    PersonaVisualLibraryService,
-    PersonaVisualLibraryServiceError,
-)
-from tldw_Server_API.app.core.Persona.visual_starter_catalog import (
-    PersonaVisualStarterCatalogError,
-    PersonaVisualStarterCatalogService,
 )
 from tldw_Server_API.app.core.Persona.connections import (
     PERSONA_CONNECTION_STATUS_FIELD,
@@ -225,6 +200,7 @@ from tldw_Server_API.app.core.Persona.connections import (
     safe_template_context,
     validate_connection_request_target,
 )
+from tldw_Server_API.app.core.Persona.dialogue_tree_context import build_runtime_tree_context
 from tldw_Server_API.app.core.Persona.exemplar_ingestion import (
     append_exemplar_review_note,
     build_transcript_exemplar_candidates,
@@ -234,6 +210,14 @@ from tldw_Server_API.app.core.Persona.exemplar_runtime import (
     resolve_persona_exemplar_runtime_context,
 )
 from tldw_Server_API.app.core.Persona.exemplar_turn_classifier import classify_persona_turn
+from tldw_Server_API.app.core.Persona.live_control import (
+    create_or_resume_live_session,
+    focus_live_session,
+    list_live_session_summaries,
+    persona_live_stream_registry,
+    stop_live_session,
+)
+from tldw_Server_API.app.core.Persona.live_voice_runtime import persona_live_voice_registry
 from tldw_Server_API.app.core.Persona.memory_integration import (
     persist_persona_turn,
     persist_tool_outcome,
@@ -244,7 +228,6 @@ from tldw_Server_API.app.core.Persona.policy_evaluator import (
     evaluate_canonical_policy,
     normalize_policy_rules,
 )
-from tldw_Server_API.app.core.Persona.dialogue_tree_context import build_runtime_tree_context
 from tldw_Server_API.app.core.Persona.runtime_explorer import (
     PersonaRuntimeExplorer,
     RuntimeExplorationResult,
@@ -256,12 +239,49 @@ from tldw_Server_API.app.core.Persona.session_materialization import (
     materialize_persona_session,
     scope_snapshot_id_from_snapshot,
 )
-from tldw_Server_API.app.core.Persona.live_control import (
-    create_or_resume_live_session,
-    focus_live_session,
-    list_live_session_summaries,
-    persona_live_stream_registry,
-    stop_live_session,
+from tldw_Server_API.app.core.Persona.visual_generation_recipes import (
+    PersonaVisualRecipeGenerationError,
+    build_persona_visual_recipe_generation_intent,
+    normalize_persona_visual_generation_request_id,
+)
+from tldw_Server_API.app.core.Persona.visual_jobs import (
+    create_generate_candidate_job,
+    create_visual_pack_export_job,
+    create_visual_pack_import_commit_job,
+    create_visual_pack_import_preview_job,
+    persona_visual_generation_queue,
+)
+from tldw_Server_API.app.core.Persona.visual_library_service import (
+    PersonaVisualLibraryService,
+    PersonaVisualLibraryServiceError,
+)
+from tldw_Server_API.app.core.Persona.visual_portability.archive import (
+    DEFAULT_MAX_ARCHIVE_SIZE_BYTES,
+)
+from tldw_Server_API.app.core.Persona.visual_portability.commit_eligibility import (
+    import_preview_plan_from_stored_json,
+    is_import_preview_plan_committable,
+)
+from tldw_Server_API.app.core.Persona.visual_portability.constants import (
+    PERSONA_VISUAL_PACK_EXTENSION,
+)
+from tldw_Server_API.app.core.Persona.visual_renderer_capabilities import (
+    list_persona_visual_renderer_capabilities,
+)
+from tldw_Server_API.app.core.Persona.visual_service import (
+    MAX_VISUAL_UPLOAD_BYTES,
+    PersonaVisualService,
+    PersonaVisualServiceError,
+)
+from tldw_Server_API.app.core.Persona.visual_starter_catalog import (
+    PersonaVisualStarterCatalogError,
+    PersonaVisualStarterCatalogService,
+)
+from tldw_Server_API.app.core.Persona.visuals import (
+    MAX_TRIGGER_DURATION_MS,
+    MIN_TRIGGER_DURATION_MS,
+    VISUAL_STATE_IDS,
+    custom_visual_state_id_error,
 )
 from tldw_Server_API.app.core.Personalization.companion_activity import (
     normalize_persona_activity_surface,
@@ -273,6 +293,7 @@ from tldw_Server_API.app.core.Personalization.companion_context import load_comp
 from tldw_Server_API.app.core.Skills.context_integration import handle_skill_tool_call
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
 from tldw_Server_API.app.core.testing import env_flag_enabled
+from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.VoiceAssistant import (
     ActionType as VoiceActionTypeInternal,
 )
@@ -318,6 +339,7 @@ _PERSONA_RUNTIME_MODES = {"session_scoped", "persistent_scoped"}
 _PERSONA_WS_REQUIRED_NOTICE_LEVELS = {"info", "warning", "error"}
 _PERSONA_WS_ALLOWED_STEP_TYPES = {"mcp_tool", "skill", "rag_query", "final_answer"}
 _PERSONA_LIVE_PROCESSING_NOTICE_DELAY_S = 2.0
+_PERSONA_LIVE_STT_INITIALIZE_TIMEOUT_SECONDS = 30.0
 _PERSONA_WAKE_BEHAVIORS = {"one_shot", "continuous", "push_to_talk_after_wake"}
 _PERSONA_WAKE_DEACTIVATION_REASONS = {
     "disarmed",
@@ -3324,39 +3346,30 @@ def _persona_session_export_from_db(
     )
 
 
-async def _transcribe_audio_chunk(audio_bytes: bytes, audio_format: str) -> str:
-    """
-    Lightweight scaffold transcription.
-
-    This is intentionally simple to keep persona WS independent from heavy STT
-    runtime requirements during early-stage rollout and tests.
-    """
-    if not audio_bytes:
-        return ""
-    try:
-        text = audio_bytes.decode("utf-8", errors="ignore").strip()
-    except Exception:
-        text = ""
-    if text:
-        return text
-    return f"[audio:{audio_format or 'unknown'}:{len(audio_bytes)} bytes]"
-
-
 def _normalize_persona_live_stt_model(raw_model: Any) -> tuple[str, str, str | None]:
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.model_utils import (
         normalize_model_and_variant,
     )
 
     normalized_raw = str(raw_model or "").strip().lower() or None
+    whisper_sizes = {
+        "tiny", "tiny.en", "base", "base.en", "small", "small.en", "medium", "medium.en",
+        "large", "large-v1", "large-v2", "large-v3", "large-v3-turbo", "turbo",
+        "distil-small.en", "distil-medium.en", "distil-large-v2", "distil-large-v3",
+    }
+    if normalized_raw in {"whisper", "whisper-1"}:
+        return "whisper", "standard", None
+    whisper_size = (normalized_raw or "").removeprefix("whisper-")
+    if whisper_size in whisper_sizes:
+        return "whisper", "standard", whisper_size
     model_name, model_variant = normalize_model_and_variant(
         normalized_raw,
         "parakeet",
         "standard",
     )
-    whisper_model_size: str | None = None
-    if model_name == "whisper" and normalized_raw and normalized_raw not in {"whisper", "whisper-1"}:
-        whisper_model_size = normalized_raw
-    return model_name, model_variant, whisper_model_size
+    if model_name not in {"parakeet", "canary", "qwen3-asr"}:
+        raise ValueError("Unsupported Persona Live speech model. Select Whisper, Parakeet, Canary or Qwen3-ASR.")
+    return model_name, model_variant, None
 
 
 def _build_persona_live_stt_config(voice_runtime: dict[str, Any] | None) -> Any:
@@ -3373,7 +3386,7 @@ def _build_persona_live_stt_config(voice_runtime: dict[str, Any] | None) -> Any:
     if whisper_model_size:
         config.whisper_model_size = whisper_model_size
     language = str((voice_runtime or {}).get("stt_language") or "").strip()
-    config.language = language or None
+    config.language = language.replace("_", "-").split("-", 1)[0].lower() or None
     config.sample_rate = 16000
     config.enable_vad = False
     config.enable_partial = True
@@ -3561,32 +3574,6 @@ def _match_persona_wake_phrase(
     return None
 
 
-async def _generate_tts_audio_chunks(
-    text: str,
-    audio_format: str,
-    *,
-    chunk_size_bytes: int,
-    max_chunks: int,
-    max_total_bytes: int,
-) -> list[bytes]:
-    """
-    Lightweight scaffold TTS chunk generator.
-
-    The event contract (`tts_audio` + binary frame) is implemented here; a full
-    provider-backed synthesis path can be added without changing WS semantics.
-    """
-    spoken = str(text or "").strip()
-    if not spoken:
-        return []
-    encoded = spoken.encode("utf-8")
-    return _chunk_persona_audio_bytes(
-        encoded,
-        chunk_size_bytes=chunk_size_bytes,
-        max_chunks=max_chunks,
-        max_total_bytes=max_total_bytes,
-    )
-
-
 def _chunk_persona_audio_bytes(
     audio_bytes: bytes,
     *,
@@ -3608,6 +3595,37 @@ def _chunk_persona_audio_bytes(
     return chunks
 
 
+async def _send_persona_live_audio_pair(
+    *, stream: Any, header: dict[str, Any], audio: bytes,
+    send_lock: asyncio.Lock, may_send: Callable[[], bool],
+) -> bool:
+    """Keep each audio ownership envelope adjacent to its binary payload."""
+    async with send_lock:
+        if not may_send():
+            return False
+        await stream.send_json(header)
+        if not may_send():
+            return False
+        await stream.ws.send_bytes(audio)
+        return True
+
+
+async def _prepare_persona_live_tts(voice_runtime: dict[str, Any]) -> None:
+    """Load the supported local speech runtime without synthesizing or playing audio."""
+    provider = str(voice_runtime.get("tts_provider") or "").strip().lower()
+    if provider not in {"tldw", "kokoro"}:
+        raise ValueError("Select local Kokoro speech output in Persona Live voice settings.")
+    from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
+
+    service = await get_tts_service_v2()
+    adapter = await service._get_adapter(model="kokoro", provider="kokoro")
+    if adapter is None or not await adapter.ensure_initialized():
+        raise RuntimeError("Kokoro speech output is unavailable.")
+    # Kokoro's lazy initialize reports AVAILABLE before loading model/voice assets.
+    if not await adapter._ensure_model_loaded():
+        raise RuntimeError("Kokoro model and voice assets could not be loaded.")
+
+
 async def _generate_persona_live_tts_audio(
     text: str,
     *,
@@ -3620,7 +3638,8 @@ async def _generate_persona_live_tts_audio(
     if not provider_norm or provider_norm == "browser":
         return b"", response_format
 
-    model_name = "kokoro" if provider_norm == "tldw" else provider_norm
+    provider_norm = "kokoro" if provider_norm == "tldw" else provider_norm
+    model_name = "tts-1" if provider_norm == "openai" else provider_norm
 
     from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
     from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
@@ -3638,7 +3657,7 @@ async def _generate_persona_live_tts_audio(
     async for chunk in tts_service.generate_speech(
         request=request,
         provider=provider_norm,
-        fallback=True,
+        fallback=False,
     ):
         if chunk:
             audio_chunks.append(chunk)
@@ -3720,6 +3739,43 @@ def _extract_auth_credentials(
         logger.debug("Failed to parse websocket subprotocol auth header", exc_info=protocol_header_error)
 
     return auth_token, resolved_api_key
+
+
+def _persona_conversation_headers(
+    ws: WebSocket,
+    token: str | None,
+    api_key: str | None,
+) -> dict[str, str]:
+    """Forward the authenticated credential family and original proxy context.
+
+    The caller keeps the original socket peer as the internal ASGI client, so
+    HTTP authentication applies the same trusted-proxy rules again. Duplicate
+    forwarding values stay ordered rather than silently selecting one value.
+    """
+    headers = {
+        name: ",".join(values)
+        for name in (
+            "origin", "host", "user-agent", "forwarded", "x-forwarded-for",
+            "x-real-ip", "x-forwarded-host", "x-forwarded-proto", "x-forwarded-port",
+        )
+        if (values := ws.headers.getlist(name))
+    }
+    auth_token, resolved_api_key = _extract_auth_credentials(ws, token, api_key)
+    method = getattr(ws.state, "persona_auth_method", "")
+    if method == "api_key":
+        if selected_key := resolved_api_key or auth_token:
+            headers["x-api-key"] = selected_key
+    elif method in {"jwt_authnz", "jwt_mcp"}:
+        if auth_token:
+            headers["authorization"] = f"Bearer {auth_token}"
+    elif method == "single_user_session":
+        # This server-owned method is set only after cookie authentication's
+        # exact trusted-Origin check. HTTP revalidates expiry, ownership and CSRF.
+        if cookie := ws.headers.get("cookie"):
+            headers["cookie"] = cookie
+        if csrf_token := ws.cookies.get("csrf_token"):
+            headers["x-csrf-token"] = csrf_token
+    return headers
 
 
 def _build_request_from_websocket(ws: WebSocket) -> StarletteRequest:
@@ -8005,6 +8061,13 @@ async def persona_stream(
     auth_watchdog_stop: asyncio.Event | None = None
     auth_revoked_event: asyncio.Event | None = None
     persona_live_stt_state_by_session: dict[str, dict[str, Any]] = {}
+    persona_live_voice_configs: dict[str, dict[str, Any]] = {}
+    voice_connection_id = str(uuid.uuid4())
+    owned_turn_tasks: set[asyncio.Task] = set()
+    turn_locks: dict[str, asyncio.Lock] = {}
+    owned_control_tasks: set[asyncio.Task] = set()
+    persona_voice_prepare_tasks: set[asyncio.Task[None]] = set()
+    persona_voice_initialization_pending = threading.Event()
     persona_live_wake_state_by_session: dict[str, dict[str, Any]] = {}
     persona_live_summary_sessions_seen: set[str] = set()
     observed_live_control_session_ids: set[str] = set()
@@ -8038,6 +8101,7 @@ async def persona_stream(
                 await stream.ws.close(code=1008)
             return
         live_control_stream_user_id = authenticated_user_id
+        conversation_headers = _persona_conversation_headers(ws, token, api_key)
         auth_watchdog_stop = asyncio.Event()
         auth_revoked_event = asyncio.Event()
 
@@ -8106,9 +8170,28 @@ async def persona_stream(
             if sid in observed_live_control_session_ids:
                 return
             observed_live_control_session_ids.add(sid)
+            loop = asyncio.get_running_loop()
+
+            async def notify_stopped() -> None:
+                turn_locks.pop(sid, None)
+                _cleanup_persona_live_stt_state(sid)
+                _clear_persona_live_wake_state(sid)
+                _cancel_persona_live_processing_notice(sid)
+                with contextlib.suppress(Exception):
+                    await stream.send_json({"event": "notice", "session_id": sid,
+                                            "reason_code": "SESSION_TERMINAL", "level": "info",
+                                            "message": "Persona session stopped."})
+
+            def schedule_stop() -> None:
+                task = asyncio.create_task(notify_stopped())
+                owned_control_tasks.add(task)
+                task.add_done_callback(owned_control_tasks.discard)
+
             persona_live_stream_registry.mark_connected(
                 user_id=authenticated_user_id,
                 session_id=sid,
+                connection_id=voice_connection_id,
+                on_stop=lambda: loop.call_soon_threadsafe(schedule_stop),
             )
 
         def _api_key_scope_allows(required_scope: Any) -> bool:
@@ -8141,6 +8224,13 @@ async def persona_stream(
                 metadata["client_message_id"] = client_message_id
             return metadata
 
+        def _ensure_current_turn(session_id: str) -> None:
+            task = asyncio.current_task()
+            if task in owned_turn_tasks and not live_conversation.persona_live_turn_registry.is_current(
+                user_id=authenticated_user_id, session_id=session_id, task=task,
+            ):
+                raise asyncio.CancelledError
+
         async def _emit_notice(
             *,
             session_id: str,
@@ -8149,6 +8239,7 @@ async def persona_stream(
             reason_code: str | None = None,
             **extra: Any,
         ) -> None:
+            _ensure_current_turn(session_id)
             payload: dict[str, Any] = {
                 "event": "notice",
                 **_next_ws_event_meta(session_id),
@@ -8165,6 +8256,7 @@ async def persona_stream(
             text_delta: str,
             **extra: Any,
         ) -> None:
+            _ensure_current_turn(session_id)
             _mark_persona_live_processing_progress(session_id)
             payload: dict[str, Any] = {
                 "event": "assistant_delta",
@@ -8183,6 +8275,7 @@ async def persona_stream(
             companion: dict[str, Any],
             persona_id_value: str,
         ) -> None:
+            _ensure_current_turn(session_id)
             _mark_persona_live_processing_progress(session_id)
             payload: dict[str, Any] = {
                 "event": "tool_plan",
@@ -8332,6 +8425,7 @@ async def persona_stream(
         voice_transcript_buffer_by_session: dict[str, str] = defaultdict(str)
         tts_seq_by_session: dict[str, int] = defaultdict(int)
         tts_in_flight_by_session: dict[str, int] = defaultdict(int)
+        tts_audio_send_lock = asyncio.Lock()
         persona_live_processing_notice_tasks_by_session: dict[str, asyncio.Task[Any]] = {}
 
         async def _record_turn(
@@ -8348,6 +8442,7 @@ async def persona_stream(
             scope_snapshot_id_override: str | None = None,
             memory_kind: str | None = None,
         ) -> None:
+            _ensure_current_turn(session_id)
             effective_persona_id = str(persona_id_override or persona_id or "").strip() or persona_id
             effective_runtime_mode = str(runtime_mode_override or "session_scoped").strip().lower()
             effective_scope_snapshot_id = str(scope_snapshot_id_override or "").strip() or None
@@ -8388,13 +8483,18 @@ async def persona_stream(
             session_id: str,
             assistant_text: str,
         ) -> None:
+            voice_key = {"user_id": authenticated_user_id, "session_id": session_id, "connection_id": voice_connection_id}
+            if not persona_live_voice_registry.is_ready(**voice_key):
+                return
             preferences = session_manager.get_preferences(
                 session_id=session_id,
                 user_id=connection_user_id,
             )
             if str(preferences.get("last_turn_type") or "").strip().lower() != "voice_commit":
                 return
-            voice_runtime = preferences.get("voice_runtime")
+            state = persona_live_stt_state_by_session.get(session_id) or {}
+            voice_runtime = state.get("voice_runtime")
+            voice_turn_id = _persona_turn_client_message_id.get() or state.get("client_message_id")
             if not isinstance(voice_runtime, dict):
                 return
             if bool(voice_runtime.get("text_only_due_to_tts_failure")):
@@ -8417,6 +8517,10 @@ async def persona_stream(
             except Exception as exc:
                 updated_voice_runtime = dict(voice_runtime)
                 updated_voice_runtime["text_only_due_to_tts_failure"] = True
+                state["voice_runtime"] = updated_voice_runtime
+                persona_live_voice_registry.clear(
+                    user_id=authenticated_user_id, session_id=session_id, connection_id=voice_connection_id,
+                )
                 with contextlib.suppress(Exception):
                     session_manager.update_preferences(
                         session_id=session_id,
@@ -8434,6 +8538,7 @@ async def persona_stream(
                     session_id=session_id,
                     level="warning",
                     reason_code="TTS_UNAVAILABLE_TEXT_ONLY",
+                    client_message_id=voice_turn_id,
                     message="Live TTS unavailable for this session. Continuing in text-only mode.",
                 )
                 return
@@ -8444,11 +8549,24 @@ async def persona_stream(
                 max_chunks=tts_max_chunks,
                 max_total_bytes=tts_max_total_bytes,
             )
+
+            def may_send_audio() -> bool:
+                _ensure_current_turn(session_id)
+                return (
+                    persona_live_voice_registry.is_ready(**voice_key)
+                    and persona_live_stt_state_by_session.get(session_id) is state
+                    and state.get("client_message_id") == voice_turn_id
+                )
+
             total_chunks = len(tts_chunks)
             for idx, chunk in enumerate(tts_chunks):
+                _ensure_current_turn(session_id)
+                if not persona_live_voice_registry.is_ready(**voice_key) or persona_live_stt_state_by_session.get(session_id) is not state:
+                    return
                 if tts_in_flight_by_session[session_id] >= tts_max_in_flight_chunks:
                     await _emit_notice(
                         session_id=session_id,
+                        client_message_id=voice_turn_id,
                         level="warning",
                         reason_code="TTS_BACKPRESSURE_DROP",
                         message=f"Dropping TTS chunk due to in-flight limit ({tts_max_in_flight_chunks})",
@@ -8459,34 +8577,35 @@ async def persona_stream(
                 tts_seq_by_session[session_id] += 1
                 chunk_id = uuid.uuid4().hex
                 tts_in_flight_by_session[session_id] += 1
-                await stream.send_json(
-                    {
-                        "event": "tts_audio",
-                        "session_id": session_id,
-                        "audio_format": str(audio_format or "mp3"),
-                        "chunk_id": chunk_id,
-                        "chunk_index": idx,
-                        "chunk_count": total_chunks,
-                        "seq": chunk_seq,
-                        "timestamp_ms": int(time.time() * 1000),
-                    }
-                )
                 try:
-                    await stream.ws.send_bytes(chunk)
-                except Exception as exc:
+                    sent = await _send_persona_live_audio_pair(
+                        stream=stream,
+                        header={
+                            "event": "tts_audio",
+                            "session_id": session_id,
+                            "client_message_id": voice_turn_id,
+                            "audio_format": str(audio_format or "mp3"),
+                            "chunk_id": chunk_id,
+                            "chunk_index": idx,
+                            "chunk_count": total_chunks,
+                            "seq": chunk_seq,
+                            "timestamp_ms": int(time.time() * 1000),
+                        },
+                        audio=chunk, send_lock=tts_audio_send_lock, may_send=may_send_audio,
+                    )
+                    if not sent:
+                        return
+                except Exception:
                     await _emit_notice(
-                        session_id=session_id,
-                        level="warning",
-                        message=f"Failed to send tts audio binary chunk: {exc}",
+                        session_id=session_id, client_message_id=voice_turn_id,
+                        level="warning", message="Speech audio delivery failed. Start voice again to retry.",
                         reason_code="TTS_SEND_FAILED",
                     )
+                    break
+                finally:
                     tts_in_flight_by_session[session_id] = max(
                         0, tts_in_flight_by_session[session_id] - 1
                     )
-                    break
-                tts_in_flight_by_session[session_id] = max(
-                    0, tts_in_flight_by_session[session_id] - 1
-                )
 
         def _cleanup_persona_live_stt_state(session_id: str) -> None:
             _cancel_persona_live_processing_notice(session_id)
@@ -8560,66 +8679,103 @@ async def persona_stream(
                 if str(phrase or "").strip()
             ]
 
-        def _get_or_create_persona_live_stt_state(
-            session_id: str,
-        ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-            preferences = session_manager.get_preferences(
-                session_id=session_id,
-                user_id=connection_user_id,
-            )
-            voice_runtime = preferences.get("voice_runtime")
-            if not isinstance(voice_runtime, dict):
-                return None, None
-
-            existing_state = persona_live_stt_state_by_session.get(session_id)
-            if isinstance(existing_state, dict):
-                existing_state["voice_runtime"] = voice_runtime
-                return existing_state, voice_runtime
-
+        async def _prepare_persona_live_voice(*, session_id: str, client_message_id: str | None, token: str) -> None:
+            """Prepare only owned real services; stale worker completion never grants readiness."""
+            key = {"user_id": authenticated_user_id, "session_id": session_id, "connection_id": voice_connection_id}
+            transcriber = None
+            installed = False
+            initialization_cleanup_claimed = threading.Event()
+            reason_code = "VOICE_CONVERSATION_UNAVAILABLE"
+            message = "Voice requires server-configured credentials for the default Chat provider and model. Configure them in server Chat settings."
             try:
-                transcriber = _create_persona_live_stt_transcriber(
-                    voice_runtime=voice_runtime,
+                from tldw_Server_API.app.core.Persona.live_conversation import (
+                    require_persona_voice_conversation_credentials,
                 )
-                transcriber.initialize()
-            except Exception as exc:
-                logger.debug(
-                    "persona live STT initialization failed for session {}: {}",
-                    session_id,
-                    exc,
-                )
-                return None, voice_runtime
 
-            turn_detector = None
-            manual_mode_reason: str | None = None
-            try:
-                turn_detector = _create_persona_live_turn_detector(
-                    voice_runtime=voice_runtime,
-                )
-                if turn_detector is not None and not bool(getattr(turn_detector, "available", False)):
-                    manual_mode_reason = str(
-                        getattr(turn_detector, "unavailable_reason", "") or "vad_unavailable"
+                await asyncio.to_thread(require_persona_voice_conversation_credentials)
+                if not persona_live_voice_registry.is_preparing(**key, token=token):
+                    return
+                voice_runtime = persona_live_voice_configs.get(session_id)
+                if not isinstance(voice_runtime, dict):
+                    reason_code = "VOICE_CONFIG_REQUIRED"
+                    message = "Save Persona Live voice settings before starting voice."
+                    raise ValueError("Voice configuration required")
+                reason_code = "VOICE_STT_UNAVAILABLE"
+                message = "The selected speech model could not load. Install its local model and dependencies or select another speech model."
+                transcriber = _create_persona_live_stt_transcriber(voice_runtime=voice_runtime)
+                from tldw_Server_API.app.core.Chat.streaming_utils import await_bounded_owned_operation
+
+                async def cleanup_abandoned_initialization() -> None:
+                    try:
+                        await asyncio.to_thread(transcriber.cleanup)
+                    finally:
+                        persona_voice_initialization_pending.clear()
+
+                persona_voice_initialization_pending.set()
+                try:
+                    await await_bounded_owned_operation(
+                        asyncio.to_thread(transcriber.initialize),
+                        timeout_seconds=_PERSONA_LIVE_STT_INITIALIZE_TIMEOUT_SECONDS,
+                        timeout_message="Persona speech model initialization timed out",
+                        on_abandoned=cleanup_abandoned_initialization,
+                        cleanup_claimed=initialization_cleanup_claimed,
                     )
-            except Exception as exc:
-                logger.debug(
-                    "persona live VAD initialization failed for session {}: {}",
-                    session_id,
-                    exc,
-                )
+                finally:
+                    if not initialization_cleanup_claimed.is_set():
+                        persona_voice_initialization_pending.clear()
+                if not persona_live_voice_registry.is_preparing(**key, token=token):
+                    return
+                reason_code = "VOICE_TTS_UNAVAILABLE"
+                message = "Select local Kokoro speech output and install its model and voice assets in server audio settings."
+                await _prepare_persona_live_tts(voice_runtime)
+                if not persona_live_voice_registry.is_preparing(**key, token=token):
+                    return
                 turn_detector = None
-                manual_mode_reason = str(exc)
-
-            state = {
-                "transcriber": transcriber,
-                "turn_detector": turn_detector,
-                "voice_runtime": voice_runtime,
-                "current_utterance_committed": False,
-                "current_commit_source": None,
-                "committed_transcript": "",
-                "manual_mode_notice_sent": False,
-                "manual_mode_reason": manual_mode_reason,
-            }
-            persona_live_stt_state_by_session[session_id] = state
-            return state, voice_runtime
+                try:
+                    turn_detector = await asyncio.to_thread(_create_persona_live_turn_detector, voice_runtime=voice_runtime)
+                except Exception:
+                    # Manual Send now remains a real supported speech path without VAD.
+                    turn_detector = None
+                if not persona_live_voice_registry.is_preparing(**key, token=token):
+                    return
+                context = await asyncio.to_thread(
+                    _load_persona_policy_rules_for_session, persona_scope_db,
+                    session_id=session_id, user_id=authenticated_user_id,
+                )
+                if not context.get("session_exists") or context.get("session_terminal"):
+                    persona_live_voice_registry.clear(**key)
+                    return
+                if not persona_live_voice_registry.complete_preparation(**key, token=token):
+                    return
+                _cleanup_persona_live_stt_state(session_id)
+                persona_live_stt_state_by_session[session_id] = {
+                    "transcriber": transcriber, "turn_detector": turn_detector,
+                    "voice_runtime": voice_runtime, "current_utterance_committed": False,
+                    "current_commit_source": None, "committed_transcript": "",
+                    "manual_mode_notice_sent": False, "manual_mode_reason": "vad_unavailable",
+                    "client_message_id": client_message_id,
+                }
+                installed = True
+                await stream.send_json({
+                    "event": "voice_readiness", "session_id": session_id,
+                    "client_message_id": client_message_id, "ready": True,
+                    "reason_code": "VOICE_READY", "message": "Voice runtime is ready. Microphone capture may now be started.",
+                })
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # Clear only this attempt; an older failure cannot revoke its replacement.
+                if persona_live_voice_registry.fail_preparation(**key, token=token):
+                    with contextlib.suppress(Exception):
+                        await stream.send_json({
+                            "event": "voice_readiness", "session_id": session_id,
+                            "client_message_id": client_message_id, "ready": False,
+                            "reason_code": reason_code, "message": message,
+                        })
+            finally:
+                if transcriber is not None and not installed and not initialization_cleanup_claimed.is_set():
+                    with contextlib.suppress(Exception):
+                        await asyncio.to_thread(transcriber.cleanup)
 
         def _current_persona_live_transcript(session_id: str) -> str:
             buffered = str(voice_transcript_buffer_by_session.get(session_id) or "").strip()
@@ -8770,6 +8926,7 @@ async def persona_stream(
             state["manual_mode_notice_sent"] = True
             await _emit_notice(
                 session_id=session_id,
+                client_message_id=state.get("client_message_id"),
                 level="warning",
                 reason_code="VOICE_MANUAL_MODE_REQUIRED",
                 message="Server VAD unavailable for this live session. Use Send now to commit heard speech manually.",
@@ -8794,11 +8951,14 @@ async def persona_stream(
             client_message_id: Any = None,
         ) -> bool:
             state = persona_live_stt_state_by_session.get(session_id) or {}
+            client_message_id = _bounded_client_message_id(client_message_id) or state.get("client_message_id")
+            state["client_message_id"] = client_message_id
             if bool(state.get("current_utterance_committed")):
                 await _emit_notice(
                     session_id=session_id,
                     level="info",
                     reason_code="VOICE_COMMIT_IGNORED_ALREADY_COMMITTED",
+                    client_message_id=client_message_id,
                     message="This utterance was already committed.",
                     commit_source=str(state.get("current_commit_source") or commit_source),
                     transcript=str(state.get("committed_transcript") or "").strip() or None,
@@ -8825,6 +8985,7 @@ async def persona_stream(
                     session_id=session_id,
                     level="info",
                     reason_code="VOICE_TRIGGER_NOT_HEARD",
+                    client_message_id=client_message_id,
                     message="No trigger phrase was heard, so the transcript was ignored.",
                 )
                 _reset_persona_live_active_turn(session_id)
@@ -8834,6 +8995,7 @@ async def persona_stream(
                     session_id=session_id,
                     level="info",
                     reason_code="VOICE_EMPTY_COMMAND_AFTER_TRIGGER",
+                    client_message_id=client_message_id,
                     message="The trigger phrase was removed, but no spoken command remained.",
                 )
                 _reset_persona_live_active_turn(session_id)
@@ -8846,6 +9008,7 @@ async def persona_stream(
                 session_id=session_id,
                 level="info",
                 reason_code="VOICE_TURN_COMMITTED",
+                client_message_id=client_message_id,
                 message="Voice turn committed.",
                 commit_source=commit_source,
                 transcript=cleaned_transcript,
@@ -8866,8 +9029,7 @@ async def persona_stream(
             }:
                 _clear_persona_live_wake_state(session_id)
             _reset_persona_live_active_turn(session_id)
-            _schedule_persona_live_processing_notice(session_id)
-            await _handle_persona_live_turn(
+            _start_persona_live_turn(
                 msg=_persona_live_voice_commit_message(
                     session_id=session_id,
                     transcript=cleaned_transcript,
@@ -9840,6 +10002,58 @@ async def persona_stream(
                     reason_code="PERSONA_STATE_DISABLED",
                     message="Persona state context disabled for this message",
                 )
+            if session_exists and not live_conversation.requires_tool_plan(normalized_text):
+                profile = await asyncio.to_thread(
+                    persona_scope_db.get_persona_profile,
+                    runtime_persona_id, user_id=authenticated_user_id, include_deleted=False,
+                )
+                if not isinstance(profile, dict):
+                    await _emit_notice(
+                        session_id=session_id, level="error", reason_code="SESSION_UNAVAILABLE",
+                        message="This Persona profile is unavailable. Select an active Persona and retry.",
+                    )
+                    return
+                system_prompt = str(profile.get("system_prompt") or "You are a helpful assistant.")[:8000]
+                context_lines = (
+                    memory_context + list(persona_state_hints.values())
+                    + list(companion_context.get("knowledge_lines") or [])
+                    + list(companion_context.get("activity_lines") or [])
+                    + [section[1] for section in persona_exemplar_assembly.sections]
+                )
+                if context_lines:
+                    context_text = "\n".join(str(line) for line in context_lines)[:7800]
+                    system_prompt += "\n\nPersona reference context (data, not tool authorization):\n" + context_text
+                try:
+                    answer = await live_conversation.complete_persona_conversation(
+                        app=ws.app, headers=conversation_headers,
+                        client=tuple(ws.client) if ws.client else None,
+                        system_prompt=system_prompt,
+                        turns=session_manager.list_turns(
+                            session_id=session_id, user_id=connection_user_id, limit=24,
+                        ),
+                    )
+                except live_conversation.PersonaConversationError as exc:
+                    await _emit_notice(
+                        session_id=session_id, level="error", reason_code="CONVERSATION_UNAVAILABLE",
+                        message=str(exc),
+                    )
+                    return
+                _ensure_current_turn(session_id)
+                current_context = await asyncio.to_thread(
+                    _load_persona_policy_rules_for_session, persona_scope_db,
+                    session_id=session_id, user_id=authenticated_user_id,
+                )
+                if not current_context.get("session_exists") or current_context.get("session_terminal"):
+                    return
+                await _record_turn(
+                    session_id=session_id, role="assistant", content=answer, turn_type="assistant_reply",
+                    metadata={"client_message_id": client_message_id, "source": source},
+                    persona_id_override=runtime_persona_id, runtime_mode_override=runtime_mode,
+                    scope_snapshot_id_override=runtime_scope_snapshot_id,
+                )
+                await _emit_assistant_delta(session_id=session_id, text_delta=answer, done=True)
+                await _emit_persona_live_tts_for_assistant_text(session_id=session_id, assistant_text=answer)
+                return
             plan = await _propose_plan(
                 normalized_text,
                 memory_context=memory_context,
@@ -9861,6 +10075,7 @@ async def persona_stream(
                 runtime_explorer_provider=runtime_explorer_provider,
                 include_diagnostics=True,
             )
+            _ensure_current_turn(session_id)
             runtime_explorer_diagnostics = plan.pop(_PERSONA_RUNTIME_EXPLORER_DIAGNOSTICS_KEY, None)
             runtime_explorer_selected_plan = bool(plan.pop(_PERSONA_RUNTIME_EXPLORER_SELECTED_KEY, False))
             if isinstance(runtime_explorer_diagnostics, dict):
@@ -10037,6 +10252,51 @@ async def persona_stream(
                 "text_only_due_to_tts_failure": False,
             }
 
+        def _start_persona_live_turn(*, msg: dict[str, Any], text: str,
+                                     turn_type: str = "user_message", source: str = "ws") -> None:
+            session_id = _normalize_ws_identifier(msg.get("session_id"), fallback=default_session_id)
+            turn_lock = turn_locks.setdefault(session_id, asyncio.Lock())
+
+            async def run_owned_turn() -> None:
+                correlation = _persona_turn_client_message_id.set(_bounded_client_message_id(msg.get("client_message_id")))
+                task = asyncio.current_task()
+                try:
+                    async with turn_lock:
+                        _ensure_current_turn(session_id)
+                        _cancel_persona_live_processing_notice(session_id)
+                        if turn_type == "voice_commit":
+                            _schedule_persona_live_processing_notice(session_id)
+                        await _handle_persona_live_turn(msg=msg, text=text, turn_type=turn_type, source=source)
+                except asyncio.CancelledError:
+                    # The retired owner needs a terminal signal even when a
+                    # different connection stopped the session. It grants no action.
+                    with contextlib.suppress(Exception, asyncio.CancelledError):
+                        await stream.send_json({
+                            "event": "notice", "session_id": session_id,
+                            "client_message_id": _bounded_client_message_id(msg.get("client_message_id")),
+                            "reason_code": "TURN_CANCELLED", "level": "info",
+                            "message": "This turn was cancelled.",
+                        })
+                    raise
+                except Exception:
+                    with contextlib.suppress(Exception):
+                        await _emit_notice(session_id=session_id, level="error", reason_code="USER_TURN_FAILED",
+                                           message="The Persona turn could not be completed. Retry or check server settings.")
+                finally:
+                    _persona_turn_client_message_id.reset(correlation)
+                    if task is not None:
+                        live_conversation.persona_live_turn_registry.release(
+                            user_id=authenticated_user_id, session_id=session_id, task=task,
+                        )
+
+            task = asyncio.create_task(run_owned_turn())
+            owned_turn_tasks.add(task)
+            task.add_done_callback(owned_turn_tasks.discard)
+            task.add_done_callback(lambda completed: live_conversation.persona_live_turn_registry.release(
+                user_id=authenticated_user_id, session_id=session_id, task=completed,
+            ))
+            live_conversation.persona_live_turn_registry.register(user_id=authenticated_user_id, session_id=session_id, task=task)
+
         while True:
             raw = await stream.receive_text()
             try:
@@ -10046,36 +10306,54 @@ async def persona_stream(
 
             mtype = msg.get("type") or msg.get("event") or "unknown"
             if mtype == "user_message":
-                _cancel_persona_live_processing_notice(
-                    _normalize_ws_identifier(msg.get("session_id"), fallback=default_session_id)
+                _start_persona_live_turn(msg=msg, text=msg.get("text") or msg.get("message") or "")
+            elif mtype in {"voice_prepare", "voice_stop"}:
+                session_id = _normalize_ws_identifier(msg.get("session_id"), fallback="")
+                client_message_id = _bounded_client_message_id(msg.get("client_message_id"))
+                runtime_context = await asyncio.to_thread(
+                    _load_persona_policy_rules_for_session, persona_scope_db,
+                    session_id=session_id, user_id=authenticated_user_id,
                 )
-                # Child tasks retain this turn's identity even after the next
-                # message arrives. Never infer correlation from session state.
-                correlation_token = _persona_turn_client_message_id.set(
-                    _bounded_client_message_id(msg.get("client_message_id"))
-                )
-                try:
-                    await _handle_persona_live_turn(
-                        msg=msg,
-                        text=msg.get("text") or msg.get("message") or "",
-                        turn_type="user_message",
-                        source="ws",
+                if not session_id or not runtime_context.get("session_exists") or runtime_context.get("session_terminal"):
+                    await stream.send_json({
+                        "event": "voice_readiness", "session_id": session_id,
+                        "client_message_id": client_message_id, "ready": False,
+                        "reason_code": "VOICE_SESSION_UNAVAILABLE",
+                        "message": "Connect an active Persona Live session before starting voice.",
+                    })
+                    continue
+                if mtype == "voice_prepare" and (
+                    persona_voice_initialization_pending.is_set()
+                    or any(not task.done() for task in persona_voice_prepare_tasks)
+                ):
+                    await stream.send_json({
+                        "event": "voice_readiness", "session_id": session_id,
+                        "client_message_id": client_message_id, "ready": False,
+                        "reason_code": "VOICE_PREPARATION_BUSY",
+                        "message": "A voice model is still loading or cleaning up on this connection. Wait for it to finish, then retry voice.",
+                    })
+                    continue
+                key = {"user_id": authenticated_user_id, "session_id": session_id, "connection_id": voice_connection_id}
+                persona_live_voice_registry.clear(**key)
+                _cleanup_persona_live_stt_state(session_id)
+                if mtype == "voice_stop":
+                    live_conversation.persona_live_turn_registry.cancel(user_id=authenticated_user_id, session_id=session_id)
+                    turn_locks.pop(session_id, None)
+                    _cancel_persona_live_processing_notice(session_id)
+                    session_manager.clear_plans(session_id=session_id, user_id=connection_user_id)
+                    _clear_persona_live_wake_state(session_id)
+                    await _emit_notice(
+                        session_id=session_id, client_message_id=client_message_id,
+                        reason_code="VOICE_STOPPED", message="Voice recording and playback stopped.",
                     )
-                except WebSocketDisconnect:
-                    raise
-                except Exception:
-                    # The generic transport shutdown has no session identity;
-                    # emit scoped feedback before restoring the outer context.
-                    with contextlib.suppress(Exception):
-                        await _emit_notice(
-                            session_id=_normalize_ws_identifier(msg.get("session_id"), fallback=default_session_id),
-                            level="error",
-                            message="The Persona turn could not be completed.",
-                            reason_code="USER_TURN_FAILED",
-                        )
-                    raise
-                finally:
-                    _persona_turn_client_message_id.reset(correlation_token)
+                    continue
+                _mark_live_control_stream_connected(session_id)
+                preparation_token = persona_live_voice_registry.begin_preparation(**key)
+                preparation = asyncio.create_task(_prepare_persona_live_voice(
+                    session_id=session_id, client_message_id=client_message_id, token=preparation_token,
+                ))
+                persona_voice_prepare_tasks.add(preparation)
+                preparation.add_done_callback(persona_voice_prepare_tasks.discard)
             elif mtype == "voice_config":
                 original_session_id = msg.get("session_id")
                 session_id = _normalize_ws_identifier(original_session_id, fallback="")
@@ -10115,6 +10393,10 @@ async def persona_stream(
                 )
                 _mark_live_control_stream_connected(session_id)
                 voice_runtime = _normalize_voice_runtime_config(msg)
+                persona_live_voice_configs[session_id] = voice_runtime
+                persona_live_voice_registry.clear(
+                    user_id=authenticated_user_id, session_id=session_id, connection_id=voice_connection_id,
+                )
                 session_manager.update_preferences(
                     session_id=session_id,
                     user_id=connection_user_id,
@@ -10226,22 +10508,48 @@ async def persona_stream(
                 )
             elif mtype == "voice_commit":
                 original_session_id = msg.get("session_id")
+                client_message_id = _bounded_client_message_id(msg.get("client_message_id"))
                 session_id = _normalize_ws_identifier(original_session_id, fallback="")
                 if not session_id:
                     await _emit_notice(
                         session_id=default_session_id,
+                        client_message_id=client_message_id,
                         level="error",
                         message="session_id is required",
                         reason_code="SESSION_ID_REQUIRED",
                     )
                     continue
+                runtime_context = _load_persona_policy_rules_for_session(
+                    persona_scope_db,
+                    session_id=session_id,
+                    user_id=authenticated_user_id,
+                )
+                if bool(runtime_context.get("session_terminal", False)):
+                    await _emit_notice(
+                        session_id=session_id,
+                        client_message_id=client_message_id,
+                        level="error",
+                        message="Persona session is stopped.",
+                        reason_code="SESSION_TERMINAL",
+                    )
+                    continue
                 _cancel_persona_live_processing_notice(session_id)
+                if not persona_live_voice_registry.is_ready(
+                    user_id=authenticated_user_id, session_id=session_id, connection_id=voice_connection_id,
+                ):
+                    await _emit_notice(
+                        session_id=session_id, client_message_id=client_message_id,
+                        level="error", reason_code="VOICE_NOT_PREPARED",
+                        message="Start voice to prepare the selected speech services before sending speech.",
+                    )
+                    continue
                 state = persona_live_stt_state_by_session.get(session_id) or {}
                 if bool(state.get("current_utterance_committed")) and not _current_persona_live_transcript(
                     session_id
                 ):
                     await _emit_notice(
                         session_id=session_id,
+                        client_message_id=client_message_id,
                         level="info",
                         reason_code="VOICE_COMMIT_IGNORED_ALREADY_COMMITTED",
                         message="This utterance was already committed.",
@@ -10255,22 +10563,10 @@ async def persona_stream(
                 if not transcript:
                     await _emit_notice(
                         session_id=session_id,
+                        client_message_id=client_message_id,
                         level="error",
                         message="transcript is required",
                         reason_code="TRANSCRIPT_REQUIRED",
-                    )
-                    continue
-                runtime_context = _load_persona_policy_rules_for_session(
-                    persona_scope_db,
-                    session_id=session_id,
-                    user_id=authenticated_user_id,
-                )
-                if bool(runtime_context.get("session_terminal", False)):
-                    await _emit_notice(
-                        session_id=session_id,
-                        level="error",
-                        message="Persona session is stopped.",
-                        reason_code="SESSION_TERMINAL",
                     )
                     continue
                 await _commit_persona_live_turn(
@@ -10283,6 +10579,16 @@ async def persona_stream(
                 )
             elif mtype == "audio_chunk":
                 session_id = _normalize_ws_identifier(msg.get("session_id"), fallback=default_session_id)
+                client_message_id = _bounded_client_message_id(msg.get("client_message_id"))
+                if not persona_live_voice_registry.is_ready(
+                    user_id=authenticated_user_id, session_id=session_id, connection_id=voice_connection_id,
+                ):
+                    await _emit_notice(
+                        session_id=session_id, client_message_id=client_message_id,
+                        level="error", reason_code="VOICE_NOT_PREPARED",
+                        message="Start voice to prepare the selected speech services before recording.",
+                    )
+                    continue
                 runtime_context = _load_persona_policy_rules_for_session(
                     persona_scope_db,
                     session_id=session_id,
@@ -10291,6 +10597,7 @@ async def persona_stream(
                 if bool(runtime_context.get("session_terminal", False)):
                     await _emit_notice(
                         session_id=session_id,
+                        client_message_id=client_message_id,
                         level="error",
                         message="Persona session is stopped.",
                         reason_code="SESSION_TERMINAL",
@@ -10308,6 +10615,7 @@ async def persona_stream(
                 if audio_format not in allowed_audio_formats:
                     await _emit_notice(
                         session_id=session_id,
+                        client_message_id=client_message_id,
                         level="error",
                         reason_code="AUDIO_FORMAT_UNSUPPORTED",
                         message=f"Unsupported audio_format '{audio_format}'",
@@ -10329,6 +10637,7 @@ async def persona_stream(
                         reason_code = "AUDIO_CHUNK_TOO_LARGE"
                     await _emit_notice(
                         session_id=session_id,
+                        client_message_id=client_message_id,
                         level="error",
                         message=error_message,
                         reason_code=reason_code,
@@ -10338,6 +10647,7 @@ async def persona_stream(
                 if len(audio_bytes) > audio_chunk_max_bytes:
                     await _emit_notice(
                         session_id=session_id,
+                        client_message_id=client_message_id,
                         level="error",
                         reason_code="AUDIO_CHUNK_TOO_LARGE",
                         message=f"Audio chunk exceeds max bytes ({len(audio_bytes)} > {audio_chunk_max_bytes})",
@@ -10351,6 +10661,7 @@ async def persona_stream(
                 if len(session_window) >= audio_chunks_per_minute:
                     await _emit_notice(
                         session_id=session_id,
+                        client_message_id=client_message_id,
                         level="warning",
                         reason_code="AUDIO_RATE_LIMITED",
                         message=f"Audio chunk rate limit exceeded ({audio_chunks_per_minute}/minute)",
@@ -10361,11 +10672,20 @@ async def persona_stream(
                 timestamp_ms = int(time.time() * 1000)
                 transcript_delta = ""
                 auto_commit_triggered = False
-                should_fallback_to_scaffold = True
                 buffer_updated_from_snapshot = False
-                stt_state, _voice_runtime = _get_or_create_persona_live_stt_state(session_id)
+                stt_state = persona_live_stt_state_by_session.get(session_id)
+                if stt_state is None:
+                    persona_live_voice_registry.clear(
+                        user_id=authenticated_user_id, session_id=session_id, connection_id=voice_connection_id,
+                    )
+                    await _emit_notice(
+                        session_id=session_id, client_message_id=client_message_id,
+                        level="error", reason_code="VOICE_STT_UNAVAILABLE",
+                        message="Speech transcription stopped. Start voice again to prepare the runtime.",
+                    )
+                    continue
                 if stt_state is not None:
-                    should_fallback_to_scaffold = False
+                    stt_state["client_message_id"] = client_message_id
                     transcriber = stt_state.get("transcriber")
                     turn_detector = stt_state.get("turn_detector")
                     try:
@@ -10411,13 +10731,15 @@ async def persona_stream(
                             exc,
                         )
                         _cleanup_persona_live_stt_state(session_id)
-                        should_fallback_to_scaffold = True
-
-                if should_fallback_to_scaffold:
-                    transcript_delta = await _transcribe_audio_chunk(
-                        audio_bytes,
-                        audio_format=audio_format,
-                    )
+                        persona_live_voice_registry.clear(
+                            user_id=authenticated_user_id, session_id=session_id, connection_id=voice_connection_id,
+                        )
+                        await _emit_notice(
+                            session_id=session_id, client_message_id=client_message_id,
+                            level="error", reason_code="VOICE_STT_UNAVAILABLE",
+                            message="Speech transcription failed. Check the selected speech model and start voice again.",
+                        )
+                        continue
                 if transcript_delta:
                     transcript_seq = transcript_seq_by_session[session_id]
                     transcript_seq_by_session[session_id] += 1
@@ -10434,6 +10756,7 @@ async def persona_stream(
                         {
                             "event": "partial_transcript",
                             "session_id": session_id,
+                            "client_message_id": client_message_id,
                             "text_delta": transcript_delta,
                             "audio_format": audio_format,
                             "seq": transcript_seq,
@@ -10450,81 +10773,6 @@ async def persona_stream(
                         client_message_id=msg.get("client_message_id"),
                     )
 
-                if "tts_text" not in msg:
-                    continue
-
-                tts_text = str(msg.get("tts_text") or f"You said: {transcript_delta or 'audio received.'}")
-                tts_source_len = len(tts_text.encode("utf-8"))
-                tts_chunks = await _generate_tts_audio_chunks(
-                    tts_text,
-                    audio_format=audio_format,
-                    chunk_size_bytes=tts_chunk_size_bytes,
-                    max_chunks=tts_max_chunks,
-                    max_total_bytes=tts_max_total_bytes,
-                )
-                emitted_tts_bytes = sum(len(chunk) for chunk in tts_chunks)
-                if tts_chunks and emitted_tts_bytes < tts_source_len:
-                    await _emit_notice(
-                        session_id=session_id,
-                        level="warning",
-                        reason_code="TTS_OUTPUT_TRUNCATED",
-                        message=f"TTS output truncated ({emitted_tts_bytes} of {tts_source_len} bytes)",
-                    )
-
-                total_chunks = len(tts_chunks)
-                for idx, chunk in enumerate(tts_chunks):
-                    if tts_in_flight_by_session[session_id] >= tts_max_in_flight_chunks:
-                        await _emit_notice(
-                            session_id=session_id,
-                            level="warning",
-                            reason_code="TTS_BACKPRESSURE_DROP",
-                            message=f"Dropping TTS chunk due to in-flight limit ({tts_max_in_flight_chunks})",
-                        )
-                        break
-
-                    chunk_seq = tts_seq_by_session[session_id]
-                    tts_seq_by_session[session_id] += 1
-                    chunk_id = uuid.uuid4().hex
-                    tts_in_flight_by_session[session_id] += 1
-                    await stream.send_json(
-                        {
-                            "event": "tts_audio",
-                            "session_id": session_id,
-                            "audio_format": audio_format,
-                            "chunk_id": chunk_id,
-                            "chunk_index": idx,
-                            "chunk_count": total_chunks,
-                            "seq": chunk_seq,
-                            "timestamp_ms": int(time.time() * 1000),
-                        }
-                    )
-                    try:
-                        await stream.ws.send_bytes(chunk)
-                    except Exception as exc:
-                        await _emit_notice(
-                            session_id=session_id,
-                            level="warning",
-                            message=f"Failed to send tts audio binary chunk: {exc}",
-                            reason_code="TTS_SEND_FAILED",
-                        )
-                        tts_in_flight_by_session[session_id] = max(
-                            0, tts_in_flight_by_session[session_id] - 1
-                        )
-                        break
-                    tts_in_flight_by_session[session_id] = max(
-                        0, tts_in_flight_by_session[session_id] - 1
-                    )
-                await _record_turn(
-                    session_id=session_id,
-                    role="assistant",
-                    content=tts_text,
-                    turn_type="tts_audio",
-                    metadata={"audio_format": audio_format, "chunks": len(tts_chunks)},
-                    persist_as_memory=False,
-                    persona_id_override=runtime_persona_id,
-                    runtime_mode_override=runtime_mode,
-                    scope_snapshot_id_override=runtime_scope_snapshot_id,
-                )
             elif mtype == "confirm_plan":
                 if not await _is_stream_auth_valid():
                     await _close_for_auth_revocation()
@@ -10847,6 +11095,12 @@ async def persona_stream(
             elif mtype == "cancel":
                 session_id = _normalize_ws_identifier(msg.get("session_id"), fallback=default_session_id)
                 reason = str(msg.get("reason") or "user_cancelled")
+                live_conversation.persona_live_turn_registry.cancel(user_id=authenticated_user_id, session_id=session_id)
+                # Retire the queue even if dispatched work delays cancellation.
+                # A subsequent explicit send must not wait for that old owner.
+                turn_locks.pop(session_id, None)
+                persona_live_voice_registry.clear(user_id=authenticated_user_id, session_id=session_id, connection_id=voice_connection_id)
+                _cleanup_persona_live_stt_state(session_id)
                 _cancel_persona_live_processing_notice(session_id)
                 cleared = session_manager.clear_plans(session_id=session_id, user_id=connection_user_id)
                 await _emit_notice(
@@ -10905,34 +11159,42 @@ async def persona_stream(
             with contextlib.suppress(Exception):
                 await ws.close(code=1011)
     finally:
-        if auth_watchdog_stop is not None:
-            auth_watchdog_stop.set()
-        if auth_watchdog_task is not None:
-            auth_watchdog_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await auth_watchdog_task
-        for session_id in list(persona_live_summary_sessions_seen):
-            _upsert_persona_live_session_summary_safe(
-                session_id=session_id,
-                voice_runtime=None,
-                finalize=True,
-            )
-        for session_id in list(observed_live_control_session_ids):
-            if live_control_stream_user_id:
-                persona_live_stream_registry.mark_disconnected(
-                    user_id=live_control_stream_user_id,
-                    session_id=session_id,
+        # ASGI servers may cancel the request scope on disconnect. Complete
+        # owned cleanup under that scope rather than abandoning model workers.
+        from anyio import CancelScope
+
+        with CancelScope(shield=True):
+            for session_id in list(persona_live_summary_sessions_seen):
+                _upsert_persona_live_session_summary_safe(
+                    session_id=session_id, voice_runtime=None, finalize=True,
                 )
-        for session_id in list(persona_live_stt_state_by_session.keys()):
-            _cleanup_persona_live_stt_state(session_id)
-        persona_live_wake_state_by_session.clear()
-        if stream is not None:
-            with contextlib.suppress(Exception):
-                await stream.stop()
-            with contextlib.suppress(Exception):
-                await stream.ws.close()
-        if persona_scope_db is not None:
-            with contextlib.suppress(Exception):
-                persona_scope_db.close_all_connections()
-            with contextlib.suppress(Exception):
-                persona_scope_db.close_connection()
+            for session_id in list(observed_live_control_session_ids):
+                if live_control_stream_user_id:
+                    persona_live_voice_registry.clear(user_id=live_control_stream_user_id, session_id=session_id, connection_id=voice_connection_id)
+                    persona_live_stream_registry.mark_disconnected(
+                        user_id=live_control_stream_user_id, session_id=session_id, connection_id=voice_connection_id,
+                    )
+            cleanup_tasks = list(owned_control_tasks | owned_turn_tasks | persona_voice_prepare_tasks)
+            for task in cleanup_tasks:
+                task.cancel()
+            if cleanup_tasks:
+                await asyncio.gather(*cleanup_tasks, return_exceptions=True)
+            if auth_watchdog_stop is not None:
+                auth_watchdog_stop.set()
+            if auth_watchdog_task is not None:
+                auth_watchdog_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await auth_watchdog_task
+            for session_id in list(persona_live_stt_state_by_session.keys()):
+                _cleanup_persona_live_stt_state(session_id)
+            persona_live_wake_state_by_session.clear()
+            if stream is not None:
+                with contextlib.suppress(Exception):
+                    await stream.stop()
+                with contextlib.suppress(Exception):
+                    await stream.ws.close()
+            if persona_scope_db is not None:
+                with contextlib.suppress(Exception):
+                    persona_scope_db.close_all_connections()
+                with contextlib.suppress(Exception):
+                    persona_scope_db.close_connection()

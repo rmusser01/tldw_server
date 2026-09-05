@@ -1024,6 +1024,7 @@ const SidepanelPersona = ({
       const nextTab = key as PersonaGardenTabKey
       if (activeTabRef.current === "live" && nextTab !== "live") {
         void liveVoiceController.stopWakeListening("tab_switch")
+        liveVoiceController.resetTurn()
       }
       setActiveTab(nextTab)
     },
@@ -1307,6 +1308,9 @@ const SidepanelPersona = ({
       connected={connected}
       state={liveVoiceController.state}
       speechAvailable={liveVoiceController.speechAvailable}
+      isVoiceActive={liveVoiceController.isVoiceActive}
+      isPreparing={liveVoiceController.isPreparing}
+      voiceReady={liveVoiceController.voiceReady}
       isListening={liveVoiceController.isListening}
       heardText={liveVoiceController.heardText}
       lastCommittedText={liveVoiceController.lastCommittedText}

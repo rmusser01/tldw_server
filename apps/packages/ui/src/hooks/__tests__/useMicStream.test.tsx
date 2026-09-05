@@ -107,6 +107,37 @@ describe("useMicStream", () => {
     expect(view.getInt16(10, true)).toBe(32767)
   })
 
+  it("rejects a retired processor's queued frame after Stop and a new capture", async () => {
+    const onChunk = vi.fn()
+    const { result } = renderHook(() => useMicStream(onChunk))
+    await act(async () => { await result.current.start() })
+    const retiredProcessor = mockProcessor
+    act(() => result.current.stop())
+    await act(async () => { await result.current.start() })
+    retiredProcessor?.onaudioprocess?.({
+      inputBuffer: { getChannelData: () => new Float32Array([0.5]) }
+    } as unknown as AudioProcessingEvent)
+    expect(onChunk).not.toHaveBeenCalled()
+    emitAudioFrame(new Float32Array([0.25]))
+    expect(onChunk).toHaveBeenCalledOnce()
+  })
+
+  it("a retired permission rejection cannot stop a newer microphone owner", async () => {
+    let rejectOld!: (error: Error) => void
+    mockGetUserMedia.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectOld = reject }))
+    const { result } = renderHook(() => useMicStream(vi.fn()))
+    let oldStart!: Promise<void>
+    await act(async () => { oldStart = result.current.start(); await Promise.resolve() })
+    act(() => result.current.stop())
+    await act(async () => { await result.current.start() })
+    await act(async () => {
+      rejectOld(new Error("old permission rejected"))
+      await expect(oldStart).rejects.toThrow("old permission rejected")
+    })
+    expect(result.current.active).toBe(true)
+    expect(getActiveAudioCaptureOwner()).toBe("live_voice")
+  })
+
   it("can emit Float32 chunks for backend VAD/STT streams", async () => {
     const onChunk = vi.fn()
     const { result } = renderHook(() =>

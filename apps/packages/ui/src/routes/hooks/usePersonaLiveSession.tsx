@@ -692,6 +692,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
       }
 
       ws.onmessage = (event) => {
+        if (!mountedRef.current || wsRef.current !== ws) return
         if (typeof event.data !== "string") {
           if (event.data instanceof ArrayBuffer) {
             liveVoiceControllerRef.current?.handleBinaryPayload(
