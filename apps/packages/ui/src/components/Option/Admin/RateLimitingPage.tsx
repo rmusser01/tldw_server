@@ -67,7 +67,9 @@ const RateLimitingPage: React.FC = () => {
   const loadCoverage = useCallback(async () => {
     setCoverageLoading(true)
     try {
-      const result = await tldwClient.getGovernorCoverage()
+      // Request the full route lists - the endpoint's default caps them at
+      // 50, which silently hid most of a 558-route audit (#2890).
+      const result = await tldwClient.getGovernorCoverage({ limit: 5000 })
       setCoverage(result)
     } catch (err) {
       markAdminGuardFromError(err)
@@ -250,6 +252,15 @@ const RateLimitingPage: React.FC = () => {
             </div>
             <div>
               <strong>{t("settings:adminRateLimiting.policyStore", "Store:")}</strong> {policy.store || "file"}
+              {(policy.store || "file") === "file" && (
+                <span style={{ color: "var(--color-text-secondary, #888)" }}>
+                  {" "}
+                  {t(
+                    "settings:adminRateLimiting.policyStoreHint",
+                    "(policies live in the YAML at [ResourceGovernor] policy_path in Config_Files/config.txt; edit on the server and restart)"
+                  )}
+                </span>
+              )}
             </div>
             <div>
               <strong>{t("settings:adminRateLimiting.policyVersion", "Version:")}</strong> {policy.version ?? "\u2014"}
@@ -299,6 +310,20 @@ const RateLimitingPage: React.FC = () => {
             {unprotectedRoutes.length > 0 && (
               <div>
                 <strong>{t("settings:adminRateLimiting.unprotectedRoutes", "Unprotected Routes:")}</strong>
+                {unprotectedRoutes.length < unprotectedCount && (
+                  // Older servers ignore the limit param and still cap the
+                  // list - never present a partial audit as complete (#2890).
+                  <div style={{ color: "var(--color-text-secondary, #888)" }}>
+                    {t(
+                      "settings:adminRateLimiting.unprotectedTruncated",
+                      "Showing the first {{shown}} of {{total}} unprotected routes reported by the server.",
+                      {
+                        shown: unprotectedRoutes.length,
+                        total: unprotectedCount
+                      }
+                    )}
+                  </div>
+                )}
                 <Table
                   dataSource={unprotectedRoutes.map((r: any, i: number) =>
                     typeof r === "string" ? { route: r, key: i } : { ...r, key: i }
@@ -330,7 +355,15 @@ const RateLimitingPage: React.FC = () => {
           {t(
             "settings:adminRateLimiting.overridesDescription",
             "Overrides created for specific users or API keys. Baseline limits come from the resource governor policy above."
-          )}
+          )}{" "}
+          {/* The only UI that creates an override today is the API Keys
+              create dialog - link the workflow instead of dead-ending (#2895). */}
+          <a href="/admin/api-keys">
+            {t(
+              "settings:adminRateLimiting.overridesCreateLink",
+              "Set a per-key limit when creating an API key in API Keys."
+            )}
+          </a>
         </p>
         {rateLimitsError ? (
           <Alert title={rateLimitsError} />

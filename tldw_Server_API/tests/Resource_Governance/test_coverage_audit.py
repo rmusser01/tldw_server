@@ -179,6 +179,25 @@ class TestAuditGovernorCoverage:
         assert len(result["protected_routes"]) == 50
         assert result["protected_count"] == 60
 
+    def test_route_limit_returns_full_lists(self):
+        """route_limit lets admin callers fetch the complete audit (#2890)."""
+        routes = [_MockRoute(f"/docs/page{i}", {"GET"}) for i in range(60)]
+        app = _MockApp(routes=routes)
+        result = audit_governor_coverage(app, route_limit=1000)
+
+        assert len(result["unprotected_routes"]) == 60
+        assert result["unprotected_count"] == 60
+        assert result["route_list_limit"] == 1000
+
+    def test_route_list_limit_reported_for_default_cap(self):
+        """Clients can detect truncation from the reported list limit (#2890)."""
+        routes = [_MockRoute(f"/docs/page{i}", {"GET"}) for i in range(60)]
+        app = _MockApp(routes=routes)
+        result = audit_governor_coverage(app)
+
+        assert result["route_list_limit"] == 50
+        assert len(result["unprotected_routes"]) == result["route_list_limit"]
+
     def test_routes_without_methods_skipped(self):
         """Routes without methods attribute are skipped (e.g., Mount)."""
 

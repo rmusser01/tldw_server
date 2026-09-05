@@ -573,7 +573,18 @@ async def rg_diag_capabilities():
     dependencies=[Depends(RequireRole("admin"))],
     summary="Resource Governor endpoint coverage audit",
 )
-async def rg_coverage_audit():
+async def rg_coverage_audit(
+    limit: int = Query(
+        50,
+        ge=1,
+        le=5000,
+        description=(
+            "Maximum entries returned in each route list. Counts always "
+            "reflect full totals; compare list length against the counts "
+            "(or route_list_limit) to detect truncation."
+        ),
+    ),
+):
     """Report which endpoints are governor-protected and which are excluded.
 
     Returns coverage percentage and lists of protected/unprotected routes.
@@ -584,7 +595,7 @@ async def rg_coverage_audit():
         )
 
         app = _get_app()
-        result = audit_governor_coverage(app)
+        result = audit_governor_coverage(app, route_limit=limit)
         return JSONResponse(result)
     except Exception:  # noqa: BLE001 - generic 500 handler
         logger.exception("rg_coverage_audit failed")
