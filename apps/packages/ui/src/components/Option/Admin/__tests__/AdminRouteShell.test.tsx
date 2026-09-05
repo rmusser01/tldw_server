@@ -24,6 +24,22 @@ describe("AdminRouteShell", () => {
     }
   })
 
+  it("wraps the module nav instead of clipping modules past the viewport (#2888)", () => {
+    render(
+      <MemoryRouter>
+        <AdminRouteShell path="/admin/server">
+          <div>content</div>
+        </AdminRouteShell>
+      </MemoryRouter>
+    )
+
+    const nav = screen.getByRole("navigation", { name: "Admin modules" })
+    const row = nav.firstElementChild as HTMLElement
+    expect(row.className).toContain("flex-wrap")
+    expect(row.className).not.toContain("whitespace-nowrap")
+    expect(row.className).not.toContain("overflow-x-auto")
+  })
+
   it("marks the current module and titles the document after it", () => {
     render(
       <MemoryRouter>
