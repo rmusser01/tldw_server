@@ -144,10 +144,29 @@ satisfy those live checks.
 
 ### Recorded verification on 2026-09-04
 
-No llama-server/model paths were supplied, so the live test was skipped. No live
-reuse metrics, verified production hash or real Chatbook mutation proof is
-claimed. TASK-13163 remains open pending that evidence. See the task's Stage 3
-report for targeted automated UI and harness validation.
+Initial verification skipped the live test until assets were supplied. A later
+operator-approved run used an isolated copy of build 10430, commit `4c1a0af40`,
+with its matching August library links and the supplied Gemma 4 26B A4B Q4_K_M
+model. The original installation had stale library links and was not modified.
+The worktree required the supported `TLDW_VERSION=0.1.41` override because its
+virtualenv lacked installed package metadata.
+
+**The live reuse test failed.** Save and restore both completed with 2770 tokens
+and a 266502188-byte artifact, but the subsequent request reported
+`timings.cache_n = 0`, below the required 80% reuse threshold. The cold-control
+request also ran, but the harness stopped at the failed reuse assertion before
+publishing its complete metrics report. This is negative evidence for this exact
+tested configuration, not proof that snapshots work or that the underlying
+cause has been identified. All disposable child processes exited.
+
+- Executable SHA-256: `d3bce60d45758268a90e0fca82ce5a22d5c35ecb92a06d1c544ed68ec2efa769`.
+- Model SHA-256: `acae52237b2abba49223a346ff8154fa15489f103676e6d10107cfa099720e38`.
+- Configuration: CPU, context 16384, parallelism 1, native completion slot 0.
+- Result: 1 live failure, 5 metric-validator passes in 180.21 seconds.
+
+The executable hash alone does not describe the corrected dynamic-library
+bundle. No production hash was admitted. TASK-13163 remains open for diagnosis,
+successful measured reuse, and real Admin/Chatbook/Pause/Resume verification.
 
 Architecture: [ADR-043](../ADR/043-managed-llamacpp-manual-slot-snapshots.md).
 Approved workflow: [design](../Design/2026-09-04-llamacpp-manual-slot-snapshots.md).
