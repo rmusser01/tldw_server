@@ -10,6 +10,7 @@ import {
 import { ServicePromptApiError } from "@/services/tldw/domains/service-prompts"
 import type {
   KnownServicePromptId,
+  ServicePromptCatalogItem,
   ServicePromptDetail,
   ServicePromptRequestScope,
   ServicePromptSource
@@ -320,6 +321,21 @@ const LEGACY_RENDER_DEFINITIONS = Object.freeze({
       mode: "template",
       required_variables: ["query"]
     }]
+  }),
+  "image.prompt.refinement": freezeRenderDefinition({
+    id: "image.prompt.refinement",
+    parts: [
+      {
+        key: "system_semantics",
+        mode: "literal",
+        required_variables: []
+      },
+      {
+        key: "rewrite_semantics",
+        mode: "literal",
+        required_variables: []
+      }
+    ]
   })
 })
 
@@ -690,6 +706,22 @@ const legacySnapshot = async (
     }
   }
 
+  if (requested.has("image.prompt.refinement")) {
+    definitions["image.prompt.refinement"] = {
+      definition: LEGACY_RENDER_DEFINITIONS["image.prompt.refinement"],
+      parts: {
+        system_semantics:
+          LEGACY_SERVICE_PROMPT_DEFAULTS["image.prompt.refinement"]
+            .system_semantics,
+        rewrite_semantics:
+          LEGACY_SERVICE_PROMPT_DEFAULTS["image.prompt.refinement"]
+            .rewrite_semantics
+      },
+      source: "packaged",
+      revision: null
+    }
+  }
+
   throwIfAborted(lease.signal)
   return freezeSnapshot(scope, "legacy-404", definitions, lease)
 }
@@ -703,6 +735,7 @@ export const loadServicePromptSnapshot = async (
 ): Promise<ServicePromptSnapshot> => {
   const lease = createServicePromptScopeLease(options.signal)
   try {
+    const requested = [...new Set(ids)]
     throwIfAborted(lease.signal)
     const scope = await resolveServicePromptScope({ signal: lease.signal })
     const expectedRequestScope = options.requestScope
@@ -721,8 +754,9 @@ export const loadServicePromptSnapshot = async (
     }
     lease.bind(scope)
     throwIfAborted(lease.signal)
+    let catalog: ServicePromptCatalogItem[]
     try {
-      await tldwClient.listServicePrompts({
+      catalog = await tldwClient.listServicePrompts({
         signal: lease.signal,
         requestScope: scope
       })
@@ -741,13 +775,19 @@ export const loadServicePromptSnapshot = async (
       throw error
     }
 
-    const requested = [...new Set(ids)]
-    const candidates = await readLegacyServicePromptCandidates({
-      signal: lease.signal
-    })
+    const advertisedIds = new Set(catalog.map((definition) => definition.id))
+    const catalogOmitsImageRefinement =
+      requested.includes("image.prompt.refinement") &&
+      !advertisedIds.has("image.prompt.refinement")
+    const requestedFromServer = requested.filter(
+      (id) => id !== "image.prompt.refinement" || !catalogOmitsImageRefinement
+    )
+    const candidates = requestedFromServer.length > 0
+      ? await readLegacyServicePromptCandidates({ signal: lease.signal })
+      : []
     throwIfAborted(lease.signal)
     const unresolved = candidates.filter((candidate) =>
-      requested.includes(candidate.definitionId)
+      requestedFromServer.includes(candidate.definitionId)
     )
     if (unresolved.length > 0) {
       const error = new Error(
@@ -759,20 +799,49 @@ export const loadServicePromptSnapshot = async (
       throw error
     }
 
-    const details = await Promise.all(requested.map((id) =>
-      tldwClient.getServicePrompt(id, {
-        signal: lease.signal,
-        requestScope: scope
-      })
-    ))
+    const details = await Promise.all(requestedFromServer.map(async (id) => {
+      try {
+        return await tldwClient.getServicePrompt(id, {
+          signal: lease.signal,
+          requestScope: scope
+        })
+      } catch (error) {
+        if (
+          id === "image.prompt.refinement" &&
+          error instanceof ServicePromptApiError &&
+          error.status === 404
+        ) {
+          return null
+        }
+        throw error
+      }
+    }))
     throwIfAborted(lease.signal)
+    const usePackagedImageRefinement =
+      catalogOmitsImageRefinement || details.some((detail) => detail === null)
     const definitions: Partial<Record<KnownServicePromptId, SnapshotDefinition>> = {}
     for (const detail of details) {
+      if (!detail) continue
       definitions[detail.id as KnownServicePromptId] = {
         definition: detail,
         parts: { ...detail.effective_parts },
         source: detail.source,
         revision: detail.revision
+      }
+    }
+    if (usePackagedImageRefinement) {
+      definitions["image.prompt.refinement"] = {
+        definition: LEGACY_RENDER_DEFINITIONS["image.prompt.refinement"],
+        parts: {
+          system_semantics:
+            LEGACY_SERVICE_PROMPT_DEFAULTS["image.prompt.refinement"]
+              .system_semantics,
+          rewrite_semantics:
+            LEGACY_SERVICE_PROMPT_DEFAULTS["image.prompt.refinement"]
+              .rewrite_semantics
+        },
+        source: "packaged",
+        revision: null
       }
     }
     return freezeSnapshot(scope, "supported", definitions, lease)

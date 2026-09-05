@@ -6296,6 +6296,12 @@
   "servicePrompts_definitions_chatTitleGeneration_description": {
     "message": "Controls the instruction used to generate automatic conversation titles."
   },
+  "servicePrompts_definitions_imagePromptRefinement_label": {
+    "message": "Image prompt refinement"
+  },
+  "servicePrompts_definitions_imagePromptRefinement_description": {
+    "message": "Controls the semantic instructions used to refine image-generation prompt drafts."
+  },
   "servicePrompts_definitions_notesTitleGenerate_label": {
     "message": "Notes title"
   },
@@ -6305,11 +6311,20 @@
   "servicePrompts_workflows_automaticConversationTitles": {
     "message": "Automatic conversation titles"
   },
+  "servicePrompts_workflows_imagePromptRefinement": {
+    "message": "Image prompt refinement"
+  },
   "servicePrompts_workflows_automaticNotesTitles": {
     "message": "Automatic Notes titles"
   },
   "servicePrompts_parts_titleInstruction": {
     "message": "Title instruction"
+  },
+  "servicePrompts_parts_systemSemantics": {
+    "message": "Refinement guidance"
+  },
+  "servicePrompts_parts_rewriteSemantics": {
+    "message": "Rewrite guidance"
   },
   "servicePrompts_titleGeneration_note": {
     "message": "Automatic title generation is enabled or disabled in Chat settings."

@@ -199,6 +199,28 @@ const catalog: ServicePromptCatalogItem[] = [
     ]
   },
   {
+    id: "image.prompt.refinement",
+    label: "Server image refinement prompt",
+    description: "Server image refinement prompt description",
+    parts: [
+      {
+        key: "system_semantics",
+        label: "Server refinement guidance",
+        mode: "literal",
+        required_variables: []
+      },
+      {
+        key: "rewrite_semantics",
+        label: "Server rewrite guidance",
+        mode: "literal",
+        required_variables: []
+      }
+    ],
+    affected_workflows: [
+      { id: "image.prompt.refinement", label: "Server image workflow" }
+    ]
+  },
+  {
     id: "notes.title.generate",
     label: "Server Notes title prompt",
     description: "Server Notes title prompt description",
@@ -241,12 +263,18 @@ const detailFor = (
       ? { template: "History: {chat_history}\nQuestion: {question}" }
       : definition.id === "chat.title.generation"
         ? { user_template: "Create a short title for {query}" }
-      : definition.id === "notes.title.generate"
-        ? {
-            system: "Write concise document titles.",
-            title_instruction: "Write a descriptive title"
-          }
-        : { template: "At {current_date_time}:\n{search_results}" }
+        : definition.id === "image.prompt.refinement"
+          ? {
+              system_semantics:
+                "You refine image-generation prompts. Preserve intent.",
+              rewrite_semantics: "Return a generation-ready prompt."
+            }
+          : definition.id === "notes.title.generate"
+            ? {
+                system: "Write concise document titles.",
+                title_instruction: "Write a descriptive title"
+              }
+            : { template: "At {current_date_time}:\n{search_results}" }
   const effective = options.parts ?? defaults
   const source = options.source ?? "packaged"
   return {
@@ -472,7 +500,7 @@ describe("ServicePromptsSettings", () => {
     expect(document.querySelector("h1")).toBeNull()
   })
 
-  it("renders the six localized definitions, query selection, status, workflows, and exact scope", async () => {
+  it("renders the seven localized definitions, query selection, status, workflows, and exact scope", async () => {
     window.history.replaceState(
       {},
       "",
@@ -481,7 +509,7 @@ describe("ServicePromptsSettings", () => {
     renderSettings()
 
     expect(await screen.findAllByTestId("service-prompt-list-item"))
-      .toHaveLength(6)
+      .toHaveLength(7)
     expect(await screen.findByRole("heading", { name: "Text translation" }))
       .toBeInTheDocument()
     expect(screen.getByText("Server default")).toBeInTheDocument()
@@ -520,6 +548,25 @@ describe("ServicePromptsSettings", () => {
     )
     expect(screen.getByText("Automatic Notes titles")).toBeVisible()
     expect(screen.queryByText("Server Notes title prompt")).not.toBeInTheDocument()
+  })
+
+  it("localizes and edits the image prompt refinement semantics", async () => {
+    renderSettings()
+
+    await openPrompt("Image prompt refinement")
+
+    expect(screen.getByRole("heading", { name: "Image prompt refinement" }))
+      .toBeVisible()
+    expect(screen.getByLabelText("Refinement guidance")).toHaveValue(
+      "You refine image-generation prompts. Preserve intent."
+    )
+    expect(screen.getByLabelText("Rewrite guidance")).toHaveValue(
+      "Return a generation-ready prompt."
+    )
+    expect(screen.getByText("Image prompt refinement", { selector: "li" }))
+      .toBeVisible()
+    expect(screen.queryByText("Server image refinement prompt"))
+      .not.toBeInTheDocument()
   })
 
   it("uses the Prompts Link and reverses dirty HashRouter Back and Forward", async () => {

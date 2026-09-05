@@ -130,6 +130,20 @@ const definitions: Record<KnownServicePromptId, ServicePromptCatalogItem> = {
     mode: "template",
     required_variables: ["query"]
   }]),
+  "image.prompt.refinement": definition("image.prompt.refinement", [
+    {
+      key: "system_semantics",
+      label: "Refinement guidance",
+      mode: "literal",
+      required_variables: []
+    },
+    {
+      key: "rewrite_semantics",
+      label: "Rewrite guidance",
+      mode: "literal",
+      required_variables: []
+    }
+  ]),
   "media.text.translation": definition("media.text.translation", [
     {
       key: "system",
@@ -161,12 +175,13 @@ const definitions: Record<KnownServicePromptId, ServicePromptCatalogItem> = {
 }
 
 describe("Service Prompt validation and rendering", () => {
-  it("keeps old-server Chat defaults byte-equivalent to the shared fixture", () => {
+  it("keeps old-server defaults byte-equivalent to the shared fixture", () => {
     expect(LEGACY_SERVICE_PROMPT_DEFAULTS).toEqual({
       "chat.rag.answer": fixture.defaults["chat.rag.answer"],
       "chat.rag.question_rewrite": fixture.defaults["chat.rag.question_rewrite"],
       "chat.web_search.answer": fixture.defaults["chat.web_search.answer"],
-      "chat.title.generation": fixture.defaults["chat.title.generation"]
+      "chat.title.generation": fixture.defaults["chat.title.generation"],
+      "image.prompt.refinement": fixture.defaults["image.prompt.refinement"]
     })
   })
 
@@ -722,6 +737,114 @@ describe("Service Prompt migration and runtime snapshots", () => {
     expect(mocks.syncGet).not.toHaveBeenCalled()
     snapshot.release()
   })
+
+  it("uses packaged image-refinement semantics on old servers without reading legacy storage", async () => {
+    mocks.listServicePrompts.mockRejectedValue(
+      new ServicePromptApiError("Not found", { status: 404 })
+    )
+
+    const snapshot = await loadServicePromptSnapshot([
+      "image.prompt.refinement"
+    ])
+
+    expect(snapshot).toMatchObject({
+      capability: "legacy-404",
+      definitions: {
+        "image.prompt.refinement": {
+          definition: {
+            id: "image.prompt.refinement",
+            parts: [
+              {
+                key: "system_semantics",
+                mode: "literal",
+                required_variables: []
+              },
+              {
+                key: "rewrite_semantics",
+                mode: "literal",
+                required_variables: []
+              }
+            ]
+          },
+          parts: fixture.defaults["image.prompt.refinement"],
+          source: "packaged",
+          revision: null
+        }
+      }
+    })
+    expect(mocks.promptForRag).not.toHaveBeenCalled()
+    expect(mocks.getWebSearchPrompt).not.toHaveBeenCalled()
+    expect(mocks.localGet).not.toHaveBeenCalled()
+    expect(mocks.syncGet).not.toHaveBeenCalled()
+    snapshot.release()
+  })
+
+  it("uses packaged image-refinement semantics when a supported older catalog omits the definition", async () => {
+    mocks.listServicePrompts.mockResolvedValue(
+      catalog.filter((item) => item.id !== "image.prompt.refinement")
+    )
+
+    const snapshot = await loadServicePromptSnapshot([
+      "image.prompt.refinement"
+    ])
+
+    expect(snapshot).toMatchObject({
+      capability: "supported",
+      definitions: {
+        "image.prompt.refinement": {
+          definition: renderDefinitionFor("image.prompt.refinement"),
+          parts: fixture.defaults["image.prompt.refinement"],
+          source: "packaged",
+          revision: null
+        }
+      }
+    })
+    expect(mocks.getServicePrompt).not.toHaveBeenCalled()
+    expect(mocks.localGet).not.toHaveBeenCalled()
+    expect(mocks.syncGet).not.toHaveBeenCalled()
+    snapshot.release()
+  })
+
+  it("uses packaged image-refinement semantics when an advertised detail returns 404", async () => {
+    mocks.getServicePrompt.mockRejectedValueOnce(
+      new ServicePromptApiError("Not found", { status: 404 })
+    )
+
+    const snapshot = await loadServicePromptSnapshot([
+      "image.prompt.refinement"
+    ])
+
+    expect(snapshot).toMatchObject({
+      capability: "supported",
+      definitions: {
+        "image.prompt.refinement": {
+          definition: renderDefinitionFor("image.prompt.refinement"),
+          parts: fixture.defaults["image.prompt.refinement"],
+          source: "packaged",
+          revision: null
+        }
+      }
+    })
+    expect(mocks.getServicePrompt).toHaveBeenCalledWith(
+      "image.prompt.refinement",
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    )
+    expect(mocks.promptForRag).not.toHaveBeenCalled()
+    expect(mocks.getWebSearchPrompt).not.toHaveBeenCalled()
+    snapshot.release()
+  })
+
+  it.each([412, 500])(
+    "does not fallback when an advertised image-refinement detail returns %s",
+    async (status) => {
+      const error = new ServicePromptApiError("Detail failed", { status })
+      mocks.getServicePrompt.mockRejectedValueOnce(error)
+
+      await expect(
+        loadServicePromptSnapshot(["image.prompt.refinement"])
+      ).rejects.toBe(error)
+    }
+  )
 
   it("rejects a mismatched authenticated user after resolving the matching multi-user target", async () => {
     const multiUserConfig = {

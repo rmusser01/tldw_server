@@ -132,6 +132,12 @@ const KNOWN_DEFINITIONS = {
     description:
       "Controls the instruction used to generate automatic conversation titles."
   },
+  "image.prompt.refinement": {
+    key: "imagePromptRefinement",
+    label: "Image prompt refinement",
+    description:
+      "Controls the semantic instructions used to refine image-generation prompt drafts."
+  },
   "media.text.translation": {
     key: "mediaTextTranslation",
     label: "Text translation",
@@ -166,6 +172,10 @@ const KNOWN_WORKFLOWS: Record<string, { key: string; label: string }> = {
     key: "automaticConversationTitles",
     label: "Automatic conversation titles"
   },
+  "image.prompt.refinement": {
+    key: "imagePromptRefinement",
+    label: "Image prompt refinement"
+  },
   "media.text.translation": {
     key: "textTranslation",
     label: "Text translation"
@@ -179,6 +189,14 @@ const KNOWN_WORKFLOWS: Record<string, { key: string; label: string }> = {
 const KNOWN_PARTS: Record<string, { key: string; label: string }> = {
   template: { key: "template", label: "Template" },
   system: { key: "system", label: "System instructions" },
+  system_semantics: {
+    key: "systemSemantics",
+    label: "Refinement guidance"
+  },
+  rewrite_semantics: {
+    key: "rewriteSemantics",
+    label: "Rewrite guidance"
+  },
   title_instruction: { key: "titleInstruction", label: "Title instruction" },
   user_template: { key: "userTemplate", label: "User template" }
 }

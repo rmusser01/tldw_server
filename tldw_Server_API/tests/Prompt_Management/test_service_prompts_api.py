@@ -168,6 +168,30 @@ def test_service_prompt_catalog_returns_exact_metadata_without_prompt_bodies(
             ],
         },
         {
+            "id": "image.prompt.refinement",
+            "label": "Image prompt refinement",
+            "description": (
+                "Controls the semantic instructions used to refine image-generation prompt drafts."
+            ),
+            "parts": [
+                {
+                    "key": "system_semantics",
+                    "label": "Refinement guidance",
+                    "mode": "literal",
+                    "required_variables": [],
+                },
+                {
+                    "key": "rewrite_semantics",
+                    "label": "Rewrite guidance",
+                    "mode": "literal",
+                    "required_variables": [],
+                },
+            ],
+            "affected_workflows": [
+                {"id": "image.prompt.refinement", "label": "Image prompt refinement"}
+            ],
+        },
+        {
             "id": "media.text.translation",
             "label": "Text translation",
             "description": (
