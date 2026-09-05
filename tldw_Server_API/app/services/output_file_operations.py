@@ -1,7 +1,7 @@
-"""Reserved, bounded output staging; publication/recovery and runtime wiring pending.
+"""Reserved, bounded output staging and publication; cleanup/runtime wiring pending.
 
 Every file operation uses the verified directory descriptor. Failed or ambiguous
-work retains journal authority; this checkpoint never publishes or unlinks files.
+work retains journal authority; this checkpoint never unlinks files or releases claims.
 Async callers wait for each offloaded lock interval to close its writable FD.
 """
 
@@ -75,7 +75,7 @@ async def _wait_worker(function):
 
 
 class OutputFileOperations:
-    """Internal staging on one explicitly bound volume, never an activation API."""
+    """Internal file mutations on one bound volume, never an activation API."""
 
     def __init__(self, db: CollectionsDatabase, *, output_root: Path, storage_namespace_id: str) -> None:
         self.db = db
@@ -246,3 +246,121 @@ class OutputFileOperations:
                     raise RuntimeError(code) from None
                 raise
             return expected_offset + len(data)
+
+    async def copy_source(self, token: str, *, expected_offset: int = 0) -> int:
+        """Copy the recorded source in 1 MiB intervals without publishing it.
+
+        Resume only from the caller's acknowledged offset. Both the read and
+        write intervals revalidate authority, and neither holds a descriptor
+        across an await. No source or ambiguous stage is truncated.
+        """
+        if type(expected_offset) is not int or expected_offset < 0:
+            raise ValueError("output_operation_invalid")
+        offset = expected_offset
+        while True:
+            data = await self._run_interval(partial(self._read_source_chunk, token, offset), token=token)
+            if not data:
+                return offset
+            offset = await self.write_chunk(token, data, expected_offset=offset)
+
+    def _read_source_chunk(self, token: str, offset: int) -> bytes:
+        with _validated_storage_directory(self.output_root, storage_namespace_id=self.namespace) as (_, directory):
+            row = self.db.validate_output_file_operation(token, self.namespace)
+            if row["kind"] != "replace" or row["written_bytes"] != offset or not row["source_identity_json"]:
+                raise RuntimeError("output_operation_conflict")
+            source = json.loads(row["source_identity_json"])
+            if source["size"] > row["reserved_bytes"] - source["size"]:
+                raise RuntimeError("output_size_limit")
+            try:
+                if not row["stage_identity_json"]:
+                    raise RuntimeError("output_operation_conflict")
+                with _open_regular(directory, row["stage_path"], os.O_RDONLY) as fd:
+                    info = os.fstat(fd)
+                    if _identity(info) != json.loads(row["stage_identity_json"]) or info.st_size != offset:
+                        raise RuntimeError("output_operation_conflict")
+                with _open_regular(directory, row["source_path"], os.O_RDONLY) as fd:
+                    if _identity(os.fstat(fd), source=True) != source or offset > source["size"]:
+                        raise RuntimeError("output_source_unavailable")
+                    os.lseek(fd, offset, os.SEEK_SET)
+                    data = os.read(fd, min(MAX_CHUNK_BYTES, source["size"] - offset))
+                    if _identity(os.fstat(fd), source=True) != source:
+                        raise RuntimeError("output_source_unavailable")
+                    if not data and offset != source["size"]:
+                        raise RuntimeError("output_source_unavailable")
+                if _source_identity(directory, row["source_path"]) != source:
+                    raise RuntimeError("output_source_unavailable")
+                return data
+            except BaseException:
+                self.db.abort_output_file_operation(token, self.namespace)
+                raise
+
+    async def publish_and_commit(self, token: str) -> CollectionsDatabase.OutputArtifactRow | None:
+        """Publish without replacement, then atomically apply the recorded mutation.
+
+        Files and reservations deliberately remain for phase-specific recovery;
+        a successful return denotes logical commit, not filesystem completion.
+        """
+        return await self._run_interval(partial(self._publish_and_commit, token), token=token)
+
+    def _publish_and_commit(self, token: str) -> CollectionsDatabase.OutputArtifactRow | None:
+        with _validated_storage_directory(self.output_root, storage_namespace_id=self.namespace) as (_, directory):
+            row = self.db.validate_output_file_operation(token, self.namespace)
+            publication = None
+            try:
+                source = json.loads(row["source_identity_json"]) if row["source_identity_json"] else None
+                if row["kind"] != "create" and (
+                    source is None or _source_identity(directory, row["source_path"]) != source
+                ):
+                    raise RuntimeError("output_source_unavailable")
+                if row["kind"] != "remove":
+                    if not row["stage_identity_json"]:
+                        raise RuntimeError("output_operation_conflict")
+                    stage = json.loads(row["stage_identity_json"])
+                    with _open_regular(directory, row["stage_path"], os.O_RDONLY) as fd:
+                        info = os.fstat(fd)
+                        if _identity(info) != stage or info.st_size != row["written_bytes"]:
+                            raise RuntimeError("output_operation_conflict")
+                        os.fsync(fd)
+                    try:
+                        os.link(
+                            row["stage_path"],
+                            row["destination_path"],
+                            src_dir_fd=directory,
+                            dst_dir_fd=directory,
+                            follow_symlinks=False,
+                        )
+                    except FileExistsError:
+                        raise RuntimeError("output_path_conflict") from None
+                    publication = {**stage, "nlink": 2}
+                    for name in (row["stage_path"], row["destination_path"]):
+                        info = os.stat(name, dir_fd=directory, follow_symlinks=False)
+                        if _identity(info) != publication or info.st_size != row["written_bytes"]:
+                            raise RuntimeError("output_operation_conflict")
+                    os.fsync(directory)
+                if source is not None and _source_identity(directory, row["source_path"]) != source:
+                    raise RuntimeError("output_source_unavailable")
+            except BaseException:
+                # No DB commit was attempted. Keep witness/source for recovery.
+                self.db.abort_output_file_operation(token, self.namespace)
+                raise
+            try:
+                return self.db.apply_output_file_operation(token, self.namespace, publication_identity=publication)
+            except Exception:  # noqa: BLE001 - any commit failure may hide durable success
+                try:
+                    outcome, output = self.db.read_output_file_operation_outcome(token, self.namespace)
+                except Exception:  # noqa: BLE001 - unknown outcome must preserve all evidence
+                    # Never abort or discard evidence when the outcome is unknown.
+                    raise RuntimeError("output_update_unconfirmed") from None
+                if outcome["phase"] == "committed":
+                    return output
+                try:
+                    aborted = self.db.abort_output_file_operation(token, self.namespace)
+                    if not aborted:
+                        outcome, output = self.db.read_output_file_operation_outcome(token, self.namespace)
+                        if outcome["phase"] == "committed":
+                            return output
+                        if outcome["phase"] != "aborting":
+                            raise RuntimeError("output_update_unconfirmed")
+                except Exception:  # noqa: BLE001 - abort acknowledgement can also be lost
+                    raise RuntimeError("output_update_unconfirmed") from None
+                raise RuntimeError("output_operation_conflict") from None

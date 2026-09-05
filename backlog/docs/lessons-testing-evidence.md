@@ -1,5 +1,20 @@
 # Testing Evidence Lessons
 
+## A fresh read alone does not settle an uncertain commit
+
+**Incident (TASK-13153, 2026-09-05):** Publication tests covered a commit that
+completed before its acknowledgement was lost, but review reproduced a later
+interleaving: the fresh outcome read saw `prepared`, the commit then completed,
+and conditional abort returned false. The service incorrectly reported a
+definite conflict even though the output and journal were committed.
+
+**Evidence and rule:** Two real-database/file regressions failed on that false
+conflict. The outcome read now acquires the existing revision fence on its new
+connection, and a failed conditional abort triggers another outcome read.
+Committed state wins; an unreadable outcome remains unconfirmed. Test a commit
+that completes after the first outcome read, not only before it, and inspect
+conditional-transition results before reporting rollback or rejection.
+
 ## Worker cancellation must wait for writable file descriptors to close
 
 **Incident (TASK-13153, 2026-09-05):** A real-file test paused an offloaded output

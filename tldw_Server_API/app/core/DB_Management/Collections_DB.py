@@ -3118,6 +3118,27 @@ class CollectionsDatabase:
             raise KeyError("output_operation_not_found")
         return dict(row)
 
+    def read_output_file_operation_outcome(
+        self, token: str, storage_namespace_id: str
+    ) -> tuple[dict[str, Any], CollectionsDatabase.OutputArtifactRow | None]:
+        """Resolve an uncertain commit using a new, non-pooled connection.
+
+        The caller retains volume exclusion. Never reuse a connection whose
+        commit acknowledgement was lost, or infer rollback from an exception.
+        """
+        with self._operation_backend_pin() as backend:
+            conn = backend.connect()
+            try:
+                with backend.transaction(connection=conn):
+                    self._lock_reading_revision_clock(conn)
+                    row = self.get_output_file_operation(token, storage_namespace_id, connection=conn)
+                    output = None
+                    if row["phase"] == "committed" and row["kind"] != "remove":
+                        output = self.get_output_artifact(row["output_id"], connection=conn)
+                    return row, output
+            finally:
+                backend.disconnect(conn)
+
     def _validate_output_file_operation(self, token: str, storage_namespace_id: str, connection: Any) -> dict[str, Any]:
         row = self.get_output_file_operation(token, storage_namespace_id, connection=connection)
         self._output_storage_policy(storage_namespace_id, connection)

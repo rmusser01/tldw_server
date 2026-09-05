@@ -16,7 +16,7 @@
 opened at `f43549c209` on user request; implementation continues on the same branch).
 **Approved spec:** `Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md`, user approved after checkpoint `8dc255fcca`.
 **Parent plan:** `Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md`; this plan replaces its generic-file-writer gap, not its remaining Reading DTO/HTTP/reconciliation/release tasks.
-**Status:** Inline execution in progress. Task 1, Task 2a, Task 2b, Task 3a staging/write and Task 3b's DB-owned recorded-commit boundary verified on SQLite/PostgreSQL. Filesystem publication/recovery and later tasks remain pending. See checkpoint evidence below.
+**Status:** Inline execution in progress. Task 1, Task 2a, Task 2b, Task 3a staging/write and Task 3b's DB-owned recorded commit plus copy/publication checkpoints verified on SQLite/PostgreSQL. Phase-specific cleanup/recovery and later tasks remain pending. See checkpoint evidence below.
 
 ---
 
@@ -579,3 +579,64 @@ Next: the Task 3b filesystem orchestrator (copy, no-clobber publication, uncerta
 commit acknowledgement and phase-specific recovery). Producer-specific metadata/
 idempotency mapping, route integration and all rollout gates remain pending.
 No runtime wiring, activation, full-task completion or merge is claimed.
+
+### Task 3b filesystem boundary: Bounded copy and no-clobber publication (2026-09-05)
+
+Adds internal `copy_source` and `publish_and_commit` methods. Copy uses at most
+1 MiB buffers, closes source descriptors between intervals, and revalidates the
+token, source fingerprint, stage identity and acknowledged offset on resume,
+including at EOF. Existing bounded writes provide capacity enforcement, syncing,
+lease refresh and cancellation handling. Publication verifies and syncs the private
+file, links without replacement through the verified directory descriptor, checks
+both links and their lengths, then syncs the directory and rechecks the source
+before invoking the recorded DB mutation. Create, replace and remove share this
+logical commit boundary. No file is unlinked and no reservation is released here.
+
+Uncertain commit acknowledgements are resolved on a new non-pooled connection,
+under the existing revision fence. Committed state always wins. If the state
+cannot be established, all files and claims remain and the service reports
+`output_update_unconfirmed`. A failed conditional abort requires another outcome
+read rather than assuming rejection. No new ADR is required: this directly
+implements the approved ADR-003 contract.
+
+TDD: 13 initial real-volume cases failed on missing methods, then passed. Expanded
+fault tests exposed an EOF resume that skipped stage revalidation; the added guard
+made the 22-case group pass. Independent review reproduced a delayed commit that
+completed after the first outcome read: conditional abort returned false but the
+service reported a definite conflict. Both new regressions failed, then passed
+after fencing the fresh read and respecting the abort result. The follow-up review
+confirmed resolution with no further checkpoint findings. The incident is recorded
+in `backlog/docs/lessons-testing-evidence.md`.
+
+Verified evidence: the final SQLite/non-PostgreSQL regression run passes 223
+cases in 21.21 seconds. The broader PostgreSQL run passes 150 cases in 384.59
+seconds, using code loaded before the final review fix. All 24 new PostgreSQL
+copy/publication cases were rerun after that fix and passed in 76.32 seconds.
+These cover 152 distinct PostgreSQL cases (22 repeated), hence 375 distinct
+targeted cases across both backends, with no required-backend skips. Service and
+tests pass Ruff/Black; touched adapter ranges pass Black; compile/diff checks
+pass; scoped Bandit reports zero findings and scanner errors. Adapter Ruff
+retains exactly the nine baseline findings, compared by code/message to HEAD.
+No full suite was run and no Docker instance was provisioned.
+
+Verification commands after activating the Server virtual environment:
+
+```bash
+TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_operations_storage.py tldw_Server_API/tests/Collections/test_output_file_operations_db.py tldw_Server_API/tests/Collections/test_output_file_claims_db.py tldw_Server_API/tests/Collections/test_reading_artifact_storage.py tldw_Server_API/tests/Collections/test_reading_artifact_cleanup.py -q -k 'not postgres'
+TLDW_TEST_NO_DOCKER=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_operations_storage.py tldw_Server_API/tests/Collections/test_output_file_operations_db.py tldw_Server_API/tests/Collections/test_reading_artifact_cleanup.py -q -k 'postgres and not sqlite' -n 2 -x
+TLDW_TEST_NO_DOCKER=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_operations_storage.py -q -k 'postgres and (publication or source_copy)' -n 2 -x
+```
+
+Logs: `/private/tmp/task-13153-publication-{red,green,faults-red,faults-green}.log`,
+`/private/tmp/task-13153-publication-review-{red,green}.log`,
+`/private/tmp/task-13153-publication-sqlite-verified.log`,
+`/private/tmp/task-13153-publication-pg-{final,focused}.log`,
+`/private/tmp/task-13153-publication-bandit-final.json`.
+
+This is not filesystem completion or runtime readiness. Next is phase-specific
+cleanup/recovery: prove witness ownership, sync abort destination removal before
+witness removal, preserve committed publication, fingerprint/reference-check old
+sources, and release reservations only after durable cleanup. Due-work selection,
+bounded retry/blocked reporting, remaining process-crash matrix and all later
+producer/reader/activation tasks remain pending. The complete Task 3 checklist
+and full-task acceptance criteria remain unchecked; PR #2903 remains a draft.

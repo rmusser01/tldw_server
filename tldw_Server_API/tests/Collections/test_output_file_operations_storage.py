@@ -63,6 +63,307 @@ def prepare(writer, original, **kwargs):
     )
 
 
+def test_publication_links_and_syncs_before_atomic_commit_without_disposal(db, storage, monkeypatch):
+    root, namespace, original = storage
+    writer = service(db, storage)
+    operation = prepare(writer, original)
+    token = operation["token"]
+    run(writer.write_chunk, token, b"replacement", expected_offset=0)
+    real_apply, real_fsync = db.apply_output_file_operation, os.fsync
+    directory_synced = []
+
+    def synced(fd):
+        if os.fstat(fd).st_ino == root.stat().st_ino:
+            directory_synced.append(True)
+        return real_fsync(fd)
+
+    def checked_apply(*args, **kwargs):
+        assert directory_synced
+        assert (root / operation["stage_path"]).stat().st_ino == (root / "destination.md").stat().st_ino
+        assert (root / "destination.md").stat().st_nlink == 2
+        assert (root / "source.md").read_bytes() == b"original"
+        assert db.get_output_artifact(original.id) == original
+        return real_apply(*args, **kwargs)
+
+    monkeypatch.setattr(os, "fsync", synced)
+    monkeypatch.setattr(db, "apply_output_file_operation", checked_apply)
+    result = run(writer.publish_and_commit, token)
+    assert result.storage_path == "destination.md"
+    assert (root / "destination.md").read_bytes() == b"replacement"
+    journal = db.get_output_file_operation(token, namespace)
+    assert journal["phase"] == "committed" and not journal["fs_done"]
+    assert journal["reserved_bytes"] == operation["reserved_bytes"]
+    assert (root / operation["stage_path"]).exists()
+    assert (root / "source.md").read_bytes() == b"original"
+
+
+@pytest.mark.parametrize("problem", ["occupied", "source_changed", "stage_replaced", "extra_bytes", "stage_link"])
+def test_publication_rejects_unproved_files_without_clobber(db, storage, problem):
+    root, namespace, original = storage
+    writer = service(db, storage)
+    operation = prepare(writer, original)
+    stage = root / operation["stage_path"]
+    if problem == "occupied":
+        (root / "destination.md").write_bytes(b"other")
+    elif problem == "source_changed":
+        (root / "source.md").write_bytes(b"changed")
+    elif problem == "stage_replaced":
+        stage.rename(root / "old-stage")
+        stage.write_bytes(b"")
+    elif problem == "extra_bytes":
+        stage.write_bytes(b"unacknowledged")
+    else:
+        os.link(stage, root / "extra-link")
+    with pytest.raises(RuntimeError, match="^output_(path_conflict|source_unavailable|operation_conflict)$"):
+        run(writer.publish_and_commit, operation["token"])
+    assert db.get_output_artifact(original.id) == original
+    assert db.get_output_file_operation(operation["token"], namespace)["phase"] == "aborting"
+    assert stage.exists()
+    if problem == "occupied":
+        assert (root / "destination.md").read_bytes() == b"other"
+    else:
+        assert not (root / "destination.md").exists()
+
+
+@pytest.mark.parametrize("committed", [False, True])
+@pytest.mark.parametrize("readable", [False, True])
+def test_publication_uncertain_commit_preserves_evidence_and_reads_fresh(db, storage, monkeypatch, committed, readable):
+    root, namespace, original = storage
+    writer = service(db, storage)
+    operation = prepare(writer, original)
+    real_apply, real_connect = db.apply_output_file_operation, db.backend.connect
+    fresh_connections = []
+
+    def lost_ack(*args, **kwargs):
+        if committed:
+            real_apply(*args, **kwargs)
+        raise OSError("private database details")
+
+    def fresh_connect():
+        fresh_connections.append(True)
+        if not readable:
+            raise OSError("private database details")
+        return real_connect()
+
+    monkeypatch.setattr(db, "apply_output_file_operation", lost_ack)
+    monkeypatch.setattr(db.backend, "connect", fresh_connect)
+    if readable and committed:
+        assert run(writer.publish_and_commit, operation["token"]).storage_path == "destination.md"
+    else:
+        code = "output_operation_conflict" if readable else "output_update_unconfirmed"
+        with pytest.raises(RuntimeError, match=f"^{code}$"):
+            run(writer.publish_and_commit, operation["token"])
+    assert fresh_connections
+    row = db.get_output_file_operation(operation["token"], namespace)
+    assert row["phase"] == ("committed" if committed else "aborting" if readable else "prepared")
+    assert not row["fs_done"] and row["reserved_bytes"]
+    assert (root / "source.md").read_bytes() == b"original"
+    assert (root / "destination.md").stat().st_nlink == 2
+    assert (root / operation["stage_path"]).exists()
+
+
+@pytest.mark.parametrize("kind", ["create", "remove"])
+def test_publication_supports_create_and_remove_without_disposing_files(db, storage, kind):
+    root, namespace, original = storage
+    writer = service(db, storage)
+    operation = run(
+        writer.prepare,
+        kind=kind,
+        output_id=original.id if kind == "remove" else None,
+        destination_path="new.md" if kind == "create" else None,
+        max_output_bytes=0,
+        intended={"title": "New", "type": "report", "format": "md"} if kind == "create" else None,
+    )
+    result = run(writer.publish_and_commit, operation["token"])
+    if kind == "create":
+        assert result.storage_path == "new.md" and (root / "new.md").read_bytes() == b""
+    else:
+        assert result is None
+        with pytest.raises(KeyError):
+            db.get_output_artifact(original.id)
+    assert (root / "source.md").read_bytes() == b"original"
+    assert db.get_output_file_operation(operation["token"], namespace)["phase"] == "committed"
+
+
+def test_source_copy_is_bounded_and_does_not_publish(db, storage, monkeypatch):
+    root, _, original = storage
+    payload = b"01234567" * (300 * 1024)
+    (root / "source.md").write_bytes(payload)
+    writer = service(db, storage)
+    operation = run(
+        writer.prepare, kind="replace", output_id=original.id, destination_path="copy.md", max_output_bytes=len(payload)
+    )
+    real_read, reads = os.read, []
+
+    def bounded_read(fd, size):
+        assert size <= 1024 * 1024
+        reads.append(size)
+        return real_read(fd, size)
+
+    monkeypatch.setattr(os, "read", bounded_read)
+    assert run(writer.copy_source, operation["token"]) == len(payload)
+    assert len(reads) >= 3
+    assert (root / operation["stage_path"]).read_bytes() == payload
+    assert (root / "source.md").read_bytes() == payload
+    assert not (root / "copy.md").exists()
+    assert db.get_output_artifact(original.id) == original
+
+
+def test_source_copy_resume_revalidates_stage_even_at_eof(db, storage):
+    root, namespace, original = storage
+    writer = service(db, storage)
+    operation = prepare(writer, original)
+    run(writer.write_chunk, operation["token"], b"original", expected_offset=0)
+    (root / operation["stage_path"]).write_bytes(b"unacknowledged bytes")
+    with pytest.raises(RuntimeError, match="^output_operation_conflict$"):
+        run(writer.copy_source, operation["token"], expected_offset=8)
+    assert db.get_output_file_operation(operation["token"], namespace)["phase"] == "aborting"
+
+
+@pytest.mark.parametrize("fault", ["directory_sync", "source_changes", "lease_expires", "link_unsupported"])
+def test_publication_fault_boundaries_keep_source_and_witness(db, storage, monkeypatch, fault):
+    root, namespace, original = storage
+    writer = service(db, storage)
+    operation = prepare(writer, original)
+    real_link, real_fsync = os.link, os.fsync
+
+    def link(*args, **kwargs):
+        if fault == "link_unsupported":
+            raise OSError(errno.ENOTSUP, "private volume details")
+        result = real_link(*args, **kwargs)
+        if fault == "source_changes":
+            (root / "source.md").write_bytes(b"changed")
+        elif fault == "lease_expires":
+            db.backend.execute(
+                "UPDATE output_file_operations SET lease_until = 0 WHERE token = ?", (operation["token"],)
+            )
+        return result
+
+    def fsync(fd):
+        if fault == "directory_sync" and os.fstat(fd).st_ino == root.stat().st_ino:
+            raise OSError(errno.EIO, "private volume details")
+        return real_fsync(fd)
+
+    monkeypatch.setattr(os, "link", link)
+    monkeypatch.setattr(os, "fsync", fsync)
+    with pytest.raises(RuntimeError, match="^output_(storage_unavailable|source_unavailable|operation_conflict)$"):
+        run(writer.publish_and_commit, operation["token"])
+    assert db.get_output_artifact(original.id) == original
+    row = db.get_output_file_operation(operation["token"], namespace)
+    assert row["phase"] == "aborting" and not row["fs_done"] and row["reserved_bytes"]
+    assert (root / "source.md").exists() and (root / operation["stage_path"]).exists()
+    assert (root / "destination.md").exists() == (fault != "link_unsupported")
+
+
+def test_publication_replay_does_not_relink_or_apply_twice(db, storage, monkeypatch):
+    root, _, original = storage
+    writer = service(db, storage)
+    operation = prepare(writer, original)
+    committed = run(writer.publish_and_commit, operation["token"])
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("committed operation replay attempted another mutation")
+
+    monkeypatch.setattr(os, "link", unexpected)
+    monkeypatch.setattr(db, "apply_output_file_operation", unexpected)
+    with pytest.raises(RuntimeError, match="^output_operation_conflict$"):
+        run(writer.publish_and_commit, operation["token"])
+    assert db.get_output_artifact(original.id) == committed
+    assert (root / "destination.md").stat().st_nlink == 2
+
+
+def test_source_copy_resumes_acknowledged_offset_and_releases_lock_between_chunks(db, storage, monkeypatch):
+    from tldw_Server_API.app.services.reading_artifact_cleanup_service import reading_storage_lock
+
+    root, namespace, original = storage
+    writer = service(db, storage)
+    operation = prepare(writer, original)
+    run(writer.write_chunk, operation["token"], b"orig", expected_offset=0)
+    real_write, intervals = writer.write_chunk, []
+
+    async def write(*args, **kwargs):
+        with reading_storage_lock(root, storage_namespace_id=namespace):
+            intervals.append(True)
+        return await real_write(*args, **kwargs)
+
+    monkeypatch.setattr(writer, "write_chunk", write)
+    assert run(writer.copy_source, operation["token"], expected_offset=4) == 8
+    assert intervals
+    assert (root / operation["stage_path"]).read_bytes() == b"original"
+
+
+@pytest.mark.parametrize("committed", [False, True])
+def test_publication_cancel_drains_commit_before_conditional_abort(db, storage, monkeypatch, committed):
+    root, namespace, original = storage
+    writer = service(db, storage)
+    operation = prepare(writer, original)
+    entered, release = Event(), Event()
+    real_apply = db.apply_output_file_operation
+
+    def delayed_commit(*args, **kwargs):
+        entered.set()
+        assert release.wait(10)
+        if committed:
+            return real_apply(*args, **kwargs)
+        raise OSError("lost database acknowledgement")
+
+    monkeypatch.setattr(db, "apply_output_file_operation", delayed_commit)
+
+    async def exercise():
+        task = asyncio.create_task(writer.publish_and_commit(operation["token"]))
+        try:
+            assert await asyncio.to_thread(entered.wait, 10)
+            task.cancel()
+            await asyncio.sleep(0)
+            assert not task.done()
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        finally:
+            release.set()
+
+    run(exercise)
+    assert db.get_output_file_operation(operation["token"], namespace)["phase"] == (
+        "committed" if committed else "aborting"
+    )
+    assert (root / "source.md").read_bytes() == b"original"
+    assert (root / "destination.md").exists() and (root / operation["stage_path"]).exists()
+
+
+@pytest.mark.parametrize("readable", [False, True])
+def test_publication_delayed_commit_wins_after_initial_outcome_read(db, storage, monkeypatch, readable):
+    root, namespace, original = storage
+    writer = service(db, storage)
+    operation = prepare(writer, original)
+    real_apply, real_outcome = db.apply_output_file_operation, db.read_output_file_operation_outcome
+    pending = []
+
+    def lost_ack(*args, **kwargs):
+        pending.append((args, kwargs))
+        raise OSError("commit acknowledgement lost")
+
+    def delayed_outcome(*args, **kwargs):
+        if pending:
+            stale = real_outcome(*args, **kwargs)
+            commit_args, commit_kwargs = pending.pop()
+            real_apply(*commit_args, **commit_kwargs)
+            return stale
+        if not readable:
+            raise OSError("outcome unavailable")
+        return real_outcome(*args, **kwargs)
+
+    monkeypatch.setattr(db, "apply_output_file_operation", lost_ack)
+    monkeypatch.setattr(db, "read_output_file_operation_outcome", delayed_outcome)
+    if readable:
+        assert run(writer.publish_and_commit, operation["token"]).storage_path == "destination.md"
+    else:
+        with pytest.raises(RuntimeError, match="^output_update_unconfirmed$"):
+            run(writer.publish_and_commit, operation["token"])
+    assert db.get_output_file_operation(operation["token"], namespace)["phase"] == "committed"
+    assert (root / "source.md").read_bytes() == b"original"
+    assert (root / "destination.md").stat().st_nlink == 2
+
+
 def test_prepare_reserves_before_create_and_persists_file_evidence(db, storage, monkeypatch):
     root, namespace, original = storage
     writer = service(db, storage)
