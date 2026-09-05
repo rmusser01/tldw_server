@@ -1,5 +1,5 @@
 import React from "react"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter } from "react-router-dom"
 
@@ -381,6 +381,80 @@ describe("BuddyShellHost", () => {
 
   afterEach(() => {
     cleanup()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it("keeps expanded controls in the viewport and restores their usable position on remount", () => {
+    vi.stubGlobal("innerWidth", 1280)
+    vi.stubGlobal("innerHeight", 720)
+    vi.spyOn(HTMLDivElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLDivElement) {
+        const open = Boolean(
+          this.querySelector('[data-testid="persona-buddy-popover"]')
+        )
+        return { width: open ? 220 : 160, height: open ? 687 : 95 } as DOMRect
+      })
+    const context: PersonaBuddyRenderContext = {
+      surface_id: "chat",
+      surface_active: true,
+      active_persona_id: "persona-1",
+      position_bucket: "web-desktop",
+      persona_source: "route-local",
+      buddy_summary: buildBuddySummary("persona-1")
+    }
+    const view = renderHost({ context })
+    expect(screen.getByTestId("persona-buddy-dock")).toHaveStyle({
+      left: "1104px", top: "609px"
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle buddy for Persona persona-1" }))
+    expect(screen.getByTestId("persona-buddy-dock")).toHaveStyle({
+      left: "1044px", top: "17px"
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle buddy for Persona persona-1" }))
+    view.unmount()
+    renderHost({ context })
+    expect(screen.getByTestId("persona-buddy-dock")).toHaveStyle({
+      left: "1044px", top: "17px"
+    })
+    expect(screen.queryByTestId("persona-buddy-popover")).not.toBeInTheDocument()
+  })
+
+  it("reclamps content growth without repeated position writes and responds to viewport resize", () => {
+    vi.stubGlobal("innerWidth", 1280)
+    vi.stubGlobal("innerHeight", 720)
+    let height = 95
+    const notifications = new Set<() => void>()
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(private callback: () => void) {}
+      observe() { notifications.add(this.callback) }
+      disconnect() { notifications.delete(this.callback) }
+    })
+    vi.spyOn(HTMLDivElement.prototype, "getBoundingClientRect")
+      .mockImplementation(() => ({ width: 220, height }) as DOMRect)
+    renderHost({ context: {
+      surface_id: "chat",
+      surface_active: true,
+      active_persona_id: "persona-1",
+      position_bucket: "web-desktop",
+      persona_source: "route-local",
+      buddy_summary: buildBuddySummary("persona-1")
+    } })
+    fireEvent.click(screen.getByRole("button", { name: "Toggle buddy for Persona persona-1" }))
+
+    height = 600
+    act(() => { [...notifications].forEach((notify) => notify()) })
+    expect(screen.getByTestId("persona-buddy-dock")).toHaveStyle({ left: "1044px", top: "104px" })
+    const settledPosition = usePersonaBuddyShellStore.getState().positions["web-desktop"]
+    act(() => { [...notifications].forEach((notify) => notify()) })
+    expect(usePersonaBuddyShellStore.getState().positions["web-desktop"]).toBe(settledPosition)
+
+    vi.stubGlobal("innerWidth", 1024)
+    vi.stubGlobal("innerHeight", 640)
+    fireEvent(window, new Event("resize"))
+    expect(screen.getByTestId("persona-buddy-dock")).toHaveStyle({ left: "788px", top: "24px" })
   })
 
   it("stays dormant until the current surface explicitly activates buddy rendering", () => {

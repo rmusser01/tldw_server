@@ -80,7 +80,7 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
       ref={dockRef}
       data-testid="persona-buddy-dock"
       data-dormant={isDormant ? "true" : "false"}
-      className="fixed z-[1100] flex flex-col gap-2"
+      className="fixed z-[1100] flex max-h-[calc(100dvh-32px)] flex-col gap-2 overflow-y-auto"
       style={{
         left: position.x,
         top: position.y
@@ -89,7 +89,7 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
       <div
         data-testid="persona-buddy-drag-handle"
         onPointerDown={onDragHandlePointerDown}
-        className="cursor-grab rounded-full border border-border bg-bg/95 px-3 py-1 text-[10px] font-medium uppercase tracking-[0.18em] text-text-muted shadow-sm backdrop-blur active:cursor-grabbing"
+        className="shrink-0 cursor-grab rounded-full border border-border bg-bg/95 px-3 py-1 text-[10px] font-medium uppercase tracking-[0.18em] text-text-muted shadow-sm backdrop-blur active:cursor-grabbing"
       >
         Drag Buddy
       </div>
@@ -100,7 +100,7 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
         disabled={isDormant}
         aria-expanded={isOpen}
         aria-label={`Toggle buddy for ${buddySummary.persona_name}`}
-        className="flex min-w-[160px] items-center justify-between gap-3 rounded-2xl border border-border bg-bg/95 px-4 py-3 text-left shadow-xl backdrop-blur"
+        className="flex min-w-[160px] shrink-0 items-center justify-between gap-3 rounded-2xl border border-border bg-bg/95 px-4 py-3 text-left shadow-xl backdrop-blur"
       >
         {canMountVisualRenderer && visualPack ? (
           <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border border-border bg-surface2">
@@ -146,7 +146,7 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
         <div
           data-testid="persona-buddy-visual-diagnostic"
           data-severity={visualDiagnostic.severity}
-          className={`max-w-[220px] rounded-lg border px-3 py-2 text-xs leading-5 shadow-sm backdrop-blur ${getPersonaVisualDiagnosticToneClassName(visualDiagnostic.severity)}`}
+          className={`max-w-[220px] shrink-0 rounded-lg border px-3 py-2 text-xs leading-5 shadow-sm backdrop-blur ${getPersonaVisualDiagnosticToneClassName(visualDiagnostic.severity)}`}
         >
           <div className="font-medium text-inherit">{visualDiagnostic.title}</div>
           <div>{visualDiagnostic.message}</div>

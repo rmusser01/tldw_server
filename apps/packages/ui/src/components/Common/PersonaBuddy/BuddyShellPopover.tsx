@@ -108,7 +108,7 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
   return (
     <div
       data-testid="persona-buddy-popover"
-      className="min-w-[220px] rounded-2xl border border-border bg-bg/95 p-3 shadow-xl backdrop-blur"
+      className="min-h-0 min-w-[220px] overflow-y-auto rounded-2xl border border-border bg-bg/95 p-3 shadow-xl backdrop-blur"
     >
       <div className="text-xs uppercase tracking-[0.18em] text-text-muted">
         {t("personaBuddy.title", "Persona Buddy")}

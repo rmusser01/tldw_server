@@ -101,3 +101,12 @@ allowed an in-memory comparison against HEAD: no new findings, only the two
 reviewed subprocess warnings removed, and 15 unchanged fixture findings. Preserve
 invalid-input coverage and compare scan results; do not remove the negative test
 or add broad suppressions merely to make a report formatter succeed.
+
+## 2026-09-05 — Buddy UAT exposed transport and lifecycle gaps hidden by test doubles
+
+TASK-13182's setup smoke test ignored `expected_version`, so it passed while a real defaults save followed by checkpoint advancement returned 409. Enforcing optimistic version checks in the test reproduced the failure. TASK-13184's direct Python WebSocket probe accepted a server handshake without a selected subprotocol, while Chromium rejected the same handshake before sending any message. Require the browser's protocol contract in the auth regression and verify the real browser boundary. During review, discarded Strict Mode loads and A→B→A persona switches also exposed stale-completion cases that a single switch/remount test did not cover.
+
+
+## 2026-09-05 — Match CI runtime and await usable editor state
+
+During PR #2884 / TASK-13176, VisualPackEditor tests passed64/64 on local Node26 but failed4/64 on Node20 with the workflow's deterministic shared-UI config. Pack metadata appeared before manifest-derived select values, and a recorded candidate-review request preceded completion of the disabled-button state. The shard also exposed a custom-state selection before its option existed. Waiting for the actual manifest values, available option, and accepted/rejected outcome preserved the assertions and passed93 tests in the six-file CI context on Node20. Reproduce both the CI runtime and package config; a selected pack ID or recorded request is not proof that downstream controls are ready. Do not replace these readiness checks with larger timeouts.

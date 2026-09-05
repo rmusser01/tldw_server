@@ -124,7 +124,7 @@ export interface UsePersonaSetupOrchestratorReturn {
   ) => void
 
   // ── Setup step handlers ──
-  handleSetupVoiceDefaultsSaved: () => Promise<void>
+  handleSetupVoiceDefaultsSaved: (profile: PersonaProfileResponse) => Promise<void>
   advancePersonaSetupStep: (
     step: PersonaSetupState["current_step"],
     errorMessage: string,
@@ -204,6 +204,10 @@ export function usePersonaSetupOrchestrator(
     setupWizardAwaitingLiveResponseRef,
     setupWizardLastLiveTextRef,
   } = deps
+
+  const selectionGenerationRef = React.useRef(0)
+  const selectedPersonaIdRef = React.useRef(selectedPersonaId)
+  selectedPersonaIdRef.current = selectedPersonaId
 
   // Stable local wrappers that read from refs — avoids circular init dependency
   const emitSetupAnalyticsEvent = React.useCallback(
@@ -332,6 +336,12 @@ export function usePersonaSetupOrchestrator(
 
   // ── Saving / test state ──
   const [setupWizardSaving, setSetupWizardSaving] = React.useState(false)
+  React.useEffect(() => {
+    setSetupWizardSaving(false)
+    return () => {
+      selectionGenerationRef.current += 1
+    }
+  }, [selectedPersonaId])
   const [setupWizardDryRunLoading, setSetupWizardDryRunLoading] = React.useState(false)
   const [setupTestOutcome, setSetupTestOutcome] =
     React.useState<SetupTestOutcome | null>(null)
@@ -446,14 +456,14 @@ export function usePersonaSetupOrchestrator(
   // ── Profile helpers ──
 
   const buildSetupProfileUpdatePath = React.useCallback(
-    (personaId: string) => {
+    (personaId: string, version = savedPersonaProfileVersion) => {
       const normalizedPersonaId = String(personaId || "").trim()
       const basePath = `/api/v1/persona/profiles/${encodeURIComponent(normalizedPersonaId)}`
-      if (!normalizedPersonaId || !savedPersonaProfileVersion) {
+      if (!normalizedPersonaId || !version) {
         return basePath
       }
       return `${basePath}?expected_version=${encodeURIComponent(
-        String(savedPersonaProfileVersion)
+        String(version)
       )}`
     },
     [savedPersonaProfileVersion]
@@ -565,9 +575,14 @@ export function usePersonaSetupOrchestrator(
 
   // ── Step advancement ──
 
-  const handleSetupVoiceDefaultsSaved = React.useCallback(async () => {
-    const personaId = String(selectedPersonaId || "").trim()
-    if (!personaId) return
+  const handleSetupVoiceDefaultsSaved = React.useCallback(async (profile: PersonaProfileResponse) => {
+    const personaId = String(profile.id || "").trim()
+    if (!personaId || personaId !== selectedPersonaIdRef.current) return
+    const selectionGeneration = selectionGenerationRef.current
+    const isCurrentSelection = () =>
+      personaId === selectedPersonaIdRef.current &&
+      selectionGeneration === selectionGenerationRef.current
+    applyPersonaProfileResponse(profile)
     setSetupWizardSaving(true)
     clearSetupStepError("voice")
     const nextSetup = buildPersonaSetupInProgress(
@@ -576,13 +591,14 @@ export function usePersonaSetupOrchestrator(
     )
     try {
       const response = await tldwClient.fetchWithAuth(
-        buildSetupProfileUpdatePath(personaId) as any,
+        buildSetupProfileUpdatePath(personaId, profile.version) as any,
         { method: "PATCH", body: { setup: nextSetup } }
       )
       if (!response.ok) {
         throw new Error(response.error || "Failed to advance assistant setup")
       }
       const payload = (await response.json()) as PersonaProfileResponse
+      if (!isCurrentSelection()) return
       applyPersonaProfileResponse(payload, { setup: nextSetup })
       void emitSetupAnalyticsEvent({
         personaId,
@@ -591,12 +607,13 @@ export function usePersonaSetupOrchestrator(
         step: "voice",
       })
     } catch (setupError: any) {
+      if (!isCurrentSelection()) return
       setSetupStepError(
         "voice",
         String(setupError?.message || "Failed to advance assistant setup")
       )
     } finally {
-      setSetupWizardSaving(false)
+      if (isCurrentSelection()) setSetupWizardSaving(false)
     }
   }, [
     applyPersonaProfileResponse,
@@ -606,7 +623,6 @@ export function usePersonaSetupOrchestrator(
     emitSetupAnalyticsEvent,
     mergeCompletedSetupSteps,
     setSetupStepError,
-    selectedPersonaId,
   ])
 
   const advancePersonaSetupStep = React.useCallback(

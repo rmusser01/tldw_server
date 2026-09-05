@@ -160,7 +160,12 @@ def test_persona_stream_auth_failure_rejects_before_stream_start(monkeypatch, cr
     assert started is False
 
 
-def test_persona_stream_single_user_accepts_bearer_api_key(monkeypatch):
+@pytest.mark.parametrize("marker", [None, "bearer", "Bearer", "unsupported"])
+@pytest.mark.parametrize("valid_credential", [True, False])
+def test_persona_stream_negotiates_only_safe_auth_marker(
+    monkeypatch: pytest.MonkeyPatch, marker: str | None, valid_credential: bool
+) -> None:
+    """Verify safe bearer-marker negotiation for valid and invalid credentials."""
     monkeypatch.setattr(persona_ep, "is_persona_enabled", lambda: True)
     monkeypatch.setattr(persona_ep, "get_settings", lambda: SimpleNamespace(AUTH_MODE="single_user"))
     monkeypatch.setattr(persona_ep, "resolve_client_ip", lambda *_args, **_kwargs: "127.0.0.1")
@@ -187,11 +192,33 @@ def test_persona_stream_single_user_accepts_bearer_api_key(monkeypatch):
     monkeypatch.setattr(persona_ep, "verify_jwt_and_fetch_user", _verify_jwt_should_not_run)
     monkeypatch.setattr(persona_ep, "get_api_key_manager", _fake_get_api_key_manager)
 
+    credential = "test_api_key" if valid_credential else "invalid_api_key"
+    headers = {}
+    protocols = []
+    selected_protocol = None
+    if marker in ("bearer", "Bearer"):
+        protocols = [marker, credential]
+        selected_protocol = marker
+    else:
+        headers = {"Authorization": f"Bearer {credential}"}
+        if marker:
+            protocols = [marker, credential]
+
     with TestClient(fastapi_app) as client:
+        if not valid_credential:
+            with pytest.raises(WebSocketDisconnect) as rejected:
+                with client.websocket_connect(
+                    "/api/v1/persona/stream", headers=headers, subprotocols=protocols
+                ):
+                    pytest.fail("Invalid credentials must not complete a handshake")
+            assert rejected.value.code == 4401
+            return
         with client.websocket_connect(
             "/api/v1/persona/stream",
-            headers={"Authorization": "Bearer test_api_key"},
+            headers=headers,
+            subprotocols=protocols,
         ) as ws:
+            assert ws.accepted_subprotocol == selected_protocol
             first_event = json.loads(ws.receive_text())
             assert first_event.get("event") == "notice"
             assert "connected" in str(first_event.get("message", "")).lower()

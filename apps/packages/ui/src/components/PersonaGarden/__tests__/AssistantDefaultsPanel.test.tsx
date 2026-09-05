@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
@@ -261,6 +261,7 @@ describe("AssistantDefaultsPanel", () => {
           ok: true,
           json: async () => ({
             id: "persona-1",
+            version: 2,
             voice_defaults: init?.body?.voice_defaults
           })
         })
@@ -391,8 +392,39 @@ describe("AssistantDefaultsPanel", () => {
     expect(onSaved).toHaveBeenCalledWith(
       expect.objectContaining({
         stt_language: "fr-FR"
-      })
+      }),
+      expect.objectContaining({ id: "persona-1", version: 2 })
     )
+  })
+
+  it("ignores a defaults save that finishes after switching personas", async () => {
+    let resolveSave!: (value: unknown) => void
+    const onSaved = vi.fn()
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      if (init?.method === "PATCH") {
+        return new Promise((resolve) => { resolveSave = resolve })
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          id: path.endsWith("persona-2") ? "persona-2" : "persona-1",
+          version: 1,
+          voice_defaults: { stt_language: path.endsWith("persona-2") ? "fr-FR" : "en-US" }
+        })
+      })
+    })
+    const view = render(<AssistantDefaultsPanel selectedPersonaId="persona-1" selectedPersonaName="Helper" isActive onSaved={onSaved} />)
+    await waitFor(() => expect(screen.getByLabelText("STT language")).toHaveValue("en-US"))
+    fireEvent.click(screen.getByRole("button", { name: "Save assistant defaults" }))
+    view.rerender(<AssistantDefaultsPanel selectedPersonaId="persona-2" selectedPersonaName="Scout" isActive onSaved={onSaved} />)
+    await waitFor(() => expect(screen.getByLabelText("STT language")).toHaveValue("fr-FR"))
+    await act(async () => {
+      resolveSave({ ok: true, json: async () => ({ id: "persona-1", version: 2, voice_defaults: { stt_language: "en-US" } }) })
+    })
+    expect(screen.getByLabelText("STT language")).toHaveValue("fr-FR")
+    expect(screen.queryByText("Assistant defaults saved.")).not.toBeInTheDocument()
+    expect(onSaved).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: "Save assistant defaults" })).toBeEnabled()
   })
 
   it("clears the previous persona defaults before a new persona load resolves", async () => {

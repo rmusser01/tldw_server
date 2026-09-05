@@ -2381,8 +2381,8 @@ const SidepanelPersona = ({
                     isActive
                     analytics={null}
                     analyticsLoading={false}
-                    onSaved={() => {
-                      void setupOrch.handleSetupVoiceDefaultsSaved()
+                    onSaved={(_voiceDefaults, profile) => {
+                      void setupOrch.handleSetupVoiceDefaultsSaved(profile)
                     }}
                   />
                 ) : undefined

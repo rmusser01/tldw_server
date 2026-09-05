@@ -1,0 +1,146 @@
+{
+  "viewport": {
+    "width": 1280,
+    "height": 720
+  },
+  "dock": {
+    "x": 938.546875,
+    "y": 229,
+    "width": 325.453125,
+    "height": 416,
+    "top": 229,
+    "right": 1264,
+    "bottom": 645,
+    "left": 938.546875
+  },
+  "popover": {
+    "x": 938.546875,
+    "y": 336,
+    "width": 325.453125,
+    "height": 309,
+    "top": 336,
+    "right": 1264,
+    "bottom": 645,
+    "left": 938.546875
+  },
+  "frames": [
+    {
+      "src": "blob:http://127.0.0.1:18384/4af57384-c97e-4545-bfe3-ede768c8b410",
+      "complete": true,
+      "width": 96,
+      "height": 96
+    },
+    {
+      "src": "blob:http://127.0.0.1:18384/b404b1f1-f343-4f3d-90cb-fe6d90aa588f",
+      "complete": true,
+      "width": 96,
+      "height": 96
+    }
+  ],
+  "assets": [
+    {
+      "url": "http://127.0.0.1:9101/api/v1/persona/profiles/e0a442a5-3861-4529-a332-a5391626f51f/visual-packs/559d3eb8-9bde-4e0c-b01e-46440708e5a7/assets/0b4f9de681b6406f9e9784739304a9ac/content",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:9101/api/v1/persona/profiles/e0a442a5-3861-4529-a332-a5391626f51f/visual-packs/559d3eb8-9bde-4e0c-b01e-46440708e5a7/assets/0122fbe9478b4b8bbd08a20752a79d2e/content",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:9101/api/v1/persona/profiles/e0a442a5-3861-4529-a332-a5391626f51f/visual-packs/559d3eb8-9bde-4e0c-b01e-46440708e5a7/assets/3b7586854cfd4315a0f707915f4b5df0/content",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:9101/api/v1/persona/profiles/e0a442a5-3861-4529-a332-a5391626f51f/visual-packs/559d3eb8-9bde-4e0c-b01e-46440708e5a7/assets/4726b0f661394679b945329cffbafe0b/content",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:9101/api/v1/persona/profiles/e0a442a5-3861-4529-a332-a5391626f51f/visual-packs/559d3eb8-9bde-4e0c-b01e-46440708e5a7/assets/552131e388b44a9d90893b2064a17278/content",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:9101/api/v1/persona/profiles/e0a442a5-3861-4529-a332-a5391626f51f/visual-packs/559d3eb8-9bde-4e0c-b01e-46440708e5a7/assets/66e1f9002c96450688f943a30ff9c1b5/content",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:9101/api/v1/persona/profiles/e0a442a5-3861-4529-a332-a5391626f51f/visual-packs/559d3eb8-9bde-4e0c-b01e-46440708e5a7/assets/6bf6c19d644e448cb8451d7ed2bc81da/content",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:9101/api/v1/persona/profiles/e0a442a5-3861-4529-a332-a5391626f51f/visual-packs/559d3eb8-9bde-4e0c-b01e-46440708e5a7/assets/7d7cb472cc69422794e256f2fa58de87/content",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:9101/api/v1/persona/profiles/e0a442a5-3861-4529-a332-a5391626f51f/visual-packs/559d3eb8-9bde-4e0c-b01e-46440708e5a7/assets/92e7fc3f5e8a4b93b0012bf330d55cdc/content",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:9101/api/v1/persona/profiles/e0a442a5-3861-4529-a332-a5391626f51f/visual-packs/559d3eb8-9bde-4e0c-b01e-46440708e5a7/assets/b5780810a2914f738d00f4dc24b022a6/content",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:9101/api/v1/persona/profiles/e0a442a5-3861-4529-a332-a5391626f51f/visual-packs/559d3eb8-9bde-4e0c-b01e-46440708e5a7/assets/ce6e4558d02c4469a1a95f40d89e7866/content",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:9101/api/v1/persona/profiles/e0a442a5-3861-4529-a332-a5391626f51f/visual-packs/559d3eb8-9bde-4e0c-b01e-46440708e5a7/assets/e96f7951d70e4610962e38539269bc97/content",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:9101/api/v1/persona/profiles/e0a442a5-3861-4529-a332-a5391626f51f/visual-packs/559d3eb8-9bde-4e0c-b01e-46440708e5a7/assets/f294e137d3824ebca4edd96edbd60bb7/content",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:9101/api/v1/persona/profiles/e0a442a5-3861-4529-a332-a5391626f51f/visual-packs/559d3eb8-9bde-4e0c-b01e-46440708e5a7/assets/0122fbe9478b4b8bbd08a20752a79d2e/content",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:9101/api/v1/persona/profiles/e0a442a5-3861-4529-a332-a5391626f51f/visual-packs/559d3eb8-9bde-4e0c-b01e-46440708e5a7/assets/0b4f9de681b6406f9e9784739304a9ac/content",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:9101/api/v1/persona/profiles/e0a442a5-3861-4529-a332-a5391626f51f/visual-packs/559d3eb8-9bde-4e0c-b01e-46440708e5a7/assets/3b7586854cfd4315a0f707915f4b5df0/content",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:9101/api/v1/persona/profiles/e0a442a5-3861-4529-a332-a5391626f51f/visual-packs/559d3eb8-9bde-4e0c-b01e-46440708e5a7/assets/4726b0f661394679b945329cffbafe0b/content",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:9101/api/v1/persona/profiles/e0a442a5-3861-4529-a332-a5391626f51f/visual-packs/559d3eb8-9bde-4e0c-b01e-46440708e5a7/assets/552131e388b44a9d90893b2064a17278/content",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:9101/api/v1/persona/profiles/e0a442a5-3861-4529-a332-a5391626f51f/visual-packs/559d3eb8-9bde-4e0c-b01e-46440708e5a7/assets/66e1f9002c96450688f943a30ff9c1b5/content",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:9101/api/v1/persona/profiles/e0a442a5-3861-4529-a332-a5391626f51f/visual-packs/559d3eb8-9bde-4e0c-b01e-46440708e5a7/assets/6bf6c19d644e448cb8451d7ed2bc81da/content",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:9101/api/v1/persona/profiles/e0a442a5-3861-4529-a332-a5391626f51f/visual-packs/559d3eb8-9bde-4e0c-b01e-46440708e5a7/assets/7d7cb472cc69422794e256f2fa58de87/content",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:9101/api/v1/persona/profiles/e0a442a5-3861-4529-a332-a5391626f51f/visual-packs/559d3eb8-9bde-4e0c-b01e-46440708e5a7/assets/92e7fc3f5e8a4b93b0012bf330d55cdc/content",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:9101/api/v1/persona/profiles/e0a442a5-3861-4529-a332-a5391626f51f/visual-packs/559d3eb8-9bde-4e0c-b01e-46440708e5a7/assets/b5780810a2914f738d00f4dc24b022a6/content",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:9101/api/v1/persona/profiles/e0a442a5-3861-4529-a332-a5391626f51f/visual-packs/559d3eb8-9bde-4e0c-b01e-46440708e5a7/assets/ce6e4558d02c4469a1a95f40d89e7866/content",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:9101/api/v1/persona/profiles/e0a442a5-3861-4529-a332-a5391626f51f/visual-packs/559d3eb8-9bde-4e0c-b01e-46440708e5a7/assets/e96f7951d70e4610962e38539269bc97/content",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:9101/api/v1/persona/profiles/e0a442a5-3861-4529-a332-a5391626f51f/visual-packs/559d3eb8-9bde-4e0c-b01e-46440708e5a7/assets/f294e137d3824ebca4edd96edbd60bb7/content",
+      "status": 200
+    }
+  ]
+}
