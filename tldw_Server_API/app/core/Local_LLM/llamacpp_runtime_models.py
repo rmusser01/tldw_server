@@ -50,6 +50,8 @@ class LlamaCppProfile(BaseModel):
     last_runtime_failure: dict[str, object] = Field(default_factory=dict)
     provider_alias: str | None = None
     tags: list[str] = Field(default_factory=list)
+    snapshots_enabled: bool = False
+    snapshot_retention: int = Field(default=10, ge=1, le=1000)
 
 
 class LlamaCppRuntime(BaseModel):

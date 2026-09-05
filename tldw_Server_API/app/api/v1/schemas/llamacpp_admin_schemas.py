@@ -332,6 +332,8 @@ class LlamaCppProfileCreateRequest(BaseModel):
     restart_policy: dict[str, object] = Field(default_factory=dict)
     provider_alias: str | None = None
     tags: list[str] = Field(default_factory=list)
+    snapshots_enabled: bool = False
+    snapshot_retention: int = Field(default=10, ge=1, le=1000)
 
 
 class LlamaCppProfileUpdateRequest(BaseModel):
@@ -353,6 +355,8 @@ class LlamaCppProfileUpdateRequest(BaseModel):
     restart_policy: dict[str, object] | None = None
     provider_alias: str | None = None
     tags: list[str] | None = None
+    snapshots_enabled: bool | None = None
+    snapshot_retention: int | None = Field(default=None, ge=1, le=1000)
 
 
 class LlamaCppProfileResponse(BaseModel):
@@ -373,6 +377,8 @@ class LlamaCppProfileResponse(BaseModel):
     restart_policy: dict[str, object] = Field(default_factory=dict)
     provider_alias: str | None = None
     tags: list[str] = Field(default_factory=list)
+    snapshots_enabled: bool = False
+    snapshot_retention: int = Field(default=10, ge=1, le=1000)
 
 
 class LlamaCppProfileListResponse(BaseModel):
