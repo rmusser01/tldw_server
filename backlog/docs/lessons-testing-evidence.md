@@ -110,3 +110,21 @@ TASK-13182's setup smoke test ignored `expected_version`, so it passed while a r
 ## 2026-09-05 — Match CI runtime and await usable editor state
 
 During PR #2884 / TASK-13176, VisualPackEditor tests passed64/64 on local Node26 but failed4/64 on Node20 with the workflow's deterministic shared-UI config. Pack metadata appeared before manifest-derived select values, and a recorded candidate-review request preceded completion of the disabled-button state. The shard also exposed a custom-state selection before its option existed. Waiting for the actual manifest values, available option, and accepted/rejected outcome preserved the assertions and passed93 tests in the six-file CI context on Node20. Reproduce both the CI runtime and package config; a selected pack ID or recorded request is not proof that downstream controls are ready. Do not replace these readiness checks with larger timeouts.
+
+## Cache size is not proof of cache reuse
+
+**Incident (TASK-13162/TASK-13163, 2026-09-04):** Manual llama.cpp snapshot
+tests initially modeled a slot token count as `n_past`. Review against pinned
+upstream source found that slot JSON uses `n_prompt_tokens` only after a task;
+fresh idle slots omit it. The live-harness investigation also found that
+completion `tokens_cached` describes the final slot size, not tokens reused.
+
+**Evidence and rule:** Source-derived fresh/busy/malformed-slot regressions
+passed after correcting the parser. At upstream commit
+`4d9176092d00586775af140581bb0b558ddc4389`, `server-common.cpp:67–71`
+serializes reused tokens as `timings.cache_n` and newly processed tokens as
+`timings.prompt_n`. The harness now requires those counters and a separate cold
+process control. No binary/model was available, so the live test remains skipped
+and the production build allowlist remains empty. Pin wire fixtures to their
+source, label source-derived versus live evidence, and never infer reuse from
+file existence, HTTP success, similar output, or final cache size.
