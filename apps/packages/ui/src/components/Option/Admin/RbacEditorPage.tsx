@@ -776,6 +776,10 @@ const RbacEditorPage: React.FC = () => {
 
   return (
     <div style={{ padding: 16 }}>
+      <h1 style={{ marginBottom: 4, fontSize: "1.5rem", fontWeight: 600 }}>Roles &amp; Permissions</h1>
+      <p style={{ marginBottom: 16, color: "var(--color-text-secondary, #888)" }}>
+        Review the permission matrix, manage roles, and adjust per-user grants.
+      </p>
       <Tabs
         defaultActiveKey="matrix"
         items={[

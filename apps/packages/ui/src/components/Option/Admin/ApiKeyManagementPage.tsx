@@ -228,7 +228,7 @@ const ApiKeyManagementPage: React.FC = () => {
 
   return (
     <div style={{ padding: "24px", maxWidth: 1200 }}>
-      <h2 style={{ marginBottom: 4 }}>API Key Management</h2>
+      <h1 style={{ marginBottom: 4, fontSize: "1.5rem", fontWeight: 600 }}>API Key Management</h1>
       <p style={{ marginBottom: 16, color: "var(--color-text-secondary, #888)" }}>
         Create, rotate, and revoke the API keys a user presents to
         authenticate against this server.

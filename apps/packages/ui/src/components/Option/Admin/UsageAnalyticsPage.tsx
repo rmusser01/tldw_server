@@ -259,7 +259,7 @@ const UsageAnalyticsPage: React.FC = () => {
   return (
     <div style={{ padding: "24px", maxWidth: 1200 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <h2 style={{ margin: 0 }}>Usage Analytics</h2>
+        <h1 style={{ margin: 0, fontSize: "1.5rem", fontWeight: 600 }}>Usage Analytics</h1>
         <Select
           value={dateRange}
           onChange={(val) => setDateRange(val)}

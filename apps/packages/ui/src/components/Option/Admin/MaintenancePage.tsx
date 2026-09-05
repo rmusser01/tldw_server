@@ -361,7 +361,7 @@ const MaintenancePage: React.FC = () => {
 
   return (
     <div style={{ padding: "24px", maxWidth: 1200 }}>
-      <h2 style={{ marginBottom: 16 }}>Maintenance Console</h2>
+      <h1 style={{ marginBottom: 16, fontSize: "1.5rem", fontWeight: 600 }}>Maintenance Console</h1>
 
       {/* Maintenance Mode Card */}
       <Card title="Maintenance Mode" loading={maintLoading} style={{ marginBottom: 16 }}>

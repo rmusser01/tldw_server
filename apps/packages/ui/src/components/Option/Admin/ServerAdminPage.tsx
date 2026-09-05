@@ -515,7 +515,7 @@ export const ServerAdminPage: React.FC = () => {
           </Text>
         )}
         <div>
-          <Title level={2}>{t("option:header.adminServer", "Server Admin")}</Title>
+          <Title level={1} style={{ fontSize: 30 }}>{t("option:header.adminServer", "Server Admin")}</Title>
           <Text type="secondary">
             {t(
               "settings:admin.serverIntro",

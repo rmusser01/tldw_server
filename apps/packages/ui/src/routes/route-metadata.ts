@@ -738,6 +738,7 @@ export const ROUTE_METADATA = [
     group: "settings",
     surface: "admin_operator",
     smoke: "manual",
+    commandPalette: "show",
     requiresBackend: true,
     rationale: "Admin landing route for operator-only workflows."
   }),
@@ -747,6 +748,7 @@ export const ROUTE_METADATA = [
     group: "settings",
     surface: "admin_operator",
     availability: webAndExtension,
+    commandPalette: "show",
     requiresBackend: true,
     rationale: "Operator server status, user, role, and maintenance route."
   }),
@@ -756,8 +758,167 @@ export const ROUTE_METADATA = [
     group: "settings",
     surface: "admin_operator",
     smoke: "manual",
+    commandPalette: "show",
     requiresBackend: true,
     rationale: "Admin route for local MLX model status and operator controls."
+  }),
+  // Every admin module is registered here so the command palette and any
+  // metadata-driven navigation can find the full admin surface — the 2026-09
+  // UX audit (finding S1) flagged that most admin routes were URL-only.
+  defineRoute({
+    path: "/admin/llamacpp",
+    label: "Admin Llama.cpp",
+    group: "settings",
+    surface: "admin_operator",
+    availability: webAndExtension,
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for the managed llama.cpp inference server."
+  }),
+  defineRoute({
+    path: "/admin/runtime-config",
+    label: "Admin Runtime Config",
+    group: "settings",
+    surface: "admin_operator",
+    availability: webAndExtension,
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for runtime configuration inspection."
+  }),
+  defineRoute({
+    path: "/admin/monitoring",
+    label: "Monitoring",
+    group: "settings",
+    surface: "admin_operator",
+    availability: webAndExtension,
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for health metrics, alerts, and telemetry."
+  }),
+  defineRoute({
+    path: "/admin/integrations",
+    label: "Workspace Integrations",
+    group: "settings",
+    surface: "admin_operator",
+    availability: webAndExtension,
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for Slack/Discord/Telegram workspace policy."
+  }),
+  defineRoute({
+    path: "/admin/sources",
+    label: "Admin Sources",
+    group: "settings",
+    surface: "admin_operator",
+    availability: webAndExtension,
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for ingestion source availability and sync state."
+  }),
+  defineRoute({
+    path: "/admin/api-keys",
+    label: "Admin API Keys",
+    group: "settings",
+    surface: "admin_operator",
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for creating, rotating, and revoking user API keys."
+  }),
+  defineRoute({
+    path: "/admin/rbac",
+    label: "Admin Roles & Permissions",
+    group: "settings",
+    surface: "admin_operator",
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for the RBAC permission matrix and role grants."
+  }),
+  defineRoute({
+    path: "/admin/orgs",
+    label: "Admin Organizations",
+    group: "settings",
+    surface: "admin_operator",
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for organizations and teams in multi-user mode."
+  }),
+  defineRoute({
+    path: "/admin/rate-limiting",
+    label: "Admin Rate Limiting",
+    group: "settings",
+    surface: "admin_operator",
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for resource governor policy and rate limits."
+  }),
+  defineRoute({
+    path: "/admin/data-ops",
+    label: "Admin Data Operations",
+    group: "settings",
+    surface: "admin_operator",
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for backups, retention, and data subject requests."
+  }),
+  defineRoute({
+    path: "/admin/usage",
+    label: "Admin Usage Analytics",
+    group: "settings",
+    surface: "admin_operator",
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for request, storage, and LLM usage analytics."
+  }),
+  defineRoute({
+    path: "/admin/billing",
+    label: "Admin Billing",
+    group: "settings",
+    surface: "admin_operator",
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for subscriptions and billing events."
+  }),
+  defineRoute({
+    path: "/admin/maintenance",
+    label: "Admin Maintenance",
+    group: "settings",
+    surface: "admin_operator",
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for maintenance mode, feature flags, and incidents."
+  }),
+  defineRoute({
+    path: "/admin/watchlists-items",
+    label: "Admin Watchlist Items",
+    group: "settings",
+    surface: "admin_operator",
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for reviewing collected watchlist updates."
+  }),
+  defineRoute({
+    path: "/admin/watchlists-runs",
+    label: "Admin Watchlist Runs",
+    group: "settings",
+    surface: "admin_operator",
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for watchlist run history (planned surface)."
   }),
   defineRoute({
     path: "/mcp-hub",

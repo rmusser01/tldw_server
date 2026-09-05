@@ -9,6 +9,8 @@ import { useRouter } from "next/router"
 import React from "react"
 import { BackendRecoveryUiProvider } from "@/components/Common/BackendRecoveryUiContext"
 import { PageAssistLoader } from "@/components/Common/PageAssistLoader"
+import { AdminRouteShell } from "@/components/Option/Admin/AdminRouteShell"
+import { isAdminRoute } from "@/components/Option/Admin/admin-modules"
 import { FirstRunGate } from "@/components/PersonaGarden/FirstRunGate"
 import { AppProviders } from "@web/components/AppProviders"
 import ErrorBoundary from "@web/components/ErrorBoundary"
@@ -389,10 +391,14 @@ export default function App({ Component, pageProps }: AppProps) {
     () => buildFirstRunSetupRoute(router.asPath || routePath || "/"),
     [routePath, router.asPath]
   )
+  const isAdminRoutePath = isAdminRoute(routePath)
   const shouldBypassFirstRunOverlay =
     !shouldBypassGates &&
     (routePath === "/" ||
       routePath === "/research-workspace" ||
+      // Admin routes are operator surfaces: never hijack them with the
+      // assistant-onboarding interstitial (2026-09 UX audit finding S8).
+      isAdminRoutePath ||
       firstRunEntryIntent === CHARACTER_CHAT_ONBOARDING_INTENT)
 
   const handleStartSetup = React.useCallback(() => {
@@ -417,7 +423,13 @@ export default function App({ Component, pageProps }: AppProps) {
 
   const layoutContent = (
     <OptionLayout {...layoutProps}>
-      <Component {...pageProps} />
+      {isAdminRoutePath ? (
+        <AdminRouteShell path={routePath}>
+          <Component {...pageProps} />
+        </AdminRouteShell>
+      ) : (
+        <Component {...pageProps} />
+      )}
     </OptionLayout>
   )
 

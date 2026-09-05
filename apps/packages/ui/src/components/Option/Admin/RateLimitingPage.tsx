@@ -209,7 +209,7 @@ const RateLimitingPage: React.FC = () => {
 
   return (
     <div style={{ padding: "24px", maxWidth: 1200 }}>
-      <h2 style={{ marginBottom: 16 }}>Rate Limiting &amp; Resource Governor</h2>
+      <h1 style={{ marginBottom: 16, fontSize: "1.5rem", fontWeight: 600 }}>Rate Limiting &amp; Resource Governor</h1>
 
       {/* Governor Policy Card */}
       <Card

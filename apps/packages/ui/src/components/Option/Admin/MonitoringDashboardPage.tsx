@@ -614,7 +614,7 @@ const MonitoringDashboardPage: React.FC = () => {
 
   return (
     <div style={{ padding: "24px", maxWidth: 1200 }}>
-      <h2 style={{ marginBottom: 4 }}>Monitoring &amp; Alerting</h2>
+      <h1 style={{ marginBottom: 4, fontSize: "1.5rem", fontWeight: 600 }}>Monitoring &amp; Alerting</h1>
       <Typography.Paragraph type="secondary" style={{ marginBottom: 16 }}>
         Monitor your tldw server&apos;s health and set up alerts for important metrics. Create rules below to get notified when something needs attention.
       </Typography.Paragraph>

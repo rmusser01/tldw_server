@@ -517,7 +517,7 @@ const BillingDashboardPage: React.FC = () => {
 
   return (
     <div style={{ padding: 24 }}>
-      <h2>Billing Dashboard</h2>
+      <h1 style={{ fontSize: "1.5rem", fontWeight: 600 }}>Billing Dashboard</h1>
       <Tabs defaultActiveKey="overview" items={tabItems} />
     </div>
   )
