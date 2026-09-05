@@ -430,10 +430,30 @@ def test_real_relay_extends_current_sync_heads_across_publication_batches(
     )
     updated_payload = updated.model_dump(mode="json")
     updated_canonical = canonical_json_bytes(updated_payload)
+    # This relay test supplies durable canonical receipt fixtures; cross-store
+    # installation verification is exercised by the activation integration suite.
+    with publications.profile_lease(manifest.profile_id) as lease:
+        prepared = canonical._repository.prepare_activation(
+            manifest.profile_id, device_id="device-a", lease=lease
+        )
+        installed = canonical._repository.complete_activation_install(
+            prepared.activation_id, prepared.baseline_digest, "fixture-install-receipt",
+            home_server_cursor=manifest_head.server_cursor, lease=lease,
+        )
+    canonical._repository.confirm_activation_device(
+        prepared.activation_id, prepared.baseline_digest, "device-a", "fixture-sync-ack",
+        local_receipt_id="fixture-local-ack", dataset_id="dataset-a",
+    )
+    with store.personal_context_authority_guard("dataset-a", manifest.profile_id) as guarded:
+        guarded.mirror_personal_context_activation(
+            dataset_id="dataset-a", user_id="user-a", profile_id=manifest.profile_id,
+            purge_generation=0, activation_epoch=installed.activation_epoch,
+            continuity_token=installed.continuity_token,
+        )
     exchange = PersonalContextExchangeProof(
         ongoing_sync_version=1,
-        activation_epoch="epoch_0123456789abcdef",
-        continuity_token="continuity_0123456789abcdef",
+        activation_epoch=installed.activation_epoch,
+        continuity_token=installed.continuity_token,
     )
     pushed = service.push(
         user_id="user-a",

@@ -12,6 +12,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.exceptions import (
     PersonalContextAuthoritySourceError,
+    PublicationActivationPending,
     PublicationRelayPoisoned,
 )
 from tldw_Server_API.app.core.Personalization.personal_context_publication import (
@@ -141,6 +142,8 @@ class PersonalContextRelay:
                             dataset_id=dataset_id,
                             budget=budget,
                         )
+            except PublicationActivationPending:
+                result = self._pending()
             except PublicationRelayPoisoned:
                 result = PersonalContextRelayResult(0, False, False, "relay_poisoned")
             except Exception:  # noqa: BLE001 - DB/lease/adapter races remain retryable.
@@ -200,6 +203,8 @@ class PersonalContextRelay:
                 budget=budget,
             )
             if batch is None:
+                if not budget.can_inspect():
+                    return self._pending(staged)
                 return PersonalContextRelayResult(
                     staged, True, False, "complete"
                 )

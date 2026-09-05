@@ -394,9 +394,40 @@ class SyncV2Store:
             bootstrap_cursor=bootstrap_cursor,
         )
 
+    def mirror_personal_context_activation(self, **values: Any) -> None:
+        """Mirror a verified canonical pair without changing readiness."""
+
+        self.db.mirror_personal_context_activation(connection=self._connection, **values)
+
+    def install_personal_context_activation(self, **values: Any) -> dict[str, Any]:
+        """Persist immutable protected bootstrap envelopes under an active guard."""
+
+        return self.db.install_personal_context_activation(connection=self._connection, **values)
+
+    def get_personal_context_activation(self, activation_id: str) -> dict[str, Any] | None:
+        """Read the durable protected bootstrap installation."""
+
+        return self.db.get_personal_context_activation(activation_id, connection=self._connection)
+
+    def acknowledge_personal_context_activation(self, **values: Any) -> dict[str, Any]:
+        """Persist one device's exact local installation receipt."""
+
+        return self.db.acknowledge_personal_context_activation(connection=self._connection, **values)
+
+    def get_personal_context_activation_ack(self, activation_id: str, device_id: str) -> dict[str, Any] | None:
+        """Read one exact device acknowledgment."""
+
+        return self.db.get_personal_context_activation_ack(activation_id, device_id, connection=self._connection)
+
     def has_personal_context_link_receipt(
-        self, *, user_id: str, dataset_id: str, device_id: str, profile_id: str,
-        integrity_key_id: str, purge_generation: int,
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str,
+        profile_id: str,
+        integrity_key_id: str,
+        purge_generation: int,
     ) -> bool:
         """Return whether this exact device has the current server-owned receipt."""
 

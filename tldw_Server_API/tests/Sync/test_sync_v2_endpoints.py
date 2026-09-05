@@ -97,17 +97,24 @@ def _seed_persisted_personal_context_exchange(
     service: SyncV2Service,
     dataset_id: str,
 ) -> dict[str, object]:
-    """Seed the future activation owner state without exposing an HTTP route."""
+    """Install real canonical receipts before enabling the test-only exchange gate."""
+
+    baseline = service.prepare_personal_context_activation(user_id="101", device_id="pc-device")
+    _receipt, installed_proof = service.acknowledge_personal_context_activation(
+        user_id="101",
+        dataset_id=dataset_id,
+        device_id="pc-device",
+        activation_id=baseline.activation.activation_id,
+        baseline_digest=baseline.activation.baseline_digest,
+        local_receipt_id="endpoint-local-install-0123456789",
+        exchange=baseline.personal_context_exchange,
+    )
 
     dataset = service.store.get_dataset(dataset_id)
     assert dataset is not None
     metadata = dict(dataset.metadata)
     state = dict(metadata["personal_context"])
-    proof: dict[str, object] = {
-        "ongoing_sync_version": 1,
-        "activation_epoch": "epoch_0123456789abcdef",
-        "continuity_token": "continuity_0123456789abcdef",
-    }
+    proof = installed_proof.model_dump(mode="json")
     state.update(proof)
     metadata["personal_context"] = state
     with service.store.db.backend.transaction() as connection:

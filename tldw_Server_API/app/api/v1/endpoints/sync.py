@@ -945,8 +945,18 @@ def bootstrap_sync_v2_personal_context(
     """Return the canonical profile snapshot and wrapped Sync integrity key."""
 
     user_id = _sync_user_id(user)
+    if (
+        request.ongoing_sync_version == 1
+        and service.capabilities(user_id=user_id).personal_context.ongoing_sync_version != 1
+    ):
+        raise HTTPException(status_code=409, detail={"code": "personal_context_ongoing_sync_unavailable"})
     try:
-        snapshot = service.bootstrap_personal_context(
+        bootstrap = (
+            service.prepare_personal_context_activation
+            if request.ongoing_sync_version == 1
+            else service.bootstrap_personal_context
+        )
+        snapshot = bootstrap(
             user_id=user_id,
             device_id=request.device_id,
             required_schema_version=request.required_schema_version,
@@ -954,9 +964,7 @@ def bootstrap_sync_v2_personal_context(
             expected_purge_generation=request.expected_purge_generation,
         )
     except Exception as exc:
-        raise _safe_sync_v2_http_error(
-            exc, user_id=user_id, device_id=request.device_id
-        ) from exc
+        raise _safe_sync_v2_http_error(exc, user_id=user_id, device_id=request.device_id) from exc
     return SyncPersonalContextBootstrapResponse(
         dataset_id=snapshot.dataset_id,
         authority_id=snapshot.authority_id,
@@ -972,6 +980,8 @@ def bootstrap_sync_v2_personal_context(
         integrity_key_id=snapshot.integrity_key.integrity_key_id,
         key_record_id=snapshot.integrity_key.key_record_id,
         wrapped_key_blob=snapshot.integrity_key.wrapped_key_blob,
+        activation=snapshot.activation,
+        personal_context_exchange=snapshot.personal_context_exchange,
     )
 
 
@@ -1926,15 +1936,29 @@ def resolve_sync_v2_conflicts(
 )
 def acknowledge_personal_context_activation(
     request: SyncPersonalContextActivationAcknowledgeRequest,
+    user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
 ) -> SyncPersonalContextActivationAcknowledgeResponse:
-    """Reserve the versioned activation-acknowledgement route until activation is ready."""
+    """Acknowledge an exact installed baseline when ongoing rollout is ready."""
 
-    del request, service
-    raise HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail={"code": "personal_context_ongoing_sync_unavailable"},
-    )
+    user_id = _sync_user_id(user)
+    if service.capabilities(user_id=user_id).personal_context.ongoing_sync_version != 1:
+        raise HTTPException(status_code=409, detail={"code": "personal_context_ongoing_sync_unavailable"})
+    try:
+        receipt, proof = service.acknowledge_personal_context_activation(
+            user_id=user_id,
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+            activation_id=request.activation_id,
+            baseline_digest=request.baseline_digest,
+            local_receipt_id=request.local_receipt_id,
+            exchange=request.personal_context_exchange,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc, user_id=user_id, dataset_id=request.dataset_id, device_id=request.device_id
+        ) from exc
+    return SyncPersonalContextActivationAcknowledgeResponse(receipt=receipt, personal_context_exchange=proof)
 
 
 @router.post(

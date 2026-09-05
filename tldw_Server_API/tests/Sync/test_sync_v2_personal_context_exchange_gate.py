@@ -56,6 +56,8 @@ ProofState = Literal[
     "incomplete_link",
     "tampered_stored",
     "version_zero",
+    "canonical_unavailable",
+    "forged_metadata",
 ]
 DeviceState = Literal["active", "paused", "revoked", "unknown"]
 
@@ -138,6 +140,10 @@ def _proof_for_state(state: ProofState) -> PersonalContextExchangeProof | None:
         return EXCHANGE.model_copy(
             update={"continuity_token": "stale_token_0123456789abcdef"}
         )
+    if state == "forged_metadata":
+        return EXCHANGE.model_copy(
+            update={"continuity_token": "forged_continuity_0123456789abcdef"}
+        )
     return EXCHANGE
 
 
@@ -157,6 +163,10 @@ def _prepare_state(
         )
     elif state == "version_zero":
         _set_personal_context_state(service, ongoing_sync_version=0)
+    elif state == "canonical_unavailable":
+        service.personal_context_service_resolver = None
+    elif state == "forged_metadata":
+        _set_personal_context_state(service, continuity_token="forged_continuity_0123456789abcdef")
     return device_id, _proof_for_state(state)
 
 
@@ -447,6 +457,8 @@ def _request_operation(
         "incomplete_link",
         "tampered_stored",
         "version_zero",
+        "canonical_unavailable",
+        "forged_metadata",
     ],
 )
 def test_personal_context_exchange_gate_matrix(

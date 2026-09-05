@@ -1,10 +1,14 @@
+"""Bootstrap compatibility, cursor, and first-link authorization regressions."""
+
 from __future__ import annotations
 
 import base64
 import hashlib
 import hmac
 import inspect
+import json
 import threading
+import uuid
 from concurrent.futures import (
     ThreadPoolExecutor,
 )
@@ -18,10 +22,20 @@ from pathlib import Path
 import pytest
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from tldw_profile_core import ProfileRecord
 from tldw_profile_core.canonical import canonical_json_bytes
 
 from tldw_Server_API.app.core.DB_Management import Sync_DB as sync_db_module
+from tldw_Server_API.app.core.DB_Management.Personal_Context_Key_Store import ServerProfileKeyProvider
+from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+    CanonicalApplyReceipt,
+    IngressIdentity,
+    PersonalContextPublicationJournal,
+    PersonalContextPublicationRelayStore,
+    PublicationObject,
+)
 from tldw_Server_API.app.core.Personalization.personal_context_service import (
     PersonalContextService,
 )
@@ -43,9 +57,12 @@ from tldw_Server_API.app.core.Sync.v2.materializers.personal_context import (
 from tldw_Server_API.app.core.Sync.v2.models import (
     PERSONAL_CONTEXT_SYNC_DOMAINS,
     SyncDatasetCreate,
+    SyncEnvelope,
     SyncEnvelopeCreate,
 )
-from tldw_Server_API.app.core.Sync.v2.profile import PersonalContextBootstrapError
+from tldw_Server_API.app.core.Sync.v2.personal_context_ongoing_contract import PersonalContextExchangeProof
+from tldw_Server_API.app.core.Sync.v2.personal_context_relay import PersonalContextRelay
+from tldw_Server_API.app.core.Sync.v2.profile import PersonalContextBootstrap, PersonalContextBootstrapError
 from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_config,
 )
@@ -56,6 +73,7 @@ from tldw_Server_API.app.core.Sync.v2.service import (
 )
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
 from tldw_Server_API.tests.Personalization.personal_context_test_support import (
+    encoded_master_key,
     global_scope,
     manifest,
     preference_record,
@@ -66,9 +84,18 @@ pytestmark = pytest.mark.unit
 
 _INTEGRITY_KEY = b"k" * 32
 _PLAINTEXT_CANARY = "bootstrap-private-canary"
+_EXCHANGE = PersonalContextExchangeProof(
+    ongoing_sync_version=1,
+    activation_epoch="epoch_0123456789abcdef",
+    continuity_token="continuity_0123456789abcdef",
+)
 
 
 class _CanonicalService:
+    """Canonical snapshot fake with explicit per-device activation authorization."""
+
+    database: PersonalizationDB
+
     def __init__(self) -> None:
         self.manifest = manifest()
         self.scope = global_scope(profile_id=self.manifest.profile_id)
@@ -86,6 +113,27 @@ class _CanonicalService:
         self.applied: list[object] = []
         self.integrity_key_id = "personal-context-integrity-v1"
         self.integrity_key = _INTEGRITY_KEY
+        self._repository = self
+        self.activated_devices: set[tuple[str, str, str]] = set()
+
+    def validate_activation_exchange(
+        self,
+        *,
+        profile_id: str,
+        device_id: str,
+        dataset_id: str,
+        activation_epoch: str,
+        continuity_token: str,
+    ) -> PersonalContextExchangeProof:
+        """Accept only explicitly acknowledged fixture devices and their exact pair."""
+        proof = PersonalContextExchangeProof(
+            ongoing_sync_version=1,
+            activation_epoch=activation_epoch,
+            continuity_token=continuity_token,
+        )
+        if (profile_id, dataset_id, device_id) not in self.activated_devices or proof != _EXCHANGE:
+            raise ValueError("personal_context_activation_required")
+        return proof
 
     def create_profile(self, *, runtime_enabled: bool = False):
         del runtime_enabled
@@ -119,25 +167,29 @@ class _CanonicalService:
             f"purge:{self.manifest.purge_generation}",
             f"integrity:{self.integrity_key_id}",
             f"scope:{self.scope.scope_id}:{self.scope.version_id}",
+            *(f"record:{item.record_id}:{item.version_id}" for item in self.records),
             *(
-                f"record:{item.record_id}:{item.version_id}" for item in self.records
-            ),
-            *(
-                "proposal:" + item.proposal_id + ":" + hashlib.sha256(
-                    item.model_dump_json().encode("utf-8")
-                ).hexdigest()
+                "proposal:"
+                + item.proposal_id
+                + ":"
+                + hashlib.sha256(item.model_dump_json().encode("utf-8")).hexdigest()
                 for item in self.proposals
             ),
         ]
-        return type("Snapshot", (), {
-            "manifest": self.manifest, "scopes": self.list_scopes(),
-            "records": self.records, "proposals": self.proposals,
-            "integrity_key_id": self.integrity_key_id,
-            "integrity_key": self.integrity_key,
-            "cursor": "personal-context-bootstrap-v1:" + hashlib.sha256(
-                "\x1e".join(sorted(entries)).encode("utf-8")
-            ).hexdigest(),
-        })()
+        return type(
+            "Snapshot",
+            (),
+            {
+                "manifest": self.manifest,
+                "scopes": self.list_scopes(),
+                "records": self.records,
+                "proposals": self.proposals,
+                "integrity_key_id": self.integrity_key_id,
+                "integrity_key": self.integrity_key,
+                "cursor": "personal-context-bootstrap-v1:"
+                + hashlib.sha256("\x1e".join(sorted(entries)).encode("utf-8")).hexdigest(),
+            },
+        )()
 
     def plan_sync_bootstrap(self):
         snapshot = self.sync_bootstrap_snapshot()
@@ -146,10 +198,7 @@ class _CanonicalService:
 
     def materialize_sync_bootstrap(self, *, profile_id: str, bootstrap_cursor: str):
         snapshot = self.plan_sync_bootstrap()
-        if (
-            profile_id != snapshot.manifest.profile_id
-            or bootstrap_cursor != snapshot.cursor
-        ):
+        if profile_id != snapshot.manifest.profile_id or bootstrap_cursor != snapshot.cursor:
             raise ValueError("stale bootstrap plan")
         self.profile_exists = True
         snapshot.materialized = True
@@ -159,9 +208,59 @@ class _CanonicalService:
         self.applied.append(values)
         return values["value"]
 
+    def apply_sync_ingress(
+        self,
+        *,
+        identity: IngressIdentity,
+        domain: str,
+        value: ProfileRecord,
+        base_object_hash: str | None,
+    ) -> CanonicalApplyReceipt:
+        """Exercise real ingress receipt validation around the existing apply fake."""
+        self.apply_sync_object(domain=domain, value=value, base_object_hash=base_object_hash)
+        return CanonicalApplyReceipt(
+            resulting_object_id=value.record_id,
+            resulting_version_id=value.version_id,
+            manifest_revision=self.manifest.revision,
+            manifest_version_id=self.manifest.current_version_id,
+            purge_generation=identity.purge_generation,
+            publication_batch_id="bootstrap-fixture-batch",
+            profile_publication_sequence=1,
+            receipt_id=str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    "tldw:personal-context:ingress:"
+                    f"{identity.dataset_id}:{identity.device_id}:{identity.client_envelope_id}",
+                )
+            ),
+            dataset_id=identity.dataset_id,
+            device_id=identity.device_id,
+            client_envelope_id=identity.client_envelope_id,
+            canonical_payload_digest=identity.canonical_payload_digest,
+            wire_entity_version=identity.wire_entity_version,
+        )
 
-def _service(tmp_path: Path) -> tuple[SyncV2Service, _CanonicalService]:
+
+def _service(
+    tmp_path: Path, *, publication_journal: bool = False, monkeypatch: pytest.MonkeyPatch | None = None
+) -> tuple[SyncV2Service, _CanonicalService]:
+    """Build real Sync storage, optionally with real encrypted authority sources."""
     canonical = _CanonicalService()
+    if publication_journal:
+        assert monkeypatch is not None
+        monkeypatch.setenv("TLDW_PERSONAL_CONTEXT_MASTER_KEY", encoded_master_key())
+        canonical.database = PersonalizationDB.for_path(tmp_path / "publication.db")
+        provider = ServerProfileKeyProvider(canonical.database)
+        with canonical.database.transaction(immediate=True) as connection:
+            keys = provider.create(canonical.manifest.profile_id, connection=connection)
+            provider.replace_encryption_key(
+                canonical.manifest.profile_id,
+                encryption_key=b"e" * 32,
+                integrity_key=_INTEGRITY_KEY,
+                expected_key_version=keys.key_version,
+                integrity_key_version=keys.integrity_key_version,
+                connection=connection,
+            )
     store = SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync.db"))
     adapters = SyncAdapterRegistry(
         [
@@ -185,9 +284,7 @@ def _service(tmp_path: Path) -> tuple[SyncV2Service, _CanonicalService]:
         },
         personal_context_service_resolver=lambda _user_id: canonical,
         personal_context_key_wrapper=lambda *, device, integrity_key, integrity_key_id: (
-            "wrapped:"
-            f"{device.device_id}:{integrity_key_id}:"
-            f"{hashlib.sha256(integrity_key).hexdigest()}"
+            f"wrapped:{device.device_id}:{integrity_key_id}:{hashlib.sha256(integrity_key).hexdigest()}"
         ),
         personal_context_key_fingerprint=lambda *, device: f"fingerprint:{device.device_id}",
         settings=SyncV2Settings(
@@ -205,11 +302,7 @@ def _service(tmp_path: Path) -> tuple[SyncV2Service, _CanonicalService]:
         display_name="Chatbook A",
         client_type="chatbook",
         device_id="device-a",
-        capabilities={
-            "supported_adapter_versions": {
-                domain: [1] for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
-            }
-        },
+        capabilities={"supported_adapter_versions": {domain: [1] for domain in PERSONAL_CONTEXT_SYNC_DOMAINS}},
     )
     return service, canonical
 
@@ -225,6 +318,34 @@ def _bootstrap(service: SyncV2Service, **overrides: object):
     return service.bootstrap_personal_context(**values)
 
 
+def _complete_and_activate(
+    service: SyncV2Service,
+    canonical: _CanonicalService,
+    bootstrap: PersonalContextBootstrap,
+    *,
+    device_id: str = "device-a",
+) -> None:
+    """Complete the real link before acknowledging this fake's v1 baseline.
+
+    Snapshot/cursor tests retain their original transport boundaries. Real
+    encrypted activation installation and receipts have separate integration tests.
+    """
+    service.complete_personal_context_link(
+        user_id="user-a",
+        device_id=device_id,
+        dataset_id=bootstrap.dataset_id,
+        bootstrap_cursor=bootstrap.cursor,
+    )
+    canonical.activated_devices.add((bootstrap.manifest.profile_id, bootstrap.dataset_id, device_id))
+    dataset = service.store.get_dataset(bootstrap.dataset_id)
+    metadata = dataset.metadata
+    metadata["personal_context"].update(_EXCHANGE.model_dump(mode="json"))
+    with service.store.db.backend.transaction() as connection:
+        service.store.db.execute(
+            "UPDATE sync_datasets SET metadata_json = ? WHERE dataset_id = ?",
+            (json.dumps(metadata), bootstrap.dataset_id),
+            connection=connection,
+        )
 
 
 def _record_envelope(bootstrap) -> SyncEnvelopeCreate:
@@ -277,6 +398,54 @@ def _transport_record_envelope(
     )
 
 
+def _publish_transport_record(
+    service: SyncV2Service, bootstrap: PersonalContextBootstrap, *, revision: int, previous: SyncEnvelope | None = None
+) -> SyncEnvelope:
+    """Publish a real acknowledged encrypted source without fabricating pull authority."""
+    canonical = service._personal_context_service_for_user("user-a")
+    database = canonical.database
+    envelope = _client_transport_record_envelope(bootstrap, revision=revision, previous=previous)
+    keys = ServerProfileKeyProvider(database).load(bootstrap.manifest.profile_id)
+    with database.transaction(immediate=True) as connection:
+        receipt = PersonalContextPublicationJournal(keys).append_batch(
+            connection,
+            profile_id=bootstrap.manifest.profile_id,
+            purge_generation=0,
+            objects=(
+                PublicationObject(
+                    domain=envelope.domain,
+                    object_id=envelope.object_id,
+                    version_id=str(envelope.entity_version),
+                    operation="upsert",
+                    role="semantic",
+                    canonical=canonical_json_bytes(envelope.payload),
+                ),
+            ),
+            now="2026-09-04T12:00:00Z",
+        )
+    result = PersonalContextRelay(
+        publications=PersonalContextPublicationRelayStore(database),
+        stage_authority=service.stage_personal_context_authority,
+        finalize_authority=service.finalize_personal_context_authority,
+        cancel_authority=service.cancel_personal_context_authority,
+    ).relay_profile(
+        user_id="user-a",
+        profile_id=bootstrap.manifest.profile_id,
+        dataset_id=bootstrap.dataset_id,
+        after_server_cursor=None,
+        wall_time_ms=5_000,
+    )
+    assert result.continuation == "complete"
+    with database.transaction() as connection:
+        row = connection.execute(
+            "SELECT sync_server_cursor FROM personal_context_publication_rows WHERE profile_publication_sequence = ?",
+            (receipt.profile_publication_sequence,),
+        ).fetchone()
+    stored = service.store.get_envelope_by_server_cursor(row[0])
+    assert stored is not None
+    return stored
+
+
 def _client_transport_record_envelope(
     bootstrap,
     *,
@@ -289,9 +458,7 @@ def _client_transport_record_envelope(
         profile_id=bootstrap.manifest.profile_id,
         record_id="transport-record",
         version_id=f"transport-record-v{revision}",
-        parent_version_id=(
-            None if revision == 1 else f"transport-record-v{revision - 1}"
-        ),
+        parent_version_id=(None if revision == 1 else f"transport-record-v{revision - 1}"),
         value=f"value-{revision}",
     ).model_dump(mode="json")
     payload_bytes = canonical_json_bytes(payload)
@@ -457,11 +624,13 @@ def test_bootstrap_sync_transport_cursor_is_accepted_by_private_pull_parser(
     service, _canonical = _service(tmp_path)
 
     bootstrap = _bootstrap(service)
+    _complete_and_activate(service, _canonical, bootstrap)
     pulled = service.pull(
         user_id="user-a",
         dataset_id=bootstrap.dataset_id,
         device_id="device-a",
         cursor=bootstrap.sync_transport_cursor,
+        personal_context_exchange=_EXCHANGE,
         domains=PERSONAL_CONTEXT_SYNC_DOMAINS,
     )
 
@@ -473,42 +642,30 @@ def test_bootstrap_sync_transport_cursor_is_accepted_by_private_pull_parser(
             dataset_id=bootstrap.dataset_id,
             device_id="device-a",
             cursor=bootstrap.cursor,
+            personal_context_exchange=_EXCHANGE,
             domains=PERSONAL_CONTEXT_SYNC_DOMAINS,
         )
 
 
 def test_bootstrap_transport_watermark_skips_retained_history_and_delivers_later_change(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    service, _canonical = _service(tmp_path)
+    service, _canonical = _service(tmp_path, publication_journal=True, monkeypatch=monkeypatch)
     first_device = _bootstrap(service)
-    prior = service.store.insert_envelope(
-        _transport_record_envelope(service, first_device, revision=1)
-    )
-    prior = service.store.insert_envelope(
-        _transport_record_envelope(
-            service,
-            first_device,
-            revision=2,
-            previous=prior,
-        )
-    )
+    prior = _publish_transport_record(service, first_device, revision=1)
+    prior = _publish_transport_record(service, first_device, revision=2, previous=prior)
     _register_transport_device(service, "device-b")
 
     reviewed = _bootstrap(service, device_id="device-b")
-    later = service.store.insert_envelope(
-        _transport_record_envelope(
-            service,
-            first_device,
-            revision=3,
-            previous=prior,
-        )
-    )
+    _complete_and_activate(service, _canonical, reviewed, device_id="device-b")
+    later = _publish_transport_record(service, first_device, revision=3, previous=prior)
     pulled = service.pull(
         user_id="user-a",
         dataset_id=reviewed.dataset_id,
         device_id="device-b",
         cursor=reviewed.sync_transport_cursor,
+        personal_context_exchange=_EXCHANGE,
         domains=PERSONAL_CONTEXT_SYNC_DOMAINS,
     )
 
@@ -522,17 +679,20 @@ def test_bootstrap_transport_watermark_skips_retained_history_and_delivers_later
             dataset_id=reviewed.dataset_id,
             device_id="device-b",
             cursor=reviewed.sync_transport_cursor,
+            personal_context_exchange=_EXCHANGE,
             domains=["personal_context.record"],
         )
 
 
 def test_bootstrap_transport_cursor_retry_preserves_boundary_and_supports_slow_review(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    service, _canonical = _service(tmp_path)
+    service, _canonical = _service(tmp_path, publication_journal=True, monkeypatch=monkeypatch)
     now = datetime(2026, 8, 30, tzinfo=timezone.utc)
     service.clock = lambda: now.isoformat()
     first = _bootstrap(service)
+    _complete_and_activate(service, _canonical, first)
     device = service.store.get_device("user-a", "device-a")
     assert device is not None
     streams = service._pull_adapter_streams(device, PERSONAL_CONTEXT_SYNC_DOMAINS)
@@ -544,9 +704,7 @@ def test_bootstrap_transport_cursor_retry_preserves_boundary_and_supports_slow_r
         version_set=version_set,
         streams=streams,
     )
-    later = service.store.insert_envelope(
-        _transport_record_envelope(service, first, revision=1)
-    )
+    later = _publish_transport_record(service, first, revision=1)
     service.personal_context_key_fingerprint = lambda *, device: (
         f"rotated-fingerprint:{device.device_id}"
     )
@@ -557,10 +715,12 @@ def test_bootstrap_transport_cursor_retry_preserves_boundary_and_supports_slow_r
         dataset_id=first.dataset_id,
         device_id="device-a",
         cursor=first.sync_transport_cursor,
+        personal_context_exchange=_EXCHANGE,
         domains=PERSONAL_CONTEXT_SYNC_DOMAINS,
         include_own_changes=True,
     ).envelopes[0].server_sequence == later.server_sequence
     retry = _bootstrap(service)
+    _complete_and_activate(service, _canonical, retry)
     retry_watermarks = service._decode_pull_token(
         retry.sync_transport_cursor,
         dataset_id=retry.dataset_id,
@@ -578,6 +738,7 @@ def test_bootstrap_transport_cursor_retry_preserves_boundary_and_supports_slow_r
             dataset_id=first.dataset_id,
             device_id="device-a",
             cursor=first.sync_transport_cursor,
+            personal_context_exchange=_EXCHANGE,
             domains=PERSONAL_CONTEXT_SYNC_DOMAINS,
             include_own_changes=True,
         )
@@ -586,6 +747,7 @@ def test_bootstrap_transport_cursor_retry_preserves_boundary_and_supports_slow_r
         dataset_id=retry.dataset_id,
         device_id="device-a",
         cursor=retry.sync_transport_cursor,
+        personal_context_exchange=_EXCHANGE,
         domains=PERSONAL_CONTEXT_SYNC_DOMAINS,
         include_own_changes=True,
     ).envelopes[0].server_sequence == later.server_sequence
@@ -593,8 +755,9 @@ def test_bootstrap_transport_cursor_retry_preserves_boundary_and_supports_slow_r
 
 def test_bootstrap_transport_snapshot_serializes_concurrent_sqlite_insert(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    service, canonical = _service(tmp_path)
+    service, canonical = _service(tmp_path, publication_journal=True, monkeypatch=monkeypatch)
     source = _bootstrap(service)
     _register_transport_device(service, "device-b")
     entered_snapshot = threading.Event()
@@ -611,8 +774,7 @@ def test_bootstrap_transport_snapshot_serializes_concurrent_sqlite_insert(
         bootstrap_future = executor.submit(_bootstrap, service, device_id="device-b")
         assert entered_snapshot.wait(timeout=5)
         insert_future = executor.submit(
-            service.store.insert_envelope,
-            _transport_record_envelope(service, source, revision=1),
+            _publish_transport_record, service, source, revision=1,
         )
         with pytest.raises(FutureTimeoutError):
             insert_future.result(timeout=0.2)
@@ -620,11 +782,13 @@ def test_bootstrap_transport_snapshot_serializes_concurrent_sqlite_insert(
         reviewed = bootstrap_future.result(timeout=5)
         inserted = insert_future.result(timeout=5)
 
+    _complete_and_activate(service, canonical, reviewed, device_id="device-b")
     pulled = service.pull(
         user_id="user-a",
         dataset_id=reviewed.dataset_id,
         device_id="device-b",
         cursor=reviewed.sync_transport_cursor,
+        personal_context_exchange=_EXCHANGE,
         domains=PERSONAL_CONTEXT_SYNC_DOMAINS,
     )
     assert [item.server_sequence for item in pulled.envelopes] == [
@@ -646,6 +810,7 @@ def test_bootstrap_rejects_real_push_paused_before_canonical_materialization(
         dataset_id=source.dataset_id,
         bootstrap_cursor=source.cursor,
     )
+    _complete_and_activate(service, canonical, source)
     _register_transport_device(service, "device-b")
     canonical.apply_sync_object = lambda **values: _apply_record_to_fake_canonical(
         canonical, **values
@@ -667,6 +832,7 @@ def test_bootstrap_rejects_real_push_paused_before_canonical_materialization(
             dataset_id=source.dataset_id,
             device_id="device-a",
             envelopes=[_client_transport_record_envelope(source, revision=1)],
+            personal_context_exchange=_EXCHANGE,
         )
         assert entered_materialization.wait(timeout=5)
         try:
@@ -684,11 +850,13 @@ def test_bootstrap_rejects_real_push_paused_before_canonical_materialization(
     assert len(pushed.accepted) == 1
 
     reviewed = _bootstrap(service, device_id="device-b")
+    _complete_and_activate(service, canonical, reviewed, device_id="device-b")
     pulled = service.pull(
         user_id="user-a",
         dataset_id=reviewed.dataset_id,
         device_id="device-b",
         cursor=reviewed.sync_transport_cursor,
+        personal_context_exchange=_EXCHANGE,
         domains=PERSONAL_CONTEXT_SYNC_DOMAINS,
     )
     assert pulled.envelopes == []
@@ -708,6 +876,7 @@ def test_failed_materialization_blocks_bootstrap_until_guarded_replay_succeeds(
         dataset_id=source.dataset_id,
         bootstrap_cursor=source.cursor,
     )
+    _complete_and_activate(service, canonical, source)
     _register_transport_device(service, "device-b")
 
     def fail_apply(**_values: object) -> object:
@@ -719,6 +888,7 @@ def test_failed_materialization_blocks_bootstrap_until_guarded_replay_succeeds(
         dataset_id=source.dataset_id,
         device_id="device-a",
         envelopes=[_client_transport_record_envelope(source, revision=1)],
+        personal_context_exchange=_EXCHANGE,
     )
     assert len(pushed.accepted) == 1
     sequence = pushed.accepted[0].server_sequence
@@ -741,7 +911,7 @@ def test_failed_materialization_blocks_bootstrap_until_guarded_replay_succeeds(
         domains=["personal_context.record"],
         failed_only=True,
     )
-    assert replayed.applied_count == 1
+    assert replayed.applied_count == 1, replayed.domain_results
     repaired = service.store.get_envelope_by_server_cursor(sequence)
     assert repaired is not None and repaired.apply_status == "applied"
 
@@ -752,11 +922,13 @@ def test_failed_materialization_blocks_bootstrap_until_guarded_replay_succeeds(
         dataset_id=reviewed.dataset_id,
         bootstrap_cursor=reviewed.cursor,
     )
+    _complete_and_activate(service, canonical, reviewed, device_id="device-b")
     assert service.pull(
         user_id="user-a",
         dataset_id=reviewed.dataset_id,
         device_id="device-b",
         cursor=reviewed.sync_transport_cursor,
+        personal_context_exchange=_EXCHANGE,
         domains=PERSONAL_CONTEXT_SYNC_DOMAINS,
     ).envelopes == []
 
@@ -1244,14 +1416,14 @@ def test_personal_context_push_stays_blocked_until_narrow_completion_transition(
     bootstrap = _bootstrap(service)
     envelope = _record_envelope(bootstrap)
 
-    before = service.push(
-        user_id="user-a",
-        dataset_id=bootstrap.dataset_id,
-        device_id="device-a",
-        envelopes=[envelope],
-    )
-    assert before.accepted == []
-    assert before.rejected[0].error_code == "personal_context_link_incomplete"
+    with pytest.raises(SyncStoreError, match="personal_context_activation_required"):
+        service.push(
+            user_id="user-a",
+            dataset_id=bootstrap.dataset_id,
+            device_id="device-a",
+            envelopes=[envelope],
+        )
+    assert _canonical.applied == []
 
     service.complete_personal_context_link(
         user_id="user-a",
@@ -1259,11 +1431,13 @@ def test_personal_context_push_stays_blocked_until_narrow_completion_transition(
         dataset_id=bootstrap.dataset_id,
         bootstrap_cursor=bootstrap.cursor,
     )
+    _complete_and_activate(service, _canonical, bootstrap)
     after = service.push(
         user_id="user-a",
         dataset_id=bootstrap.dataset_id,
         device_id="device-a",
         envelopes=[envelope],
+        personal_context_exchange=_EXCHANGE,
     )
     assert len(after.accepted) == 1
 
@@ -1283,13 +1457,16 @@ def test_personal_context_push_stays_blocked_until_narrow_completion_transition(
         client_envelope_id="device-b:record:1",
         device_id="device-b",
     )
-    blocked_other_device = service.push(
-        user_id="user-a",
-        dataset_id=bootstrap.dataset_id,
-        device_id="device-b",
-        envelopes=[other_device],
-    )
-    assert blocked_other_device.rejected[0].error_code == "personal_context_link_incomplete"
+    applied_before = list(_canonical.applied)
+    with pytest.raises(SyncStoreError, match="personal_context_activation_required"):
+        service.push(
+            user_id="user-a",
+            dataset_id=bootstrap.dataset_id,
+            device_id="device-b",
+            envelopes=[other_device],
+            personal_context_exchange=_EXCHANGE,
+        )
+    assert _canonical.applied == applied_before
 
 
 def test_generic_enrollment_cannot_forge_personal_context_binding(tmp_path: Path) -> None:

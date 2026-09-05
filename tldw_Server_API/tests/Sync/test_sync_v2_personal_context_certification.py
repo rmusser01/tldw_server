@@ -407,13 +407,25 @@ def _device_payload(public_key: rsa.RSAPublicKey) -> dict[str, object]:
     }
 
 
-def _seed_exchange(service, dataset_id: str) -> None:
+def _seed_exchange(service, dataset_id: str) -> dict[str, object]:
+    """Install and acknowledge through the real journals before test-only rollout."""
+
+    baseline = service.prepare_personal_context_activation(user_id=_USER_ID, device_id=_DEVICE_ID)
+    _receipt, proof = service.acknowledge_personal_context_activation(
+        user_id=_USER_ID,
+        dataset_id=dataset_id,
+        device_id=_DEVICE_ID,
+        activation_id=baseline.activation.activation_id,
+        baseline_digest=baseline.activation.baseline_digest,
+        local_receipt_id="certification-local-install-0123456789",
+        exchange=baseline.personal_context_exchange,
+    )
     dataset = service.store.get_dataset(dataset_id, owner_user_id=_USER_ID)
     _require(dataset is not None, "seed dataset was not found")
     metadata = dict(dataset.metadata)
     metadata["personal_context"] = {
         **metadata["personal_context"],
-        **_EXCHANGE,
+        **proof.model_dump(),
     }
     with service.store.db.backend.transaction() as connection:
         service.store.db.execute(
@@ -421,6 +433,7 @@ def _seed_exchange(service, dataset_id: str) -> None:
             (json.dumps(metadata, sort_keys=True), dataset_id),
             connection=connection,
         )
+    return proof.model_dump()
 
 
 def _record_body(scope_id: str, value: str) -> dict[str, object]:
@@ -460,13 +473,13 @@ def _publication_state(canonical) -> list[dict[str, object]]:
         ]
 
 
-def _pull_params(dataset_id: str, cursor: str | None = None) -> dict[str, object]:
+def _pull_params(dataset_id: str, cursor: str | None = None, *, exchange: dict[str, object]) -> dict[str, object]:
     params: dict[str, object] = {
         "dataset_id": dataset_id,
         "device_id": _DEVICE_ID,
         "domain": "personal_context.record",
-        "personal_context_activation_epoch": _EXCHANGE["activation_epoch"],
-        "personal_context_continuity_token": _EXCHANGE["continuity_token"],
+        "personal_context_activation_epoch": exchange["activation_epoch"],
+        "personal_context_continuity_token": exchange["continuity_token"],
     }
     if cursor is not None:
         params["cursor"] = cursor
@@ -1317,7 +1330,7 @@ def test_production_http_relay_debt_survives_restart_and_recovers_on_push_and_pu
                 },
             )
             _require_status(complete, 204, "Personal Context link completion failed")
-            _seed_exchange(initial_sync, dataset_id)
+            exchange = _seed_exchange(initial_sync, dataset_id)
             _require(
                 client.get("/api/v1/sync/capabilities").json()["personal_context"][
                     "ongoing_sync_version"
@@ -1492,7 +1505,7 @@ def test_production_http_relay_debt_survives_restart_and_recovers_on_push_and_pu
                 json={
                     "dataset_id": dataset_id,
                     "device_id": _DEVICE_ID,
-                    "personal_context_exchange": _EXCHANGE,
+                    "personal_context_exchange": exchange,
                     "envelopes": [
                         {
                             "dataset_id": dataset_id,
@@ -1636,10 +1649,10 @@ def test_production_http_relay_debt_survives_restart_and_recovers_on_push_and_pu
         with _production_client(production_app) as pull_client:
             zero_limit = pull_client.get(
                 "/api/v1/sync/pull",
-                params={**_pull_params(dataset_id), "page_size": 0},
+                params={**_pull_params(dataset_id, exchange=exchange), "page_size": 0},
             )
             _require_status(zero_limit, 422, "zero pull limit was accepted")
-            pulled = pull_client.get("/api/v1/sync/pull", params=_pull_params(dataset_id))
+            pulled = pull_client.get("/api/v1/sync/pull", params=_pull_params(dataset_id, exchange=exchange))
             responses.append(pulled.text)
             _require_status(pulled, 200, "authority pull failed")
             pull_body = pulled.json()
@@ -1705,7 +1718,7 @@ def test_production_http_relay_debt_survives_restart_and_recovers_on_push_and_pu
 
             repeated = pull_client.get(
                 "/api/v1/sync/pull",
-                params=_pull_params(dataset_id, pull_body["next_cursor"]),
+                params=_pull_params(dataset_id, pull_body["next_cursor"], exchange=exchange),
             )
             responses.append(repeated.text)
             _require_status(repeated, 200, "repeat pull failed")

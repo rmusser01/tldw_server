@@ -26,12 +26,31 @@ class ProfileKeyMaterial:
     integrity_key_version: int = 1
 
 
+@dataclass(frozen=True, slots=True, repr=False)
+class PreparedPersonalContextActivation:
+    """Authenticated exact-head baseline; decrypted bytes never enter diagnostics."""
+
+    profile_id: str
+    device_id: str
+    activation_id: str
+    baseline_digest: str
+    purge_generation: int
+    publication_watermark: int
+    baseline: bytes
+    state: str
+    sync_receipt_id: str | None
+    home_server_cursor: int | None
+    activation_epoch: str | None
+    continuity_token: str | None
+
+
 __all__ = [
     "ConcurrentProfileUpdateError",
     "ProfileAlreadyExistsError",
     "ProfileIntegrityError",
     "ProfileKeyAlreadyExistsError",
     "ProfileKeyMaterial",
+    "PreparedPersonalContextActivation",
     "ProfileQuotaExceededError",
     "ProfileSemanticKeyCollisionError",
     "ProfileStorageLockedError",

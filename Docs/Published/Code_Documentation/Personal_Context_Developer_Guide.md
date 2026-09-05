@@ -53,7 +53,7 @@ ADR](https://github.com/rmusser01/tldw_server/blob/dev/backlog/decisions/002-per
 | Published during successful reviewed first linking when eligible | Not published by the shipped ongoing application lifecycle |
 | --- | --- |
 | Canonical manifest in the snapshot resulting from the user-approved content-free reconciliation plan | Later syncable Chatbook mutations: encrypted outbox entries are created but no shipped ongoing Personal Context caller sends them |
-| Required global and linked-workspace scopes in that snapshot | Ordinary server REST mutations: the server copy changes but no Personal Context Sync entry publishes them to Chatbook |
+| Required global and linked-workspace scopes in that snapshot | Later server edits: publication is journaled, but automatic delivery to the current Chatbook is not enabled |
 | Eligible record heads, tombstones, and proposal review state selected by reconciliation, including approved interview answer content after it becomes a canonical record payload | Device-only or non-syncable records |
 | Exact canonical object identities, versions, and bytes for those eligible objects | Runtime agent authority grants, tool availability, local workspace mappings, and enablement |
 | — | Peer-local at-rest encryption/recovery keys, local undo data, caches, ciphertext, database row identities, conflict-review metadata, acknowledgement tracking, and other operational state |
@@ -123,10 +123,10 @@ encrypted transactional read or write. Expected version IDs provide optimistic
 concurrency; unknown and cross-user opaque IDs receive the same not-found
 response.
 
-REST runtime policy and exports are server-local operations. REST record and
-proposal mutations change the canonical server copy, but no server-origin
-publisher currently appends those edits to the linked Personal Context Sync
-streams.
+REST runtime policy and exports are server-local operations. Eligible record and
+proposal changes append encrypted publication batches in their canonical
+transaction. A bounded post-commit relay installs them in the linked Sync streams;
+failed delivery remains durable work rather than rolling back the user mutation.
 
 `POST /scopes/workspace` is stricter than inbound canonical scope
 materialization. The REST path proves that the authenticated user owns the
@@ -199,12 +199,13 @@ Personal Context status/outbox surface, or dedicated post-link conflict
 resolver. Later syncable Chatbook mutations remain queued locally. Generic
 Sync conflict metadata is a transport capability, not a current user workflow.
 
-REST edits are not published to linked clients. They update the server
-canonical copy without appending a Personal Context Sync entry, so post-link
-editing can make the peers diverge in either direction.
+Eligible REST edits now append encrypted publication batches transactionally with
+canonical changes. The bounded server relay retries installation into Sync.
+Client-side ongoing delivery remains gated; publication alone is not evidence of
+cross-peer convergence.
 
-Server purge does not publish the protocol purge envelope, and acknowledgement
-completion is absent.
+Server purge journals a generation barrier. Cross-device acknowledgement
+completion is still absent.
 
 The `personal_context.purge` domain, adapter validation, and inbound service
 projection exist. The REST purge endpoint only advances the server-local
@@ -215,8 +216,7 @@ state, and leaves the profile in `purge_pending`. A mutation returns
 or object resolution, and entry into the existing-profile writable boundary.
 Manifest recreation is unsupported because surviving profile state prevents a
 replacement, while earlier gates may return their own errors. There is no
-shipped server producer/distributor for a purge envelope and no device
-acknowledgement-completion path.
+enabled end-to-end device acknowledgement-completion path.
 
 ## Future-client integration boundaries
 
@@ -225,13 +225,55 @@ domains or bootstrap endpoints. Client work owns capability negotiation and
 incompatibility handling, an explicit ongoing Personal Context caller, durable
 queue/status UX, and conflict review/resolution UX.
 
-Companion server work separately owns publishing server-origin REST mutations,
-producing and distributing purge envelopes, and tracking device
-acknowledgements. Completing the purge acknowledgement lifecycle is shared
+The server owns publication and device acknowledgement journals. Completing the
+purge acknowledgement lifecycle is shared
 cross-peer work: clients must consume and acknowledge the barrier, while the
 server must aggregate those acknowledgements and finish the lifecycle. Neither
 side should document post-link convergence or completed purge until its own
 responsibilities and the shared handshake are implemented and verified.
+
+### Activation storage and recovery
+
+`Personalization/personal_context_activation.py` owns the source-side orchestration;
+`Sync/v2/personal_context_activation.py` installs protected delivery baselines and
+coordinates exact device receipts. Neither enables `ongoing_sync_version: 1`.
+
+Preparation stores encrypted eligible heads and a whole-batch publication
+watermark. Baseline envelopes use a dedicated encrypted Sync journal because a
+whole profile can exceed the ordinary 100-row publication batch limit and can
+have watermark zero. They are delivered through the existing bootstrap response,
+not a new transport stream. Envelope IDs are deterministic and authenticated with
+profile, device, dataset, generation, activation ID and digest. The install receipt
+also binds ciphertext, checkpoint, and expiry.
+
+Sync installation commits before a leased canonical coverage CAS. A failure in
+between leaves the exact installation replayable. Source-body compaction is
+permitted only after canonical coverage; terminal batch/activation proof remains.
+Device acknowledgement similarly commits in Sync before the canonical device
+state advances. These are two independently committed stores, not one atomic
+transaction.
+
+The canonical publication journal owns the random generation-bound epoch and
+continuity token. Sync retains a secondary metadata fence, but cannot grant
+activation without canonical proof and that device's acknowledgement. A downgrade
+changes neither journal. Activation delivery expires after 30 days; renewal
+retires only the expired activation and its device acknowledgement, retaining
+other devices and publication coverage. Existing authorized profile purge removes
+the new baseline and acknowledgement storage too. Canonical encryption-key
+rotation rewraps baseline keys; Sync encryption uses the existing separately
+derived, rotation-stable profile integrity key.
+
+An interrupted canonical preparation has a 60-second lifetime. While it is fresh,
+relay reports pending; retries reuse the prepared bytes. Once stale, the bounded
+relay can expire that uninstalled preparation under its profile lease without the
+requesting device. Source batches remain uncovered and publish normally; the
+expired ID is retained as a tombstone and a subsequent bootstrap gets a new ID.
+Already installed or active activations are not retired by this recovery path.
+
+Bootstrap remains blocked while accepted ingress has not finished canonical
+materialization. Guarded repair may move a failed ingress to applied only after
+verifying its exact canonical receipt; conflict and other non-retryable states
+remain blocked. Do not clear apply status manually to obtain a baseline.
 
 Chatbook's current interview boundary is also relevant to compatible clients.
 Fixed mode generates questions locally and makes no model call; its encrypted

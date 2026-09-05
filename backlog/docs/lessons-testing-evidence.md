@@ -143,3 +143,25 @@ operator configuration, with memory/restart guidance. Do not infer another
 architecture's support from a model-family label or one successful configuration.
 Publish warm/cold measurements before reuse assertions so failures retain useful
 evidence. Managed runtime evidence does not substitute for live client acceptance.
+
+## Activation fixtures must distinguish authorization from publication state
+
+**Incident (TASK-13162, 2026-09-05):** Adding canonical activation checks exposed
+older relay fixtures that granted access by writing only Sync metadata. Simply
+activating those fixtures would cover the pending source rows their recovery
+tests were meant to exercise.
+
+**Evidence and rule:** Production certification now performs real baseline
+installation and acknowledgement before creating relay debt. Narrow authority
+and budget tests use an explicit typed authorization double while preserving
+their real source rows and original assertions. Keep those concerns separate;
+never add a production metadata-only fallback to satisfy a test harness. Compare
+broader failures against unchanged dev before attributing them to the new guard.
+
+**Follow-up (TASK-13162):** Updating those proof fixtures exposed a deeper failure:
+guarded repair verified the canonical ingress receipt, but terminalization accepted
+only pending/applied rows, so a previously failed row could never unblock bootstrap.
+The original recovery assertion caught it. A focused regression failed on both
+SQLite and PostgreSQL before the one-line transition fix; all 22 receipt/state
+cases and 48 bootstrap tests then passed. Keep the recovery assertion through
+fixture repairs, and test retryable failure states as well as first application.

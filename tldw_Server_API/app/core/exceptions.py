@@ -204,6 +204,10 @@ class PublicationRelayPoisoned(PersonalContextError):
     """Content-free durable attention state for the earliest corrupt batch."""
 
 
+class PublicationActivationPending(PersonalContextError):
+    """A live prepared baseline temporarily fences ordinary publication relay."""
+
+
 class PersonalContextAuthoritySourceError(PersonalContextError):
     """Authenticated source content is malformed and requires durable attention."""
 

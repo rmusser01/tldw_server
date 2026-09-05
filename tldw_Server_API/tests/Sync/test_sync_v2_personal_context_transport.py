@@ -1,3 +1,5 @@
+"""Isolated transport validation with explicit canonical activation test doubles."""
+
 from __future__ import annotations
 
 import hashlib
@@ -6,7 +8,6 @@ import sqlite3
 import uuid
 from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from tldw_profile_core.canonical import canonical_json_bytes
@@ -75,11 +76,35 @@ EXCHANGE = PersonalContextExchangeProof(
 )
 
 
+class _RecordingRepository:
+    """Supply only the canonical proof needed by isolated transport scenarios."""
+
+    def __init__(self, database: PersonalizationDB | None) -> None:
+        """Keep the real source database only for authority relay cases."""
+        self.database = database
+
+    def validate_activation_exchange(
+        self, *, profile_id: str, device_id: str, dataset_id: str,
+        activation_epoch: str, continuity_token: str,
+    ) -> PersonalContextExchangeProof:
+        """Model a device's acknowledged canonical receipt independently of Sync metadata."""
+        supplied = PersonalContextExchangeProof(
+            ongoing_sync_version=1, activation_epoch=activation_epoch,
+            continuity_token=continuity_token,
+        )
+        if (profile_id != PROFILE_ID or dataset_id != DATASET_ID
+                or device_id not in {"device-a", "device-b"} or supplied != EXCHANGE):
+            raise ValueError("personal_context_activation_required")
+        return EXCHANGE
+
+
 class _RecordingService:
+    """Record materialization separately from real Sync storage and delivery guards."""
+
     def __init__(self, database: PersonalizationDB | None = None) -> None:
-        self.values = []
-        if database is not None:
-            self._repository = SimpleNamespace(database=database)
+        """Attach the explicit canonical proof double to this recording target."""
+        self.values: list[object] = []
+        self._repository = _RecordingRepository(database)
 
     def sync_integrity_key(self, profile_id: str) -> tuple[str, bytes]:
         assert profile_id == PROFILE_ID
@@ -212,9 +237,7 @@ def _service(
             )
             for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
         },
-        personal_context_service_resolver=(
-            (lambda _user_id: target) if personal_database is not None else None
-        ),
+        personal_context_service_resolver=lambda _user_id: target,
         settings=SyncV2Settings(
             pull_token_signing_secret="test-only-pull-secret",
             server_trusted_encryption=server_trusted_encryption_status_from_config(

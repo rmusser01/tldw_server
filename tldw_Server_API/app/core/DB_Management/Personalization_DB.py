@@ -298,6 +298,40 @@ class PersonalizationDB:
                         expires_at_ns INTEGER NOT NULL
                     );
 
+                    CREATE TABLE IF NOT EXISTS personal_context_activations (
+                        activation_id TEXT PRIMARY KEY,
+                        profile_id TEXT NOT NULL,
+                        device_id TEXT NOT NULL,
+                        baseline_digest TEXT NOT NULL,
+                        purge_generation INTEGER NOT NULL CHECK (purge_generation >= 0),
+                        publication_watermark INTEGER NOT NULL CHECK (publication_watermark >= 0),
+                        state TEXT NOT NULL CHECK (state IN ('prepared','installed','active','expired')),
+                        sync_receipt_id TEXT,
+                        home_server_cursor INTEGER,
+                        activation_epoch TEXT,
+                        continuity_token TEXT,
+                        algorithm TEXT NOT NULL,
+                        key_version INTEGER NOT NULL,
+                        nonce BLOB NOT NULL,
+                        wrapped_dek BLOB NOT NULL,
+                        wrapped_dek_nonce BLOB NOT NULL,
+                        ciphertext BLOB NOT NULL,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_personal_context_activation_device
+                        ON personal_context_activations(profile_id, device_id, created_at);
+                    CREATE TABLE IF NOT EXISTS personal_context_activation_devices (
+                        activation_id TEXT NOT NULL,
+                        device_id TEXT NOT NULL,
+                        dataset_id TEXT NOT NULL,
+                        baseline_digest TEXT NOT NULL,
+                        local_receipt_id TEXT NOT NULL,
+                        sync_ack_receipt_id TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        PRIMARY KEY (activation_id, device_id)
+                    );
+
                     CREATE TABLE IF NOT EXISTS personal_context_publication_relay_attention (
                         profile_id TEXT NOT NULL,
                         profile_publication_sequence INTEGER NOT NULL,
