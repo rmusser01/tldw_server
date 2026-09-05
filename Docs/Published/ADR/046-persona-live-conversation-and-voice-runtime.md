@@ -4,7 +4,7 @@
 **Date:** 2026-09-05
 **Backfilled from:** not backfilled
 **Decision owner:** Migu Buddy UAT implementation session
-**Related task:** TASK-13194, TASK-13195
+**Related task:** TASK-13197, TASK-13195
 **Related spec/plan:** Docs/superpowers/plans/2026-09-05-persona-live-conversation-voice.md
 
 ## Decision
@@ -38,4 +38,4 @@ Live currently proposes a RAG tool for ordinary greetings, advertises voice=fals
 
 ## Follow-up
 
-Focused ownership, admission, readiness and cancellation regressions, then real provider and human microphone/playback UAT under TASK-13194 and TASK-13195.
+Focused ownership, admission, readiness and cancellation regressions, then real provider and human microphone/playback UAT under TASK-13197 and TASK-13195.

@@ -16,7 +16,7 @@ The probe's first summary read a `type` field and top-level capabilities; inspec
 
 ## Acceptance gaps
 
-TASK13194 tracks conversational responses through the Buddy live session. The current `_handle_persona_live_turn` always proposes a plan; ordinary text falls through to a RAG search. A provider credential alone cannot make that path return the requested conversation. Its provider/Persona Chat integration needs an explicit design and real response/Stop/recovery acceptance.
+TASK13197 tracks conversational responses through the Buddy live session. The current `_handle_persona_live_turn` always proposes a plan; ordinary text falls through to a RAG search. A provider credential alone cannot make that path return the requested conversation. Its provider/Persona Chat integration needs an explicit design and real response/Stop/recovery acceptance.
 
 TASK13195 tracks an actual voice-capable Buddy session. `core/Persona/live_control.py` deliberately advertises voicefalse. TASK12419's frontend gate correctly respects that capability; changing the flag would not establish microphone/STT/provider/TTS readiness. Full Persona Live and separate audio endpoints are distinct surfaces and were not certified by this Buddy probe.
 
@@ -24,7 +24,7 @@ No production code changed. The findings are recorded as To Do tasks rather than
 
 ## Follow-up implementation: real readiness probe
 
-The later implementation under TASK13194/13195 follows ADR046. On an uncommitted
+The later implementation under TASK13197/13195 follows ADR046. On an uncommitted
 working tree over `c1467cddd8`, a real server initialized local Whisper `tiny.en`
 and Kokoro in 7.69 seconds. A subsequent preparation reused the loaded models.
 The [readiness and Stop receipt](assets/migu-buddy-voice-readiness-2026-09-05/readiness-result.json)
@@ -99,3 +99,28 @@ Reloading `/persona` and choosing Migu UAT opened the normal Live Session worksp
 without another setup flow. Whisper `en`/`tiny.en`, Kokoro `tldw`/`af_heart`,
 manual commit and auto-resume off were preserved. All 90 targeted route tests passed.
 This verifies setup persistence; it does not claim microphone acceptance.
+
+## Rebased verification
+
+Implementation revision `2270153980c95f17af0b3bc85eb041ef62750387` is rebased on
+`dev` `f6d6a673b628c77a7e262d7638c658782906aef0`. The six targeted Persona Python
+modules passed all 204 tests (94.39 seconds). The nine frontend voice, microphone,
+Buddy, diagnostics and route modules passed all 198 tests (28.35 seconds).
+OpenAPI fingerprint verification passed. Touched production Bandit found zero
+issues; new Python helpers/tests passed Ruff. Frontend lint has zero errors,
+with existing warnings; scoped TypeScript has zero owned errors and 27 dependency
+diagnostics. No full-suite result is claimed.
+
+The fresh final UAT harness initially copied only `config.txt`, omitting the
+separate TTS configuration. DeepSeek reply/Stop/retry passed but voice preparation
+correctly returned `VOICE_TTS_UNAVAILABLE`. The harness was corrected to use the
+same complete isolated configuration as the previous successful run; no product
+code or normal user configuration was changed to address that harness failure.
+
+The corrected [rebased probe](assets/migu-buddy-conversation-2026-09-05/rebased-assessment.json)
+returned the exact expected DeepSeek answer in 0.77 seconds, suppressed the cancelled
+answer, and recovered in the same session. Real Whisper/Kokoro preparation passed;
+a synthetic `voice_commit` transcript produced 25388 speech bytes. Explicit search
+still produced an unapproved `rag_search` plan, and final Stop returned 200.
+The [rebased source receipt](assets/migu-buddy-conversation-2026-09-05/rebased-source-identity.json)
+identifies revision and source hashes. Microphone and playback were not used.

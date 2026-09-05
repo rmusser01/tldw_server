@@ -1,10 +1,10 @@
 ---
 id: TASK-13196
 title: Preserve existing Persona setup when selecting a saved Persona
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-05 23:15'
-updated_date: '2026-09-05 23:23'
+updated_date: '2026-09-05 23:27'
 labels: []
 dependencies: []
 ---
@@ -36,27 +36,23 @@ Reason: Routine selection/persistence bug fix preserving the existing setup mode
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Selecting an existing Persona now reads its saved profile before changing setup. Completed setup and later in-progress stages are applied unchanged; failed reads leave the selection and saved state untouched. Completing the initial Persona choice still advances to Voice while retaining an existing run ID and completed steps. Added route regressions for completed, in-progress, and failed-read selections. Validation: 90 targeted sidepanel route tests passed; scoped TypeScript has zero owned diagnostics (27 dependency diagnostics remain); ESLint has zero errors and 78 warnings in the existing hook/test files. Bandit skipped because only TypeScript files changed. ADR not required: routine persistence bug fix. Real-browser reload/reselection evidence remains with root; task stays In Progress.
-
-Real browser verification: completed setup with the DeepSeek reply Migu setup preserved., reloaded /persona, selected saved Migu UAT, and reached the normal Live Session workspace. STT en/tiny.en, TTS tldw/af_heart, auto-resume off and manual commit persisted. Final rebased verification and PR publication remain pending.
+Saved-Persona selection now reads the target before applying setup. Completed and later in-progress setup resume unchanged; failed reads cause no write or selection switch. Initial Persona/archetype choice advances to Voice while preserving existing run identity and completed steps. Real browser reload/reselection preserved completed setup and en/tiny.en, tldw/af_heart, manual commit and auto-resume off. Post-rebase route/voice regression scope: 198 passed. ESLint: zero errors, existing warnings only; scoped TypeScript: zero owned diagnostics, 27 dependency diagnostics remain. Bandit not applicable to this TypeScript-only task. Evidence and incident lesson updated; ADR not required for this persistence bug fix.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Completed saved-Persona setup survives reload and reselection. Regression and real browser checks passed; unrelated voice acceptance remains under TASK13195.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
