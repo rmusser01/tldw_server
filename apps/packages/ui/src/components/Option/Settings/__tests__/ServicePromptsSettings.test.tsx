@@ -242,6 +242,13 @@ const catalog: ServicePromptCatalogItem[] = [
     affected_workflows: [{ id: "media.ebook.summarization", label: "Server EPUB workflow" }]
   },
   {
+    id: "media.email.summarization",
+    label: "Server email prompt",
+    description: "Server email prompt description",
+    parts: [{ key: "system", label: "System instructions", mode: "literal", required_variables: [] }],
+    affected_workflows: [{ id: "media.email.summarization", label: "Server email workflow" }]
+  },
+  {
     id: "notes.title.generate",
     label: "Server Notes title prompt",
     description: "Server Notes title prompt description",
@@ -273,7 +280,9 @@ const detailFor = (
     parts?: Record<string, string>
   } = {}
 ): ServicePromptDetail => {
-  const defaults = definition.id === "media.ebook.summarization"
+  const defaults = definition.id === "media.email.summarization"
+    ? { system: "Summarize the email clearly." }
+    : definition.id === "media.ebook.summarization"
     ? { system: "Summarize the EPUB clearly." }
     : definition.id === "media.pdf.summarization"
     ? { system: "Summarize the PDF clearly." }
@@ -536,7 +545,7 @@ describe("ServicePromptsSettings", () => {
     renderSettings()
 
     expect(await screen.findAllByTestId("service-prompt-list-item"))
-      .toHaveLength(10)
+      .toHaveLength(11)
     expect(await screen.findByRole("heading", { name: "Text translation" }))
       .toBeInTheDocument()
     expect(screen.getByText("Server default")).toBeInTheDocument()
@@ -596,6 +605,17 @@ describe("ServicePromptsSettings", () => {
     expect(screen.getByText("Synchronous PDF analysis")).toBeVisible()
     expect(screen.getAllByText(/Without a saved override, server defaults apply/)[0]).toBeVisible()
     expect(screen.queryByText("Server PDF prompt")).not.toBeInTheDocument()
+  })
+
+  it("exposes independent email system guidance and its synchronous scope", async () => {
+    renderSettings()
+    await openPrompt("Email summarization")
+    expect(screen.getByLabelText("System instructions")).toHaveValue(
+      "Summarize the email clearly."
+    )
+    expect(screen.getByText("Synchronous email analysis")).toBeVisible()
+    expect(screen.getAllByText(/Without a saved override, server defaults apply/)[0]).toBeVisible()
+    expect(screen.queryByText("Server email prompt")).not.toBeInTheDocument()
   })
 
   it("exposes independent EPUB system guidance and its synchronous scope", async () => {

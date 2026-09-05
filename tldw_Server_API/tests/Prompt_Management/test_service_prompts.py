@@ -92,6 +92,12 @@ EXPECTED_REGISTRY = {
         "parts": (("system", "System instructions", "literal", ()),),
         "workflows": (("media.ebook.summarization", "Synchronous EPUB analysis"),),
     },
+    "media.email.summarization": {
+        "label": "Email summarization",
+        "description": "Controls system instructions for synchronous email analysis. Without a saved override, server defaults apply.",
+        "parts": (("system", "System instructions", "literal", ()),),
+        "workflows": (("media.email.summarization", "Synchronous email analysis"),),
+    },
     "media.text.translation": {
         "label": "Text translation",
         "description": "Controls the visible instructions used by synchronous text translation.",
