@@ -73,12 +73,14 @@ https://www.designsystemscollective.com/how-to-build-a-design-system-in-a-weeken
 https://syntaxstream.substack.com/p/10-ui-patterns-that-wont-survive
 https://medium.muz.li/12-ui-patterns-designers-copy-from-top-saas-products-e68d54ade5e8
 
+https://anatolyzenkov.com/stolen-buttons
 https://github.com/leonxlnx/taste-skill
 https://github.com/coreyhaines31/marketingskills/tree/main
 https://github.com/nextlevelbuilder/ui-ux-pro-max-skill
 https://michalmalewicz.medium.com/ui-design-direction-2026-2027-2b4b6eb88336
 https://kurtis-redux.medium.com/what-is-bento-style-note-taking-751df3702068
 https://github.com/OttoRenner/Gentle-Coding
+\https://github.com/OttoRenner/Gentle-Coding
 https://uxdesign.cc/ai-uxr-implementation-d0e1b8a33613
 https://medium.com/analysts-corner/the-dialog-map-a-valuable-business-analysis-and-ux-design-tool-8ffa503d6e03
 https://medium.com/analysts-corner/design-to-make-it-hard-for-users-to-make-mistakes-75a38911cc15
@@ -94,6 +96,8 @@ https://craftwork.design/catalog/ui-kits?subCategories=28
 https://www.landingfolio.com/
 https://logosystem.co/
 
+https://buzzusborne.com/writing/discovery-delivery/?ref=sidebar
+https://www.tastelab.xyz/?ref=sidebar
 https://craftwork.design/product/modernize-nextjs-tailwind-css
 
 https://www.nngroup.com/articles/ux-basics-study-guide/
@@ -142,6 +146,7 @@ https://github.com/sshh12/spark-stack
 https://rentry.org/bloatmaxx
 https://github.com/ddkasa/textual-timepiece
 https://github.com/abi/screenshot-to-code
+https://github.com/abi/screenshot-to-
 https://data.perkins.org/
 https://customsvg.github.io/
 https://designdetails.fm/episodes
@@ -155,6 +160,27 @@ https://www.grug.design/know
 https://www.designsystemscollective.com/good-design-doesnt-happen-by-default-c400cbdd332b?gi=3b7cf76aa01d
 https://icones.js.org/
 https://syntaxstream.substack.com/p/the-ai-delegation-matrix-what-parts
+
+
+TUI
+  https://github.com/pndpti/anilist-tui
+  https://github.com/unkn0wn-root/resterm
+  https://github.com/mendrik-private/sqv
+  https://github.com/sparklost/endcord
+  https://github.com/armgabrielyan/lazyvec
+  https://github.com/christo-auer/eilmeldung/blob/main/docs/llm-development.md
+  https://github.com/Textualize/frogmouth
+  https://github.com/1j01/textual-paint
+  https://github.com/joeynyc/hermes-hud
+  https://github.com/EnhancedJax/Bagels
+  https://github.com/darrenburns/posting
+  https://github.com/enso-org/enso
+  https://github.com/noisrucer/girok
+  https://github.com/dooit-org/dooit
+  https://github.com/krishnakanthb13/yt-beats
+  https://github.com/thesmokinator/hledger-textual
+  https://github.com/Hmbown/DeepSeek-TUI
+  https://github.com/DimwitLabs/Prosaic
 
 https://github.com/vibeflowing-inc/vibe_figma
 https://ant.design/docs/spec/colors/
@@ -268,6 +294,7 @@ https://uxdesign.cc/when-innovation-deceives-escaping-the-value-mirage-bcbf5511a
 https://ieeexplore.ieee.org/document/5387632
 https://www.growthmates.news/p/how-an-ai-powered-user-onboardin
 https://www.nngroup.com/articles/serial-task-switching/
+https://www.nngroup.com/articles/serial-task-switching/g
 https://x.com/dot_louis/status/1884990033775493505
 https://clig.dev/
 https://www.nngroup.com/articles/analyze-usability-data/

@@ -21,6 +21,12 @@ https://github.com/s7ephen/OSX-Sandbox--Seatbelt--Profiles
 https://github.com/instavm/coderunner
 https://github.com/vrn21/bouvet
 https://github.com/rcarmo/agentbox
-
-https://github.com/superradcompany/microsandbox
-https://smolmachines.com/
+https://openai.com/index/building-codex-windows-sandbox/
+https://www.conductor.build/
+https://github.com/epiral/pinix
+https://github.com/highpost/tailscale-macos-container
+https://eclecticlight.co/2026/05/02/how-fast-is-a-macos-vm-and-how-small-could-it-be/
+https://docs.docker.com/ai/sandboxes/
+https://github.com/isola-run/isola
+https://github.com/Division-36/Z-Jail
+https://github.com/always-further/nono

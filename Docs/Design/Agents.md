@@ -20,8 +20,16 @@ https://github.com/VILA-Lab/Dive-into-Claude-Code
 https://github.com/outsourc-e/hermes-workspace
 https://charlielabs.ai/
 https://archive.is/UhxWz
+https://github.com/alexisfox7/PRO-LONG
+https://lilianweng.github.io/posts/2026-07-04-harness/
+https://github.com/stevyhacker/lokalbot
+https://github.com/esengine/deepseek-reasonix
+https://shikigami.dev/
+https://blog.zsec.uk/harnessing-harnesses/
+https://github.com/just-every/code
 
 
+https://github.com/vinhnx/vtcode
 https://github.com/itayinbarr/little-coder
 
 Allow the user to modify the tool call before its executed to fix typos/change intent of call
