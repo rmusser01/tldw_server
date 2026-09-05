@@ -1,3 +1,10 @@
+"""Certify Personal Context using production factories and durable isolated databases.
+
+Exercise authority races and restart recovery, including real PostgreSQL connections.
+A child pytest process forces a diagnostic failure and checks that protected canaries
+are absent from its captured output; fixture teardown retires managed database handles.
+"""
+
 from __future__ import annotations
 
 import base64
@@ -6,8 +13,11 @@ import hmac
 import json
 import os
 import sqlite3
-import subprocess
+
+# Trusted child pytest process using an explicit argument list, never a shell.
+import subprocess  # nosec B404
 import sys
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
@@ -38,6 +48,9 @@ from tldw_Server_API.app.core.DB_Management.backends.factory import (
     reset_managed_sqlite_backends,
 )
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.Personalization.personal_context_service import (
+    PersonalContextService,
+)
 from tldw_Server_API.app.core.Sync.v2 import factory as sync_v2_factory
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.models import (
@@ -45,6 +58,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncDatasetCreate,
 )
 from tldw_Server_API.app.core.Sync.v2.profile import PersonalContextBootstrapError
+from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
 from tldw_Server_API.tests.Personalization.personal_context_test_support import (
     preference_record,
 )
@@ -216,7 +230,8 @@ def test_certification_failure_diagnostics_are_content_free(tmp_path: Path) -> N
         "TASK13172_DIAGNOSTIC_KEY": _KEY_CANARY.decode("ascii"),
         "TASK13172_DIAGNOSTIC_WRAPPED": wrapped_canary,
     }
-    result = subprocess.run(
+    # Current interpreter and fixed pytest argv; paths are trusted test fixtures.
+    result = subprocess.run(  # nosec B603
         [
             sys.executable,
             "-m",
@@ -246,6 +261,8 @@ def test_certification_failure_diagnostics_are_content_free(tmp_path: Path) -> N
 
 
 def _clear_factory_caches() -> None:
+    """Remove cached production dependencies between isolated certification runs."""
+
     for cached_factory in (
         sync_v2_factory._sync_v2_store_for_user,
         sync_v2_factory._chacha_notes_db_for_user,
@@ -259,7 +276,7 @@ def _clear_factory_caches() -> None:
 def production_factories(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-):
+) -> Iterator[tuple[PersonalContextService, SyncV2Service]]:
     """Use the production factories over isolated, durable per-user files."""
 
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_databases"))
@@ -292,18 +309,26 @@ def production_factories(
     )
     actual_sync_factory = sync_v2_factory.sync_v2_service_for_user
 
-    def track_sync_backend(service: object) -> object:
+    def track_sync_backend(service: SyncV2Service) -> SyncV2Service:
+        """Track the managed backend for teardown and make recovery time deterministic."""
+
         backend = service.store.db.backend
         if not any(candidate is backend for candidate in managed_sync_backends):
             managed_sync_backends.append(backend)
         service._recovery_clock_ns = lambda: 0
         return service
 
-    def traced_personal_context_factory(*args: object, **kwargs: object):
+    def traced_personal_context_factory(
+        *args: object, **kwargs: object
+    ) -> PersonalContextService:
+        """Count calls while exercising the actual Personal Context factory."""
+
         trace["personal_context_factory"] += 1
         return actual_personal_context_factory(*args, **kwargs)
 
-    def traced_sync_factory(user_id: str):
+    def traced_sync_factory(user_id: str) -> SyncV2Service:
+        """Count calls and track resources from the actual Sync factory."""
+
         trace["sync_factory"] += 1
         return track_sync_backend(actual_sync_factory(user_id))
 

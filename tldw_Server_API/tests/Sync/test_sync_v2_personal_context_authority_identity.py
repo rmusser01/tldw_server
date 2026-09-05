@@ -9,6 +9,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -885,22 +886,34 @@ class PurgeIngressHarness(AuthorityHarness):
 
 
 @pytest.fixture
-def authority_harness(tmp_path, monkeypatch) -> AuthorityHarness:
+def authority_harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AuthorityHarness:
+    """Create isolated canonical and Sync stores with an authority binding."""
+
     return AuthorityHarness(tmp_path, monkeypatch)
 
 
 @pytest.fixture
-def ingress_harness(tmp_path, monkeypatch) -> IngressHarness:
+def ingress_harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> IngressHarness:
+    """Create an authority harness with an existing client-ingress receipt."""
+
     return IngressHarness(tmp_path, monkeypatch)
 
 
 @pytest.fixture
-def first_ingress_harness(tmp_path, monkeypatch) -> FirstIngressHarness:
+def first_ingress_harness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> FirstIngressHarness:
+    """Create a harness for the first client-ingress publication."""
+
     return FirstIngressHarness(tmp_path, monkeypatch)
 
 
 @pytest.fixture
-def purge_ingress_harness(tmp_path, monkeypatch) -> PurgeIngressHarness:
+def purge_ingress_harness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> PurgeIngressHarness:
+    """Create an authority harness carrying an incoming client purge publication."""
+
     return PurgeIngressHarness(tmp_path, monkeypatch)
 
 

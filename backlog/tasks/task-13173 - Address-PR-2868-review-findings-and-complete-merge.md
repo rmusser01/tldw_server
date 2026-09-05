@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-05 02:25'
-updated_date: '2026-09-05 03:56'
+updated_date: '2026-09-05 04:15'
 labels: []
 dependencies: []
 references:
@@ -60,6 +60,10 @@ Round 5 plan: reproduce missing structured operation/attempt context in the exis
 Round 5 red-green evidence: all eight diagnostic regressions failed for missing structured operation, then passed after adding a UUID4 relay_attempt_id and fixed operation through scoped Loguru context. Tests verify distinct IDs for successive attempts, no context after return, content-free complete records, sink-failure isolation and subsequent recovery. No persistent identifiers, exception content or new dependencies added. Scoped Ruff/Bandit and diff checks pass. Latest dev advanced only through document-summary prompt work; rebase and final verification follow.
 
 Round 5 final rebase: latest dev a5aa0c8e675116a971156ee6273caeb8928df267; all 68 commits retain identical patches by range-diff, no conflicts. Repinned unchanged contract artifact provenance to source 3ed7a9290baeb21aa8dcf876a793602208f38282. API types regenerated; fingerprint unchanged and drift check passes. Fresh relay-recovery, production certification and contract gate: 78 passed, 22 warnings in 86.38s with PostgreSQL required, no skips. Scoped Ruff/Bandit and diff checks pass. Independent review confirms UUID4 context covers lease acquisition/teardown and exception handling, restores caller context and preserves thread/task isolation, retry and privacy. Remote current-head checks/review and merge remain pending.
+
+Round 6 plan: address five non-behavioral test-hygiene findings. Verify the certification subprocess uses sys.executable and a fixed argument list with no shell, then document only the B404/B603 safety exceptions; add certification/exchange module docstrings, concrete annotations on four harness fixtures and the production factory iterator. Run scoped lint/security checks and the affected test files. Existing AC3 and ADR-002 apply; no runtime, schema, dependency or protocol behavior changes.
+
+Round 6 verification: all 191 tests in the three affected modules passed, 26 warnings in 67.07s, PostgreSQL required and no skips. Changes are annotations, docstrings and narrowly justified B404/B603 suppressions only; scoped Ruff and diff checks pass, independent review confirms no executable behavior changes. Requested Bandit checks pass. Broader scanning hit a pre-existing lone-surrogate fixture report-encoding bug in both text and JSON formatters; direct scanner results compared in memory with HEAD confirm zero new findings, exactly the two reviewed subprocess warnings removed, and 15 unchanged test-fixture findings. Recorded this incident and safe verification method in lessons-testing-evidence.md. No production or generated artifacts changed. Dev remains a5aa0c8e675116a971156ee6273caeb8928df267. Current-head remote review/checks and merge remain pending.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

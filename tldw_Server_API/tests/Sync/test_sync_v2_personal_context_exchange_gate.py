@@ -1,3 +1,5 @@
+"""Verify active Personal Context exchange proofs and atomic endpoint gating."""
+
 from __future__ import annotations
 
 import json

@@ -89,3 +89,15 @@ their application databases under an explicitly configured trusted root. For a
 mixed legacy matrix, preserve the production path guard and record conclusive
 group results under pytest's trusted temp root; never weaken storage validation
 to make evidence paths prettier.
+
+## Security report formatters can fail on deliberate invalid-Unicode fixtures
+
+**Incident (TASK-13173, 2026-09-05):** Bandit's text and JSON report writers both
+raised `UnicodeEncodeError` on an existing lone-surrogate continuity-token fixture.
+The scanner itself had completed; changing output formats did not fix reporting.
+
+**Evidence and rule:** Serializing the scanner's issue fields with escaped Unicode
+allowed an in-memory comparison against HEAD: no new findings, only the two
+reviewed subprocess warnings removed, and 15 unchanged fixture findings. Preserve
+invalid-input coverage and compare scan results; do not remove the negative test
+or add broad suppressions merely to make a report formatter succeed.
