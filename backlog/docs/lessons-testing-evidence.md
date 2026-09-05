@@ -1,5 +1,19 @@
 # Testing Evidence Lessons
 
+## Exercise ordinary ingress after narrow storage repairs
+
+**Incident (TASK-13192, 2026-09-05):** The activation repair fixture seeded
+PostgreSQL envelopes directly because ordinary insertion failed elsewhere.
+Replacing that seed with `SyncV2Store.insert_envelope` reproduced the failure in
+the shared SQL converter: `ELSE ? END` retained a question mark, leaving five
+bind slots for six parameters. SQLite passed the same insertion.
+
+**Evidence and rule:** Directional CASE keyword recognition restored ordinary
+ingress and all receipt-state tests on both backends. Parser regressions also
+retain JSONB operators after `CASE ... END` and before a CASE operand. A narrow
+storage test may isolate a separate defect temporarily, but remove its bypass
+when fixing that defect and prove the public insertion path on each backend.
+
 ## Generic dict lint rules do not apply to `sqlite3.Row`
 
 **Incident (TASK-13144, 2026-08-30):** Ruff's `SIM118` suggestion replaced

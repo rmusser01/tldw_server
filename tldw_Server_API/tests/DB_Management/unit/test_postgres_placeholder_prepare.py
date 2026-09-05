@@ -3,9 +3,59 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.backends.query_utils import (
     convert_sqlite_placeholders_to_postgres,
-    prepare_backend_statement,
     prepare_backend_many_statement,
+    prepare_backend_statement,
 )
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT CASE ? WHEN ? THEN ? ELSE ? END",
+        "SELECT CASE WHEN ? THEN ? ELSE ? END",
+        "SELECT CASE WHEN n > ? THEN n ELSE ? END FROM items",
+        "SELECT CASE WHEN ? THEN CASE ? WHEN ? THEN ? ELSE ? END ELSE ? END",
+        "SELECT case when ? then ? else ? end",
+        "UPDATE state SET version = ?, seq = CASE WHEN seq > ? THEN seq ELSE ? END, updated = ? WHERE id = ? AND domain = ?",
+    ],
+)
+def test_case_placeholders_preserve_parameter_order(sql):
+    params = tuple(range(sql.count("?")))
+    converted, prepared = prepare_backend_statement(BackendType.POSTGRESQL, sql, params)
+    assert converted == sql.replace("?", "%s")
+    assert prepared == params
+    assert prepare_backend_statement(BackendType.SQLITE, sql, params) == (sql, params)
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        ("SELECT CASE WHEN payload ? 'key' THEN ? ELSE ? END", "SELECT CASE WHEN payload ? 'key' THEN %s ELSE %s END"),
+        ("SELECT CASE WHEN payload ? ? THEN ? ELSE ? END", "SELECT CASE WHEN payload ? %s THEN %s ELSE %s END"),
+        (
+            "SELECT CASE WHEN flag THEN payload ELSE payload END ? 'key'",
+            "SELECT CASE WHEN flag THEN payload ELSE payload END ? 'key'",
+        ),
+        (
+            "SELECT payload ? CASE WHEN flag THEN 'a' ELSE 'b' END",
+            "SELECT payload ? CASE WHEN flag THEN 'a' ELSE 'b' END",
+        ),
+        (
+            "SELECT CASE WHEN \"END\" ? 'key' THEN '?' ELSE ? END",
+            "SELECT CASE WHEN \"END\" ? 'key' THEN '?' ELSE %s END",
+        ),
+        (
+            "SELECT CASE WHEN payload ?| array['a'] THEN ? ELSE ? END",
+            "SELECT CASE WHEN payload ?| array['a'] THEN %s ELSE %s END",
+        ),
+        (
+            "SELECT CASE WHEN payload ?& array['a'] THEN ? ELSE ? END",
+            "SELECT CASE WHEN payload ?& array['a'] THEN %s ELSE %s END",
+        ),
+    ],
+)
+def test_case_preserves_jsonb_operators_and_quoted_text(sql, expected):
+    assert convert_sqlite_placeholders_to_postgres(sql) == expected
 
 
 def test_convert_placeholders_ignores_single_quoted_literals():
@@ -54,10 +104,10 @@ def test_prepare_backend_many_statement_batch_params():
     reason="psycopg not available",
 )
 def test_postgres_backend_prepare_query_no_replace_inside_literals():
+    from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
     from tldw_Server_API.app.core.DB_Management.backends.postgresql_backend import (
         PostgreSQLBackend,
     )
-    from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
 
     backend = PostgreSQLBackend(DatabaseConfig(backend_type=BackendType.POSTGRESQL))
     sql = "SELECT '? literal ?' as txt, id FROM table WHERE id = ? AND note = 'x?y'"

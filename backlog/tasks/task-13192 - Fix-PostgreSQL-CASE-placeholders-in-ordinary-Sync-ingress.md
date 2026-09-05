@@ -1,0 +1,46 @@
+---
+id: TASK-13192
+title: Fix PostgreSQL CASE placeholders in ordinary Sync ingress
+status: Done
+assignee:
+  - '@codex'
+created_date: '2026-09-05 19:50'
+updated_date: '2026-09-05 19:58'
+labels: []
+dependencies: []
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Ordinary PostgreSQL Sync envelope insertion fails because the shared placeholder converter treats CASE result binds as JSONB operators. Restore backend parity without changing Sync authority or conflict policy.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 CASE-expression placeholders convert correctly while JSONB operators and quoted text remain unchanged
+- [x] #2 Real PostgreSQL and SQLite ordinary Personal Context ingress and monotonic domain watermarks are verified
+- [x] #3 Ingress repair tests use ordinary envelope insertion and targeted tests and static checks pass
+<!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+ADR required: no. ADR path: backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md. Reason: preserve existing SQL and Sync contracts; correct shared parameter translation only. First add failing CASE and ordinary-ingress regressions, then minimally correct converter keyword handling, remove the raw-seed workaround, and run targeted backend plus PostgreSQL-required ingress tests. Record verification and review before closing.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Corrected directional CASE placeholder recognition in the shared backend converter; preserved JSONB operators before CASE and after END. Ordinary SyncV2Store insertion now seeds receipt repair coverage, with real PostgreSQL/SQLite successive insertion, replay and nondecreasing domain-watermark assertions. Plan: Docs/superpowers/plans/2026-09-05-postgres-case-ingress.md. ADR check: no new decision; existing ADR-002 governs unchanged Personal Context authority. RED: 11 parser failures and real PostgreSQL ordinary insertion failure, SQLite passed. Final focused verification: 109 passed (placeholder helpers, backend utilities, dual-backend ingress repair, bootstrap), TLDW_TEST_POSTGRES_REQUIRED=1. Ruff touched files and test formatting passed; production Bandit no findings; diff check passed. Independent plan and correctness review approved (reviewer additionally ran 18 parser tests). Broader selected store run: 94 passed, one pre-existing fake-backend receipt test failed with personal_context_link_binding_stale; reproduced after loading unchanged HEAD converter in memory, and neither that test nor Sync_DB changed. No full sweep, capability enablement, PR or merge. Added incident-based testing lesson. Backlog MCP search hung; CLI fallback used.
+<!-- SECTION:NOTES:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->

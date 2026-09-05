@@ -11,7 +11,12 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Personalization.personal_context_publication import CanonicalApplyReceipt
-from tldw_Server_API.app.core.Sync.v2.models import PERSONAL_CONTEXT_SYNC_DOMAINS, SyncDatasetCreate, SyncDeviceUpsert
+from tldw_Server_API.app.core.Sync.v2.models import (
+    PERSONAL_CONTEXT_SYNC_DOMAINS,
+    SyncDatasetCreate,
+    SyncDeviceUpsert,
+    SyncEnvelopeCreate,
+)
 from tldw_Server_API.app.core.Sync.v2.store import SyncStoreError, SyncV2Store
 
 pytestmark = pytest.mark.unit
@@ -45,36 +50,7 @@ def ingress_store(
             domains=sorted(PERSONAL_CONTEXT_SYNC_DOMAINS),
         )
     )
-    # Seed this narrow storage fixture directly: ordinary PostgreSQL insertion
-    # currently hits an unrelated _ensure_domain_state placeholder mismatch.
-    # The bootstrap regression covers the complete SQLite push/repair workflow.
-    with database.backend.transaction() as connection:
-        database.execute(
-            """INSERT INTO sync_envelopes (
-               server_sequence, dataset_id, domain, entity_id, operation,
-               client_envelope_id, device_id, server_timestamp, entity_version,
-               routing_metadata_json, payload_ciphertext, payload_hash,
-               payload_size_bytes, adapter_version, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                1,
-                "repair-dataset",
-                "personal_context.record",
-                "repair-record",
-                "upsert",
-                "repair-client-envelope",
-                "repair-device",
-                "2026-09-04T00:00:00Z",
-                '"record-v1"',
-                '{"personal_context_authority":{"role":"client_ingress"}}',
-                "opaque-fixture-ciphertext",
-                "hmac-sha256-v1:" + "a" * 64,
-                24,
-                1,
-                "accepted",
-            ),
-            connection=connection,
-        )
+    envelope = store.insert_envelope(_ingress_envelope())
     receipt = CanonicalApplyReceipt(
         resulting_object_id="repair-record",
         resulting_version_id="record-v1",
@@ -91,10 +67,57 @@ def ingress_store(
         wire_entity_version="record-v1",
     )
     try:
-        yield store, 1, receipt
+        yield store, envelope.server_cursor, receipt
     finally:
         if backend is not None:
             backend.get_pool().close_all()
+
+
+def _ingress_envelope(**overrides: object) -> SyncEnvelopeCreate:
+    values = {
+        "dataset_id": "repair-dataset",
+        "domain": "personal_context.record",
+        "object_id": "repair-record",
+        "operation": "upsert",
+        "client_envelope_id": "repair-client-envelope",
+        "device_id": "repair-device",
+        "entity_version": "record-v1",
+        "routing_metadata": {"personal_context_authority": {"role": "client_ingress"}},
+        "payload_ciphertext": "opaque-fixture-ciphertext",
+        "payload_hash": "hmac-sha256-v1:" + "a" * 64,
+        "payload_size_bytes": 24,
+    }
+    values.update(overrides)
+    return SyncEnvelopeCreate(**values)
+
+
+def test_ordinary_ingress_advances_domain_watermark_without_regression(
+    ingress_store: tuple[SyncV2Store, int, CanonicalApplyReceipt],
+) -> None:
+    store, first_cursor, _receipt = ingress_store
+    second = store.insert_envelope(
+        _ingress_envelope(
+            object_id="second-record",
+            client_envelope_id="second-envelope",
+        )
+    )
+    assert second.server_cursor > first_cursor
+    assert store.insert_envelope(_ingress_envelope()).server_cursor == first_cursor
+    with store.db.backend.transaction() as connection:
+        # Replay may revisit an older sequence; never lower the watermark.
+        store.db._ensure_domain_state(
+            dataset_id="repair-dataset",
+            domain="personal_context.record",
+            adapter_version=1,
+            server_sequence=first_cursor,
+            connection=connection,
+        )
+        row = store.db.execute(
+            "SELECT server_sequence FROM sync_domain_state WHERE dataset_id = ? AND domain = ?",
+            ("repair-dataset", "personal_context.record"),
+            connection=connection,
+        )[0]
+        assert row["server_sequence"] == second.server_cursor
 
 
 def _set_apply_state(store: SyncV2Store, cursor: int, state: str) -> None:
