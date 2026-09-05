@@ -4,7 +4,7 @@ title: Expose synchronous audio summarization in Service Prompts
 status: In Progress
 assignee: []
 created_date: '2026-09-05 18:15'
-updated_date: '2026-09-05 18:46'
+updated_date: '2026-09-05 19:10'
 labels: []
 dependencies: []
 ---
@@ -41,6 +41,8 @@ PR created against dev: https://github.com/rmusser01/tldw_server/pull/2901. Impl
 PR2901 review follow-up authorized: latest dev remains 86eb9e517c; rebase is already up to date. Qodo posted three rule comments: endpoint architecture, test helper type hints and docstrings. Verify and address before merge.
 
 Qodo fixes: fully annotated the new audio test helpers and added first-statement docstrings to every function in the new module. All125 focused tests pass; Ruff lint/format and AST annotation/docstring audit pass. Runtime code unchanged. Architecture suggestion reviewed and declined in-thread: core owns decoding/validation/defaults, HTTP boundary owns lazy authenticated acquisition and same-worker cleanup. Existing independent review approved this boundary. Scheduled heartbeat creation was rejected by auto-review; continuing current-session work only.
+
+Superseded for active tracking by TASK-13192 because upstream dev assigned TASK-13185 to snapshot work. This audio record is retained only as historical evidence.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

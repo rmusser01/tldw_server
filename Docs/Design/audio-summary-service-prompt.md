@@ -1,6 +1,6 @@
 # Audio summarization Service Prompt
 
-Approved scope: synchronous `/api/v1/media/process-audios` only. Track in TASK-13185.
+Approved scope: synchronous `/api/v1/media/process-audios` only. Track in TASK-13192.
 
 Expose `media.audio.analysis` as one atomic pair of literal `system` and `user`
 instructions in the existing shared WebUI/extension Service Prompts editor.
