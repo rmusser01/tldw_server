@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -56,7 +55,6 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
     save_uploaded_files,
 )
-from tldw_Server_API.app.core.Prompt_Management.service_prompts import resolve_service_prompt
 
 router = APIRouter()
 
@@ -98,6 +96,7 @@ async def process_videos_endpoint(
 
     # Lazy import to avoid import-time hard failures from optional transcriber backends.
     from tldw_Server_API.app.core.Ingestion_Media_Processing.video_batch import (
+        resolve_video_summary_prompts,
         run_video_batch,
     )
 
@@ -133,28 +132,9 @@ async def process_videos_endpoint(
         files,
     )
 
-    final_summary_prompt = form_data.custom_prompt
-    needs_final_summary = form_data.perform_chunking and form_data.summarize_recursively
-    if (
-        form_data.perform_analysis
-        and form_data.api_name
-        and form_data.api_name.lower() != "none"
-        and (form_data.system_prompt is None or (needs_final_summary and final_summary_prompt is None))
-    ):
-        prompts_db = await get_prompts_db_for_user(request, current_user)
-
-        def resolve_video_prompts() -> dict[str, str]:
-            """Capture the owner's pair and close its connection on the lookup worker."""
-            try:
-                return dict(resolve_service_prompt(prompts_db, "media.video.summarization").parts)
-            finally:
-                prompts_db.close_connection()
-
-        parts = await asyncio.to_thread(resolve_video_prompts)
-        if form_data.system_prompt is None:
-            form_data.system_prompt = parts["system"]
-        if needs_final_summary and final_summary_prompt is None:
-            final_summary_prompt = parts["final_summary"]
+    final_summary_prompt = await resolve_video_summary_prompts(
+        form_data, lambda: get_prompts_db_for_user(request, current_user)
+    )
 
     batch_result: dict[str, Any] = {
         "processed_count": 0,

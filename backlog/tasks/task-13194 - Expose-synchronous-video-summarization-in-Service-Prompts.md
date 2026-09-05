@@ -4,7 +4,7 @@ title: Expose synchronous video summarization in Service Prompts
 status: In Progress
 assignee: []
 created_date: '2026-09-05 21:35'
-updated_date: '2026-09-05 21:53'
+updated_date: '2026-09-05 22:08'
 labels: []
 dependencies: []
 references:
@@ -47,6 +47,12 @@ Post-normalization contract run reported43passed/8warnings in86.78s; process shu
 Final contract test process exited successfully (exit0), including shutdown. Temporary frontend dependency symlinks removed. All related local verification complete.
 
 Opened PR2904 against dev from codex/video-summary-service-prompt. Implementation commitfb882adccc. Awaiting remote review and CI; worktree retained for follow-up.
+
+PR2904 review follow-up: latest fetched dev is already ancestor of current head. Qodo reported two maintainability findings: route-owned prompt selection/lifecycle and private-adapter test spy. Verifying and addressing both with a bounded extraction into the existing video batch core and public model-adapter test coverage; preserving the approved behavior.
+
+Addressed both Qodo findings: extracted selection and worker-owned cleanup into existing video_batch core; changed integration tests to the public OpenAI adapter boundary so real prompt assembly runs. RED core test failed for missing API. GREEN29 video tests;134 adjacent registry/API/video/batch/request-contract tests;3 strengthened HTTP/empty-prompt cases and3 direct-caller cases passed. Bandit0 findings/errors on changed runtime scope; Ruff, formatting, compileall and diff checks passed. Independent reviewer found no correctness regressions; restored initial-chunk direct-caller assertions as suggested. Latest dev advanced during verification; rebasing the reviewed commit before pushing.
+
+Rebased cleanly onto dev1741adffdd. Post-rebase verification:44 video/request-contract tests passed (exit0), OpenAPI fingerprint matches updated dev, Bandit0 findings/errors. Review fixes complete and ready to push; GitHub review/checks will be evaluated on the new head.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

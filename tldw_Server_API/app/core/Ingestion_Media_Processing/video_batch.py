@@ -10,13 +10,54 @@ layer (status codes, request/response models) remains in the endpoint module.
 
 import asyncio
 import functools
-from typing import Any
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any
 
 from tldw_Server_API.app.core.config import config
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib import (
     process_videos,
 )
+from tldw_Server_API.app.core.Prompt_Management.service_prompts import resolve_service_prompt
 from tldw_Server_API.app.core.Utils.Utils import logging as logger
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
+
+
+async def resolve_video_summary_prompts(
+    form_data: Any,
+    get_prompts_db: Callable[[], Awaitable[PromptsDatabase]],
+) -> str | None:
+    """Fill missing video instructions from one owner snapshot before processing.
+
+    The caller binds storage acquisition to the authenticated owner. This core
+    workflow avoids storage for disabled analysis or explicit relevant parts,
+    closes the lookup connection on its worker, and keeps initial user guidance
+    unchanged. The returned guidance is only for recursive final synthesis.
+    """
+    final_summary_prompt = form_data.custom_prompt
+    needs_final_summary = form_data.perform_chunking and form_data.summarize_recursively
+    if (
+        form_data.perform_analysis
+        and form_data.api_name
+        and form_data.api_name.lower() != "none"
+        and (form_data.system_prompt is None or (needs_final_summary and final_summary_prompt is None))
+    ):
+        prompts_db = await get_prompts_db()
+
+        def resolve_parts() -> dict[str, str]:
+            """Read and close the owner connection on the same lookup worker."""
+            try:
+                return dict(resolve_service_prompt(prompts_db, "media.video.summarization").parts)
+            finally:
+                prompts_db.close_connection()
+
+        parts = await asyncio.to_thread(resolve_parts)
+        if form_data.system_prompt is None:
+            form_data.system_prompt = parts["system"]
+        if needs_final_summary and final_summary_prompt is None:
+            final_summary_prompt = parts["final_summary"]
+    return final_summary_prompt
 
 
 async def run_video_batch(

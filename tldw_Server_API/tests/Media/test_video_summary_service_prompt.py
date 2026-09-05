@@ -16,8 +16,10 @@ from tldw_Server_API.app.api.v1.schemas.media_request_models import ProcessVideo
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase, ServicePromptOverrideRow
 from tldw_Server_API.app.core.exceptions import ServicePromptCorruptOverride
+from tldw_Server_API.app.core.Ingestion_Media_Processing import video_batch
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video import Video_DL_Ingestion_Lib as video
 from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as summary
+from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
 from tldw_Server_API.app.core.Prompt_Management.service_prompts import resolve_service_prompt
 
 pytestmark = pytest.mark.integration
@@ -72,15 +74,16 @@ def context(
         state.transcriptions.append(kwargs)
         return None, [{"Text": "Alpha report. Beta report.", "start": 0, "end": 1}]
 
-    def adapter(**kwargs: Any) -> str:
+    def adapter(self: OpenAIAdapter, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
         """Record model-facing requests produced by the real analyzer."""
-        state.calls.append(kwargs)
-        return "Report summary."
+        state.calls.append(request)
+        return {"choices": [{"message": {"role": "assistant", "content": "Report summary."}, "finish_reason": "stop"}]}
 
     monkeypatch.setitem(client.app.dependency_overrides, get_request_user, current_user)
     monkeypatch.setattr(endpoint, "get_prompts_db_for_user", get_db, raising=False)
     monkeypatch.setattr(video, "perform_transcription", transcribe)
-    monkeypatch.setattr(summary, "_summarize_via_adapter", adapter)
+    monkeypatch.setattr(OpenAIAdapter, "chat", adapter)
+    monkeypatch.setattr(summary, "loaded_config_data", {"openai_api": {"model": "test-model"}})
     yield state
     for database in state.databases.values():
         database.close_connection()
@@ -126,9 +129,11 @@ def test_final_instruction_is_stage_specific_and_owner_scoped(context: SimpleNam
     for owner in (1, 2):
         context.owner = owner
         context.calls.clear()
-        process(context)
+        result = process(context)
+        assert result["results"][0]["analysis"] == "Report summary."
         assert len(context.calls) == 3
-        assert [call["custom_prompt_arg"] for call in context.calls] == [None, None, f"Owner {owner} final {{literal}}"]
+        assert [call["messages"][0]["content"] for call in context.calls[:2]] == ["Alpha report.", "Beta report."]
+        assert context.calls[-1]["messages"][0]["content"].endswith(f"Owner {owner} final {{literal}}")
         assert {call["system_message"] for call in context.calls} == {f"Owner {owner} system {{literal}}"}
 
 
@@ -138,8 +143,8 @@ def test_canonical_provider_uses_owner_video_prompts(context: SimpleNamespace, l
     save(context)
     process(context, api_provider="openai", api_name=legacy)
     assert len(context.calls) == 3
-    assert {call["api_name"] for call in context.calls} == {"openai"}
-    assert context.calls[-1]["custom_prompt_arg"] == "Owner 1 final {literal}"
+    assert {call["model"] for call in context.calls} == {"test-model"}
+    assert context.calls[-1]["messages"][0]["content"].endswith("Owner 1 final {literal}")
 
 
 @pytest.mark.parametrize("value", ["Explicit {literal}", ""])
@@ -147,7 +152,12 @@ def test_explicit_user_fans_out_but_keeps_saved_system(context: SimpleNamespace,
     """An explicit user prompt replaces chunk and final instructions independently."""
     save(context)
     process(context, custom_prompt=value)
-    assert [call["custom_prompt_arg"] for call in context.calls] == [value] * 3
+    prompts = [call["messages"][0]["content"] for call in context.calls]
+    if value:
+        assert all(prompt.endswith("Explicit {literal}") for prompt in prompts)
+        assert all("Owner 1 final" not in prompt for prompt in prompts)
+    else:
+        assert prompts == ["Alpha report.", "Beta report.", "Report summary.\n\n---\n\nReport summary."]
     assert {call["system_message"] for call in context.calls} == {"Owner 1 system {literal}"}
 
 
@@ -157,7 +167,7 @@ def test_explicit_system_keeps_saved_final(context: SimpleNamespace, value: str)
     save(context)
     process(context, system_prompt=value)
     assert {call["system_message"] for call in context.calls} == {value}
-    assert context.calls[-1]["custom_prompt_arg"] == "Owner 1 final {literal}"
+    assert context.calls[-1]["messages"][0]["content"].endswith("Owner 1 final {literal}")
 
 
 @pytest.mark.parametrize(
@@ -181,9 +191,9 @@ def test_irrelevant_storage_is_not_read(context: SimpleNamespace, options: dict[
 def test_snapshot_survives_edits_and_owner_switch(context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     """All files and passes must use the configuration captured before processing."""
     row = save(context)
-    original = summary._summarize_via_adapter
+    original = OpenAIAdapter.chat
 
-    def edit(**kwargs: Any) -> str:
+    def edit(self: OpenAIAdapter, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
         """Change saved settings and future request identity during the first call."""
         if not context.calls:
             database = context.databases[1]
@@ -194,12 +204,13 @@ def test_snapshot_survives_edits_and_owner_switch(context: SimpleNamespace, monk
             finally:
                 database.close_connection()
             context.owner = 2
-        return original(**kwargs)
+        return original(self, request, timeout=timeout)
 
-    monkeypatch.setattr(summary, "_summarize_via_adapter", edit)
+    monkeypatch.setattr(OpenAIAdapter, "chat", edit)
     process(context, count=2)
     assert context.reads == [1]
-    assert [call["custom_prompt_arg"] for call in context.calls] == [None, None, "Owner 1 final {literal}"] * 2
+    assert sum(call["messages"][0]["content"].endswith("Owner 1 final {literal}") for call in context.calls) == 2
+    assert all("Future" not in call["messages"][0]["content"] for call in context.calls)
     assert {call["system_message"] for call in context.calls} == {"Owner 1 system {literal}"}
 
 
@@ -249,11 +260,10 @@ def test_reset_uses_deployed_system_and_legacy_final(context: SimpleNamespace, m
     }
     process(context)
     assert {call["system_message"] for call in context.calls} == {"Deployment system"}
-    assert [call["custom_prompt_arg"] for call in context.calls] == [
-        None,
-        None,
-        "Summarize the key points from the preceding text sections.",
-    ]
+    assert [call["messages"][0]["content"] for call in context.calls[:2]] == ["Alpha report.", "Beta report."]
+    assert context.calls[-1]["messages"][0]["content"].endswith(
+        "Summarize the key points from the preceding text sections."
+    )
 
 
 @pytest.mark.parametrize("mode", ["unchunked", "nonrecursive", "empty_chunks", "failed_chunks", "single_chunk"])
@@ -279,7 +289,7 @@ def test_final_guidance_never_becomes_initial_guidance(
         monkeypatch.setattr(video, "improved_chunking_process", lambda *_: chunks)
     process(context, **options)
     assert context.calls
-    assert {call["custom_prompt_arg"] for call in context.calls} == {None}
+    assert all("Owner 1 final" not in call["messages"][0]["content"] for call in context.calls)
     assert {call["system_message"] for call in context.calls} == {"Owner 1 system {literal}"}
 
 
@@ -316,9 +326,31 @@ def test_direct_video_call_preserves_legacy_synthesis_defaults(
         temp_dir=str(tmp_path),
     )
     assert result["analysis"] == "Report summary."
-    assert [call["custom_prompt_arg"] for call in context.calls] == [
-        custom,
-        custom,
-        custom or "Summarize the key points from the preceding text sections.",
-    ]
+    assert len(context.calls) == 3
+    assert [call["messages"][0]["content"] for call in context.calls[:2]] == (
+        ["Alpha report.\n\n\n\nDirect custom", "Beta report.\n\n\n\nDirect custom"]
+        if custom
+        else ["Alpha report.", "Beta report."]
+    )
+    assert context.calls[-1]["messages"][0]["content"].endswith(
+        custom or "Summarize the key points from the preceding text sections."
+    )
     assert context.reads == []
+
+
+@pytest.mark.asyncio
+async def test_core_prompt_selection_preserves_explicit_parts(tmp_path: Path) -> None:
+    """Core selection fills only missing parts and leaves initial user guidance untouched."""
+    database = PromptsDatabase(tmp_path / "core.sqlite", "video-core-test")
+    database.save_service_prompt_override(PROMPT_ID, {"system": "Saved system", "final_summary": "Saved final"}, None)
+
+    async def get_db() -> PromptsDatabase:
+        """Supply the already selected owner's database without HTTP dependencies."""
+        return database
+
+    form = ProcessVideosForm(api_name="openai", system_prompt="", perform_chunking=True, summarize_recursively=True)
+    try:
+        final = await video_batch.resolve_video_summary_prompts(form, get_db)
+        assert (form.system_prompt, form.custom_prompt, final) == ("", None, "Saved final")
+    finally:
+        database.close_connection()
