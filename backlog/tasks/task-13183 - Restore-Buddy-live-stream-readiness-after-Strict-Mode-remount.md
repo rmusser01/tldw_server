@@ -1,5 +1,5 @@
 ---
-id: TASK-13177
+id: TASK-13183
 title: Restore Buddy live-stream readiness after Strict Mode remount
 status: Done
 assignee:
@@ -58,6 +58,7 @@ Coordinated final validation: 265 focused frontend tests, 54 backend tests, prod
 Qodo PR2884 follow-up: Start now returns the successful backend session result even if the requesting mount has ended, while guarding only local focus/state writes. sendText retains its independent generation fence and cancels stale sends. Automatic stop was deliberately rejected: create_or_resume_live_session can return an existing nonterminal user-owned session; its response has no exclusive mount ownership or created/resumed provenance, and its idempotency key is overwritten even when resuming. Closing that session could terminate work resumed by another mount/client. Persistent sessions remain listable/resumable across component lifetimes.
 
 Red: the new pending-Start/unmount regression failed with promise rejected STREAM_CONNECT_ERROR (1 failed, 22 passed). Green: bun x vitest run ../packages/ui/src/hooks/__tests__/usePersonaLiveControl.test.tsx from apps/tldw-frontend passed 23 tests, including discarded StrictMode send returning either a different session or the same session used by the current mount. Existing backend contract tests create_resume_compatible_reuses_active_session and stop_marks_closed_and_clears_focus passed (2 passed, 39 deselected). Scoped ESLint run from repository root with apps/tldw-frontend/eslint.config.mjs passed without findings; existing root pages-directory configuration notice remains. An initial frontend-directory ESLint invocation ignored shared files; it was replaced by the effective root run. git diff --check clean. Bandit not applicable to this TS/TSX-only follow-up. No additional browser UAT or full suite run; no backend contract changes. ADR not required: preserves existing persistent ownership/resume behavior.
+Rebase provenance: originally TASK-13177, created before review. Latest dev independently allocated13177 to the Docs Design recovery task in PR2885. Buddy record renumbered to13183 during the already-authorized task collision closeout; the dev record is preserved.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

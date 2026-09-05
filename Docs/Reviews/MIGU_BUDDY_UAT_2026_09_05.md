@@ -29,7 +29,7 @@ The previously running frontend at 18383 had a missing dependency and the backen
 | Select bundled Migu Marker Basic, copy draft and activate | Pass for backend publication | Active pack 30a938ed-3fbf-4232-a41f-8f6d372f036b; authenticated PNG GET 200, 9617 bytes |
 | Render activated Migu in WebUI | Fail | Relative image URLs request frontend origin and repeatedly 404; TASK-13176 |
 | Start and Stop live session from Buddy | Pass | Idle appears on Start; Stop becomes disabled after stop |
-| Send real Buddy text from browser | Fail | Stream connection error, draft retained, no WebSocket created; TASK-13177 |
+| Send real Buddy text from browser | Fail | Stream connection error, draft retained, no WebSocket created; TASK-13183 |
 | Backend direct stream control | Pass for handshake/planning only | Authenticated WebSocket returns WS_CONNECTED notice and tool_plan for synthetic input; test session stopped with HTTP 200 |
 | Conversational answer/provider quality | Not verified | Browser send blocked. Direct stream returns a RAG tool plan, not the requested conversational answer; no plan execution was approved |
 | Voice | Unavailable, gating correct | Real session advertises capabilities.voice=false; shell offers no voice button. No microphone, speech, or provider UAT pass claimed |
@@ -37,7 +37,7 @@ The previously running frontend at 18383 had a missing dependency and the backen
 
 ## Original defects and fix order
 
-1. **TASK-13177 — Stream lifecycle after Strict Mode remount.** Start succeeds; Send repeatedly returns “Persona live stream failed to connect” without opening a WebSocket. `usePersonaLiveControl.tsx:183` cleanup sets mountedRef=false, and effect setup never restores it. `ensureStreamSocket` then rejects before socket creation. Next config enables Strict Mode. This is a source-supported mechanism; no production fix was applied during this UAT. Re-run actual browser Send after correction, then validate incoming plans/replies and their visible controls.
+1. **TASK-13183 — Stream lifecycle after Strict Mode remount.** Start succeeds; Send repeatedly returns “Persona live stream failed to connect” without opening a WebSocket. `usePersonaLiveControl.tsx:183` cleanup sets mountedRef=false, and effect setup never restores it. `ensureStreamSocket` then rejects before socket creation. Next config enables Strict Mode. This is a source-supported mechanism; no production fix was applied during this UAT. Re-run actual browser Send after correction, then validate incoming plans/replies and their visible controls.
 2. **TASK-13182 — Setup version handoff.** Create Migu → Save assistant defaults: database version 2 versus expected 1. Reload/reselect/retry repeats version 4 versus expected 3. Voice saving and setup advancement need to hand off the current version while retaining optimistic conflict protection.
 3. **TASK-13176 — Visual transport.** Copy Migu Marker Basic as draft → activate → browser requests `/api/v1/persona/.../assets/.../content` on port 18384. Advanced mode has no same-origin API rewrite. The identical authenticated asset endpoint on 9101 returns image/png 200. Failed frames are retried repeatedly while animation runs. Resolve asset transport/auth consistently for both builder and shell, then retest animation and state changes.
 4. **TASK-13175 — Expanded-shell containment.** At 1280×720, initial expanded dock (1104,609,220,687) and popover (1104,818,220,478) exceed the viewport. Normal click on Choose/Change Buddy times out as outside viewport. Dragging upward makes it usable. Host clamping watches position and window resize, but not expanded/content size changes. Retest expansion, errors, loaded visuals and reload without manually rescuing the position.
@@ -46,7 +46,7 @@ The previously running frontend at 18383 had a missing dependency and the backen
 
 [Clipped controls](assets/migu-buddy-uat-2026-09-05/popover-clipped.png), [setup conflict](assets/migu-buddy-uat-2026-09-05/setup-conflict.yml), [failed browser send](assets/migu-buddy-uat-2026-09-05/ui-sent.txt), [stopped session](assets/migu-buddy-uat-2026-09-05/ui-stopped.txt), [backend stream frames](assets/migu-buddy-uat-2026-09-05/direct-stream-frames.json), [session capabilities](assets/migu-buddy-uat-2026-09-05/live-session.json).
 
-The initial UAT created TASK-13182,13175,13176,13177 without production changes. Its browser and synthetic sessions were stopped before the repair pass. Chatbook follows existing ADR-074.
+The initial UAT created TASK-13182,13175,13176,13183 without production changes. Its browser and synthetic sessions were stopped before the repair pass. Chatbook follows existing ADR-074.
 
 
 ## Repair follow-up
@@ -56,7 +56,7 @@ The isolated `codex/migu-server-buddy-uat` branch repairs six concrete failures:
 - **TASK-13182:** pass the saved profile version explicitly to the setup checkpoint; retain genuine optimistic conflicts and ignore stale save completions after persona selection changes.
 - **TASK-13175:** clamp expanded/content-resized Buddy bounds before paint, constrain dock height, and scroll the compact controls.
 - **TASK-13176:** fetch server-owned visual content through the existing authenticated binary transport, render disposable object URLs, retain failures until sources change, and abort/revoke on cleanup. Both sprite frames and generated candidate thumbnails share this path; external asset URLs do not receive credentials.
-- **TASK-13177:** restore Strict Mode mount readiness and fence stale asynchronous session/stream work.
+- **TASK-13183:** restore Strict Mode mount readiness and fence stale asynchronous session/stream work.
 - **TASK-13178:** real Chromium then exposed the server's missing WebSocket subprotocol selection. After successful authentication, select only the offered bearer marker, never its credential. Invalid authentication remains rejected.
 - **TASK-13179:** actual quickstart startup exposed a missing public `/health` rewrite. Next now forwards that path only in quickstart mode to the configured backend's public endpoint.
 
@@ -96,7 +96,7 @@ After the final stale-response fixes and a clean browser reload, defaults saving
 
 ### Final handoff
 
-TASK-13182,13175,13177,13178,13179 are Done. TASK-13176 remains In Progress because its quickstart acceptance is blocked by TASK-13181. TASK-13180 and13181 are recorded as high-priority follow-ups.
+TASK-13182,13175,13183,13178,13179 are Done. TASK-13176 remains In Progress because its quickstart acceptance is blocked by TASK-13181. TASK-13180 and13181 are recorded as high-priority follow-ups.
 
 Final real pointer drag moved the repaired dock from `(938.55,16)` to `(738.55,56)`; the asynchronous Stop completed and disabled its control. [Drag evidence](assets/migu-buddy-uat-2026-09-05/final-drag.json), [completed stop](assets/migu-buddy-uat-2026-09-05/final-stop.json). The initial immediate post-click stop flag is false because the API was still pending; the separate completion evidence is true.
 
@@ -110,3 +110,5 @@ Protected frames now load on demand. Each renderer retains at most eight blobs a
 A completed Start returns its successful backend create/resume result even if its original mount has gone away, while local state and sends remain fenced by generation. Sessions are persistent user-owned resources and can already have been resumed by another mount/client; they cannot safely be stopped on component cleanup without an exclusive ownership contract. Regressions cover both distinct and shared session responses.
 
 Review verification after rebase onto dev dc0b7455f2: 271 focused frontend tests across 13 affected suites; 54 backend authentication/live-control tests. Repository-wide typechecking still reports the same 80 unrelated diagnostics, with none in touched Buddy files. Scoped ESLint: zero errors and two existing native-image warnings. The modified WebSocket test now includes parameter/return types and a behavior docstring. These review changes have automated regression evidence; the recorded real-browser UAT above predates them. Chatbook summary claims were narrowed to match the evidence review in PR #2418.
+
+Task provenance: Buddy lifecycle was originally TASK-13177; rebase onto dc0b7455f2 introduced an independently allocated Docs Design recovery record at that ID. Buddy now uses TASK-13183, retaining its original record and notes; the task already merged into dev keeps TASK-13177.
