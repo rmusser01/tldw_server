@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-03 02:27'
-updated_date: '2026-09-05 22:40'
+updated_date: '2026-09-05 23:08'
 labels:
   - collections
   - reading-list
@@ -52,5 +52,5 @@ diagnostic-privacy behavior are covered.
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-ADR required: yes; ADR path: backlog/decisions/003-reading-atomic-hard-delete.md (existing contract). Execute approved Docs/superpowers/plans/2026-09-05-reading-output-file-reservations.md inline. Draft PR https://github.com/rmusser01/tldw_server/pull/2903 against dev. Task3 immediate cleanup checkpoint implemented: confirmed commits attempt identity-verified cleanup under the same storage exclusion, reusing recovery; cleanup/reporting failures preserve logical success and durable retry/blocked authority; unknown commits preserve every file and claim; cancellation drains cleanup. Initial 9 expected RED then GREEN; 12 new completion cases, adapted real-commit interruption and process tests. Final verification: 172 SQLite/non-PostgreSQL plus 129 required PostgreSQL cases passed (301 distinct, no required-backend skips); independent focused review found no actionable findings; all changed files pass Ruff/Black/compile/diff, production Bandit clean, test Bandit clean with only B101 excluded. No full sweep or Docker provisioning. See plan checkpoint record for commands and logs. Next: Task4 protected descriptor readers, followed by history/producer integration. Background WorkerSpec registration belongs to Task9 after prerequisites; no premature activation. No runtime routes/capability/merge/full-task completion; AC unchecked and In Progress.
+ADR required: yes; ADR path: backlog/decisions/003-reading-atomic-hard-delete.md (existing contract). Execute approved Docs/superpowers/plans/2026-09-05-reading-output-file-reservations.md inline, draft PR https://github.com/rmusser01/tldw_server/pull/2903 against dev. Task4a complete as a separately verified foundation: descriptor-owning bounded/offloaded response reuses Starlette HTTP/range helpers and existing cancellation draining, with real generic download compatibility characterization. 37 descriptor cases plus 14 SQLite compatibility and 12 prior completion regressions = 63 local passes; 14 required PostgreSQL compatibility passes = 77 distinct cases, no required-backend skips. Review feedback addressed (failed header setup releases descriptor), constructor OSError and 416 compatibility findings fixed; final Ruff/Black/compile/diff and scoped Bandit clean. Exact commands/logs and limitations recorded in plan. Next Task4b: protected current-row lookup after exclusion; structural namespace and committed-witness validation; generic and Watchlist download/content-loader migration and end-to-end path-reuse races. Preserve characterized inactive HEAD and conditional behavior. No production caller uses the response yet; entire Task4 remains incomplete. No activation/background registration/merge/full sweep; TASK-13153 In Progress and full-task AC unchecked.
 <!-- SECTION:PLAN:END -->

@@ -153,7 +153,15 @@ boundary; no file lifecycle is claimed complete by the DB-only checkpoint.
 
 ## Task 4: Protected lookup and opened-descriptor HTTP responses
 
-**Files:** Create `tldw_Server_API/app/services/output_file_response.py`, `tldw_Server_API/tests/Collections/test_output_file_responses.py`; modify `tldw_Server_API/app/api/v1/endpoints/outputs.py` and `tldw_Server_API/app/api/v1/endpoints/watchlists.py`; extend `tldw_Server_API/tests/Watchlists/test_watchlists_api.py`.
+**Files:** Create `tldw_Server_API/app/services/output_file_response.py`, `tldw_Server_API/tests/Collections/test_output_file_responses.py`, and `tldw_Server_API/tests/Collections/test_output_download_compatibility.py`; modify `tldw_Server_API/app/api/v1/endpoints/outputs.py` and `tldw_Server_API/app/api/v1/endpoints/watchlists.py`; extend `tldw_Server_API/tests/Watchlists/test_watchlists_api.py`.
+
+Execution split: Task 4a characterizes existing generic HTTP downloads and the
+response-start/path-reuse race, then establishes the bounded descriptor-owning
+response and its lifetime/HTTP tests. Reuse installed Starlette range/header
+helpers, not a pathname response or a new HTTP parser. Task 4b adds protected
+DB lookup, namespace/publication-witness checks, and migrates generic plus
+Watchlist downloads/content loaders. Neither the response foundation alone nor
+its compatibility tests establish protected lookup or activated-reader readiness.
 
 - [ ] Characterize current download-by-ID, by-name and HEAD success/missing/auth/Content-Disposition/range/conditional behavior with real endpoint tests before replacing FileResponse. Add race tests paused before protected lookup and after descriptor open. Run `python -m pytest tldw_Server_API/tests/Collections/test_output_file_responses.py -q` and confirm new race assertions fail.
 - [ ] Implement protected current-row lookup under the verified generic storage lock. Compare structural ownership namespace to the locked volume; missing/ambiguous/mismatched owned namespace fails closed before open. No filename fallback, no cross-volume search, no path normalization writes. Unowned rows use reconciled generic provenance. Open relative to that same directory with nofollow and verify `fstat`; only journal-proven committed witness links permit expected extra links.
@@ -838,3 +846,68 @@ Logs: `/private/tmp/task-13153-completion-{red,green,expanded}.log`,
 `/private/tmp/task-13153-completion-pg.log`,
 `/private/tmp/task-13153-completion-bandit.json`, and
 `/private/tmp/task-13153-completion-tests-bandit.json`.
+
+### Task 4a: Descriptor response foundation and HTTP characterization (2026-09-05)
+
+Added `OpenedOutputResponse` in `app/services/output_file_response.py`. It takes
+ownership of an already-authorized descriptor, captures metadata via fstat and
+never transmits or reopens a pathname, including with ASGI pathsend advertised.
+It reuses the installed Starlette stat-header, If-Range, range parsing and
+multipart helpers, and StreamingResponse disconnect handling. Reads use bounded
+64 KiB pread intervals off the event loop, reusing the existing cancellation-drain
+helper before closing the descriptor. Construction belongs in the later protected
+open worker; the response itself performs no lookup or authorization.
+
+The 14 new compatibility cases per backend exercise real generic download-by-ID,
+by-name and HEAD routes with real Collections adapters: media types, filenames,
+body/length, ranges, validators, missing/deleted/foreign rows and authentication
+before lookup. Current generic HEAD emits only type/length; current GET supports
+If-Range but ignores If-None-Match/If-Modified-Since (200, not 304). Task 4b must
+preserve inactive route behavior rather than silently introduce a cache policy.
+No 304 response path is introduced by this foundation.
+
+The 37 descriptor cases are filesystem/ASGI tests, independent of DB backend.
+A negative-control pathname response reproduces recycled bytes after headers;
+the new full/single/multipart responses retain the original inode and metadata.
+Coverage includes path deletion/reuse, Unicode filename headers, range merging,
+empty/bounded reads, changed descriptor offsets, short/read/send errors, HEAD,
+400/416, abandoned/replayed responses, nonregular descriptors and failed setup.
+Direct asyncio and AnyIO cancellation drain active reads with both ASGI 2.3 and
+2.4; disconnect-message and send-error paths both close the descriptor.
+
+Initial verification had 15 characterization/negative-control passes and three
+expected failures for the missing descriptor response; the three then passed.
+Expanded HTTP comparison caught a missing 416 content type and passed after
+reusing PlainTextResponse for that error. A separate failing fstat fault proved
+constructor OSError details needed sanitization; fixed-category errors now
+preserve descriptor cleanup. Independent review requested failed header-setup
+coverage; it was added and follow-up review found no residual findings.
+
+Final verification: 63 descriptor/SQLite compatibility/completion regressions
+passed in 31.06 seconds, plus all 14 required PostgreSQL compatibility cases in
+107.36 seconds: 77 distinct targeted cases, no required-backend skips. Earlier
+overlapping runs are superseded, not counted again. All three changed Python
+files pass Ruff, Black, compile and diff checks. Scoped production Bandit reports
+zero findings/errors without exclusions; test Bandit is clean with only B101
+(pytest assertions) excluded. Existing local PostgreSQL was reused; no Docker
+provisioning or full sweep occurred. Existing ADR-003 applies.
+
+Commands after Server virtual-environment activation:
+
+```bash
+TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_responses.py tldw_Server_API/tests/Collections/test_output_download_compatibility.py tldw_Server_API/tests/Collections/test_output_file_completion.py -q -k 'not postgres'
+TLDW_TEST_NO_DOCKER=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest tldw_Server_API/tests/Collections/test_output_download_compatibility.py -q -k postgres -n 2
+```
+
+Logs: `/private/tmp/task-13153-response-{red,green,expanded,expanded-green}.log`,
+`/private/tmp/task-13153-response-construction-red.log`,
+`/private/tmp/task-13153-response-final-verified.log`,
+`/private/tmp/task-13153-response-pg.log`,
+`/private/tmp/task-13153-response-bandit-final.json`, and
+`/private/tmp/task-13153-response-tests-bandit-final.json`.
+
+The Task 4 checklist remains incomplete: protected DB lookup, namespace and
+committed-witness checks, generic/Watchlist download and content-loader dispatch,
+and their end-to-end races are next. No production caller uses the new response
+yet. No runtime activation/background-worker change; TASK-13153 is In Progress
+and PR #2903 remains draft with the human-written Change summary gate pending.
