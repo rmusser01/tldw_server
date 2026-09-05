@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-03 02:27'
-updated_date: '2026-09-05 03:28'
+updated_date: '2026-09-05 03:56'
 labels:
   - collections
   - reading-list
@@ -52,5 +52,5 @@ diagnostic-privacy behavior are covered.
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-ADR required: yes. ADR path: backlog/decisions/003-reading-atomic-hard-delete.md. Reason: persisted aggregate revisions, destructive preconditions, ownership and durable cleanup. Design: Docs/superpowers/specs/2026-09-04-reading-atomic-hard-delete-design.md. Plan: Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md. Stage 1 writer checkpoints remain partial pending complete production routing/DTOs. Stage 3 includes verified POSIX storage exclusion, durable staging/pending cleanup, reserved-path guards and guarded internal adoption. Combined writer/adopter holds storage exclusion through file sync, ownership commit or failed-adoption scheduling. One DB transaction rechecks original authority and writes output, ownership, archive reference, FTS, one parent revision and staging removal. Shared validator now refreshes lease time after DB lock acquisition. Review clear; focused results and rollback-phase evidence in plan, including 137 SQLite/storage regressions and 15 real PostgreSQL adoption cases. Scoped Bandit zero; service/tests lint/format clean; DB retains nine baseline findings. Next: owned-output disposal intents, guarded item hard delete, legacy reconciliation, production archive/purge routing, coherent DTOs and fail-closed startup readiness. No production service caller or capability activation yet. Task remains In Progress.
+ADR required: yes. ADR path: backlog/decisions/003-reading-atomic-hard-delete.md. Reason: persisted revisions, destructive preconditions, ownership and durable cleanup. Approved design/plan: Docs/superpowers/{specs,plans}/2026-09-04-reading-atomic-hard-delete*. Guarded adoption committed as 9a4a9e34c9. Internal atomic-delete checkpoint implemented: existing clock fence, positive exact revision predicate, transactional strict FTS/child/output removal and durable unshared-file intents, staging cancellation, preserved external Media/Notes and independent collection entries. Review findings reproduced and fixed: retain exact filename spellings, honor known storage namespaces through cleanup, reject ambiguous cross-owner case variants without mutation. Final re-review clear. Verification: 171 SQLite/POSIX regressions plus one FTS SQL-error test, 69 real PostgreSQL atomic-delete/adoption/cleanup cases; 241 distinct targeted passes, no PostgreSQL skips, no Docker startup or full suite. Scoped Bandit zero findings/errors; test lint/format clean; DB retains nine baseline Ruff findings. Execution evidence and lesson in plan/docs. Next: generic owned-output deletion/purge and collection-link writer routing, legacy reconciliation, production archive integration, coherent DTOs and fail-closed startup readiness. No public caller or capability activation; task remains In Progress.
 <!-- SECTION:PLAN:END -->

@@ -1,5 +1,21 @@
 # Testing Evidence Lessons
 
+## Conservative path comparisons must not discard cleanup authority
+
+**Incident (TASK-13153, 2026-09-04):** Review of guarded Reading deletion found
+that lowercasing owned paths discarded one cleanup intent for distinct `A.md`
+and `a.md` files on case-sensitive storage. Treating a same-named, structurally
+owned output on another volume as a shared reference also lost the first
+volume's cleanup authority. A second review found the case-variant loss across
+different owners on the same volume.
+
+**Evidence and rule:** Failing real-database regressions led to retaining exact
+spellings within one aggregate, honoring known namespaces in reference checks
+through cleanup retirement, and rejecting cross-owner case ambiguity without
+mutation. Case-insensitive comparison can protect against accidental deletion;
+it cannot prove file identity when deciding to discard a durable cleanup record.
+Unknown generic-output namespaces remain conservative, not guessed.
+
 ## Refresh lease time after acquiring the database fence
 
 **Incident (TASK-13153, 2026-09-04):** Reading staging validation compared its lease

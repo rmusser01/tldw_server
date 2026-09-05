@@ -3170,6 +3170,7 @@ class CollectionsDatabase:
         notes: str | None = None,
         tags: list[str] | None = None,
         metadata_json: str | None = None,
+        connection: Any | None = None,
     ) -> None:
         if not self._fts_available:
             return
@@ -3178,6 +3179,7 @@ class CollectionsDatabase:
                 self.backend.execute(
                     "DELETE FROM content_items_fts WHERE rowid = ?",
                     (item_id,),
+                    connection=connection,
                 )
                 return
 
@@ -3193,8 +3195,11 @@ class CollectionsDatabase:
                 VALUES('delete', ?, ?, ?, ?)
                 """,
                 (item_id, title or "", summary or "", metadata_text),
+                connection=connection,
             )
         except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
+            if connection is not None:
+                raise
             logger.debug(f"Collections FTS delete failed for item {item_id}: {exc}")
 
     def _row_to_content_item(
@@ -4409,6 +4414,146 @@ class CollectionsDatabase:
             )
             return tgt
 
+    def hard_delete_reading_item(self, item_id: int, *, expected_revision: int) -> bool:
+        """Delete exactly the confirmed aggregate; return whether cleanup is pending.
+
+        This internal primitive requires established schema/storage readiness at
+        its service boundary. It does no file I/O and never acquires storage locks.
+        Output ownership must already be proven by adoption or reconciliation.
+        """
+        if type(expected_revision) is not int or expected_revision <= 0:
+            raise ValueError("invalid_expected_revision")
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            parent = self._get_reading_parent(item_id, conn)
+            if parent.revision != expected_revision:
+                raise ReadingRevisionConflict("reading_revision_conflict")
+            owned = self._reading_outputs_for_deletion(parent, conn)
+            # Reserve before deleting output rows. Shared references outside this
+            # aggregate retain the file; generic registrations use the same fence.
+            paths = {(row["storage_namespace_id"], row["storage_path"]) for row in owned}
+            unshared = []
+            for namespace, path in paths:
+                shared = self.backend.execute(
+                    "SELECT o.storage_path FROM outputs o LEFT JOIN reading_output_ownership owner ON owner.output_id = o.id "
+                    "WHERE o.user_id = ? AND lower(o.storage_path) = lower(?) "
+                    "AND (owner.output_id IS NULL OR owner.storage_namespace_id = ?) "
+                    "AND NOT EXISTS (SELECT 1 FROM reading_output_ownership r "
+                    "WHERE r.output_id = o.id AND r.user_id = ? AND r.item_id = ?)",
+                    (self.user_id, path, namespace, self.user_id, item_id),
+                    connection=conn,
+                ).rows
+                if shared:
+                    # Same spelling can be handed off to the surviving owner.
+                    # Different spellings may be distinct files on Linux; do not
+                    # discard this spelling's authority based on a case alias.
+                    if any(row["storage_path"] != path for row in shared):
+                        raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
+                    continue
+                existing = self.backend.execute(
+                    "SELECT 1 FROM reading_artifact_paths WHERE user_id = ? AND storage_namespace_id = ? "
+                    "AND lower(storage_path) = lower(?) LIMIT 1",
+                    (self.user_id, namespace, path),
+                    connection=conn,
+                ).first
+                if existing:
+                    raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
+                unshared.append((namespace, path))
+            # Retain exact spellings: case variants may be separate files on
+            # Linux. Preflight the whole set before inserting our own aliases.
+            for namespace, path in unshared:
+                self.backend.execute(
+                    "INSERT INTO reading_artifact_paths "
+                    "(token, user_id, storage_namespace_id, storage_path, item_id, expected_revision, lease_until, state) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 0, 'pending')",
+                    (uuid4().hex, self.user_id, namespace, path, item_id, expected_revision),
+                    connection=conn,
+                )
+            self.backend.execute(
+                "DELETE FROM reading_output_ownership WHERE user_id = ? AND item_id = ?",
+                (self.user_id, item_id),
+                connection=conn,
+            )
+            for output in owned:
+                self.backend.execute(
+                    "DELETE FROM outputs WHERE id = ? AND user_id = ?",
+                    (output["id"], self.user_id),
+                    connection=conn,
+                )
+            self.backend.execute("DELETE FROM content_item_tags WHERE item_id = ?", (item_id,), connection=conn)
+            self.backend.execute(
+                "DELETE FROM content_item_note_links WHERE user_id = ? AND item_id = ?",
+                (self.user_id, item_id),
+                connection=conn,
+            )
+            self.backend.execute(
+                "DELETE FROM reading_highlights WHERE user_id = ? AND item_id = ?",
+                (self.user_id, item_id),
+                connection=conn,
+            )
+            self.backend.execute(
+                "UPDATE media_collection_items SET content_item_id = NULL WHERE user_id = ? AND content_item_id = ?",
+                (self.user_id, item_id),
+                connection=conn,
+            )
+            self._delete_content_fts_entry(
+                item_id,
+                title=parent.title,
+                summary=parent.summary,
+                notes=parent.notes,
+                tags=parent.tags,
+                metadata_json=parent.metadata_json,
+                connection=conn,
+            )
+            deleted = self.backend.execute(
+                "DELETE FROM content_items WHERE id = ? AND user_id = ? AND origin = 'reading' AND revision = ?",
+                (item_id, self.user_id, expected_revision),
+                connection=conn,
+            )
+            if deleted.rowcount != 1:
+                raise ReadingRevisionConflict("reading_revision_conflict")
+            # Outstanding private writers must fail their next lease check, even
+            # when a file was never opened. Keep their original namespace/token.
+            self.backend.execute(
+                "UPDATE reading_artifact_paths SET state = 'pending' WHERE user_id = ? AND item_id = ? AND state = 'staged'",
+                (self.user_id, item_id),
+                connection=conn,
+            )
+            return bool(
+                self.backend.execute(
+                    "SELECT 1 FROM reading_artifact_paths WHERE user_id = ? AND item_id = ? LIMIT 1",
+                    (self.user_id, item_id),
+                    connection=conn,
+                ).first
+            )
+
+    def _reading_outputs_for_deletion(self, parent: ContentItemRow, connection: Any) -> list[dict[str, Any]]:
+        """Use structural ownership only; legacy hints can block, never authorize."""
+        owned = self.backend.execute(
+            "SELECT o.id, o.type, o.storage_path, r.storage_namespace_id FROM outputs o "
+            "JOIN reading_output_ownership r ON r.output_id = o.id AND r.user_id = o.user_id "
+            "WHERE r.user_id = ? AND r.item_id = ?",
+            (self.user_id, parent.id),
+            connection=connection,
+        ).rows
+        owned_ids = {str(row["id"]) for row in owned}
+        reference = self._json_loads_dict(parent.metadata_json).get("archive_output_id")
+        if (reference is not None and str(reference) not in owned_ids) or any(
+            row["type"] != "reading_archive" for row in owned
+        ):
+            raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
+        # ponytail: scan this user's legacy archives until reconciliation removes
+        # ambiguity; index a normalized candidate key only if measured cost warrants it.
+        candidates = self.backend.execute(
+            "SELECT o.id, o.metadata_json FROM outputs o LEFT JOIN reading_output_ownership r ON r.output_id = o.id "
+            "WHERE o.user_id = ? AND o.type = 'reading_archive' AND r.output_id IS NULL",
+            (self.user_id,),
+            connection=connection,
+        ).rows
+        if any(str(self._json_loads_dict(row["metadata_json"]).get("item_id")) == str(parent.id) for row in candidates):
+            raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
+        return owned
+
     def delete_content_item(self, item_id: int) -> None:
         """Delete a content item and its tags/FTS entry."""
         row = self.backend.execute(
@@ -5301,7 +5446,7 @@ class CollectionsDatabase:
             parent = self._get_reading_parent(item_id, conn)
             if parent.revision != expected_revision:
                 raise ReadingRevisionConflict("reading_revision_conflict")
-            if self._reading_artifact_has_output_reference(path, conn):
+            if self._reading_artifact_has_output_reference(path, storage_namespace_id, conn):
                 raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
             self.backend.execute(
                 "INSERT INTO reading_artifact_paths "
@@ -5357,7 +5502,7 @@ class CollectionsDatabase:
         with self.transaction() as conn:
             self._lock_reading_revision_clock(conn)
             row, parent = self._validate_staged_reading_artifact(token, storage_namespace_id, now, conn)
-            if self._reading_artifact_has_output_reference(row["storage_path"], conn):
+            if self._reading_artifact_has_output_reference(row["storage_path"], storage_namespace_id, conn):
                 raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
             result = self._execute_insert(
                 "INSERT INTO outputs (user_id, type, title, format, storage_path, metadata_json, created_at, media_item_id, retention_until, deleted) "
@@ -5425,11 +5570,15 @@ class CollectionsDatabase:
                 connection=conn,
             )
 
-    def _reading_artifact_has_output_reference(self, storage_path: str, connection: Any) -> bool:
+    def _reading_artifact_has_output_reference(
+        self, storage_path: str, storage_namespace_id: str, connection: Any
+    ) -> bool:
         return bool(
             self.backend.execute(
-                "SELECT 1 FROM outputs WHERE user_id = ? AND lower(storage_path) = lower(?) LIMIT 1",
-                (self.user_id, storage_path),
+                "SELECT 1 FROM outputs o LEFT JOIN reading_output_ownership r ON r.output_id = o.id "
+                "WHERE o.user_id = ? AND lower(o.storage_path) = lower(?) "
+                "AND (r.output_id IS NULL OR r.storage_namespace_id = ?) LIMIT 1",
+                (self.user_id, storage_path, storage_namespace_id),
                 connection=connection,
             ).first
         )
@@ -5466,7 +5615,7 @@ class CollectionsDatabase:
                     (row["token"], self.user_id),
                     connection=conn,
                 )
-                if self._reading_artifact_has_output_reference(row["storage_path"], conn):
+                if self._reading_artifact_has_output_reference(row["storage_path"], storage_namespace_id, conn):
                     self._record_reading_artifact_error(row, "shared_output", now, conn)
                 else:
                     ready.append(dict(row))
@@ -5496,8 +5645,10 @@ class CollectionsDatabase:
             self._lock_reading_revision_clock(conn)
             result = self.backend.execute(
                 "DELETE FROM reading_artifact_paths WHERE token = ? AND user_id = ? AND storage_namespace_id = ? "
-                "AND state = 'pending' AND NOT EXISTS (SELECT 1 FROM outputs "
-                "WHERE outputs.user_id = reading_artifact_paths.user_id AND lower(outputs.storage_path) = lower(reading_artifact_paths.storage_path))",
+                "AND state = 'pending' AND NOT EXISTS (SELECT 1 FROM outputs o "
+                "LEFT JOIN reading_output_ownership r ON r.output_id = o.id "
+                "WHERE o.user_id = reading_artifact_paths.user_id AND lower(o.storage_path) = lower(reading_artifact_paths.storage_path) "
+                "AND (r.output_id IS NULL OR r.storage_namespace_id = reading_artifact_paths.storage_namespace_id))",
                 (token, self.user_id, storage_namespace_id),
                 connection=conn,
             )

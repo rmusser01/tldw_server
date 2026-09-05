@@ -308,14 +308,70 @@ instead of introducing parallel locking helpers.
 
 ## Stage 2: Atomic relational deletion and ownership
 
-**Status:** Not Started
+**Status:** In Progress — internal guarded deletion and owned-file intents; reconciliation and production routing remain separate checkpoints.
 **Goal:** Matching deletion removes exactly owned records or rolls back completely.
 **Success Criteria:** Stale/missing/ownership cases mutate nothing; external records survive.
 **Tests:** Atomic delete module, FTS regression and real PostgreSQL races.
 
 **Interfaces:** Add `CollectionsDatabase.hard_delete_reading_item(item_id: int, *, expected_revision: int) -> bool`, returning whether artifact cleanup remains pending. Raise `KeyError` for absent/inaccessible/non-Reading items, `ReadingRevisionConflict` for stale tokens, and `ReadingArtifactOwnershipConflict` for unresolved ownership; define both exception classes in Collections_DB.py.
 
-- [ ] Add failing tests for exact-match deletion, stale token, wrong user, non-Reading row, absent row, external preservation and ambiguous ownership. Core assertion:
+Current internal slice (existing ADR-003; no new ADR required): first cover exact
+deletion, rejected preconditions, structurally owned outputs, ambiguous legacy
+references, surviving shared files, staging cancellation and rollback phases on
+both backends. Reuse `reading_artifact_paths` for pending disposal; persist intents
+before removing output rows, with no file I/O or storage-lock acquisition in the
+transaction. Clear collection-entry capture links, preserving their independent
+source/Media records and containers. Propagate the transaction through strict FTS
+deletion. Add deterministic mutation/delete commit-order checks. Keep public routes,
+generic delete/purge routing, legacy reconciliation and readiness unactivated;
+this checkpoint alone does not establish the complete contract.
+
+Internal atomic-delete checkpoint (2026-09-04): the new DB primitive validates
+positive revision, authority and Reading origin under the clock fence, rejects
+unproven legacy ownership, reserves unshared owned files before output deletion,
+removes item-local joins/highlights/FTS, clears independent collection-entry links,
+deletes the exact parent revision and cancels outstanding staging atomically.
+The clock remains spent after deletion. No filesystem calls or storage locks are
+introduced inside this transaction. The existing cleanup worker consumes the
+committed intents after restart; external Media and Notes are preserved.
+
+Review found and regressions reproduced cleanup-authority loss from collapsing
+case variants and treating separate known volumes as one shared path. Intents
+now retain exact spellings; reference checks honor structural namespace through
+cleanup retirement. Across different owners on the same/unknown volume, distinct
+case spellings are ambiguous and reject deletion without mutation. Exact-path
+shared references remain preserved. A final independent re-review found no
+further issues in this internal slice. Existing ADR-003 governs these safeguards.
+
+Checkpoint verification (existing Server virtual environment):
+
+- Initial red run: 24 SQLite cases failed for the absent method; later case-variant,
+  distinct-volume and cross-owner-alias regressions failed before their fixes.
+- Initial green: 26 SQLite and 26 real PostgreSQL deletion cases passed.
+- Final combined SQLite/POSIX regression: atomic deletion, archive adoption,
+  artifact cleanup/storage, revision mutations and contentless FTS — 171 passed,
+  149 deselected. No full suite.
+- Supplemental real SQLite FTS SQL-failure check exercises the helper's exception
+  handling itself (not only an exception injected after the helper returns);
+  1 passed, 68 deselected.
+- Final PostgreSQL atomic-delete/adoption/cleanup regression: 69 passed, 69
+  deselected, no skips on the existing real service with Docker startup disabled.
+  Together with the SQLite/POSIX run and supplemental FTS SQL-error test, this
+  verifies 241 distinct targeted cases (earlier reruns overlap these cases).
+- New test Ruff/Black, changed DB-range formatting, compilation and diff checks
+  pass. DB Ruff retains the same nine baseline findings; scoped Bandit reports
+  zero findings and zero errors.
+- External preservation uses real Media records on the tested backend and a
+  separate real SQLite Notes database, matching its independent storage boundary.
+  An initial test mistakenly merged Notes and Media schema tables; corrected the
+  fixture rather than changing production schemas. An unsupported test-only
+  update argument was corrected to the existing upsert API.
+
+Remaining Stage 2/3 work is not complete: explicit legacy reconciliation, generic
+delete/purge and collection-link writer routing, archive production callers and
+cleanup startup/readiness integration. No public endpoint or capability enabled.
+
+- [x] Add failing tests for exact-match deletion, stale token, wrong user, non-Reading row, absent row, external preservation and ambiguous ownership. Core assertion:
 
 ```python
 def test_stale_delete_keeps_newer_item(db):
@@ -326,8 +382,8 @@ def test_stale_delete_keeps_newer_item(db):
     assert db.get_content_item(item.id).revision == changed.revision
 ```
 
-- [ ] Run `python -m pytest tldw_Server_API/tests/Collections/test_reading_atomic_delete.py -q`; verify the expected missing-method failure.
-- [ ] Under the Stage 1 fence validate owner/origin/revision and proven artifact ownership. Remove item-owned joins/highlights/FTS and outputs, reserve unlink intents for unshared files, and delete with the exact predicate:
+- [x] Run `python -m pytest tldw_Server_API/tests/Collections/test_reading_atomic_delete.py -q`; verify the expected missing-method failure.
+- [x] Under the Stage 1 fence validate owner/origin/revision and proven artifact ownership. Remove item-owned joins/highlights/FTS and outputs, reserve unlink intents for unshared files, and delete with the exact predicate:
 
 ```sql
 DELETE FROM content_items
@@ -606,4 +662,5 @@ Review amendments cover late file creation after intent retirement, storage-volu
 identity, explicit legacy reconciliation, fail-closed capability/endpoint readiness,
 and reuse of existing snapshot/transaction primitives. These add test requirements;
 they are not claims that the proposed mechanisms have passed runtime verification.
-No implementation or test results are claimed by this document.
+The original review record describes proposed checks; dated checkpoint sections
+above record implementation and verification evidence as execution progresses.
