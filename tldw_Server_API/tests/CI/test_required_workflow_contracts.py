@@ -1131,6 +1131,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         }
         assert shard_path_sets["media-core-documents"] == {
             "tldw_Server_API/tests/Media/test_document*.py",
+            "tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py",
             "tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py",
             "tldw_Server_API/tests/Media/test_pdf_text_normalization.py",
         }
