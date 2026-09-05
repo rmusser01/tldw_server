@@ -190,6 +190,13 @@ def test_service_prompt_catalog_returns_exact_metadata_without_prompt_bodies(
             "affected_workflows": [{"id": "media.pdf.summarization", "label": "Synchronous PDF analysis"}],
         },
         {
+            "id": "media.ebook.summarization",
+            "label": "EPUB summarization",
+            "description": "Controls system instructions for synchronous EPUB analysis. Without a saved override, server defaults apply.",
+            "parts": [{"key": "system", "label": "System instructions", "mode": "literal", "required_variables": []}],
+            "affected_workflows": [{"id": "media.ebook.summarization", "label": "Synchronous EPUB analysis"}],
+        },
+        {
             "id": "media.text.translation",
             "label": "Text translation",
             "description": ("Controls the visible instructions used by synchronous text translation."),
@@ -246,9 +253,11 @@ def test_service_prompt_detail_returns_packaged_state_without_caching(api_contex
     assert set(body["default_parts"]) == {"system", "user_template"}
 
 
-@pytest.mark.parametrize("prompt_id", ["media.document.summarization", "media.pdf.summarization"])
+@pytest.mark.parametrize(
+    "prompt_id", ["media.document.summarization", "media.pdf.summarization", "media.ebook.summarization"]
+)
 def test_summary_prompt_can_be_saved_and_reset(api_context: SimpleNamespace, prompt_id: str) -> None:
-    """Exercise independent document/PDF guidance through the generic save/reset API."""
+    """Exercise independent media guidance through the generic save/reset API."""
     path = f"/api/v1/service-prompts/{prompt_id}"
     parts = {"system": "Summarize in French. Preserve literal {braces}."}
     saved = api_context.client.put(path, json={"parts": parts, "expected_revision": None})
@@ -259,7 +268,9 @@ def test_summary_prompt_can_be_saved_and_reset(api_context: SimpleNamespace, pro
     assert reset.json()["source"] == "packaged"
 
 
-@pytest.mark.parametrize("prompt_id", ["media.document.summarization", "media.pdf.summarization"])
+@pytest.mark.parametrize(
+    "prompt_id", ["media.document.summarization", "media.pdf.summarization", "media.ebook.summarization"]
+)
 def test_summary_settings_uses_deployment_default_for_detail_and_reset(
     api_context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, prompt_id: str
 ) -> None:

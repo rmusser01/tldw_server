@@ -235,6 +235,13 @@ const catalog: ServicePromptCatalogItem[] = [
     affected_workflows: [{ id: "media.pdf.summarization", label: "Server PDF workflow" }]
   },
   {
+    id: "media.ebook.summarization",
+    label: "Server EPUB prompt",
+    description: "Server EPUB prompt description",
+    parts: [{ key: "system", label: "System instructions", mode: "literal", required_variables: [] }],
+    affected_workflows: [{ id: "media.ebook.summarization", label: "Server EPUB workflow" }]
+  },
+  {
     id: "notes.title.generate",
     label: "Server Notes title prompt",
     description: "Server Notes title prompt description",
@@ -266,7 +273,9 @@ const detailFor = (
     parts?: Record<string, string>
   } = {}
 ): ServicePromptDetail => {
-  const defaults = definition.id === "media.pdf.summarization"
+  const defaults = definition.id === "media.ebook.summarization"
+    ? { system: "Summarize the EPUB clearly." }
+    : definition.id === "media.pdf.summarization"
     ? { system: "Summarize the PDF clearly." }
     : definition.id === "media.document.summarization"
     ? { system: "Summarize the document clearly." }
@@ -527,7 +536,7 @@ describe("ServicePromptsSettings", () => {
     renderSettings()
 
     expect(await screen.findAllByTestId("service-prompt-list-item"))
-      .toHaveLength(9)
+      .toHaveLength(10)
     expect(await screen.findByRole("heading", { name: "Text translation" }))
       .toBeInTheDocument()
     expect(screen.getByText("Server default")).toBeInTheDocument()
@@ -587,6 +596,17 @@ describe("ServicePromptsSettings", () => {
     expect(screen.getByText("Synchronous PDF analysis")).toBeVisible()
     expect(screen.getAllByText(/Without a saved override, server defaults apply/)[0]).toBeVisible()
     expect(screen.queryByText("Server PDF prompt")).not.toBeInTheDocument()
+  })
+
+  it("exposes independent EPUB system guidance and its synchronous scope", async () => {
+    renderSettings()
+    await openPrompt("EPUB summarization")
+    expect(screen.getByLabelText("System instructions")).toHaveValue(
+      "Summarize the EPUB clearly."
+    )
+    expect(screen.getByText("Synchronous EPUB analysis")).toBeVisible()
+    expect(screen.getAllByText(/Without a saved override, server defaults apply/)[0]).toBeVisible()
+    expect(screen.queryByText("Server EPUB prompt")).not.toBeInTheDocument()
   })
 
   it("localizes and edits the image prompt refinement semantics", async () => {

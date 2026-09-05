@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import Form, status
+from fastapi import Form, Request, status
 from loguru import logger
 from pydantic import ValidationError
 
@@ -455,6 +455,7 @@ async def get_process_pdfs_form(
 
 
 async def get_process_ebooks_form(
+    request: Request,
     urls: list[str] | None = Form(None),
     title: str | None = Form(None),
     author: str | None = Form(None),
@@ -478,6 +479,7 @@ async def get_process_ebooks_form(
     hierarchical_chunking: bool = Form(False),
     hierarchical_template: str | dict[str, Any] | None = Form(None),
     extraction_method: str = Form("filtered"),
+    api_provider: str | None = Form(None),
     api_name: str | None = Form(None),
     api_key: str | None = Form(None),
 ) -> ProcessEbooksForm:
@@ -487,6 +489,10 @@ async def get_process_ebooks_form(
     Used by /media/process-ebooks (no DB persistence).
     """
     try:
+        # FastAPI normalizes empty optional fields to None. Restore explicit
+        # empty text before validation so downstream code uses only the model.
+        if system_prompt is None and (await request.form()).get("system_prompt") == "":
+            system_prompt = ""
         urls_norm = _coerce_urls(urls)
         keywords_value = keywords if keywords is not None else (keywords_str if keywords_str is not None else "")
         return ProcessEbooksForm(
@@ -514,7 +520,8 @@ async def get_process_ebooks_form(
                 hierarchical_template=hierarchical_template,
             ),
             extraction_method=extraction_method,
-            api_name=api_name,
+            api_provider=api_provider,
+            api_name=api_provider or api_name,
             api_key=api_key,
         )
     except ValidationError as exc:

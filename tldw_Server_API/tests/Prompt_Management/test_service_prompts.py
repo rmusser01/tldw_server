@@ -86,6 +86,12 @@ EXPECTED_REGISTRY = {
         "parts": (("system", "System instructions", "literal", ()),),
         "workflows": (("media.pdf.summarization", "Synchronous PDF analysis"),),
     },
+    "media.ebook.summarization": {
+        "label": "EPUB summarization",
+        "description": "Controls system instructions for synchronous EPUB analysis. Without a saved override, server defaults apply.",
+        "parts": (("system", "System instructions", "literal", ()),),
+        "workflows": (("media.ebook.summarization", "Synchronous EPUB analysis"),),
+    },
     "media.text.translation": {
         "label": "Text translation",
         "description": "Controls the visible instructions used by synchronous text translation.",
