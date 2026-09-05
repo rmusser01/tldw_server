@@ -1,4 +1,5 @@
 import React from "react"
+import { useTranslation } from "react-i18next"
 import {
   Button,
   Card,
@@ -20,6 +21,7 @@ import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 const { Text } = Typography
 
 interface LlamacppRuntimePanelProps {
+  onSnapshots?: (profileId: string) => void
   profiles: LlamacppProfile[]
   runtimes: LlamacppRuntime[]
   loading?: boolean
@@ -57,7 +59,10 @@ const stateColor = (state?: LlamacppRuntimeState) => {
   }
 }
 
-const formatEndpoint = (profile?: LlamacppProfile, runtime?: LlamacppRuntime) => {
+const formatEndpoint = (
+  profile?: LlamacppProfile,
+  runtime?: LlamacppRuntime
+) => {
   if (runtime?.endpoint) return runtime.endpoint
   const host = runtime?.host || profile?.host
   const port = runtime?.port ?? profile?.port
@@ -76,7 +81,9 @@ const modelLabel = (row: RuntimeRow) =>
   "No model selected"
 
 const uniqueStrings = (values: Array<string | null | undefined>) =>
-  Array.from(new Set(values.map((value) => value?.trim()).filter(Boolean) as string[]))
+  Array.from(
+    new Set(values.map((value) => value?.trim()).filter(Boolean) as string[])
+  )
 
 const basename = (value?: string | null) => {
   const trimmed = value?.trim()
@@ -140,6 +147,7 @@ const capabilityWarnings = (row: RuntimeRow) =>
   ])
 
 export const LlamacppRuntimePanel: React.FC<LlamacppRuntimePanelProps> = ({
+  onSnapshots,
   profiles,
   runtimes,
   loading = false,
@@ -152,8 +160,11 @@ export const LlamacppRuntimePanel: React.FC<LlamacppRuntimePanelProps> = ({
   onResume,
   onUseInChat
 }) => {
+  const { t } = useTranslation()
   const rows = React.useMemo<RuntimeRow[]>(() => {
-    const runtimeByProfile = new Map(runtimes.map((runtime) => [runtime.profile_id, runtime]))
+    const runtimeByProfile = new Map(
+      runtimes.map((runtime) => [runtime.profile_id, runtime])
+    )
     const profileRows = profiles.map((profile) => ({
       profileId: profile.profile_id,
       profile,
@@ -213,6 +224,19 @@ export const LlamacppRuntimePanel: React.FC<LlamacppRuntimePanelProps> = ({
               const warnings = capabilityWarnings(row)
               const tags = capabilityTags(row, projector)
               const actions: React.ReactNode[] = []
+
+              if (row.profile && onSnapshots) {
+                actions.push(
+                  <Button
+                    key="snapshots"
+                    size="small"
+                    onClick={() => onSnapshots(row.profileId)}
+                    aria-label={`${t("settings:admin.snapshots.title", "Slot snapshots")}: ${label}`}
+                  >
+                    {t("settings:admin.snapshots.title", "Slot snapshots")}
+                  </Button>
+                )
+              }
 
               if (isRunning) {
                 actions.push(
@@ -304,7 +328,9 @@ export const LlamacppRuntimePanel: React.FC<LlamacppRuntimePanelProps> = ({
                         </Tag>
                       ))}
                       {projector && <Tag color="purple">mmproj</Tag>}
-                      {row.profile?.enabled === false && <Tag color="orange">disabled</Tag>}
+                      {row.profile?.enabled === false && (
+                        <Tag color="orange">disabled</Tag>
+                      )}
                       {row.runtime?.pid && <Tag>pid {row.runtime.pid}</Tag>}
                       {port && <Tag>{port}</Tag>}
                       {row.runtime?.restart_count ? (

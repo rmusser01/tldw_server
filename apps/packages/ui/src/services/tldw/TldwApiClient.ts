@@ -1,6 +1,10 @@
 import type { ChatScope } from "@/types/chat-scope"
 import { toChatScopeParams } from "@/types/chat-scope"
 import type {
+  LlamacppSnapshotSlotsResponse,
+  LlamacppSnapshotCatalogResponse,
+  LlamacppSnapshotOperationResponse,
+  LlamacppSnapshotRequest,
   LlamacppAsset,
   LlamacppAssetsResponse,
   LlamacppConfigResponse,
@@ -3011,6 +3015,76 @@ export class TldwApiClientBase {
     return await bgRequest<LlamacppProfileListResponse>({
       path: "/api/v1/llamacpp/profiles",
       method: "GET"
+    })
+  }
+
+  async getLlamacppSnapshotSlots(
+    profileId: string,
+    signal?: AbortSignal
+  ): Promise<LlamacppSnapshotSlotsResponse> {
+    return await bgRequest<LlamacppSnapshotSlotsResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/slots`,
+      method: "GET",
+      abortSignal: signal
+    })
+  }
+
+  async listLlamacppSnapshots(
+    profileId: string,
+    offset = 0,
+    signal?: AbortSignal
+  ): Promise<LlamacppSnapshotCatalogResponse> {
+    return await bgRequest<LlamacppSnapshotCatalogResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/snapshots?offset=${offset}&limit=50`,
+      method: "GET",
+      abortSignal: signal
+    })
+  }
+
+  async saveLlamacppSnapshot(
+    profileId: string,
+    payload: LlamacppSnapshotRequest
+  ): Promise<LlamacppSnapshotOperationResponse> {
+    return await bgRequest<LlamacppSnapshotOperationResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/snapshots`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async restoreLlamacppSnapshot(
+    profileId: string,
+    snapshotId: string,
+    payload: LlamacppSnapshotRequest & { replace_confirmed: true }
+  ): Promise<LlamacppSnapshotOperationResponse> {
+    return await bgRequest<LlamacppSnapshotOperationResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/snapshots/${encodeURIComponent(snapshotId)}/restore`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async deleteLlamacppSnapshot(
+    profileId: string,
+    snapshotId: string
+  ): Promise<{ deleted: boolean }> {
+    return await bgRequest<{ deleted: boolean }>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/snapshots/${encodeURIComponent(snapshotId)}`,
+      method: "DELETE"
+    })
+  }
+
+  async getLlamacppSnapshotOperation(
+    profileId: string,
+    operationId: string,
+    signal?: AbortSignal
+  ): Promise<LlamacppSnapshotOperationResponse> {
+    return await bgRequest<LlamacppSnapshotOperationResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/snapshot-operations/${encodeURIComponent(operationId)}`,
+      method: "GET",
+      abortSignal: signal
     })
   }
 

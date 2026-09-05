@@ -1,3 +1,5 @@
+"""Profile persistence and validation tests using isolated JSON files."""
+
 import json
 from pathlib import Path
 
@@ -11,6 +13,8 @@ from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
     LlamaCppProfileMode,
     LlamaCppProfileStoreError,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def profile(
@@ -109,6 +113,31 @@ def test_profile_store_round_trips_updates_and_deletes(tmp_path: Path):
     assert reloaded.delete("one") is True
     assert reloaded.delete("one") is False
     assert JsonLlamaCppProfileStore(store_path).list_profiles() == []
+
+
+def test_old_profile_defaults_snapshot_opt_in_and_retention(tmp_path: Path):
+    legacy = profile("legacy").model_dump()
+    legacy.pop("snapshots_enabled", None)
+    legacy.pop("snapshot_retention", None)
+    store_path = tmp_path / "profiles.json"
+    store_path.write_text(json.dumps({"version": 1, "profiles": [legacy]}), encoding="utf-8")
+
+    loaded = JsonLlamaCppProfileStore(store_path).get("legacy")
+
+    assert loaded is not None
+    assert loaded.snapshots_enabled is False
+    assert loaded.snapshot_retention == 10
+
+
+def test_profile_store_round_trips_snapshot_settings_without_implicit_deletion(tmp_path: Path):
+    store_path = tmp_path / "profiles.json"
+    store = JsonLlamaCppProfileStore(store_path)
+    configured = profile("one").model_copy(update={"snapshots_enabled": True, "snapshot_retention": 25})
+
+    store.upsert(configured)
+    loaded = JsonLlamaCppProfileStore(store_path).get("one")
+
+    assert loaded == configured
 
 
 def test_profile_store_rejects_invalid_dict_store_without_overwriting(tmp_path: Path):

@@ -37,6 +37,35 @@ _PROMPT_IMPROVEMENT_DISPATCH_MESSAGES = {
 _MAX_PROMPT_IMPROVEMENT_RETRY_AFTER_SECONDS = 86_400
 
 
+class SnapshotOperationError(RuntimeError):
+    """Safe machine-readable error at the admin snapshot operation boundary."""
+
+    def __init__(self, code: str, status_code: int = 409) -> None:
+        super().__init__(code)
+        self.code = code
+        self.status_code = status_code
+
+
+class UnstableFingerprintError(RuntimeError):
+    """Raised when a file changes while its identity is being calculated."""
+
+
+class SnapshotStoreError(RuntimeError):
+    """Base error for private snapshot storage."""
+
+
+class SnapshotCorruptError(SnapshotStoreError):
+    """Raised when committed bytes no longer match their manifest."""
+
+
+class SnapshotNotFoundError(SnapshotStoreError):
+    """Raised when no valid committed snapshot or receipt exists."""
+
+
+class SnapshotStorageUnavailableError(SnapshotStoreError):
+    """Raised when storage exists but cannot be read reliably."""
+
+
 class TransactionPassthroughError(Exception):
     """Sanitized domain failure that may cross a rolled-back DB transaction."""
 
@@ -282,11 +311,7 @@ class PromptImprovementDispatchError(RuntimeError):
             _PROMPT_IMPROVEMENT_DISPATCH_MESSAGES["internal_error"],
         )
         super().__init__(public_message)
-        self.code = (
-            code
-            if code in _PROMPT_IMPROVEMENT_DISPATCH_MESSAGES
-            else "internal_error"
-        )
+        self.code = code if code in _PROMPT_IMPROVEMENT_DISPATCH_MESSAGES else "internal_error"
         self.retryable = bool(retryable)
         try:
             retry_after = int(retry_after_seconds)
@@ -295,9 +320,7 @@ class PromptImprovementDispatchError(RuntimeError):
         if retry_after is not None and retry_after < 0:
             retry_after = None
         self.retry_after_seconds = (
-            min(retry_after, _MAX_PROMPT_IMPROVEMENT_RETRY_AFTER_SECONDS)
-            if retry_after is not None
-            else None
+            min(retry_after, _MAX_PROMPT_IMPROVEMENT_RETRY_AFTER_SECONDS) if retry_after is not None else None
         )
 
 
@@ -680,11 +703,7 @@ class ChatConfigurationError(ChatAPIError):
         provider: str | None = None,
         error_code: str = "provider_configuration_invalid",
     ) -> None:
-        self.error_code = (
-            error_code
-            if error_code in self._ERROR_CODES
-            else "provider_configuration_invalid"
-        )
+        self.error_code = error_code if error_code in self._ERROR_CODES else "provider_configuration_invalid"
         super().__init__(message, status_code=500, provider=provider)
 
 
@@ -887,9 +906,7 @@ def sanitize_embedding_public_details(details: list[SafeDetail] | None) -> list[
                 continue
 
             if isinstance(raw_value, str):
-                safe_item[raw_key] = (
-                    _EMBEDDING_REDACTED if _is_embedding_sensitive_string(raw_value) else raw_value
-                )
+                safe_item[raw_key] = _EMBEDDING_REDACTED if _is_embedding_sensitive_string(raw_value) else raw_value
             elif isinstance(raw_value, (int, float, bool)) or raw_value is None:
                 safe_item[raw_key] = raw_value
 
@@ -918,9 +935,7 @@ def sanitize_embedding_scalar_mapping(values: Mapping[str, object] | None) -> di
             continue
 
         if isinstance(raw_value, str):
-            sanitized[raw_key] = (
-                _EMBEDDING_REDACTED if _is_embedding_sensitive_string(raw_value) else raw_value
-            )
+            sanitized[raw_key] = _EMBEDDING_REDACTED if _is_embedding_sensitive_string(raw_value) else raw_value
         elif isinstance(raw_value, (int, float, bool)) or raw_value is None:
             sanitized[raw_key] = raw_value
 
