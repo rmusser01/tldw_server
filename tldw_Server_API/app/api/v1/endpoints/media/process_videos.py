@@ -9,6 +9,7 @@ from fastapi import (
     Depends,
     File,
     HTTPException,
+    Request,
     Response,
     UploadFile,
     status,
@@ -29,6 +30,7 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
 )
+from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
 from tldw_Server_API.app.api.v1.API_Deps.validations_deps import file_validator_instance
 from tldw_Server_API.app.api.v1.endpoints import media as media_mod
@@ -69,6 +71,7 @@ router = APIRouter()
     ],
 )
 async def process_videos_endpoint(
+    request: Request,
     background_tasks: BackgroundTasks,
     injected_response: Response,
     db: Any = Depends(get_media_db_for_user),
@@ -79,7 +82,7 @@ async def process_videos_endpoint(
     ),
     current_user: User = Depends(get_request_user),
     usage_log: UsageEventLogger = Depends(get_usage_event_logger),
-):
+) -> JSONResponse:
     """
     Process videos without persisting to the Media DB.
 
@@ -93,6 +96,7 @@ async def process_videos_endpoint(
 
     # Lazy import to avoid import-time hard failures from optional transcriber backends.
     from tldw_Server_API.app.core.Ingestion_Media_Processing.video_batch import (
+        resolve_video_summary_prompts,
         run_video_batch,
     )
 
@@ -126,6 +130,10 @@ async def process_videos_endpoint(
         "video",
         form_data.urls,
         files,
+    )
+
+    final_summary_prompt = await resolve_video_summary_prompts(
+        form_data, lambda: get_prompts_db_for_user(request, current_user)
     )
 
     batch_result: dict[str, Any] = {
@@ -224,6 +232,7 @@ async def process_videos_endpoint(
 
         # --- Call process_videos via helper ---
         batch_result = await run_video_batch(
+            final_summary_prompt=final_summary_prompt,
             all_inputs_to_process=all_inputs_to_process,
             form_data=form_data,
             current_user=current_user,
@@ -256,7 +265,7 @@ async def process_videos_endpoint(
     log_level = "INFO" if final_status_code == status.HTTP_200_OK else "WARNING"
     logger.log(
         log_level,
-        "/process-videos request finished with status {}. Results count: {}, " "Errors: {}",
+        "/process-videos request finished with status {}. Results count: {}, Errors: {}",
         final_status_code,
         total_items,
         final_error_count,

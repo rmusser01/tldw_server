@@ -259,6 +259,16 @@ const catalog: ServicePromptCatalogItem[] = [
     affected_workflows: [{ id: "media.audio.analysis", label: "Server audio workflow" }]
   },
   {
+    id: "media.video.summarization",
+    label: "Server video prompt",
+    description: "Server video description",
+    parts: [
+      { key: "system", label: "System instructions", mode: "literal", required_variables: [] },
+      { key: "final_summary", label: "Server final label", mode: "literal", required_variables: [] }
+    ],
+    affected_workflows: [{ id: "media.video.summarization", label: "Server video workflow" }]
+  },
+  {
     id: "notes.title.generate",
     label: "Server Notes title prompt",
     description: "Server Notes title prompt description",
@@ -290,7 +300,9 @@ const detailFor = (
     parts?: Record<string, string>
   } = {}
 ): ServicePromptDetail => {
-  const defaults = definition.id === "media.audio.analysis"
+  const defaults = definition.id === "media.video.summarization"
+    ? { system: "Video system guidance.", final_summary: "Combine video summaries." }
+    : definition.id === "media.audio.analysis"
     ? { system: "Audio system guidance.", user: "Audio user guidance." }
     : definition.id === "media.email.summarization"
     ? { system: "Summarize the email clearly." }
@@ -557,7 +569,7 @@ describe("ServicePromptsSettings", () => {
     renderSettings()
 
     expect(await screen.findAllByTestId("service-prompt-list-item"))
-      .toHaveLength(12)
+      .toHaveLength(13)
     expect(await screen.findByRole("heading", { name: "Text translation" }))
       .toBeInTheDocument()
     expect(screen.getByText("Server default")).toBeInTheDocument()
@@ -617,6 +629,22 @@ describe("ServicePromptsSettings", () => {
     expect(screen.getByText("Synchronous PDF analysis")).toBeVisible()
     expect(screen.getAllByText(/Without a saved override, server defaults apply/)[0]).toBeVisible()
     expect(screen.queryByText("Server PDF prompt")).not.toBeInTheDocument()
+  })
+
+  it("edits video system and final-summary instructions as one pair", async () => {
+    renderSettings()
+    await openPrompt("Video summarization")
+    expect(screen.getByLabelText("System instructions")).toHaveValue("Video system guidance.")
+    expect(screen.getByLabelText("Final-summary instructions")).toHaveValue("Combine video summaries.")
+    expect(screen.getByText("Synchronous video analysis")).toBeVisible()
+    fireEvent.change(screen.getByLabelText("System instructions"), { target: { value: "Video {system}" } })
+    fireEvent.change(screen.getByLabelText("Final-summary instructions"), { target: { value: "Video {final}" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledWith(
+      "media.video.summarization",
+      { parts: { system: "Video {system}", final_summary: "Video {final}" }, expected_revision: null },
+      { signal: expect.any(AbortSignal), requestScope: scopeOne }
+    ))
   })
 
   it("edits audio system and user instructions as one pair", async () => {

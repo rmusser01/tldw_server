@@ -104,6 +104,15 @@ EXPECTED_REGISTRY = {
         "parts": (("system", "System instructions", "literal", ()), ("user", "User instructions", "literal", ())),
         "workflows": (("media.audio.analysis", "Synchronous audio analysis"),),
     },
+    "media.video.summarization": {
+        "label": "Video summarization",
+        "description": "Controls system instructions and recursive final-summary instructions for synchronous video analysis. Without a saved override, server defaults apply.",
+        "parts": (
+            ("system", "System instructions", "literal", ()),
+            ("final_summary", "Final-summary instructions", "literal", ()),
+        ),
+        "workflows": (("media.video.summarization", "Synchronous video analysis"),),
+    },
     "media.text.translation": {
         "label": "Text translation",
         "description": "Controls the visible instructions used by synchronous text translation.",

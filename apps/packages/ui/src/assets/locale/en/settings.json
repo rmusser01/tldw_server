@@ -63,6 +63,10 @@
         "label": "Audio summarization",
         "description": "Controls system and user instructions for synchronous audio analysis. Without a saved override, server defaults apply."
       },
+      "mediaVideoSummarization": {
+        "label": "Video summarization",
+        "description": "Controls system instructions and recursive final-summary instructions for synchronous video analysis. Without a saved override, server defaults apply."
+      },
       "mediaEmailSummarization": {
         "label": "Email summarization",
         "description": "Controls system instructions for synchronous email analysis. Without a saved override, server defaults apply."
@@ -87,6 +91,7 @@
       "ebookSummarization": "Synchronous EPUB analysis",
       "emailSummarization": "Synchronous email analysis",
       "audioAnalysis": "Synchronous audio analysis",
+      "videoSummarization": "Synchronous video analysis",
       "automaticNotesTitles": "Automatic Notes titles"
     },
     "titleGeneration": {
@@ -97,6 +102,7 @@
       "template": "Template",
       "system": "System instructions",
       "user": "User instructions",
+      "finalSummary": "Final-summary instructions",
       "systemSemantics": "Refinement guidance",
       "rewriteSemantics": "Rewrite guidance",
       "titleInstruction": "Title instruction",
