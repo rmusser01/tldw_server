@@ -2,12 +2,16 @@
 id: TASK-13192
 title: Expose synchronous audio summarization in Service Prompts
 status: In Progress
-created_date: 2026-09-05 19:10
+assignee: []
+created_date: '2026-09-05 19:10'
+updated_date: '2026-09-05 19:12'
+labels: []
+dependencies: []
 references:
-- https://github.com/rmusser01/tldw_server/pull/2901
-- TASK-12957
+  - 'https://github.com/rmusser01/tldw_server/pull/2901'
+  - TASK-12957
 documentation:
-- Docs/Design/audio-summary-service-prompt.md
+  - Docs/Design/audio-summary-service-prompt.md
 ---
 
 ## Description
@@ -18,9 +22,9 @@ Continues the approved audio Service Prompts slice from the branch-local TASK-13
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Shared WebUI and extension edit/reset the audio system/user pair
-- [ ] #2 Explicit-part precedence and owner snapshots survive files and recursive passes
-- [ ] #3 Inactive analysis bypasses prompt storage and deployment/direct-core defaults remain unchanged
+- [x] #1 Shared WebUI and extension edit/reset the audio system/user pair
+- [x] #2 Explicit-part precedence and owner snapshots survive files and recursive passes
+- [x] #3 Inactive analysis bypasses prompt storage and deployment/direct-core defaults remain unchanged
 - [ ] #4 Review findings resolved and latest-dev rebase verified before merge
 <!-- AC:END -->
 
@@ -32,13 +36,21 @@ Preserve upstream snapshot changes and archive only the superseded audio trackin
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Original implementation3b126b37d9, Qodo fixes02c1b38ffb. Baseline102 passed, full targeted backend236/sharedUI198/WebUI5 passed; Qodo helper corrections125passed. Bandit zero, Ruff/compileall/OpenAPI checks passed. Qodo currently zero bugs/violations; all3threads resolved. Rebase onto dev53d683f0ed now required after snapshot PR2883 merged. Full repository suite/live browser/STT/provider checks not run locally.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
+Rebased onto dev53d683f0ed. Only generated fingerprint conflicted; regenerated combined API has2073paths/3140schemas, fingerprintaffe135193fca5726d8e378e82620553b55ceafc2f882d3af59b8b28ca5f0788. Range-diff confirms no runtime/test patch changes beyond fingerprint. Post-rebase140tests passed, Bandit zero findings, OpenAPI typegen and fingerprint check passed. PR body updated to TASK-13192. Awaiting fresh remote review/checks before merge.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+
+<!-- SECTION:FINAL_SUMMARY:END -->
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 
