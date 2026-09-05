@@ -5,7 +5,7 @@ import functools
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from loguru import logger
 from starlette.responses import JSONResponse
 
@@ -17,9 +17,11 @@ from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import (
 from tldw_Server_API.app.api.v1.API_Deps.media_route_deps import (
     media_create_dependencies,
 )
+from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
 from tldw_Server_API.app.api.v1.endpoints import media as media_mod
 from tldw_Server_API.app.api.v1.schemas.media_request_models import ProcessEmailsForm
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     apply_chunking_template_if_any,
     async_resolve_chunking_for_result,
@@ -36,6 +38,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.pipeline import (
     run_batch_processor,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Upload_Sink import FileValidator
+from tldw_Server_API.app.core.Prompt_Management.service_prompts import resolve_service_prompt
 
 router = APIRouter()
 
@@ -47,16 +50,36 @@ router = APIRouter()
     dependencies=[*media_create_dependencies(), Depends(guard_storage_quota)],
 )
 async def process_emails_endpoint(
+    request: Request,
+    current_user: User = Depends(get_request_user),
     db: Any = Depends(get_media_db_for_user),
     form_data: ProcessEmailsForm = Depends(get_process_emails_form),
     files: list[UploadFile] | None = File(None),
-):
+) -> JSONResponse:
     """
     Modularized wrapper for the legacy /process-emails endpoint.
 
     Uses TempDirManager, save_uploaded_files, and run_batch_processor for input
     handling and batch orchestration while preserving the legacy response shape
     and status-code semantics.
+
+    Args:
+        request: HTTP request used to acquire the authenticated owner's prompt database.
+        current_user: Authenticated owner whose saved email instructions apply when
+            analysis is enabled and no explicit system prompt was supplied.
+        db: Owner's media database, used only for optional chunking-template lookup.
+        form_data: Validated processing options, including provider, prompt and container flags.
+        files: Uploaded EML files or explicitly enabled ZIP, MBOX and PST/OST containers.
+
+    Returns:
+        JSON batch results without media persistence: HTTP 200 on success, 207
+        for item-level failures, or 400 when no processable results remain.
+
+    Raises:
+        HTTPException: HTTP 400 when no files are supplied, or a prompt database
+            dependency error before input processing.
+        ServicePromptCorruptOverride: Saved email instructions are invalid; input
+            processing does not start and the lookup worker releases its connection.
     """
 
     if not files:
@@ -67,6 +90,20 @@ async def process_emails_endpoint(
         )
 
     logger.info("Request received for /process-emails (no persistence).")
+
+    system_prompt = form_data.system_prompt
+    if form_data.perform_analysis and form_data.api_name and system_prompt is None:
+        prompts_db = await get_prompts_db_for_user(request, current_user)
+
+        def resolve_system_prompt() -> str:
+            """Capture email instructions and release this worker's connection."""
+            try:
+                return resolve_service_prompt(prompts_db, "media.email.summarization").parts["system"]
+            finally:
+                prompts_db.close_connection()
+
+        # Freeze instructions before input processing for all messages and passes.
+        system_prompt = await asyncio.to_thread(resolve_system_prompt)
 
     batch: dict[str, Any] = {
         "results": [],
@@ -194,7 +231,7 @@ async def process_emails_endpoint(
                             api_name=form_data.api_name,
                             api_key=None,
                             custom_prompt=form_data.custom_prompt,
-                            system_prompt=form_data.system_prompt,
+                            system_prompt=system_prompt,
                             summarize_recursively=form_data.summarize_recursively,
                             ingest_attachments=form_data.ingest_attachments,
                             max_depth=form_data.max_depth,
@@ -229,7 +266,7 @@ async def process_emails_endpoint(
                             api_name=form_data.api_name,
                             api_key=None,
                             custom_prompt=form_data.custom_prompt,
-                            system_prompt=form_data.system_prompt,
+                            system_prompt=system_prompt,
                             summarize_recursively=form_data.summarize_recursively,
                             ingest_attachments=form_data.ingest_attachments,
                             max_depth=form_data.max_depth,
@@ -266,7 +303,7 @@ async def process_emails_endpoint(
                             api_name=form_data.api_name,
                             api_key=None,
                             custom_prompt=form_data.custom_prompt,
-                            system_prompt=form_data.system_prompt,
+                            system_prompt=system_prompt,
                             summarize_recursively=form_data.summarize_recursively,
                             ingest_attachments=form_data.ingest_attachments,
                             max_depth=form_data.max_depth,
@@ -300,7 +337,7 @@ async def process_emails_endpoint(
                             api_name=form_data.api_name,
                             api_key=None,
                             custom_prompt=form_data.custom_prompt,
-                            system_prompt=form_data.system_prompt,
+                            system_prompt=system_prompt,
                             summarize_recursively=form_data.summarize_recursively,
                             ingest_attachments=form_data.ingest_attachments,
                             max_depth=form_data.max_depth,
@@ -319,7 +356,7 @@ async def process_emails_endpoint(
                             }
                         )
                         results.append(res)
-                except Exception as exc:  # pragma: no cover - defensive
+                except Exception:  # pragma: no cover - defensive
                     results.append(
                         {
                             "status": "Error",

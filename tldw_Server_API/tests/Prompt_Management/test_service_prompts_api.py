@@ -197,6 +197,13 @@ def test_service_prompt_catalog_returns_exact_metadata_without_prompt_bodies(
             "affected_workflows": [{"id": "media.ebook.summarization", "label": "Synchronous EPUB analysis"}],
         },
         {
+            "id": "media.email.summarization",
+            "label": "Email summarization",
+            "description": "Controls system instructions for synchronous email analysis. Without a saved override, server defaults apply.",
+            "parts": [{"key": "system", "label": "System instructions", "mode": "literal", "required_variables": []}],
+            "affected_workflows": [{"id": "media.email.summarization", "label": "Synchronous email analysis"}],
+        },
+        {
             "id": "media.text.translation",
             "label": "Text translation",
             "description": ("Controls the visible instructions used by synchronous text translation."),
@@ -254,7 +261,13 @@ def test_service_prompt_detail_returns_packaged_state_without_caching(api_contex
 
 
 @pytest.mark.parametrize(
-    "prompt_id", ["media.document.summarization", "media.pdf.summarization", "media.ebook.summarization"]
+    "prompt_id",
+    [
+        "media.document.summarization",
+        "media.pdf.summarization",
+        "media.ebook.summarization",
+        "media.email.summarization",
+    ],
 )
 def test_summary_prompt_can_be_saved_and_reset(api_context: SimpleNamespace, prompt_id: str) -> None:
     """Exercise independent media guidance through the generic save/reset API."""
@@ -269,7 +282,13 @@ def test_summary_prompt_can_be_saved_and_reset(api_context: SimpleNamespace, pro
 
 
 @pytest.mark.parametrize(
-    "prompt_id", ["media.document.summarization", "media.pdf.summarization", "media.ebook.summarization"]
+    "prompt_id",
+    [
+        "media.document.summarization",
+        "media.pdf.summarization",
+        "media.ebook.summarization",
+        "media.email.summarization",
+    ],
 )
 def test_summary_settings_uses_deployment_default_for_detail_and_reset(
     api_context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, prompt_id: str

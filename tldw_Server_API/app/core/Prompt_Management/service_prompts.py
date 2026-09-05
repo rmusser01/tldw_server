@@ -306,6 +306,26 @@ _DEFINITION_SEQUENCE = (
         ),
     ),
     ServicePromptDefinition(
+        id="media.email.summarization",
+        label="Email summarization",
+        description="Controls system instructions for synchronous email analysis. Without a saved override, server defaults apply.",
+        parts=(
+            ServicePromptPart(
+                key="system",
+                label="System instructions",
+                mode="literal",
+                required_variables=(),
+            ),
+        ),
+        default_parts=MappingProxyType({"system": _DOCUMENT_SUMMARY_SYSTEM_DEFAULT}),
+        affected_workflows=(
+            ServicePromptWorkflow(
+                id="media.email.summarization",
+                label="Synchronous email analysis",
+            ),
+        ),
+    ),
+    ServicePromptDefinition(
         id="media.text.translation",
         label="Text translation",
         description="Controls the visible instructions used by synchronous text translation.",
@@ -530,7 +550,12 @@ def render_service_prompt_part(
 def resolve_service_prompt_default(definition: ServicePromptDefinition) -> ResolvedServicePrompt:
     """Resolve the server default without reading owner storage, including after reset."""
     parts = definition.default_parts
-    if definition.id in {"media.document.summarization", "media.pdf.summarization", "media.ebook.summarization"}:
+    if definition.id in {
+        "media.document.summarization",
+        "media.pdf.summarization",
+        "media.ebook.summarization",
+        "media.email.summarization",
+    }:
         # These workflows honor deployment prompt files. Keep this decision shared
         # by runtime resolution and Settings detail/reset responses.
         from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import _resolve_default_system_prompt

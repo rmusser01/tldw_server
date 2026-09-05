@@ -162,6 +162,12 @@ const KNOWN_DEFINITIONS = {
     description:
       "Controls system instructions for synchronous EPUB analysis. Without a saved override, server defaults apply."
   },
+  "media.email.summarization": {
+    key: "mediaEmailSummarization",
+    label: "Email summarization",
+    description:
+      "Controls system instructions for synchronous email analysis. Without a saved override, server defaults apply."
+  },
   "notes.title.generate": {
     key: "notesTitleGenerate",
     label: "Notes title",
@@ -209,6 +215,10 @@ const KNOWN_WORKFLOWS: Record<string, { key: string; label: string }> = {
   "media.ebook.summarization": {
     key: "ebookSummarization",
     label: "Synchronous EPUB analysis"
+  },
+  "media.email.summarization": {
+    key: "emailSummarization",
+    label: "Synchronous email analysis"
   },
   "notes.title.generate": {
     key: "automaticNotesTitles",

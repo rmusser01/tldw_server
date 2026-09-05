@@ -59,6 +59,10 @@
         "label": "EPUB summarization",
         "description": "Controls system instructions for synchronous EPUB analysis. Without a saved override, server defaults apply."
       },
+      "mediaEmailSummarization": {
+        "label": "Email summarization",
+        "description": "Controls system instructions for synchronous email analysis. Without a saved override, server defaults apply."
+      },
       "notesTitleGenerate": {
         "label": "Notes title",
         "description": "Controls the wording used by LLM-backed automatic Notes titles."
@@ -77,6 +81,7 @@
       "documentSummarization": "Synchronous document analysis",
       "pdfSummarization": "Synchronous PDF analysis",
       "ebookSummarization": "Synchronous EPUB analysis",
+      "emailSummarization": "Synchronous email analysis",
       "automaticNotesTitles": "Automatic Notes titles"
     },
     "titleGeneration": {

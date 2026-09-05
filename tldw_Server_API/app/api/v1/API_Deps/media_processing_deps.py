@@ -529,6 +529,7 @@ async def get_process_ebooks_form(
 
 
 async def get_process_emails_form(
+    request: Request,
     urls: list[str] | None = Form(None),
     title: str | None = Form(None),
     author: str | None = Form(None),
@@ -560,13 +561,40 @@ async def get_process_emails_form(
     accept_pst: bool = Form(False),
     ingest_attachments: bool = Form(False),
     max_depth: int = Form(2),
+    api_provider: str | None = Form(None),
+    api_name: str | None = Form(None),
+    summarize_recursively: bool = Form(False),
 ) -> ProcessEmailsForm:
     """
     Dependency that parses multipart/form-data into a ProcessEmailsForm.
 
     Used by /media/process-emails (no DB persistence).
+
+    Args:
+        request: HTTP request used to distinguish an omitted system prompt from
+            an explicitly empty multipart field before model validation.
+        system_prompt: Explicit system instructions; empty text is preserved and
+            omission permits the endpoint to resolve saved instructions/defaults.
+        api_provider: Canonical analysis provider, taking precedence over api_name
+            when nonempty. Credentials remain the shared analyzer's responsibility.
+        api_name: Legacy provider alias used when api_provider is absent or empty.
+        summarize_recursively: Enable the analyzer's recursive summary passes;
+            this does not enable analysis itself or analyze nested attachments.
+
+    Remaining multipart fields supply source metadata, analysis/chunking options,
+    container acceptance flags and attachment-depth limits to ProcessEmailsForm.
+
+    Returns:
+        ProcessEmailsForm with validated options, normalized provider fields and
+        preserved explicit-system-prompt presence.
+
+    Raises:
+        HTTPException: HTTP 422 when the supplied options fail model validation.
     """
     try:
+        # Preserve explicit empty text before validation, as in EPUB parsing.
+        if system_prompt is None and (await request.form()).get("system_prompt") == "":
+            system_prompt = ""
         urls_norm = _coerce_urls(urls)
         return ProcessEmailsForm(
             urls=urls_norm,
@@ -602,6 +630,9 @@ async def get_process_emails_form(
             accept_pst=accept_pst,
             ingest_attachments=ingest_attachments,
             max_depth=max_depth,
+            api_provider=api_provider,
+            api_name=api_provider or api_name,
+            summarize_recursively=summarize_recursively,
         )
     except ValidationError as exc:
         _raise_422(exc)
