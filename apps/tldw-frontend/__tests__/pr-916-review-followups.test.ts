@@ -21,7 +21,7 @@ describe("PR 916 review follow-ups", () => {
     expect(dockerfile).toContain("RUN bun install --frozen-lockfile --cwd /app/apps")
     expect(dockerfile).toContain("WORKDIR /app/apps/tldw-frontend")
     expect(dockerfile).toContain("RUN node /app/apps/tldw-frontend/scripts/validate-networking-config.mjs")
-    expect(dockerfile).toContain("npm run compile:prod")
+    expect(dockerfile).toContain("npm run build:prod")
     expect(dockerfile).toContain("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=quickstart")
     expect(dockerfile).toContain("TLDW_INTERNAL_API_ORIGIN=http://app:8000")
     expect(compose).toContain("NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-}")
