@@ -235,3 +235,8 @@ evidence; the recorded real-browser run above predates these refinements.
 Final review check: **178 Persona/Governor tests passed**, published-mirror suite
 **33 passed**, and canonical OpenAPI fingerprint verification passed after
 regenerating frontend declarations (2073 paths, 3142 schemas).
+
+Rebased again onto dev `a61abea39d` after Personal Context activation merged.
+Both independent testing lessons were retained and the combined API fingerprint
+was regenerated. Production patches remain range-diff equivalent; 53 session
+manager/detail tests and the canonical fingerprint check pass on this base.

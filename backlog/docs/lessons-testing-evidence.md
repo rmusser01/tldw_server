@@ -177,3 +177,11 @@ a newer attempt's loading state. Resolve/reject regressions now keep the newer
 request pending and prove another Connect click cannot issue a duplicate request.
 Test effect replay and overlapping completions, including failure/finally paths,
 when mounted/attempt refs guard asynchronous connection state.
+
+## Check final task-file newlines after Backlog serialization
+
+PR2902's pre-commit job rejected two task records after Backlog MCP updates
+removed their terminal newline. `git diff --check` had passed, because that check
+does not require a final newline. Normalize final newlines after the last task
+edit, then include those bytes in pre-commit verification; repeated MCP writes
+can otherwise reintroduce the same formatting-only CI failure.
