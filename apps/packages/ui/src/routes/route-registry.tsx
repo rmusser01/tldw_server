@@ -114,6 +114,16 @@ const OptionAdminLlamacpp = lazy(() => import("./option-admin-llamacpp"))
 const OptionAdminMlx = lazy(() => import("./option-admin-mlx"))
 const OptionAdminRuntimeConfig = lazy(() => import("./option-admin-runtime-config"))
 const OptionAdminMonitoring = lazy(() => import("./option-admin-monitoring"))
+const OptionAdminApiKeys = lazy(() => import("./option-admin-api-keys"))
+const OptionAdminBilling = lazy(() => import("./option-admin-billing"))
+const OptionAdminDataOps = lazy(() => import("./option-admin-data-ops"))
+const OptionAdminMaintenance = lazy(() => import("./option-admin-maintenance"))
+const OptionAdminOrgs = lazy(() => import("./option-admin-orgs"))
+const OptionAdminRateLimiting = lazy(() => import("./option-admin-rate-limiting"))
+const OptionAdminRbac = lazy(() => import("./option-admin-rbac"))
+const OptionAdminUsage = lazy(() => import("./option-admin-usage"))
+const OptionAdminWatchlistsItems = lazy(() => import("./option-admin-watchlists-items"))
+const OptionAdminOverview = lazy(() => import("./option-admin"))
 const OptionChatSettings = createSettingsRoute(
   () => import("~/components/Option/Settings/ChatSettings"),
   "ChatSettings"
@@ -591,6 +601,66 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
     kind: "options",
     path: "/admin/monitoring",
     element: <OptionAdminMonitoring />,
+    targets: ALL_TARGETS,
+  },
+  {
+    kind: "options",
+    path: "/admin",
+    element: <OptionAdminOverview />,
+    targets: ALL_TARGETS,
+  },
+  {
+    kind: "options",
+    path: "/admin/api-keys",
+    element: <OptionAdminApiKeys />,
+    targets: ALL_TARGETS,
+  },
+  {
+    kind: "options",
+    path: "/admin/billing",
+    element: <OptionAdminBilling />,
+    targets: ALL_TARGETS,
+  },
+  {
+    kind: "options",
+    path: "/admin/data-ops",
+    element: <OptionAdminDataOps />,
+    targets: ALL_TARGETS,
+  },
+  {
+    kind: "options",
+    path: "/admin/maintenance",
+    element: <OptionAdminMaintenance />,
+    targets: ALL_TARGETS,
+  },
+  {
+    kind: "options",
+    path: "/admin/orgs",
+    element: <OptionAdminOrgs />,
+    targets: ALL_TARGETS,
+  },
+  {
+    kind: "options",
+    path: "/admin/rate-limiting",
+    element: <OptionAdminRateLimiting />,
+    targets: ALL_TARGETS,
+  },
+  {
+    kind: "options",
+    path: "/admin/rbac",
+    element: <OptionAdminRbac />,
+    targets: ALL_TARGETS,
+  },
+  {
+    kind: "options",
+    path: "/admin/usage",
+    element: <OptionAdminUsage />,
+    targets: ALL_TARGETS,
+  },
+  {
+    kind: "options",
+    path: "/admin/watchlists-items",
+    element: <OptionAdminWatchlistsItems />,
     targets: ALL_TARGETS,
   },
   {

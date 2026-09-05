@@ -1,18 +1,18 @@
 import OptionLayout from "~/components/Layouts/Layout"
-import MaintenancePage from "@/components/Option/Admin/MaintenancePage"
 import { RouteErrorBoundary } from "@/components/Common/RouteErrorBoundary"
+import { AdminOperationsOverviewPage } from "@/components/Option/Admin/AdminOperationsOverviewPage"
 import { AdminRouteShell } from "@/components/Option/Admin/AdminRouteShell"
 
-const OptionAdminMaintenance = () => {
+const OptionAdmin = () => {
   return (
-    <RouteErrorBoundary routeId="admin-maintenance" routeLabel="Maintenance">
+    <RouteErrorBoundary routeId="admin" routeLabel="Admin Operations">
       <OptionLayout>
-        <AdminRouteShell path="/admin/maintenance">
-          <MaintenancePage />
+        <AdminRouteShell path="/admin">
+          <AdminOperationsOverviewPage />
         </AdminRouteShell>
       </OptionLayout>
     </RouteErrorBoundary>
   )
 }
 
-export default OptionAdminMaintenance
+export default OptionAdmin

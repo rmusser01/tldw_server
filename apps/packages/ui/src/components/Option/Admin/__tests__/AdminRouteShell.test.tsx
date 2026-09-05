@@ -2,6 +2,7 @@
 import React from "react"
 import { describe, expect, it } from "vitest"
 import { render, screen, within } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 
 import { AdminRouteShell } from "../AdminRouteShell"
 import { ADMIN_MODULES, adminModuleForRoute, isAdminRoute } from "../admin-modules"
@@ -9,9 +10,11 @@ import { ADMIN_MODULES, adminModuleForRoute, isAdminRoute } from "../admin-modul
 describe("AdminRouteShell", () => {
   it("renders a nav landmark linking every admin module", () => {
     render(
-      <AdminRouteShell path="/admin/server">
-        <div>content</div>
-      </AdminRouteShell>
+      <MemoryRouter>
+        <AdminRouteShell path="/admin/server">
+          <div>content</div>
+        </AdminRouteShell>
+      </MemoryRouter>
     )
 
     const nav = screen.getByRole("navigation", { name: "Admin modules" })
@@ -23,9 +26,11 @@ describe("AdminRouteShell", () => {
 
   it("marks the current module and titles the document after it", () => {
     render(
-      <AdminRouteShell path="/admin/server">
-        <div>content</div>
-      </AdminRouteShell>
+      <MemoryRouter>
+        <AdminRouteShell path="/admin/server">
+          <div>content</div>
+        </AdminRouteShell>
+      </MemoryRouter>
     )
 
     const nav = screen.getByRole("navigation", { name: "Admin modules" })
@@ -37,9 +42,11 @@ describe("AdminRouteShell", () => {
 
   it("provides a skip link to the admin content region", () => {
     render(
-      <AdminRouteShell path="/admin/monitoring">
-        <div>content</div>
-      </AdminRouteShell>
+      <MemoryRouter>
+        <AdminRouteShell path="/admin/monitoring">
+          <div>content</div>
+        </AdminRouteShell>
+      </MemoryRouter>
     )
 
     const skip = screen.getByRole("link", { name: "Skip to admin content" })

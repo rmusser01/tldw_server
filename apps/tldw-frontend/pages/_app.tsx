@@ -9,7 +9,6 @@ import { useRouter } from "next/router"
 import React from "react"
 import { BackendRecoveryUiProvider } from "@/components/Common/BackendRecoveryUiContext"
 import { PageAssistLoader } from "@/components/Common/PageAssistLoader"
-import { AdminRouteShell } from "@/components/Option/Admin/AdminRouteShell"
 import { isAdminRoute } from "@/components/Option/Admin/admin-modules"
 import { FirstRunGate } from "@/components/PersonaGarden/FirstRunGate"
 import { AppProviders } from "@web/components/AppProviders"
@@ -423,13 +422,7 @@ export default function App({ Component, pageProps }: AppProps) {
 
   const layoutContent = (
     <OptionLayout {...layoutProps}>
-      {isAdminRoutePath ? (
-        <AdminRouteShell path={routePath}>
-          <Component {...pageProps} />
-        </AdminRouteShell>
-      ) : (
-        <Component {...pageProps} />
-      )}
+      <Component {...pageProps} />
     </OptionLayout>
   )
 
