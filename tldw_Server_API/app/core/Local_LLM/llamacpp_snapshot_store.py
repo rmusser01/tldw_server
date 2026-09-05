@@ -68,12 +68,9 @@ class SnapshotStore:
         self._require_open()
         paths = self._profile_paths(profile_id)
         results: list[SnapshotMetadata] = []
-        try:
-            manifests = list(paths["manifests"].iterdir())
-        except OSError as exc:
-            raise SnapshotStorageUnavailableError("snapshot catalog is unavailable") from exc
-        for manifest in manifests:
-            if manifest.suffix != ".json" or manifest.is_symlink():
+        for name in self._list_names(paths["manifests"]):
+            manifest = paths["manifests"] / name
+            if manifest.suffix != ".json":
                 continue
             try:
                 item = self._read_model(manifest, SnapshotMetadata)
@@ -98,7 +95,7 @@ class SnapshotStore:
         source_before = os.fstat(source_fd)
         binary = paths["snapshots"] / f"{metadata.snapshot_id}.bin"
         manifest = paths["manifests"] / f"{metadata.snapshot_id}.json"
-        if binary.exists() or manifest.exists():
+        if self._exists(binary) or self._exists(manifest):
             os.close(source_fd)
             raise SnapshotStoreError("snapshot ID is already committed")
         temp = paths["snapshots"] / f".{uuid.uuid4().hex}.tmp"
@@ -134,7 +131,7 @@ class SnapshotStore:
             os.close(temp_fd)
             temp_fd = None
             self._checkpoint("binary_rename")
-            os.replace(temp, binary)
+            self._replace(temp, binary)
             self._checkpoint("directory_fsync")
             self._fsync_dir(paths["snapshots"])
             self._publish_json(manifest, metadata.model_dump(mode="json"), checkpoint_prefix="manifest")
@@ -144,8 +141,8 @@ class SnapshotStore:
             if temp_fd is not None:
                 os.close(temp_fd)
             try:
-                temp.unlink()
-            except FileNotFoundError:
+                self._unlink(temp)
+            except SnapshotNotFoundError:
                 pass
 
     def stage_restore(self, profile_id: str, snapshot_id: str, working: Path) -> Path:
@@ -173,8 +170,8 @@ class SnapshotStore:
             return destination
         except BaseException:
             try:
-                destination.unlink()
-            except FileNotFoundError:
+                self._unlink(destination)
+            except SnapshotNotFoundError:
                 pass
             raise
         finally:
@@ -204,9 +201,9 @@ class SnapshotStore:
         self._read_snapshot(paths, profile_id, snapshot_id)
         binary = paths["snapshots"] / f"{snapshot_id}.bin"
         manifest = paths["manifests"] / f"{snapshot_id}.json"
-        binary.unlink()
+        self._unlink(binary)
         self._fsync_dir(paths["snapshots"])
-        manifest.unlink()
+        self._unlink(manifest)
         self._fsync_dir(paths["manifests"])
 
     def write_receipt(self, receipt: OperationReceipt) -> None:
@@ -261,7 +258,7 @@ class SnapshotStore:
         replace: bool = False,
         checkpoint_prefix: str | None = None,
     ) -> None:
-        if not replace and target.exists():
+        if not replace and self._exists(target):
             raise SnapshotStoreError("published file already exists")
         payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
         if len(payload) > _MAX_MANIFEST_BYTES:
@@ -280,7 +277,7 @@ class SnapshotStore:
             fd = None
             if checkpoint_prefix:
                 self._checkpoint(f"{checkpoint_prefix}_rename")
-            os.replace(temp, target)
+            self._replace(temp, target)
             if checkpoint_prefix:
                 self._checkpoint(f"{checkpoint_prefix}_directory_fsync")
             self._fsync_dir(target.parent)
@@ -288,8 +285,8 @@ class SnapshotStore:
             if fd is not None:
                 os.close(fd)
             try:
-                temp.unlink()
-            except FileNotFoundError:
+                self._unlink(temp)
+            except SnapshotNotFoundError:
                 pass
 
     def _read_model(self, path: Path, model: type[SnapshotMetadata] | type[OperationReceipt]):
@@ -315,7 +312,11 @@ class SnapshotStore:
     def _acquire_owner_lock(self) -> None:
         lock_path = self.root / ".owner.lock"
         flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0) | self._no_follow_flag()
-        fd = os.open(lock_path, flags, 0o600)
+        parent_fd = self._open_directory_fd(lock_path.parent)
+        try:
+            fd = os.open(lock_path.name, flags, 0o600, dir_fd=parent_fd)
+        finally:
+            os.close(parent_fd)
         os.fchmod(fd, 0o600)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -333,37 +334,35 @@ class SnapshotStore:
 
     @staticmethod
     def _ensure_private_dir(path: Path) -> None:
-        SnapshotStore._reject_symlink_components(path)
+        fd = SnapshotStore._open_directory_fd(path, create=True)
         try:
-            path.mkdir(mode=0o700)
-        except FileExistsError:
-            pass
-        try:
-            info = path.lstat()
-        except OSError as exc:
-            raise SnapshotStoreError("private storage directory unavailable") from exc
-        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
-            raise SnapshotStoreError("unsupported private storage confinement")
-        if stat.S_IMODE(info.st_mode) != 0o700:
-            try:
-                path.chmod(0o700)
-            except OSError as exc:
-                raise SnapshotStoreError("unsupported private storage confinement") from exc
-            if stat.S_IMODE(path.lstat().st_mode) != 0o700:
+            info = os.fstat(fd)
+            if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
                 raise SnapshotStoreError("unsupported private storage confinement")
+            if stat.S_IMODE(info.st_mode) != 0o700:
+                try:
+                    os.fchmod(fd, 0o700)
+                except OSError as exc:
+                    raise SnapshotStoreError("unsupported private storage confinement") from exc
+                if stat.S_IMODE(os.fstat(fd).st_mode) != 0o700:
+                    raise SnapshotStoreError("unsupported private storage confinement")
+        finally:
+            os.close(fd)
 
     @staticmethod
     def _open_regular_readonly(path: Path) -> int:
-        SnapshotStore._reject_symlink_components(path)
         flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | SnapshotStore._no_follow_flag()
+        parent_fd = SnapshotStore._open_directory_fd(path.parent)
         try:
-            fd = os.open(path, flags)
+            fd = os.open(path.name, flags, dir_fd=parent_fd)
         except FileNotFoundError as exc:
             raise SnapshotNotFoundError("file not found") from exc
         except OSError as exc:
             if exc.errno == errno.ELOOP:
                 raise SnapshotStoreError("file is unsafe") from exc
             raise SnapshotStorageUnavailableError("file is unavailable") from exc
+        finally:
+            os.close(parent_fd)
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             os.close(fd)
             raise SnapshotStoreError("file must be regular")
@@ -381,9 +380,12 @@ class SnapshotStore:
 
     @staticmethod
     def _open_exclusive_write(path: Path) -> int:
-        SnapshotStore._reject_symlink_components(path)
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | SnapshotStore._no_follow_flag()
-        return os.open(path, flags, 0o600)
+        parent_fd = SnapshotStore._open_directory_fd(path.parent)
+        try:
+            return os.open(path.name, flags, 0o600, dir_fd=parent_fd)
+        finally:
+            os.close(parent_fd)
 
     @staticmethod
     def _write_chunk(fd: int, payload: bytes) -> None:
@@ -396,11 +398,7 @@ class SnapshotStore:
 
     @staticmethod
     def _fsync_dir(path: Path) -> None:
-        SnapshotStore._reject_symlink_components(path)
-        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | SnapshotStore._no_follow_flag()
-        if hasattr(os, "O_DIRECTORY"):
-            flags |= os.O_DIRECTORY
-        fd = os.open(path, flags)
+        fd = SnapshotStore._open_directory_fd(path)
         try:
             os.fsync(fd)
         finally:
@@ -421,18 +419,83 @@ class SnapshotStore:
         return flag
 
     @staticmethod
-    def _reject_symlink_components(path: Path) -> None:
-        """Reject every existing symlink component without resolving the path."""
-        SnapshotStore._no_follow_flag()
+    def _open_directory_fd(path: Path, *, create: bool = False) -> int:
+        """Walk a directory using held descriptors so ancestors cannot be swapped."""
+        no_follow = SnapshotStore._no_follow_flag()
         absolute = path if path.is_absolute() else Path.cwd() / path
-        current = Path(absolute.anchor)
-        for part in absolute.parts[1:]:
-            current = current / part
+        if ".." in absolute.parts:
+            raise SnapshotStoreError("parent traversal is unsupported")
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | no_follow
+        if hasattr(os, "O_DIRECTORY"):
+            flags |= os.O_DIRECTORY
+        fd = os.open(absolute.anchor, flags)
+        parts = absolute.parts[1:]
+        try:
+            for index, part in enumerate(parts):
+                is_final = index == len(parts) - 1
+                try:
+                    next_fd = os.open(part, flags, dir_fd=fd)
+                except FileNotFoundError:
+                    if not create or not is_final:
+                        raise SnapshotNotFoundError("directory not found") from None
+                    os.mkdir(part, 0o700, dir_fd=fd)
+                    next_fd = os.open(part, flags, dir_fd=fd)
+                except OSError as exc:
+                    if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+                        raise SnapshotStoreError("symlink directory components are unsupported") from exc
+                    raise SnapshotStorageUnavailableError("directory traversal failed") from exc
+                os.close(fd)
+                fd = next_fd
+            return fd
+        except BaseException:
+            os.close(fd)
+            raise
+
+    @staticmethod
+    def _replace(source: Path, target: Path) -> None:
+        source_fd = SnapshotStore._open_directory_fd(source.parent)
+        target_fd = SnapshotStore._open_directory_fd(target.parent)
+        try:
+            os.replace(source.name, target.name, src_dir_fd=source_fd, dst_dir_fd=target_fd)
+        finally:
+            os.close(source_fd)
+            os.close(target_fd)
+
+    @staticmethod
+    def _unlink(path: Path) -> None:
+        parent_fd = SnapshotStore._open_directory_fd(path.parent)
+        try:
             try:
-                info = current.lstat()
+                os.unlink(path.name, dir_fd=parent_fd)
+            except FileNotFoundError as exc:
+                raise SnapshotNotFoundError("file not found") from exc
+        finally:
+            os.close(parent_fd)
+
+    @staticmethod
+    def _exists(path: Path) -> bool:
+        parent_fd = SnapshotStore._open_directory_fd(path.parent)
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | SnapshotStore._no_follow_flag()
+        try:
+            try:
+                fd = os.open(path.name, flags, dir_fd=parent_fd)
             except FileNotFoundError:
-                continue
+                return False
             except OSError as exc:
-                raise SnapshotStorageUnavailableError("path confinement check failed") from exc
-            if stat.S_ISLNK(info.st_mode):
-                raise SnapshotStoreError("symlink path components are unsupported")
+                if exc.errno == errno.ELOOP:
+                    raise SnapshotStoreError("unsafe file target") from exc
+                raise SnapshotStorageUnavailableError("file existence check failed") from exc
+            os.close(fd)
+            return True
+        finally:
+            os.close(parent_fd)
+
+    @staticmethod
+    def _list_names(path: Path) -> list[str]:
+        fd = SnapshotStore._open_directory_fd(path)
+        try:
+            return os.listdir(fd)
+        except OSError as exc:
+            raise SnapshotStorageUnavailableError("snapshot catalog is unavailable") from exc
+        finally:
+            os.close(fd)

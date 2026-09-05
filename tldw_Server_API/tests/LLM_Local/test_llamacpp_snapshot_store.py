@@ -127,6 +127,32 @@ def test_symlink_ancestors_fail_closed_without_touching_outside(tmp_path: Path, 
     assert marker.read_text(encoding="utf-8") == "unchanged"
 
 
+def test_ancestor_swap_before_directory_creation_never_writes_outside(tmp_path: Path, monkeypatch):
+    ancestor = tmp_path / "ancestor"
+    ancestor.mkdir(mode=0o700)
+    displaced = tmp_path / "displaced"
+    outside = tmp_path / "outside"
+    outside.mkdir(mode=0o700)
+    root = ancestor / "store"
+    original_mkdir = os.mkdir
+    swapped = False
+
+    def swap_then_mkdir(path, mode=0o777, *, dir_fd=None):
+        nonlocal swapped
+        if not swapped and Path(path).name == "store":
+            ancestor.rename(displaced)
+            ancestor.symlink_to(outside, target_is_directory=True)
+            swapped = True
+        return original_mkdir(path, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "mkdir", swap_then_mkdir)
+    with pytest.raises(SnapshotStoreError):
+        SnapshotStore(root)
+
+    assert swapped is True
+    assert not (outside / "store").exists()
+
+
 def test_oversized_and_incomplete_manifests_are_not_catalog_entries(tmp_path: Path):
     with SnapshotStore(tmp_path / "private") as store:
         profile = tmp_path / "private/profile_1"
@@ -198,7 +224,7 @@ def test_interrupted_publication_never_lists_incomplete_snapshot(tmp_path: Path,
         second = tmp_path / "second.bin"
         second.write_bytes(b"second")
         if failure_boundary == "binary_rename":
-            monkeypatch.setattr(os, "replace", lambda *_: (_ for _ in ()).throw(OSError("interrupt")))
+            monkeypatch.setattr(os, "replace", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("interrupt")))
         else:
             monkeypatch.setattr(
                 store,

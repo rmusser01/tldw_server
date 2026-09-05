@@ -47,3 +47,11 @@ The tests use real temporary files/directories and cover known-hash publication,
 - Malformed/oversized manifest fixtures now have private `0600` permissions, proving parsing/size recovery rather than permission rejection. Fault injection covers copy, file fsync, binary rename, binary-directory fsync, manifest write, manifest fsync, manifest rename, and manifest-directory fsync while preserving the prior committed entry.
 - Final round-one test command used cached Hypothesis 6.138.2 via the supplied `PYTHONPATH`: `49 passed, 7 warnings in 1.54s`. The seven warnings are existing test-bootstrap/dependency warnings: Starlette/httpx deprecation, the documented unknown pytest `plugins` option, two legacy Pydantic class-config warnings, the conftest event-loop deprecation, Python `crypt` deprecation through passlib, and an existing Pydantic field-shadow warning.
 - Round-one static/security evidence: Ruff format check and Ruff check passed for the four amended files; compileall passed for both amended production modules; Bandit 1.9.4 reported no findings; `git diff --check` passed.
+
+## Round-two independent-review fix
+
+- RED evidence: the deterministic ancestor-swap test failed against the round-one implementation because pathname `mkdir` followed an ancestor replaced by a symlink after validation.
+- Directory traversal now opens every component relative to a held parent descriptor with mandatory `O_DIRECTORY|O_NOFOLLOW`. Directory creation uses `mkdir(..., dir_fd=...)`; confinement correction uses `fchmod`; file open/create/unlink, atomic replace, directory listing, and directory fsync all operate relative to verified directory descriptors.
+- The regression swaps the snapshot root ancestor immediately before directory creation. The operation fails closed on the subsequent pathname walk, and the outside target receives neither the snapshot directory nor ownership lock.
+- Final round-two targeted run, with cached Hypothesis 6.138.2: `50 passed, 7 warnings in 1.59s`. The warnings are the same seven pre-existing bootstrap/dependency warnings itemized above.
+- Round-two static/security evidence: Ruff format check and Ruff check passed; compileall passed; Bandit 1.9.4 reported no findings; `git diff --check` passed.
