@@ -53,6 +53,38 @@ const fixture = () => ({
 })
 
 describe("LlamacppSnapshotsPanel", () => {
+  it.each(["Delete", "Stop recovery"])(
+    "focuses the %s confirmation so immediate Escape closes it",
+    async (name) => {
+      const user = userEvent.setup()
+      const props = fixture()
+      render(
+        <LlamacppSnapshotsPanel
+          {...props}
+          operation={
+            name === "Stop recovery"
+              ? {
+                  profile_id: "test",
+                  operation_id: "op",
+                  launch_generation: "launch-one",
+                  kind: "restore",
+                  state: "outcome_unknown",
+                  recovery_action: "stop_runtime"
+                }
+              : null
+          }
+        />
+      )
+      const trigger = screen.getByRole("button", { name })
+      await user.click(trigger)
+      expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus()
+      await user.keyboard("{Escape}")
+      expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull()
+      expect(trigger).toHaveFocus()
+      expect(props.onDelete).not.toHaveBeenCalled()
+      expect(props.onStop).not.toHaveBeenCalled()
+    }
+  )
   it("allows deleting saved copies after an unknown launch is confirmed stopped", () => {
     render(
       <LlamacppSnapshotsPanel

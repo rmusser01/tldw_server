@@ -68,3 +68,37 @@ No llama-server or GGUF paths were supplied; live inference was not run. No exec
 The metric fields were verified from public pinned source using approved curl: tools/server/server-common.cpp:67–71 maps `timings.cache_n` to `n_prompt_cached` and `timings.prompt_n` to `n_prompt_processed`. tools/server/server-context.cpp:2118 assigns top-level `tokens_cached` from final slot prompt size. The harness requires direct timings counters and fails closed if absent. Source-derived fixtures are not live build support.
 
 Review attention: the live harness is unexercised with real assets and deliberately characterizes a candidate only; initial production capability stays unsupported. Native `/completion` explicitly routes to slot 0, while normal Chatbook requests may route elsewhere. Keep TASK-13163 open until the measured runtime proof and real client semantics checks are recorded.
+
+## Round-one independent-review fixes
+
+Reviewed against base `3d751231c3`. Corrected all three reported issues without changing the approved design or live-support boundary:
+
+- Save/restore failures distinguish exact documented pre-admission status/detail pairs from transport, malformed-success, storage and unrecognized HTTP failures. The classifier uses the actual client's `error.status` and `error.details.detail` shape, not message parsing or a blanket HTTP classification. A definitive rejection with no new receipt permits Refresh and a new explicit action; ambiguous outcomes still require recovery and never resubmit automatically.
+- Latest receipts remain profile-scoped historical display across launch changes, including when no runner generation exists. Only matching-current-generation active/unknown receipts control current mutations and polling. Historical receipts explicitly disclaim current slot state.
+- Delete and Stop confirmations focus Cancel on opening; Restore still focuses its destination. Immediate Escape closes each confirmation, restores initiating-control focus and causes no mutation.
+
+RED evidence: the initial regressions failed **8 tests**, with 23 passing (`/private/tmp/snapshot-round1-red.log`). An additional focused `-t unrecognized-rejection` regression failed **1 test** against an overly broad rejection classifier before tightening the exact status/detail allowlist (`/private/tmp/snapshot-round1-rejection-red.log`). Final GREEN: **36 passed**, 2 files, 5.99 seconds; targeted TypeScript exits 0 with no diagnostics.
+
+Exact final commands from `apps/tldw-frontend`:
+
+```sh
+npm run test:run -- ../packages/ui/src/components/Option/Admin/__tests__/LlamacppSnapshotsAdmin.test.tsx ../packages/ui/src/components/Option/Admin/__tests__/LlamacppSnapshotsPanel.test.tsx > /private/tmp/snapshot-round1-green.log 2>&1
+NODE_OPTIONS=--max-old-space-size=8192 node node_modules/typescript/bin/tsc --noEmit --pretty false -p /private/tmp/snapshot-targeted-tsconfig.json > /private/tmp/snapshot-round1-tsc.log 2>&1
+node node_modules/prettier/bin/prettier.cjs --check e2e/workflows/llamacpp-runtime-admin.spec.ts
+TLDW_WEB_URL=http://localhost:18383 TLDW_WEB_CMD='npm run dev:webpack -- -p 18383 --hostname 127.0.0.1' node node_modules/@playwright/test/cli.js test e2e/workflows/llamacpp-runtime-admin.spec.ts --project=chromium --grep 'manual snapshot' --workers=1 --reporter=line --output=/private/tmp/snapshot-stage3-round1-browser > /private/tmp/snapshot-round1-playwright.log 2>&1
+```
+
+The browser run passed **2 tests in 34.1 seconds**, exercising the actual Next.js Admin page with mocked APIs in light/dark 390px viewports, now including prior-launch receipt recovery and immediate Delete Escape/focus return. No real runtime/profile was mutated. Both screenshots were opened and inspected:
+
+- /private/tmp/snapshot-stage3-round1-browser/workflows-llamacpp-runtime-8cb83-d-API-light-narrow-viewport-chromium/snapshots-light-390.png
+- /private/tmp/snapshot-stage3-round1-browser/workflows-llamacpp-runtime-d3156-ed-API-dark-narrow-viewport-chromium/snapshots-dark-390.png
+
+Exact final root static commands:
+
+```sh
+node apps/tldw-frontend/node_modules/eslint/bin/eslint.js -c apps/tldw-frontend/eslint.config.mjs apps/packages/ui/src/components/Option/Admin/LlamacppAdminPage.tsx apps/packages/ui/src/components/Option/Admin/LlamacppSnapshotsPanel.tsx apps/packages/ui/src/components/Option/Admin/__tests__/LlamacppSnapshotsAdmin.test.tsx apps/packages/ui/src/components/Option/Admin/__tests__/LlamacppSnapshotsPanel.test.tsx apps/tldw-frontend/e2e/workflows/llamacpp-runtime-admin.spec.ts --max-warnings=0 > /private/tmp/snapshot-round1-eslint.log 2>&1
+node apps/tldw-frontend/node_modules/prettier/bin/prettier.cjs --check --no-semi --trailing-comma none --single-quote false apps/packages/ui/src/components/Option/Admin/LlamacppAdminPage.tsx apps/packages/ui/src/components/Option/Admin/LlamacppSnapshotsPanel.tsx apps/packages/ui/src/components/Option/Admin/__tests__/LlamacppSnapshotsAdmin.test.tsx apps/packages/ui/src/components/Option/Admin/__tests__/LlamacppSnapshotsPanel.test.tsx
+git diff --check
+```
+
+All final static commands exited 0; Prettier reported all matched files use its code style. An initial combined format check incorrectly applied shared-package conventions to the frontend workflow and warned on that file; separate checks using each package's existing conventions pass without changing its style. ESLint retains only the existing root missing-pages configuration notice, not changed-code diagnostics. A first targeted TypeScript check caught an invalid test-only RTL `exact` option; removed it and reran successfully. No Python/security-boundary files changed in this round, so the recorded Ruff/Bandit harness checks were not rerun. No full sweep was run. Live blockers, empty production allowlist and TASK-13163 In Progress status are unchanged.

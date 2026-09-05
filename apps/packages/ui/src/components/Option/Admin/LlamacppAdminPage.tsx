@@ -43,6 +43,45 @@ import {
   snapshotOperationActive
 } from "./LlamacppSnapshotsPanel"
 
+const isSnapshotAdmissionRejection = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") return false
+  const { status, details } = error as {
+    status?: number
+    details?: { detail?: unknown }
+  }
+  // Exact codes from the snapshot admission boundary, never message parsing or
+  // a blanket HTTP failure classification. Storage/transport ambiguity stays unknown.
+  const admissionCodes: Record<number, string[]> = {
+    404: ["snapshot_resource_not_found"],
+    409: [
+      "snapshot_operation_busy",
+      "launch_quarantined",
+      "stale_launch_generation",
+      "request_token_conflict",
+      "restart_required"
+    ],
+    422: [
+      "invalid_request_token",
+      "snapshots_disabled",
+      "replace_confirmation_required",
+      "unsupported_configuration",
+      "unsupported_build",
+      "runtime_identity_changed",
+      "snapshot_incompatible"
+    ],
+    503: [
+      "runtime_owner_unavailable",
+      "runtime_stopped",
+      "server_shutting_down"
+    ]
+  }
+  return (
+    typeof status === "number" &&
+    typeof details?.detail === "string" &&
+    Boolean(admissionCodes[status]?.includes(details.detail))
+  )
+}
+
 /** Profile-scoped network owner. The presentation panel never sends requests. */
 export const LlamacppSnapshotsAdmin = ({
   profile,
@@ -157,12 +196,15 @@ export const LlamacppSnapshotsAdmin = ({
         setSlots(nextSlots)
         setCatalog(nextCatalog)
         const receipt =
-          nextOperation?.profile_id === profile.profile_id &&
-          nextOperation.launch_generation === nextSlots.launch_generation
+          nextOperation?.profile_id === profile.profile_id
             ? nextOperation
             : null
         setOperation(receipt)
-        if (receipt && receipt.operation_id !== uncertainAfter.current)
+        if (
+          receipt &&
+          receipt.launch_generation === nextSlots.launch_generation &&
+          receipt.operation_id !== uncertainAfter.current
+        )
           setUncertain(false)
       } catch (caught) {
         if (current()) {
@@ -190,11 +232,16 @@ export const LlamacppSnapshotsAdmin = ({
     t
   ])
   React.useEffect(() => {
-    if (!visible || !snapshotOperationActive(operation) || loading || error)
+    if (
+      !visible ||
+      !snapshotOperationActive(operation, slots?.launch_generation) ||
+      loading ||
+      error
+    )
       return
     const timer = window.setTimeout(refresh, 1500)
     return () => window.clearTimeout(timer)
-  }, [operation, visible, loading, error])
+  }, [operation, slots?.launch_generation, visible, loading, error])
   const reload = () => {
     setError(null)
     refresh()
@@ -268,8 +315,8 @@ export const LlamacppSnapshotsAdmin = ({
       }
     } catch (caught) {
       if (current()) {
-        // Once POST was attempted, only a durable receipt can settle uncertainty.
-        if (sent) setUncertain(true)
+        // A definitive admission rejection caused no new native mutation.
+        if (sent && !isSnapshotAdmissionRejection(caught)) setUncertain(true)
         setError(
           sanitizeAdminErrorMessage(
             caught,

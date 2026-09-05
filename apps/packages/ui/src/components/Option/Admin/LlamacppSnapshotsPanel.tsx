@@ -29,10 +29,13 @@ export interface LlamacppSnapshotsPanelProps {
 }
 
 export const snapshotOperationActive = (
-  operation?: LlamacppSnapshotOperationResponse | null
+  operation?: LlamacppSnapshotOperationResponse | null,
+  launchGeneration?: string | null
 ) =>
   Boolean(
     operation &&
+    launchGeneration &&
+    operation.launch_generation === launchGeneration &&
     !["complete", "failed", "outcome_unknown"].includes(operation.state)
   )
 
@@ -48,9 +51,11 @@ export const LlamacppSnapshotsPanel = (props: LlamacppSnapshotsPanelProps) => {
   const [retention, setRetention] = React.useState(props.retention)
   const trigger = React.useRef<HTMLElement | null>(null)
   const destinationRef = React.useRef<HTMLSelectElement>(null)
+  const cancelRef = React.useRef<React.ComponentRef<typeof Button>>(null)
   React.useEffect(() => setRetention(props.retention), [props.retention])
   React.useEffect(() => {
     if (confirmation?.kind === "restore") destinationRef.current?.focus()
+    else if (confirmation) cancelRef.current?.focus()
   }, [confirmation])
   const close = () => {
     setConfirmation(null)
@@ -67,10 +72,19 @@ export const LlamacppSnapshotsPanel = (props: LlamacppSnapshotsPanelProps) => {
     )
     setConfirmation({ kind, id })
   }
-  const active = snapshotOperationActive(props.operation)
+  const currentOperation = Boolean(
+    props.operation &&
+    props.slots?.launch_generation &&
+    props.operation.launch_generation === props.slots.launch_generation
+  )
+  const active = snapshotOperationActive(
+    props.operation,
+    props.slots?.launch_generation
+  )
   const unknown =
     props.outcomeUnknown ||
-    (props.operation?.state === "outcome_unknown" &&
+    (currentOperation &&
+      props.operation?.state === "outcome_unknown" &&
       props.slots?.capability !== "stopped")
   const blocked = Boolean(
     props.loading || props.mutating || props.error || active || unknown
@@ -454,7 +468,7 @@ export const LlamacppSnapshotsPanel = (props: LlamacppSnapshotsPanelProps) => {
               </Button>
             </>
           )}
-          <Button className="ml-2" onClick={close}>
+          <Button ref={cancelRef} className="ml-2" onClick={close}>
             {copy("cancel", "Cancel")}
           </Button>
         </div>
@@ -475,6 +489,14 @@ export const LlamacppSnapshotsPanel = (props: LlamacppSnapshotsPanelProps) => {
         )}
         {props.operation && (
           <>
+            {!currentOperation && (
+              <p>
+                {copy(
+                  "previousLaunch",
+                  "Receipt from a previous launch. It does not describe the current slot state."
+                )}
+              </p>
+            )}
             <p>
               {copy("latest", "Latest operation")}:{" "}
               {operationLabels[props.operation.state]}

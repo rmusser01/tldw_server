@@ -359,6 +359,7 @@ test.describe('llama.cpp managed runtime admin smoke', () => {
       await mockManagedRuntimeAdmin(page);
       const mutations: Array<{ method: string; path: string; body: unknown }> = [];
       let operationState = 'restoring';
+      let launchGeneration = 'launch-one';
       let submitted = false;
       let deleted = false;
       let tokens = 0;
@@ -385,7 +386,7 @@ test.describe('llama.cpp managed runtime admin smoke', () => {
         fulfillJson(route, {
           capability: submitted && operationState === 'restoring' ? 'busy' : 'ready',
           reason: null,
-          launch_generation: 'launch-one',
+          launch_generation: launchGeneration,
           request_id: `signed-token-${++tokens}`,
           latest_operation_id: submitted ? 'operation-one' : null,
           slots: [{ slot_id: 0, busy: false, token_count: 8192 }],
@@ -467,13 +468,19 @@ test.describe('llama.cpp managed runtime admin smoke', () => {
         },
       ]);
       operationState = 'complete';
+      launchGeneration = 'launch-two';
       await page.reload();
       await page.getByRole('button', { name: 'Slot snapshots: Chat runtime', exact: true }).click();
       await expect(panel.getByRole('status')).toContainText('Complete');
+      await expect(panel.getByText(/Receipt from a previous launch/)).toBeVisible();
       await expect(
         panel.getByText('Open the original conversation in Chatbook to continue.')
       ).toBeVisible();
       expect(mutations).toHaveLength(1);
+      await panel.getByRole('button', { name: 'Delete', exact: true }).click();
+      await expect(panel.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
+      await page.keyboard.press('Escape');
+      await expect(panel.getByRole('button', { name: 'Delete', exact: true })).toBeFocused();
       await panel.getByRole('button', { name: 'Delete', exact: true }).click();
       await expect(panel.getByText(/does not erase an active slot/)).toBeVisible();
       expect(mutations).toHaveLength(1);

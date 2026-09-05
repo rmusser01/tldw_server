@@ -66,6 +66,78 @@ beforeEach(() => {
 })
 
 describe("snapshot Admin coordination", () => {
+  it.each([
+    [422, "snapshot_incompatible"],
+    [409, "stale_launch_generation"],
+    [503, "runtime_owner_unavailable"]
+  ] as const)(
+    "allows refresh and a new manual action after definitive %s admission rejection with no receipt",
+    async (status, detail) => {
+      api.saveLlamacppSnapshot.mockRejectedValueOnce(
+        Object.assign(new Error(detail), {
+          status,
+          details: { detail }
+        })
+      )
+      render(
+        <LlamacppSnapshotsAdmin profile={profile} onProfileChanged={vi.fn()} />
+      )
+      const save = await screen.findByRole("button", { name: "Save snapshot" })
+      await waitFor(() => expect(save).toBeEnabled())
+      fireEvent.click(save)
+      await screen.findByText(detail)
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled()
+      )
+      expect(screen.queryByRole("button", { name: "Stop recovery" })).toBeNull()
+      expect(api.saveLlamacppSnapshot).toHaveBeenCalledOnce()
+      fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+      await waitFor(() => expect(save).toBeEnabled())
+      fireEvent.click(save)
+      await waitFor(() =>
+        expect(api.saveLlamacppSnapshot).toHaveBeenCalledTimes(2)
+      )
+      expect(api.stopLlamacppProfile).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(["complete", "failed", "saving", "outcome_unknown"])(
+    "preserves historical %s receipts without blocking the new launch",
+    async (state) => {
+      api.getLlamacppSnapshotSlots.mockResolvedValue({
+        ...slots,
+        launch_generation: "new-launch",
+        latest_operation_id: "operation-one"
+      })
+      api.getLlamacppSnapshotOperation.mockResolvedValue({ ...receipt, state })
+      render(
+        <LlamacppSnapshotsAdmin profile={profile} onProfileChanged={vi.fn()} />
+      )
+      expect(await screen.findByText(/Latest operation:/)).toBeVisible()
+      expect(screen.getByText("operation-one")).toBeInTheDocument()
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: "Save snapshot" })
+        ).toBeEnabled()
+      )
+      expect(screen.queryByRole("button", { name: "Stop recovery" })).toBeNull()
+      expect(api.saveLlamacppSnapshot).not.toHaveBeenCalled()
+    }
+  )
+
+  it("recovers a historical receipt when there is no runner generation", async () => {
+    api.getLlamacppSnapshotSlots.mockResolvedValue({
+      ...slots,
+      capability: "stopped",
+      launch_generation: null,
+      latest_operation_id: "operation-one",
+      slots: []
+    })
+    render(
+      <LlamacppSnapshotsAdmin profile={profile} onProfileChanged={vi.fn()} />
+    )
+    expect(await screen.findByText(/Latest operation: Complete/)).toBeVisible()
+  })
   it("recovers the latest receipt on reload without resubmitting", async () => {
     api.getLlamacppSnapshotSlots.mockResolvedValue({
       ...slots,
@@ -165,29 +237,49 @@ describe("snapshot Admin coordination", () => {
     expect(api.saveLlamacppSnapshot).not.toHaveBeenCalled()
   })
 
-  it("shows uncertain transport outcomes without retrying and allows explicit Stop", async () => {
-    api.saveLlamacppSnapshot.mockRejectedValue(new Error("connection closed"))
-    render(
-      <LlamacppSnapshotsAdmin profile={profile} onProfileChanged={vi.fn()} />
-    )
-    const save = await screen.findByRole("button", { name: "Save snapshot" })
-    await waitFor(() => expect(save).toBeEnabled())
-    fireEvent.click(save)
-    expect(
-      await screen.findByRole("button", { name: "Stop recovery" })
-    ).toBeVisible()
-    expect(api.saveLlamacppSnapshot).toHaveBeenCalledOnce()
-    expect(save).toBeDisabled()
-    fireEvent.click(screen.getByRole("button", { name: "Stop recovery" }))
-    fireEvent.click(
-      screen.getByRole("button", { name: "Stop runtime and inference" })
-    )
-    await waitFor(() =>
-      expect(api.stopLlamacppProfile).toHaveBeenCalledExactlyOnceWith(
-        "test-profile"
+  it.each(["transport", "server", "malformed", "unrecognized-rejection"])(
+    "shows uncertain %s outcomes without retrying and allows explicit Stop",
+    async (outcome) => {
+      if (outcome === "malformed")
+        api.saveLlamacppSnapshot.mockResolvedValue({})
+      else if (outcome === "unrecognized-rejection")
+        api.saveLlamacppSnapshot.mockRejectedValue(
+          Object.assign(new Error("unrecognized response"), {
+            status: 422,
+            details: { detail: "unrecognized_response" }
+          })
+        )
+      else
+        api.saveLlamacppSnapshot.mockRejectedValue(
+          outcome === "server"
+            ? Object.assign(new Error("snapshot_storage_unavailable"), {
+                status: 503,
+                details: { detail: "snapshot_storage_unavailable" }
+              })
+            : new Error("connection closed")
+        )
+      render(
+        <LlamacppSnapshotsAdmin profile={profile} onProfileChanged={vi.fn()} />
       )
-    )
-  })
+      const save = await screen.findByRole("button", { name: "Save snapshot" })
+      await waitFor(() => expect(save).toBeEnabled())
+      fireEvent.click(save)
+      expect(
+        await screen.findByRole("button", { name: "Stop recovery" })
+      ).toBeVisible()
+      expect(api.saveLlamacppSnapshot).toHaveBeenCalledOnce()
+      expect(save).toBeDisabled()
+      fireEvent.click(screen.getByRole("button", { name: "Stop recovery" }))
+      fireEvent.click(
+        screen.getByRole("button", { name: "Stop runtime and inference" })
+      )
+      await waitFor(() =>
+        expect(api.stopLlamacppProfile).toHaveBeenCalledExactlyOnceWith(
+          "test-profile"
+        )
+      )
+    }
+  )
 
   it("polls active receipts only while visible and aborts on unmount", async () => {
     api.getLlamacppSnapshotSlots.mockResolvedValue({
