@@ -4,7 +4,7 @@ title: Expose synchronous audio summarization in Service Prompts
 status: Done
 assignee: []
 created_date: '2026-09-05 18:15'
-updated_date: '2026-09-05 18:29'
+updated_date: '2026-09-05 18:32'
 labels: []
 dependencies: []
 ---
@@ -35,6 +35,8 @@ Approved bounded slice: expose the existing audio analysis system/user instructi
 Approved design: Docs/Design/audio-summary-service-prompt.md. Incremental slice of TASK-12957 (broad media/audio migration). Worktree codex/audio-summary-service-prompt from dev 86eb9e517c. Baseline102 passed; new behavior RED13 failures, registryRED3 failures, UIRED1 failure. Reviewer found existing direct-form test helper must supply Request; verified three failing audio/ebook/email cases and adapted helper without weakening production. Audio deployment fixture now isolates its own file approval policy; long transcript exercises recursive passes. Shared UI198 passed; WebUI5 targeted passed. Verification in progress.
 
 Final verification: 236 backend regressions passed (10 warnings), 198 shared UI tests passed, and 5 targeted WebUI Settings tests passed. Independent reviewer approved with no remaining actionable findings. Compileall and Ruff lint passed for touched runtime/tests; changed endpoint/registry/form/tests formatted. Existing audio_batch formatting drift is present at base and was not swept into this feature. Bandit touched runtime scope: zero findings/errors (/tmp/bandit_audio_service_prompt.json). Official OpenAPI export, TypeScript generation, and fingerprint check passed (2068 paths/3133 schemas). Full repository suite, full frontend typecheck/build, live browser/STT/provider calls were not run locally; tests replace external transcription/model boundaries. No implementation blockers; PR/integration not yet requested.
+
+PR created against dev: https://github.com/rmusser01/tldw_server/pull/2901. Implementation commit 3b126b37d98ee6a963cca856b3563cae8ebe8647. Branch and worktree retained for review; no merge or recurring monitor requested in this step.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
