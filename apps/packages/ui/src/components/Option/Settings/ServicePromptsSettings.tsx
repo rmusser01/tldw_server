@@ -156,6 +156,12 @@ const KNOWN_DEFINITIONS = {
     description:
       "Controls system instructions for synchronous PDF analysis. Without a saved override, server defaults apply."
   },
+  "media.ebook.summarization": {
+    key: "mediaEbookSummarization",
+    label: "EPUB summarization",
+    description:
+      "Controls system instructions for synchronous EPUB analysis. Without a saved override, server defaults apply."
+  },
   "notes.title.generate": {
     key: "notesTitleGenerate",
     label: "Notes title",
@@ -199,6 +205,10 @@ const KNOWN_WORKFLOWS: Record<string, { key: string; label: string }> = {
   "media.pdf.summarization": {
     key: "pdfSummarization",
     label: "Synchronous PDF analysis"
+  },
+  "media.ebook.summarization": {
+    key: "ebookSummarization",
+    label: "Synchronous EPUB analysis"
   },
   "notes.title.generate": {
     key: "automaticNotesTitles",

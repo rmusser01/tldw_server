@@ -478,6 +478,7 @@ async def get_process_ebooks_form(
     hierarchical_chunking: bool = Form(False),
     hierarchical_template: str | dict[str, Any] | None = Form(None),
     extraction_method: str = Form("filtered"),
+    api_provider: str | None = Form(None),
     api_name: str | None = Form(None),
     api_key: str | None = Form(None),
 ) -> ProcessEbooksForm:
@@ -514,7 +515,8 @@ async def get_process_ebooks_form(
                 hierarchical_template=hierarchical_template,
             ),
             extraction_method=extraction_method,
-            api_name=api_name,
+            api_provider=api_provider,
+            api_name=api_provider or api_name,
             api_key=api_key,
         )
     except ValidationError as exc:

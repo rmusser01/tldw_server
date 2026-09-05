@@ -55,6 +55,10 @@
         "label": "PDF summarization",
         "description": "Controls system instructions for synchronous PDF analysis. Without a saved override, server defaults apply."
       },
+      "mediaEbookSummarization": {
+        "label": "EPUB summarization",
+        "description": "Controls system instructions for synchronous EPUB analysis. Without a saved override, server defaults apply."
+      },
       "notesTitleGenerate": {
         "label": "Notes title",
         "description": "Controls the wording used by LLM-backed automatic Notes titles."
@@ -72,6 +76,7 @@
       "textTranslation": "Text translation",
       "documentSummarization": "Synchronous document analysis",
       "pdfSummarization": "Synchronous PDF analysis",
+      "ebookSummarization": "Synchronous EPUB analysis",
       "automaticNotesTitles": "Automatic Notes titles"
     },
     "titleGeneration": {
