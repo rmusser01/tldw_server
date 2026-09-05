@@ -8006,6 +8006,11 @@ async def persona_stream(
             return
 
         # Wrap socket for lifecycle and metrics; keep domain payloads unchanged
+        # Browsers require selection from an offered protocol list. Echo only
+        # the recognized auth marker, never the credential following it.
+        auth_protocol = (ws.headers.get("sec-websocket-protocol") or "").split(",", 1)[0].strip()
+        if auth_protocol.lower() == "bearer":
+            await ws.accept(subprotocol=auth_protocol)
         stream = WebSocketStream(
             ws,
             heartbeat_interval_s=0.0,  # disable WS pings for this scaffold

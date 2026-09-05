@@ -148,6 +148,10 @@ const nextConfig = {
 
     return [
       {
+        source: '/health',
+        destination: `${internalApiOrigin}/health`,
+      },
+      {
         source: '/api/v1/media',
         destination: `${internalApiOrigin}/api/v1/media/`,
       },

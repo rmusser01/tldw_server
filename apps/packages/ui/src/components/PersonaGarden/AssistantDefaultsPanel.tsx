@@ -15,6 +15,7 @@ import {
   type PersonaVoiceDefaults,
   useResolvedPersonaVoiceDefaults
 } from "@/hooks/useResolvedPersonaVoiceDefaults"
+import type { PersonaProfileResponse } from "@/routes/personaTypes"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { toAllowedPath } from "@/services/tldw/path-utils"
 
@@ -29,12 +30,10 @@ type AssistantDefaultsPanelProps = {
     token: number
   } | null
   onSetupHandoffFocusConsumed?: (token: number) => void
-  onSaved?: (voiceDefaults: PersonaVoiceDefaults) => void
-}
-
-type PersonaProfileResponse = {
-  id?: string
-  voice_defaults?: PersonaVoiceDefaults | null
+  onSaved?: (
+    voiceDefaults: PersonaVoiceDefaults,
+    profile: PersonaProfileResponse
+  ) => void
 }
 
 type AssistantDefaultsFormState = {
@@ -178,8 +177,11 @@ export const AssistantDefaultsPanel: React.FC<AssistantDefaultsPanelProps> = ({
   const confirmationModeRef = React.useRef<HTMLSelectElement | null>(null)
   const lastHandledHandoffTokenRef = React.useRef<number | null>(null)
 
+  const saveGenerationRef = React.useRef(0)
+
   React.useEffect(() => {
     let cancelled = false
+    setSaving(false)
 
     const load = async () => {
       if (!isActive || !selectedPersonaId) {
@@ -232,6 +234,7 @@ export const AssistantDefaultsPanel: React.FC<AssistantDefaultsPanelProps> = ({
     void load()
     return () => {
       cancelled = true
+      saveGenerationRef.current += 1
     }
   }, [isActive, selectedPersonaId])
 
@@ -293,6 +296,7 @@ export const AssistantDefaultsPanel: React.FC<AssistantDefaultsPanelProps> = ({
 
   const handleSave = React.useCallback(async () => {
     if (!selectedPersonaId) return
+    const saveGeneration = saveGenerationRef.current
     setSaving(true)
     setError(null)
     setSuccess(null)
@@ -316,15 +320,20 @@ export const AssistantDefaultsPanel: React.FC<AssistantDefaultsPanelProps> = ({
         )
       }
       const payload = (await response.json()) as PersonaProfileResponse
+      if (saveGeneration !== saveGenerationRef.current) return
       const nextFormState = buildFormState(payload.voice_defaults)
       setFormState(nextFormState)
-      onSaved?.(payload.voice_defaults || buildPayload(formState))
+      onSaved?.(payload.voice_defaults || buildPayload(formState), {
+        ...payload,
+        id: selectedPersonaId
+      })
       setSuccess(
         t("sidepanel:personaGarden.profile.assistantDefaultsSaved", {
           defaultValue: "Assistant defaults saved."
         })
       )
     } catch (saveError) {
+      if (saveGeneration !== saveGenerationRef.current) return
       setError(
         saveError instanceof Error
           ? saveError.message
@@ -333,7 +342,7 @@ export const AssistantDefaultsPanel: React.FC<AssistantDefaultsPanelProps> = ({
             })
       )
     } finally {
-      setSaving(false)
+      if (saveGeneration === saveGenerationRef.current) setSaving(false)
     }
   }, [formState, onSaved, selectedPersonaId, t])
 

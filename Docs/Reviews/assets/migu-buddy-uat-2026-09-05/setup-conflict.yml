@@ -1,0 +1,226 @@
+- generic [active] [ref=f5e10]:
+  - generic [ref=f5e11]:
+    - generic [ref=f5e13]:
+      - generic [ref=f5e14]:
+        - button "Expand sidebar" [ref=f5e15] [cursor=pointer]
+        - button "New Chat" [ref=f5e19] [cursor=pointer]
+        - generic [ref=f5e22]:
+          - button "Quick Ingest" [ref=f5e23] [cursor=pointer]
+          - button "Chat" [ref=f5e27] [cursor=pointer]
+          - button "Prompts" [ref=f5e30] [cursor=pointer]
+          - button "Characters" [ref=f5e34] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f5e39] [cursor=pointer]
+          - button "World Books" [ref=f5e43] [cursor=pointer]
+          - button "Notes" [ref=f5e46] [cursor=pointer]
+          - button "Knowledge QA" [ref=f5e50] [cursor=pointer]
+          - button "Media" [ref=f5e58] [cursor=pointer]
+          - button "Document Workspace" [ref=f5e61] [cursor=pointer]
+          - button "Research Workspace" [ref=f5e67] [cursor=pointer]
+          - button "Kanban" [ref=f5e73] [cursor=pointer]
+          - button "Watchlists" [ref=f5e75] [cursor=pointer]
+        - generic [ref=f5e80]:
+          - button "Open Notes Dock" [ref=f5e81] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f5e86] [cursor=pointer]
+          - button "Settings" [ref=f5e89] [cursor=pointer]
+      - main [ref=f5e93]:
+        - generic [ref=f5e94]:
+          - generic [ref=f5e97]:
+            - generic [ref=f5e98]:
+              - button "Expand sidebar" [ref=f5e99] [cursor=pointer]
+              - generic [ref=f5e101]:
+                - img "tldw Assistant" [ref=f5e102]
+                - generic [ref=f5e103]: tldw Assistant
+                - button "Companion Home" [ref=f5e104] [cursor=pointer]
+                - button "Show shortcuts" [ref=f5e108] [cursor=pointer]
+            - generic [ref=f5e111]:
+              - button "Search - Open command palette" [ref=f5e112] [cursor=pointer]:
+                - generic [ref=f5e116]: Search
+                - generic [ref=f5e117]: ⌘K
+              - button "Open settings" [ref=f5e118] [cursor=pointer]
+              - generic [ref=f5e130]:
+                - button "Notifications, 0 unread" [ref=f5e131] [cursor=pointer]
+                - status [ref=f5e135]: Notifications are active
+              - button "Switch to light theme" [ref=f5e136] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f5e143] [cursor=pointer]:
+                - generic [ref=f5e144]: "?"
+          - generic [ref=f5e146]:
+            - generic [ref=f5e147]:
+              - generic [ref=f5e148]:
+                - button "Expand sidebar" [ref=f5e149] [cursor=pointer]
+                - button "Connected to your tldw server" [ref=f5e151] [cursor=pointer]
+                - generic [ref=f5e155]:
+                  - img "tldw Assistant" [ref=f5e156]
+                  - generic [ref=f5e157]: tldw Assistant
+                - generic "Persona Garden" [ref=f5e159]
+              - generic [ref=f5e161]:
+                - button "TTS clips" [ref=f5e162] [cursor=pointer]
+                - link "Open Persona Garden" [ref=f5e167] [cursor=pointer]:
+                  - /url: /persona
+                - button "Open dashboard" [ref=f5e171] [cursor=pointer]
+                - button "Open full chat in WebUI" [ref=f5e177] [cursor=pointer]
+                - generic [ref=f5e182]: Opens /chat in a new tab. Use Continue in WebUI from the composer tools to carry a draft or page context.
+                - link "Open settings" [ref=f5e183] [cursor=pointer]:
+                  - /url: /settings
+            - generic [ref=f5e280]:
+              - generic [ref=f5e281]:
+                - generic [ref=f5e282]:
+                  - generic [ref=f5e283]: Assistant Setup
+                  - generic [ref=f5e284]: Finish setup before using this persona in Persona Garden.
+                - button "Reset setup" [ref=f5e285] [cursor=pointer]
+              - generic [ref=f5e286]:
+                - generic [ref=f5e288]:
+                  - generic [ref=f5e289]: 1. Pick a starting point
+                  - generic [ref=f5e290]: pending
+                - generic [ref=f5e291]:
+                  - generic [ref=f5e292]:
+                    - generic [ref=f5e293]: 2. Choose persona
+                    - generic [ref=f5e294]: completed
+                  - generic [ref=f5e295]: Persona selected
+                - generic [ref=f5e296]:
+                  - generic [ref=f5e297]:
+                    - generic [ref=f5e298]: 3. Voice defaults
+                    - generic [ref=f5e299]: current
+                  - generic [ref=f5e300]: Save assistant defaults
+                - generic [ref=f5e302]:
+                  - generic [ref=f5e303]: 4. Starter commands
+                  - generic [ref=f5e304]: pending
+                - generic [ref=f5e306]:
+                  - generic [ref=f5e307]: 5. Safety and connections
+                  - generic [ref=f5e308]: pending
+                - generic [ref=f5e310]:
+                  - generic [ref=f5e311]: 6. Test and finish
+                  - generic [ref=f5e312]: pending
+              - generic [ref=f5e313]: voice
+              - generic [ref=f5e314]: live
+              - generic [ref=f5e434]: "Persona profile version mismatch (db has 4, expected 3). (Entity: persona_profiles, ID: e19c631e-e2ac-452d-9935-293af03cee4e)"
+              - generic [ref=f5e316]:
+                - generic [ref=f5e317]:
+                  - generic [ref=f5e318]:
+                    - generic [ref=f5e319]: Visual buddy
+                    - generic [ref=f5e320]: Migu UAT
+                    - generic [ref=f5e321]: Open the Buddy builder in Persona Garden to choose, import, review, and activate visuals.
+                  - generic [ref=f5e322]: optional
+                - button "Open Buddy builder" [ref=f5e323] [cursor=pointer]
+              - generic [ref=f5e331]:
+                - generic [ref=f5e332]:
+                  - generic [ref=f5e333]:
+                    - generic [ref=f5e334]: Assistant Defaults
+                    - paragraph [ref=f5e335]: Persona defaults stay separate from browser-wide fallback settings. The preview below shows the effective values after local fallback is applied.
+                  - generic [ref=f5e336]: Migu UAT
+                - generic [ref=f5e435]: Assistant defaults saved.
+                - generic [ref=f5e337]:
+                  - generic [ref=f5e338]:
+                    - generic [ref=f5e339]: STT language
+                    - textbox "STT language" [ref=f5e340]
+                  - generic [ref=f5e341]:
+                    - generic [ref=f5e342]: STT model
+                    - textbox "STT model" [ref=f5e343]
+                  - generic [ref=f5e344]:
+                    - generic [ref=f5e345]: TTS provider
+                    - combobox "TTS provider" [ref=f5e346]:
+                      - option "Use browser fallback" [selected]
+                      - option "browser"
+                      - option "tldw"
+                      - option "openai"
+                      - option "elevenlabs"
+                  - generic [ref=f5e347]:
+                    - generic [ref=f5e348]: TTS voice
+                    - textbox "TTS voice" [ref=f5e349]
+                  - generic [ref=f5e350]:
+                    - generic [ref=f5e351]: Confirmation mode
+                    - combobox "Confirmation mode" [ref=f5e352]:
+                      - option "always"
+                      - option "destructive_only" [selected]
+                      - option "never"
+                  - generic [ref=f5e353]:
+                    - generic [ref=f5e354]: Wake behavior
+                    - combobox "Wake behavior" [ref=f5e355]:
+                      - option "One turn after wake" [selected]
+                      - option "Continuous after wake"
+                      - option "Push to talk after wake"
+                  - generic [ref=f5e356]:
+                    - generic [ref=f5e357]:
+                      - generic [ref=f5e358]: Auto-resume
+                      - combobox "Auto-resume" [ref=f5e359]:
+                        - option "Use browser fallback" [selected]
+                        - option "On"
+                        - option "Off"
+                    - generic [ref=f5e360]:
+                      - generic [ref=f5e361]: Barge-in
+                      - combobox "Barge-in" [ref=f5e362]:
+                        - option "Use browser fallback" [selected]
+                        - option "On"
+                        - option "Off"
+                - generic [ref=f5e363]:
+                  - generic [ref=f5e364]: Trigger phrases
+                  - textbox "Trigger phrases" [ref=f5e365]:
+                    - /placeholder: One phrase per line
+                - generic [ref=f5e366]:
+                  - generic [ref=f5e367]:
+                    - generic [ref=f5e368]:
+                      - generic [ref=f5e369]: Turn detection defaults
+                      - generic [ref=f5e370]: Saved for future live sessions. Existing live sessions keep their current turn-detection settings until reconnect.
+                    - button "Advanced" [ref=f5e371] [cursor=pointer]
+                  - generic [ref=f5e373]:
+                    - generic [ref=f5e374] [cursor=pointer]:
+                      - checkbox "Auto-commit (saved default)" [checked] [ref=f5e376]
+                      - generic [ref=f5e378]: Auto-commit (saved default)
+                    - generic [ref=f5e379]:
+                      - button "Conservative" [ref=f5e380] [cursor=pointer]
+                      - button "Balanced" [ref=f5e382] [cursor=pointer]
+                      - button "Fast" [ref=f5e384] [cursor=pointer]
+                - generic [ref=f5e386]:
+                  - generic [ref=f5e387]: Effective Preview
+                  - generic [ref=f5e388]:
+                    - generic [ref=f5e389]:
+                      - term [ref=f5e390]: STT language
+                      - definition [ref=f5e391]: en-US
+                    - generic [ref=f5e392]:
+                      - term [ref=f5e393]: STT model
+                      - definition [ref=f5e394]: unset
+                    - generic [ref=f5e395]:
+                      - term [ref=f5e396]: TTS provider
+                      - definition [ref=f5e397]: tldw
+                    - generic [ref=f5e398]:
+                      - term [ref=f5e399]: TTS voice
+                      - definition [ref=f5e400]: Bella
+                    - generic [ref=f5e401]:
+                      - term [ref=f5e402]: Confirmation mode
+                      - definition [ref=f5e403]: destructive_only
+                    - generic [ref=f5e404]:
+                      - term [ref=f5e405]: Wake behavior
+                      - definition [ref=f5e406]: one_shot
+                    - generic [ref=f5e407]:
+                      - term [ref=f5e408]: Auto-resume
+                      - definition [ref=f5e409]: "On"
+                    - generic [ref=f5e410]:
+                      - term [ref=f5e411]: Barge-in
+                      - definition [ref=f5e412]: "Off"
+                    - generic [ref=f5e413]:
+                      - term [ref=f5e414]: Trigger phrases
+                      - definition [ref=f5e415]: None
+                    - generic [ref=f5e416]:
+                      - term [ref=f5e417]: Auto-commit
+                      - definition [ref=f5e418]: "On"
+                    - generic [ref=f5e419]:
+                      - term [ref=f5e420]: Speech threshold
+                      - definition [ref=f5e421]: "0.5"
+                    - generic [ref=f5e422]:
+                      - term [ref=f5e423]: Silence before commit
+                      - definition [ref=f5e424]: 250 ms
+                    - generic [ref=f5e425]:
+                      - term [ref=f5e426]: Minimum utterance
+                      - definition [ref=f5e427]: 0.4 s
+                    - generic [ref=f5e428]:
+                      - term [ref=f5e429]: Turn tail
+                      - definition [ref=f5e430]: 0.2 s
+                - button "Save assistant defaults" [ref=f5e432] [cursor=pointer]
+    - generic [ref=f5e263]:
+      - generic [ref=f5e264]: Drag Buddy
+      - button "Toggle buddy for Migu UAT" [ref=f5e433] [cursor=pointer]:
+        - generic [ref=f5e266]:
+          - generic [ref=f5e267]: Migu UAT
+          - generic [ref=f5e268]: capybara
+        - generic [ref=f5e269]: +
+  - button "Open Next.js Dev Tools" [ref=f5e275] [cursor=pointer]
+  - alert [ref=f5e279]

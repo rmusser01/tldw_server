@@ -318,7 +318,7 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     }
   }, [positionBucket, setPosition])
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     const clampPersistedPosition = () => {
       if (!dockRef.current) {
         return
@@ -346,11 +346,18 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     }
 
     clampPersistedPosition()
+    const resizeObserver = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(clampPersistedPosition)
+    if (dockRef.current) {
+      resizeObserver?.observe(dockRef.current)
+    }
     window.addEventListener("resize", clampPersistedPosition)
     return () => {
+      resizeObserver?.disconnect()
       window.removeEventListener("resize", clampPersistedPosition)
     }
-  }, [position, positionBucket, setPosition])
+  }, [isOpen, position, positionBucket, renderContext, setPosition])
 
   const handleDragHandlePointerDown = React.useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {

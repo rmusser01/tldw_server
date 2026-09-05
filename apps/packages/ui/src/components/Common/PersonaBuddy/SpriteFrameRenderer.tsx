@@ -8,6 +8,8 @@ import type {
   PersonaVisualStateId
 } from "@/types/persona-visuals"
 
+import { usePersonaVisualAssetUrls } from "./usePersonaVisualAssetUrls"
+
 import { normalizeFrames } from "./personaVisualAssets"
 import type {
   PersonaVisualRenderError,
@@ -171,6 +173,7 @@ export const SpriteFrameRenderer: React.FC<SpriteFrameRendererProps> = ({
   className,
   onRenderError
 }) => {
+  const resolveAssetUrl = usePersonaVisualAssetUrls(assets)
   const resolved = React.useMemo(
     () => resolveAnimationForState(manifest, state),
     [manifest, state]
@@ -190,20 +193,22 @@ export const SpriteFrameRenderer: React.FC<SpriteFrameRendererProps> = ({
     setFrameIndex(initialFrameIndex)
   }, [initialFrameIndex, resolved?.animationId, state])
 
+  const frame = frames[frameIndex] ?? frames[0]
+  const asset = frame ? assets[frame.asset_id] : null
+  const assetUrl = asset ? resolveAssetUrl(asset) : null
+
   React.useEffect(() => {
-    if (!resolved || frames.length <= 1) return undefined
+    if (!assetUrl || !resolved || frames.length <= 1) return undefined
     const currentFrame = frames[frameIndex] ?? frames[0]
     const timer = window.setTimeout(() => {
       setFrameIndex((current) => (current + 1) % frames.length)
     }, resolveFrameDuration(currentFrame, resolved.animation))
     return () => window.clearTimeout(timer)
-  }, [frameIndex, frames, resolved])
+  }, [assetUrl, frameIndex, frames, resolved])
 
-  const frame = frames[frameIndex] ?? frames[0]
-  const asset = frame ? assets[frame.asset_id] : null
   const error: PersonaVisualRenderError | null = !resolved || !frame
     ? "missing_animation"
-    : !asset
+    : !asset || assetUrl === null
       ? "missing_asset"
       : hasUnsupportedRegion(frame, asset)
         ? "unsupported_region"
@@ -213,13 +218,13 @@ export const SpriteFrameRenderer: React.FC<SpriteFrameRendererProps> = ({
     onRenderError?.(error)
   }, [error, onRenderError])
 
-  if (error || !frame || !asset) {
+  if (error || !frame || !asset || !assetUrl) {
     return <span>{fallbackLabel}</span>
   }
 
   return renderFrame({
     frame,
-    asset,
+    asset: { ...asset, url: assetUrl },
     visualState: state,
     fallbackLabel,
     className

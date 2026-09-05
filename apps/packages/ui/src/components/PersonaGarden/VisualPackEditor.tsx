@@ -1,4 +1,5 @@
 import React from "react"
+import { PersonaVisualAssetImage } from "@/components/Common/PersonaBuddy/usePersonaVisualAssetUrls"
 import { Button, Modal, Tag, Typography } from "antd"
 import {
   ArrowDown,
@@ -4781,8 +4782,8 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                             key={asset.id}
                             className="flex items-center gap-2 rounded border border-border bg-surface px-2 py-1"
                           >
-                            <img
-                              src={asset.url}
+                            <PersonaVisualAssetImage
+                              asset={asset}
                               alt={asset.original_filename || asset.id}
                               className="h-10 w-10 rounded object-contain"
                             />

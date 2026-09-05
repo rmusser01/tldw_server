@@ -1884,7 +1884,7 @@ describe("SidepanelPersona", () => {
     })
   })
 
-  it("smoke-tests setup from persona choice through starter retry and dry-run handoff", async () => {
+  it.each([false, true])("smoke-tests setup with optimistic versions (concurrent edit: %s) through starter retry and dry-run handoff", async (concurrentEdit) => {
     mocks.location.search = "?persona_id=garden-helper&tab=profiles"
     mocks.getConfig.mockResolvedValue({
       serverUrl: "http://127.0.0.1:8000",
@@ -1894,6 +1894,7 @@ describe("SidepanelPersona", () => {
 
     let profileVersion = 2
     let starterAttempts = 0
+    let injectedConflict = false
     let currentVoiceDefaults = {
       confirmation_mode: "destructive_only"
     }
@@ -1983,6 +1984,19 @@ describe("SidepanelPersona", () => {
       }
       if (path.includes("/persona/profiles/garden-helper")) {
         if (method === "PATCH") {
+          if (concurrentEdit && !injectedConflict && init?.body?.setup?.current_step === "commands") {
+            profileVersion += 1
+            injectedConflict = true
+          }
+          const expectedVersion = new URL(path, "http://localhost").searchParams.get("expected_version")
+          if (expectedVersion !== null && Number(expectedVersion) !== profileVersion) {
+            return Promise.resolve({
+              ok: false,
+              status: 409,
+              error: "Profile changed; retry assistant defaults",
+              json: async () => ({})
+            })
+          }
           profileVersion += 1
           currentVoiceDefaults = {
             ...currentVoiceDefaults,
@@ -2024,6 +2038,13 @@ describe("SidepanelPersona", () => {
     })
 
     fireEvent.click(screen.getByRole("button", { name: "Save assistant defaults" }))
+
+    if (concurrentEdit) {
+      expect(await screen.findByText("Profile changed; retry assistant defaults")).toBeInTheDocument()
+      expect(currentSetup.current_step).toBe("voice")
+      expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("voice")
+      fireEvent.click(screen.getByRole("button", { name: "Save assistant defaults" }))
+    }
 
     await waitFor(() => {
       expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("commands")
