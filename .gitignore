@@ -424,3 +424,8 @@ Dockerfiles/Monitoring/secrets/
 /.playwright-cli
 /output
 /apps/tldw-frontend/output
+
+# Bundled pixel-migu manifests are production package resources.
+!tldw_Server_API/app/core/Persona/assets/starter_packs/pixel-migu/manifest.json
+!tldw_Server_API/app/core/Visual_Identities/assets/pixel-migu/pixel-migu.character.json
+!tldw_Server_API/app/core/Visual_Identities/assets/pixel-migu/visual_identity_pack.json

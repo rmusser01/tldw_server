@@ -20,7 +20,12 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 
 # Local Imports
 from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.DB_Management import sqlite_policy
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.chacha.runtime import (
+    ChaChaRuntimeManager,
+    ChaChaRuntimeUnavailableError,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -29,11 +34,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     SchemaError,
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.DB_Management import sqlite_policy
-from tldw_Server_API.app.core.DB_Management.chacha.runtime import (
-    ChaChaRuntimeManager,
-    ChaChaRuntimeUnavailableError,
-)
+from tldw_Server_API.app.core.exceptions import BuiltinCharacterSeedError
 
 #
 #######################################################################################################################
@@ -459,6 +460,7 @@ def _health_check_instance(db_instance: CharactersRAGDB) -> bool:
 
 
 def _create_and_prepare_db(user_id: int, client_id: str) -> CharactersRAGDB:
+    """Prepare an owner database and seed its bundled content before publication."""
     db_path: Optional[Path] = None
     db_path = _get_chacha_db_path_for_user(user_id)
     try:
@@ -474,6 +476,22 @@ def _create_and_prepare_db(user_id: int, client_id: str) -> CharactersRAGDB:
         raise
     db_instance = CharactersRAGDB(db_path=str(db_path), client_id=str(client_id))
     _apply_sqlite_tuning(db_instance)
+    from tldw_Server_API.app.core.Visual_Identities.builtin_pixel_migu import ensure_pixel_migu_character
+
+    try:
+        ensure_pixel_migu_character(db_instance, owner_user_id=user_id)
+    # Storage, decoding and legacy repository APIs can still raise built-ins.
+    except (
+        BuiltinCharacterSeedError,
+        CharactersRAGDBError,
+        sqlite3.Error,
+        OSError,
+        RuntimeError,
+        ValueError,
+        TypeError,
+    ):
+        db_instance.close_connection()
+        raise
     return db_instance
 
 
@@ -604,6 +622,7 @@ def _map_chacha_init_db_error(exc: Exception) -> HTTPException:
 
 
 async def _get_or_init_db_instance(user_id: int, client_id: str) -> CharactersRAGDB:
+    """Return a cached owner database or serialize and publish its initialization."""
     user_dir = DatabasePaths.get_user_base_directory(user_id)
     cache_key = str(user_dir)
     with _chacha_db_lock:
@@ -694,7 +713,15 @@ async def _get_or_init_db_instance(user_id: int, client_id: str) -> CharactersRA
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="ChaChaNotes initialization timed out",
         ) from e
-    except (CharactersRAGDBError, sqlite3.Error, OSError, RuntimeError, ValueError, TypeError) as e:
+    except (
+        BuiltinCharacterSeedError,
+        CharactersRAGDBError,
+        sqlite3.Error,
+        OSError,
+        RuntimeError,
+        ValueError,
+        TypeError,
+    ) as e:
         duration_ms = (time.perf_counter() - start) * 1000
         _record_init(duration_ms, False, e)
         with _chacha_db_lock:

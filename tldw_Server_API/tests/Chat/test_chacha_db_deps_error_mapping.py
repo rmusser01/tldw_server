@@ -1,17 +1,18 @@
-from pathlib import Path
 import threading
+from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as deps
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDBError,
     ConflictError,
     InputError,
     SchemaError,
 )
-from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 
 
 class _LoggerStub:
@@ -312,20 +313,27 @@ def test_maybe_dump_traceback_sanitizes_dump_failure_log(monkeypatch):
     )
 
 
-def test_create_and_prepare_db_sanitizes_secondary_mkdir_failure_log(monkeypatch, tmp_path):
+def test_create_and_prepare_db_sanitizes_secondary_mkdir_failure_log(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Database initialization logs omit raw parent-directory creation errors."""
     logger_stub = _LoggerStub()
     safe_db_path = tmp_path / "safe-chacha" / "ChaChaNotes.db"
     original_mkdir = deps.Path.mkdir
 
     class _DBInstance:
+        """Minimal database double for the path-log sanitization boundary."""
+
         pass
 
-    def fail_parent_mkdir(self, *args, **kwargs):
+    def fail_parent_mkdir(self: Path, *args: Any, **kwargs: Any) -> None:
+        """Fail only the private database directory creation request."""
         if self == safe_db_path.parent:
             raise OSError("chacha backend exploded at /private/db/path SECRET_TOKEN")
         return original_mkdir(self, *args, **kwargs)
 
-    def make_db(*, db_path, client_id):
+    def make_db(*, db_path: str, client_id: str) -> _DBInstance:
+        """Validate factory arguments and return an inert database double."""
         assert db_path == str(safe_db_path)
         assert client_id == "safe-client"
         return _DBInstance()
@@ -335,6 +343,10 @@ def test_create_and_prepare_db_sanitizes_secondary_mkdir_failure_log(monkeypatch
     monkeypatch.setattr(deps.Path, "mkdir", fail_parent_mkdir)
     monkeypatch.setattr(deps, "CharactersRAGDB", make_db)
     monkeypatch.setattr(deps, "_apply_sqlite_tuning", lambda _db_instance: None)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Visual_Identities.builtin_pixel_migu.ensure_pixel_migu_character",
+        lambda _db_instance, **_kwargs: None,
+    )
 
     assert isinstance(deps._create_and_prepare_db(4242, "safe-client"), _DBInstance)
 

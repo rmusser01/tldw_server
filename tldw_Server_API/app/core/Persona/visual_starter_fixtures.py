@@ -9,12 +9,12 @@ catalog scaffolds until their final reviewed animation assets are authored.
 
 from __future__ import annotations
 
-from importlib import resources
+import json
 import struct
 import zlib
 from dataclasses import dataclass, field
+from importlib import resources
 from typing import Any
-
 
 DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID = "search-lens-basic"
 LEGACY_PERSONA_VISUAL_STARTER_PACK_ID = "research-buddy-starter"
@@ -25,6 +25,7 @@ DEFAULT_PERSONA_VISUAL_STARTER_PACK_IDS: tuple[str, ...] = (
     "paperclip-basic",
     "terminal-tile-basic",
     "migu-marker-basic",
+    "pixel-migu",
     "study-desk-intermediate",
     "tool-helper-intermediate",
     "object-creature-intermediate",
@@ -148,12 +149,7 @@ class PersonaVisualStarterPack:
 
 def _png_chunk(kind: bytes, payload: bytes) -> bytes:
     """Build one PNG chunk with length and CRC fields."""
-    return (
-        struct.pack(">I", len(payload))
-        + kind
-        + payload
-        + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
-    )
+    return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
 
 
 def _png_from_rgba(width: int, height: int, pixels: bytes | bytearray) -> bytes:
@@ -884,11 +880,7 @@ _MIGU_MARKER_FRAME_FILES: tuple[tuple[str, str, str], ...] = (
 
 def _starter_resource_bytes(starter_id: str, filename: str) -> bytes:
     """Load one bundled starter PNG from package resources."""
-    return (
-        resources.files(__package__)
-        .joinpath("assets", "starter_packs", starter_id, "frames", filename)
-        .read_bytes()
-    )
+    return resources.files(__package__).joinpath("assets", "starter_packs", starter_id, "frames", filename).read_bytes()
 
 
 def _resource_png_asset(
@@ -967,12 +959,9 @@ def _index_card_basic_pack() -> PersonaVisualStarterPack:
             "research helper with approved 3x4 source-sheet frames."
         ),
         renderer_type="sprite_frames",
-        manifest=_success_reaction_art_manifest(
-            "Single celebratory pose derived from the Index Card source sheet."
-        ),
+        manifest=_success_reaction_art_manifest("Single celebratory pose derived from the Index Card source sheet."),
         assets=tuple(
-            _resource_png_asset(starter_id, key, filename, role=role)
-            for key, filename, role in _INDEX_CARD_FRAME_FILES
+            _resource_png_asset(starter_id, key, filename, role=role) for key, filename, role in _INDEX_CARD_FRAME_FILES
         ),
         tags=(
             "starter",
@@ -1017,9 +1006,7 @@ def _archive_cube_basic_pack() -> PersonaVisualStarterPack:
             "helper with approved 3x4 source-sheet frames."
         ),
         renderer_type="sprite_frames",
-        manifest=_success_reaction_art_manifest(
-            "Single celebratory pose derived from the Archive Cube source sheet."
-        ),
+        manifest=_success_reaction_art_manifest("Single celebratory pose derived from the Archive Cube source sheet."),
         assets=tuple(
             _resource_png_asset(starter_id, key, filename, role=role)
             for key, filename, role in _ARCHIVE_CUBE_FRAME_FILES
@@ -1067,12 +1054,9 @@ def _paperclip_basic_pack() -> PersonaVisualStarterPack:
             "helper with approved 3x4 source-sheet frames."
         ),
         renderer_type="sprite_frames",
-        manifest=_success_reaction_art_manifest(
-            "Single celebratory pose derived from the Paperclip source sheet."
-        ),
+        manifest=_success_reaction_art_manifest("Single celebratory pose derived from the Paperclip source sheet."),
         assets=tuple(
-            _resource_png_asset(starter_id, key, filename, role=role)
-            for key, filename, role in _PAPERCLIP_FRAME_FILES
+            _resource_png_asset(starter_id, key, filename, role=role) for key, filename, role in _PAPERCLIP_FRAME_FILES
         ),
         tags=(
             "starter",
@@ -1117,9 +1101,7 @@ def _terminal_tile_basic_pack() -> PersonaVisualStarterPack:
             "tile helper with approved 3x4 source-sheet frames."
         ),
         renderer_type="sprite_frames",
-        manifest=_success_reaction_art_manifest(
-            "Single celebratory pose derived from the Terminal Tile source sheet."
-        ),
+        manifest=_success_reaction_art_manifest("Single celebratory pose derived from the Terminal Tile source sheet."),
         assets=tuple(
             _resource_png_asset(starter_id, key, filename, role=role)
             for key, filename, role in _TERMINAL_TILE_FRAME_FILES
@@ -1168,9 +1150,7 @@ def _migu_marker_basic_pack() -> PersonaVisualStarterPack:
             "helper with approved 3x4 source-sheet frames."
         ),
         renderer_type="sprite_frames",
-        manifest=_success_reaction_art_manifest(
-            "Single celebratory pose derived from the Migu Marker source sheet."
-        ),
+        manifest=_success_reaction_art_manifest("Single celebratory pose derived from the Migu Marker source sheet."),
         assets=tuple(
             _resource_png_asset(starter_id, key, filename, role=role)
             for key, filename, role in _MIGU_MARKER_FRAME_FILES
@@ -1201,6 +1181,36 @@ def _migu_marker_basic_pack() -> PersonaVisualStarterPack:
                 "Recreate state loops from neutral by preserving rough asymmetry; hair bob, "
                 "mouth changes, headset position, and teal marks carry animation."
             ),
+            animation_outputs=("required_state_loops",),
+        ),
+    )
+
+
+def _pixel_migu_pack() -> PersonaVisualStarterPack:
+    """Load the user-supplied pixel-art Buddy without changing the default."""
+    root = resources.files("tldw_Server_API.app.core.Persona").joinpath("assets", "starter_packs", "pixel-migu")
+    manifest = json.loads(root.joinpath("manifest.json").read_text(encoding="utf-8"))
+    asset_keys = sorted(
+        {frame["asset_id"] for animation in manifest["animations"].values() for frame in animation["frames"]}
+    )
+    return PersonaVisualStarterPack(
+        id="pixel-migu",
+        title="pixel-migu",
+        description="Turquoise pixel-art robot companion with twin tails, state loops and expression poses.",
+        renderer_type="sprite_frames",
+        manifest=manifest,
+        assets=tuple(
+            _resource_png_asset("pixel-migu", key, f"{key}.png", role="preview" if key == "pose-neutral" else "frame")
+            for key in asset_keys
+        ),
+        tags=("starter", "sprite_frames", "catalog:art-ready", "tier:basic", "pixel-art", "user-art"),
+        license_label="LicenseRef-User-Supplied",
+        production_status="art_ready",
+        animation_coverage_notes=("Reviewed user-supplied art: twelve four-frame sequences and sixteen static poses.",),
+        production_recipe=_production_recipe(
+            identity_brief="Turquoise pixel-art robot with rectangular face, black outlines and long twin tails.",
+            neutral_anchor="Use the supplied neutral pose; retain the pixel grid, silhouette and turquoise palette.",
+            static_sheet="Sixteen supplied expression poses complement the timed state sequences.",
             animation_outputs=("required_state_loops",),
         ),
     )
@@ -1511,6 +1521,7 @@ DEFAULT_PERSONA_VISUAL_STARTER_PACKS: tuple[PersonaVisualStarterPack, ...] = (
     _paperclip_basic_pack(),
     _terminal_tile_basic_pack(),
     _migu_marker_basic_pack(),
+    _pixel_migu_pack(),
     _multi_asset_pack(
         starter_id="study-desk-intermediate",
         title="Study Desk Intermediate",

@@ -185,3 +185,14 @@ removed their terminal newline. `git diff --check` had passed, because that chec
 does not require a final newline. Normalize final newlines after the last task
 edit, then include those bytes in pre-commit verification; repeated MCP writes
 can otherwise reintroduce the same formatting-only CI failure.
+
+## First-run name checks must include tombstones
+
+**Incident (TASK-13196, 2026-09-05):** pixel-migu seed replay tests preserved
+its own deletion receipt, but independent review found that a preexisting deleted
+user card with the same name had no receipt. The ordinary name lookup excluded
+that tombstone while SQLite's unique name constraint retained it, so canonical
+DB initialization failed on every retry. A real factory regression reproduced
+the conflict; an explicit include-deleted lookup preserved the user's tombstone
+and restored startup. Test both deletion after seeding and deleted user content
+that predates the seed.
