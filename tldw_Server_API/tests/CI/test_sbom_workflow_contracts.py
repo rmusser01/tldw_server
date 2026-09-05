@@ -91,6 +91,69 @@ def _uses_steps(workflow: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def _downstream_job_runs(
+    job: dict[str, Any], results: dict[str, str], *, cancelled: bool = False
+) -> bool:
+    """Evaluate this workflow's conjunction-only guards with admission skipped.
+
+    This is not a general Actions evaluator: reject unsupported clauses instead
+    of silently accepting new syntax. GitHub's implicit success check is false
+    in the observed direct-PR run with a skipped admission ancestor.
+    """
+    values = {
+        "always()": True,
+        "!cancelled()": not cancelled,
+        "success()": False,
+    }
+    values.update({
+        f"needs.{name}.result=='success'": result == "success"
+        for name, result in results.items()
+    })
+    expression = re.sub(r"\s+", "", job.get("if", "success()"))
+    clauses = expression.removeprefix("${{").removesuffix("}}").split("&&")
+    assert set(clauses) <= values.keys(), f"Unsupported job condition: {expression}"
+    # Conditions without an explicit status function inherit success().
+    has_status = any(clause in {"always()", "!cancelled()", "success()"} for clause in clauses)
+    return has_status and all(values[clause] for clause in clauses)
+
+
+@pytest.mark.parametrize("job_name", ["merge-source", "scan-source"])
+def test_downstream_sbom_jobs_run_after_success_despite_skipped_admission(job_name: str) -> None:
+    job = _load()["jobs"][job_name]
+    results = dict.fromkeys(job["needs"], "success")
+
+    assert _downstream_job_runs(job, results)
+
+
+@pytest.mark.parametrize("job_name", ["merge-source", "scan-source"])
+def test_downstream_sbom_jobs_do_not_run_after_workflow_cancellation(job_name: str) -> None:
+    job = _load()["jobs"][job_name]
+    results = dict.fromkeys(job["needs"], "success")
+
+    assert not _downstream_job_runs(job, results, cancelled=True)
+
+
+@pytest.mark.parametrize("result", ["failure", "skipped", "cancelled"])
+@pytest.mark.parametrize(
+    ("job_name", "prerequisite"),
+    [
+        ("merge-source", "generate-python"),
+        ("merge-source", "generate-apps-workspace"),
+        ("merge-source", "generate-admin-ui"),
+        ("scan-source", "merge-source"),
+    ],
+)
+def test_downstream_sbom_jobs_require_each_successful_prerequisite(
+    job_name: str, prerequisite: str, result: str
+) -> None:
+    job = _load()["jobs"][job_name]
+    assert prerequisite in job["needs"]
+    results = dict.fromkeys(job["needs"], "success")
+    results[prerequisite] = result
+
+    assert not _downstream_job_runs(job, results)
+
+
 def test_sbom_workflow_has_read_only_reusable_entry_points() -> None:
     """Catches a source gate that cannot be reused or gains write authority."""
     workflow = _load()
