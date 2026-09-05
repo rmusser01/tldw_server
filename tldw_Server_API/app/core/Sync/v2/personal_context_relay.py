@@ -7,9 +7,12 @@ from dataclasses import dataclass, replace
 from time import monotonic_ns
 from typing import Any, Literal
 
+from tldw_Server_API.app.core.exceptions import (
+    PersonalContextAuthoritySourceError,
+    PublicationRelayPoisoned,
+)
 from tldw_Server_API.app.core.Personalization.personal_context_publication import (
     AuthorityStageReceipt,
-    PublicationRelayPoisoned,
     PublicationSourceRow,
     PublicationStageIdentity,
 )
@@ -72,10 +75,6 @@ AuthorityCanceller = Callable[
     [PublicationSourceRow | PublicationStageIdentity, AuthorityStageReceipt | None, str, str],
     Literal["removed", "absent", "applied"],
 ]
-
-
-class PersonalContextAuthoritySourceError(RuntimeError):
-    """Authenticated source content is malformed and requires durable attention."""
 
 
 @dataclass(slots=True)

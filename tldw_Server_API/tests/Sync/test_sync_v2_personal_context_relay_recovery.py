@@ -47,6 +47,8 @@ from tldw_Server_API.tests.Sync.test_sync_v2_personal_context_authority_identity
     AuthorityHarness,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def authority_harness(tmp_path, monkeypatch) -> AuthorityHarness:

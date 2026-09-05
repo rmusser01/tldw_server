@@ -122,6 +122,26 @@ without exposing attachment payloads.
 
 ## Conflict Policy
 
+### Listing pages
+
+`GET /api/v1/sync/conflicts` returns at most 20 matching conflicts per request.
+Use `limit` (1–20, default 20) and `offset` (non-negative, default 0), keeping
+`dataset_id`, `status`, and `domain` filters unchanged while paging. Results
+are ordered by creation time, then conflict ID. Advance the offset by the number
+returned until a short or empty page is received; a 20-item response is not a
+complete inventory. Offset paging is not a snapshot: resolving conflicts while
+filtering by status can shift later pages, so fetch before resolving or restart
+at offset 0 after mutations.
+
+A page containing Personal Context conflicts requires `device_id` and a valid
+`personal_context_activation_epoch` / `personal_context_continuity_token` pair.
+Proof verification covers the selected page before any conflict is returned.
+Such responses wrap the list in `conflicts` alongside `dataset_id` and the
+verified `personal_context_exchange`; pages without Personal Context entries
+retain the bare-list response, including empty pages.
+
+### Resolution
+
 Domain adapters decide whether an incoming envelope is accepted, rejected, or
 converted into a durable conflict. Sync v2 currently has adapters for notes,
 chat, workspaces, source cache, and media compatibility.

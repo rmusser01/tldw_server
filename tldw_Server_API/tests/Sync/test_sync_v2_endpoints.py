@@ -1229,6 +1229,41 @@ def test_conflict_list_page_is_bounded_to_twenty_items(client: TestClient) -> No
     assert response.status_code == 422
 
 
+def test_conflict_list_offset_reaches_every_record(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    """Clients can traverse bounded conflict pages through the public endpoint."""
+
+    sync_service.enroll_dataset(
+        user_id="user-1", dataset_id="dataset-paging", domains=["notes.note"]
+    )
+    for index in range(25):
+        sync_service.store.insert_conflict(
+            SyncConflictCreate(
+                conflict_id=f"paging-{index:02d}",
+                dataset_id="dataset-paging",
+                domain="notes.note",
+                object_id=f"note-{index}",
+                conflict_type="revision_mismatch",
+            )
+        )
+    pages = [
+        client.get(
+            "/api/v1/sync/conflicts",
+            params={"dataset_id": "dataset-paging", "limit": 20, "offset": offset},
+        )
+        for offset in (0, 20, 40)
+    ]
+    assert all(page.status_code == 200 for page in pages)
+    assert [len(page.json()) for page in pages] == [20, 5, 0]
+    assert len({item["conflict_id"] for page in pages for item in page.json()}) == 25
+    assert client.get(
+        "/api/v1/sync/conflicts",
+        params={"dataset_id": "dataset-paging", "offset": -1},
+    ).status_code == 422
+
+
 def test_non_personal_context_conflict_list_ignores_unverified_pc_proof(
     client: TestClient,
     sync_service: SyncV2Service,

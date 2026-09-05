@@ -56,6 +56,9 @@ from tldw_Server_API.tests.Sync.test_sync_v2_personal_context_authority_identity
     AuthorityHarness,
 )
 
+pytestmark = pytest.mark.unit
+
+
 _AUTHORITY_CANARY = "authority-retention-canary-8e531c31"
 _INGRESS_CANARY = "ingress-retention-canary-c94fe170"
 _CONFLICT_CANARY = "conflict-retention-canary-771c341a"

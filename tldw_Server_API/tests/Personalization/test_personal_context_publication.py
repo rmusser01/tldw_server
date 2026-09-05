@@ -1,10 +1,15 @@
+"""Verify atomic encrypted publications, replay receipts, and purge authority."""
+
 from __future__ import annotations
 
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+from loguru import logger
 from tldw_profile_core import (
     ProfileControls,
     ProfileManifest,
@@ -44,11 +49,48 @@ from tldw_Server_API.tests.Personalization.personal_context_test_support import 
     encoded_master_key,
 )
 
+if TYPE_CHECKING:
+    from loguru import Message
+
+pytestmark = pytest.mark.unit
+
 NOW = datetime(2026, 9, 3, 12, 0, tzinfo=UTC)
 
 
+@pytest.mark.parametrize("sink_fails", [False, True])
+def test_post_commit_relay_failure_logs_without_protected_content(
+    service: PersonalContextService,
+    sink_fails: bool,
+) -> None:
+    """A committed profile remains successful while a fixed failure event is logged."""
+
+    events: list[object] = []
+
+    def capture_event(message: Message) -> None:
+        events.append(message.record)
+        if sink_fails:
+            raise RuntimeError("PR2868-PROTECTED-SINK-ERROR")
+
+    sink = logger.add(capture_event, catch=False)
+
+    def fail_relay(profile_id: str) -> None:
+        raise RuntimeError("PR2868-PROTECTED-RELAY-ERROR")
+
+    service.set_after_commit_relay(fail_relay)
+    try:
+        manifest = service.create_profile()
+        assert service.get_manifest() == manifest
+        service._relay_after_commit("PR2868-PROTECTED-PROFILE")
+    finally:
+        logger.remove(sink)
+    if not events:
+        pytest.fail("relay failure diagnostic missing", pytrace=False)
+    if "PR2868-PROTECTED" in str(events):
+        pytest.fail("relay diagnostic exposed protected content", pytrace=False)
+
+
 @pytest.fixture()
-def database(tmp_path, monkeypatch) -> PersonalizationDB:
+def database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PersonalizationDB:
     monkeypatch.setenv("TLDW_PERSONAL_CONTEXT_MASTER_KEY", encoded_master_key())
     return PersonalizationDB.for_path(tmp_path / "personalization.db")
 

@@ -25,6 +25,7 @@ from tldw_profile_core import (
 )
 from tldw_profile_core.canonical import canonical_json_bytes
 
+from tldw_Server_API.app.core.exceptions import PublicationRelayPoisoned
 from tldw_Server_API.app.core.Personalization.personal_context_crypto import (
     EncryptedEnvelope,
     EnvelopeAuthenticationError,
@@ -163,10 +164,6 @@ class PublicationSourceBatch:
     profile_publication_sequence: int
     publication_batch_id: str
     rows: tuple[PublicationSourceRow, ...]
-
-
-class PublicationRelayPoisoned(RuntimeError):
-    """Content-free durable attention state for the earliest corrupt batch."""
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,3 +1,5 @@
+"""Verify authenticated legacy receipt backfill and content-free failure handling."""
+
 from __future__ import annotations
 
 import hashlib
@@ -41,6 +43,9 @@ from tldw_Server_API.tests.Personalization.personal_context_test_support import 
     encoded_master_key,
     proposal,
 )
+
+pytestmark = pytest.mark.unit
+
 
 REPLAY_ERROR = "ingress identity reused with a different payload"
 PROTECTED_CANARY = "PRIVATE-PROFILE-DIAGNOSTIC-CANARY"

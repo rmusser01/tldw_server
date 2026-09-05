@@ -1852,11 +1852,11 @@ class SyncV2Service:
     ) -> AuthorityStageReceipt:
         """Persist one authenticated journal row as internal home-authority egress."""
 
+        from tldw_Server_API.app.core.exceptions import PersonalContextAuthoritySourceError
         from tldw_Server_API.app.core.Personalization.personal_context_publication import (
             AuthorityStageReceipt,
         )
 
-        from .personal_context_relay import PersonalContextAuthoritySourceError
         from .server_origin import insert_personal_context_authority
 
         dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)

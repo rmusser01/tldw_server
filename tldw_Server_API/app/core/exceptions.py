@@ -171,6 +171,14 @@ class PersonalContextError(RuntimeError):
     """Base error for canonical Personal Context operations."""
 
 
+class PublicationRelayPoisoned(PersonalContextError):
+    """Content-free durable attention state for the earliest corrupt batch."""
+
+
+class PersonalContextAuthoritySourceError(PersonalContextError):
+    """Authenticated source content is malformed and requires durable attention."""
+
+
 class ProfileStorageLockedError(PersonalContextError):
     """Report unavailable or unauthenticated server profile key material."""
 

@@ -58,6 +58,8 @@ from tldw_Server_API.tests.Personalization.personal_context_test_support import 
     preference_record,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class AuthorityHarness:
     """Real two-store harness for one unacknowledged authority source row."""

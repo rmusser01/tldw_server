@@ -1,3 +1,5 @@
+"""Verify strict ongoing-sync wire models and reproducible contract artifacts."""
+
 from __future__ import annotations
 
 import hashlib
@@ -19,6 +21,8 @@ from tldw_Server_API.app.core.Sync.v2.personal_context_ongoing_contract import (
     export_personal_context_ongoing_contract,
     validate_client_personal_context_metadata,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_exchange_proof_requires_exact_version_epoch_and_token() -> None:

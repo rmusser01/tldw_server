@@ -1642,6 +1642,31 @@ def test_mixed_conflict_page_with_personal_context_is_gated_without_leakage(
     assert "private_marker" not in response.text
 
 
+def test_conflict_offset_checks_proof_for_the_selected_page(tmp_path: Path) -> None:
+    """Paging past public notes never bypasses the Personal Context proof gate."""
+
+    service, _target, _sqlite_path = _service(tmp_path)
+    for conflict_id, domain in (("a-note", "notes.note"), ("b-personal", DOMAIN)):
+        _insert_conflict(
+            service, conflict_id=conflict_id, domain=domain, with_source=False
+        )
+    client = _client(service)
+    first = client.get(
+        "/api/v1/sync/conflicts",
+        params={"dataset_id": DATASET_ID, "limit": 1, "offset": 0},
+    )
+    second = client.get(
+        "/api/v1/sync/conflicts",
+        params={"dataset_id": DATASET_ID, "limit": 1, "offset": 1},
+    )
+
+    assert first.status_code == 200
+    assert [item["conflict_id"] for item in first.json()] == ["a-note"]
+    assert second.status_code == 409
+    assert "b-personal" not in second.text
+    assert "private_marker" not in second.text
+
+
 def test_conflict_domain_query_rejects_unknown_domain_at_boundary(
     tmp_path: Path,
 ) -> None:

@@ -32,7 +32,18 @@ def _canonical_json_bytes(value: object) -> bytes:
 
 
 def generate_contract_artifacts(*, source_commit: str, output_dir: Path) -> tuple[Path, Path]:
-    """Write the versioned schema and a digest-bound provenance manifest."""
+    """Write the versioned schema and a digest-bound provenance manifest.
+
+    Args:
+        source_commit: Server source revision recorded in the provenance manifest.
+        output_dir: Directory to create or reuse for the generated JSON files.
+
+    Returns:
+        The schema path followed by the provenance manifest path.
+
+    Raises:
+        OSError: If the output directory or either artifact cannot be written.
+    """
 
     output_dir.mkdir(parents=True, exist_ok=True)
     schema_bytes = _canonical_json_bytes(export_personal_context_ongoing_contract())

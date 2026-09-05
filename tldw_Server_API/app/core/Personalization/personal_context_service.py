@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
+from loguru import logger
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 from tldw_profile_core import (
     ActorType,
@@ -199,6 +200,12 @@ class PersonalContextService:
             self._after_commit_relay(profile_id)
         except Exception:  # noqa: BLE001 - post-commit delivery must be isolated.
             # Relay debt is durable; mutation success must never depend on egress.
+            try:
+                logger.opt(exception=False).warning(
+                    "personal_context_after_commit_relay_failed: durable recovery pending"
+                )
+            except Exception:  # noqa: BLE001 - a failing log sink cannot undo a commit.
+                return
             return
 
     def _now(self) -> datetime:

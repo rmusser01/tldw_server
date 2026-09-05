@@ -1754,7 +1754,13 @@ def list_sync_v2_conflicts(
     conflict_status: ConflictStatus | None = Query(None, alias="status"),
     domain: SyncDomain | None = Query(None),
     device_id: str | None = Query(None, min_length=1),
-    limit: int = Query(20, ge=1, le=20),
+    limit: int = Query(
+        20, ge=1, le=20,
+        description="Page size; advance offset until a short or empty page is returned.",
+    ),
+    offset: int = Query(
+        0, ge=0, description="Number of matching conflicts to skip in stable creation/ID order.",
+    ),
     personal_context_activation_epoch: str | None = Query(None, min_length=16, max_length=256),
     personal_context_continuity_token: str | None = Query(None, min_length=16, max_length=256),
     user: User = Depends(get_request_user),
@@ -1771,6 +1777,7 @@ def list_sync_v2_conflicts(
             status=conflict_status,
             domain=domain,
             limit=limit,
+            offset=offset,
             device_id=device_id,
             personal_context_exchange=personal_context_exchange,
         )
