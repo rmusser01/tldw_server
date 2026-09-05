@@ -1337,9 +1337,11 @@ Resolve only this task's conflicts. Do not overwrite concurrent work.
 
 2026-09-04 rebase checkpoint: rebased all 36 commits onto `c5dfe0ff73d17e177380551c946c109008d0c2cd`, preserving every upstream monitoring-rotation test in the sole textual conflict. A recovery branch retains the pre-rebase checkpoint. Added the newly upstreamed public `packages/tldw_profile_core` to all three locked Python builder contexts, without changing that package. An isolated wheel contains its modules, schemas, and fixtures. Fixed an existing preflight test's reproducible logging-capture dependency by owning and removing only its own sink. The same failing-order seed now passes all 549 focused tests; independent re-review reports no Important/Critical defects. Upstream also raised the Python minimum to 3.11 and added `rfc8785==0.1.4`: regenerated the universal lock with uv 0.12.7 while retaining the prior Docling versions, adding only rfc8785 and dropping obsolete package variants. The resulting 654-package lock passes offline checks; both Bun locks remain unchanged; all 106 supply-chain tests pass after regeneration. The regenerated 297-component Python SBOM still reports 2 Critical and 5 High findings using the pinned scanner and the database updated 2026-09-04T13:08:55Z. Certification remains blocked; these findings are not approved exceptions.
 
-- [ ] **Step 12: Open the PR with the requester-authored Change summary**
+- [x] **Step 12: Open the PR with the requester-authored Change summary**
 
 Before opening or merging, obtain a human-written `Change summary` explaining what changed and why these lock, scan, digest, promotion, and exception choices were made. Add the task/spec/plan, verification, evidence, platform, frontend-publication boundary, and known limitations to the PR body.
+
+2026-09-04: requester supplied the Change summary and authorized publication against `dev`. Opened [PR #2869](https://github.com/rmusser01/tldw_server/pull/2869) with that summary verbatim, technical scope, verification, and explicit remaining blockers. Publication uses sanitized commit `843dc9e8cc`; original development history is retained locally. CI/review and live release certification remain pending.
 
 - [ ] **Step 13: Address automated and human review, then merge only when green**
 
