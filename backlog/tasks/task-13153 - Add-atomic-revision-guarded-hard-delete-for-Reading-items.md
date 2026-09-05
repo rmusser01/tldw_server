@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-03 02:27'
-updated_date: '2026-09-05 23:08'
+updated_date: '2026-09-05 23:47'
 labels:
   - collections
   - reading-list
@@ -52,5 +52,5 @@ diagnostic-privacy behavior are covered.
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-ADR required: yes; ADR path: backlog/decisions/003-reading-atomic-hard-delete.md (existing contract). Execute approved Docs/superpowers/plans/2026-09-05-reading-output-file-reservations.md inline, draft PR https://github.com/rmusser01/tldw_server/pull/2903 against dev. Task4a complete as a separately verified foundation: descriptor-owning bounded/offloaded response reuses Starlette HTTP/range helpers and existing cancellation draining, with real generic download compatibility characterization. 37 descriptor cases plus 14 SQLite compatibility and 12 prior completion regressions = 63 local passes; 14 required PostgreSQL compatibility passes = 77 distinct cases, no required-backend skips. Review feedback addressed (failed header setup releases descriptor), constructor OSError and 416 compatibility findings fixed; final Ruff/Black/compile/diff and scoped Bandit clean. Exact commands/logs and limitations recorded in plan. Next Task4b: protected current-row lookup after exclusion; structural namespace and committed-witness validation; generic and Watchlist download/content-loader migration and end-to-end path-reuse races. Preserve characterized inactive HEAD and conditional behavior. No production caller uses the response yet; entire Task4 remains incomplete. No activation/background registration/merge/full sweep; TASK-13153 In Progress and full-task AC unchecked.
+ADR required: yes; ADR path: backlog/decisions/003-reading-atomic-hard-delete.md (existing contract). Continue approved Docs/superpowers/plans/2026-09-05-reading-output-file-reservations.md inline on draft PR 2903. Task 4b protected generic ID/title/HEAD lookup checkpoint implemented and reviewed: DB-owned current-row snapshots under verified storage exclusion, non-creating root resolution, strict namespace/ownership/publication evidence, descriptor-relative open, preserved inactive HTTP behavior and cancellation cleanup. Final targeted verification: 97 descriptor/SQLite route cases in 54.12s, 57 existing generic/managed-output regressions in 98.69s, and 60 required PostgreSQL cases in 307.48s (214 distinct passes, no required-backend skips); exact commands/logs in plan checkpoint. Service/new-test Ruff and Black, scoped DB Black, compile/diff and scoped Bandit pass; DB nine and endpoint one pre-existing Ruff findings unchanged by code/message. Independent review findings addressed with RED/GREEN regressions for malformed witness identity and metadata-error descriptor cleanup. Next: Task 4c Watchlist download/content-loader and sidecar audit/migration; do not claim all Task 4 complete. No activation/background registration/full sweep/Docker provisioning/merge; task In Progress and full-task AC unchecked. PR remains draft; human-written Change summary gate pending.
 <!-- SECTION:PLAN:END -->

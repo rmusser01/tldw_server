@@ -16,7 +16,7 @@
 opened at `f43549c209` on user request; implementation continues on the same branch).
 **Approved spec:** `Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md`, user approved after checkpoint `8dc255fcca`.
 **Parent plan:** `Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md`; this plan replaces its generic-file-writer gap, not its remaining Reading DTO/HTTP/reconciliation/release tasks.
-**Status:** Inline execution in progress. Task 1, Task 2a, Task 2b, Task 3a staging/write and Task 3b's recorded commit, copy/publication, recovery and real-process kill/progress checkpoints verified on SQLite/PostgreSQL. Immediate post-commit cleanup now reuses recovery under publication exclusion; checkpoint verification is recorded below. Protected readers, history/producer integration and Task 9 background lifecycle/activation remain pending.
+**Status:** Inline execution in progress. Task 1, Task 2a, Task 2b, Task 3a staging/write and Task 3b's recorded commit, copy/publication, recovery and real-process kill/progress checkpoints verified on SQLite/PostgreSQL. Immediate post-commit cleanup reuses recovery under publication exclusion. Task 4a descriptor responses and Task 4b protected generic downloads are implemented; checkpoint verification is recorded below. Task 4c Watchlist readers, history/producer integration and Task 9 background lifecycle/activation remain pending.
 
 ---
 
@@ -159,8 +159,9 @@ Execution split: Task 4a characterizes existing generic HTTP downloads and the
 response-start/path-reuse race, then establishes the bounded descriptor-owning
 response and its lifetime/HTTP tests. Reuse installed Starlette range/header
 helpers, not a pathname response or a new HTTP parser. Task 4b adds protected
-DB lookup, namespace/publication-witness checks, and migrates generic plus
-Watchlist downloads/content loaders. Neither the response foundation alone nor
+DB lookup, namespace/publication-witness checks, and migrates generic ID/title/HEAD
+downloads. Task 4c then audits and migrates Watchlist downloads/content loaders
+and sidecar output reads. Neither the response foundation alone nor
 its compatibility tests establish protected lookup or activated-reader readiness.
 
 - [ ] Characterize current download-by-ID, by-name and HEAD success/missing/auth/Content-Disposition/range/conditional behavior with real endpoint tests before replacing FileResponse. Add race tests paused before protected lookup and after descriptor open. Run `python -m pytest tldw_Server_API/tests/Collections/test_output_file_responses.py -q` and confirm new race assertions fail.
@@ -911,3 +912,58 @@ committed-witness checks, generic/Watchlist download and content-loader dispatch
 and their end-to-end races are next. No production caller uses the new response
 yet. No runtime activation/background-worker change; TASK-13153 is In Progress
 and PR #2903 remains draft with the human-written Change summary gate pending.
+
+### Task 4b: Protected generic download lookup (2026-09-05)
+
+Generic ID/title/HEAD routes now select a protected response when a per-user
+storage binding exists. DB-owned snapshots reject unsupported or inconsistent
+bindings, wrong structural ownership namespaces and ambiguous/uncommitted
+publication evidence. An absent binding permits legacy dispatch only when no
+Reading ownership/path or output-operation authority exists. Mutation-worker
+health is intentionally not a read prerequisite.
+
+The existing verified storage lock covers current-row lookup and nofollow open
+relative to that same directory descriptor. Path resolution does not provision
+directories: a missing mount fails closed. Regular single-link files are accepted;
+extra links require exact committed publication identity and witness evidence.
+The response retains the opened inode across path deletion/reuse. HEAD preserves
+the existing type/length-only header policy, and cancellation drains protected
+open work before closing an unreturned response.
+
+Fourteen initial real-route tests failed before implementation, then passed.
+Expanded tests cover ownership, special files, hardlinks, committed witness
+states, current-row deletion/retarget before lock acquisition, root replacement,
+HEAD cleanup and direct cancellation. Two additional fault tests exposed a
+malformed recorded link-count acceptance and a metadata-error descriptor leak;
+requiring recorded nlink=2 and calculating media type before opening fixed both.
+Independent follow-up review found no remaining actionable checkpoint findings.
+
+Verification commands after Server virtual-environment activation:
+
+```bash
+TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_output_protected_downloads.py tldw_Server_API/tests/Collections/test_output_download_compatibility.py tldw_Server_API/tests/Collections/test_output_file_responses.py -q -k 'not postgres'
+TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_items_and_outputs_api.py tldw_Server_API/tests/Collections/test_reading_output_updates.py -q -k 'not postgres'
+TLDW_TEST_NO_DOCKER=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest tldw_Server_API/tests/Collections/test_output_protected_downloads.py tldw_Server_API/tests/Collections/test_output_download_compatibility.py -q -k postgres -n 2
+```
+
+The first two runs passed 97 cases in 54.12 seconds and 57 cases in 98.69 seconds.
+All 60 required PostgreSQL cases passed in 307.48 seconds: 214 distinct targeted
+cases overall, with no required-backend skips. Earlier overlapping runs are not
+counted again. The already-running local PostgreSQL instance was reused.
+Ruff/Black pass for the response service and new tests, and scoped DB Black,
+compile and diff checks pass. Whole-file lint is not clean: the DB's nine and
+endpoint's one pre-existing Ruff findings match HEAD by code/message. Scoped
+production Bandit reports no findings or scanner errors; test Bandit also passes
+with only B101 (pytest assertions) excluded.
+
+Logs: `/private/tmp/task-13153-lookup-{red,green,expanded,fault-red,reviewed}.log`,
+`/private/tmp/task-13153-lookup-existing.log`,
+`/private/tmp/task-13153-lookup-pg.log`,
+`/private/tmp/task-13153-lookup-bandit.json`, and
+`/private/tmp/task-13153-lookup-tests-bandit.json`.
+
+Existing ADR-003 applies; no new dependency or architecture decision. Task 4c's
+Watchlist download/content-loader and sidecar audit is next, not completed here.
+The full Task 4 checklist and TASK-13153 ACs remain incomplete. No activation or
+background-worker registration, full sweep, Docker provisioning or merge; PR
+#2903 remains draft and the human-written Change summary gate remains pending.

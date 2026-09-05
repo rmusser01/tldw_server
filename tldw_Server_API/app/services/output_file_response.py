@@ -1,8 +1,9 @@
-"""Bounded responses over an already-authorized file descriptor; lookup wiring pending."""
+"""Protected generic output lookup and bounded opened-descriptor responses."""
 
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import stat
 from functools import partial
@@ -10,6 +11,7 @@ from secrets import token_hex
 from urllib.parse import quote
 
 import anyio
+from fastapi import HTTPException
 from starlette.datastructures import Headers
 from starlette.responses import (
     FileResponse,
@@ -21,7 +23,110 @@ from starlette.responses import (
 )
 from starlette.types import Receive, Scope, Send
 
-from tldw_Server_API.app.services.output_file_operations import _wait_worker
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.services.output_file_operations import _require_identity, _stat_optional, _wait_worker
+from tldw_Server_API.app.services.reading_artifact_cleanup_service import (
+    ReadingStorageBusy,
+    ReadingStorageUnavailable,
+    _validated_storage_directory,
+)
+
+
+async def protected_output_response(
+    db: CollectionsDatabase,
+    *,
+    output_id: int | None = None,
+    title: str | None = None,
+    format_: str | None = None,
+    head_only: bool = False,
+) -> Response | None:
+    """Open activated downloads safely; None permits only genuinely inactive legacy dispatch."""
+    response = None
+    try:
+        with anyio.CancelScope(shield=True):
+            response, cancelled = await _wait_worker(
+                partial(
+                    _open_output_response,
+                    db,
+                    output_id=output_id,
+                    title=title,
+                    format_=format_,
+                )
+            )
+        if cancelled:
+            raise asyncio.CancelledError
+        await anyio.lowlevel.checkpoint_if_cancelled()
+        if head_only and response is not None:
+            # Preserve the generic HEAD route's existing headers and range policy.
+            headers = {key: response.headers[key] for key in ("content-type", "content-length")}
+            response.close()
+            return Response(headers=headers)
+        return response
+    except BaseException:
+        if response is not None:
+            response.close()
+        raise
+
+
+def _open_output_response(db, *, output_id, title, format_):
+    response = None
+    try:
+        namespace = db.get_output_read_namespace()
+        if namespace is None:
+            return None
+        root = DatabasePaths.resolve_user_base_directory(db.user_id) / DatabasePaths.OUTPUTS_SUBDIR
+        with _validated_storage_directory(root, storage_namespace_id=namespace) as (_, directory):
+            row, proof = db.get_output_file_read_state(namespace, output_id=output_id, title=title, format_=format_)
+            name = db._output_operation_filename(row.storage_path)
+            media_type = {
+                "md": "text/markdown; charset=utf-8",
+                "html": "text/html; charset=utf-8",
+                "mp3": "audio/mpeg",
+            }.get(row.format.lower(), "application/octet-stream")
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+            try:
+                info = os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode):
+                    raise RuntimeError("output_storage_unavailable")
+                if proof is None:
+                    if info.st_nlink != 1:
+                        raise RuntimeError("output_storage_unavailable")
+                else:
+                    identity = json.loads(proof["publication_identity_json"] or "null")
+                    stage_name = proof["stage_path"]
+                    if (
+                        not isinstance(identity, dict)
+                        or identity.get("nlink") != 2
+                        or any(type(value) is not int for value in identity.values())
+                        or not isinstance(stage_name, str)
+                        or not stage_name.startswith(".output-stage-")
+                        or len(stage_name) != len(".output-stage-") + 32
+                        or any(char not in "0123456789abcdef" for char in stage_name[len(".output-stage-") :])
+                    ):
+                        raise RuntimeError("output_storage_unavailable")
+                    stage = _stat_optional(directory, stage_name)
+                    _require_identity(info, {**identity, "nlink": 2 if stage else 1}, size=proof["written_bytes"])
+                    if stage is not None:
+                        _require_identity(stage, identity, size=proof["written_bytes"])
+            except BaseException:
+                os.close(fd)
+                raise
+            response = OpenedOutputResponse(fd, filename=name, media_type=media_type)
+        return response
+    except BaseException as exc:
+        if response is not None:
+            response.close()
+        if isinstance(exc, KeyError):
+            raise HTTPException(404, "output_not_found") from None
+        if isinstance(exc, FileNotFoundError):
+            raise HTTPException(404, "file_missing") from None
+        if isinstance(exc, ReadingStorageBusy):
+            raise HTTPException(409, "output_file_busy") from None
+        if isinstance(exc, (OSError, ReadingStorageUnavailable, RuntimeError, ValueError, TypeError, DatabaseError)):
+            raise HTTPException(503, "output_storage_unavailable") from None
+        raise
 
 
 class OpenedOutputResponse(StreamingResponse):

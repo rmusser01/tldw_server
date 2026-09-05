@@ -3027,6 +3027,82 @@ class CollectionsDatabase:
         with self._read_snapshot() as conn:
             return self._output_storage_policy(storage_namespace_id, conn)
 
+    def _output_read_namespace(self, connection: Any) -> str | None:
+        row = self.backend.execute(
+            "SELECT storage_namespace_id, protocol_version FROM output_storage_bindings WHERE user_id = ?",
+            (self.user_id,),
+            connection=connection,
+        ).first
+        if row:
+            namespace = row["storage_namespace_id"]
+            if row["protocol_version"] != 1 or not isinstance(namespace, str) or not namespace.strip():
+                raise RuntimeError("output_storage_unavailable")
+            return namespace
+        if self.backend.execute(
+            "SELECT 1 FROM reading_output_ownership WHERE user_id = ? "
+            "UNION ALL SELECT 1 FROM reading_artifact_paths WHERE user_id = ? "
+            "UNION ALL SELECT 1 FROM output_file_operations WHERE user_id = ? LIMIT 1",
+            (self.user_id, self.user_id, self.user_id),
+            connection=connection,
+        ).first:
+            raise RuntimeError("output_storage_unavailable")
+        return None
+
+    def get_output_read_namespace(self) -> str | None:
+        """Return read binding, or None only for genuinely inactive storage.
+
+        This read does not provision storage or require mutation-worker health.
+        The protected lookup must recheck binding after acquiring exclusion.
+        """
+        with self._read_snapshot() as conn:
+            return self._output_read_namespace(conn)
+
+    def get_output_file_read_state(
+        self,
+        storage_namespace_id: str,
+        *,
+        output_id: int | None = None,
+        title: str | None = None,
+        format_: str | None = None,
+    ) -> tuple[CollectionsDatabase.OutputArtifactRow, dict[str, Any] | None]:
+        """Read current metadata and publication evidence under caller-held storage exclusion."""
+        if (output_id is None) == (title is None):
+            raise ValueError("output_operation_invalid")
+        with self._read_snapshot() as conn:
+            if self._output_read_namespace(conn) != storage_namespace_id:
+                raise RuntimeError("output_storage_unavailable")
+            row = (
+                self.get_output_artifact(output_id, connection=conn)
+                if output_id is not None
+                else self.get_output_artifact_by_title(title, format_, connection=conn)
+            )
+            owner = self.backend.execute(
+                "SELECT user_id, storage_namespace_id FROM reading_output_ownership WHERE output_id = ?",
+                (row.id,),
+                connection=conn,
+            ).first
+            if (
+                owner and (owner["user_id"] != self.user_id or owner["storage_namespace_id"] != storage_namespace_id)
+            ) or (row.type == "reading_archive" and not owner):
+                raise RuntimeError("output_storage_unavailable")
+            name = self._output_operation_filename(row.storage_path)
+            publications = self.backend.execute(
+                "SELECT output_id, phase, destination_path, stage_path, publication_identity_json, written_bytes "
+                "FROM output_file_operations WHERE user_id = ? AND storage_namespace_id = ? AND fs_done = 0 "
+                "AND (destination_key = ? OR stage_key = ?) LIMIT 2",
+                (self.user_id, storage_namespace_id, name.lower(), name.lower()),
+                connection=conn,
+            ).rows
+            proof = dict(publications[0]) if publications else None
+            if proof and (
+                len(publications) != 1
+                or proof["phase"] != "committed"
+                or proof["output_id"] != row.id
+                or proof["destination_path"] != name
+            ):
+                raise RuntimeError("output_storage_unavailable")
+            return row, proof
+
     def record_output_file_progress(
         self,
         token: str,
@@ -6738,7 +6814,12 @@ class CollectionsDatabase:
         return DeletedOutput(storage_path=current["storage_path"], managed=bool(owner), shared=shared_path)
 
     def get_output_artifact_by_title(
-        self, title: str, format_: str | None = None, include_deleted: bool = False
+        self,
+        title: str,
+        format_: str | None = None,
+        include_deleted: bool = False,
+        *,
+        connection: Any | None = None,
     ) -> CollectionsDatabase.OutputArtifactRow:
         where = ["user_id = ?", "title = ?"]
         params: list[Any] = [self.user_id, title]
@@ -6751,7 +6832,7 @@ class CollectionsDatabase:
             "SELECT id, user_id, job_id, run_id, type, title, format, storage_path, metadata_json, workspace_tag, created_at, media_item_id, chatbook_path, idempotency_key "  # nosec B608
             f"FROM outputs WHERE {' AND '.join(where)} ORDER BY created_at DESC LIMIT 1"
         )
-        row = self.backend.execute(q, tuple(params)).first
+        row = self.backend.execute(q, tuple(params), connection=connection).first
         if not row:
             raise KeyError("output_not_found")
         return CollectionsDatabase.OutputArtifactRow(**row)

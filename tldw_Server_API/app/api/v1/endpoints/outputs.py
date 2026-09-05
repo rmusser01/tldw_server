@@ -47,6 +47,7 @@ from tldw_Server_API.app.services.outputs_service import (
     render_output_template,
     update_output_artifact_db,
 )
+from tldw_Server_API.app.services.output_file_response import protected_output_response
 
 router = APIRouter(prefix="/outputs", tags=["outputs"])
 
@@ -547,6 +548,9 @@ async def download_output(
     current_user: User = Depends(get_request_user),
     cdb = Depends(get_collections_db_for_user),
 ):
+    protected = await protected_output_response(cdb, output_id=output_id)
+    if protected is not None:
+        return protected
     try:
         row = cdb.get_output_artifact(output_id)
     except KeyError:
@@ -604,6 +608,9 @@ async def download_output_by_name(
     current_user: User = Depends(get_request_user),
     cdb = Depends(get_collections_db_for_user),
 ):
+    protected = await protected_output_response(cdb, title=title, format_=format or None)
+    if protected is not None:
+        return protected
     try:
         row = cdb.get_output_artifact_by_title(title, format_=(format if format else None))
     except KeyError:
@@ -652,6 +659,9 @@ async def head_download_output(
     current_user: User = Depends(get_request_user),
     cdb = Depends(get_collections_db_for_user),
 ):
+    protected = await protected_output_response(cdb, output_id=output_id, head_only=True)
+    if protected is not None:
+        return protected
     try:
         row = cdb.get_output_artifact(output_id)
     except KeyError:
