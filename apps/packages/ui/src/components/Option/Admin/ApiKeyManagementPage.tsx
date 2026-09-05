@@ -376,7 +376,18 @@ const ApiKeyManagementPage: React.FC = () => {
           <Form.Item name="name" label={t("settings:adminApiKeys.keyNameLabel", "Key Name (optional)")}>
             <Input placeholder={t("settings:adminApiKeys.keyNamePlaceholder", "e.g. Production Key")} />
           </Form.Item>
-          <Form.Item name="rate_limit" label={t("settings:adminApiKeys.rateLimitLabel", "Rate Limit (requests/minute, optional)")}>
+          <Form.Item
+            name="rate_limit"
+            label={t("settings:adminApiKeys.rateLimitLabel", "Rate Limit (requests/minute, optional)")}
+            extra={
+              <a href="/admin/rate-limiting">
+                {t(
+                  "settings:adminApiKeys.rateLimitCrossLink",
+                  "Baseline limits and endpoint coverage live in Rate Limiting."
+                )}
+              </a>
+            }
+          >
             <Input type="number" placeholder={t("settings:adminApiKeys.rateLimitDefault", "Default")} />
           </Form.Item>
         </Form>

@@ -269,7 +269,12 @@ const UsageAnalyticsPage: React.FC = () => {
   return (
     <div style={{ padding: "24px", maxWidth: 1200 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <h1 style={{ margin: 0, fontSize: "1.5rem", fontWeight: 600 }}>{t("settings:adminUsage.title", "Usage Analytics")}</h1>
+        <span style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
+          <h1 style={{ margin: 0, fontSize: "1.5rem", fontWeight: 600 }}>{t("settings:adminUsage.title", "Usage Analytics")}</h1>
+          <a href="/admin/billing" style={{ fontSize: "0.85rem" }}>
+            {t("settings:adminUsage.billingCrossLink", "Costs and spend live in Billing")}
+          </a>
+        </span>
         <Select
           value={dateRange}
           onChange={(val) => setDateRange(val)}

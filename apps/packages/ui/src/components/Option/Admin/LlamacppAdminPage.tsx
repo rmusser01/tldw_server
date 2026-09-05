@@ -1229,7 +1229,9 @@ export const LlamacppAdminPage: React.FC = () => {
         )}
 
         <div>
-          <Title level={2}>
+          {/* level 1: this is the page heading; it must exist even while the
+              backend is unavailable (#2898 L2). Sized to match level 2. */}
+          <Title level={1} style={{ fontSize: 30 }}>
             {t("option:header.adminLlamacpp", "Llama.cpp Admin")}
           </Title>
           <Text type="secondary">
