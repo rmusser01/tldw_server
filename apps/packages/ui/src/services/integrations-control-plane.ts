@@ -238,14 +238,18 @@ export async function deletePersonalIntegration(
 export async function listWorkspaceIntegrations(): Promise<IntegrationOverviewResponse> {
   return await bgRequest<IntegrationOverviewResponse>({
     path: "/api/v1/integrations/workspace",
-    method: "GET"
+    method: "GET",
+    // Capability probe: absent on servers without the module (#2896).
+    expectedStatuses: [404, 405, 410, 501]
   })
 }
 
 export async function getWorkspaceSlackPolicy(): Promise<SlackWorkspacePolicyResponse> {
   return await bgRequest<SlackWorkspacePolicyResponse>({
     path: "/api/v1/integrations/workspace/slack/policy",
-    method: "GET"
+    method: "GET",
+    // Capability probe: absent on servers without the module (#2896).
+    expectedStatuses: [404, 405, 410, 501]
   })
 }
 
@@ -263,7 +267,9 @@ export async function updateWorkspaceSlackPolicy(
 export async function getWorkspaceDiscordPolicy(): Promise<DiscordWorkspacePolicyResponse> {
   return await bgRequest<DiscordWorkspacePolicyResponse>({
     path: "/api/v1/integrations/workspace/discord/policy",
-    method: "GET"
+    method: "GET",
+    // Capability probe: absent on servers without the module (#2896).
+    expectedStatuses: [404, 405, 410, 501]
   })
 }
 
@@ -281,7 +287,9 @@ export async function updateWorkspaceDiscordPolicy(
 export async function getWorkspaceTelegramBot(): Promise<TelegramBotConfigResponse> {
   return await bgRequest<TelegramBotConfigResponse>({
     path: "/api/v1/integrations/workspace/telegram/bot",
-    method: "GET"
+    method: "GET",
+    // Capability probe: absent on servers without the module (#2896).
+    expectedStatuses: [404, 405, 410, 501]
   })
 }
 
@@ -308,7 +316,9 @@ export async function createWorkspaceTelegramPairingCode(): Promise<TelegramPair
 export async function listWorkspaceTelegramLinkedActors(): Promise<TelegramLinkedActorListResponse> {
   return await bgRequest<TelegramLinkedActorListResponse>({
     path: "/api/v1/integrations/workspace/telegram/linked-actors",
-    method: "GET"
+    method: "GET",
+    // Capability probe: absent on servers without the module (#2896).
+    expectedStatuses: [404, 405, 410, 501]
   })
 }
 
