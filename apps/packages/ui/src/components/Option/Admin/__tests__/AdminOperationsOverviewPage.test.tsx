@@ -5,7 +5,7 @@ import { render, screen, waitFor, within } from "@testing-library/react"
 
 const apiMock = vi.hoisted(() => ({
   getSystemStats: vi.fn(),
-  listAlertHistory: vi.fn(),
+  getSecurityAlertStatus: vi.fn(),
   listBackups: vi.fn(),
   getLlamacppStatus: vi.fn(),
   getMlxStatus: vi.fn(),
@@ -23,7 +23,7 @@ describe("AdminOperationsOverviewPage", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     apiMock.getSystemStats.mockResolvedValue({ users: { total: 1 } })
-    apiMock.listAlertHistory.mockResolvedValue([])
+    apiMock.getSecurityAlertStatus.mockResolvedValue({ health: "ok" })
     apiMock.listBackups.mockResolvedValue({ backups: [] })
     apiMock.getLlamacppStatus.mockRejectedValue(new Error("Request failed: 503"))
     apiMock.getMlxStatus.mockResolvedValue({ active: false })
@@ -64,7 +64,7 @@ describe("AdminOperationsOverviewPage", () => {
 
     // Healthy / attention signals from resolved fetchers.
     expect(await screen.findByText("1 user")).toBeInTheDocument()
-    expect(screen.getByText("No open alerts")).toBeInTheDocument()
+    expect(screen.getByText("Alerting healthy")).toBeInTheDocument()
     expect(screen.getByText("No backups yet")).toBeInTheDocument()
     expect(screen.getByText("No model loaded")).toBeInTheDocument()
     expect(screen.getByText("78.9% endpoint coverage")).toBeInTheDocument()

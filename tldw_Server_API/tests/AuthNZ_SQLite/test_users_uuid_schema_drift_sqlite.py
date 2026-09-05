@@ -21,6 +21,7 @@ pytestmark = pytest.mark.unit
 
 
 def _connect(db_path: pathlib.Path) -> sqlite3.Connection:
+    """Open a SQLite connection with dict-style row access for assertions."""
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn

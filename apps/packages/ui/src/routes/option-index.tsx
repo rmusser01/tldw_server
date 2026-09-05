@@ -96,7 +96,7 @@ const SETUP_BANNER_DISMISSED_KEY = "__tldw_setup_banner_dismissed"
 
 const OptionIndex = () => {
   const hostedMode = isHostedTldwDeployment()
-  const { phase } = useConnectionState()
+  const { phase, serverUrl } = useConnectionState()
   const { checkOnce } = useConnectionActions()
   const {
     state: firstRunState,
@@ -109,16 +109,22 @@ const OptionIndex = () => {
     readFirstSourceDismissed
   )
   const navigate = useNavigate()
-  const [setupBannerDismissed, setSetupBannerDismissed] = React.useState(() => {
+  // Dismissal is scoped per server so switching connections in the same
+  // browser profile does not inherit another server's dismissal.
+  const setupBannerDismissKey = `${SETUP_BANNER_DISMISSED_KEY}::${
+    serverUrl || "unconfigured"
+  }`
+  const [sessionDismissedBannerKeys, setSessionDismissedBannerKeys] =
+    React.useState<ReadonlySet<string>>(() => new Set())
+  const setupBannerDismissed = React.useMemo(() => {
+    if (sessionDismissedBannerKeys.has(setupBannerDismissKey)) return true
     if (typeof window === "undefined") return false
     try {
-      return (
-        window.localStorage.getItem(SETUP_BANNER_DISMISSED_KEY) === "1"
-      )
+      return window.localStorage.getItem(setupBannerDismissKey) === "1"
     } catch {
       return false
     }
-  })
+  }, [setupBannerDismissKey, sessionDismissedBannerKeys])
   const [lastFirstSourceKind, setLastFirstSourceKind] =
     React.useState<FirstSourceKind>("web_url")
   const quickIngestSession = useQuickIngestSessionStore(
@@ -255,14 +261,16 @@ const OptionIndex = () => {
   }
 
   const dismissSetupBanner = () => {
-    setSetupBannerDismissed(true)
     if (typeof window !== "undefined") {
       try {
-        window.localStorage.setItem(SETUP_BANNER_DISMISSED_KEY, "1")
+        window.localStorage.setItem(setupBannerDismissKey, "1")
       } catch {
         // Dismissal is best-effort frontend-only state.
       }
     }
+    setSessionDismissedBannerKeys(
+      (prev) => new Set(prev).add(setupBannerDismissKey)
+    )
   }
 
   return (

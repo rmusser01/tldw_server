@@ -46,16 +46,18 @@ const SIGNAL_FETCHERS: Record<string, () => Promise<AdminModuleSignal>> = {
     }
   },
   "/admin/monitoring": async () => {
-    const alerts = await withTimeout(tldwClient.listAlertHistory())
-    const open = Array.isArray(alerts)
-      ? alerts.filter((alert) => {
-          const status = String(alert?.status ?? "open").toLowerCase()
-          return status !== "resolved" && status !== "closed"
-        }).length
-      : 0
-    return open > 0
-      ? { state: "attention", detail: plural(open, "open alert") }
-      : { state: "healthy", detail: "No open alerts" }
+    // The alerts/history endpoint is an audit log of alert actions, not a
+    // list of open alerts, so the aggregated security alert health is the
+    // honest signal here ("ok" | "degraded" | "errors").
+    const status = await withTimeout(tldwClient.getSecurityAlertStatus())
+    const health = String(status?.health ?? "").toLowerCase()
+    if (health === "ok") {
+      return { state: "healthy", detail: "Alerting healthy" }
+    }
+    if (health === "degraded" || health === "errors") {
+      return { state: "attention", detail: `Alerting ${health}` }
+    }
+    return { state: "healthy", detail: "Monitoring reachable" }
   },
   "/admin/data-ops": async () => {
     const result = await withTimeout(tldwClient.listBackups())
@@ -102,10 +104,15 @@ export const loadAdminModuleSignals = async (): Promise<
   const signals: Record<string, AdminModuleSignal> = {}
   routes.forEach((route, index) => {
     const result = results[index]
-    signals[route] =
-      result.status === "fulfilled"
-        ? result.value
-        : { state: "unavailable", detail: "Status unavailable" }
+    if (result.status === "fulfilled") {
+      signals[route] = result.value
+      return
+    }
+    console.warn(
+      `[admin-signals] signal for ${route} unavailable:`,
+      result.reason
+    )
+    signals[route] = { state: "unavailable", detail: "Status unavailable" }
   })
   return signals
 }

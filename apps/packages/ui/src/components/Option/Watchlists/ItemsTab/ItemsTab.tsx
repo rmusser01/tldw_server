@@ -349,6 +349,7 @@ export const ItemsTab: React.FC = () => {
 
   const [sources, setSources] = useState<WatchlistSource[]>([])
   const [sourcesLoading, setSourcesLoading] = useState(false)
+  const [sourcesLoaded, setSourcesLoaded] = useState(false)
   const [sourcesCappedAtLimit, setSourcesCappedAtLimit] = useState(false)
   const [sourceSearch, setSourceSearch] = useState("")
   const [runs, setRuns] = useState<WatchlistRun[]>([])
@@ -664,6 +665,7 @@ export const ItemsTab: React.FC = () => {
       if (requestToken !== sourcesRequestTokenRef.current) return
       const capped = loaded.slice(0, SOURCE_LOAD_MAX_ITEMS)
       setSources(capped)
+      setSourcesLoaded(true)
       const normalizedTotal = sourceTotal > 0 ? sourceTotal : capped.length
       setSourcesCappedAtLimit(normalizedTotal > SOURCE_LOAD_MAX_ITEMS)
     } catch (error) {
@@ -2765,7 +2767,7 @@ export const ItemsTab: React.FC = () => {
                 <Empty
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
                   description={
-                    orderedSources.length === 0
+                    sourcesLoaded && !sourcesLoading && sources.length === 0
                       ? t(
                           "watchlists:items.emptyNoWatchlists",
                           "No watchlist feeds yet. Create a watchlist to start collecting updates."
@@ -2773,7 +2775,10 @@ export const ItemsTab: React.FC = () => {
                       : t("watchlists:items.empty", "No updates found")
                   }
                 >
-                  {orderedSources.length === 0 && navigate ? (
+                  {sourcesLoaded &&
+                  !sourcesLoading &&
+                  sources.length === 0 &&
+                  navigate ? (
                     <Button type="primary" onClick={() => navigate("/watchlists")}>
                       {t("watchlists:items.createWatchlist", "Create a watchlist")}
                     </Button>
