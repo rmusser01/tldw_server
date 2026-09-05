@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-03 13:40'
-updated_date: '2026-09-05 06:34'
+updated_date: '2026-09-05 16:15'
 labels:
   - personal-context
   - sync
@@ -17,6 +17,7 @@ references:
   - >-
     backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md
   - Docs/superpowers/specs/2026-09-02-personal-context-ongoing-sync-design.md
+  - 'https://github.com/rmusser01/tldw_server/pull/2886'
 priority: high
 ---
 
@@ -54,6 +55,8 @@ Compatibility work preserved original cursor, race, projection and recovery asse
 Final closing evidence, PostgreSQL required: 279 canonical/publication/authorization tests; 156 relay/recovery/shared-contract tests; 254 activation/API/transport/bootstrap/ingress tests. All three runs exited zero with no failures/errors/skips; 659 distinct cases across the runs. JUnit: /private/tmp/task13162-canonical-final-close.xml, /private/tmp/task13162-relay-final-close.xml, /private/tmp/task13162-integration-final-close.xml. No full repository sweep. Ruff passed all 23 changed Python files; five new files pass format checks; diff check clean; published docs match source. Bandit: zero findings in 13 changed production files. Compared test findings against unchanged dev: new low-severity hardcoded-token flags are reviewed synthetic proof fixtures, not production secrets. Independent specification and code/security reviews have no remaining P1/P2 findings.
 
 Known separate issue: ordinary PostgreSQL ingress fixture insertion reached unchanged SyncDatabase._ensure_domain_state SQL translation with five placeholders and six parameters. No unrelated production fix was bundled. The new backend regression seeds valid ingress input rows with parameterized SQL and exercises real receipt/transition storage; it does not claim PostgreSQL ordinary-envelope insertion is verified. End-to-end bootstrap repair passes on SQLite. This transport insertion issue remains follow-up work. TASK-13163–13165 are not implemented; ongoing_sync_version remains 0.
+
+PR handoff 2026-09-05: rebased without conflicts onto dev 63358431d799828cfb86511f7babd8490bbbdda9; range-diff confirms the implementation patch is unchanged (rebased commit adb741dfb10c77fc5b873abb809f19e7517f7b20). Fresh post-rebase integration gate: 254 passed, zero failures/errors/skips, PostgreSQL required, /private/tmp/task13162-pr-rebased-verification.xml. Scoped Ruff and production Bandit passed again. Opened PR 2886 against dev: https://github.com/rmusser01/tldw_server/pull/2886. Human-written Change summary is still required before merge; no auto-merge enabled.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
