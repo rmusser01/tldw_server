@@ -1377,6 +1377,7 @@ jobs:
           - name: media-core-documents
             paths: >-
               tldw_Server_API/tests/Media/test_document*.py
+              tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_pdf_text_normalization.py
           - name: media-core-api
             paths: >-
@@ -2941,6 +2942,7 @@ jobs:
           - name: media-core-documents
             paths: >-
               tldw_Server_API/tests/Media/test_document*.py
+              tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_pdf_text_normalization.py
           - name: media-core-api
             paths: >-
@@ -4349,6 +4351,7 @@ jobs:
           - name: media-core-documents
             paths: >-
               tldw_Server_API/tests/Media/test_document*.py
+              tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_pdf_text_normalization.py
           - name: media-core-api
             paths: >-
@@ -5680,6 +5683,7 @@ jobs:
           - name: media-core-documents
             paths: >-
               tldw_Server_API/tests/Media/test_document*.py
+              tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_pdf_text_normalization.py
           - name: media-core-api
             paths: >-
@@ -7017,6 +7021,7 @@ jobs:
           - name: media-core-documents
             paths: >-
               tldw_Server_API/tests/Media/test_document*.py
+              tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_pdf_text_normalization.py
           - name: media-core-api
             paths: >-
