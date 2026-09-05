@@ -423,6 +423,62 @@ Run `python -m pytest tldw_Server_API/tests/Collections/test_reading_artifact_re
 **Success Criteria:** Retry/restart and writer/cleanup races pass; pending work remains observable.
 **Tests:** New artifact module, existing Reading archive/API tests and output-service regressions.
 
+Output-deletion DB slice (existing ADR-003, no new ADR): reuse the internal file
+intent preparation for single-output disposal. Under the existing clock fence,
+soft/hard deletion of an owned archive clears only a matching parent archive
+reference and advances the parent once; soft deletion retains structural ownership,
+hard deletion records unshared disposal before removing ownership/output rows.
+Normalized replay is a no-op. Service bulk deletion and DB retention purge delegate
+to this boundary, with retention eligibility rechecked under the clock. Keep
+filesystem quota measurement outside transactions and preserve generic unowned
+output behavior. Cover real-backend rollback/noops, shared siblings, stale item
+tokens and retention-renewal races. Public file-first handlers and scheduler are
+not activated for managed archives by this slice; their file-option semantics and
+storage/readiness routing remain to be integrated before production adoption.
+
+Output-deletion DB checkpoint (2026-09-04): `delete_output_artifact()` now fences
+its current output and any Reading owner, preserves ownership on soft deletion,
+queues durable unshared-file disposal on hard deletion, clears only the matching
+parent archive reference with strict FTS refresh, and advances the surviving
+parent once. Replays do not advance it. The extracted disposal helper excludes
+only the exact output IDs being removed, so siblings sharing the same path keep
+the file until the last reference is removed. Existing namespace and case-alias
+safeguards remain. No filesystem work was moved into a DB transaction.
+
+The bulk service delegates unique IDs through this boundary and reports actual
+removals; mismatched user scope is rejected. Database retention purge selects
+candidates, then rechecks the same backend-specific expiry/grace predicate inside
+each deletion transaction. Renewal after selection survives. These are per-output
+commits, not a new all-or-nothing multi-output transaction.
+
+Verification and review:
+
+- Red: 14 expected SQLite failures for missing parent revision/lifecycle behavior,
+  ownership-FK failures in old hard-delete/purge SQL, and missing bulk scope guard;
+  the existing foreign-output non-mutation case already passed.
+- New module initial green: 20 SQLite cases and 20 real PostgreSQL cases passed,
+  with no PostgreSQL skips and `TLDW_TEST_NO_DOCKER=1` against the existing service.
+- Combined SQLite regression (new output deletion, atomic item deletion, adoption,
+  cleanup, revision mutations, contentless FTS, existing output service/API and
+  idempotency suites): 218 passed, 169 deselected. No full suite.
+- Supplemental soft-delete grace checks on both backends: 4 passed, 40 deselected,
+  no skips. Total distinct targeted evidence for this checkpoint: 242 cases;
+  initial green and quota comparison reruns overlap that total.
+- Four real SQLite quota comparisons showed unchanged bulk SQL and per-output
+  delegation agree for metadata sizes, filesystem sizes and prior soft deletion.
+  After the safety review blocked the initial broad helper-removal attempt, this
+  evidence supported the narrower delegation edit. Final backend suites repeat
+  those quota checks through the accepted delegation; existing unused legacy
+  quota-helper definitions were left unchanged in this slice.
+- New tests Ruff/Black, changed production-range Black, compilation and diff
+  checks pass. Scoped Bandit has zero findings/errors. Production Ruff retains
+  ten baseline findings (nine DB and one service import-order finding).
+- Independent read-only review found no actionable issues in this slice.
+
+Unfinished: public file-first delete/purge/transcode handlers and scheduler,
+managed file-option semantics, bounded runtime cleanup/readiness, legacy
+reconciliation and remaining aggregate writer routing. No capability activation.
+
 **Interfaces:** Create `drain_reading_artifact_cleanup(db: CollectionsDatabase, *, storage_namespace_id: str, limit: int = 100) -> int` in the cleanup service; returns completed intent count. Reservations have a namespace, unique token, lease deadline and `staged|owned|pending` lifecycle. Adoption requires matching token, unexpired lease, surviving item and original revision. Worker claim and output registration serialize on the database fence. Namespace identity is provisioned and verified against a volume marker, not inferred from the database or hostname.
 
 Storage prerequisite slice: implement explicit, idempotent namespace provisioning

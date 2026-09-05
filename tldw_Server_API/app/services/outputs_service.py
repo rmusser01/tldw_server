@@ -583,25 +583,10 @@ def find_outputs_to_purge(
 
 
 def delete_outputs_by_ids(cdb, user_id: int, ids: list[int]) -> int:
-    """Delete output rows by IDs for a user. Returns number of IDs requested (best-effort)."""
-    if not ids:
-        return 0
-    placeholders = ",".join(["?"] * len(ids))
-    audiobook_bytes = _sum_audiobook_output_bytes_for_ids(cdb, user_id, ids)
-    try:
-        cdb.backend.execute(
-            f"DELETE FROM outputs WHERE user_id = ? AND id IN ({placeholders})",  # nosec B608
-            tuple([user_id] + list(ids)),
-        )
-        if audiobook_bytes:
-            try:
-                cdb.update_audiobook_output_usage(-audiobook_bytes)
-            except _OUTPUTS_DB_FALLBACK_EXCEPTIONS as exc:
-                logger.warning("outputs_service: failed to decrement audiobook usage: {}", exc)
-        return len(ids)
-    except Exception as e:
-        logger.error(f"outputs_service.purge: delete failed: {e}")
-        raise
+    """Delete unique outputs through their lifecycle and quota-accounting boundary."""
+    if str(user_id) != str(cdb.user_id):
+        raise ValueError("output_user_mismatch")
+    return sum(cdb.delete_output_artifact(output_id, hard=True) for output_id in dict.fromkeys(ids))
 
 
 # ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-03 02:27'
-updated_date: '2026-09-05 03:56'
+updated_date: '2026-09-05 04:16'
 labels:
   - collections
   - reading-list
@@ -52,5 +52,5 @@ diagnostic-privacy behavior are covered.
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-ADR required: yes. ADR path: backlog/decisions/003-reading-atomic-hard-delete.md. Reason: persisted revisions, destructive preconditions, ownership and durable cleanup. Approved design/plan: Docs/superpowers/{specs,plans}/2026-09-04-reading-atomic-hard-delete*. Guarded adoption committed as 9a4a9e34c9. Internal atomic-delete checkpoint implemented: existing clock fence, positive exact revision predicate, transactional strict FTS/child/output removal and durable unshared-file intents, staging cancellation, preserved external Media/Notes and independent collection entries. Review findings reproduced and fixed: retain exact filename spellings, honor known storage namespaces through cleanup, reject ambiguous cross-owner case variants without mutation. Final re-review clear. Verification: 171 SQLite/POSIX regressions plus one FTS SQL-error test, 69 real PostgreSQL atomic-delete/adoption/cleanup cases; 241 distinct targeted passes, no PostgreSQL skips, no Docker startup or full suite. Scoped Bandit zero findings/errors; test lint/format clean; DB retains nine baseline Ruff findings. Execution evidence and lesson in plan/docs. Next: generic owned-output deletion/purge and collection-link writer routing, legacy reconciliation, production archive integration, coherent DTOs and fail-closed startup readiness. No public caller or capability activation; task remains In Progress.
+ADR required: yes; existing backlog/decisions/003-reading-atomic-hard-delete.md governs revisions, ownership and cleanup. Approved spec/plan in Docs/superpowers. Internal item deletion committed as 6862a9caab. Current owned-output DB deletion checkpoint complete and verified: shared exact-output-ID disposal helper, transactional soft/hard deletion, matching archive-reference/FTS cleanup and one parent revision; soft ownership retained, hard file disposal durable. Bulk service delegates unique IDs with actual counts and user-scope check; DB retention purge rechecks expiry/grace under the clock. Quota accounting preserved and measured outside transactions; comparison tests justified a narrower safety-approved delegation change, leaving legacy quota helper definitions unchanged. Verification: 218 combined SQLite regression passes, 20 real PostgreSQL output cases, 4 additional SQLite/PostgreSQL grace cases; 242 distinct targeted passes, no PostgreSQL skips or Docker startup/full sweep. Scoped Bandit zero; formatting/compilation/test lint pass; 10 baseline production Ruff findings unchanged. Read-only review clear. Next: file-first API handlers/scheduler and managed file-option semantics, collection-link writers, legacy reconciliation, production archive routing, coherent DTOs and startup readiness. Capability absent; task remains In Progress.
 <!-- SECTION:PLAN:END -->

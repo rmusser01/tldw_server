@@ -4429,46 +4429,7 @@ class CollectionsDatabase:
             if parent.revision != expected_revision:
                 raise ReadingRevisionConflict("reading_revision_conflict")
             owned = self._reading_outputs_for_deletion(parent, conn)
-            # Reserve before deleting output rows. Shared references outside this
-            # aggregate retain the file; generic registrations use the same fence.
-            paths = {(row["storage_namespace_id"], row["storage_path"]) for row in owned}
-            unshared = []
-            for namespace, path in paths:
-                shared = self.backend.execute(
-                    "SELECT o.storage_path FROM outputs o LEFT JOIN reading_output_ownership owner ON owner.output_id = o.id "
-                    "WHERE o.user_id = ? AND lower(o.storage_path) = lower(?) "
-                    "AND (owner.output_id IS NULL OR owner.storage_namespace_id = ?) "
-                    "AND NOT EXISTS (SELECT 1 FROM reading_output_ownership r "
-                    "WHERE r.output_id = o.id AND r.user_id = ? AND r.item_id = ?)",
-                    (self.user_id, path, namespace, self.user_id, item_id),
-                    connection=conn,
-                ).rows
-                if shared:
-                    # Same spelling can be handed off to the surviving owner.
-                    # Different spellings may be distinct files on Linux; do not
-                    # discard this spelling's authority based on a case alias.
-                    if any(row["storage_path"] != path for row in shared):
-                        raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
-                    continue
-                existing = self.backend.execute(
-                    "SELECT 1 FROM reading_artifact_paths WHERE user_id = ? AND storage_namespace_id = ? "
-                    "AND lower(storage_path) = lower(?) LIMIT 1",
-                    (self.user_id, namespace, path),
-                    connection=conn,
-                ).first
-                if existing:
-                    raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
-                unshared.append((namespace, path))
-            # Retain exact spellings: case variants may be separate files on
-            # Linux. Preflight the whole set before inserting our own aliases.
-            for namespace, path in unshared:
-                self.backend.execute(
-                    "INSERT INTO reading_artifact_paths "
-                    "(token, user_id, storage_namespace_id, storage_path, item_id, expected_revision, lease_until, state) "
-                    "VALUES (?, ?, ?, ?, ?, ?, 0, 'pending')",
-                    (uuid4().hex, self.user_id, namespace, path, item_id, expected_revision),
-                    connection=conn,
-                )
+            self._queue_reading_output_disposal(parent, owned, conn)
             self.backend.execute(
                 "DELETE FROM reading_output_ownership WHERE user_id = ? AND item_id = ?",
                 (self.user_id, item_id),
@@ -4525,6 +4486,48 @@ class CollectionsDatabase:
                     (self.user_id, item_id),
                     connection=conn,
                 ).first
+            )
+
+    def _queue_reading_output_disposal(
+        self, parent: ContentItemRow, outputs: list[dict[str, Any]], connection: Any
+    ) -> None:
+        """Reserve unshared owned paths before deleting these exact output rows."""
+        removed_ids = {row["id"] for row in outputs}
+        paths = {(row["storage_namespace_id"], row["storage_path"]) for row in outputs}
+        unshared = []
+        for namespace, path in paths:
+            references = self.backend.execute(
+                "SELECT o.id, o.storage_path FROM outputs o LEFT JOIN reading_output_ownership owner ON owner.output_id = o.id "
+                "WHERE o.user_id = ? AND lower(o.storage_path) = lower(?) "
+                "AND (owner.output_id IS NULL OR owner.storage_namespace_id = ?)",
+                (self.user_id, path, namespace),
+                connection=connection,
+            ).rows
+            shared = [row for row in references if row["id"] not in removed_ids]
+            if shared:
+                # Different spellings may be distinct files on Linux. Preserve
+                # authority by rejecting ambiguity across surviving owners.
+                if any(row["storage_path"] != path for row in shared):
+                    raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
+                continue
+            existing = self.backend.execute(
+                "SELECT 1 FROM reading_artifact_paths WHERE user_id = ? AND storage_namespace_id = ? "
+                "AND lower(storage_path) = lower(?) LIMIT 1",
+                (self.user_id, namespace, path),
+                connection=connection,
+            ).first
+            if existing:
+                raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
+            unshared.append((namespace, path))
+        # Exact spellings can name separate files. Preflight the whole set before
+        # inserting our own aliases; generic registration uses this same fence.
+        for namespace, path in unshared:
+            self.backend.execute(
+                "INSERT INTO reading_artifact_paths "
+                "(token, user_id, storage_namespace_id, storage_path, item_id, expected_revision, lease_until, state) "
+                "VALUES (?, ?, ?, ?, ?, ?, 0, 'pending')",
+                (uuid4().hex, self.user_id, namespace, path, parent.id, parent.revision),
+                connection=connection,
             )
 
     def _reading_outputs_for_deletion(self, parent: ContentItemRow, connection: Any) -> list[dict[str, Any]]:
@@ -5654,7 +5657,14 @@ class CollectionsDatabase:
             )
             return result.rowcount == 1
 
-    def delete_output_artifact(self, output_id: int, *, hard: bool = False) -> bool:
+    def delete_output_artifact(self, output_id: int, *, hard: bool = False, purge_before: str | None = None) -> bool:
+        """Delete output metadata, fencing any Reading owner and durable disposal.
+
+        For managed archives hard deletion schedules file cleanup; callers must
+        not unlink files first. ``purge_before`` is an internal retention scan
+        cutoff, rechecked after locking so a renewed output survives a stale scan.
+        Filesystem quota measurement stays outside the mutation transaction.
+        """
         row = self.backend.execute(
             "SELECT id, type, metadata_json, storage_path, deleted FROM outputs WHERE id = ? AND user_id = ?",
             (output_id, self.user_id),
@@ -5672,13 +5682,79 @@ class CollectionsDatabase:
             if size_bytes is None:
                 size_bytes = _resolve_output_size_bytes(self.user_id, storage_path)
 
-        if hard:
-            q = "DELETE FROM outputs WHERE id = ? AND user_id = ?"
-            res = self.backend.execute(q, (output_id, self.user_id))
-        else:
-            q = "UPDATE outputs SET deleted = 1, deleted_at = ? WHERE id = ? AND user_id = ? AND deleted = 0"
-            res = self.backend.execute(q, (_utcnow_iso(), output_id, self.user_id))
-        ok = res.rowcount > 0
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            current = self.backend.execute(
+                "SELECT id, type, storage_path, deleted FROM outputs WHERE id = ? AND user_id = ?",
+                (output_id, self.user_id),
+                connection=conn,
+            ).first
+            if not current or (not hard and current["deleted"]):
+                return False
+            if purge_before is not None:
+                predicate, params = self._output_purge_predicate(purge_before)
+                eligible = self.backend.execute(
+                    f"SELECT 1 FROM outputs WHERE id = ? AND user_id = ? AND ({predicate})",  # nosec B608: fixed predicate
+                    (output_id, self.user_id, *params),
+                    connection=conn,
+                ).first
+                if not eligible:
+                    return False
+            owner = self.backend.execute(
+                "SELECT item_id, storage_namespace_id FROM reading_output_ownership WHERE output_id = ? AND user_id = ?",
+                (output_id, self.user_id),
+                connection=conn,
+            ).first
+            parent = self._get_reading_parent(owner["item_id"], conn) if owner else None
+            if parent and hard:
+                if current["type"] != "reading_archive":
+                    raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
+                self._queue_reading_output_disposal(parent, [{**current, **owner}], conn)
+                self.backend.execute(
+                    "DELETE FROM reading_output_ownership WHERE output_id = ? AND user_id = ?",
+                    (output_id, self.user_id),
+                    connection=conn,
+                )
+            if hard:
+                res = self.backend.execute(
+                    "DELETE FROM outputs WHERE id = ? AND user_id = ?", (output_id, self.user_id), connection=conn
+                )
+            else:
+                res = self.backend.execute(
+                    "UPDATE outputs SET deleted = 1, deleted_at = ? WHERE id = ? AND user_id = ? AND deleted = 0",
+                    (_utcnow_iso(), output_id, self.user_id),
+                    connection=conn,
+                )
+            ok = res.rowcount > 0
+            if not ok:
+                raise DatabaseError("output_deletion_failed")
+            if parent:
+                metadata = self._json_loads_dict(parent.metadata_json)
+                if str(metadata.get("archive_output_id")) == str(output_id):
+                    metadata.pop("archive_output_id")
+                    metadata_json = json.dumps(metadata, ensure_ascii=False)
+                    self.backend.execute(
+                        "UPDATE content_items SET metadata_json = ? WHERE id = ? AND user_id = ?",
+                        (metadata_json, parent.id, self.user_id),
+                        connection=conn,
+                    )
+                    self._update_content_fts_entry(
+                        parent.id,
+                        title=parent.title,
+                        summary=parent.summary,
+                        notes=parent.notes,
+                        tags=parent.tags,
+                        metadata_json=metadata_json,
+                        previous_title=parent.title,
+                        previous_summary=parent.summary,
+                        previous_notes=parent.notes,
+                        previous_tags=parent.tags,
+                        previous_metadata_json=parent.metadata_json,
+                        has_previous_entry=True,
+                        connection=conn,
+                    )
+                self._advance_reading_parent(parent.id, conn)
+            should_decrement = should_decrement and not current["deleted"]
         if ok and should_decrement and size_bytes:
             try:
                 self.update_audiobook_output_usage(-size_bytes)
@@ -5686,7 +5762,9 @@ class CollectionsDatabase:
                 logger.warning("audiobook_quota: failed to decrement usage: {}", exc)
         return ok
 
-    def get_output_artifact_by_title(self, title: str, format_: str | None = None, include_deleted: bool = False) -> CollectionsDatabase.OutputArtifactRow:
+    def get_output_artifact_by_title(
+        self, title: str, format_: str | None = None, include_deleted: bool = False
+    ) -> CollectionsDatabase.OutputArtifactRow:
         where = ["user_id = ?", "title = ?"]
         params: list[Any] = [self.user_id, title]
         if format_:
@@ -8475,33 +8553,26 @@ class CollectionsDatabase:
     def purge_expired_outputs(self) -> int:
         """Hard delete expired/retained outputs. Returns number of rows removed."""
         now = _utcnow_iso()
+        predicate, params = self._output_purge_predicate(now)
+        rows = self.backend.execute(
+            f"SELECT id FROM outputs WHERE user_id = ? AND ({predicate})",  # nosec B608: fixed predicate
+            (self.user_id, *params),
+        ).rows
+        return sum(self.delete_output_artifact(row["id"], hard=True, purge_before=now) for row in rows)
+
+    def _output_purge_predicate(self, now: str) -> tuple[str, tuple[str, str]]:
+        """Share the same backend retention predicate for scanning and rechecking."""
         if self.backend.backend_type == BackendType.POSTGRESQL:
-            r1 = self.backend.execute(
-                "DELETE FROM outputs WHERE user_id = ? AND retention_until IS NOT NULL AND retention_until::timestamptz <= ?",
-                (self.user_id, now),
+            return (
+                "(retention_until IS NOT NULL AND retention_until::timestamptz <= ?) OR "
+                "(deleted = 1 AND deleted_at IS NOT NULL AND (?::timestamptz - deleted_at::timestamptz) >= INTERVAL '30 days')",
+                (now, now),
             )
-            try:
-                r2 = self.backend.execute(
-                    "DELETE FROM outputs WHERE user_id = ? AND deleted = 1 AND deleted_at IS NOT NULL AND (NOW() - deleted_at::timestamptz) >= INTERVAL '30 days'",
-                    (self.user_id,),
-                )
-                return int((r1.rowcount or 0) + (r2.rowcount or 0))
-            except _COLLECTIONS_NONCRITICAL_EXCEPTIONS:
-                return int(r1.rowcount or 0)
-        # Hard delete those with retention_until past
-        r1 = self.backend.execute(
-            "DELETE FROM outputs WHERE user_id = ? AND retention_until IS NOT NULL AND retention_until <= ?",
-            (self.user_id, now),
+        return (
+            "(retention_until IS NOT NULL AND retention_until <= ?) OR "
+            "(deleted = 1 AND deleted_at IS NOT NULL AND julianday(?) - julianday(deleted_at) >= 30)",
+            (now, now),
         )
-        # Soft-deleted older than 30 days
-        try:
-            r2 = self.backend.execute(
-                "DELETE FROM outputs WHERE user_id = ? AND deleted = 1 AND deleted_at IS NOT NULL AND julianday(?) - julianday(deleted_at) >= 30",
-                (self.user_id, now),
-            )
-            return int((r1.rowcount or 0) + (r2.rowcount or 0))
-        except _COLLECTIONS_NONCRITICAL_EXCEPTIONS:
-            return int(r1.rowcount or 0)
 
     # ------------------------
     # File artifacts API
