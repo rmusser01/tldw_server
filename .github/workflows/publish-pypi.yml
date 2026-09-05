@@ -134,7 +134,10 @@ jobs:
     name: Admit exact source dependencies
     uses: ./.github/workflows/sbom.yml
     permissions:
+      actions: read
       contents: read
+      pull-requests: read
+      statuses: read
 
   test-suite:
     name: Test suite gate
@@ -210,7 +213,7 @@ jobs:
           uv --version | grep -Eq '^uv 0\.12\.7 '
 
       - name: Sync locked release tools
-        run: uv sync --locked --no-dev --no-editable --group release
+        run: uv sync --locked --only-group release
 
       - name: Build and validate package
         run: >-

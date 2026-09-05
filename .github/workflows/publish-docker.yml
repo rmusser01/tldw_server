@@ -70,7 +70,10 @@ jobs:
     needs: validate-release
     uses: ./.github/workflows/sbom.yml
     permissions:
+      actions: read
       contents: read
+      pull-requests: read
+      statuses: read
 
   prepare-scanner:
     name: Prepare fresh Trivy database
@@ -88,6 +91,7 @@ jobs:
           set -euo pipefail
           mkdir -p scanner
           docker run --rm --platform linux/amd64 \
+            --user "$(id -u):$(id -g)" \
             --cap-drop ALL \
             --security-opt no-new-privileges:true \
             --read-only \
@@ -248,6 +252,7 @@ jobs:
           set -euo pipefail
           trivy() {
             docker run --rm --platform linux/amd64 \
+              --user "$(id -u):$(id -g)" \
               --cap-drop ALL \
               --security-opt no-new-privileges:true \
               --read-only \
@@ -501,19 +506,9 @@ jobs:
               media_type = descriptor["mediaType"]
               child = subject
           digest_path = root / "blobs" / "sha256" / subject.removeprefix("sha256:")
-          if digest_path.exists():
-              assert "sha256:" + hashlib.sha256(digest_path.read_bytes()).hexdigest() == subject
-          identity = {
-              "subject_digest": subject,
-              "index_digest": index_digest,
-              "subject_media_type": media_type,
-              "platform_manifest_digest": child,
-              "platform": "linux/amd64",
-          }
-          Path("evidence/subject-${{ matrix.name }}.json").write_text(
-              json.dumps(identity, indent=2, sort_keys=True) + "\n",
-              encoding="utf-8",
-          )
+          subject_raw = index_raw if subject == index_digest else digest_path.read_bytes()
+          assert "sha256:" + hashlib.sha256(subject_raw).hexdigest() == subject
+          Path("evidence/subject-${{ matrix.name }}.json").write_bytes(subject_raw)
           with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
               print(f"media_type={media_type}", file=output)
               print(f"platform_digest={child}", file=output)
@@ -533,6 +528,7 @@ jobs:
           set -euo pipefail
           trivy() {
             docker run --rm --platform linux/amd64 \
+              --user "$(id -u):$(id -g)" \
               --network none \
               --cap-drop ALL \
               --security-opt no-new-privileges:true \
@@ -784,6 +780,7 @@ jobs:
           set -euo pipefail
           trivy() {
             docker run --rm --platform linux/amd64 \
+              --user "$(id -u):$(id -g)" \
               --cap-drop ALL \
               --security-opt no-new-privileges:true \
               --read-only \
@@ -980,6 +977,7 @@ jobs:
       - name: Assemble and verify release evidence
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           SOURCE_COMMIT: ${{ needs.validate-release.outputs.source_commit }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
@@ -1198,6 +1196,8 @@ jobs:
 
       - name: Verify admitted release manifest
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           python Helper_Scripts/Supply_Chain/release_evidence.py verify \

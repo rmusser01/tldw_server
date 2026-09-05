@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import re
+import shlex
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
+
+pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW_PATH = ROOT / ".github/workflows/sbom.yml"
@@ -33,6 +37,28 @@ PRODUCER_JOBS = {
     "merge-source",
     "scan-source",
 }
+
+
+@pytest.mark.parametrize(
+    "filename", ["sbom.yml", "container-build-check.yml", "publish-docker.yml", "publish-ghcr-main.yml"]
+)
+def test_scanner_writable_mounts_use_runner_identity(filename: str) -> None:
+    workflow = yaml.safe_load((ROOT / ".github/workflows" / filename).read_text())
+    checked = 0
+    for job in workflow["jobs"].values():
+        for step in job.get("steps", []):
+            script = step.get("run", "").replace("\\\n", " ")
+            for line in script.splitlines():
+                if "docker run " not in line or ":rw" not in line:
+                    continue
+                args = shlex.split(line)
+                assert "--user" in args, f"{filename}: {step['name']}"
+                assert args[args.index("--user") + 1] == "$(id -u):$(id -g)"
+                assert "--read-only" in args
+                assert args[args.index("--cap-drop") + 1] == "ALL"
+                assert args[args.index("--security-opt") + 1] == "no-new-privileges:true"
+                checked += 1
+    assert checked > 0
 
 
 def _load() -> dict[str, Any]:
@@ -75,6 +101,22 @@ def test_sbom_workflow_has_read_only_reusable_entry_points() -> None:
     assert workflow["permissions"] == {"contents": "read"}
     assert "packages: write" not in _text()
     assert "id-token: write" not in _text()
+
+
+@pytest.mark.parametrize("filename", ["publish-docker.yml", "publish-pypi.yml", "publish-ghcr-main.yml"])
+def test_release_callers_allow_nested_admission_read_scopes(filename: str) -> None:
+    """Reject a reusable call that cannot grant its nested admission job access."""
+    caller = yaml.safe_load((ROOT / ".github/workflows" / filename).read_text())
+    assert caller["jobs"]["source-admission"]["permissions"] == {
+        "actions": "read", "contents": "read", "pull-requests": "read", "statuses": "read",
+    }
+
+
+def test_source_jobs_keep_only_contents_read_despite_nested_admission() -> None:
+    """Adding admission permissions must not grant scanner jobs extra authority."""
+    workflow = _load()
+    for name in PRODUCER_JOBS | {"source-gate"}:
+        assert workflow["jobs"][name].get("permissions", workflow["permissions"]) == {"contents": "read"}
 
 
 def test_sbom_workflow_upload_root_is_visible_and_concurrency_is_caller_scoped() -> None:
@@ -265,7 +307,7 @@ def test_final_gate_needs_every_producer_and_verifies_named_evidence() -> None:
     gate = workflow["jobs"]["source-gate"]
     script = _run_text(workflow, "source-gate")
 
-    assert set(gate["needs"]) == PRODUCER_JOBS
+    assert set(gate["needs"]) == PRODUCER_JOBS | {"admission"}
     assert "always()" in str(gate["if"])
     for job in PRODUCER_JOBS:
         assert f"needs.{job}.result" in script

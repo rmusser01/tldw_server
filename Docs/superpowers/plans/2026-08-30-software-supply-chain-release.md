@@ -1345,6 +1345,85 @@ Before opening or merging, obtain a human-written `Change summary` explaining wh
 
 - [ ] **Step 13: Address automated and human review, then merge only when green**
 
+2026-09-04 Qodo follow-up: all five findings have local corrections. Evidence
+verification now invokes `gh` for retained bundles and exact OCI subject bytes,
+with canonical image-role, repository, source/signer digest, tag, and workflow
+constraints. An independently supplied trusted root enables disconnected
+verification; a URL alone is no longer admission evidence. Independent review
+and re-review found and closed a cross-role substitution gap. Final combined
+validation reports 601 passed and one existing shard-coverage failure; the
+578-test classification audit, scoped Ruff, actionlint, Bandit (zero production
+findings), and diff checks pass. The requester approved CI remediation on
+2026-09-04 for packaging, scanner mount permissions, frontend failures, and the
+missing shard assignment. Implementation and regression verification are in progress.
+Do not commit, publish these corrections, or merge until required validation is
+satisfied. Existing vulnerability blockers and the empty exception policy remain.
+
+2026-09-04 approved CI setup checkpoint: release-only packaging, scanner UID/GID,
+and all five Character integration shard matrices are corrected. The touched
+Python suite passes 583 tests, with exactly one accepted marker per test.
+Actual isolated wheel/sdist builds, Twine and artifact-content checks, pinned
+cdxgen generation, Trivy cache download, scoped Ruff, actionlint, lock freshness,
+and Bandit pass. Independent CI review found no issues. The wider CI-contract
+suite reports 344 passed and six failures: four workflow-admission regressions
+introduced by the PR, a routing inventory mismatch partly inherited from dev,
+and a schema text expectation already failing on dev. Preserve and restore the
+existing workflow gate; do not bypass it. The WebUI webpack bundle-budget
+decision remains pending, with no threshold change made. No commit or push at
+this checkpoint; full CI and release admission remain open.
+
+Frontend follow-up is verified: both full Characters harness entry points pass
+110 tests each under concurrent execution, Watchlists help passes 13 tests, and
+the page-object guard passes 10 tests. Independent review found no Critical or
+Important issue in the three test-only corrections.
+
+### Approved follow-up: workflow admission and unchanged WebUI budgets
+
+2026-09-04: requester approved this follow-up. Keep all existing vulnerability
+and bundle-size limits. Do not change the two unrelated failures present on dev.
+
+1. **Restore workflow admission (Complete locally).** Update the existing graph
+   contracts for the three source producers, merge, scan, and result gate; run
+   `python -m pytest -q tldw_Server_API/tests/CI/test_license_first_workflow_contracts.py`
+   and the PyPI lock routing regression to observe failures. Restore the existing
+   admission job/condition and immutable checkout refs in `sbom.yml`, retain
+   caller-scoped concurrency, and permit only the required read scopes in the
+   three reusable publishing callers. Add `uv.lock` to the PyPI route inventory.
+   Rerun the admission, SBOM, PyPI, and release contracts plus actionlint.
+2. **Investigate WebUI build (Complete; resource decision pending).** Compare the real Node 24/Turbopack
+   path with the prior Bun/Turbopack OOM evidence using a bounded isolated
+   experiment. Preserve the 600/900 KB bundle budgets and all build checks.
+   Change tracked build configuration only after evidence supports the fix.
+3. **Review and publish (Reviewed; publication blocked).** Independently review the new diff,
+   rerun touched tests, security checks, and lock freshness, and classify any
+   wider-suite failures against dev. Commit and push only validated corrections;
+   then reply to the five review findings and recheck exact-head CI. Merge only
+   when all required review, CI, and vulnerability gates are satisfied.
+
+Gate repair results: 70 focused tests pass after the red regressions; independent
+review found no issues. The wider matrix reports 840 passed and only the two
+known dev failures. Ruff, actionlint, lock freshness, Bandit, and diff checks pass.
+The bounded real Node 24/Turbopack experiment failed on the 7.65 GiB Docker VM
+with a memory allocation error after 48.35 seconds. No tracked build changes or
+budget increases were made, and no further retry was attempted. The same-head
+Turbopack command meets the unchanged budgets on the 15.61 GiB CI runner. Choosing
+a larger build host or expanding into shared-bundle optimization requires the
+requester's direction. No commit, push, or merge at this checkpoint.
+
+2026-09-04 approved final CI repairs: restored the canonical Node 24/Turbopack
+Docker production command and documented a 16 GiB-class build host, keeping the
+600/900 KB budgets unchanged. Synchronized the Watchlists admission inventory
+with the existing workflow filters and corrected the Postgres test to assert
+the existing schema-qualified tables; no trigger policy or SQL changed. All
+seven red regression cases now pass, and the full focused matrix passes 846
+tests. Independent review found no issues. Actionlint, pinned offline lock
+freshness, diff checks, and Bandit pass (zero production-scope findings).
+Touched Python lint passes apart from the confirmed unchanged broad-exception
+warning in the Watchlists fixture; its import block was formatted. The exact
+Docker image still requires CI verification. Latest dev remains a5aa0c8e6751.
+Commit and publish the reviewed fixes, then respond to the five Qodo threads.
+Vulnerability admission remains blocked; no exception or bypass was approved.
+
 Wait for all required checks and reviewer comments. Resolve every actionable thread with evidence, rerun affected tests, rebase again if `dev` moved, and merge only after:
 
 - all required checks pass;

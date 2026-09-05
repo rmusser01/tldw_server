@@ -61,6 +61,21 @@ Dependabot-owned input, regenerate the relevant lock with the reviewed tool,
 review the lock diff, and rerun frozen installs, framework tests, builds, SBOMs,
 and scans. Never hand-edit a resolved package entry.
 
+## WebUI build-host requirements
+
+The WebUI Docker build uses real Node 24 and the canonical `npm run build:prod`
+Turbopack pipeline; Bun installs the frozen workspace dependencies. Provision
+a 16 GiB-class build host or Docker VM. The 6 GiB Node heap setting does not
+cap total build memory, including Turbopack's native allocations. The 8 GiB-class
+Docker VM failed this build with memory exhaustion and is not a supported
+build target. This is a build-time requirement, not a runtime memory requirement.
+
+The canonical build command passed on a 15.61 GiB CI runner with the unchanged
+600 KB shared and 900 KB route gzip budgets. The updated Docker image still
+requires its own exact-artifact build and scan in CI; command-level validation
+does not certify the image. Do not increase the budgets to accommodate a
+different compiler pipeline.
+
 ## Generate and admit source SBOMs
 
 Dispatch the canonical gate for the exact source commit:
@@ -260,14 +275,25 @@ gh attestation verify oci://"$IMAGE_REPOSITORY@$SUBJECT_DIGEST" \
 ```
 
 The evidence archive also contains `provenance-image-<name>.jsonl` bundles for
-all five project-built subjects. They support bundle-based verification when
-the GitHub API record must be compared with the release snapshot. The record's
-`provenance_ref` must identify the exact GitHub attestation; a workflow-run URL
-alone is insufficient.
+all five project-built subjects and the exact OCI subject bytes in
+`subject-<name>.json`. Assembly and verification require GitHub CLI (`gh`) and
+cryptographically verify every retained bundle against those bytes, the manifest's
+repository and source commit, the release tag, and `publish-docker.yml` at the
+same commit. The verified statement must contain exactly that image name and
+digest. Missing bundles, mismatched subjects, unverifiable signatures, or missing
+verification tooling fail closed before promotion.
 
-The manifest verifier checks evidence structure, identity, references, and
-hashes; it does not cryptographically verify the signed bundles. Use the
-attestation verifier above for signature and signer-identity verification.
+The record's `provenance_ref` is a navigation link in the expected repository's
+attestation namespace, not proof of authenticity. The verified bundle is the
+authority; a GitHub URL alone can never satisfy admission. Confirm the manifest's
+repository, tag, and source commit against your intended release before trusting it.
+
+By default, `gh` may access the network to bootstrap or refresh its Sigstore trust
+roots. For disconnected verification, obtain a trusted root independently using
+`gh attestation trusted-root` on a trusted connected host, then pass
+`--trusted-root /trusted/path/trusted_root.jsonl` to either evidence command.
+Do not take trust roots from the untrusted release archive. No registry access
+or frontend image publication is needed for this bundle-based verification.
 
 PyPI trusted-publishing and PEP 740 consumer verification are documented in
 [`PyPI_Publishing.md`](PyPI_Publishing.md).

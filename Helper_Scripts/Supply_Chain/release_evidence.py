@@ -1,4 +1,4 @@
-"""Assemble and verify digest-bound release evidence without network access."""
+"""Assemble digest-bound release evidence and verify signed provenance with gh."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import re
+import subprocess  # nosec B404
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
@@ -392,6 +393,10 @@ def load_image_evidence(path: Path) -> ImageEvidence:
             raise _error(context, "publication")
         if provenance_ref is None or not provenance_ref.startswith("https://github.com/"):
             raise _error(context, "provenance_ref")
+        _relative_file(root, f"provenance-image-{name}.jsonl", f"{context} provenance bundle")
+        subject_path = _relative_file(root, f"subject-{name}.json", f"{context} provenance subject")
+        if "sha256:" + _sha256(subject_path) != subject:
+            raise _error(context, "provenance subject")
     else:
         if dockerfile is not None:
             raise _error(context, "dockerfile")
@@ -516,9 +521,67 @@ def _validate_image_sets(
     return project, reference
 
 
+def _verify_project_provenance(
+    root: Path,
+    image: ImageEvidence,
+    metadata: Mapping[str, object],
+    trusted_root: Path | None,
+) -> None:
+    """Require a valid signature for the exact retained OCI subject and source."""
+    context = f"image {image.name} provenance"
+    repository = str(metadata["repository"])
+    suffixes = {"app": "", "worker": "-worker", "audio-worker": "-audio-worker"}
+    subject_name = (
+        f"ghcr.io/{repository.lower()}{suffixes[image.name]}"
+        if image.name in suffixes else f"local.invalid/tldw/{image.name}"
+    )
+    if image.reference.split("@", 1)[0].rsplit(":", 1)[0] != subject_name:
+        raise _error(context, "subject name")
+    # The URL is a navigation aid, never the authority for accepting provenance.
+    # Authenticity comes from verifying the retained bundle and subject bytes.
+    if not re.fullmatch(
+        rf"https://github\.com/{re.escape(repository)}/attestations/[1-9][0-9]*",
+        image.provenance_ref or "",
+    ):
+        raise _error(context, "provenance_ref")
+    command = [
+        "gh", "attestation", "verify", str(root / f"subject-{image.name}.json"),
+        "--bundle", str(root / f"provenance-image-{image.name}.jsonl"),
+        "--repo", repository,
+        "--signer-workflow", f"{repository}/.github/workflows/publish-docker.yml",
+        "--source-digest", str(metadata["source_commit"]),
+        "--signer-digest", str(metadata["source_commit"]),
+        "--source-ref", f"refs/tags/{metadata['release_tag']}",
+        "--predicate-type", "https://slsa.dev/provenance/v1",
+        "--deny-self-hosted-runners", "--format", "json",
+    ]
+    if trusted_root is not None:
+        command.extend(["--custom-trusted-root", str(_checked_file(trusted_root, "trusted root"))])
+    try:
+        # Fixed executable with validated arguments, never passed through a shell.
+        result = subprocess.run(  # nosec B603
+            command, check=True, capture_output=True, text=True, timeout=60,
+        )
+        if len(result.stdout) > _MAX_EVIDENCE_BYTES:
+            raise _error(context, "verification size")
+        verified = json.loads(result.stdout, object_pairs_hook=_duplicate_rejecting_object)
+        expected_subject = {
+            "name": subject_name,
+            "digest": {"sha256": image.subject_digest.removeprefix("sha256:")},
+        }
+        if type(verified) is not list or len(verified) != 1:
+            raise _error(context, "verification result")
+        if verified[0]["verificationResult"]["statement"]["subject"] != [expected_subject]:
+            raise _error(context, "subject")
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError) as error:
+        raise _error(context, "verification") from error
+
+
 def build_release_manifest(
     evidence_dir: Path,
     metadata: Mapping[str, object],
+    *,
+    trusted_root: Path | None = None,
 ) -> ReleaseManifest:
     """Build a stable release manifest after validating every evidence input."""
     root = _evidence_root(evidence_dir)
@@ -540,6 +603,8 @@ def build_release_manifest(
         if record_path.name != f"image-{image.name}.json":
             raise _error(f"image {image.name}", "record filename")
     project_images, reference_images = _validate_image_sets(images)
+    for image in project_images:
+        _verify_project_provenance(root, image, validated_metadata, trusted_root)
 
     policy_path = _relative_file(root, validated_metadata["policy_file"], "policy_file")
     claimed_file_names = {policy_path.name}
@@ -641,7 +706,12 @@ def _manifest_payload(manifest: ReleaseManifest) -> dict[str, object]:
     }
 
 
-def verify_release_manifest(manifest: ReleaseManifest, evidence_dir: Path) -> None:
+def verify_release_manifest(
+    manifest: ReleaseManifest,
+    evidence_dir: Path,
+    *,
+    trusted_root: Path | None = None,
+) -> None:
     """Recompute every checksum and identity relationship in a release manifest."""
     root = _evidence_root(evidence_dir)
     if manifest.schema_version != 1 or manifest.platform != "linux/amd64" or manifest.decision != "pass":
@@ -671,7 +741,7 @@ def verify_release_manifest(manifest: ReleaseManifest, evidence_dir: Path) -> No
         "scanner": dict(manifest.scanner),
         "decision": manifest.decision,
     }
-    rebuilt = build_release_manifest(root, metadata)
+    rebuilt = build_release_manifest(root, metadata, trusted_root=trusted_root)
     if rebuilt != manifest:
         raise EvidenceError("manifest identity mismatch")
 
@@ -700,6 +770,11 @@ def _parser() -> argparse.ArgumentParser:
     verify = subparsers.add_parser("verify", help="verify a release evidence manifest")
     verify.add_argument("--manifest", required=True, type=Path)
     verify.add_argument("--evidence-dir", required=True, type=Path)
+    for command in (assemble, verify):
+        command.add_argument(
+            "--trusted-root", type=Path,
+            help="independently trusted Sigstore root for offline gh verification",
+        )
     return parser
 
 
@@ -710,13 +785,15 @@ def main(argv: list[str] | None = None) -> int:
         metadata = _load_json_file(arguments.metadata, "metadata")
         if not isinstance(metadata, Mapping):
             raise _error("metadata", "root")
-        manifest = build_release_manifest(arguments.evidence_dir, metadata)
+        manifest = build_release_manifest(
+            arguments.evidence_dir, metadata, trusted_root=arguments.trusted_root,
+        )
         _write_manifest(arguments.output, manifest)
         return 0
 
     payload = _load_json_file(arguments.manifest, "manifest")
     manifest = _manifest_from_payload(payload)
-    verify_release_manifest(manifest, arguments.evidence_dir)
+    verify_release_manifest(manifest, arguments.evidence_dir, trusted_root=arguments.trusted_root)
     return 0
 
 
