@@ -10,6 +10,10 @@ import {
   loadAdminModuleSignals,
   type AdminModuleSignal
 } from "./admin-module-signals"
+import {
+  loadAdminFirstSteps,
+  type AdminFirstStep
+} from "./admin-first-steps"
 
 const groupedModules = ADMIN_MODULE_GROUPS.map((group: AdminModuleGroup) => ({
   group,
@@ -53,16 +57,54 @@ export const AdminOperationsOverviewPage: React.FC = () => {
     Record<string, AdminModuleSignal>
   >({})
   const { serverUrl } = useConnectionState()
+  const [firstSteps, setFirstSteps] = React.useState<AdminFirstStep[]>([])
+  // Dismissal is scoped per server, like the resume-setup banner: a new
+  // connection gets its own first-session checklist.
+  const firstStepsDismissKey = `__tldw_admin_first_steps_dismissed::${
+    serverUrl || "unconfigured"
+  }`
+  const [dismissedKeys, setDismissedKeys] = React.useState<ReadonlySet<string>>(
+    () => new Set()
+  )
+  const firstStepsDismissed = React.useMemo(() => {
+    if (dismissedKeys.has(firstStepsDismissKey)) return true
+    if (typeof window === "undefined") return false
+    try {
+      return window.localStorage.getItem(firstStepsDismissKey) === "1"
+    } catch {
+      return false
+    }
+  }, [firstStepsDismissKey, dismissedKeys])
+  const dismissFirstSteps = () => {
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem(firstStepsDismissKey, "1")
+      } catch {
+        // Dismissal is best-effort frontend-only state.
+      }
+    }
+    setDismissedKeys((prev) => new Set(prev).add(firstStepsDismissKey))
+  }
 
   React.useEffect(() => {
     let cancelled = false
     void loadAdminModuleSignals().then((loaded) => {
       if (!cancelled) setSignals(loaded)
     })
+    void loadAdminFirstSteps().then((steps) => {
+      if (!cancelled) setFirstSteps(steps)
+    })
     return () => {
       cancelled = true
     }
   }, [])
+
+  // The card earns its place only while something is left to do; a finished
+  // (or dismissed, or unconnected) checklist renders nothing.
+  const showFirstSteps =
+    Boolean(serverUrl) &&
+    !firstStepsDismissed &&
+    firstSteps.some((step) => !step.done)
 
   return (
     <PageShell maxWidthClassName="max-w-6xl" className="py-8">
@@ -96,6 +138,65 @@ export const AdminOperationsOverviewPage: React.FC = () => {
           </p>
         </div>
       </header>
+
+      {showFirstSteps ? (
+        <section
+          aria-labelledby="admin-first-steps-title"
+          data-testid="admin-first-steps"
+          className="mt-6 rounded-lg border border-border bg-surface p-4 shadow-sm"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2
+                id="admin-first-steps-title"
+                className="text-sm font-semibold uppercase tracking-wide text-text-muted"
+              >
+                First steps
+              </h2>
+              <p className="mt-1 text-sm text-text-muted">
+                A few one-time setups most servers want before day-to-day
+                operation.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="rounded-md px-2.5 py-1 text-sm text-text-muted hover:bg-surface2"
+              onClick={dismissFirstSteps}
+            >
+              Dismiss
+            </button>
+          </div>
+          <ul className="mt-3 space-y-1.5">
+            {firstSteps.map((step) => (
+              <li
+                key={step.key}
+                className="flex items-center gap-2 text-sm"
+                data-testid={`admin-first-step-${step.key}`}
+              >
+                <span
+                  aria-hidden="true"
+                  className={
+                    step.done
+                      ? "text-[color:var(--state-ready,#2f9e6e)]"
+                      : "text-text-muted"
+                  }
+                >
+                  {step.done ? "☑" : "☐"}
+                </span>
+                {step.done ? (
+                  <span className="text-text-muted line-through">
+                    {step.label}
+                  </span>
+                ) : (
+                  <a className="text-text hover:underline" href={step.route}>
+                    {step.label}
+                  </a>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <div className="mt-8 space-y-8" data-testid="admin-operations-modules">
         {groupedModules.map(({ group, modules }) => (
