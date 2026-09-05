@@ -1,11 +1,11 @@
 ---
 id: TASK-13163
 title: Resolve Personal Context conflicts through the batched Sync API
-status: In Progress
+status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-03 13:40'
-updated_date: '2026-09-05 21:42'
+updated_date: '2026-09-05 23:51'
 labels:
   - personal-context
   - sync
@@ -28,13 +28,13 @@ Extend the existing batched Sync conflict API for ongoing Personal Context confl
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Every Personal Context push conflict creates or reuses a deterministic protected home-authority candidate before returning a terminal conflict result.
-- [ ] #2 Conflict records carry expected local and remote envelope IDs; stale reviews are rejected without mutating canonical state or resolving the generic conflict.
-- [ ] #3 The batched endpoint implements skip, overwrite, and duplicate_rename only, with canonical overwrite, merge payload, and duplicate decisions routed through PersonalContextService.
-- [ ] #4 Mutating decisions use idempotent Personalization replay receipts so interruption cannot duplicate a version, manifest advance, publication batch, merge, or renamed record.
-- [ ] #5 Ordinary conflicts freeze one object; key collisions freeze both object IDs and only the contested semantic-key slot while unrelated objects continue.
-- [ ] #6 Candidate retention, replay, stale-review, key-collision, batch-partial-failure, authorization, and plaintext-canary tests pass.
-- [ ] #7 ADR required: no new ADR; backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md governs conflict authority and retention.
+- [x] #1 Every Personal Context push conflict creates or reuses a deterministic protected home-authority candidate before returning a terminal conflict result.
+- [x] #2 Conflict records carry expected local and remote envelope IDs; stale reviews are rejected without mutating canonical state or resolving the generic conflict.
+- [x] #3 The batched endpoint implements skip, overwrite, and duplicate_rename only, with canonical overwrite, merge payload, and duplicate decisions routed through PersonalContextService.
+- [x] #4 Mutating decisions use idempotent Personalization replay receipts so interruption cannot duplicate a version, manifest advance, publication batch, merge, or renamed record.
+- [x] #5 Ordinary conflicts freeze one object; key collisions freeze both object IDs and only the contested semantic-key slot while unrelated objects continue.
+- [x] #6 Candidate retention, replay, stale-review, key-collision, batch-partial-failure, authorization, and plaintext-canary tests pass.
+- [x] #7 ADR required: no new ADR; backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md governs conflict authority and retention.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -49,14 +49,26 @@ ADR required: no new ADR. ADR path: backlog/decisions/002-personal-context-profi
 Continuation checkpoint: approved detail plan Docs/superpowers/plans/2026-09-05-personal-context-conflict-resolution-detail.md adds missing canonical encrypted journal/freeze and Sync retention ownership; independent plan review approved. Existing ongoing wire-contract baseline: 12 passed. Implementation paused before code edits for an owner decision: on a semantic-key collision between distinct local and shared object IDs, does overwrite/Keep local authorize retiring the shared record and installing the local ID, or must that shared record remain and the local copy use duplicate_rename? Approved spec defines duplicate_rename but does not resolve this destructive identity choice. No default deletion, action restriction, or capability enablement introduced. Investigation found generic encrypted object_versions could own private journals under existing purge/rotation inventory; verify in implementation after choice. TASK13192 committed6363466d07 is this isolated branch base, not yet merged.
 
 Owner clarification resolved: user explicitly chooses deconfliction outcome; no automatic local/server winner. Keep shared, keep local values, reviewed merge, or explicitly distinct keep-both. For same-key distinct IDs, keep-local/merge explicitly targets established shared canonical identity; incoming duplicate is accounted for by exact receipt, not silently installed alongside it. Spec and detail plan updated; continuation authorized. Supersedes prior paused-decision checkpoint.
+
+Implemented user-directed Personal Context deconfliction in the existing batched Sync endpoint. Protected immutable canonical candidates and narrow object/key-slot freezes share existing encrypted storage; completed exact receipts do not consume the internal 1000-active-conflict bound. Keep-local and merged values explicitly target the established shared canonical ID; duplicate_rename requires a new ID and noncolliding key. Canonical mutation, manifest, publication and exact decision receipt commit together, with recoverable Sync finalization. Candidate identity/body authentication and same-transaction activation checks cover capture, attachment, resolution and replay. Invalid linked manifests and invalid purge generations reject before conflict review. Retention guards include real SQLite/PostgreSQL destructive checks. No schema, dependency, shared profile-core, new endpoint/action or rollout changes.
+
+Verification: final amended candidate/replay/race/PostgreSQL selection 16 passed and activation 25 passed, both exit 0; preceding classification fix 2 focused plus 35 adapter/materializer passed. Earlier implementation checkpoints: 48 conflict cases, 60 compatibility/activation, 316 targeted regressions and 71 relay/activation passed; these are not claimed as final-source full reruns. Affected Ruff, formatting, Bandit, docs path hygiene and branch diff checks passed. Independent task review and final whole-branch review, including scoped fixes, approved source commit 62e63bf5124628b3e2bb1d7aec745af6f976c3cf. No full suite or live end-to-end rollout certification was run. Known dependency/config warnings remain attributed; the long 48-test interpreter cleanup exited 0 normally.
+
+API/developer guides, published copies, approved spec/detail plan and testing lesson updated. ADR required: no new ADR; backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md governs the existing storage, authority and conflict boundaries. Plan: Docs/superpowers/plans/2026-09-05-personal-context-conflict-resolution-detail.md. Runtime context builder remains an unwired existing scaffold; the unchanged all-domain scan-watermark length limitation remains outside this task and was not independently baseline-reproduced. Ongoing sync stays version 0. Local branch codex/personal-context-conflict-resolution starts at 6363466d07; no push, PR, merge or destructive cleanup performed.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Completed canonical user-directed conflict resolution with exact encrypted candidates/receipts, guarded retention, restart recovery and transaction-boundary activation checks. Task and final reviews approved all fixes; targeted tests/static/docs checks passed with disclosed baseline warnings. Implementation and documentation are local only; ongoing sync remains gated at version 0.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
