@@ -272,6 +272,7 @@ async def get_process_videos_form(
 
 
 async def get_process_audios_form(
+    request: Request,
     urls: list[str] | None = Form(None),
     title: str | None = Form(None),
     titles: str | None = Form(None),
@@ -314,6 +315,10 @@ async def get_process_audios_form(
     Dependency that parses multipart/form-data into a ProcessAudiosForm.
 
     Used by /media/process-audios (no DB persistence).
+
+    Explicit empty system/custom prompts remain empty instead of selecting defaults.
+    Canonical api_provider takes precedence over the legacy api_name alias.
+    Returns validated audio options; invalid fields raise HTTP 422.
     """
     transcription_model = _resolve_transcription_model_or_default(
         transcription_model,
@@ -323,6 +328,11 @@ async def get_process_audios_form(
     try:
         urls_norm = _coerce_urls(urls)
         title_val = title or titles
+        raw_form = await request.form()
+        if system_prompt is None and raw_form.get("system_prompt") == "":
+            system_prompt = ""
+        if custom_prompt is None and raw_form.get("custom_prompt") == "":
+            custom_prompt = ""
         return ProcessAudiosForm(
             urls=urls_norm,
             title=title_val,
@@ -343,7 +353,7 @@ async def get_process_audios_form(
             end_time=end_time,
             api_provider=api_provider,
             model_name=model_name,
-            api_name=api_name,
+            api_name=api_provider or api_name,
             use_cookies=use_cookies,
             cookies=cookies,
             chunk_method=chunk_method,

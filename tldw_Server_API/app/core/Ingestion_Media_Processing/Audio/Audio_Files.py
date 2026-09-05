@@ -743,6 +743,8 @@ def process_audio_files(
     temp_dir: Optional[str] = None,
     user_id: Optional[int] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
+    *,
+    prompts_resolved: bool = False,
 ) -> dict[str, Any]:
     """
     Processes a list of audio inputs (URLs or local file paths).
@@ -794,6 +796,8 @@ def process_audio_files(
         # api_key parameter removed - API keys are retrieved from server config
         custom_prompt_input: Custom user prompt for the analysis task. Defaults to None.
         system_prompt_input: System prompt/message for the analysis task. Defaults to None.
+        prompts_resolved: Preserve an already-resolved instruction pair, including empty
+            text. False retains legacy file-default lookup for direct/background callers.
         summarize_recursively: If True, use a recursive summarization strategy for long texts.
                                Defaults to False. Effective only if `perform_analysis` is True.
         use_cookies: If True, pass cookies when downloading audio from URLs. Defaults to False.
@@ -1288,9 +1292,9 @@ def process_audio_files(
                         # Load default prompts if none provided
                         try:
                             from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt as _load_prompt
-                            if not custom_prompt_input:
+                            if not prompts_resolved and not custom_prompt_input:
                                 custom_prompt_input = _load_prompt("audio", "Transcription Analysis Summary") or custom_prompt_input
-                            if not system_prompt_input:
+                            if not prompts_resolved and not system_prompt_input:
                                 system_prompt_input = _load_prompt("audio", "System Prompt") or system_prompt_input
                         except _AUDIO_FILES_NONCRITICAL_EXCEPTIONS:
                             pass

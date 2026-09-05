@@ -98,6 +98,12 @@ EXPECTED_REGISTRY = {
         "parts": (("system", "System instructions", "literal", ()),),
         "workflows": (("media.email.summarization", "Synchronous email analysis"),),
     },
+    "media.audio.analysis": {
+        "label": "Audio summarization",
+        "description": "Controls system and user instructions for synchronous audio analysis. Without a saved override, server defaults apply.",
+        "parts": (("system", "System instructions", "literal", ()), ("user", "User instructions", "literal", ())),
+        "workflows": (("media.audio.analysis", "Synchronous audio analysis"),),
+    },
     "media.text.translation": {
         "label": "Text translation",
         "description": "Controls the visible instructions used by synchronous text translation.",

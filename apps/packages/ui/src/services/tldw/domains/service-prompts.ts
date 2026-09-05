@@ -14,6 +14,7 @@ export type KnownServicePromptId =
   | "media.pdf.summarization"
   | "media.ebook.summarization"
   | "media.email.summarization"
+  | "media.audio.analysis"
   | "media.text.translation"
   | "notes.title.generate"
 
