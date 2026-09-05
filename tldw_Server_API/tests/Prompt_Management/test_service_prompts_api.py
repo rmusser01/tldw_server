@@ -238,7 +238,8 @@ def test_service_prompt_detail_returns_packaged_state_without_caching(api_contex
     assert set(body["default_parts"]) == {"system", "user_template"}
 
 
-def test_document_summary_prompt_can_be_saved_and_reset(api_context) -> None:
+def test_document_summary_prompt_can_be_saved_and_reset(api_context: SimpleNamespace) -> None:
+    """Exercise document guidance save and reset through the generic API."""
     path = "/api/v1/service-prompts/media.document.summarization"
     parts = {"system": "Summarize in French. Preserve literal {braces}."}
     saved = api_context.client.put(path, json={"parts": parts, "expected_revision": None})

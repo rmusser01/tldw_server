@@ -155,6 +155,7 @@ async def process_documents_endpoint(
         prompts_db = await get_prompts_db_for_user(request, current_user)
 
         def resolve_system_prompt() -> str:
+            """Resolve the request snapshot and release this worker's connection."""
             try:
                 resolved = resolve_service_prompt(prompts_db, "media.document.summarization")
                 # With no user override, retain deployment-specific prompt files.

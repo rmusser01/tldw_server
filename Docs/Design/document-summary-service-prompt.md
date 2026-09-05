@@ -47,3 +47,11 @@ TypeScript compile, Ruff lint/format, and touched-scope Bandit passed (zero find
 Independent review identified the multipart empty-string normalization issue; a
 real HTTP test reproduced it before the boundary fix. Re-review found no further
 issues. Full repository tests and browser end-to-end tests were not run.
+
+PR review follow-up: real SQLite regressions reproduced retained connections from
+database initialization and successful/failed liveness probes. Those temporary
+connections now close on their originating worker; cached instances remain usable.
+The expanded focused backend suite passed all 138 tests, and Bandit found no issues
+in the three touched production files. New functions also have docstrings and
+explicit parameter/return annotations. Prompt lookup remains lazy at the request
+boundary, consistent with Notes title generation and the approved bypass behavior.
