@@ -4,9 +4,11 @@ title: Expose synchronous PDF summarization in Service Prompts
 status: Done
 assignee: []
 created_date: '2026-09-05 04:03'
-updated_date: '2026-09-05 04:21'
+updated_date: '2026-09-05 04:26'
 labels: []
 dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/pull/2880'
 documentation:
   - Docs/Design/pdf-summary-service-prompt.md
 ---
@@ -37,6 +39,8 @@ Implement the approved bounded PDF slice: independent media.pdf.summarization se
 Approved in this conversation. Fresh worktree codex/pdf-summary-service-prompt from dev a5aa0c8e67. Baseline registry plus document Service Prompt tests: 64 passed, 2 warnings. Read-only searches found no existing PDF Service Prompt task/worktree. MCP search did not return; using official CLI fallback. Local worktree task-ID scan tops out at 13160.
 
 Implemented the approved independent PDF literal-system entry with shared Settings metadata and golden defaults. HTTP tests exposed an existing multipart bug: api_name was discarded, preventing analysis. Added only parsing/forwarding of that existing field; credentials remain server-only. RED: 7 backend contract failures and 1 shared Settings failure before implementation. GREEN: PDF/registry/API 89 passed; broader PDF/document, chunking, input-contract, usage-event and permission regressions 95 passed (8 warnings); Settings/service/domain 195 passed. Ruff lint/format and touched-file ESLint passed; ESLint emitted only the shared-file Next pages-directory notice. Extension tsc --noEmit -p tsconfig.compile.json passed (not a full shared-UI typecheck). Bandit scanned the three changed production Python files: zero findings and errors, report /tmp/bandit_pdf_summary_service_prompt.json. Independent review found no Critical, Important or Minor issues. git diff --check passed. Full repository suites, full shared-UI typecheck and live provider/browser E2E were not run. No dependency changes; temporary dependency symlinks removed before commit. Local implementation complete; PR creation/integration awaits the user choice.
+
+User selected push and PR. Opened PR #2880 against dev: https://github.com/rmusser01/tldw_server/pull/2880 . Fresh committed-tree PDF/registry/API verification: 89 passed, 9 warnings. Human-written Change summary remains pending before merge; no merge or review-monitoring automation requested in this step.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
