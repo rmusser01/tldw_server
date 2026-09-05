@@ -1078,7 +1078,7 @@ describe("BuddyShellHost", () => {
 
     expect(screen.getByRole("link", { name: "Stop listening" })).toHaveAttribute(
       "href",
-      "/persona?persona_id=persona-1&tab=live"
+      "/persona?persona_id=persona-1&tab=live&session_id=live-session-1"
     )
   })
 

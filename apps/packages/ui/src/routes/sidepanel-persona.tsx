@@ -239,6 +239,12 @@ const SidepanelPersona = ({
     setActiveTab,
     setSelectedPersonaId
   })
+  const [dismissedBuddyReviewLocator, setDismissedBuddyReviewLocator] =
+    React.useState<string | null>(null)
+  const buddyReviewLocator =
+    !isCompanionMode && routeBootstrap.personaId && routeBootstrap.sessionId
+      ? JSON.stringify([routeBootstrap.personaId, routeBootstrap.sessionId])
+      : null
   const setBuddyShellRenderContext = useSetBuddyShellRenderContext()
   const visualRuntimeOverride = usePersonaVisualRuntimeStore((state) => state.override)
   const visualRuntimeDiagnostics = usePersonaVisualRuntimeStore(
@@ -552,6 +558,7 @@ const SidepanelPersona = ({
     capabilities,
     capsLoading,
     routeBootstrapPersonaId: routeBootstrap.personaId,
+    routeBootstrapSessionId: routeBootstrap.sessionId,
   })
   const {
     sessionHistory,
@@ -1058,6 +1065,9 @@ const SidepanelPersona = ({
           }}
           options={[
             { label: t("sidepanel:persona.newSession", "New session"), value: "__new__" },
+            ...(resumeSessionId && !sessionHistory.some((item) => item.session_id === resumeSessionId)
+              ? [{ label: resumeSessionId, value: resumeSessionId }]
+              : []),
             ...sessionHistory.map((session) => ({
               label: session.session_id,
               value: session.session_id
@@ -1486,6 +1496,13 @@ const SidepanelPersona = ({
       </div>
     </div>
   ) : null
+
+  const isBuddyReviewDetour =
+    setupOrch.personaSetupWizard.isSetupRequired &&
+    activeTab === "live" &&
+    selectedPersonaId === routeBootstrap.personaId &&
+    buddyReviewLocator !== null &&
+    buddyReviewLocator !== dismissedBuddyReviewLocator
 
   const liveSessionStatusPanels = (
     <>
@@ -2204,7 +2221,10 @@ const SidepanelPersona = ({
   // ── Early-return gates ──
   if (uxState === "error_auth" || uxState === "configuring_auth") {
     return (
-      <div data-testid="persona-route-root" className={routeRootClassName}>
+      <div
+      data-testid="persona-route-root"
+      className={routeRootClassName}
+    >
         {routeHeader}
         <div className="p-4">
           <FeatureEmptyState
@@ -2337,10 +2357,7 @@ const SidepanelPersona = ({
   }
 
   return (
-    <div
-      data-testid="persona-route-root"
-      className={routeRootClassName}
-    >
+    <div data-testid="persona-route-root" className={routeRootClassName}>
       {routeHeader}
       {isCompanionMode ? (
         <div className="flex flex-1 flex-col gap-3 p-3">
@@ -2352,7 +2369,35 @@ const SidepanelPersona = ({
         </div>
       ) : (
         <div className="flex flex-1 flex-col p-3">
-          {setupOrch.personaSetupWizard.isSetupRequired && !setupOrch.setupCommandDetour && !setupOrch.setupLiveDetour && !setupOrch.setupVisualDetour ? (
+          {isBuddyReviewDetour ? (
+            <div className="flex flex-col gap-3">
+              <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-sm text-sky-100">
+                <div>
+                  {t(
+                    "sidepanel:persona.buddyReviewSetupNotice",
+                    "Reviewing this Buddy session. Setup is still incomplete."
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className="mt-2 rounded-md border border-sky-500/40 px-3 py-2 text-sm font-medium text-sky-100"
+                  onClick={() =>
+                    setDismissedBuddyReviewLocator(buddyReviewLocator)
+                  }
+                >
+                  {t("sidepanel:persona.returnToSetup", "Return to setup")}
+                </button>
+              </div>
+              {liveSessionControls}
+              {liveSessionStatusPanels}
+              {pendingPlanCard}
+              {transcriptPanel}
+              {composerPanel}
+            </div>
+          ) : setupOrch.personaSetupWizard.isSetupRequired &&
+            !setupOrch.setupCommandDetour &&
+            !setupOrch.setupLiveDetour &&
+            !setupOrch.setupVisualDetour ? (
             <AssistantSetupWizard
               catalog={catalog.map((persona) => ({
                 id: String(persona.id || ""),

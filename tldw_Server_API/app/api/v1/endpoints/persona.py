@@ -15,6 +15,7 @@ import threading
 import time
 import uuid
 from collections import defaultdict, deque
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -56,6 +57,7 @@ from tldw_Server_API.app.api.v1.schemas.persona import (
     PersonaLiveVoiceAnalyticsSummary,
     PersonaLiveVoiceSessionSummary,
     PersonaLiveVoiceSessionUpdateRequest,
+    PersonaPendingPlanReview,
     PersonaPolicyRulesReplaceRequest,
     PersonaPolicyRulesResponse,
     PersonaProfileCreate,
@@ -293,6 +295,8 @@ from tldw_Server_API.app.core.VoiceAssistant import (
 )
 
 router = APIRouter()
+
+_persona_turn_client_message_id: ContextVar[str | None] = ContextVar("persona_turn_client_message_id", default=None)
 
 _PERSONA_KNOWN_TOOLS = {
     "ingest_url",
@@ -7904,7 +7908,16 @@ async def persona_session_detail(
             user_id=user_id,
             limit_turns=None if limit_turns <= 0 else limit_turns,
         )
-        return _persona_session_detail_from_db(row, manager_snapshot=snapshot)
+        detail = _persona_session_detail_from_db(row, manager_snapshot=snapshot)
+        if str(row.get("status") or "active").strip().lower() == "active":
+            pending_plan = manager.get_latest_plan_snapshot(
+                session_id=session_id,
+                user_id=user_id,
+                persona_id=str(row.get("persona_id") or ""),
+            )
+            if pending_plan is not None:
+                detail.pending_plan = PersonaPendingPlanReview.model_validate(pending_plan)
+        return detail
     except HTTPException:
         raise
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
@@ -8118,11 +8131,15 @@ async def persona_stream(
             sid = _normalize_ws_identifier(session_id, fallback=default_session_id)
             seq = ws_event_seq_by_session[sid]
             ws_event_seq_by_session[sid] += 1
-            return {
+            metadata = {
                 "session_id": sid,
                 "timestamp_ms": int(time.time() * 1000),
                 "event_seq": int(seq),
             }
+            client_message_id = _persona_turn_client_message_id.get()
+            if client_message_id is not None:
+                metadata["client_message_id"] = client_message_id
+            return metadata
 
         async def _emit_notice(
             *,
@@ -9874,6 +9891,7 @@ async def persona_stream(
                     persona_id=runtime_persona_id,
                     plan_id=plan_id,
                     steps=proposed_steps,
+                    requires_persisted_session=session_exists,
                 )
             except ValueError as exc:
                 _cancel_persona_live_processing_notice(session_id)
@@ -9935,6 +9953,7 @@ async def persona_stream(
                         persona_id=runtime_persona_id,
                         plan_id=plan_id,
                         steps=list(safe_plan.get("steps", [])),
+                        requires_persisted_session=pending_plan.requires_persisted_session,
                     )
                 except ValueError as exc:
                     _cancel_persona_live_processing_notice(session_id)
@@ -10030,12 +10049,33 @@ async def persona_stream(
                 _cancel_persona_live_processing_notice(
                     _normalize_ws_identifier(msg.get("session_id"), fallback=default_session_id)
                 )
-                await _handle_persona_live_turn(
-                    msg=msg,
-                    text=msg.get("text") or msg.get("message") or "",
-                    turn_type="user_message",
-                    source="ws",
+                # Child tasks retain this turn's identity even after the next
+                # message arrives. Never infer correlation from session state.
+                correlation_token = _persona_turn_client_message_id.set(
+                    _bounded_client_message_id(msg.get("client_message_id"))
                 )
+                try:
+                    await _handle_persona_live_turn(
+                        msg=msg,
+                        text=msg.get("text") or msg.get("message") or "",
+                        turn_type="user_message",
+                        source="ws",
+                    )
+                except WebSocketDisconnect:
+                    raise
+                except Exception:
+                    # The generic transport shutdown has no session identity;
+                    # emit scoped feedback before restoring the outer context.
+                    with contextlib.suppress(Exception):
+                        await _emit_notice(
+                            session_id=_normalize_ws_identifier(msg.get("session_id"), fallback=default_session_id),
+                            level="error",
+                            message="The Persona turn could not be completed.",
+                            reason_code="USER_TURN_FAILED",
+                        )
+                    raise
+                finally:
+                    _persona_turn_client_message_id.reset(correlation_token)
             elif mtype == "voice_config":
                 original_session_id = msg.get("session_id")
                 session_id = _normalize_ws_identifier(original_session_id, fallback="")
@@ -10530,7 +10570,7 @@ async def persona_stream(
                     session_id=session_id,
                     plan_id=plan_id,
                     user_id=connection_user_id,
-                    consume=True,
+                    consume=False,
                 )
                 if pending_plan is None:
                     await _emit_notice(
@@ -10546,6 +10586,36 @@ async def persona_stream(
                     session_id=session_id,
                     user_id=authenticated_user_id,
                 )
+                if bool(runtime_context.get("session_terminal", False)):
+                    await _emit_notice(
+                        session_id=session_id,
+                        level="error",
+                        message="Persona session is stopped.",
+                        reason_code="SESSION_TERMINAL",
+                    )
+                    continue
+                if pending_plan.requires_persisted_session and not bool(runtime_context.get("session_exists")):
+                    await _emit_notice(
+                        session_id=session_id,
+                        level="error",
+                        message="Persona session is unavailable.",
+                        reason_code="SESSION_NOT_FOUND",
+                    )
+                    continue
+                if session_manager.get_plan(
+                    session_id=session_id,
+                    plan_id=plan_id,
+                    user_id=connection_user_id,
+                    consume=True,
+                ) is not pending_plan:
+                    await _emit_notice(
+                        session_id=session_id,
+                        level="error",
+                        message="Invalid plan_id/session_id",
+                        reason_code="PLAN_NOT_FOUND",
+                    )
+                    continue
+
                 runtime_persona_id = str(runtime_context.get("persona_id") or _DEFAULT_PERSONA_ID).strip() or _DEFAULT_PERSONA_ID
                 runtime_mode = _bounded_label(
                     runtime_context.get("runtime_mode"),

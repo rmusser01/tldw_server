@@ -63,7 +63,11 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
     Boolean(visualDiagnostic) &&
     (isOpen || visualDiagnostic?.severity !== "info")
   const focusedLiveSession = liveControl?.focusedSession ?? null
-  const urgentCount = focusedLiveSession?.pendingApprovalCount ?? 0
+  const hasCurrentReview = liveControl?.feedback?.status === "review" &&
+    liveControl.feedback.sessionId === focusedLiveSession?.sessionId &&
+    liveControl.feedback.personaId === focusedLiveSession?.personaId &&
+    (!personaId || personaId === focusedLiveSession?.personaId)
+  const urgentCount = Math.max(focusedLiveSession?.pendingApprovalCount ?? 0, hasCurrentReview ? 1 : 0)
   const liveStatusLabel = urgentCount > 0
     ? "Needs approval"
     : focusedLiveSession?.lifecycle === "connected" ||

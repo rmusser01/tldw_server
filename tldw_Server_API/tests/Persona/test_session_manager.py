@@ -278,3 +278,49 @@ def test_session_manager_applies_payload_caps_with_truncation_markers():
     retention = metadata.get("_retention") or {}
     assert retention.get("content_truncated") is True
     assert retention.get("metadata_truncated") is True
+
+
+def test_latest_pending_plan_snapshot_is_owned_detached_and_non_consuming():
+    manager = SessionManager()
+    for plan_id in ("old", "latest"):
+        manager.put_plan(
+            session_id="s",
+            user_id="u",
+            persona_id="p",
+            plan_id=plan_id,
+            steps=[{"idx": 0, "tool": "rag_search", "args": {"query": plan_id}}],
+        )
+    snapshot = manager.get_latest_plan_snapshot(session_id="s", user_id="u", persona_id="p")
+    assert snapshot["plan_id"] == "latest"
+    assert snapshot["steps"][0]["args"] == {"query": "latest"}
+    assert "policy" not in snapshot["steps"][0]
+    snapshot["steps"][0]["args"]["query"] = "mutated"
+    assert manager.get_plan(session_id="s", user_id="u", plan_id="latest").steps[0].args == {"query": "latest"}
+    assert manager.get_latest_plan_snapshot(session_id="s", user_id="other", persona_id="p") is None
+    assert manager.get_latest_plan_snapshot(session_id="s", user_id="u", persona_id="other") is None
+    manager.get_plan(session_id="s", user_id="u", plan_id="latest", consume=True)
+    assert manager.get_latest_plan_snapshot(session_id="s", user_id="u", persona_id="p")["plan_id"] == "old"
+
+
+def test_latest_pending_plan_read_does_not_revive_expired_runtime():
+    manager = SessionManager(session_ttl_seconds=1)
+    manager.put_plan(
+        session_id="s", user_id="u", persona_id="p", plan_id="plan", steps=[{"idx": 0, "tool": "rag_search"}]
+    )
+    manager.get("s").updated_at = datetime.now(timezone.utc) - timedelta(seconds=2)
+    assert manager.get_latest_plan_snapshot(session_id="s", user_id="u", persona_id="p") is None
+    assert manager.get("s") is None
+
+
+@pytest.mark.parametrize(
+    "steps",
+    [
+        [{"idx": i, "tool": "rag_search"} for i in range(101)],
+        [{"idx": 0, "tool": "rag_search", "args": {"query": "x" * 65536}}],
+    ],
+)
+def test_latest_pending_plan_projection_omits_oversized_plan_without_consuming(steps):
+    manager = SessionManager()
+    manager.put_plan(session_id="s", user_id="u", persona_id="p", plan_id="plan", steps=steps)
+    assert manager.get_latest_plan_snapshot(session_id="s", user_id="u", persona_id="p") is None
+    assert manager.get_plan(session_id="s", user_id="u", plan_id="plan") is not None

@@ -661,7 +661,24 @@ class PersonaSessionSummary(BaseModel):
     scope_audit: dict[str, object] = Field(default_factory=dict)
 
 
+class PersonaPendingPlanStep(BaseModel):
+    idx: int
+    tool: str
+    step_type: str
+    args: dict[str, Any] = Field(default_factory=dict)
+    description: str | None = None
+    why: str | None = None
+
+
+class PersonaPendingPlanReview(BaseModel):
+    """Read-only review data; confirmation revalidates current server policy."""
+
+    plan_id: str
+    steps: list[PersonaPendingPlanStep] = Field(max_length=100)
+
+
 class PersonaSessionDetail(PersonaSessionSummary):
+    pending_plan: PersonaPendingPlanReview | None = None
     turns: list[dict[str, object]] = Field(default_factory=list)
 
 

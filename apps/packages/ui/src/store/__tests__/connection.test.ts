@@ -25,12 +25,13 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 }))
 
 vi.mock("@/services/tldw/runtime-auth-override", () => ({
-  getRuntimeSingleUserApiKeyOverride: vi.fn(() => null)
+  getRuntimeSingleUserApiKeyOverride: vi.fn(() => null),
+  isCookieSessionConfigInvalidated: vi.fn(() => false)
 }))
 
 import { apiSend } from "@/services/api-send"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
-import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
+import { getRuntimeSingleUserApiKeyOverride, isCookieSessionConfigInvalidated } from "@/services/tldw/runtime-auth-override"
 import { CONNECTION_TIMEOUT_MS, useConnectionStore } from "../connection"
 
 const mockedApiSend = vi.mocked(apiSend)
@@ -216,6 +217,7 @@ describe("connection store stability", () => {
     mockedClient.initialize.mockResolvedValue(undefined)
     mockedClient.ragHealth.mockResolvedValue({ status: "healthy" } as any)
     mockedRuntimeApiKey.mockReturnValue(null)
+    vi.mocked(isCookieSessionConfigInvalidated).mockReturnValue(false)
   })
 
   afterEach(() => {
@@ -337,6 +339,22 @@ describe("connection store stability", () => {
         timeoutMs: CONNECTION_TIMEOUT_MS
       })
     )
+  })
+
+  it.each([
+    ["active", true], ["invalidated", false], ["foreign-origin", false]
+  ])("uses %s cookie-session readiness without an API key", async (kind, expected) => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    mockedClient.getConfig.mockResolvedValue({
+      serverUrl: kind === "foreign-origin" ? "https://foreign.example" : window.location.origin,
+      authMode: "single-user", authSource: "cookie-session"
+    })
+    vi.mocked(isCookieSessionConfigInvalidated).mockReturnValue(kind === "invalidated")
+    mockedApiSend.mockResolvedValue({ ok: true, status: 200, data: { status: "alive" } })
+    await useConnectionStore.getState().checkOnce()
+    expect(useConnectionStore.getState().state.isConnected).toBe(expected)
+    if (expected) expect(mockedApiSend).toHaveBeenCalledWith(expect.objectContaining({ noAuth: false }))
+    else expect(useConnectionStore.getState().state.configStep).toBe("auth")
   })
 
   it("treats runtime single-user auth as configured without persisting an api key", async () => {

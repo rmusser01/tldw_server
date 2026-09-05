@@ -14,6 +14,8 @@ from typing import Any
 
 _VALID_PERSONA_PLAN_STEP_TYPES = frozenset({"mcp_tool", "skill", "rag_query", "final_answer"})
 _TRUNCATION_SUFFIX = "... [truncated]"
+_MAX_PENDING_PLAN_REVIEW_STEPS = 100
+_MAX_PENDING_PLAN_REVIEW_BYTES = 65_536
 
 
 def _truncate_text(value: Any, *, max_chars: int) -> tuple[str, bool, int]:
@@ -97,6 +99,7 @@ class PendingPlan:
     session_id: str
     created_at: datetime
     steps: list[PlanStep] = field(default_factory=list)
+    requires_persisted_session: bool = False
 
 
 @dataclass
@@ -218,6 +221,7 @@ class SessionManager:
         persona_id: str,
         plan_id: str,
         steps: list[dict[str, Any]],
+        requires_persisted_session: bool = False,
     ) -> PendingPlan:
         if not session_id:
             raise ValueError("session_id is required")
@@ -265,6 +269,7 @@ class SessionManager:
                 session_id=session_id,
                 created_at=datetime.now(timezone.utc),
                 steps=normalized_steps,
+                requires_persisted_session=requires_persisted_session,
             )
             session.pending_plans[plan_id] = pending
             self._trim_pending_plans_locked(session)
@@ -293,6 +298,51 @@ class SessionManager:
                 session.pending_plans.pop(plan_id, None)
                 self._touch_session(session)
             return pending
+
+    def get_latest_plan_snapshot(
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        persona_id: str,
+    ) -> dict[str, Any] | None:
+        """Read the latest retained plan for review without consuming or renewing it.
+
+        The detached projection omits oversized plans entirely and contains no
+        authorization decisions. The caller must also check persisted lifecycle.
+        """
+        with self._lock:
+            self._prune_expired_sessions_locked()
+            session = self._sessions.get(session_id)
+            if session is None or session.user_id != user_id or session.persona_id != persona_id:
+                return None
+            if not session.pending_plans:
+                return None
+            # Prefer the most recently inserted plan when timestamps tie.
+            pending = max(reversed(session.pending_plans.values()), key=lambda plan: plan.created_at)
+            if len(pending.steps) > _MAX_PENDING_PLAN_REVIEW_STEPS:
+                return None
+            payload = {
+                "plan_id": pending.plan_id,
+                "steps": [
+                    {
+                        "idx": step.idx,
+                        "tool": step.tool,
+                        "step_type": step.step_type,
+                        "args": step.args,
+                        "description": step.description,
+                        "why": step.why,
+                    }
+                    for step in pending.steps
+                ],
+            }
+            try:
+                encoded = json.dumps(payload, ensure_ascii=False, allow_nan=False)
+            except (TypeError, ValueError):
+                return None
+            if len(encoded.encode("utf-8")) > _MAX_PENDING_PLAN_REVIEW_BYTES:
+                return None
+            return json.loads(encoded)
 
     def clear_plans(
         self,

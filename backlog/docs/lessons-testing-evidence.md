@@ -165,3 +165,15 @@ The original recovery assertion caught it. A focused regression failed on both
 SQLite and PostgreSQL before the one-line transition fix; all 22 receipt/state
 cases and 48 bootstrap tests then passed. Keep the recovery assertion through
 fixture repairs, and test retryable failure states as well as first application.
+## 2026-09-05 — Verify session handoff under StrictMode and superseded attempts
+
+TASK-13180 real browser UAT resumed the exact Buddy session with HTTP 200, but
+full Live never requested its detail or opened a WebSocket. Effect cleanup set
+`mountedRef` false while StrictMode setup replay never restored it; the ordinary
+route test passed. A StrictMode route regression reproduced the missing socket,
+and restoring the mounted flag during effect setup made both paths pass.
+Independent review also found that an older connection's catch/finally could clear
+a newer attempt's loading state. Resolve/reject regressions now keep the newer
+request pending and prove another Connect click cannot issue a duplicate request.
+Test effect replay and overlapping completions, including failure/finally paths,
+when mounted/attempt refs guard asynchronous connection state.

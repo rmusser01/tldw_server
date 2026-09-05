@@ -12,9 +12,10 @@ import { apiSend } from "@/services/api-send"
 import { createSafeStorage } from "@/utils/safe-storage"
 import {
   resolveWebUiQuickstartServerUrl,
+  isExactOriginCookieSessionConfig,
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
-import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
+import { getRuntimeSingleUserApiKeyOverride, isCookieSessionConfigInvalidated } from "@/services/tldw/runtime-auth-override"
 import { resolveBrowserRequestTransport } from "@/services/tldw/request-core"
 import { isPlaceholderApiKey } from "@/utils/api-key"
 import {
@@ -567,13 +568,17 @@ const hasSingleUserApiKey = (config: Partial<TldwConfig> | null | undefined): bo
   )
 }
 
+const hasActiveCookieSession = (config: Partial<TldwConfig> | null | undefined): boolean =>
+  !isCookieSessionConfigInvalidated() &&
+  isExactOriginCookieSessionConfig(config, getQuickstartWebUiServerUrl())
+
 const hasRequiredAuthForConfig = (config: Partial<TldwConfig> | null | undefined): boolean => {
   const authMode = config?.authMode ?? "single-user"
   if (authMode === "multi-user") {
     return Boolean(String(config?.accessToken || "").trim())
   }
 
-  return hasSingleUserApiKey(config)
+  return hasSingleUserApiKey(config) || hasActiveCookieSession(config)
 }
 
 const deriveOnboardingConfigStep = (
@@ -746,6 +751,9 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
 
       try {
         let cfg = await (await getTldwClient()).getConfig()
+        // Check the original binding before quickstart normalizes serverUrl.
+        // Foreign-origin cookie metadata must never become local authority.
+        const hasCookieSessionAuth = hasActiveCookieSession(cfg)
         const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
         const recoveryProbeSourceServerUrl = cfg?.serverUrl ?? currentState.serverUrl ?? null
         let serverUrl = quickstartWebUiServerUrl ?? cfg?.serverUrl ?? null
@@ -780,18 +788,15 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
           }
         }
 
-        const hasSingleUserApiKeyValue = hasSingleUserApiKey(cfg)
-        const missingSingleUserApiKey =
+        const hasSingleUserAuthValue = hasSingleUserApiKey(cfg) || hasCookieSessionAuth
+        const missingSingleUserAuth =
           Boolean(serverUrl) &&
           (cfg?.authMode ?? "single-user") === "single-user" &&
-          !hasSingleUserApiKeyValue
+          !hasSingleUserAuthValue
 
-        // If we have a server URL but no single-user API key, treat as
-        // unconfigured/unauthenticated instead of marking the app connected
-        // off an unauthenticated liveness check.
-        // Users must explicitly configure their own credentials in
-        // Settings/Onboarding before authenticated pages can function.
-        if (missingSingleUserApiKey) {
+        // Require API-key or active same-origin cookie-session configuration
+        // before using liveness to mark authenticated pages ready.
+        if (missingSingleUserAuth) {
           set((s) => ({
             state: {
               ...s.state,
@@ -844,7 +849,7 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
         // Health endpoints may require auth; apiSend injects headers based
         // on tldwConfig (API key / access token).
         const noAuthForHealth = !cfg ||
-          (!hasSingleUserApiKeyValue &&
+          (!hasSingleUserAuthValue &&
             !cfg.accessToken &&
             cfg.authMode !== "multi-user")
 

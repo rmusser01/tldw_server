@@ -607,3 +607,45 @@ def test_persona_sessions_return_404_when_disabled(monkeypatch, persona_db: Char
         assert r_detail.status_code == 404
 
     fastapi_app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize("session_status", ["active", "closed", "archived"])
+def test_session_detail_pending_plan_is_active_owned_and_detail_only(monkeypatch, persona_db, session_status):
+    manager = SessionManager()
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr(persona_ep, "_get_persona_rbac_flags", lambda: (True, False))
+    try:
+        with _client_for_user(1, persona_db) as client:
+            created = client.post("/api/v1/persona/session", json={"persona_id": "research_assistant"})
+            assert created.status_code == 200
+            sid = created.json()["session_id"]
+            manager.put_plan(
+                session_id=sid,
+                user_id="1",
+                persona_id="research_assistant",
+                plan_id="pending",
+                steps=[{"idx": 0, "tool": "rag_search", "args": {"query": "review me"}}],
+            )
+            if session_status != "active":
+                row = persona_db.get_persona_session(sid, user_id="1")
+                persona_db.update_persona_session(
+                    session_id=sid, user_id="1", expected_version=row["version"], update_data={"status": session_status}
+                )
+            detail = client.get(f"/api/v1/persona/sessions/{sid}")
+            assert detail.status_code == 200
+            payload = detail.json()
+            if session_status == "active":
+                assert payload["pending_plan"]["plan_id"] == "pending"
+                assert payload["pending_plan"]["steps"][0]["args"] == {"query": "review me"}
+                exported = client.get(f"/api/v1/persona/sessions/{sid}/export")
+                assert exported.status_code == 200
+                assert "pending_plan" not in exported.json()
+            else:
+                assert payload["pending_plan"] is None
+            listed = client.get("/api/v1/persona/sessions").json()
+            assert all("pending_plan" not in item for item in listed)
+            assert manager.get_plan(session_id=sid, user_id="1", plan_id="pending") is not None
+        with _client_for_user(2, persona_db) as other:
+            assert other.get(f"/api/v1/persona/sessions/{sid}").status_code == 404
+    finally:
+        fastapi_app.dependency_overrides.clear()

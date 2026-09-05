@@ -38,6 +38,10 @@ type PersonaSessionPreferences = {
 }
 
 type PersonaSessionDetailResponse = {
+  session_id?: string
+  persona_id?: string
+  status?: string
+  pending_plan?: { plan_id: string; steps: PendingPlan["steps"] } | null
   preferences?: PersonaSessionPreferences
   turns?: Array<Record<string, unknown>>
 }
@@ -175,7 +179,8 @@ export interface UsePersonaLiveSessionDeps {
   capabilities: { hasPersonalization?: boolean; hasAudio?: boolean } | null
   capsLoading: boolean
   /** Route bootstrap */
-  routeBootstrapPersonaId: string | undefined
+  routeBootstrapPersonaId: string | null | undefined
+  routeBootstrapSessionId?: string | null
 }
 
 // ── Hook ──
@@ -232,13 +237,17 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
     capabilities,
     capsLoading,
     routeBootstrapPersonaId,
+    routeBootstrapSessionId,
   } = deps
 
   // ── Session state ──
   const [sessionHistory, setSessionHistory] = React.useState<
     PersonaSessionSummary[]
   >([])
-  const [resumeSessionId, setResumeSessionId] = React.useState<string>("")
+  const [resumeSessionId, setResumeSessionId] = React.useState<string>(
+    isCompanionMode ? "" : routeBootstrapSessionId || ""
+  )
+  const appliedRouteSessionRef = React.useRef(routeBootstrapSessionId)
   const [memoryEnabled, setMemoryEnabled] = React.useState(true)
   const [memoryTopK, setMemoryTopK] = React.useState<number>(3)
   const [companionContextEnabled, setCompanionContextEnabled] =
@@ -414,6 +423,43 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
     ]
   )
 
+  React.useEffect(() => {
+    if (
+      isCompanionMode ||
+      !routeBootstrapSessionId ||
+      appliedRouteSessionRef.current === routeBootstrapSessionId
+    )
+      return
+    appliedRouteSessionRef.current = routeBootstrapSessionId
+    if (!confirmDiscardUnsavedStateDrafts("session_switch")) return
+    // A second Buddy handoff selects its session and invalidates any earlier
+    // hydration. It still requires an explicit Connect, never an auto-resume.
+    connectAttemptRef.current += 1
+    const previousSocket = wsRef.current
+    if (previousSocket) {
+      previousSocket.onopen = null
+      previousSocket.onmessage = null
+      previousSocket.onerror = null
+      previousSocket.onclose = null
+    }
+    disconnect({ force: true })
+    setConnecting(false)
+    setSessionId(null)
+    setPendingPlan(null)
+    setApprovedStepMap({})
+    setResumeSessionId(routeBootstrapSessionId)
+  }, [
+    confirmDiscardUnsavedStateDrafts,
+    disconnect,
+    isCompanionMode,
+    routeBootstrapSessionId,
+    setApprovedStepMap,
+    setConnecting,
+    setPendingPlan,
+    setSessionId,
+    wsRef
+  ])
+
   // ── Connect ──
   const connect = React.useCallback(async () => {
     if (connecting || connected) return
@@ -529,6 +575,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
           ? (sessionsJson as PersonaSessionSummary[])
           : []
       }
+      if (!mountedRef.current || connectAttemptRef.current !== attemptId) return
       setSessionHistory(sessionsPayload)
 
       const sessionResp = await tldwClient.fetchWithAuth(
@@ -556,6 +603,10 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
       if (!nextSessionId) {
         throw new Error("Persona session response missing session_id")
       }
+      if (!mountedRef.current || connectAttemptRef.current !== attemptId) return
+      if (resumeSessionId && nextSessionId !== resumeSessionId) {
+        throw new Error("The server did not resume the selected Persona session.")
+      }
       const connectedPersonaId =
         String(
           sessionPayload?.persona?.id || resolvedPersonaId || ""
@@ -579,11 +630,38 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
         if (sessionDetailResp.ok) {
           const sessionDetailPayload =
             (await sessionDetailResp.json()) as PersonaSessionDetailResponse
+          if (!mountedRef.current || connectAttemptRef.current !== attemptId) return
           applySessionPreferences(sessionDetailPayload?.preferences)
+          const review = sessionDetailPayload?.pending_plan
+          if (
+            review?.plan_id &&
+            Array.isArray(review.steps) &&
+            review.steps.length > 0 &&
+            sessionDetailPayload.session_id === nextSessionId &&
+            sessionDetailPayload.persona_id === connectedPersonaId &&
+            sessionDetailPayload.status === "active"
+          ) {
+            // A restored plan carries no remembered grant. Every step needs a
+            // new explicit selection; the server rechecks policy on confirm.
+            const steps = review.steps.map(
+              ({ idx, tool, args, description, why }) => ({
+                idx,
+                tool,
+                args,
+                description,
+                why
+              })
+            )
+            setApprovedStepMap(
+              Object.fromEntries(steps.map((step) => [step.idx, false]))
+            )
+            setPendingPlan({ planId: review.plan_id, steps })
+          }
         }
       } catch {
         // session detail hydration is best-effort during connect
       }
+      if (!mountedRef.current || connectAttemptRef.current !== attemptId) return
       if (
         !sessionsPayload.some(
           (item) => item.session_id === nextSessionId
@@ -656,6 +734,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
         }
       }
     } catch (err: any) {
+      if (!mountedRef.current || connectAttemptRef.current !== attemptId) return
       const message = String(
         err?.message || "Failed to connect persona stream"
       )
@@ -669,7 +748,9 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
       setError(message)
       appendLog("notice", message)
     } finally {
-      setConnecting(false)
+      if (mountedRef.current && connectAttemptRef.current === attemptId) {
+        setConnecting(false)
+      }
     }
   }, [
     appendLog,
@@ -723,6 +804,8 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
 
   // ── Cleanup on unmount ──
   React.useEffect(() => {
+    // StrictMode replays setup after cleanup on the same hook instance.
+    mountedRef.current = true
     return () => {
       // Supersede any in-flight connect() so it can't create a socket after we
       // unmount.

@@ -1481,6 +1481,7 @@ async def get_request_user(
       via the same AuthNZ tables and RBAC as multi-user, with the
       bootstrapped admin treated as a normal user with roles/permissions.
     - Treats non-JWT Bearer tokens as API keys for compatibility.
+    - Delegates headerless requests to the canonical cookie-aware resolver.
     """
     # Test-mode bypasses are disabled in production for safety
     try:
@@ -1576,6 +1577,20 @@ async def get_request_user(
         user = await authenticate_api_key_user(request, api_key)
         _warn_single_user_context_mismatch(request, user, "x_api_key")
         return user
+
+    # Resolve cookie sessions through their canonical owner, including explicit
+    # header precedence and session revocation. Import locally: the resolver also
+    # uses this module's JWT/API-key helpers.
+    if (
+        request.headers.get("Authorization") is None
+        and request.headers.get("X-API-KEY") is None
+    ):
+        from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import get_auth_principal
+
+        await get_auth_principal(request)
+        user = getattr(request.state, "_auth_user", None)
+        if isinstance(user, User):
+            return user
 
     # Neither Bearer token nor API key provided
     logger.warning(

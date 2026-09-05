@@ -1,4 +1,5 @@
 import React from "react"
+import type { PersonaBuddyStreamFeedback } from "@/types/persona-buddy"
 
 import { buildPersonaWebSocketUrl } from "@/services/persona-stream"
 import {
@@ -117,6 +118,12 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
   const [pendingFocusSessionId, setPendingFocusSessionId] =
     React.useState<string | null>(null)
 
+  const [streamFeedback, setStreamFeedback] = React.useState<PersonaBuddyStreamFeedback | null>(null)
+  const feedbackRef = React.useRef<PersonaBuddyStreamFeedback | null>(null)
+  const updateFeedback = React.useCallback((next: PersonaBuddyStreamFeedback | null) => {
+    feedbackRef.current = next
+    setStreamFeedback(next)
+  }, [])
   const sessionsRef = React.useRef(sessions)
   const focusedSessionIdRef = React.useRef(focusedSessionId)
   const wsRef = React.useRef<WebSocket | null>(null)
@@ -149,6 +156,7 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
       reloadRequestRef.current += 1
       setLoading(false)
       setSessions((current) => upsertSession(current, session, { focused: true }))
+      focusedSessionIdRef.current = session.sessionId
       setFocusedSessionId(session.sessionId)
     },
     []
@@ -220,6 +228,7 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
         ws.onopen = null
         ws.onerror = null
         ws.onclose = null
+        ws.onmessage = null
         if (ws.readyState < WebSocket.CLOSING) {
           ws.close()
         }
@@ -291,6 +300,7 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
       const stoppedSession = await stopPersonaLiveSession(normalizedSessionId)
       setSessions((current) => upsertSession(current, stoppedSession))
       if (focusedSessionIdRef.current === normalizedSessionId) {
+        focusedSessionIdRef.current = null
         setFocusedSessionId(null)
       }
       await reload().catch(() => undefined)
@@ -324,6 +334,48 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
         const { url, protocols } = buildPersonaWebSocketUrl(config)
         const ws = new WebSocket(url, protocols)
         wsRef.current = ws
+        const lastSequence = new Map<string, number>()
+        ws.onmessage = (event) => {
+          if (!mountedRef.current || generation !== mountGenerationRef.current || wsRef.current !== ws) return
+          if (typeof event.data !== "string") return
+          let payload: Record<string, unknown>
+          try {
+            const parsed: unknown = JSON.parse(event.data)
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return
+            payload = parsed as Record<string, unknown>
+          } catch { return }
+          const currentFeedback = feedbackRef.current
+          if (!currentFeedback || currentFeedback.sessionId !== focusedSessionIdRef.current) return
+          if (payload.session_id !== currentFeedback.sessionId) return
+          if (payload.persona_id && payload.persona_id !== currentFeedback.personaId) return
+          if (payload.client_message_id && payload.client_message_id !== currentFeedback.clientMessageId) return
+          if (typeof payload.event_seq === "number") {
+            if (!Number.isSafeInteger(payload.event_seq) || payload.event_seq < 0) return
+            if (payload.event_seq <= (lastSequence.get(currentFeedback.sessionId) ?? -1)) return
+            lastSequence.set(currentFeedback.sessionId, payload.event_seq)
+          }
+          const eventType = payload.event || payload.type
+          const boundedText = (value: unknown) => typeof value === "string" ? value.slice(0, 4000) : ""
+          if (eventType === "assistant_delta") {
+            const delta = boundedText(payload.text_delta)
+            if (!delta) return
+            updateFeedback({ ...currentFeedback, status: "reply", text: (
+              (currentFeedback.status === "reply" ? currentFeedback.text : "") + delta
+            ).slice(0, 4000) })
+          } else if (eventType === "tool_plan" && typeof payload.plan_id === "string" && payload.plan_id) {
+            updateFeedback({ ...currentFeedback, status: "review", planId: payload.plan_id,
+              text: "A plan is ready. Open Full Live View to review it before anything runs." })
+          } else if (eventType === "tool_result" && payload.approval) {
+            updateFeedback({ ...currentFeedback, status: "review", text: "A tool needs approval. Review it in Full Live View." })
+          } else if (eventType === "notice" || eventType === "error") {
+            const text = boundedText(payload.message)
+            if (!text) return
+            const isError = eventType === "error" || payload.level === "error"
+            // Processing notices must not erase an already received reply or plan.
+            if (!isError && currentFeedback.status !== "pending") return
+            updateFeedback({ ...currentFeedback, status: isError ? "error" : "notice", text })
+          }
+        }
 
         return new Promise<WebSocket>((resolve, reject) => {
           let settled = false
@@ -384,6 +436,10 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
             clearConnectTimer()
             if (wsRef.current === ws) {
               setStreamState("closed")
+              const pending = feedbackRef.current
+              if (pending && (pending.status === "pending" || pending.status === "notice")) {
+                updateFeedback({ ...pending, status: "error", text: "The stream disconnected before a reply arrived. Reconnect or send again." })
+              }
             }
           }
         })
@@ -400,7 +456,7 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
 
     streamConnectPromiseRef.current = connectPromise
     return connectPromise
-  }, [])
+  }, [updateFeedback])
 
   const ensureSendableSession = React.useCallback(async () => {
     const focusedId = focusedSessionIdRef.current
@@ -443,6 +499,11 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
         assertCurrentMount()
         const ws = await ensureStreamSocket()
         assertCurrentMount()
+        if (focusedSessionIdRef.current !== session.sessionId) {
+          throw new Error("The focused session changed before the message could be sent")
+        }
+        updateFeedback({ sessionId: session.sessionId, personaId: session.personaId,
+          clientMessageId, status: "pending", text: "Waiting for your buddy…" })
         ws.send(
           JSON.stringify({
             type: "user_message",
@@ -459,6 +520,10 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
         )
         if (mountedRef.current && generation === mountGenerationRef.current) {
           setLastSendError(message)
+          const pending = feedbackRef.current
+          if (pending?.clientMessageId === clientMessageId) {
+            updateFeedback({ ...pending, status: "error", text: message })
+          }
         }
         return {
           ok: false,
@@ -467,10 +532,16 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
         }
       }
     },
-    [ensureSendableSession, ensureStreamSocket]
+    [ensureSendableSession, ensureStreamSocket, updateFeedback]
   )
 
+  const feedback = streamFeedback?.sessionId === focusedSessionId &&
+    streamFeedback.personaId === focusedSession?.personaId &&
+    (!normalizedDefaultPersonaId || streamFeedback.personaId === normalizedDefaultPersonaId)
+    ? streamFeedback : null
+
   return {
+    feedback,
     sessions,
     focusedSessionId,
     focusedSession,
