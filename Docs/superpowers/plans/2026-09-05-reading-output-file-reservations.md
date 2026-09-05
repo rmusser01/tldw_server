@@ -16,7 +16,7 @@
 opened at `f43549c209` on user request; implementation continues on the same branch).
 **Approved spec:** `Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md`, user approved after checkpoint `8dc255fcca`.
 **Parent plan:** `Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md`; this plan replaces its generic-file-writer gap, not its remaining Reading DTO/HTTP/reconciliation/release tasks.
-**Status:** Inline execution in progress. Task 1, Task 2a, Task 2b, Task 3a staging/write and Task 3b's recorded commit, copy/publication and phase-specific recovery checkpoints verified on SQLite/PostgreSQL. Remaining process-crash/concurrency evidence, runtime integration and later tasks remain pending. See checkpoint evidence below.
+**Status:** Inline execution in progress. Task 1, Task 2a, Task 2b, Task 3a staging/write and Task 3b's recorded commit, copy/publication, recovery and real-process kill/progress checkpoints verified on SQLite/PostgreSQL. Runtime lifecycle integration and later tasks remain pending. See checkpoint evidence below.
 
 ---
 
@@ -716,3 +716,72 @@ Real process-kill/two-process and remaining end-to-end fault coverage are still
 required before marking the complete Task 3 checklist done. Later descriptor
 readers, history receiver, producer/route adaptation and rollout gates also remain
 pending. The task stays In Progress and PR #2903 stays draft.
+
+### Task 3b process evidence: Actual kill and cross-process progress (2026-09-05)
+
+Adds `tldw_Server_API/tests/Collections/test_output_file_process_recovery.py`.
+This is characterization/fault evidence for the existing implementation, not a
+new production behavior change; no service or adapter code changed. Spawned
+workers construct their own backend/Collections adapter from the test fixture's
+configuration, avoiding inherited live database connections. Parent and worker
+coordinate over a pipe. Parent sends SIGKILL while the worker is paused inside
+the real storage interval, checks its negative signal exit code, and reacquires
+the same persistent lock inode before recovery. Bounded teardown kills only the
+test's worker and never signals a terminated process's semaphore.
+
+The 12 kill boundaries are: durable reservation, private file creation before
+identity recording, recorded stage identity, file sync before offset recording,
+no-clobber link before directory sync, committed DB mutation, aborted destination
+unlink, aborted witness unlink, committed witness unlink, source unlink, and
+before/after final filesystem-completion DB transaction. Recovery preserves
+unproved pre-identity/unacknowledged files as blocked; confirmed aborts leave the
+original bytes and no orphan private files; commits retain the published bytes
+and clean the old source. Retirement replay does not reopen disposed authority.
+
+Two additional tests pause a separate producer before a write, abort or expire/
+recover/retire its operation, and prove it cannot recreate the private file after
+resuming. A 12 MiB source-copy test checks each write is at most 1 MiB, traced
+Python allocation peak during copy is below 8 MiB (not an RSS claim), and another
+process acquires storage exclusion to read between all twelve chunks. In the
+first gap, a conflicting mutation is rejected by durable claims while an
+unrelated create/write/commit/recovery succeeds and its bytes are checked.
+
+Initial SQLite and PostgreSQL process runs passed. Review identified two evidence
+gaps: successful retirement did not explicitly check for orphan private files,
+and a rejected competing writer did not prove successful writer progress. Both
+assertions/flows were added and follow-up review found no remaining issue. An
+isolated parent-side negative-control pytest plugin deliberately skipped aborted
+cleanup: the real stage-recorded kill test then failed specifically with
+`retired operation left an orphan private file`. The plugin is only in
+`/private/tmp`, was not used in final runs, and is not part of the repository.
+No new ADR is needed: test-only verification of ADR-003's approved contract.
+
+Final verification after review changes: 140 SQLite/non-PostgreSQL process,
+recovery, publication and lock regressions pass in 36.00 seconds; all 15 new
+PostgreSQL process cases pass in 71.29 seconds. This is 155 distinct targeted
+cases, with no required-backend skips. Earlier overlapping runs are superseded,
+not counted again. Ruff, Black, compile and diff checks pass. Scoped Bandit on
+the new test module reports no findings or scanner errors with only B101
+(ordinary pytest assertions) excluded; the first unfiltered scan reported only
+those assertions. No production code was modified, no full sweep was run, and
+the existing PostgreSQL fixture was used without Docker provisioning.
+
+Commands after Server virtual-environment activation:
+
+```bash
+TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_process_recovery.py tldw_Server_API/tests/Collections/test_output_file_recovery.py tldw_Server_API/tests/Collections/test_output_file_operations_storage.py tldw_Server_API/tests/Collections/test_reading_artifact_storage.py -q -k 'not postgres'
+TLDW_TEST_NO_DOCKER=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_process_recovery.py -q -k postgres -n 2 -x
+python -m bandit tldw_Server_API/tests/Collections/test_output_file_process_recovery.py -s B101 -f json -o /private/tmp/task-13153-process-bandit-reviewed.json
+```
+
+Logs: `/private/tmp/task-13153-process-sqlite-verified.log`,
+`/private/tmp/task-13153-process-pg-reviewed.log`,
+`/private/tmp/task-13153-process-negative-control.log`,
+`/private/tmp/task-13153-process-bandit-reviewed.json`.
+
+This closes the specifically recorded process-kill, independent-connection,
+late-producer and cross-process progress evidence gap. It does not simulate host
+power loss, verify network-filesystem semantics, or establish runtime activation
+readiness. Immediate post-publication cleanup/background lifecycle integration,
+remaining producer/reader/history contracts and rollout gates are still pending;
+the full Task 3 checklist and TASK-13153 acceptance criteria are not marked done.
