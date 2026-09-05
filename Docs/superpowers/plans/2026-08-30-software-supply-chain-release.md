@@ -1521,6 +1521,26 @@ pass. Bandit has only test assertions and seven verified unchanged baseline
 findings. The combined approved CI fixes are ready to commit/push; live final-
 head admission and other existing PR blockers remain required before merge.
 
+2026-09-05 approved Admin Webhooks CI repair — Locally verified: backend status now
+includes a sanitized `delivery` diagnostics object. The Admin client still
+requires exactly the older seven fields, so a valid response is rejected before
+the page can show operational status. Keep the existing strict readiness
+validator and project out only this documented, object-valued extension; do not
+retain unused diagnostics in page state or accept arbitrary response fields.
+The new client regression reproduces the rejection before implementation; the
+fixed client/page suites pass 58 tests, including malformed extension/readiness
+and unexpected-field rejection. ESLint, typecheck and the production build pass.
+The unchanged real-backend test reproduced the CI failure before the fix; the
+fixed full JWT suite passes 26 tests with one existing auth-project skip. The
+focused release matrix passes 885 tests, including pinned Docker SBOM coverage.
+Independent review reports no findings. Bandit cannot parse TypeScript and is
+not applicable to this TS-only executable change; security validation uses
+strict malformed-response regression cases, ESLint and independent review.
+No page, backend or E2E assertions are changed. Browser prerequisites were
+restored without changing the shared Python environment. The final browser
+invocation uses canonical `/private/tmp` paths and CI minimal-startup settings.
+Publish after checking latest-dev integration; other PR merge gates remain open.
+
 Wait for all required checks and reviewer comments. Resolve every actionable thread with evidence, rerun affected tests, rebase again if `dev` moved, and merge only after:
 
 - all required checks pass;
