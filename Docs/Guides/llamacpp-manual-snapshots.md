@@ -186,5 +186,43 @@ the older installed build as a sufficient explanation; it does not isolate a
 runtime, model, option or integration cause. No support gate was opened and no
 user installation was replaced.
 
+### Root-cause investigation: sliding-window cache
+
+A native-only diagnostic on the same b10816 build and model reproduced the
+failure without tldw's storage, coordinator or API. Normal same-process reuse
+worked: 2770 cached tokens and 10 newly processed tokens. After saving,
+restarting and restoring, native llama.cpp logged its full prompt reprocessing
+fallback for missing SWA/hybrid cache data and processed all 2780 tokens.
+The model reports a sliding-window attention size of 1024.
+
+Pinned upstream code explains the boundary: native slot save writes sequence
+state and serialized tokens; restore clears the `server_prompt` before assigning
+those tokens. Its `clear()` also clears the separate in-memory checkpoint list.
+When the next request needs a checkpoint for the windowed cache and none is
+available, the server resets the reused-token count to zero. See
+[save/restore](https://github.com/ggml-org/llama.cpp/blob/b10816/tools/server/server-context.cpp#L2552),
+[checkpoint clearing](https://github.com/ggml-org/llama.cpp/blob/b10816/tools/server/server-task.h#L566)
+and the [fallback](https://github.com/ggml-org/llama.cpp/blob/b10816/tools/server/server-context.cpp#L3363).
+
+Changing only `--swa-full` in the disposable native diagnostic avoided the
+fallback. All requests still used the same synthetic prefix/suffix and slot 0:
+
+| Native configuration | Reused after restart | Newly processed | Prompt processing time |
+| --- | ---: | ---: | ---: |
+| Default windowed cache | 0 | 2780 | 24414.949 ms |
+| `--swa-full` | 2770 | 10 | 199.455 ms |
+
+This proves a working native configuration for this exact test, not managed
+Admin/Chatbook acceptance or universal model support. The trade-off is memory:
+at context 16384 the SWA allocation grew from 300 MiB to 3200 MiB (the separate
+non-SWA allocation remained 320 MiB). All diagnostic children stopped; neither
+the installed runtime nor production profile settings changed.
+
+The current tldw snapshot configuration gate does not accept `swa_full`, and the
+shared argument formatter does not expose it. Implementing this remedy requires
+a validated option included in compatibility identity, explicit memory/restart
+guidance, and a fresh managed end-to-end verification. Do not bypass the gate or
+admit the build based solely on this native experiment. TASK-13163 remains open.
+
 Architecture: [ADR-043](../ADR/043-managed-llamacpp-manual-slot-snapshots.md).
 Approved workflow: [design](../Design/2026-09-04-llamacpp-manual-slot-snapshots.md).

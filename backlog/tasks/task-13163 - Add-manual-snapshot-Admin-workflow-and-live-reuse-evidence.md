@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-05 02:19'
-updated_date: '2026-09-05 05:15'
+updated_date: '2026-09-05 05:23'
 labels: []
 dependencies:
   - TASK-13162
@@ -47,12 +47,14 @@ User approved isolated runtime repair. Created /private/tmp/llamacpp-snapshot-ru
 Isolated runtime copy verification completed: build10430 commit4c1a0af40. With TLDW_VERSION=0.1.41, live test ran save→stop→start→restore→warm request→separate cold request. Save/restore receipts complete with2770 tokens; artifact266502188 bytes. Live assertion failed because warm timings.cache_n=0 (<80% saved tokens). Result1failed5passed7warnings180.21s. Root cause of zero reuse not yet diagnosed; do not infer successful compatibility from receipts. Logs /private/tmp/llamacpp-snapshot-live-retry.log and XML /private/tmp/llamacpp-snapshot-live-retry.xml. Process check confirms no remaining disposable llama-server; original executable matches copied bytes and original mtmd link remains unchanged. Guide now records negative evidence and exact hashes. Production allowlist remains empty; AC3 unfulfilled.
 
 User requested latest official macOS ARM64 download and retry. Downloaded b10816 archive into /private/tmp/llamacpp-latest-arm64.RlECpI; SHA256726ca8e7680203280b72029f92380aaf482e6a48ebe4a73fbe934ccc0bcf2de9 matches official asset digest. --version build10816 commit427291b5b. Same disposable test/model/settings: save/restore2770 tokens; warm and cold each cached0 processed2780. Result1failed5passed7warnings179.05s. Log /private/tmp/llamacpp-snapshot-live-b10816.log and XML /private/tmp/llamacpp-snapshot-live-b10816.xml. Latest upgrade alone does not resolve reuse; no cause attribution or production support claim. Test children exited; original installation untouched.
+
+Diagnostic-only investigation isolated cause on b10816: direct native /completion and /slots (no tldw modules) reuses2770/10 tokens in same process but after restart reuses0/processes2780. Native restored.log explicitly forces full prompt reprocessing due to missing SWA/hybrid cache data; model n_swa1024. Pinned server-task.h566–574 clears checkpoint list; save/restore persists sequence/tokens, not that list. One-variable native --swa-full experiment restores2770 cached/10 processed; prompt processing199.455ms versus24414.949ms default. SWA allocation300→3200MiB atctx16384, separate nonSWA320MiB unchanged. Diagnostic script/logs /private/tmp/llamacpp-reuse-diagnosis.nqonY0 (baseline-fspl26xp and full-c6euz_74); all child processes stopped. No production changes made. Current tldw formatter/config gate lacks swa_full; implementing validated option and memory/restart UX plus fresh managed acceptance requires follow-up authorization. Production allowlist remains empty.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Live cache reuse fails on both supplied build10430 and latest official ARM64 build10816. Both native operations complete but b10816 warm/cold each process2780 tokens with0 reuse. Task remains InProgress for root-cause diagnosis and successful runtime/client evidence; production allowlist stays empty.
+Cause isolated: default sliding-window cache loses required checkpoint coverage across native save/restart/restore. Direct native --swa-full fixes this case (2770 reused,10processed) at higher RAM cost. No implementation changes; managed runtime/UI acceptance remains incomplete and support gate stays closed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
