@@ -3670,8 +3670,41 @@ class SyncV2Service:
         required_schema_version: int | None = None,
         required_quotas: Mapping[str, int] | None = None,
         expected_purge_generation: int | None = None,
+        ongoing_sync_version: int | None = None,
     ) -> PersonalContextBootstrap:
-        """Return an authenticated device's canonical first-link snapshot."""
+        """Dispatch first linking or activation under the current rollout gate.
+
+        Args:
+            user_id: Authenticated owner of the profile and registered device.
+            device_id: Device requesting the baseline.
+            required_schema_version: Optional client schema requirement.
+            required_quotas: Optional client quota requirements.
+            expected_purge_generation: Optional generation the client expects.
+            ongoing_sync_version: None or zero for first linking; one for activation.
+
+        Returns:
+            The canonical snapshot and its protected device delivery metadata.
+
+        Raises:
+            SyncStoreError: The requested ongoing version is unavailable or
+                activation cannot establish valid continuity.
+            PersonalContextBootstrapError: Device, schema, quota, generation,
+                custody, or snapshot requirements cannot be satisfied.
+        """
+
+        if ongoing_sync_version not in (None, 0):
+            if (
+                ongoing_sync_version != 1
+                or self.capabilities(user_id=user_id).personal_context.ongoing_sync_version != 1
+            ):
+                raise SyncStoreError("personal_context_ongoing_sync_unavailable")
+            return self.prepare_personal_context_activation(
+                user_id=user_id,
+                device_id=device_id,
+                required_schema_version=required_schema_version,
+                required_quotas=required_quotas,
+                expected_purge_generation=expected_purge_generation,
+            )
 
         return self._profile_manager().bootstrap_personal_context(
             user_id=user_id,
@@ -3693,6 +3726,8 @@ class SyncV2Service:
     ) -> PersonalContextBootstrap:
         """Install a canonical activation baseline through protected Sync storage."""
 
+        from tldw_Server_API.app.core.exceptions import PersonalContextActivationError
+
         from .personal_context_activation import prepare_activation
 
         try:
@@ -3704,6 +3739,8 @@ class SyncV2Service:
                 required_quotas=required_quotas,
                 expected_purge_generation=expected_purge_generation,
             )
+        except PersonalContextActivationError as exc:
+            raise SyncStoreError("personal_context_activation_required") from exc
         except (ValueError, RuntimeError) as exc:
             if isinstance(exc, SyncStoreError):
                 raise
@@ -3722,6 +3759,8 @@ class SyncV2Service:
     ) -> tuple[PersonalContextActivationReceipt, PersonalContextExchangeProof]:
         """Record an exact device acknowledgment across both durable journals."""
 
+        from tldw_Server_API.app.core.exceptions import PersonalContextActivationError
+
         from .personal_context_activation import acknowledge_activation
 
         try:
@@ -3735,6 +3774,8 @@ class SyncV2Service:
                 local_receipt_id=local_receipt_id,
                 exchange=exchange,
             )
+        except PersonalContextActivationError as exc:
+            raise SyncStoreError("personal_context_activation_required") from exc
         except (ValueError, RuntimeError) as exc:
             if isinstance(exc, SyncStoreError):
                 raise

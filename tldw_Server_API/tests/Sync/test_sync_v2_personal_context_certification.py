@@ -407,7 +407,7 @@ def _device_payload(public_key: rsa.RSAPublicKey) -> dict[str, object]:
     }
 
 
-def _seed_exchange(service, dataset_id: str) -> dict[str, object]:
+def _seed_exchange(service: SyncV2Service, dataset_id: str) -> dict[str, object]:
     """Install and acknowledge through the real journals before test-only rollout."""
 
     baseline = service.prepare_personal_context_activation(user_id=_USER_ID, device_id=_DEVICE_ID)

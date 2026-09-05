@@ -1,11 +1,11 @@
 ---
 id: TASK-13162
 title: Activate existing Personal Context links with continuity fencing
-status: Done
+status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-03 13:40'
-updated_date: '2026-09-05 16:15'
+updated_date: '2026-09-05 17:03'
 labels:
   - personal-context
   - sync
@@ -37,6 +37,7 @@ Add the replayable activation journal that establishes a server baseline and pub
 - [x] #6 Restart tests cover preparation, Sync installation, coverage CAS, compaction, acknowledgment, racing server writes, and first post-watermark relay.
 - [x] #7 ADR required: no new ADR; backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md governs activation and continuity.
 - [x] #8 Failed ingress repair can unblock baseline preparation only after exact canonical receipt verification; mismatched receipts and non-retryable states remain rejected.
+- [x] #9 Concurrent activation and production ingress after-commit relay cannot deadlock; contended relay returns pending without losing publication debt.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -57,6 +58,12 @@ Final closing evidence, PostgreSQL required: 279 canonical/publication/authoriza
 Known separate issue: ordinary PostgreSQL ingress fixture insertion reached unchanged SyncDatabase._ensure_domain_state SQL translation with five placeholders and six parameters. No unrelated production fix was bundled. The new backend regression seeds valid ingress input rows with parameterized SQL and exercises real receipt/transition storage; it does not claim PostgreSQL ordinary-envelope insertion is verified. End-to-end bootstrap repair passes on SQLite. This transport insertion issue remains follow-up work. TASK-13163–13165 are not implemented; ongoing_sync_version remains 0.
 
 PR handoff 2026-09-05: rebased without conflicts onto dev 63358431d799828cfb86511f7babd8490bbbdda9; range-diff confirms the implementation patch is unchanged (rebased commit adb741dfb10c77fc5b873abb809f19e7517f7b20). Fresh post-rebase integration gate: 254 passed, zero failures/errors/skips, PostgreSQL required, /private/tmp/task13162-pr-rebased-verification.xml. Scoped Ruff and production Bandit passed again. Opened PR 2886 against dev: https://github.com/rmusser01/tldw_server/pull/2886. Human-written Change summary is still required before merge; no auto-merge enabled.
+
+PR 2886 review follow-up authorized 2026-09-05: user explicitly waived the human-written Change summary requirement for this PR only and authorized latest-dev rebase, all review/CI remediation and merge. Latest fetched dev remains 63358431d7, already the branch base. Plan: reproduce and address Qodo purge-generation/lock-order reports; move rollout dispatch into core, complete public docstrings/type hints and use domain exceptions; evaluate fixture feedback without introducing production test-only helpers or unrelated auth dependencies; reproduce/fix OpenAPI fingerprint CI drift; run focused regressions and independent review, reply to all threads, then wait for current-head Qodo/required checks and merge. ADR-002 continues to govern; no rollout or protocol-policy expansion.
+
+Independent specification review traced a remaining preexisting Sync-to-profile-lock path through production ingress after-commit relay. Extend the review remediation plan to reproduce that interleaving and make relay process-lock acquisition nonblocking, preserving ordinary activation lease acquisition, durable fencing and retryable pending debt. Verify a deterministic production callback regression plus existing recovery budgets. This is a bounded lock-order correction under ADR-002, not a new storage or protocol policy.
+
+Qodo remediation: core bootstrap now owns version dispatch; public activation contracts and fixture typing are explicit; activation errors use content-free domain subclasses with compatible HTTP translation. Activation takes profile lease before Sync and revalidates generation plus the exact link receipt inside the install guard. Production ingress after-commit relay skips a contended process lock before canonical SQL and retains durable publication debt. Deterministic regressions reproduced the races before the fixes and now pass, including later acknowledgment of the raced publication. Worker closing gate: 172 passed with PostgreSQL required; core dispatch gate: 124 passed. Independent specification and code/security review cleared the final behavioral changes. The two fixture suggestions were rebutted with concrete transaction and shared PostgreSQL fixture ownership evidence. Updated developer/published docs and regenerated the OpenAPI fingerprint; exact drift check passes (description-only difference, unchanged path/schema counts). Broad final targeted matrix and current-head CI/merge are still pending. Newly added activation files pass formatting; existing publication module has pre-existing whole-file formatter drift, so unrelated formatting is not bundled.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

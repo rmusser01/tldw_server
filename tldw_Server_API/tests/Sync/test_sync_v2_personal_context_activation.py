@@ -450,3 +450,204 @@ def test_protected_sync_baseline_has_no_plaintext_and_survives_rotation(linked_a
     replay = service.prepare_personal_context_activation(user_id=_USER_ID, device_id=_DEVICE_ID)
     assert replay.activation.activation_id == result.activation.activation_id
     assert replay.records == result.records
+
+
+@pytest.mark.parametrize("expected_generation", [None, 0])
+def test_purge_between_link_authorization_and_preparation_rejects_install(
+    linked_activation, monkeypatch: pytest.MonkeyPatch, expected_generation: int | None
+) -> None:
+    """A receipt for generation zero cannot install a generation-one baseline."""
+    from tldw_Server_API.app.core.Personalization.personal_context_activation import PersonalContextActivationService
+
+    canonical, service = linked_activation
+    prepare = PersonalContextActivationService.prepare
+
+    def purge_then_prepare(self, *args, **kwargs):
+        canonical.purge_profile(mode="everywhere", confirmation="DELETE EVERYWHERE", expected_purge_generation=0)
+        return prepare(self, *args, **kwargs)
+
+    monkeypatch.setattr(PersonalContextActivationService, "prepare", purge_then_prepare)
+    code = "purge_generation_stale" if expected_generation is not None else "activation_required"
+    with pytest.raises(SyncStoreError, match=code):
+        service.prepare_personal_context_activation(
+            user_id=_USER_ID, device_id=_DEVICE_ID, expected_purge_generation=expected_generation
+        )
+    assert not service.store.db.execute("SELECT * FROM sync_personal_context_activations").rows
+    dataset = service.store.personal_context_dataset_for_profile(
+        user_id=_USER_ID, profile_id=canonical.get_manifest().profile_id
+    )
+    assert "activation_epoch" not in dataset.metadata["personal_context"]
+
+
+def test_activation_waiting_for_relay_lease_does_not_hold_sync_transaction(
+    linked_activation, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A relay owning the profile lease can finish its Sync stage during install."""
+    from concurrent.futures import ThreadPoolExecutor
+    from contextlib import contextmanager
+    from threading import Event, current_thread
+
+    from tldw_Server_API.app.core.Personalization.personal_context_activation import PersonalContextActivationService
+    from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+        PersonalContextPublicationRelayStore,
+    )
+
+    canonical, service = linked_activation
+    profile_id = canonical.get_manifest().profile_id
+    dataset = service.store.personal_context_dataset_for_profile(user_id=_USER_ID, profile_id=profile_id)
+    prepared, relay_owned, installer_waiting, stage_done = Event(), Event(), Event(), Event()
+    prepare = PersonalContextActivationService.prepare
+    lease_method = PersonalContextPublicationRelayStore.profile_lease
+
+    def prepare_then_pause(self, *args, **kwargs):
+        result = prepare(self, *args, **kwargs)
+        prepared.set()
+        assert relay_owned.wait(5)
+        return result
+
+    @contextmanager
+    def observe_lease(self, requested_profile, **kwargs):
+        if prepared.is_set() and current_thread().name != "relay-stage":
+            installer_waiting.set()
+        with lease_method(self, requested_profile, **kwargs) as lease:
+            yield lease
+
+    def relay_stage():
+        current_thread().name = "relay-stage"
+        assert prepared.wait(5)
+        with lease_method(PersonalContextPublicationRelayStore(canonical._repository.database), profile_id):
+            relay_owned.set()
+            assert installer_waiting.wait(5)
+            with service.store.personal_context_authority_guard(dataset.dataset_id, profile_id):
+                stage_done.set()
+
+    monkeypatch.setattr(PersonalContextActivationService, "prepare", prepare_then_pause)
+    monkeypatch.setattr(PersonalContextPublicationRelayStore, "profile_lease", observe_lease)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        relay = executor.submit(relay_stage)
+        activation = executor.submit(
+            service.prepare_personal_context_activation, user_id=_USER_ID, device_id=_DEVICE_ID
+        )
+        relay.result(timeout=15)
+        result = activation.result(timeout=15)
+    assert stage_done.is_set()
+    assert result.activation.state == "installed"
+
+
+def test_push_after_commit_relay_does_not_wait_for_installers_profile_lease(
+    linked_activation, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Real push commits ingress while a competing installer waits for its Sync guard."""
+    import hashlib
+    import hmac
+    from concurrent.futures import ThreadPoolExecutor
+    from contextlib import contextmanager
+    from threading import Event, current_thread
+
+    from tldw_profile_core.canonical import canonical_json_bytes
+
+    from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+        PersonalContextPublicationRelayStore,
+    )
+    from tldw_Server_API.app.core.Sync.v2.models import SyncEnvelopeCreate
+    from tldw_Server_API.app.core.Sync.v2.personal_context_ongoing_contract import PersonalContextExchangeProof
+    from tldw_Server_API.tests.Personalization.personal_context_test_support import preference_record
+    from tldw_Server_API.tests.Sync.test_sync_v2_personal_context_certification import _seed_exchange
+
+    canonical, service = linked_activation
+    manifest = canonical.get_manifest()
+    dataset = service.store.personal_context_dataset_for_profile(user_id=_USER_ID, profile_id=manifest.profile_id)
+    exchange = PersonalContextExchangeProof.model_validate(_seed_exchange(service, dataset.dataset_id))
+    key_id, key = canonical.sync_integrity_key(manifest.profile_id)
+    payload = {
+        **preference_record(manifest.profile_id, record_id="racing-ingress-record").model_dump(mode="json"),
+        "scope_id": canonical.list_scopes()[0].scope_id,
+    }
+    clear = canonical_json_bytes(payload)
+    envelope = SyncEnvelopeCreate(
+        dataset_id=dataset.dataset_id,
+        client_envelope_id="racing-push-after-commit",
+        device_id=_DEVICE_ID,
+        domain="personal_context.record",
+        operation="upsert",
+        object_id=payload["record_id"],
+        parent_id=payload["scope_id"],
+        adapter_version=1,
+        schema_version=1,
+        payload=payload,
+        payload_hash="hmac-sha256-v1:" + hmac.new(key, clear, hashlib.sha256).hexdigest(),
+        payload_size_bytes=len(clear),
+        entity_version=payload["version_id"],
+        routing_metadata={"integrity_key_id": key_id, "profile_id": manifest.profile_id, "purge_generation": 0},
+        encryption_metadata={"policy": "server_trusted_v1"},
+    )
+    committed, installer_owned, callback_entered, installer_done = Event(), Event(), Event(), Event()
+    repository_type = type(canonical._repository)
+    apply_ingress = repository_type.apply_ingress_and_publish
+    lease_method = PersonalContextPublicationRelayStore.profile_lease
+    skipped_callback_claims = []
+
+    def pause_after_ingress(self, *args, **kwargs):
+        result = apply_ingress(self, *args, **kwargs)
+        committed.set()
+        assert installer_owned.wait(5)
+        return result
+
+    @contextmanager
+    def observe_callback_lease(self, profile_id, **kwargs):
+        callback = committed.is_set() and current_thread().name == "push-worker"
+        if callback:
+            callback_entered.set()
+        with lease_method(self, profile_id, **kwargs) as lease:
+            if callback and lease is None:
+                skipped_callback_claims.append(profile_id)
+            yield lease
+
+    def installer():
+        assert committed.wait(5)
+        publications = PersonalContextPublicationRelayStore(canonical._repository.database)
+        with lease_method(publications, manifest.profile_id):
+            installer_owned.set()
+            assert callback_entered.wait(5)
+            with service.store.personal_context_authority_guard(dataset.dataset_id, manifest.profile_id):
+                installer_done.set()
+
+    def push():
+        current_thread().name = "push-worker"
+        return service.push(
+            user_id=_USER_ID,
+            dataset_id=dataset.dataset_id,
+            device_id=_DEVICE_ID,
+            envelopes=[envelope],
+            personal_context_exchange=exchange,
+        )
+
+    monkeypatch.setattr(repository_type, "apply_ingress_and_publish", pause_after_ingress)
+    monkeypatch.setattr(PersonalContextPublicationRelayStore, "profile_lease", observe_callback_lease)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        installation = executor.submit(installer)
+        pushed = executor.submit(push)
+        result = pushed.result(timeout=15)
+        assert not result.rejected
+        installation.result(timeout=15)
+    assert installer_done.is_set()
+    assert skipped_callback_claims
+    assert not result.rejected
+    assert len(result.accepted) == 1
+    stored = service.store.get_envelope_by_client_id(dataset.dataset_id, envelope.client_envelope_id)
+    assert stored.apply_status == "applied"
+    assert canonical.get_record(payload["record_id"]).payload == preference_record().payload
+    recovered = service.personal_context_relay.relay_profile(
+        user_id=_USER_ID,
+        profile_id=manifest.profile_id,
+        dataset_id=dataset.dataset_id,
+        after_server_cursor=None,
+        wall_time_ms=1000,
+    )
+    assert recovered.source_exhausted
+    with canonical._repository.database.transaction() as connection:
+        rows = connection.execute(
+            "SELECT row_state FROM personal_context_publication_rows WHERE opaque_object_id = ?",
+            (payload["record_id"],),
+        ).fetchall()
+    assert [row[0] for row in rows] == ["acknowledged"]

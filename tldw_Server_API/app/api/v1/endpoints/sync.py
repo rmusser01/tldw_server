@@ -296,6 +296,11 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
         return HTTPException(status_code=status_code, detail=detail)
     if isinstance(exc, SyncStoreError):
         lowered = str(exc).lower()
+        if lowered == "personal_context_ongoing_sync_unavailable":
+            return HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "personal_context_ongoing_sync_unavailable"},
+            )
         if "personal_context_activation_required" in lowered:
             return HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -945,23 +950,14 @@ def bootstrap_sync_v2_personal_context(
     """Return the canonical profile snapshot and wrapped Sync integrity key."""
 
     user_id = _sync_user_id(user)
-    if (
-        request.ongoing_sync_version == 1
-        and service.capabilities(user_id=user_id).personal_context.ongoing_sync_version != 1
-    ):
-        raise HTTPException(status_code=409, detail={"code": "personal_context_ongoing_sync_unavailable"})
     try:
-        bootstrap = (
-            service.prepare_personal_context_activation
-            if request.ongoing_sync_version == 1
-            else service.bootstrap_personal_context
-        )
-        snapshot = bootstrap(
+        snapshot = service.bootstrap_personal_context(
             user_id=user_id,
             device_id=request.device_id,
             required_schema_version=request.required_schema_version,
             required_quotas=request.required_quotas,
             expected_purge_generation=request.expected_purge_generation,
+            ongoing_sync_version=request.ongoing_sync_version,
         )
     except Exception as exc:
         raise _safe_sync_v2_http_error(exc, user_id=user_id, device_id=request.device_id) from exc

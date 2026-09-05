@@ -270,6 +270,15 @@ requesting device. Source batches remain uncovered and publish normally; the
 expired ID is retained as a tombstone and a subsequent bootstrap gets a new ID.
 Already installed or active activations are not retired by this recovery path.
 
+Activation acquires the process profile lease before the Sync guard, then enters
+the canonical generation transaction. Relay uses a nonblocking process-lease
+attempt: an ingress after-commit callback may still hold an outer Sync transaction,
+so waiting for that lease could deadlock an installer waiting for Sync. Contention
+returns pending without a canonical lease-claim query; durable batches remain for
+later relay. Before installation commits, the prepared generation and its exact
+device link receipt are checked again under the Sync and canonical guards, so an
+earlier authorization cannot survive a concurrent purge.
+
 Bootstrap remains blocked while accepted ingress has not finished canonical
 materialization. Guarded repair may move a failed ingress to applied only after
 verifying its exact canonical receipt; conflict and other non-retryable states

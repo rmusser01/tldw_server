@@ -33,6 +33,12 @@ from tldw_Server_API.app.core.DB_Management.Personal_Context_Key_Store import (
     ServerProfileKeyProvider,
 )
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
+from tldw_Server_API.app.core.exceptions import (
+    PersonalContextActivationInputError,
+    PersonalContextActivationMissingError,
+    PersonalContextActivationPendingError,
+    PersonalContextActivationStaleError,
+)
 from tldw_Server_API.app.core.Personalization.personal_context_crypto import (
     EncryptedEnvelope,
     EnvelopeAuthenticationError,
@@ -1403,7 +1409,7 @@ class PersonalContextRepository:
             ).fetchone()
             is None
         ):
-            raise ValueError("personal_context_activation_required")
+            raise PersonalContextActivationStaleError("personal_context_activation_required")
         connection.execute(
             """UPDATE personal_context_publication_relay_leases SET expires_at_ns = ?
                WHERE profile_id = ? AND owner_token = ?""",
@@ -1417,7 +1423,7 @@ class PersonalContextRepository:
     ) -> PreparedPersonalContextActivation:
         """Authenticate an exact journal snapshot before returning plaintext."""
         if row["state"] == "expired":
-            raise ValueError("personal_context_activation_required")
+            raise PersonalContextActivationStaleError("personal_context_activation_required")
         keys = self._keys.load(str(row["profile_id"]), connection=connection)
         baseline = EnvelopeCipher(keys.encryption_key, key_version=keys.key_version).decrypt(
             EncryptedEnvelope(
@@ -1465,7 +1471,7 @@ class PersonalContextRepository:
                 (activation_id,),
             ).fetchone()
             if row is None:
-                raise ValueError("personal_context_activation_required")
+                raise PersonalContextActivationMissingError("personal_context_activation_required")
             return self._decode_activation(connection, row)
 
     def prepare_activation(
@@ -1476,9 +1482,29 @@ class PersonalContextRepository:
         lease: PublicationRelayLease | None,
         fresh: bool = False,
     ) -> PreparedPersonalContextActivation:
-        """Commit one device's exact eligible heads and whole-batch watermark."""
+        """Commit one device's exact eligible heads and whole-batch watermark.
+
+        Args:
+            profile_id: Canonical profile to snapshot.
+            device_id: Nonempty device identifier of at most 128 characters.
+            lease: Current publication lease owned by the caller for this profile.
+            fresh: Replace an active baseline; prepared and installed baselines
+                always replay until their installation or acknowledgment finishes.
+
+        Returns:
+            The authenticated durable preparation, including its exact baseline,
+            digest, purge generation and whole-batch publication watermark.
+
+        Raises:
+            PersonalContextActivationInputError: The device identifier is invalid.
+            PersonalContextActivationStaleError: The caller's lease is not current.
+            PersonalContextActivationPendingError: Another preparation or an
+                incomplete publication batch prevents preparing a fresh baseline.
+            ProfileIntegrityError: The encrypted baseline or watermark is invalid.
+            ProfileStorageLockedError: Canonical profile keys are unavailable.
+        """
         if not device_id or len(device_id) > 128:
-            raise ValueError("personal_context_activation_required")
+            raise PersonalContextActivationInputError("personal_context_activation_required")
         with self._database.transaction(immediate=True) as connection:
             self._require_activation_lease(connection, profile_id, lease)
             manifest, scopes, records, proposals, _key_id, _key = self.sync_bootstrap_snapshot(
@@ -1497,7 +1523,7 @@ class PersonalContextRepository:
                     return previous
                 try:
                     self._activation_current_pair(connection, row)
-                except ValueError:
+                except PersonalContextActivationStaleError:
                     pass  # A broken continuity proof requires a new exact-head baseline.
                 else:
                     if row["state"] == "installed" or not fresh:
@@ -1510,7 +1536,7 @@ class PersonalContextRepository:
                 ).fetchone()
                 is not None
             ):
-                raise ValueError("personal_context_activation_pending")
+                raise PersonalContextActivationPendingError("personal_context_activation_pending")
             if (
                 connection.execute(
                     """SELECT 1 FROM personal_context_activations a
@@ -1523,7 +1549,7 @@ class PersonalContextRepository:
                 ).fetchone()
                 is not None
             ):
-                raise ValueError("personal_context_activation_pending")
+                raise PersonalContextActivationPendingError("personal_context_activation_pending")
             profile = connection.execute(
                 "SELECT * FROM personal_context_publication_profiles WHERE profile_id = ?",
                 (profile_id,),
@@ -1608,13 +1634,15 @@ class PersonalContextRepository:
                 "SELECT * FROM personal_context_activations WHERE activation_id = ?",
                 (activation_id,),
             ).fetchone()
-            if row is None or not hmac.compare_digest(row["baseline_digest"], baseline_digest):
-                raise ValueError("personal_context_activation_required")
+            if row is None:
+                raise PersonalContextActivationMissingError("personal_context_activation_required")
+            if not hmac.compare_digest(row["baseline_digest"], baseline_digest):
+                raise PersonalContextActivationStaleError("personal_context_activation_required")
             self._require_activation_lease(connection, row["profile_id"], lease)
             keys = self._keys.load(row["profile_id"], connection=connection)
             manifest = self._current_manifest_for_publication(connection, row["profile_id"], keys)
             if manifest.purge_generation != row["purge_generation"]:
-                raise ValueError("personal_context_activation_required")
+                raise PersonalContextActivationStaleError("personal_context_activation_required")
             yield self._decode_activation(connection, row)
 
     def complete_activation_install(
@@ -1628,14 +1656,16 @@ class PersonalContextRepository:
     ) -> PreparedPersonalContextActivation:
         """CAS verified Sync installation, source coverage, and continuity in one commit."""
         if not sync_receipt_id or type(home_server_cursor) is not int or home_server_cursor < 0:
-            raise ValueError("personal_context_activation_required")
+            raise PersonalContextActivationInputError("personal_context_activation_required")
         with self._database.transaction(immediate=True) as connection:
             row = connection.execute(
                 "SELECT * FROM personal_context_activations WHERE activation_id = ?",
                 (activation_id,),
             ).fetchone()
-            if row is None or not hmac.compare_digest(row["baseline_digest"], baseline_digest):
-                raise ValueError("personal_context_activation_required")
+            if row is None:
+                raise PersonalContextActivationMissingError("personal_context_activation_required")
+            if not hmac.compare_digest(row["baseline_digest"], baseline_digest):
+                raise PersonalContextActivationStaleError("personal_context_activation_required")
             activation = self._decode_activation(connection, row)
             self._require_activation_lease(connection, activation.profile_id, lease)
             profile = connection.execute(
@@ -1645,10 +1675,10 @@ class PersonalContextRepository:
             keys = self._keys.load(activation.profile_id, connection=connection)
             manifest = self._current_manifest_for_publication(connection, activation.profile_id, keys)
             if manifest.purge_generation != activation.purge_generation:
-                raise ValueError("personal_context_activation_required")
+                raise PersonalContextActivationStaleError("personal_context_activation_required")
             if row["state"] != "prepared":
                 if row["sync_receipt_id"] != sync_receipt_id or row["home_server_cursor"] != home_server_cursor:
-                    raise ValueError("personal_context_activation_required")
+                    raise PersonalContextActivationStaleError("personal_context_activation_required")
                 self._activation_current_pair(connection, row)
                 return self._decode_activation(connection, row)
             epoch = profile["activation_epoch"] if profile else None
@@ -1716,18 +1746,19 @@ class PersonalContextRepository:
         coverage and the shared continuity pair survive this per-device change.
         """
         if not sync_receipt_id or len(sync_receipt_id) > 128:
-            raise ValueError("personal_context_activation_required")
+            raise PersonalContextActivationInputError("personal_context_activation_required")
         with self._database.transaction(immediate=True) as connection:
             row = connection.execute(
                 "SELECT * FROM personal_context_activations WHERE activation_id = ?",
                 (activation_id,),
             ).fetchone()
-            if (
-                row is None
-                or not hmac.compare_digest(row["baseline_digest"], baseline_digest)
-                or row["sync_receipt_id"] not in (None, sync_receipt_id)
+            if row is None:
+                raise PersonalContextActivationMissingError("personal_context_activation_required")
+            if not hmac.compare_digest(row["baseline_digest"], baseline_digest) or row["sync_receipt_id"] not in (
+                None,
+                sync_receipt_id,
             ):
-                raise ValueError("personal_context_activation_required")
+                raise PersonalContextActivationStaleError("personal_context_activation_required")
             self._require_activation_lease(connection, row["profile_id"], lease)
             if row["state"] == "expired":
                 return
@@ -1750,8 +1781,10 @@ class PersonalContextRepository:
                 "SELECT * FROM personal_context_activations WHERE activation_id = ?",
                 (activation_id,),
             ).fetchone()
-            if activation is None or activation["state"] == "prepared" or not activation["sync_receipt_id"]:
-                raise ValueError("personal_context_activation_required")
+            if activation is None:
+                raise PersonalContextActivationMissingError("personal_context_activation_required")
+            if activation["state"] == "prepared" or not activation["sync_receipt_id"]:
+                raise PersonalContextActivationStaleError("personal_context_activation_required")
             return connection.execute(
                 """UPDATE personal_context_publication_rows SET ciphertext = ?, wrapped_dek = ?,
                    wrapped_dek_nonce = ?, nonce = ?, row_state = 'shredded'
@@ -1796,19 +1829,20 @@ class PersonalContextRepository:
                 device_id,
             )
         ):
-            raise ValueError("personal_context_activation_required")
+            raise PersonalContextActivationInputError("personal_context_activation_required")
         with self._database.transaction(immediate=True) as connection:
             row = connection.execute(
                 "SELECT * FROM personal_context_activations WHERE activation_id = ?",
                 (activation_id,),
             ).fetchone()
+            if row is None:
+                raise PersonalContextActivationMissingError("personal_context_activation_required")
             if (
-                row is None
-                or row["device_id"] != device_id
+                row["device_id"] != device_id
                 or row["state"] == "prepared"
                 or not hmac.compare_digest(row["baseline_digest"], baseline_digest)
             ):
-                raise ValueError("personal_context_activation_required")
+                raise PersonalContextActivationStaleError("personal_context_activation_required")
             self._activation_current_pair(connection, row)
             expected = (baseline_digest, local_receipt_id, sync_ack_receipt_id, dataset_id)
             receipt = connection.execute(
@@ -1817,7 +1851,7 @@ class PersonalContextRepository:
                 (activation_id, device_id),
             ).fetchone()
             if receipt is not None and tuple(receipt) != expected:
-                raise ValueError("personal_context_activation_required")
+                raise PersonalContextActivationStaleError("personal_context_activation_required")
             connection.execute(
                 """INSERT INTO personal_context_activation_devices (
                    activation_id, device_id, baseline_digest, local_receipt_id,
@@ -1858,7 +1892,7 @@ class PersonalContextRepository:
             or not hmac.compare_digest(profile["activation_epoch"] or "", activation["activation_epoch"])
             or not hmac.compare_digest(profile["continuity_token"] or "", activation["continuity_token"])
         ):
-            raise ValueError("personal_context_activation_required")
+            raise PersonalContextActivationStaleError("personal_context_activation_required")
 
     def validate_activation_exchange(
         self,
@@ -1877,7 +1911,7 @@ class PersonalContextRepository:
                 continuity_token=continuity_token,
             )
         except (TypeError, ValueError):
-            raise ValueError("personal_context_activation_required") from None
+            raise PersonalContextActivationInputError("personal_context_activation_required") from None
         with self._database.transaction() as connection:
             row = connection.execute(
                 """SELECT a.* FROM personal_context_activations a
@@ -1890,13 +1924,13 @@ class PersonalContextRepository:
                 (profile_id, device_id, dataset_id),
             ).fetchone()
             if row is None:
-                raise ValueError("personal_context_activation_required")
+                raise PersonalContextActivationMissingError("personal_context_activation_required")
             self._activation_current_pair(connection, row)
             if not (
                 hmac.compare_digest(row["activation_epoch"], supplied.activation_epoch)
                 and hmac.compare_digest(row["continuity_token"], supplied.continuity_token)
             ):
-                raise ValueError("personal_context_activation_required")
+                raise PersonalContextActivationStaleError("personal_context_activation_required")
         return supplied
 
     def has_sync_profile_reservation(self) -> bool:

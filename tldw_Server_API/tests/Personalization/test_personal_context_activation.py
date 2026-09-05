@@ -31,6 +31,63 @@ from tldw_Server_API.tests.Personalization.personal_context_test_support import 
 pytestmark = pytest.mark.unit
 
 
+def test_contended_nonblocking_profile_lease_skips_canonical_sql(
+    service: PersonalContextService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A caller holding Sync must not touch canonical storage while another thread owns the lease."""
+    manifest = service.create_profile()
+    publications = PersonalContextPublicationRelayStore(service._repository.database)
+
+    def no_canonical_sql(*args, **kwargs):
+        raise AssertionError("contended relay must not open a canonical transaction")
+
+    def attempt() -> None:
+        with publications.profile_lease(manifest.profile_id, blocking=False) as lease:
+            assert lease is None
+
+    with publications.profile_lease(manifest.profile_id):
+        with monkeypatch.context() as patch:
+            patch.setattr(service._repository.database, "transaction", no_canonical_sql)
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                executor.submit(attempt).result(timeout=5)
+    with publications.profile_lease(manifest.profile_id, blocking=False) as lease:
+        assert lease is not None
+
+
+def test_activation_failures_have_content_free_domain_types(service: PersonalContextService) -> None:
+    """Callers can distinguish invalid input, missing state, contention, and stale proof."""
+    from tldw_Server_API.app.core import exceptions
+
+    manifest = service.create_profile()
+    repository = service._repository
+    publications = PersonalContextPublicationRelayStore(repository.database)
+    cases = []
+    with publications.profile_lease(manifest.profile_id) as lease:
+        for invoke in (
+            lambda: repository.prepare_activation(manifest.profile_id, device_id="", lease=lease),
+            lambda: repository.load_activation("missing-activation"),
+        ):
+            with pytest.raises(ValueError, match="personal_context_activation_required") as error:
+                invoke()
+            cases.append(error.value)
+        prepared = repository.prepare_activation(manifest.profile_id, device_id="device-a", lease=lease)
+        with pytest.raises(ValueError, match="personal_context_activation_pending") as error:
+            repository.prepare_activation(manifest.profile_id, device_id="device-b", lease=lease)
+        cases.append(error.value)
+    with pytest.raises(ValueError, match="personal_context_activation_required") as error:
+        repository.complete_activation_install(
+            prepared.activation_id, prepared.baseline_digest, "receipt", home_server_cursor=0, lease=lease
+        )
+    cases.append(error.value)
+    assert [type(error).__name__ for error in cases] == [
+        "PersonalContextActivationInputError",
+        "PersonalContextActivationMissingError",
+        "PersonalContextActivationPendingError",
+        "PersonalContextActivationStaleError",
+    ]
+    assert all(isinstance(error, exceptions.PersonalContextActivationError) for error in cases)
+
+
 @pytest.mark.parametrize("legacy", [False, True])
 def test_abandoned_preparation_expires_without_covering_source(service: PersonalContextService, legacy: bool) -> None:
     """Another device's relay retires a stale baseline without losing queued writes."""

@@ -184,7 +184,28 @@ def prepare_activation(
     required_quotas: Mapping[str, int] | None = None,
     expected_purge_generation: int | None = None,
 ) -> PersonalContextBootstrap:
-    """Prepare, install and verify a linked device baseline without enabling rollout."""
+    """Prepare, install and verify a linked device baseline without enabling rollout.
+
+    Args:
+        service: Authenticated Sync owner providing canonical and transport stores.
+        user_id: Owner of the canonical profile and linked dataset.
+        device_id: Registered device with a current-generation link receipt.
+        required_schema_version: Optional caller schema compatibility requirement.
+        required_quotas: Optional caller quota compatibility requirements.
+        expected_purge_generation: Optional generation that must still be current
+            when the prepared baseline is installed.
+
+    Returns:
+        The exact installed baseline, wrapped integrity key, transport checkpoint,
+        activation receipt and continuity proof; device acknowledgment is separate.
+
+    Raises:
+        SyncStoreError: Access, capability, compatibility, link, generation or
+            protected installation receipt validation fails.
+        PersonalContextActivationError: Canonical preparation or installation
+            rejects invalid input, pending work, missing state or stale proof.
+        PersonalContextError: Canonical profile/key access or integrity fails.
+    """
 
     device = service._require_registered_device(user_id, device_id)
     capability = service.capabilities(user_id=user_id).personal_context
@@ -227,15 +248,19 @@ def prepare_activation(
     prepared = activations.prepare(manifest.profile_id, device_id=device_id)
     identity = _identity(prepared, dataset, user_id)
     cipher = _cipher(service, dataset)
-    with service.store.personal_context_authority_guard(dataset.dataset_id, prepared.profile_id) as guarded:
+    with (
+        activations.publications.profile_lease(prepared.profile_id) as lease,
+        service.store.personal_context_authority_guard(dataset.dataset_id, prepared.profile_id) as guarded,
+    ):
+        if lease is None:
+            raise SyncStoreError("personal_context_activation_pending")
         stored = guarded.get_personal_context_activation(prepared.activation_id)
         if stored is not None and _expired(stored):
             if not _verify_install(prepared, stored, identity, cipher):
                 raise SyncStoreError("personal_context_activation_receipt_mismatch")
-            with activations.publications.profile_lease(prepared.profile_id) as lease:
-                repository.expire_activation(
-                    prepared.activation_id, prepared.baseline_digest, sync_receipt_id=stored["receipt_id"], lease=lease
-                )
+            repository.expire_activation(
+                prepared.activation_id, prepared.baseline_digest, sync_receipt_id=stored["receipt_id"], lease=lease
+            )
             prepared = None
     if prepared is None:
         if service.personal_context_relay is not None:
@@ -244,11 +269,27 @@ def prepare_activation(
             )
         prepared = activations.prepare(manifest.profile_id, device_id=device_id)
         identity = _identity(prepared, dataset, user_id)
-    with service.store.personal_context_authority_guard(dataset.dataset_id, prepared.profile_id) as guarded:
+    with (
+        activations.publications.profile_lease(prepared.profile_id) as lease,
+        service.store.personal_context_authority_guard(dataset.dataset_id, prepared.profile_id) as guarded,
+    ):
+        if lease is None:
+            raise SyncStoreError("personal_context_activation_pending")
 
         def install(current: PreparedPersonalContextActivation) -> Mapping[str, Any]:
             """Commit Sync while the verified canonical generation guard remains held."""
 
+            if expected_purge_generation is not None and expected_purge_generation != current.purge_generation:
+                raise SyncStoreError("personal_context_purge_generation_stale")
+            if not guarded.has_personal_context_link_receipt(
+                user_id=user_id,
+                dataset_id=dataset.dataset_id,
+                device_id=device_id,
+                profile_id=current.profile_id,
+                integrity_key_id=integrity_key_id,
+                purge_generation=current.purge_generation,
+            ):
+                raise SyncStoreError("personal_context_activation_required")
             stored = guarded.get_personal_context_activation(current.activation_id)
             if stored is None:
                 history = guarded.get_dataset_envelope_range(dataset.dataset_id)
@@ -274,9 +315,10 @@ def prepare_activation(
             prepared.baseline_digest,
             install=install,
             verify=lambda current, row: _verify_install(current, row, identity, cipher),
+            lease=lease,
         )
-    with service.store.personal_context_authority_guard(dataset.dataset_id, prepared.profile_id) as guarded:
-        with activations.publications.profile_lease(prepared.profile_id) as lease:
+    with activations.publications.profile_lease(prepared.profile_id) as lease:
+        with service.store.personal_context_authority_guard(dataset.dataset_id, prepared.profile_id) as guarded:
             with repository.activation_install_guard(installed.activation_id, installed.baseline_digest, lease=lease):
                 guarded.mirror_personal_context_activation(
                     dataset_id=dataset.dataset_id,
@@ -370,8 +412,8 @@ def acknowledge_activation(
         or not hmac.compare_digest(current.continuity_token, exchange.continuity_token)
     ):
         raise SyncStoreError("personal_context_activation_required")
-    with service.store.personal_context_authority_guard(dataset_id, prepared.profile_id) as guarded:
-        with activations.publications.profile_lease(prepared.profile_id) as lease:
+    with activations.publications.profile_lease(prepared.profile_id) as lease:
+        with service.store.personal_context_authority_guard(dataset_id, prepared.profile_id) as guarded:
             with repository.activation_install_guard(activation_id, baseline_digest, lease=lease) as live:
                 stored = guarded.get_personal_context_activation(activation_id)
                 if stored is None or not _verify_install(live, stored, identity, cipher):

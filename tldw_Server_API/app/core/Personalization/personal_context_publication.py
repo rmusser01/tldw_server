@@ -566,13 +566,30 @@ class PersonalContextPublicationRelayStore:
         )
 
     @contextmanager
-    def profile_lease(self, profile_id: str) -> Iterator[PublicationRelayLease | None]:
-        """Acquire a recoverable SQLite lease shared by every process entry point."""
+    def profile_lease(
+        self, profile_id: str, *, blocking: bool = True
+    ) -> Iterator[PublicationRelayLease | None]:
+        """Claim a recoverable lease, optionally skipping a contended process lock.
+
+        Nonblocking relay callers may already hold Sync. They return no lease
+        before any canonical SQL when another thread owns the profile lock.
+        The durable claim still commits before yielding to external Sync work.
+
+        Args:
+            profile_id: Profile whose publication lease is requested.
+            blocking: Whether to wait for the in-process profile lock.
+
+        Yields:
+            The owned durable lease, or None when either lock is unavailable.
+        """
 
         key = (self._database.db_path, profile_id)
         with self._locks_guard:
             lock = self._profile_locks.setdefault(key, threading.RLock())
-        with lock:
+        if not lock.acquire(blocking=blocking):
+            yield None
+            return
+        try:
             owner_token = uuid.uuid4().hex
             now = time.time_ns()
             with self._database.transaction(immediate=True) as connection:
@@ -620,6 +637,8 @@ class PersonalContextPublicationRelayStore:
                         )
                         if released.rowcount != 1:
                             raise RuntimeError("publication relay lease changed")
+        finally:
+            lock.release()
 
     def renew_lease(self, lease: PublicationRelayLease) -> bool:
         """CAS-renew the current owner before an external stage transition."""

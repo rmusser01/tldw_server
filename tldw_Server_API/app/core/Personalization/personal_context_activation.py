@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from contextlib import nullcontext
 from typing import Any
 
+from tldw_Server_API.app.core.exceptions import (
+    PersonalContextActivationInputError,
+    PersonalContextActivationStaleError,
+)
 from tldw_Server_API.app.core.Personalization.personal_context_publication import (
     PersonalContextPublicationRelayStore,
+    PublicationRelayLease,
 )
 from tldw_Server_API.app.core.Personalization.personal_context_repository import (
     PersonalContextRepository,
@@ -50,15 +56,31 @@ class PersonalContextActivationService:
         *,
         install: Callable[[PreparedPersonalContextActivation], Mapping[str, Any]],
         verify: Callable[[PreparedPersonalContextActivation, Mapping[str, Any]], bool],
+        lease: PublicationRelayLease | None = None,
     ) -> PreparedPersonalContextActivation:
         """Commit coverage only after the caller commits and verifies the exact Sync receipt.
 
-        The Sync owner acquires its dataset guard before calling this method.
+        The Sync owner acquires the profile lease before its dataset guard and
+        supplies that lease here, preserving lease -> Sync -> canonical ordering.
         Its install callback commits Sync independently while the canonical
         generation remains fenced. A later failure leaves preparation replayable.
+
+        Args:
+            activation_id: Identifier of the prepared activation.
+            baseline_digest: Expected digest of its exact baseline.
+            install: Callback that commits the baseline and returns its Sync receipt.
+            verify: Callback that verifies the receipt against the preparation.
+            lease: Already owned profile lease, or None to acquire one here.
+
+        Returns:
+            The activation with verified installation coverage recorded.
+
+        Raises:
+            PersonalContextActivationInputError: The receipt is malformed.
+            PersonalContextActivationStaleError: Verification or fencing fails.
         """
         prepared = self.repository.load_activation(activation_id)
-        with self.publications.profile_lease(prepared.profile_id) as lease:
+        with nullcontext(lease) if lease is not None else self.publications.profile_lease(prepared.profile_id) as lease:
             with self.repository.activation_install_guard(
                 activation_id,
                 baseline_digest,
@@ -66,11 +88,11 @@ class PersonalContextActivationService:
             ) as current:
                 receipt = install(current)
                 if not verify(current, receipt):
-                    raise ValueError("personal_context_activation_required")
+                    raise PersonalContextActivationStaleError("personal_context_activation_required")
                 receipt_id = receipt.get("receipt_id")
                 home_server_cursor = receipt.get("home_server_cursor")
                 if not isinstance(receipt_id, str) or type(home_server_cursor) is not int:
-                    raise ValueError("personal_context_activation_required")
+                    raise PersonalContextActivationInputError("personal_context_activation_required")
             return self.repository.complete_activation_install(
                 activation_id,
                 baseline_digest,

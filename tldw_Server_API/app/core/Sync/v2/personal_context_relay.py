@@ -131,7 +131,9 @@ class PersonalContextRelay:
             operation="personal_context_relay", relay_attempt_id=uuid4().hex
         ):
             try:
-                with self.publications.profile_lease(profile_id) as lease:
+                # A synchronous after-commit hook may still hold its outer Sync
+                # transaction. Never wait here for an installer staging into Sync.
+                with self.publications.profile_lease(profile_id, blocking=False) as lease:
                     if lease is None:
                         result = self._pending()
                     else:

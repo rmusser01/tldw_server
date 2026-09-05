@@ -26,7 +26,8 @@ def test_relay_bounds_source_decryption_before_loading_a_batch() -> None:
 
     class BoundedSource:
         @contextmanager
-        def profile_lease(self, _profile_id):
+        def profile_lease(self, _profile_id, *, blocking=True):
+            assert blocking is False
             yield SimpleNamespace(owner_token="owner")
 
         def earliest_nonterminal_batch(
@@ -596,7 +597,8 @@ class _Publications:
         self.failed_after: int | None = None
 
     @contextmanager
-    def profile_lease(self, _profile_id: str):
+    def profile_lease(self, _profile_id: str, *, blocking=True):
+        assert blocking is False
         yield type("Lease", (), {"owner_token": "lease-token"})()
 
     def renew_lease(self, _lease: object) -> bool:
