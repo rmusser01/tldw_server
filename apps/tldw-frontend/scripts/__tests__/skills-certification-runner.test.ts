@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, type Mock, vi } from 'vitest';
 import { tmpdir } from 'node:os';
 
 import {
@@ -9,8 +9,96 @@ import {
 const webName = 'skills-cert-web';
 const extensionName = 'skills-cert-extension';
 
-type HarnessCommand = { name: string };
-type HarnessRecord = { command: HarnessCommand };
+type CertificationPorts = { backend: number; web: number };
+type CertificationCommand = {
+  name: string;
+  args?: string[];
+  env?: Record<string, string>;
+};
+type CertificationChildOutcome = { code?: number | null; signal?: string | null };
+type CertificationProcessRecord = { command: CertificationCommand };
+type CertificationProcessRegistry = {
+  spawn: (command: CertificationCommand, logPath?: string) => CertificationProcessRecord;
+  stop: (record?: CertificationProcessRecord) => Promise<void>;
+  teardown: () => Promise<void>;
+  wait: (record?: CertificationProcessRecord) => Promise<CertificationChildOutcome>;
+};
+type CertificationEvidence = {
+  extensionDir: string;
+  frontendRoot: string;
+  logsDir: string;
+  relayLedgerPath: string;
+  root: string;
+  runId: string;
+  summaryPath: string;
+  webuiDir: string;
+};
+type CertificationProfile = {
+  baseRoot: string;
+  extensionProfileDir: string;
+  root: string;
+};
+type CertificationFailure = { category: string; detail?: string; surface?: string };
+type CertificationSummaryInput = {
+  failures: CertificationFailure[];
+  surfaces: Record<string, { postcondition: boolean; state: string }>;
+};
+type CertificationFinalizeInput = {
+  evidence: CertificationEvidence;
+  runtime?: object;
+  summaryInput: CertificationSummaryInput;
+  teardownOutcome:
+    { status: 'fulfilled'; value: unknown } | { status: 'rejected'; reason: unknown };
+};
+type CertificationHttpResponse = {
+  json: () => Promise<unknown>;
+  status: number;
+};
+
+interface SkillsCertificationOperationMocks {
+  buildCommands: Mock<
+    (input: {
+      frontendRoot: string;
+      ports: CertificationPorts;
+      profile: CertificationProfile;
+      repoRoot: string;
+    }) => Record<string, CertificationCommand>
+  >;
+  createEvidence: Mock<(input: { frontendRoot: string }) => CertificationEvidence>;
+  createProfile: Mock<(input: { repoRoot: string; temporaryBase: string }) => CertificationProfile>;
+  createRegistry: Mock<() => CertificationProcessRegistry>;
+  fetch: Mock<(url: string, init?: RequestInit) => Promise<CertificationHttpResponse>>;
+  finalize: Mock<(input: CertificationFinalizeInput) => Promise<Record<string, unknown>>>;
+  installHandlers: Mock<
+    (input: { onSignal: () => void; registry: CertificationProcessRegistry }) => () => void
+  >;
+  isBindConflict: Mock<(text: string) => boolean>;
+  readJson: Mock<(filePath: string) => unknown>;
+  readText: Mock<(filePath: string) => string>;
+  reservePorts: Mock<(names: string[]) => Promise<CertificationPorts>>;
+  removeEvidence: Mock<(evidence?: CertificationEvidence) => boolean>;
+  removeRuntime: Mock<(runtime?: object) => boolean>;
+  runChild: Mock<
+    (
+      registry: CertificationProcessRegistry,
+      command: CertificationCommand,
+      logPath: string
+    ) => Promise<CertificationChildOutcome>
+  >;
+  startChild: Mock<
+    (
+      registry: CertificationProcessRegistry,
+      command: CertificationCommand,
+      logPath: string
+    ) => CertificationProcessRecord | Promise<CertificationProcessRecord>
+  >;
+  stopChild: Mock<
+    (registry: CertificationProcessRegistry, record: CertificationProcessRecord) => Promise<void>
+  >;
+  waitForHttpOk: Mock<
+    (url: string, options?: { headers?: Record<string, string> }) => Promise<void>
+  >;
+}
 
 function result(status: 'passed' | 'failed' | 'running', categories: string[] = []) {
   return { categories, status };
@@ -20,16 +108,14 @@ function report(stats = { expected: 1, flaky: 0, skipped: 0, unexpected: 0 }) {
   return { stats };
 }
 
-function harness<Overrides extends Record<string, unknown> = Record<never, never>>(
-  overrides: Overrides = {} as Overrides
-) {
+function harness(overrides: Partial<SkillsCertificationOperationMocks> = {}) {
   const calls: string[] = [];
   const files = new Map<string, unknown>();
   const registry = {
-    spawn: vi.fn((command: HarnessCommand, _logPath?: string) => ({ command })),
-    stop: vi.fn(async (_record: HarnessRecord) => undefined),
-    teardown: vi.fn(async (): Promise<void> => undefined),
-    wait: vi.fn(async (_record: HarnessRecord) => ({ code: 0, signal: null })),
+    spawn: vi.fn((command: CertificationCommand, _logPath?: string) => ({ command })),
+    stop: vi.fn(async (_record?: unknown) => undefined),
+    teardown: vi.fn(async () => undefined),
+    wait: vi.fn(async (_record?: unknown) => ({ code: 0, signal: null })),
   };
   const evidence = {
     extensionDir: '/evidence/extension',
@@ -65,9 +151,8 @@ function harness<Overrides extends Record<string, unknown> = Record<never, never
     '/evidence/extension/report.json': report(),
   };
   Object.entries(defaultResults).forEach(([key, value]) => files.set(key, value));
-  const operations = {
-    buildCommands: vi.fn((_input: { ports: { backend: number; web: number } }) => commands),
-    buildEnvironments: vi.fn(() => ({})),
+  const operations: SkillsCertificationOperationMocks = {
+    buildCommands: vi.fn(() => commands),
     createEvidence: vi.fn(() => evidence),
     createProfile: vi.fn((_input: { temporaryBase: string }) => profile),
     createRegistry: vi.fn(() => registry),
@@ -90,16 +175,27 @@ function harness<Overrides extends Record<string, unknown> = Record<never, never
     installHandlers: vi.fn(() => vi.fn()),
     isBindConflict: vi.fn((text: string) => /EADDRINUSE/.test(text)),
     readJson: vi.fn((filePath: string) => files.get(filePath)),
+    readText: vi.fn(() => ''),
     reservePorts: vi.fn(async () => ({ backend: 8100, web: 3100 })),
+    removeEvidence: vi.fn(() => true),
+    removeRuntime: vi.fn(() => true),
     runChild: vi.fn(async (activeRegistry: typeof registry, command: { name: string }) => {
       calls.push(command.name);
       const record = activeRegistry.spawn(command, `/evidence/logs/${command.name}.log`);
       return activeRegistry.wait(record);
     }),
-    startChild: vi.fn((activeRegistry: typeof registry, command: HarnessCommand): HarnessRecord | Promise<HarnessRecord> => {
-      calls.push(command.name);
-      return activeRegistry.spawn(command, `/evidence/logs/${command.name}.log`);
-    }),
+    startChild: vi.fn(
+      (
+        activeRegistry: typeof registry,
+        command: CertificationCommand
+      ): CertificationProcessRecord | Promise<CertificationProcessRecord> => {
+        calls.push(command.name);
+        return activeRegistry.spawn(command, `/evidence/logs/${command.name}.log`);
+      }
+    ),
+    stopChild: vi.fn((activeRegistry: typeof registry, record: { command: { name: string } }) =>
+      activeRegistry.stop(record)
+    ),
     waitForHttpOk: vi.fn(async (url: string) => {
       calls.push(`health:${url}`);
     }),

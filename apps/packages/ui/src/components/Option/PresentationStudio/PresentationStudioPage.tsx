@@ -11,6 +11,7 @@ import {
   buildPresentationVisualStyleSnapshot,
   tldwClient,
   type PresentationDetailResult,
+  type StructuredPresentationStudioRecord,
   type VisualStyleRecord
 } from "@/services/tldw/TldwApiClient"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
@@ -43,13 +44,12 @@ type InFlightProjectRequest = {
   promise: Promise<DetailLoadResult | null>
 }
 
+type StructuredPresentationDetailResult = Omit<PresentationDetailResult, "record"> & {
+  record: StructuredPresentationStudioRecord
+}
+
 type DetailLoadResult =
-  | {
-      kind: "structured"
-      detail: Omit<PresentationDetailResult, "record"> & {
-        record: Extract<PresentationDetailResult["record"], { content_kind: "structured_slides" }>
-      }
-    }
+  | { kind: "structured"; detail: StructuredPresentationDetailResult }
   | { kind: "standalone_html" }
   | { kind: "unsupported"; contentKind: string | null }
   | { kind: "metadata_unavailable" }

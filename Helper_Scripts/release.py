@@ -869,6 +869,7 @@ class ShellReleaseRunner:
         self._release_notes_body = extract_release_notes_for_version(updated_changelog, next_version)
         self._prepared_paths = [
             pyproject_path,
+            self.repo_root / "uv.lock",
             changelog_path,
             readme_path,
             mkdocs_path,
@@ -921,6 +922,12 @@ class ShellReleaseRunner:
             ],
             env=refresh_env,
         )
+        if not re.fullmatch(r"uv 0\.12\.7(?:\s+.*)?", self._run_text(["uv", "--version"])):
+            raise RuntimeError("Release metadata requires uv 0.12.7; use the reviewed supply-chain tool")
+        # The root package version is a lock input. Refresh it without upgrading
+        # dependencies or resolving from the network before staging the release.
+        self._run_command(["uv", "lock", "--offline"])
+        self._run_command(["uv", "lock", "--check", "--offline"])
         self._run_command(["git", "add", *rel_paths])
         self._run_command(["git", "commit", "-m", release_commit_message(next_version)])
         return self.get_head_sha()
@@ -960,6 +967,7 @@ class ShellReleaseRunner:
                 "create",
                 tag_name,
                 "--verify-tag",
+                "--draft",
                 "--title",
                 tag_name,
                 "--notes",

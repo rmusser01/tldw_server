@@ -47,17 +47,17 @@ type DocLoadState = {
 // import.meta.glob is Vite-only; use empty object in Next.js/non-Vite environments
 const EXTENSION_DOC_IMPORTS: DocImportMap =
   typeof import.meta?.glob === "function"
-    ? import.meta.glob<string>(
+    ? (import.meta.glob(
         "/Docs/User_Documentation/**/*.{md,mdx}",
         { query: "?raw", import: "default" }
-      )
+      ) as DocImportMap)
     : {}
 const SERVER_DOC_IMPORTS: DocImportMap =
   typeof import.meta?.glob === "function"
-    ? import.meta.glob<string>(
+    ? (import.meta.glob(
         "/Docs/Published/**/*.{md,mdx}",
         { query: "?raw", import: "default" }
-      )
+      ) as DocImportMap)
     : {}
 
 const DOC_IMPORTS_BY_SOURCE: Record<DocumentationSource, DocImportMap> = {
