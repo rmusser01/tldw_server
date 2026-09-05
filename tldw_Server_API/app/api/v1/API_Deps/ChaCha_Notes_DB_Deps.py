@@ -20,7 +20,12 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 
 # Local Imports
 from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.DB_Management import sqlite_policy
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.chacha.runtime import (
+    ChaChaRuntimeManager,
+    ChaChaRuntimeUnavailableError,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -29,11 +34,6 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     SchemaError,
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.DB_Management import sqlite_policy
-from tldw_Server_API.app.core.DB_Management.chacha.runtime import (
-    ChaChaRuntimeManager,
-    ChaChaRuntimeUnavailableError,
-)
 
 #
 #######################################################################################################################
@@ -474,6 +474,13 @@ def _create_and_prepare_db(user_id: int, client_id: str) -> CharactersRAGDB:
         raise
     db_instance = CharactersRAGDB(db_path=str(db_path), client_id=str(client_id))
     _apply_sqlite_tuning(db_instance)
+    from tldw_Server_API.app.core.Visual_Identities.builtin_pixel_migu import ensure_pixel_migu_character
+
+    try:
+        ensure_pixel_migu_character(db_instance, owner_user_id=user_id)
+    except (CharactersRAGDBError, sqlite3.Error, OSError, RuntimeError, ValueError, TypeError):
+        db_instance.close_connection()
+        raise
     return db_instance
 
 

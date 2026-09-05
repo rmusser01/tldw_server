@@ -1,17 +1,17 @@
-from pathlib import Path
 import threading
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as deps
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDBError,
     ConflictError,
     InputError,
     SchemaError,
 )
-from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 
 
 class _LoggerStub:
@@ -335,6 +335,10 @@ def test_create_and_prepare_db_sanitizes_secondary_mkdir_failure_log(monkeypatch
     monkeypatch.setattr(deps.Path, "mkdir", fail_parent_mkdir)
     monkeypatch.setattr(deps, "CharactersRAGDB", make_db)
     monkeypatch.setattr(deps, "_apply_sqlite_tuning", lambda _db_instance: None)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Visual_Identities.builtin_pixel_migu.ensure_pixel_migu_character",
+        lambda _db_instance, **_kwargs: None,
+    )
 
     assert isinstance(deps._create_and_prepare_db(4242, "safe-client"), _DBInstance)
 
