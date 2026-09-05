@@ -8,6 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 import pytest
 from loguru import logger
@@ -63,7 +64,7 @@ def test_unexpected_relay_failure_logs_content_free_retry(
 ) -> None:
     """Operational failures remain retryable without leaking errors through logging."""
 
-    events: list[object] = []
+    events: list[dict[str, Any]] = []
 
     def capture(message: Message) -> None:
         """Capture the complete record, including any accidental exception context."""
@@ -88,10 +89,25 @@ def test_unexpected_relay_failure_logs_content_free_retry(
         with monkeypatch.context() as patch:
             patch.setattr(target, name, fail)
             result = _relay(authority_harness)
+            repeated = _relay(authority_harness)
+        try:
+            logger.warning("after_relay_context_check")
+        except RuntimeError:
+            if not sink_fails:
+                raise
     finally:
         logger.remove(sink)
     assert result.continuation == "personal_context_relay_pending"
-    assert any("personal_context_relay_failed" in str(event) for event in events)
+    assert repeated.continuation == "personal_context_relay_pending"
+    failures = [event for event in events if "personal_context_relay_failed" in event["message"]]
+    assert failures
+    assert all(event["extra"].get("operation") == "personal_context_relay" for event in failures)
+    attempts = {event["extra"].get("relay_attempt_id") for event in failures}
+    assert len(attempts) == 2
+    assert all(isinstance(attempt, str) and UUID(attempt).version == 4 for attempt in attempts)
+    after = next(event for event in events if event["message"] == "after_relay_context_check")
+    assert "relay_attempt_id" not in after["extra"]
+    assert "operation" not in after["extra"]
     if "PR2868-PROTECTED" in str(events):
         pytest.fail("relay diagnostic exposed protected content", pytrace=False)
     assert _drain(authority_harness).continuation == "complete"

@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from time import monotonic_ns
 from typing import Any, Literal
+from uuid import uuid4
 
 from loguru import logger
 
@@ -80,7 +81,7 @@ AuthorityCanceller = Callable[
 
 
 def _log_relay_failure() -> None:
-    """Emit a fixed retry diagnostic without exception text, identifiers, or locals."""
+    """Emit a scoped retry diagnostic without source identifiers or exception content."""
 
     try:
         logger.opt(exception=False).warning(
@@ -125,23 +126,26 @@ class PersonalContextRelay:
                 clock_ns=self.clock_ns,
             )
         starting_rows = budget.remaining_rows
-        try:
-            with self.publications.profile_lease(profile_id) as lease:
-                if lease is None:
-                    result = self._pending()
-                else:
-                    result = self._relay_owned(
-                        lease=lease,
-                        user_id=user_id,
-                        profile_id=profile_id,
-                        dataset_id=dataset_id,
-                        budget=budget,
-                    )
-        except PublicationRelayPoisoned:
-            result = PersonalContextRelayResult(0, False, False, "relay_poisoned")
-        except Exception:  # noqa: BLE001 - DB/lease/adapter races remain retryable.
-            _log_relay_failure()
-            result = self._pending()
+        with logger.contextualize(
+            operation="personal_context_relay", relay_attempt_id=uuid4().hex
+        ):
+            try:
+                with self.publications.profile_lease(profile_id) as lease:
+                    if lease is None:
+                        result = self._pending()
+                    else:
+                        result = self._relay_owned(
+                            lease=lease,
+                            user_id=user_id,
+                            profile_id=profile_id,
+                            dataset_id=dataset_id,
+                            budget=budget,
+                        )
+            except PublicationRelayPoisoned:
+                result = PersonalContextRelayResult(0, False, False, "relay_poisoned")
+            except Exception:  # noqa: BLE001 - DB/lease/adapter races remain retryable.
+                _log_relay_failure()
+                result = self._pending()
         return replace(
             result,
             inspected_rows=starting_rows - budget.remaining_rows,

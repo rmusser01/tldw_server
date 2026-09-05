@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-05 02:25'
-updated_date: '2026-09-05 03:37'
+updated_date: '2026-09-05 03:52'
 labels: []
 dependencies: []
 references:
@@ -27,6 +27,7 @@ Resolve Qodo review findings and CI issues for the rebased Personal Context rela
 - [x] #5 Bootstrap rejects ambiguous unbound Chatbook default datasets before enrollment, key wrapping, or binding, while retaining a sole existing authority
 - [x] #6 Reserved activation and purge routes enforce the existing rate limiter, and exported JSON Schema enforces runtime authority/readiness invariants
 - [x] #7 Unexpected relay failures emit content-free diagnostics without breaking retry, and purge cleanup orchestration lives in the core service with unchanged capability checks
+- [x] #8 Relay warnings include a fresh privacy-safe attempt correlation ID and structured operation without retaining sensitive identifiers or exception content
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -53,6 +54,10 @@ Final rebase: dev advanced to 5cd10750d89f9668c1c83db232a8ffb08c08895e. Rebased 
 Qodo round 4 plan: verify and fix six new findings. Correct indentation and pull/helper documentation; move existing cross-dataset cleanup loop into PersonalContextService with the existing Sync service injected by API wiring; retain all capability verification and archive inclusion. Reproduce unexpected relay failure logging with protected exception/identifier canaries and sink failure, then add a shared content-free diagnostic at every retryable exception boundary. Reuse central PersonalContextError for retention checkpoint failure rather than inventing a new exception hierarchy; preserve pending cleanup behavior. ADR required: no new ADR, existing ADR-002 service ownership and privacy apply; no new storage, authorization or protocol policy.
 
 Round 4 complete locally: fixed all six new Qodo findings. Moved existing purge cleanup orchestration into core PersonalContextService with authenticated Sync injection and unchanged capability checks; reused central PersonalContextError for checkpoint failure; corrected materializer indentation and pull/helper documentation. Shared content-free relay warning covers all eight unexpected exception paths and isolates sink failures. New regressions reproduced missing diagnostics, missing core operation and generic checkpoint error before fixes; corrected test setup to archived_at and the existing PermissionError for forged claims. Final seven-file affected regression gate: 366 passed, 74 warnings in 258.86s with PostgreSQL required and no skips. Separate contract gate: 12 passed. Scoped Ruff, Bandit, diff check, regenerated API types/fingerprint and drift check pass; independent review found no issues. Qodo summary still repeats the prior schema omission, but the exact cited remote artifact contains all conditionals; evidence posted in its original thread. Existing ADR-002 applies. Current-head remote CI/review and merge remain pending.
+
+Round 5 plan: reproduce missing structured operation/attempt context in the existing diagnostic canary tests; add per-call random correlation through scoped Loguru context and fixed operation metadata, preserving retry and sink-failure behavior. Confirm distinct attempts cannot share IDs and context does not leak after return. Rebase on latest dev, regenerate affected artifacts, run targeted regression/security/static checks, reply with evidence. ADR required: no new ADR; existing ADR-002 privacy boundary applies, no stable identity or new persisted state.
+
+Round 5 red-green evidence: all eight diagnostic regressions failed for missing structured operation, then passed after adding a UUID4 relay_attempt_id and fixed operation through scoped Loguru context. Tests verify distinct IDs for successive attempts, no context after return, content-free complete records, sink-failure isolation and subsequent recovery. No persistent identifiers, exception content or new dependencies added. Scoped Ruff/Bandit and diff checks pass. Latest dev advanced only through document-summary prompt work; rebase and final verification follow.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
