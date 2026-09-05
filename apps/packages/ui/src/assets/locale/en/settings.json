@@ -67,6 +67,10 @@
         "label": "Video summarization",
         "description": "Controls system instructions and recursive final-summary instructions for synchronous video analysis. Without a saved override, server defaults apply."
       },
+      "mediaWebSummarization": {
+        "label": "Web article summarization",
+        "description": "Controls summary instructions for synchronous web scraping. Reset restores each scraping engine's existing defaults; the displayed defaults are the deployed web-article prompts."
+      },
       "mediaEmailSummarization": {
         "label": "Email summarization",
         "description": "Controls system instructions for synchronous email analysis. Without a saved override, server defaults apply."
@@ -92,6 +96,7 @@
       "emailSummarization": "Synchronous email analysis",
       "audioAnalysis": "Synchronous audio analysis",
       "videoSummarization": "Synchronous video analysis",
+      "webSummarization": "Synchronous web scraping",
       "automaticNotesTitles": "Automatic Notes titles"
     },
     "titleGeneration": {

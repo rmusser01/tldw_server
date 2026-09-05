@@ -40,6 +40,10 @@
       "system": "You are an expert translator. Your task is to provide accurate,\nnatural-sounding translations that preserve the original meaning, tone, and formatting.\nDo not add explanations or notes - only provide the translation.",
       "user_template": "Translate the following text to {target_language}.\nPreserve the original formatting, meaning, and tone.\nOnly output the translation, no explanations, notes, or additional text.\n\nText to translate:\n{text}"
     },
+    "media.web.summarization": {
+      "system": "You are a professional summarizer who produces accurate, concise summaries of web content.",
+      "user": "Summarize this article concisely. Focus on the main points, facts, and any actionable insights."
+    },
     "notes.title.generate": {
       "system": "You are a helpful assistant that writes concise document titles.",
       "title_instruction": "Write a descriptive title"
