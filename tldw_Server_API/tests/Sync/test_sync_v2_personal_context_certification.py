@@ -773,6 +773,68 @@ def test_direct_bind_rejects_invalid_authority_target_before_side_effects(
         _transport_counts(service), transport_before, "invalid bind changed transport"
     )
 
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("profile_id", 13172),
+        ("authority_id", 13172),
+        ("integrity_key_id", 13172),
+        ("link_state", b"complete"),
+        ("purge_generation", True),
+        ("purge_generation", 0.5),
+        ("purge_generation", "0"),
+    ),
+)
+def test_direct_bind_rejects_malformed_values_before_transaction(
+    production_factories,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: object,
+) -> None:
+    """Malformed binding scalars fail before transaction or durable mutation."""
+
+    canonical, service = production_factories
+    canonical.create_profile(runtime_enabled=False)
+    dataset_id = "malformed-direct-binding"
+    _new_dataset(service, dataset_id)
+    datasets_before = _dataset_digest(service)
+    domains_before = _domain_state_digest(service)
+    transport_before = _transport_counts(service)
+    binding = _binding_values(canonical)
+    binding[field] = value
+
+    @contextmanager
+    def unexpected_transaction(*_args: object, **_kwargs: object):
+        pytest.fail("malformed bind entered database transaction", pytrace=False)
+        yield
+
+    monkeypatch.setattr(
+        service.store.db.backend,
+        "transaction",
+        unexpected_transaction,
+    )
+    reason_code = None
+    try:
+        service.store.bind_personal_context_dataset(
+            dataset_id=dataset_id,
+            **binding,
+        )
+    except SyncStoreError as exc:
+        reason_code = str(exc)
+
+    _require(reason_code == _AUTHORITY_ERROR, "malformed bind value was not rejected")
+    _require_digest_equal(
+        _dataset_digest(service), datasets_before, "malformed bind changed dataset state"
+    )
+    _require_digest_equal(
+        _domain_state_digest(service), domains_before, "malformed bind changed domains"
+    )
+    _require_digest_equal(
+        _transport_counts(service), transport_before, "malformed bind changed transport"
+    )
+
+
 def test_bootstrap_rolls_back_default_and_domains_after_interleaved_bind_rejection(
     production_factories,
     monkeypatch: pytest.MonkeyPatch,
@@ -1649,6 +1711,7 @@ def test_production_http_relay_debt_survives_restart_and_recovers_on_push_and_pu
                 for phase in (
                     "before-first-backend-reset",
                     "before-second-backend-reset",
+                    "final-active-backend",
                 )
                 for category in ("sync-wal", "sync-shm", "notes-wal", "notes-shm")
             }.issubset(observed_phase_categories),

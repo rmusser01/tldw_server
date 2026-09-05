@@ -4239,11 +4239,13 @@ class SyncDatabase:
         """Merge a canonical Personal Context binding into the locked dataset row."""
 
         if (
-            not profile_id
-            or not authority_id
-            or not integrity_key_id
-            or purge_generation < 0
+            any(
+                type(value) is not str or not value
+                for value in (profile_id, authority_id, integrity_key_id, link_state)
+            )
             or link_state not in {"bootstrap_pending", "complete"}
+            or type(purge_generation) is not int
+            or purge_generation < 0
         ):
             raise SyncStoreError("personal_context_authority_mismatch")
         with self.backend.transaction(connection) as transaction:
