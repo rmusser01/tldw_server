@@ -1435,6 +1435,18 @@ vulnerability admission. New SBOM metadata and two real-backend journey failures
 are diagnosed separately and await a scoped repair decision; no security policy,
 timeouts, or assertions were relaxed. All five original Qodo threads are resolved.
 
+2026-09-05 approved SBOM and journey follow-up: clean manifest-and-lock fixtures
+confirmed that pinned cdxgen omits child metadata without child locks or local
+node_modules, including in JavaScript mode. Keep the canonical required-only Bun
+dependency scan and derive only the three workspace identity records from the
+checked-in manifests. The actual workflow now passes a clean-fixture Docker
+regression and pinned CycloneDX schema validation. All 852 focused Python tests
+pass; workflow syntax, touched lint, and Bandit checks pass. Test-only Bandit
+annotations document fixed subprocess invocations and a bounded container tmpfs;
+pytest assertions are excluded from that test-file scan. No scanner/admission
+policy or vulnerability exception changed. Real-backend journey investigation
+continues separately; merge remains blocked on exact-head review and admission.
+
 Wait for all required checks and reviewer comments. Resolve every actionable thread with evidence, rerun affected tests, rebase again if `dev` moved, and merge only after:
 
 - all required checks pass;
