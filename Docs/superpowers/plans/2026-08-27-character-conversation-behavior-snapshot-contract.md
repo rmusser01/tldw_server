@@ -4,7 +4,7 @@
 
 **Goal:** Make new server-owned character conversations resumable with their creation-time behavior by storing an immutable snapshot and exposing a capability-gated, idempotent, pre- and post-generation fenced completion contract.
 
-**Architecture:** Add one pure snapshot module, one shared atomic character-conversation factory, one focused ChaCha persistence/CAS store, and typed API additions around the existing character-session routes. TASK-13134 allocates the next free schema version for snapshot, settings, and complete-history fencing; TASK-13135 then adds prior-tail-CAS idempotent append, snapshot-only prompt preparation, generation-fence persistence, and exact capability advertisement without changing legacy completion behavior.
+**Architecture:** Add one pure snapshot module, one shared atomic character-conversation factory, one focused ChaCha persistence/CAS store, and typed API additions around the existing character-session routes. TASK-13159 allocates the next free schema version for snapshot, settings, and complete-history fencing; TASK-13160 then adds prior-tail-CAS idempotent append, snapshot-only prompt preparation, generation-fence persistence, and exact capability advertisement without changing legacy completion behavior.
 
 **Tech Stack:** Python 3.10+, FastAPI, Pydantic v2, SQLite and PostgreSQL ChaCha backends, TestClient, pytest, Loguru, Bandit.
 
@@ -12,7 +12,7 @@
 
 **Approved downstream design:** `rmusser01/tldw_chatbook/Docs/superpowers/specs/2026-08-27-server-backed-roleplay-conversation-resume-design.md`
 
-**Backlog tasks:** TASK-13134 (snapshot foundation), TASK-13135 (resume completion contract)
+**Backlog tasks:** TASK-13159 (snapshot foundation), TASK-13160 (resume completion contract)
 
 **ADR required:** yes
 
@@ -24,14 +24,14 @@
 
 ## Global constraints
 
-- Implement and merge TASK-13134 before starting TASK-13135. Keep each task to one reviewable PR.
+- Implement and merge TASK-13159 before starting TASK-13160. Keep each task to one reviewable PR.
 - Do not backfill legacy conversations from current mutable sources. Their snapshot status is `missing`.
 - Do not change legacy `/complete-v2` semantics unless the request selects contract version 1.
 - Contract completion may read only the immutable snapshot, versioned conversation state, exact fenced history, and deployment/runtime inputs. It must not call current card, preset, exemplar, lore/world-book, or memory loaders.
 - Never persist credentials, provider secrets, portrait/attachment binaries, raw auth context, or live tool/retrieval output in the snapshot.
 - Non-stream assistant persistence is required. Stream persistence is advertised only after its CAS path is complete.
 - Post-generation conflict never creates/selects a branch. Return generated text with `saved=false` and `code="generation_fence_changed"`.
-- Before TASK-13134 implementation, rebase on current `origin/dev`, inspect the
+- Before TASK-13159 implementation, rebase on current `origin/dev`, inspect the
   actual ChaCha schema head, and allocate the next free version for both SQLite and
   PostgreSQL. The plan-time head is v63 and examples call the candidate v64; do not
   hard-code v64 if the upstream head has advanced.
@@ -85,8 +85,8 @@
 - `tldw_Server_API/tests/Config/test_docs_info_capabilities.py`
 - `tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py`
 - `tldw_Server_API/tests/Characters/test_character_chat_lib.py`
-- `backlog/tasks/task-13134 - Persist-immutable-character-conversation-behavior-snapshots.md`
-- `backlog/tasks/task-13135 - Enforce-versioned-Roleplay-resume-completion-contract.md`
+- `backlog/tasks/task-13159 - Persist-immutable-character-conversation-behavior-snapshots.md`
+- `backlog/tasks/task-13160 - Enforce-versioned-Roleplay-resume-completion-contract.md`
 
 ### Read-only reference
 
@@ -99,13 +99,13 @@
 
 | Stage | Owner | Outcome | Merge gate |
 | --- | --- | --- | --- |
-| 1 | TASK-13134 | Freeze snapshot v1 and input classification | Pure tests green |
-| 2 | TASK-13134 | Persist atomically in the next schema and expose readiness across every creator | Migration/create tests green |
-| 3 | TASK-13134 | Materialize/version settings plus complete history fences | PR 1 reviewed and merged |
-| 4 | TASK-13135 | CAS idempotent user append and pre-dispatch snapshot/history fences | No-dispatch tests green |
-| 5 | TASK-13135 | Generation CAS, optional stream persist, capabilities | PR 2 reviewed and merged |
+| 1 | TASK-13159 | Freeze snapshot v1 and input classification | Pure tests green |
+| 2 | TASK-13159 | Persist atomically in the next schema and expose readiness across every creator | Migration/create tests green |
+| 3 | TASK-13159 | Materialize/version settings plus complete history fences | PR 1 reviewed and merged |
+| 4 | TASK-13160 | CAS idempotent user append and pre-dispatch snapshot/history fences | No-dispatch tests green |
+| 5 | TASK-13160 | Generation CAS, optional stream persist, capabilities | PR 2 reviewed and merged |
 
-## Stage 1 — TASK-13134: Freeze snapshot v1
+## Stage 1 — TASK-13159: Freeze snapshot v1
 
 ### Task 1: Define the canonical behavior snapshot
 
@@ -177,7 +177,7 @@ git commit -m "feat(character-chat): define behavior snapshot contract"
 
 Expected: PASS; this commit has no API or DB changes.
 
-## Stage 2 — TASK-13134: Store snapshots atomically
+## Stage 2 — TASK-13159: Store snapshots atomically
 
 ### Task 2: Allocate the next ChaCha schema version and add the resume store
 
@@ -350,7 +350,7 @@ git diff --cached --check
 git commit -m "feat(character-chat): snapshot behavior at conversation creation"
 ```
 
-## Stage 3 — TASK-13134: Version conversation behavior settings
+## Stage 3 — TASK-13159: Version conversation behavior settings
 
 ### Task 4: Materialize settings and publish coherent fences
 
@@ -406,7 +406,7 @@ mutation advances `history_version`; retain tail/message versions for exact-row
 identity but never treat them as a complete history fence. Do not overload settings
 version for transcript mutations.
 
-- [x] **Step 5: Verify TASK-13134**
+- [x] **Step 5: Verify TASK-13159**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q --tb=short \
@@ -419,17 +419,17 @@ version for transcript mutations.
   tldw_Server_API/app/core/Character_Chat/character_behavior_snapshot.py \
   tldw_Server_API/app/core/DB_Management/chacha/conversation_resume_store.py \
   tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py \
-  -f json -o /tmp/bandit_task_13134.json
+  -f json -o /tmp/bandit_task_13159.json
 git diff --check
 ```
 
 Expected: targeted tests and Bandit pass.
 
-- [ ] **Step 6: Close and merge TASK-13134**
+- [ ] **Step 6: Close and merge TASK-13159**
 
-Use Backlog CLI/MCP to link ADR-002/this plan, record exact evidence, complete AC/DoD, add implementation notes, and mark Done. Commit the task update, request code review, and merge PR 1 before TASK-13135 starts.
+Use Backlog CLI/MCP to link ADR-002/this plan, record exact evidence, complete AC/DoD, add implementation notes, and mark Done. Commit the task update, request code review, and merge PR 1 before TASK-13160 starts.
 
-## Stage 4 — TASK-13135: Idempotent append and pre-dispatch fences
+## Stage 4 — TASK-13160: Idempotent append and pre-dispatch fences
 
 ### Task 5: Add caller-ID append and exact request validation
 
@@ -581,7 +581,7 @@ git diff --cached --check
 git commit -m "feat(character-chat): fence snapshot resume before generation"
 ```
 
-## Stage 5 — TASK-13135: Fence assistant commit and advertise support
+## Stage 5 — TASK-13160: Fence assistant commit and advertise support
 
 ### Task 7: Compare-and-swap non-stream and stream persistence
 
@@ -658,12 +658,12 @@ git diff --cached --check
 git commit -m "feat(character-chat): fence resumed assistant persistence"
 ```
 
-### Task 8: Advertise exact capability and close TASK-13135
+### Task 8: Advertise exact capability and close TASK-13160
 
 **Files:**
 - Modify: `tldw_Server_API/app/api/v1/endpoints/config_info.py`
 - Modify: `tldw_Server_API/tests/Config/test_docs_info_capabilities.py`
-- Modify: `backlog/tasks/task-13135 - Enforce-versioned-Roleplay-resume-completion-contract.md`
+- Modify: `backlog/tasks/task-13160 - Enforce-versioned-Roleplay-resume-completion-contract.md`
 
 - [ ] **Step 1: Write failing capability tests**
 
@@ -733,7 +733,7 @@ Expected: PASS; record exact counts/skips. Do not run the repository-wide suite 
   tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py \
   tldw_Server_API/app/api/v1/endpoints/character_messages.py \
   tldw_Server_API/app/api/v1/endpoints/config_info.py \
-  -f json -o /tmp/bandit_task_13135.json
+  -f json -o /tmp/bandit_task_13160.json
 git diff --check
 ```
 
@@ -745,4 +745,4 @@ Create a fresh conversation; confirm snapshot valid; mutate its card; caller-ID 
 
 - [ ] **Step 6: Close, review, rebase, and merge**
 
-Use Backlog CLI/MCP to link ADR-002/this plan, record evidence, complete TASK-13135 AC/DoD, add notes, and mark Done. Commit capability/task docs. Request code review. Rebase on current `origin/dev`, rerun targeted tests/Bandit, resolve every review thread with evidence, and merge only with green required checks. Chatbook TASK-23089 remains blocked until the capability-bearing server work is merged and available to its test server.
+Use Backlog CLI/MCP to link ADR-002/this plan, record evidence, complete TASK-13160 AC/DoD, add notes, and mark Done. Commit capability/task docs. Request code review. Rebase on current `origin/dev`, rerun targeted tests/Bandit, resolve every review thread with evidence, and merge only with green required checks. Chatbook TASK-23089 remains blocked until the capability-bearing server work is merged and available to its test server.

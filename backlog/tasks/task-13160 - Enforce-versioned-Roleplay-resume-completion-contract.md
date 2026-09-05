@@ -1,17 +1,17 @@
 ---
-id: TASK-13135
+id: TASK-13160
 title: Enforce versioned Roleplay resume completion contract
 status: To Do
 assignee: []
 created_date: '2026-08-28 05:06'
-updated_date: '2026-08-28 05:19'
+updated_date: '2026-09-05 01:01'
 labels:
   - character-chat
   - api
   - streaming
   - roleplay-resume
 dependencies:
-  - TASK-13134
+  - TASK-13159
 references:
   - 'https://github.com/rmusser01/tldw_chatbook'
   - >-
@@ -38,6 +38,12 @@ Expose an exact capability-gated character completion contract that consumes the
 - [ ] #6 Structured missing/invalid snapshot, policy, drift, saved, unknown, validation-degraded, grant-tamper/expiry, cross-user, cross-conversation, and idempotent identical-replay outcomes are documented and covered by targeted endpoint and concurrency tests.
 - [ ] #7 Current card, preset, lore/world-book, note/memory, participant, exemplar, settings, ancestor-message edit/delete, append-race, active-Sync readiness, and mutation-during-provider tests prove historical isolation and fail-closed persistence.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-09-04: With explicit user approval, renumbered this task from its colliding former ID TASK-13135 to TASK-13160. Its snapshot prerequisite is now TASK-13159. Scope and acceptance criteria are unchanged; implementation remains pending the prerequisite merge.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

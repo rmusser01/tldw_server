@@ -21,7 +21,7 @@ The Chatbook Roleplay design requires an exact, capability-gated resume path. It
 approved downstream contract is documented in
 `rmusser01/tldw_chatbook` ADR-095 and
 `Docs/superpowers/specs/2026-08-27-server-backed-roleplay-conversation-resume-design.md`.
-TASK-13134 provides the stored historical behavior prerequisite; TASK-13135
+TASK-13159 provides the stored historical behavior prerequisite; TASK-13160
 provides the versioned completion and persistence contract.
 
 ## Decision
