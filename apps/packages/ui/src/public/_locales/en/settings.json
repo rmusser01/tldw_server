@@ -6026,6 +6026,15 @@
   "servicePrompts_definitions_mediaTextTranslation_label": {
     "message": "Text translation"
   },
+  "servicePrompts_definitions_mediaDocumentSummarization_label": {
+    "message": "Document summarization"
+  },
+  "servicePrompts_definitions_mediaDocumentSummarization_description": {
+    "message": "Controls system instructions for synchronous document analysis. Without a saved override, server defaults apply."
+  },
+  "servicePrompts_workflows_documentSummarization": {
+    "message": "Synchronous document analysis"
+  },
   "servicePrompts_definitions_mediaTextTranslation_description": {
     "message": "Controls the visible instructions used by synchronous text translation."
   },

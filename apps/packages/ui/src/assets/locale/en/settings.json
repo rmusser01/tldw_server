@@ -47,6 +47,10 @@
         "label": "Text translation",
         "description": "Controls the visible instructions used by synchronous text translation."
       },
+      "mediaDocumentSummarization": {
+        "label": "Document summarization",
+        "description": "Controls system instructions for synchronous document analysis. Without a saved override, server defaults apply."
+      },
       "notesTitleGenerate": {
         "label": "Notes title",
         "description": "Controls the wording used by LLM-backed automatic Notes titles."
@@ -62,6 +66,7 @@
       "automaticConversationTitles": "Automatic conversation titles",
       "imagePromptRefinement": "Image prompt refinement",
       "textTranslation": "Text translation",
+      "documentSummarization": "Synchronous document analysis",
       "automaticNotesTitles": "Automatic Notes titles"
     },
     "titleGeneration": {

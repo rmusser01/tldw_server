@@ -101,9 +101,7 @@ _TITLE_GENERATION_USER_TEMPLATE_DEFAULT = (
 _IMAGE_PROMPT_REFINEMENT_SYSTEM_DEFAULT = (
     "You refine image-generation prompts. Preserve intent while improving clarity, visual specificity, and composition."
 )
-_IMAGE_PROMPT_REFINEMENT_REWRITE_DEFAULT = (
-    "Rewrite the prompt to be concise, concrete, and generation-ready."
-)
+_IMAGE_PROMPT_REFINEMENT_REWRITE_DEFAULT = "Rewrite the prompt to be concise, concrete, and generation-ready."
 
 _TRANSLATION_SYSTEM_DEFAULT = """You are an expert translator. Your task is to provide accurate,
 natural-sounding translations that preserve the original meaning, tone, and formatting.
@@ -118,6 +116,24 @@ Text to translate:
 
 _NOTES_TITLE_SYSTEM_DEFAULT = "You are a helpful assistant that writes concise document titles."
 _NOTES_TITLE_INSTRUCTION_DEFAULT = "Write a descriptive title"
+
+_DOCUMENT_SUMMARY_SYSTEM_DEFAULT = """You are a bulleted notes specialist. ```When creating comprehensive bulleted notes, you should follow these guidelines: Use multiple headings based on the referenced topics, not categories like quotes or terms. Headings should be surrounded by bold formatting and not be listed as bullet points themselves. Leave no space between headings and their corresponding list items underneath. Important terms within the content should be emphasized by setting them in bold font. Any text that ends with a colon should also be bolded. Before submitting your response, review the instructions, and make any corrections necessary to adhered to the specified format. Do not reference these instructions within the notes.```
+Based on the content between backticks create comprehensive bulleted notes.
+**Bulleted Note Creation Guidelines**
+
+**Headings**:
+- Based on referenced topics, not categories like quotes or terms
+- Surrounded by **bold** formatting
+- Not listed as bullet points
+- No space between headings and list items underneath
+
+**Emphasis**:
+- **Important terms** set in bold font
+- **Text ending in a colon**: also bolded
+
+**Review**:
+- Ensure adherence to specified format
+- Do not reference these instructions in your response."""
 
 _DEFINITION_SEQUENCE = (
     ServicePromptDefinition(
@@ -189,9 +205,7 @@ _DEFINITION_SEQUENCE = (
                 required_variables=("query",),
             ),
         ),
-        default_parts=MappingProxyType(
-            {"user_template": _TITLE_GENERATION_USER_TEMPLATE_DEFAULT}
-        ),
+        default_parts=MappingProxyType({"user_template": _TITLE_GENERATION_USER_TEMPLATE_DEFAULT}),
         affected_workflows=(
             ServicePromptWorkflow(
                 id="chat.title.generation",
@@ -227,6 +241,26 @@ _DEFINITION_SEQUENCE = (
             ServicePromptWorkflow(
                 id="image.prompt.refinement",
                 label="Image prompt refinement",
+            ),
+        ),
+    ),
+    ServicePromptDefinition(
+        id="media.document.summarization",
+        label="Document summarization",
+        description="Controls system instructions for synchronous document analysis. Without a saved override, server defaults apply.",
+        parts=(
+            ServicePromptPart(
+                key="system",
+                label="System instructions",
+                mode="literal",
+                required_variables=(),
+            ),
+        ),
+        default_parts=MappingProxyType({"system": _DOCUMENT_SUMMARY_SYSTEM_DEFAULT}),
+        affected_workflows=(
+            ServicePromptWorkflow(
+                id="media.document.summarization",
+                label="Synchronous document analysis",
             ),
         ),
     ),

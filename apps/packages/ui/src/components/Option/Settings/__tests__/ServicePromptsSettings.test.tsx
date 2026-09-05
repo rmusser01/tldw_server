@@ -221,6 +221,13 @@ const catalog: ServicePromptCatalogItem[] = [
     ]
   },
   {
+    id: "media.document.summarization",
+    label: "Server document prompt",
+    description: "Server document prompt description",
+    parts: [{ key: "system", label: "System instructions", mode: "literal", required_variables: [] }],
+    affected_workflows: [{ id: "media.document.summarization", label: "Server document workflow" }]
+  },
+  {
     id: "notes.title.generate",
     label: "Server Notes title prompt",
     description: "Server Notes title prompt description",
@@ -252,7 +259,9 @@ const detailFor = (
     parts?: Record<string, string>
   } = {}
 ): ServicePromptDetail => {
-  const defaults = definition.id === "media.text.translation"
+  const defaults = definition.id === "media.document.summarization"
+    ? { system: "Summarize the document clearly." }
+    : definition.id === "media.text.translation"
     ? {
         system: "Translate accurately. Literal {braces} stay literal.",
         user_template: "Translate to {target_language}:\n{text}"
@@ -500,7 +509,7 @@ describe("ServicePromptsSettings", () => {
     expect(document.querySelector("h1")).toBeNull()
   })
 
-  it("renders the seven localized definitions, query selection, status, workflows, and exact scope", async () => {
+  it("renders the eight localized definitions, query selection, status, workflows, and exact scope", async () => {
     window.history.replaceState(
       {},
       "",
@@ -509,7 +518,7 @@ describe("ServicePromptsSettings", () => {
     renderSettings()
 
     expect(await screen.findAllByTestId("service-prompt-list-item"))
-      .toHaveLength(7)
+      .toHaveLength(8)
     expect(await screen.findByRole("heading", { name: "Text translation" }))
       .toBeInTheDocument()
     expect(screen.getByText("Server default")).toBeInTheDocument()
@@ -548,6 +557,16 @@ describe("ServicePromptsSettings", () => {
     )
     expect(screen.getByText("Automatic Notes titles")).toBeVisible()
     expect(screen.queryByText("Server Notes title prompt")).not.toBeInTheDocument()
+  })
+
+  it("exposes document system guidance and identifies its synchronous scope", async () => {
+    renderSettings()
+    await openPrompt("Document summarization")
+    expect(screen.getByLabelText("System instructions")).toHaveValue(
+      "Summarize the document clearly."
+    )
+    expect(screen.getByText("Synchronous document analysis")).toBeVisible()
+    expect(screen.getAllByText(/Without a saved override, server defaults apply/)[0]).toBeVisible()
   })
 
   it("localizes and edits the image prompt refinement semantics", async () => {
