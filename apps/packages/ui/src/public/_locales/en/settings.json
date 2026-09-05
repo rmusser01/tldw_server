@@ -6035,6 +6035,15 @@
   "servicePrompts_workflows_documentSummarization": {
     "message": "Synchronous document analysis"
   },
+  "servicePrompts_definitions_mediaPdfSummarization_label": {
+    "message": "PDF summarization"
+  },
+  "servicePrompts_definitions_mediaPdfSummarization_description": {
+    "message": "Controls system instructions for synchronous PDF analysis. Without a saved override, server defaults apply."
+  },
+  "servicePrompts_workflows_pdfSummarization": {
+    "message": "Synchronous PDF analysis"
+  },
   "servicePrompts_definitions_mediaTextTranslation_description": {
     "message": "Controls the visible instructions used by synchronous text translation."
   },

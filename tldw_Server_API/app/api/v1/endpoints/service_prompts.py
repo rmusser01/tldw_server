@@ -37,6 +37,7 @@ from tldw_Server_API.app.core.Prompt_Management.service_prompts import (
     get_service_prompt_definition,
     list_service_prompt_definitions,
     resolve_service_prompt,
+    resolve_service_prompt_default,
     validate_service_prompt_parts,
 )
 
@@ -61,10 +62,7 @@ def _sanitize_validation_location(
     """Keep public schema locations without echoing authored field names."""
 
     return [
-        segment
-        if isinstance(segment, int)
-        or segment in _SAFE_VALIDATION_LOCATION_SEGMENTS
-        else "field"
+        segment if isinstance(segment, int) or segment in _SAFE_VALIDATION_LOCATION_SEGMENTS else "field"
         for segment in location
     ]
 
@@ -122,10 +120,7 @@ def _catalog_item(definition: ServicePromptDefinition) -> ServicePromptCatalogIt
             }
             for part in definition.parts
         ],
-        affected_workflows=[
-            {"id": workflow.id, "label": workflow.label}
-            for workflow in definition.affected_workflows
-        ],
+        affected_workflows=[{"id": workflow.id, "label": workflow.label} for workflow in definition.affected_workflows],
     )
 
 
@@ -310,14 +305,7 @@ def reset_service_prompt(
             definition.id,
             str(expected_revision) if expected_revision is not None else None,
         )
-        return _detail(
-            ResolvedServicePrompt(
-                definition=definition,
-                parts=definition.default_parts,
-                source="packaged",
-                revision=None,
-            )
-        )
+        return _detail(resolve_service_prompt_default(definition))
     except (
         UnknownServicePromptDefinition,
         ServicePromptRevisionConflict,

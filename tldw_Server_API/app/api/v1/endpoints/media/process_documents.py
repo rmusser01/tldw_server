@@ -57,7 +57,6 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.pipeline import (
     ProcessItem,
     run_batch_processor,
 )
-from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as summarization
 from tldw_Server_API.app.core.Prompt_Management.service_prompts import resolve_service_prompt
 
 router = APIRouter()
@@ -157,13 +156,7 @@ async def process_documents_endpoint(
         def resolve_system_prompt() -> str:
             """Resolve the request snapshot and release this worker's connection."""
             try:
-                resolved = resolve_service_prompt(prompts_db, "media.document.summarization")
-                # With no user override, retain deployment-specific prompt files.
-                return (
-                    resolved.parts["system"]
-                    if resolved.source == "user"
-                    else summarization._resolve_default_system_prompt()
-                )
+                return resolve_service_prompt(prompts_db, "media.document.summarization").parts["system"]
             finally:
                 prompts_db.close_connection()
 

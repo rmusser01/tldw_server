@@ -265,6 +265,27 @@ _DEFINITION_SEQUENCE = (
         ),
     ),
     ServicePromptDefinition(
+        id="media.pdf.summarization",
+        label="PDF summarization",
+        description="Controls system instructions for synchronous PDF analysis. Without a saved override, server defaults apply.",
+        parts=(
+            ServicePromptPart(
+                key="system",
+                label="System instructions",
+                mode="literal",
+                required_variables=(),
+            ),
+        ),
+        # PDFs and documents share the analyzer's packaged default, not overrides.
+        default_parts=MappingProxyType({"system": _DOCUMENT_SUMMARY_SYSTEM_DEFAULT}),
+        affected_workflows=(
+            ServicePromptWorkflow(
+                id="media.pdf.summarization",
+                label="Synchronous PDF analysis",
+            ),
+        ),
+    ),
+    ServicePromptDefinition(
         id="media.text.translation",
         label="Text translation",
         description="Controls the visible instructions used by synchronous text translation.",
@@ -486,21 +507,28 @@ def render_service_prompt_part(
     return "".join(rendered)
 
 
+def resolve_service_prompt_default(definition: ServicePromptDefinition) -> ResolvedServicePrompt:
+    """Resolve the server default without reading owner storage, including after reset."""
+    parts = definition.default_parts
+    if definition.id in {"media.document.summarization", "media.pdf.summarization"}:
+        # Both workflows honor deployment prompt files. Keep this decision shared
+        # by runtime resolution and Settings detail/reset responses.
+        from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import _resolve_default_system_prompt
+
+        parts = MappingProxyType({"system": _resolve_default_system_prompt()})
+    return ResolvedServicePrompt(definition=definition, parts=parts, source="packaged", revision=None)
+
+
 def resolve_service_prompt(
     db: PromptsDatabase,
     definition_id: str,
 ) -> ResolvedServicePrompt:
-    """Resolve a valid saved override, otherwise the packaged default."""
+    """Resolve a valid saved override, otherwise the effective server default."""
 
     definition = get_service_prompt_definition(definition_id)
     override = db.get_service_prompt_override(definition_id)
     if override is None:
-        return ResolvedServicePrompt(
-            definition=definition,
-            parts=definition.default_parts,
-            source="packaged",
-            revision=None,
-        )
+        return resolve_service_prompt_default(definition)
 
     try:
         decoded = json.loads(override.parts_json)
@@ -535,5 +563,6 @@ __all__ = [
     "list_service_prompt_definitions",
     "render_service_prompt_part",
     "resolve_service_prompt",
+    "resolve_service_prompt_default",
     "validate_service_prompt_parts",
 ]

@@ -11,6 +11,7 @@ export type KnownServicePromptId =
   | "chat.title.generation"
   | "image.prompt.refinement"
   | "media.document.summarization"
+  | "media.pdf.summarization"
   | "media.text.translation"
   | "notes.title.generate"
 

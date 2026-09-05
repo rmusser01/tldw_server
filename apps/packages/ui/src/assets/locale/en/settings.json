@@ -51,6 +51,10 @@
         "label": "Document summarization",
         "description": "Controls system instructions for synchronous document analysis. Without a saved override, server defaults apply."
       },
+      "mediaPdfSummarization": {
+        "label": "PDF summarization",
+        "description": "Controls system instructions for synchronous PDF analysis. Without a saved override, server defaults apply."
+      },
       "notesTitleGenerate": {
         "label": "Notes title",
         "description": "Controls the wording used by LLM-backed automatic Notes titles."
@@ -67,6 +71,7 @@
       "imagePromptRefinement": "Image prompt refinement",
       "textTranslation": "Text translation",
       "documentSummarization": "Synchronous document analysis",
+      "pdfSummarization": "Synchronous PDF analysis",
       "automaticNotesTitles": "Automatic Notes titles"
     },
     "titleGeneration": {
