@@ -718,6 +718,13 @@ cannot durably pin another candidate, it stops before advancing the cursor and
 reports profile attention; it never drops the oldest unresolved candidate to
 make room silently.
 
+The current server implementation also has an internal admission bound of 1,000
+active conflicts per profile. This is not a negotiated concurrent-conflict quota
+or a lifetime limit: resolved decisions leave the active set while their exact
+encrypted replay receipts remain available. Exhaustion leaves a new push
+retryable and preserves existing candidates; resolving a conflict frees an
+active slot. Existing negotiated envelope and batch limits still apply.
+
 Every Personal Context push conflict must name and deliver the current
 canonical authority candidate. Before the server reports the conflict, it:
 

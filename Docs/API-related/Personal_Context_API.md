@@ -183,6 +183,11 @@ The losing incoming candidate is accounted for by the resolution receipt rather
 than installed as a duplicate active fact. Clients must construct that explicitly
 reviewed replacement; they must not expect the server to silently rewrite its ID.
 
+The server's internal safety bound is 1,000 active conflicts per profile, not
+1,000 lifetime decisions or a negotiated quota. When full, new conflicts remain
+retryable without evicting existing candidates. Resolution frees an active slot
+while preserving the exact decision receipt for retries.
+
 Until rollout advertises ongoing-sync version 1, these semantics describe the
 client integration contract, not an enabled end-to-end workflow.
 

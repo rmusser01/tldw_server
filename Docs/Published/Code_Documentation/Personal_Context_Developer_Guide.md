@@ -239,6 +239,13 @@ timestamps or peer identity. Unresolved candidates remain protected while
 unrelated objects continue. Capability remains gated independently of this
 contract; the current client limitations above still apply.
 
+Active conflict heads and completed receipt heads share the existing encrypted
+object owner but have separate types. The internal 1,000-active-conflict bound
+does not count completed decisions; ordinary freeze checks do not scan completed
+receipt history. Exact receipts are retained, not expired to reclaim capacity.
+This admission bound is not a new negotiated wire quota. A full active set must
+leave new conflicts retryable and preserve every already pinned candidate.
+
 A future client must not infer a complete lifecycle from the presence of Sync
 domains or bootstrap endpoints. Client work owns capability negotiation and
 incompatibility handling, an explicit ongoing Personal Context caller, durable
