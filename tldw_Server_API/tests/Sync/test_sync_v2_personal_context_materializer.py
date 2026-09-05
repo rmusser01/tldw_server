@@ -1,9 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import uuid
+from dataclasses import dataclass, field, replace
+from types import SimpleNamespace
 
 import pytest
 
+from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+    CanonicalApplyReceipt,
+)
 from tldw_Server_API.app.core.Personalization.personal_context_service import (
     ProfileConflictError,
 )
@@ -25,13 +30,43 @@ pytestmark = pytest.mark.unit
 @dataclass
 class _RecordingService:
     calls: list[dict[str, object]] = field(default_factory=list)
+    ingress_calls: list[dict[str, object]] = field(default_factory=list)
     conflict: bool = False
+    invalid_ingress_receipt: bool = False
 
     def apply_sync_object(self, **values: object) -> object:
         if self.conflict:
             raise ProfileConflictError("changed")
         self.calls.append(values)
         return values["value"]
+
+    def apply_sync_ingress(self, **values: object) -> object:
+        self.ingress_calls.append(values)
+        if self.invalid_ingress_receipt:
+            return SimpleNamespace(receipt_id="not-a-canonical-receipt")
+        identity = values["identity"]
+        value = values["value"]
+        return CanonicalApplyReceipt(
+            resulting_object_id=value.record_id,
+            resulting_version_id=value.version_id,
+            manifest_revision=1,
+            manifest_version_id="manifest-v1",
+            purge_generation=identity.purge_generation,
+            publication_batch_id="batch-1",
+            profile_publication_sequence=1,
+            receipt_id=str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    "tldw:personal-context:ingress:"
+                    f"{identity.dataset_id}:{identity.device_id}:{identity.client_envelope_id}",
+                )
+            ),
+            dataset_id=identity.dataset_id,
+            device_id=identity.device_id,
+            client_envelope_id=identity.client_envelope_id,
+            canonical_payload_digest=identity.canonical_payload_digest,
+            wire_entity_version=identity.wire_entity_version,
+        )
 
 
 class _Store:
@@ -65,6 +100,21 @@ class _Store:
         del apply_error_message
         self.statuses.append((cursor, apply_status, apply_error_code))
 
+    def mark_personal_context_ingress_applied(
+        self,
+        *,
+        server_cursor: int,
+        receipt: CanonicalApplyReceipt,
+    ) -> None:
+        assert receipt.client_envelope_id == "device-a:record-a:1"
+        assert receipt.receipt_id == str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                "tldw:personal-context:ingress:dataset-a:device-a:device-a:record-a:1",
+            )
+        )
+        self.statuses.append((server_cursor, "applied", None))
+
 
 def _dataset() -> SyncDataset:
     return SyncDataset(
@@ -74,7 +124,7 @@ def _dataset() -> SyncDataset:
         encryption_policy="server_trusted_v1",
         domains=["personal_context.record"],
         workspace_id=None,
-        metadata={"personal_context": {"profile_id": "profile-a"}},
+        metadata={"personal_context": {"profile_id": "profile-a", "purge_generation": 0}},
         created_at="2026-08-30T12:00:00Z",
         updated_at="2026-08-30T12:00:00Z",
     )
@@ -97,6 +147,7 @@ def _envelope() -> SyncEnvelope:
         payload=record.model_dump(mode="json"),
         payload_hash="hmac-sha256-v1:" + "a" * 64,
         object_revision=1,
+        entity_version=record.version_id,
         encryption_metadata={"policy": "server_trusted_v1"},
     )
 
@@ -133,6 +184,130 @@ def test_materializer_maps_service_cas_failure_to_content_free_conflict() -> Non
     assert "concise" not in (result.message or "")
 
 
+def test_materializer_applies_client_ingress_through_a_canonical_receipt() -> None:
+    service = _RecordingService()
+    store = _Store(_dataset())
+    materializer = PersonalContextMaterializer(
+        domain="personal_context.record",
+        service_resolver=lambda _user_id: service,
+    )
+    envelope = replace(
+        _envelope(),
+        routing_metadata={"personal_context_authority": {"role": "client_ingress"}},
+    )
+
+    result = materializer.apply(envelope, store=store)
+
+    assert result.status == "applied"
+    assert service.calls == []
+    assert service.ingress_calls[0]["identity"].client_envelope_id == "device-a:record-a:1"
+    assert store.statuses == [(1, "applied", None)]
+
+
+def test_materializer_derives_omitted_update_revision_from_immutable_lineage() -> None:
+    service = _RecordingService()
+    store = _Store(_dataset())
+    envelope = replace(
+        _envelope(),
+        server_cursor=9,
+        object_revision=None,
+        base_server_cursor=8,
+        base_object_revision=4,
+        base_object_hash="hmac-sha256-v1:" + "b" * 64,
+        base_version="record-v4",
+        routing_metadata={"personal_context_authority": {"role": "client_ingress"}},
+    )
+    store.object_states.append(
+        SyncObjectState(
+            dataset_id="dataset-a",
+            domain="personal_context.record",
+            object_id=envelope.object_id,
+            object_revision=4,
+            object_hash="hmac-sha256-v1:" + "b" * 64,
+            latest_server_cursor=8,
+        )
+    )
+    materializer = PersonalContextMaterializer(
+        domain="personal_context.record",
+        service_resolver=lambda _user_id: service,
+    )
+
+    result = materializer.apply(envelope, store=store)
+
+    assert result.status == "applied"
+    assert store.object_states[-1].object_revision == 5
+
+
+@pytest.mark.parametrize(
+    ("field", "changed"),
+    [
+        ("dataset_id", "other-dataset"),
+        ("domain", "personal_context.scope"),
+        ("object_id", "other-record"),
+        ("latest_server_cursor", 7),
+        ("object_revision", 3),
+        ("object_hash", "hmac-sha256-v1:" + "0" * 64),
+        ("deleted", True),
+    ],
+)
+def test_materializer_rejects_omitted_revision_predecessor_mismatch_before_receipt(
+    field: str,
+    changed: object,
+) -> None:
+    service = _RecordingService()
+    envelope = replace(
+        _envelope(),
+        server_cursor=9,
+        object_revision=None,
+        base_server_cursor=8,
+        base_object_revision=4,
+        base_object_hash="hmac-sha256-v1:" + "b" * 64,
+        base_version="record-v4",
+        routing_metadata={"personal_context_authority": {"role": "client_ingress"}},
+    )
+    state = SyncObjectState(
+        dataset_id="dataset-a",
+        domain="personal_context.record",
+        object_id=envelope.object_id,
+        object_revision=4,
+        object_hash="hmac-sha256-v1:" + "b" * 64,
+        latest_server_cursor=8,
+    )
+    store = _Store(_dataset())
+    store.object_states.append(replace(state, **{field: changed}))
+    materializer = PersonalContextMaterializer(
+        domain="personal_context.record",
+        service_resolver=lambda _user_id: service,
+    )
+
+    result = materializer.apply(envelope, store=store)
+
+    assert result.status == "conflict"
+    assert service.ingress_calls == []
+    assert store.statuses == [(9, "conflict", "personal_context_base_conflict")]
+
+
+def test_materializer_rejects_partial_omitted_revision_lineage_before_receipt() -> None:
+    service = _RecordingService()
+    store = _Store(_dataset())
+    materializer = PersonalContextMaterializer(
+        domain="personal_context.record",
+        service_resolver=lambda _user_id: service,
+    )
+    envelope = replace(
+        _envelope(),
+        object_revision=None,
+        base_server_cursor=8,
+        routing_metadata={"personal_context_authority": {"role": "client_ingress"}},
+    )
+
+    result = materializer.apply(envelope, store=store)
+
+    assert result.status == "failed"
+    assert service.ingress_calls == []
+    assert store.statuses == [(1, "failed", "personal_context_payload_invalid")]
+
+
 def test_materializer_fails_before_service_resolution_without_authorized_dataset() -> None:
     resolver_calls: list[str] = []
     materializer = PersonalContextMaterializer(
@@ -145,3 +320,22 @@ def test_materializer_fails_before_service_resolution_without_authorized_dataset
     assert result.status == "failed"
     assert result.error_code == "personal_context_authorization_unavailable"
     assert resolver_calls == []
+
+
+def test_materializer_rejects_fake_ingress_receipts_before_sync_terminalization() -> None:
+    service = _RecordingService(invalid_ingress_receipt=True)
+    store = _Store(_dataset())
+    materializer = PersonalContextMaterializer(
+        domain="personal_context.record",
+        service_resolver=lambda _user_id: service,
+    )
+    envelope = replace(
+        _envelope(),
+        routing_metadata={"personal_context_authority": {"role": "client_ingress"}},
+    )
+
+    result = materializer.apply(envelope, store=store)
+
+    assert result.status == "failed"
+    assert result.error_code == "personal_context_payload_invalid"
+    assert store.statuses == [(1, "failed", "personal_context_payload_invalid")]

@@ -12,11 +12,13 @@ import os
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
-from typing import Literal
+from time import monotonic_ns
+from typing import TYPE_CHECKING, Literal
 from uuid import RFC_4122, UUID, uuid4
 
 from loguru import logger
 from tldw_profile_core import SERIALIZED_SCHEMA_VERSION
+from tldw_profile_core.canonical import canonical_json_bytes
 
 from tldw_Server_API.app.core.Notes.attachment_policy import (
     NoteAttachmentPolicyError,
@@ -117,6 +119,7 @@ from .models import (
     normalize_supported_adapter_versions,
     normalize_sync_timestamp,
     normalize_sync_v2_requested_domains,
+    resolve_personal_context_ingress_result_revision,
     sync_v2_advertised_domain_schemas,
     sync_v2_attachment_ref_v2_is_writable,
     sync_v2_dataset_writable_adapter_versions,
@@ -142,6 +145,17 @@ from .notes_task_readiness import (
     NOTES_TASK_SERVER_METADATA_KEYS,
     notes_task_sync_is_ready,
     redact_notes_task_server_metadata,
+)
+from .personal_context_ongoing_contract import (
+    PersonalContextAuthorityMetadata,
+    PersonalContextExchangeProof,
+    PersonalContextRelayContinuation,
+)
+from .personal_context_relay import (
+    PersonalContextRecoveryBudget as _PersonalContextRecoveryBudget,
+)
+from .personal_context_relay import (
+    PersonalContextRelayResult,
 )
 from .profile import (
     PersonalContextBootstrap,
@@ -171,7 +185,16 @@ from .security import (
     server_trusted_encryption_status_from_env,
     validate_private_payload,
 )
-from .store import SyncV2Store
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+        AuthorityStageReceipt,
+        CanonicalApplyReceipt,
+        PersonalContextPublicationRelayStore,
+        PublicationSourceRow,
+    )
+
+from .store import PersonalContextAuthorityScan, SyncV2Store
 
 SYNC_PULL_TOKEN_MAX_ENCODED_BYTES = 32_768
 SYNC_PULL_TOKEN_MAX_DECODED_BYTES = 24_576
@@ -183,6 +206,169 @@ SYNC_RETENTION_BINDING_PAGE_SIZE = 1000
 SYNC_DATASET_RECOVERY_KEY_PURPOSE = "dataset_recovery"
 SYNC_KEY_RECOVERY_MAX_WRAPPED_KEY_BYTES = 64 * 1024
 _SERVER_ORIGIN_DEVICE_ID = "server-origin"
+_AUTHORITY_ENVELOPE_TAG_KEY = "authority_envelope_tag"
+
+
+def _routing_metadata_without_authority_tag(
+    metadata: Mapping[str, object],
+) -> dict[str, object]:
+    """Return immutable authority routing without its self-authenticating tag."""
+
+    normalized = dict(metadata)
+    normalized.pop(_AUTHORITY_ENVELOPE_TAG_KEY, None)
+    return normalized
+
+
+def _normalized_authority_encryption_metadata(
+    metadata: Mapping[str, object],
+) -> dict[str, object]:
+    """Keep stable encryption facts; randomized AEAD bytes authenticate on restore."""
+
+    normalized: dict[str, object] = {}
+    if "policy" in metadata:
+        normalized["policy"] = metadata["policy"]
+    at_rest = metadata.get("personal_context_at_rest")
+    if isinstance(at_rest, Mapping):
+        normalized["personal_context_at_rest"] = {
+            key: at_rest.get(key)
+            for key in ("version", "algorithm", "key_version")
+        }
+    return normalized
+
+
+def _authority_source_receipt_identity(
+    *,
+    ingress_cursor: int | None,
+    canonical_receipt: CanonicalApplyReceipt | None,
+    sync_receipt: Mapping[str, object] | None,
+) -> tuple[object, ...] | None:
+    """Normalize an optional cross-store ingress receipt for authority attestation."""
+
+    if canonical_receipt is None and sync_receipt is None:
+        return None
+    canonical_identity = (
+        None
+        if canonical_receipt is None
+        else (
+            canonical_receipt.dataset_id,
+            canonical_receipt.device_id,
+            canonical_receipt.client_envelope_id,
+            canonical_receipt.canonical_payload_digest,
+            canonical_receipt.purge_generation,
+            canonical_receipt.resulting_object_id,
+            canonical_receipt.resulting_version_id,
+            canonical_receipt.manifest_revision,
+            canonical_receipt.manifest_version_id,
+            canonical_receipt.publication_batch_id,
+            canonical_receipt.profile_publication_sequence,
+            canonical_receipt.receipt_id,
+            canonical_receipt.wire_entity_version,
+        )
+    )
+    sync_identity = (
+        None
+        if sync_receipt is None
+        else tuple(
+            sync_receipt.get(field)
+            for field in (
+                "server_sequence",
+                "dataset_id",
+                "device_id",
+                "client_envelope_id",
+                "canonical_payload_digest",
+                "purge_generation",
+                "resulting_object_id",
+                "resulting_internal_version_id",
+                "manifest_revision",
+                "manifest_version_id",
+                "publication_batch_id",
+                "profile_publication_sequence",
+                "receipt_id",
+                "wire_entity_version",
+            )
+        )
+    )
+    return (ingress_cursor, canonical_identity, sync_identity)
+
+
+def _authority_attested_fields(
+    envelope: SyncEnvelope | SyncEnvelopeCreate,
+    authority: PersonalContextAuthorityMetadata,
+    *,
+    canonical_payload_digest: str,
+    source_role: str,
+    source_version_id: str,
+    source_receipt_identity: tuple[object, ...] | None,
+) -> tuple[object, ...]:
+    """Return every stable stage-derived field bound to authority reuse."""
+
+    return (
+        envelope.dataset_id,
+        envelope.client_envelope_id,
+        envelope.device_id,
+        envelope.client_profile_id,
+        envelope.domain,
+        envelope.operation,
+        envelope.object_id,
+        envelope.base_server_cursor,
+        envelope.base_object_revision,
+        envelope.base_object_hash,
+        envelope.object_revision,
+        envelope.stable_key,
+        envelope.parent_id,
+        envelope.base_version,
+        envelope.entity_version,
+        envelope.schema_version,
+        envelope.adapter_version,
+        envelope.client_sequence,
+        normalize_sync_timestamp(envelope.client_timestamp),
+        tuple(envelope.dependencies),
+        envelope.mutation_group_id,
+        envelope.mutation_step,
+        envelope.mutation_step_count,
+        envelope.mutation_plan_hash,
+        envelope.deleted,
+        envelope.payload_hash,
+        envelope.payload_size_bytes,
+        _normalized_authority_encryption_metadata(envelope.encryption_metadata),
+        _routing_metadata_without_authority_tag(envelope.routing_metadata),
+        authority.role,
+        authority.publication_batch_id,
+        authority.profile_publication_sequence,
+        authority.batch_ordinal,
+        authority.batch_size,
+        canonical_payload_digest,
+        source_role,
+        source_version_id,
+        source_receipt_identity,
+    )
+
+
+def _authority_envelope_tag(
+    integrity_key: bytes,
+    envelope: SyncEnvelope | SyncEnvelopeCreate,
+    authority: PersonalContextAuthorityMetadata,
+    *,
+    canonical_payload_digest: str,
+    source_role: str,
+    source_version_id: str,
+    source_receipt_identity: tuple[object, ...] | None,
+) -> str:
+    """Authenticate a complete, normalized authority-envelope identity."""
+
+    fields = _authority_attested_fields(
+        envelope,
+        authority,
+        canonical_payload_digest=canonical_payload_digest,
+        source_role=source_role,
+        source_version_id=source_version_id,
+        source_receipt_identity=source_receipt_identity,
+    )
+    return "hmac-sha256-v1:" + hmac.new(
+        integrity_key,
+        canonical_json_bytes(list(fields)),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 def _require_client_device_id(device_id: str) -> None:
@@ -602,6 +788,10 @@ class PersonalContextSyncCapabilities:
 
     available: bool = False
     blockers: tuple[str, ...] = ("personal_context_profile_key_unavailable",)
+    ongoing_sync_version: Literal[0, 1] = 0
+    ongoing_sync_blockers: tuple[str, ...] = ()
+    activation_epoch: str | None = None
+    continuity_token: str | None = None
     authorization_policy: Literal["server_trusted_v1"] = "server_trusted_v1"
     min_schema_version: int = 1
     max_schema_version: int = 1
@@ -937,6 +1127,7 @@ class SyncPushResult:
     rejected: list[SyncPushRejected] = field(default_factory=list)
     conflicts: list[SyncPushConflict] = field(default_factory=list)
     next_cursor: str | None = None
+    personal_context_exchange: PersonalContextExchangeProof | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -946,6 +1137,8 @@ class SyncPullResult:
     envelopes: list[SyncEnvelope] = field(default_factory=list)
     next_cursor: str | None = None
     has_more: bool = False
+    personal_context_relay: PersonalContextRelayContinuation | None = None
+    personal_context_exchange: PersonalContextExchangeProof | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1126,6 +1319,8 @@ class SyncV2Service:
         personal_context_key_wrapper: Callable[..., str] | None = None,
         personal_context_key_fingerprint: Callable[..., str] | None = None,
         personal_context_authority_id: str = "tldw-server",
+        personal_context_relay: object | None = None,
+        recovery_clock_ns: Callable[[], int] | None = None,
     ) -> None:
         self.store = store
         self.adapters = adapters
@@ -1146,6 +1341,1112 @@ class SyncV2Service:
         self.personal_context_authority_id = (
             str(personal_context_authority_id).strip() or "tldw-server"
         )
+        self.personal_context_relay = personal_context_relay
+        self._recovery_clock_ns = recovery_clock_ns
+
+    def shred_authorized_personal_context_history(
+        self,
+        claim: object,
+    ) -> object:
+        """Execute only a live repository-verified direct-purge capability."""
+
+        from tldw_Server_API.app.core.DB_Management.Personal_Context_Repository import (
+            _validate_direct_purge_cleanup_claim,
+        )
+
+        try:
+            _validate_direct_purge_cleanup_claim(
+                claim,
+                expected_store=self.store,
+                expected_database=self.store.db,
+            )
+        except PermissionError as exc:
+            raise SyncStoreError("Personal Context cleanup intent is unauthorized") from exc
+        return self.store._shred_authorized_personal_context_history(claim)
+
+    def require_active_exchange(
+        self,
+        *,
+        dataset: SyncDataset,
+        user_id: str,
+        exchange: object | None,
+        device_id: str | None = None,
+        store: SyncV2Store | None = None,
+    ) -> PersonalContextExchangeProof:
+        """Return only a verified persisted version-one activation proof."""
+
+        active_store = store or self.store
+        state = dataset.metadata.get("personal_context")
+        device = (
+            active_store.get_device(user_id, device_id)
+            if isinstance(device_id, str) and device_id
+            else None
+        )
+        try:
+            if not isinstance(state, Mapping):
+                raise ValueError("Personal Context activation state is unavailable")
+            if (
+                type(state.get("ongoing_sync_version")) is not int
+                or type(getattr(exchange, "ongoing_sync_version", None)) is not int
+            ):
+                raise ValueError("Personal Context activation version is invalid")
+            persisted = PersonalContextExchangeProof.model_validate(
+                {
+                    "ongoing_sync_version": state.get("ongoing_sync_version"),
+                    "activation_epoch": state.get("activation_epoch"),
+                    "continuity_token": state.get("continuity_token"),
+                }
+            )
+            supplied = PersonalContextExchangeProof.model_validate(
+                {
+                    "ongoing_sync_version": getattr(
+                        exchange, "ongoing_sync_version", None
+                    ),
+                    "activation_epoch": getattr(exchange, "activation_epoch", None),
+                    "continuity_token": getattr(exchange, "continuity_token", None),
+                }
+            )
+            proof_matches = hmac.compare_digest(
+                persisted.activation_epoch.encode("ascii"),
+                supplied.activation_epoch.encode("ascii"),
+            ) and hmac.compare_digest(
+                persisted.continuity_token.encode("ascii"),
+                supplied.continuity_token.encode("ascii"),
+            )
+        except (TypeError, UnicodeError, ValueError):
+            proof_matches = False
+        if (
+            not isinstance(state, Mapping)
+            or state.get("link_state") != "complete"
+            or device is None
+            or device.status != "active"
+            or device.revoked_at is not None
+            or not proof_matches
+            or not _personal_context_link_is_complete(
+                active_store,
+                dataset,
+                user_id=user_id,
+                device_id=device_id,
+            )
+        ):
+            raise SyncStoreError("personal_context_activation_required")
+        return persisted
+
+    def verified_active_exchange(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        exchange: object | None,
+        device_id: str | None = None,
+    ) -> PersonalContextExchangeProof:
+        """Resolve a dataset and return its persisted verified exchange proof."""
+
+        return self.require_active_exchange(
+            dataset=self._require_dataset_access(
+                user_id=user_id,
+                dataset_id=dataset_id,
+            ),
+            user_id=user_id,
+            device_id=device_id,
+            exchange=exchange,
+        )
+
+    def verified_active_exchange_if_enrolled(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        exchange: object | None,
+        device_id: str | None = None,
+    ) -> PersonalContextExchangeProof | None:
+        """Preserve legacy conflict listing for datasets without PC domains."""
+
+        dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
+        if not any(domain in PERSONAL_CONTEXT_SYNC_DOMAINS for domain in dataset.domains):
+            return None
+        return self.require_active_exchange(
+            dataset=dataset,
+            user_id=user_id,
+            device_id=device_id,
+            exchange=exchange,
+        )
+
+    def _verify_personal_context_authority_receipt(
+        self,
+        *,
+        dataset: SyncDataset,
+        stored: SyncEnvelope,
+        row: object,
+        user_id: str,
+        sync_store: SyncV2Store,
+        source_claim_guarded: bool = False,
+        recovery_budget: _PersonalContextRecoveryBudget | None = None,
+    ) -> int:
+        """Verify one stored authority row against its live source and receipts."""
+
+        from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+            PersonalContextPublicationRelayStore,
+            PublicationRelayLease,
+        )
+
+        invalid = "Personal Context authority receipt is invalid"
+        if recovery_budget is not None and not recovery_budget.deadline_open():
+            raise SyncStoreError(invalid)
+        domain = str(getattr(row, "domain", ""))
+        if domain not in PERSONAL_CONTEXT_SYNC_DOMAINS:
+            raise SyncStoreError(invalid)
+        try:
+            payload = json.loads(bytes(row.canonical).decode("utf-8"))
+        except (TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise SyncStoreError(invalid) from exc
+        state = dataset.metadata.get("personal_context")
+        if not isinstance(payload, dict) or not isinstance(state, Mapping):
+            raise SyncStoreError(invalid)
+        profile_id = state.get("profile_id")
+        integrity_key_id = state.get("integrity_key_id")
+        purge_generation = state.get("purge_generation")
+        relay_token = getattr(row, "relay_owner_token", None)
+        if (
+            not isinstance(profile_id, str)
+            or profile_id != getattr(row, "profile_id", None)
+            or not isinstance(integrity_key_id, str)
+            or type(purge_generation) is not int
+            or purge_generation != getattr(row, "purge_generation", None)
+            or (
+                not source_claim_guarded
+                and (not isinstance(relay_token, str) or not relay_token)
+            )
+        ):
+            raise SyncStoreError(invalid)
+        try:
+            canonical_service = self._personal_context_service_for_user(user_id)
+            resolved_key_id, integrity_key = canonical_service.sync_integrity_key(
+                profile_id
+            )
+            publication_store = PersonalContextPublicationRelayStore(
+                canonical_service._repository.database
+            )
+            if recovery_budget is not None and not recovery_budget.deadline_open():
+                raise SyncStoreError(invalid)
+            if not source_claim_guarded and not publication_store.row_is_current(
+                row, PublicationRelayLease(profile_id, relay_token)
+            ):
+                raise SyncStoreError("Personal Context authority relay claim is stale")
+        except (AttributeError, KeyError, RuntimeError, TypeError, ValueError) as exc:
+            raise SyncStoreError(invalid) from exc
+        if resolved_key_id != integrity_key_id or len(integrity_key) != 32:
+            raise SyncStoreError(invalid)
+
+        canonical = canonical_json_bytes(payload)
+        canonical_payload_digest = "sha256:" + hashlib.sha256(canonical).hexdigest()
+        payload_hash = "hmac-sha256-v1:" + hmac.new(
+            integrity_key, canonical, hashlib.sha256
+        ).hexdigest()
+        journal_integrity_tag = "hmac-sha256-v1:" + hmac.new(
+            integrity_key,
+            canonical_json_bytes(
+                {"canonical": canonical.decode("utf-8"), "domain": domain}
+            ),
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(
+            journal_integrity_tag,
+            str(getattr(row, "integrity_tag", "")),
+        ):
+            raise SyncStoreError(invalid)
+        parent_id = (
+            payload.get("profile_id")
+            if domain == "personal_context.scope"
+            else payload.get("scope_id")
+            if domain in {"personal_context.record", "personal_context.proposal"}
+            else None
+        )
+        if domain == "personal_context.manifest":
+            entity_version = payload.get("current_version_id")
+        elif domain == "personal_context.proposal":
+            entity_version = (
+                "sync-proposal-sha256:" + hashlib.sha256(canonical).hexdigest()
+            )
+        elif domain == "personal_context.purge":
+            entity_version = payload.get("purge_generation")
+        else:
+            entity_version = payload.get("version_id")
+
+        authority = stored.authority
+        (
+            receipt_ingress_cursor,
+            canonical_receipt,
+            sync_ingress_receipt,
+        ) = self._personal_context_authority_source_receipts(
+            dataset=dataset,
+            row=row,
+            authority_envelope=stored,
+            publication_store=publication_store,
+            sync_store=sync_store,
+            recovery_budget=recovery_budget,
+        )
+        if recovery_budget is not None and not recovery_budget.deadline_open():
+            raise SyncStoreError(invalid)
+        source_receipt_identity = _authority_source_receipt_identity(
+            ingress_cursor=receipt_ingress_cursor,
+            canonical_receipt=canonical_receipt,
+            sync_receipt=sync_ingress_receipt,
+        )
+        try:
+            if recovery_budget is not None and not recovery_budget.deadline_open():
+                raise SyncStoreError(invalid)
+            restored = self._restore_personal_context_from_storage(dataset, stored)
+            if recovery_budget is not None and not recovery_budget.deadline_open():
+                raise SyncStoreError(invalid)
+            stored_canonical = canonical_json_bytes(restored.payload)
+            expected_authority_tag = (
+                None
+                if authority is None
+                else _authority_envelope_tag(
+                    integrity_key,
+                    stored,
+                    authority,
+                    canonical_payload_digest=(
+                        "sha256:" + hashlib.sha256(stored_canonical).hexdigest()
+                    ),
+                    source_role=str(getattr(row, "role", "")),
+                    source_version_id=str(getattr(row, "version_id", "")),
+                    source_receipt_identity=source_receipt_identity,
+                )
+            )
+        except (SyncStoreError, TypeError, ValueError) as exc:
+            raise SyncStoreError(invalid) from exc
+        stored_authority_tag = stored.routing_metadata.get(
+            _AUTHORITY_ENVELOPE_TAG_KEY
+        )
+        deterministic_id = str(getattr(row, "deterministic_envelope_id", ""))
+        if (
+            stored.dataset_id != dataset.dataset_id
+            or stored.client_envelope_id != deterministic_id
+            or stored.device_id != _SERVER_ORIGIN_DEVICE_ID
+            or stored.domain != domain
+            or stored.operation != str(getattr(row, "operation", ""))
+            or stored.object_id != str(getattr(row, "object_id", ""))
+            or stored.entity_version != entity_version
+            or stored.payload_hash != payload_hash
+            or stored.payload_size_bytes != len(canonical)
+            or stored.parent_id != parent_id
+            or stored.base_version != payload.get("parent_version_id")
+            or stored.schema_version != 1
+            or stored.adapter_version != 1
+            or stored.deleted
+            != (str(getattr(row, "operation", "")) == "tombstone")
+            or stored.status != "accepted"
+            or stored.apply_status not in {"pending", "applied"}
+            or stored_canonical != canonical
+            or stored.routing_metadata.get("profile_id") != profile_id
+            or stored.routing_metadata.get("integrity_key_id") != integrity_key_id
+            or stored.routing_metadata.get("purge_generation") != purge_generation
+            or authority is None
+            or authority.role != "home_authority"
+            or authority.publication_batch_id
+            != str(getattr(row, "publication_batch_id", ""))
+            or authority.profile_publication_sequence
+            != int(getattr(row, "profile_publication_sequence", 0))
+            or authority.batch_ordinal != int(getattr(row, "batch_ordinal", -1))
+            or authority.batch_size != int(getattr(row, "batch_size", 0))
+            or not isinstance(stored_authority_tag, str)
+            or not isinstance(expected_authority_tag, str)
+            or not hmac.compare_digest(stored_authority_tag, expected_authority_tag)
+            or stored.server_cursor is None
+            or canonical_payload_digest
+            != "sha256:" + hashlib.sha256(stored_canonical).hexdigest()
+        ):
+            raise SyncStoreError(invalid)
+        if recovery_budget is not None and not recovery_budget.deadline_open():
+            raise SyncStoreError(invalid)
+        return stored.server_cursor
+
+    def _personal_context_authority_source_receipts(
+        self,
+        *,
+        dataset: SyncDataset,
+        row: object,
+        authority_envelope: SyncEnvelope | SyncEnvelopeCreate,
+        publication_store: PersonalContextPublicationRelayStore,
+        sync_store: SyncV2Store,
+        recovery_budget: _PersonalContextRecoveryBudget | None = None,
+    ) -> tuple[
+        int | None,
+        CanonicalApplyReceipt | None,
+        Mapping[str, object] | None,
+    ]:
+        """Resolve any ingress receipt shared by one authority publication batch."""
+
+        if recovery_budget is not None and not recovery_budget.deadline_open():
+            raise SyncStoreError("Personal Context authority receipt is invalid")
+
+        def returned_proof(proof: object | None) -> object | None:
+            if recovery_budget is None:
+                return proof
+            if proof is not None and not recovery_budget.consume_returned():
+                raise SyncStoreError(
+                    "Personal Context authority receipt is invalid"
+                )
+            if not recovery_budget.deadline_open():
+                raise SyncStoreError(
+                    "Personal Context authority receipt is invalid"
+                )
+            return proof
+
+        def sync_envelope(cursor: int) -> SyncEnvelope | None:
+            if recovery_budget is not None and not recovery_budget.can_inspect():
+                raise SyncStoreError(
+                    "Personal Context authority receipt is invalid"
+                )
+            return returned_proof(
+                sync_store.get_envelope_by_server_cursor(cursor)
+            )  # type: ignore[return-value]
+
+        def sync_receipt(cursor: int) -> Mapping[str, object] | None:
+            if recovery_budget is not None and not recovery_budget.can_inspect():
+                raise SyncStoreError(
+                    "Personal Context authority receipt is invalid"
+                )
+            return returned_proof(
+                sync_store.get_personal_context_ingress_receipt(cursor)
+            )  # type: ignore[return-value]
+
+        ingress_cursor = authority_envelope.base_server_cursor
+        origin_proof = None
+        if getattr(row, "role", None) == "manifest":
+            if (
+                int(getattr(row, "batch_size", 0)) == 1
+                and int(getattr(row, "batch_ordinal", -1)) == 0
+            ):
+                return None, None, None
+            origin_proof = publication_store.originating_authority_for_source(
+                row,
+                budget=recovery_budget,
+            )
+            if recovery_budget is not None and not recovery_budget.deadline_open():
+                raise SyncStoreError("Personal Context authority receipt is invalid")
+            origin_cursor = (
+                None
+                if origin_proof is None
+                else origin_proof.sync_server_cursor
+            )
+            origin = None if origin_cursor is None else sync_envelope(origin_cursor)
+            origin_authority = None if origin is None else origin.authority
+            if origin_cursor is None:
+                raise SyncStoreError("Personal Context authority receipt is invalid")
+            if (
+                origin is None
+                or origin.device_id != _SERVER_ORIGIN_DEVICE_ID
+                or origin.apply_status != "applied"
+                or origin_authority is None
+                or origin_authority.role != "home_authority"
+                or origin_authority.publication_batch_id
+                != str(getattr(row, "publication_batch_id", ""))
+                or origin_authority.profile_publication_sequence
+                != int(getattr(row, "profile_publication_sequence", 0))
+                or origin_authority.batch_ordinal
+                >= int(getattr(row, "batch_ordinal", -1))
+            ):
+                raise SyncStoreError("Personal Context authority receipt is invalid")
+            ingress_cursor = origin.base_server_cursor
+            if ingress_cursor is None:
+                return None, None, None
+            origin_base = sync_envelope(ingress_cursor)
+            origin_base_authority = (
+                None if origin_base is None else origin_base.authority
+            )
+            if (
+                origin_base is not None
+                and origin_base_authority is not None
+                and origin_base_authority.role == "home_authority"
+            ):
+                if (
+                    origin_base.device_id != _SERVER_ORIGIN_DEVICE_ID
+                    or origin_base.status != "accepted"
+                    or origin_base.apply_status != "applied"
+                    or origin_base.dataset_id != origin.dataset_id
+                    or origin_base.domain != origin.domain
+                    or origin_base.object_id != origin.object_id
+                    or origin.base_object_revision != origin_base.object_revision
+                    or origin.base_object_hash != origin_base.payload_hash
+                    or origin.base_version != origin_base.entity_version
+                    or origin.object_revision
+                    != (origin_base.object_revision or 0) + 1
+                ):
+                    raise SyncStoreError(
+                        "Personal Context authority receipt is invalid"
+                    )
+                return None, None, None
+            if (
+                origin_base is None
+                or origin_base_authority is None
+                or origin_base_authority.role != "client_ingress"
+            ):
+                raise SyncStoreError("Personal Context authority receipt is invalid")
+        resolved_sync_receipt = (
+            None
+            if ingress_cursor is None
+            else sync_receipt(ingress_cursor)
+        )
+        if recovery_budget is not None and not recovery_budget.deadline_open():
+            raise SyncStoreError("Personal Context authority receipt is invalid")
+        canonical_receipt = (
+            None
+            if resolved_sync_receipt is None
+            else publication_store.canonical_ingress_receipt_for_source(
+                row,
+                dataset_id=str(resolved_sync_receipt.get("dataset_id", "")),
+                device_id=str(resolved_sync_receipt.get("device_id", "")),
+                client_envelope_id=str(
+                    resolved_sync_receipt.get("client_envelope_id", "")
+                ),
+                origin_proof=origin_proof,
+                budget=recovery_budget,
+            )
+        )
+        if recovery_budget is not None and not recovery_budget.deadline_open():
+            raise SyncStoreError("Personal Context authority receipt is invalid")
+        if getattr(row, "role", None) == "manifest" and (
+            canonical_receipt is None
+            or resolved_sync_receipt is None
+            or origin is None
+            or ingress_cursor is None
+        ):
+            raise SyncStoreError("Personal Context authority receipt is invalid")
+        if getattr(row, "role", None) == "manifest":
+            try:
+                if recovery_budget is not None and not recovery_budget.deadline_open():
+                    raise SyncStoreError(
+                        "Personal Context authority receipt is invalid"
+                    )
+                origin_canonical = canonical_json_bytes(
+                    self._restore_personal_context_from_storage(dataset, origin).payload
+                )
+                if recovery_budget is not None and not recovery_budget.deadline_open():
+                    raise SyncStoreError(
+                        "Personal Context authority receipt is invalid"
+                    )
+            except (SyncStoreError, TypeError, ValueError) as exc:
+                raise SyncStoreError(
+                    "Personal Context authority receipt is invalid"
+                ) from exc
+            if not self._is_exact_ingress_confirmation(
+                dataset=dataset,
+                current_head=origin_base,
+                envelope=origin,
+                canonical=origin_canonical,
+                source_row=row,
+                canonical_receipt=canonical_receipt,
+                sync_ingress_receipt=resolved_sync_receipt,
+            ):
+                raise SyncStoreError("Personal Context authority receipt is invalid")
+        return ingress_cursor, canonical_receipt, resolved_sync_receipt
+
+    def stage_personal_context_authority(
+        self,
+        row: object,
+        dataset_id: str,
+        user_id: str,
+    ) -> AuthorityStageReceipt:
+        """Persist one authenticated journal row as internal home-authority egress."""
+
+        from tldw_Server_API.app.core.exceptions import PersonalContextAuthoritySourceError
+        from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+            AuthorityStageReceipt,
+        )
+
+        from .server_origin import insert_personal_context_authority
+
+        dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
+        domain = str(getattr(row, "domain", ""))
+        if domain not in PERSONAL_CONTEXT_SYNC_DOMAINS:
+            raise PersonalContextAuthoritySourceError("Personal Context authority source is invalid")
+        try:
+            payload = json.loads(bytes(row.canonical).decode("utf-8"))
+        except (TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise PersonalContextAuthoritySourceError("Personal Context authority source is invalid") from exc
+        if not isinstance(payload, dict):
+            raise PersonalContextAuthoritySourceError("Personal Context authority source is invalid")
+        state = dataset.metadata.get("personal_context")
+        if not isinstance(state, Mapping):
+            raise SyncStoreError("Personal Context authority source is invalid")
+        profile_id = state.get("profile_id")
+        integrity_key_id = state.get("integrity_key_id")
+        purge_generation = state.get("purge_generation")
+        if (
+            not isinstance(profile_id, str)
+            or profile_id != getattr(row, "profile_id", None)
+            or not isinstance(integrity_key_id, str)
+            or type(purge_generation) is not int
+            or purge_generation != getattr(row, "purge_generation", None)
+        ):
+            raise SyncStoreError("Personal Context authority source binding is stale")
+        relay_token = getattr(row, "relay_owner_token", None)
+        if not isinstance(relay_token, str) or not relay_token:
+            raise SyncStoreError("Personal Context authority relay claim is invalid")
+        try:
+            canonical_service = self._personal_context_service_for_user(user_id)
+            _key_id, integrity_key = canonical_service.sync_integrity_key(profile_id)
+            from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+                PersonalContextPublicationRelayStore,
+                PublicationRelayLease,
+            )
+
+            publication_store = PersonalContextPublicationRelayStore(
+                canonical_service._repository.database
+            )
+            lease = PublicationRelayLease(profile_id, relay_token)
+            if not publication_store.row_is_current(row, lease):
+                raise SyncStoreError("Personal Context authority relay claim is stale")
+        except (AttributeError, KeyError, RuntimeError, TypeError, ValueError) as exc:
+            raise SyncStoreError("Personal Context authority integrity is unavailable") from exc
+        if _key_id != integrity_key_id or len(integrity_key) != 32:
+            raise SyncStoreError("Personal Context authority integrity is unavailable")
+        canonical = canonical_json_bytes(payload)
+        canonical_payload_digest = "sha256:" + hashlib.sha256(canonical).hexdigest()
+        payload_hash = "hmac-sha256-v1:" + hmac.new(
+            integrity_key, canonical, hashlib.sha256
+        ).hexdigest()
+        journal_integrity_tag = "hmac-sha256-v1:" + hmac.new(
+            integrity_key,
+            canonical_json_bytes(
+                {"canonical": canonical.decode("utf-8"), "domain": domain}
+            ),
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(
+            journal_integrity_tag, str(getattr(row, "integrity_tag", ""))
+        ):
+            raise PersonalContextAuthoritySourceError(
+                "Personal Context authority source integrity is invalid"
+            )
+        parent_id = (
+            payload.get("profile_id")
+            if domain == "personal_context.scope"
+            else payload.get("scope_id")
+            if domain in {"personal_context.record", "personal_context.proposal"}
+            else None
+        )
+        if domain == "personal_context.manifest":
+            entity_version = payload.get("current_version_id")
+        elif domain == "personal_context.proposal":
+            entity_version = "sync-proposal-sha256:" + hashlib.sha256(canonical).hexdigest()
+        elif domain == "personal_context.purge":
+            entity_version = payload.get("purge_generation")
+        else:
+            entity_version = payload.get("version_id")
+        if parent_id is not None and not isinstance(parent_id, str):
+            raise PersonalContextAuthoritySourceError("Personal Context authority source is invalid")
+        deterministic_id = str(getattr(row, "deterministic_envelope_id", ""))
+
+        def stage_receipt(server_cursor: int) -> AuthorityStageReceipt:
+            return AuthorityStageReceipt(
+                server_cursor=server_cursor,
+                deterministic_envelope_id=deterministic_id,
+                publication_batch_id=str(getattr(row, "publication_batch_id", "")),
+                profile_publication_sequence=int(
+                    getattr(row, "profile_publication_sequence", 0)
+                ),
+                batch_ordinal=int(getattr(row, "batch_ordinal", -1)),
+                batch_size=int(getattr(row, "batch_size", 0)),
+                purge_generation=int(getattr(row, "purge_generation", -1)),
+            )
+
+        try:
+            with self.store.personal_context_authority_guard(
+                dataset_id, profile_id
+            ) as guarded:
+                with publication_store.authority_staging_guard(row, lease=lease):
+                    try:
+                        current_head = guarded.get_current_head(
+                            dataset_id,
+                            domain,  # type: ignore[arg-type]
+                            str(getattr(row, "object_id", "")),
+                        )
+                    except (OverflowError, TypeError, ValueError) as exc:
+                        raise SyncStoreError(
+                            "Personal Context authority receipt is invalid"
+                        ) from exc
+                    existing = guarded.get_envelope_by_client_id(
+                        dataset_id, deterministic_id
+                    )
+                    current_authority = (
+                        None if current_head is None else current_head.authority
+                    )
+                    if (
+                        existing is None
+                        and current_head is not None
+                        and current_authority is not None
+                        and current_authority.role == "home_authority"
+                        and current_authority.publication_batch_id
+                        == str(getattr(row, "publication_batch_id", ""))
+                        and current_authority.profile_publication_sequence
+                        == int(getattr(row, "profile_publication_sequence", 0))
+                        and current_authority.batch_ordinal
+                        == int(getattr(row, "batch_ordinal", -1))
+                    ):
+                        existing = current_head
+                    if existing is not None:
+                        server_cursor = self._verify_personal_context_authority_receipt(
+                            dataset=dataset,
+                            stored=existing,
+                            row=row,
+                            user_id=user_id,
+                            sync_store=guarded,
+                            source_claim_guarded=True,
+                        )
+                        return stage_receipt(server_cursor)
+
+                    base_server_cursor = None
+                    base_object_revision = None
+                    base_object_hash = None
+                    object_revision = 1
+                    if current_head is not None:
+                        base_server_cursor = current_head.server_cursor
+                        base_object_revision = resolve_personal_context_ingress_result_revision(
+                            object_revision=current_head.object_revision,
+                            base_server_cursor=current_head.base_server_cursor,
+                            base_object_revision=current_head.base_object_revision,
+                            base_object_hash=current_head.base_object_hash,
+                            base_version=current_head.base_version,
+                        )
+                        if base_object_revision is None:
+                            raise SyncStoreError(
+                                "Personal Context authority receipt is invalid"
+                            )
+                        base_object_hash = current_head.payload_hash
+                        object_revision = base_object_revision + 1
+                    envelope = SyncEnvelopeCreate(
+                        dataset_id=dataset_id,
+                        client_envelope_id=deterministic_id,
+                        domain=domain,  # type: ignore[arg-type]
+                        operation=str(getattr(row, "operation", "")),  # type: ignore[arg-type]
+                        object_id=str(getattr(row, "object_id", "")),
+                        device_id=_SERVER_ORIGIN_DEVICE_ID,
+                        base_server_cursor=base_server_cursor,
+                        base_object_revision=base_object_revision,
+                        base_object_hash=base_object_hash,
+                        object_revision=object_revision,
+                        parent_id=parent_id,
+                        base_version=payload.get("parent_version_id"),
+                        entity_version=entity_version,
+                        schema_version=1,
+                        payload=payload,
+                        payload_hash=payload_hash,
+                        payload_size_bytes=len(canonical),
+                        deleted=str(getattr(row, "operation", "")) == "tombstone",
+                        encryption_metadata={"policy": "server_trusted_v1"},
+                        routing_metadata={
+                            "integrity_key_id": integrity_key_id,
+                            "profile_id": profile_id,
+                            "purge_generation": purge_generation,
+                        },
+                    )
+                    outcome = self._evaluate_envelope(dataset, envelope)
+                    (
+                        receipt_ingress_cursor,
+                        canonical_receipt,
+                        sync_ingress_receipt,
+                    ) = self._personal_context_authority_source_receipts(
+                        dataset=dataset,
+                        row=row,
+                        authority_envelope=envelope,
+                        publication_store=publication_store,
+                        sync_store=guarded,
+                    )
+                    if not isinstance(outcome, AdapterAccepted) and not (
+                        current_head is not None
+                        and self._is_exact_ingress_confirmation(
+                            dataset=dataset,
+                            current_head=current_head,
+                            envelope=envelope,
+                            canonical=canonical,
+                            source_row=row,
+                            canonical_receipt=canonical_receipt,
+                            sync_ingress_receipt=sync_ingress_receipt,
+                        )
+                    ):
+                        raise SyncStoreError(
+                            "Personal Context authority receipt is invalid"
+                        )
+                    source_receipt_identity = _authority_source_receipt_identity(
+                        ingress_cursor=receipt_ingress_cursor,
+                        canonical_receipt=canonical_receipt,
+                        sync_receipt=sync_ingress_receipt,
+                    )
+                    authority = PersonalContextAuthorityMetadata(
+                        role="home_authority",
+                        publication_batch_id=str(
+                            getattr(row, "publication_batch_id", "")
+                        ),
+                        profile_publication_sequence=int(
+                            getattr(row, "profile_publication_sequence", 0)
+                        ),
+                        batch_ordinal=int(getattr(row, "batch_ordinal", -1)),
+                        batch_size=int(getattr(row, "batch_size", 0)),
+                    )
+                    protected = self._protect_personal_context_for_storage(
+                        dataset, envelope
+                    )
+                    protected = replace(
+                        protected,
+                        routing_metadata={
+                            **protected.routing_metadata,
+                            "personal_context_authority": authority.model_dump(
+                                mode="json"
+                            ),
+                        },
+                    )
+                    authority_tag = _authority_envelope_tag(
+                        integrity_key,
+                        protected,
+                        authority,
+                        canonical_payload_digest=canonical_payload_digest,
+                        source_role=str(getattr(row, "role", "")),
+                        source_version_id=str(getattr(row, "version_id", "")),
+                        source_receipt_identity=source_receipt_identity,
+                    )
+                    protected = replace(
+                        protected,
+                        routing_metadata={
+                            **protected.routing_metadata,
+                            _AUTHORITY_ENVELOPE_TAG_KEY: authority_tag,
+                        },
+                    )
+                    stored = insert_personal_context_authority(
+                        self,
+                        envelope=protected,
+                        authority=authority,
+                        sync_store=guarded,
+                    )
+                    guarded.commit_personal_context_authority()
+        except RuntimeError as exc:
+            if str(exc) == "publication authority staging claim changed":
+                raise SyncStoreError(
+                    "Personal Context authority relay claim is stale"
+                ) from exc
+            raise
+        if stored.server_cursor is None:
+            raise SyncStoreError("Personal Context authority receipt is unavailable")
+        return stage_receipt(stored.server_cursor)
+
+    def _is_exact_ingress_confirmation(
+        self,
+        *,
+        dataset: SyncDataset,
+        current_head: SyncEnvelope | None,
+        envelope: SyncEnvelopeCreate,
+        canonical: bytes,
+        source_row: PublicationSourceRow,
+        canonical_receipt: CanonicalApplyReceipt | None,
+        sync_ingress_receipt: Mapping[str, object] | None,
+    ) -> bool:
+        """Allow only canonical authority confirmation of an identical ingress head."""
+
+        if (
+            current_head is None
+            or current_head.server_cursor is None
+            or canonical_receipt is None
+            or sync_ingress_receipt is None
+        ):
+            return False
+        current_revision = resolve_personal_context_ingress_result_revision(
+            object_revision=current_head.object_revision,
+            base_server_cursor=current_head.base_server_cursor,
+            base_object_revision=current_head.base_object_revision,
+            base_object_hash=current_head.base_object_hash,
+            base_version=current_head.base_version,
+        )
+        if current_revision is None:
+            return False
+        authority = current_head.authority
+        canonical_digest = "sha256:" + hashlib.sha256(canonical).hexdigest()
+        source_receipt_result_matches = (
+            source_row.role == "semantic"
+            and canonical_receipt.resulting_object_id == source_row.object_id
+            and canonical_receipt.resulting_version_id == source_row.version_id
+        ) or (
+            source_row.role == "manifest"
+            and canonical_receipt.manifest_version_id == source_row.version_id
+        ) or (
+            source_row.role == "purge_barrier"
+            and canonical_receipt.resulting_object_id == source_row.object_id
+        )
+        receipt_matches = (
+            sync_ingress_receipt.get("server_sequence") == current_head.server_cursor
+            and sync_ingress_receipt.get("dataset_id") == canonical_receipt.dataset_id
+            and sync_ingress_receipt.get("device_id") == canonical_receipt.device_id
+            and sync_ingress_receipt.get("client_envelope_id")
+            == canonical_receipt.client_envelope_id
+            and sync_ingress_receipt.get("canonical_payload_digest")
+            == canonical_receipt.canonical_payload_digest
+            and sync_ingress_receipt.get("purge_generation")
+            == canonical_receipt.purge_generation
+            and sync_ingress_receipt.get("resulting_object_id")
+            == canonical_receipt.resulting_object_id
+            and sync_ingress_receipt.get("resulting_internal_version_id")
+            == canonical_receipt.resulting_version_id
+            and sync_ingress_receipt.get("manifest_revision")
+            == canonical_receipt.manifest_revision
+            and sync_ingress_receipt.get("manifest_version_id")
+            == canonical_receipt.manifest_version_id
+            and sync_ingress_receipt.get("publication_batch_id")
+            == canonical_receipt.publication_batch_id
+            and sync_ingress_receipt.get("profile_publication_sequence")
+            == canonical_receipt.profile_publication_sequence
+            and sync_ingress_receipt.get("receipt_id") == canonical_receipt.receipt_id
+            and sync_ingress_receipt.get("wire_entity_version")
+            == canonical_receipt.wire_entity_version
+        )
+        if (
+            not receipt_matches
+            or canonical_receipt.dataset_id != envelope.dataset_id
+            or canonical_receipt.device_id != current_head.device_id
+            or canonical_receipt.client_envelope_id
+            != current_head.client_envelope_id
+            or canonical_receipt.canonical_payload_digest != canonical_digest
+            or canonical_receipt.purge_generation != source_row.purge_generation
+            or not source_receipt_result_matches
+            or canonical_receipt.publication_batch_id
+            != source_row.publication_batch_id
+            or canonical_receipt.profile_publication_sequence
+            != source_row.profile_publication_sequence
+            or canonical_receipt.wire_entity_version
+            != str(current_head.entity_version)
+            or source_row.profile_id
+            != envelope.routing_metadata.get("profile_id")
+            or source_row.profile_id
+            != current_head.routing_metadata.get("profile_id")
+            or envelope.base_server_cursor != current_head.server_cursor
+            or envelope.base_object_revision != current_revision
+            or envelope.base_object_hash != current_head.payload_hash
+            or envelope.object_revision != current_revision + 1
+            or current_head.dataset_id != envelope.dataset_id
+            or current_head.domain != envelope.domain
+            or current_head.object_id != envelope.object_id
+            or current_head.operation != envelope.operation
+            or current_head.entity_version != envelope.entity_version
+            or current_head.parent_id != envelope.parent_id
+            or current_head.base_version != envelope.base_version
+            or current_head.payload_hash != envelope.payload_hash
+            or current_head.payload_size_bytes != envelope.payload_size_bytes
+            or current_head.schema_version != envelope.schema_version
+            or current_head.adapter_version != envelope.adapter_version
+            or current_head.deleted != envelope.deleted
+            or current_head.status != "accepted"
+            or current_head.apply_status not in {"pending", "applied"}
+            or current_head.routing_metadata.get("profile_id")
+            != envelope.routing_metadata.get("profile_id")
+            or current_head.routing_metadata.get("integrity_key_id")
+            != envelope.routing_metadata.get("integrity_key_id")
+            or current_head.routing_metadata.get("purge_generation")
+            != envelope.routing_metadata.get("purge_generation")
+            or current_head.routing_metadata.get("purge_generation")
+            != canonical_receipt.purge_generation
+            or authority is None
+            or authority.role != "client_ingress"
+        ):
+            return False
+        try:
+            restored = self._restore_personal_context_from_storage(dataset, current_head)
+            return hmac.compare_digest(canonical_json_bytes(restored.payload), canonical)
+        except (SyncStoreError, TypeError, ValueError):
+            return False
+
+    def finalize_personal_context_authority(
+        self,
+        row: object,
+        receipt: AuthorityStageReceipt,
+        dataset_id: str,
+        user_id: str,
+    ) -> None:
+        """Expose one staged authority row only while its source lease still owns it."""
+
+        from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+            AuthorityStageReceipt,
+            PersonalContextPublicationRelayStore,
+            PublicationRelayLease,
+        )
+
+        dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
+        if not isinstance(receipt, AuthorityStageReceipt):
+            raise SyncStoreError("Personal Context authority receipt is invalid")
+        relay_token = getattr(row, "relay_owner_token", None)
+        if not isinstance(relay_token, str) or not relay_token:
+            raise SyncStoreError("Personal Context authority receipt is invalid")
+        canonical_service = self._personal_context_service_for_user(user_id)
+        publication_store = PersonalContextPublicationRelayStore(
+            canonical_service._repository.database
+        )
+        lease = PublicationRelayLease(str(getattr(row, "profile_id", "")), relay_token)
+        staged = self.store.get_envelope_by_server_cursor(receipt.server_cursor)
+        if staged is None:
+            raise SyncStoreError("Personal Context authority receipt is invalid")
+        try:
+            with self.store.materialization_guard(
+                [staged],
+                require_predecessors=False,
+            ) as guarded:
+                with publication_store.authority_finalization_guard(
+                    row, receipt, lease=lease
+                ):
+                    stored = guarded.get_envelope_by_server_cursor(
+                        receipt.server_cursor
+                    )
+                    if stored is None:
+                        raise SyncStoreError(
+                            "Personal Context authority receipt is invalid"
+                        )
+                    self._verify_personal_context_authority_receipt(
+                        dataset=dataset,
+                        stored=stored,
+                        row=row,
+                        user_id=user_id,
+                        sync_store=guarded,
+                        source_claim_guarded=True,
+                    )
+                    guarded.mark_personal_context_authority_applied(
+                        receipt.server_cursor,
+                        dataset_id=dataset_id,
+                        client_envelope_id=receipt.deterministic_envelope_id,
+                        profile_id=str(getattr(row, "profile_id", "")),
+                        purge_generation=receipt.purge_generation,
+                        publication_batch_id=receipt.publication_batch_id,
+                        profile_publication_sequence=receipt.profile_publication_sequence,
+                        batch_ordinal=receipt.batch_ordinal,
+                        batch_size=receipt.batch_size,
+                    )
+                    guarded.commit_personal_context_authority()
+        except RuntimeError as exc:
+            if str(exc) == "publication authority finalization claim changed":
+                raise SyncStoreError(
+                    "Personal Context authority source is not acknowledged"
+                ) from exc
+            raise
+
+    def cancel_personal_context_authority(
+        self,
+        row: object,
+        receipt: AuthorityStageReceipt | None,
+        dataset_id: str,
+        user_id: str,
+    ) -> Literal["removed", "absent", "applied"]:
+        """Reconcile one exact hidden authority row under source authorization."""
+
+        from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+            AuthorityStageReceipt,
+            PersonalContextPublicationRelayStore,
+            PublicationRelayLease,
+        )
+
+        self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
+        relay_token = getattr(row, "relay_owner_token", None)
+        if not isinstance(relay_token, str) or not relay_token:
+            raise SyncStoreError("Personal Context authority cancellation is not authorized")
+        canonical_service = self._personal_context_service_for_user(user_id)
+        publication_store = PersonalContextPublicationRelayStore(
+            canonical_service._repository.database
+        )
+        profile_id = str(getattr(row, "profile_id", ""))
+        deterministic_id = str(getattr(row, "deterministic_envelope_id", ""))
+        lease = PublicationRelayLease(profile_id, relay_token)
+        try:
+            with self.store.personal_context_authority_guard(
+                dataset_id, profile_id
+            ) as guarded:
+                with publication_store.authority_compensation_guard(row, lease=lease):
+                    by_id = guarded.get_envelope_by_client_id(
+                        dataset_id, deterministic_id
+                    )
+                    if receipt is None:
+                        source_cursor = getattr(row, "sync_server_cursor", None)
+                        by_cursor = (
+                            guarded.get_envelope_by_server_cursor(source_cursor)
+                            if isinstance(source_cursor, int)
+                            else by_id
+                        )
+                        if by_cursor is None and by_id is None:
+                            return "absent"
+                        if (
+                            by_cursor is None
+                            or by_id is None
+                            or by_cursor.server_cursor != by_id.server_cursor
+                            or by_cursor.server_cursor is None
+                        ):
+                            raise SyncStoreError(
+                                "Personal Context authority cancellation raced"
+                            )
+                        receipt = AuthorityStageReceipt(
+                            server_cursor=by_cursor.server_cursor,
+                            deterministic_envelope_id=deterministic_id,
+                            publication_batch_id=str(
+                                getattr(row, "publication_batch_id", "")
+                            ),
+                            profile_publication_sequence=int(
+                                getattr(row, "profile_publication_sequence", 0)
+                            ),
+                            batch_ordinal=int(getattr(row, "batch_ordinal", -1)),
+                            batch_size=int(getattr(row, "batch_size", 0)),
+                            purge_generation=int(
+                                getattr(row, "purge_generation", -1)
+                            ),
+                        )
+                    else:
+                        by_cursor = guarded.get_envelope_by_server_cursor(
+                            receipt.server_cursor
+                        )
+                        if by_cursor is None and by_id is None:
+                            return "absent"
+                        if (
+                            by_cursor is None
+                            or by_id is None
+                            or by_cursor.server_cursor != by_id.server_cursor
+                        ):
+                            raise SyncStoreError(
+                                "Personal Context authority cancellation raced"
+                            )
+                    if (
+                        receipt.deterministic_envelope_id
+                        != getattr(row, "deterministic_envelope_id", None)
+                        or receipt.publication_batch_id
+                        != getattr(row, "publication_batch_id", None)
+                        or receipt.profile_publication_sequence
+                        != getattr(row, "profile_publication_sequence", None)
+                        or receipt.batch_ordinal
+                        != getattr(row, "batch_ordinal", None)
+                        or receipt.batch_size != getattr(row, "batch_size", None)
+                        or receipt.purge_generation
+                        != getattr(row, "purge_generation", None)
+                    ):
+                        raise SyncStoreError(
+                            "Personal Context authority cancellation raced"
+                        )
+                    outcome = guarded.discard_pending_personal_context_authority(
+                        server_cursor=receipt.server_cursor,
+                        dataset_id=dataset_id,
+                        client_envelope_id=receipt.deterministic_envelope_id,
+                        profile_id=profile_id,
+                        purge_generation=receipt.purge_generation,
+                        publication_batch_id=receipt.publication_batch_id,
+                        profile_publication_sequence=(
+                            receipt.profile_publication_sequence
+                        ),
+                        batch_ordinal=receipt.batch_ordinal,
+                        batch_size=receipt.batch_size,
+                    )
+                    if outcome == "removed":
+                        guarded.commit_personal_context_authority()
+        except RuntimeError as exc:
+            if str(exc) == "publication authority cancellation is not authorized":
+                raise SyncStoreError(
+                    "Personal Context authority cancellation is not authorized"
+                ) from exc
+            raise
+        if outcome == "mismatch":
+            raise SyncStoreError("Personal Context authority cancellation raced")
+        return outcome
 
     def _notes_task_domains_ready(self, dataset: SyncDataset | None) -> bool:
         """Return the single service-level task/activity activation predicate."""
@@ -3038,6 +4339,7 @@ class SyncV2Service:
         envelopes: Sequence[SyncEnvelopeCreate],
         base_server_cursor: int | None = None,
         stop_on_conflict: bool = False,
+        personal_context_exchange: object | None = None,
     ) -> SyncPushResult:
         # The top-level cursor is a client dataset checkpoint; object conflict checks use envelope bases.
         _ = base_server_cursor
@@ -3053,7 +4355,6 @@ class SyncV2Service:
                     for envelope in envelopes
                 ],
             )
-        device = self._require_registered_device(user_id, device_id)
         try:
             dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
         except SyncStoreError:
@@ -3068,6 +4369,21 @@ class SyncV2Service:
                     for envelope in envelopes
                 ],
             )
+
+        verified_exchange = (
+            self.require_active_exchange(
+                dataset=dataset,
+                user_id=user_id,
+                device_id=device_id,
+                exchange=personal_context_exchange,
+            )
+            if any(
+                envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+                for envelope in envelopes
+            )
+            else None
+        )
+        device = self._require_registered_device(user_id, device_id)
 
         accepted: list[SyncPushAccepted] = []
         rejected: list[SyncPushRejected] = []
@@ -3112,6 +4428,23 @@ class SyncV2Service:
                     )
                 )
                 continue
+            if envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+                if "personal_context_authority" in envelope.routing_metadata:
+                    rejected.append(
+                        SyncPushRejected(
+                            client_envelope_id=envelope.client_envelope_id,
+                            error_code="reserved_routing_metadata",
+                            message="Sync envelope contains reserved routing metadata",
+                        )
+                    )
+                    continue
+                envelope = replace(
+                    envelope,
+                    routing_metadata={
+                        **envelope.routing_metadata,
+                        "personal_context_authority": {"role": "client_ingress"},
+                    },
+                )
             if envelope.domain not in dataset.domains:
                 rejected.append(
                     SyncPushRejected(
@@ -3460,6 +4793,7 @@ class SyncV2Service:
             rejected=rejected,
             conflicts=conflicts,
             next_cursor=str(next_sequence) if next_sequence is not None else None,
+            personal_context_exchange=verified_exchange,
         )
 
     def pull(
@@ -3472,27 +4806,206 @@ class SyncV2Service:
         domains: Sequence[SyncDomain] | None = None,
         page_size: int | None = None,
         include_own_changes: bool = False,
+        personal_context_exchange: object | None = None,
     ) -> SyncPullResult:
-        device = self._require_registered_device(user_id, device_id)
         if page_size is not None and page_size < 1:
             raise SyncStoreError("Sync pull page_size must be greater than zero")
         dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
 
-        selected_domains = self._selected_pull_domains(dataset, device, domains)
+        candidate_device = self.store.get_device(user_id, device_id)
+        candidate_is_active = bool(
+            candidate_device is not None
+            and candidate_device.status == "active"
+            and candidate_device.revoked_at is None
+        )
+        selected_domains = (
+            self._selected_pull_domains(dataset, candidate_device, domains)
+            if candidate_is_active and candidate_device is not None
+            else ()
+        )
+        requested_domains = (
+            selected_domains
+            if candidate_is_active
+            else (domains if domains is not None else dataset.domains)
+        )
+        requested_personal_context = any(
+            domain in PERSONAL_CONTEXT_SYNC_DOMAINS for domain in requested_domains
+        )
+        preverified_exchange = (
+            self.require_active_exchange(
+                dataset=dataset,
+                user_id=user_id,
+                device_id=device_id,
+                exchange=personal_context_exchange,
+            )
+            if requested_personal_context
+            else None
+        )
+        device = self._require_registered_device(user_id, device_id)
+        verified_exchange = preverified_exchange
         streams = self._pull_adapter_streams(device, selected_domains)
-        if any(adapter_version != 1 for _domain, adapter_version in streams) or (
+        versioned_mode = any(adapter_version != 1 for _domain, adapter_version in streams) or (
             isinstance(cursor, str) and "." in cursor
-        ):
-            return self._pull_versioned(
+        )
+        personal_context_selected = any(
+            domain in PERSONAL_CONTEXT_SYNC_DOMAINS for domain in selected_domains
+        )
+        recovery = self._coordinate_personal_context_recovery(
+            dataset=dataset,
+            user_id=user_id,
+            after_server_cursor=(
+                None
+                if versioned_mode
+                else self._resolve_cursor(
+                    dataset_id,
+                    device_id,
+                    cursor,
+                    selected_domains,
+                )
+            ),
+            enabled=personal_context_selected and verified_exchange is not None,
+        )
+        versioned_relay: PersonalContextRelayContinuation | None = None
+        if recovery.relay is not None:
+            versioned_relay = PersonalContextRelayContinuation(
+                state=recovery.relay.continuation,
+                scan_watermark=None,
+            )
+        if versioned_mode:
+            result = self._pull_versioned(
                 dataset=dataset,
                 device=device,
+                user_id=user_id,
+                verified_personal_context_exchange=verified_exchange,
                 cursor=cursor,
                 streams=streams,
                 page_size=page_size,
                 include_own_changes=include_own_changes,
+                recovery=recovery,
+            )
+            if versioned_relay is None:
+                return replace(result, personal_context_exchange=verified_exchange)
+            return replace(
+                result,
+                has_more=result.has_more
+                or versioned_relay.state != "complete",
+                personal_context_relay=versioned_relay.model_copy(
+                    update={"scan_watermark": result.next_cursor}
+                ),
+                personal_context_exchange=verified_exchange,
             )
         since_sequence = self._resolve_cursor(dataset_id, device_id, cursor, selected_domains)
         page_limit = min(page_size or self.settings.max_pull_page_size, self.settings.max_pull_page_size)
+        relay_continuation: PersonalContextRelayContinuation | None = None
+        if personal_context_selected:
+            personal_context_state = dataset.metadata.get("personal_context")
+            active_profile_id = (
+                personal_context_state.get("profile_id")
+                if isinstance(personal_context_state, Mapping)
+                else None
+            )
+            active_integrity_key_id = (
+                personal_context_state.get("integrity_key_id")
+                if isinstance(personal_context_state, Mapping)
+                else None
+            )
+            active_purge_generation = (
+                personal_context_state.get("purge_generation")
+                if isinstance(personal_context_state, Mapping)
+                else None
+            )
+            scan = (
+                self.store.scan_personal_context_authority(
+                    dataset_id,
+                    after_server_cursor=since_sequence,
+                    limit=page_limit,
+                    budget=recovery,
+                    domains=selected_domains,
+                    adapter_versions=[1],
+                    exclude_device_id=(
+                        None if include_own_changes else device_id
+                    ),
+                    profile_id=(
+                        active_profile_id
+                        if isinstance(active_profile_id, str)
+                        else None
+                    ),
+                    integrity_key_id=(
+                        active_integrity_key_id
+                        if isinstance(active_integrity_key_id, str)
+                        else None
+                    ),
+                    purge_generation=(
+                        active_purge_generation
+                        if type(active_purge_generation) is int
+                        else None
+                    ),
+                    authority_verifier=lambda envelope: (
+                        self._verify_personal_context_pull_authority(
+                            dataset=dataset,
+                            user_id=user_id,
+                            envelope=envelope,
+                            budget=recovery,
+                        )
+                    ),
+                )
+                if verified_exchange is not None and recovery.can_inspect()
+                else PersonalContextAuthorityScan(
+                    raw_scan_watermark=since_sequence,
+                    visible_envelopes=[],
+                    has_visible_lookahead=False,
+                )
+            )
+            page, restore_barrier = self._restore_recovery_page(
+                dataset=dataset,
+                envelopes=scan.visible_envelopes,
+                page_limit=page_limit,
+                budget=recovery,
+            )
+            if restore_barrier is not None:
+                next_sequence = max(
+                    (
+                        envelope.server_sequence
+                        for envelope in scan.raw_envelopes
+                        if envelope.server_sequence < restore_barrier
+                    ),
+                    default=since_sequence,
+                )
+            elif scan.has_visible_lookahead and page:
+                next_sequence = page[-1].server_sequence
+            else:
+                next_sequence = scan.raw_scan_watermark
+            if recovery.relay is not None:
+                relay_watermarks = dict.fromkeys(streams, next_sequence)
+                relay_continuation = PersonalContextRelayContinuation(
+                    state=recovery.relay.continuation,
+                    scan_watermark=self._encode_pull_token(
+                        dataset_id=dataset_id,
+                        device_id=device_id,
+                        version_set=self._pull_version_set(device),
+                        watermarks=relay_watermarks,
+                    ),
+                )
+            if next_sequence != since_sequence:
+                self._update_cursors(
+                    dataset_id,
+                    device_id,
+                    selected_domains,
+                    next_sequence if cursor is None else None,
+                    delivered=page,
+                )
+            return SyncPullResult(
+                dataset_id=dataset_id,
+                encryption_policy=dataset.encryption_policy,
+                envelopes=page,
+                next_cursor=str(next_sequence),
+                has_more=scan.has_visible_lookahead
+                or restore_barrier is not None
+                or not scan.source_exhausted
+                or (relay_continuation is not None and relay_continuation.state != "complete"),
+                personal_context_relay=relay_continuation,
+                personal_context_exchange=verified_exchange,
+            )
         raw_envelopes, visible = self._scan_pull_page(
             dataset_id=dataset_id,
             device_id=device_id,
@@ -3501,6 +5014,9 @@ class SyncV2Service:
             page_limit=page_limit,
             include_own_changes=include_own_changes,
             adapter_versions=[1],
+            personal_context_egress_authorized=(
+                verified_exchange is not None
+            ),
         )
 
         page = [
@@ -3530,6 +5046,7 @@ class SyncV2Service:
             envelopes=page,
             next_cursor=str(next_sequence),
             has_more=has_more,
+            personal_context_exchange=verified_exchange,
         )
 
     def restore_manifest(
@@ -4953,9 +6470,167 @@ class SyncV2Service:
         user_id: str,
         dataset_id: str,
         status: ConflictStatus | None = None,
+        domain: SyncDomain | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        device_id: str | None = None,
+        personal_context_exchange: object | None = None,
     ) -> list[SyncConflict]:
-        self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
-        return self.store.list_conflicts(dataset_id, status=status)
+        conflicts, _verified_exchange = self.list_conflicts_with_exchange(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            status=status,
+            domain=domain,
+            limit=limit,
+            offset=offset,
+            device_id=device_id,
+            personal_context_exchange=personal_context_exchange,
+        )
+        return conflicts
+
+    def list_conflicts_with_exchange(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        status: ConflictStatus | None = None,
+        domain: SyncDomain | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        device_id: str | None = None,
+        personal_context_exchange: object | None = None,
+    ) -> tuple[list[SyncConflict], PersonalContextExchangeProof | None]:
+        """Return one selected page only after any Personal Context proof passes."""
+
+        dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
+        conflicts = self.store.list_conflicts(
+            dataset_id,
+            status=status,
+            domain=domain,
+            limit=limit,
+            offset=offset,
+        )
+        verified_exchange = None
+        if any(conflict.domain in PERSONAL_CONTEXT_SYNC_DOMAINS for conflict in conflicts):
+            verified_exchange = self.require_active_exchange(
+                dataset=dataset,
+                user_id=user_id,
+                device_id=device_id,
+                exchange=personal_context_exchange,
+            )
+        return conflicts, verified_exchange
+
+    def resolve_conflicts_batch(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str,
+        resolutions: Sequence[
+            tuple[
+                str,
+                str,
+                SyncEnvelopeCreate | None,
+                str | None,
+                str | None,
+                str | None,
+            ]
+        ],
+        personal_context_exchange: object | None = None,
+    ) -> tuple[
+        list[tuple[int, SyncConflict]],
+        list[int],
+        PersonalContextExchangeProof | None,
+    ]:
+        """Resolve one ordered batch from a single guarded conflict snapshot."""
+
+        with self.store.conflict_resolution_guard(dataset_id) as guarded_store:
+            dataset = self._require_dataset_access(
+                user_id=user_id,
+                dataset_id=dataset_id,
+                store=guarded_store,
+            )
+            selected: dict[str, SyncConflict | None] = {}
+            for conflict_id in sorted({resolution[0] for resolution in resolutions}):
+                selected[conflict_id] = guarded_store.get_conflict(
+                    conflict_id,
+                    dataset_id=dataset_id,
+                    for_update=True,
+                )
+            verified_exchange = None
+            if any(
+                conflict is not None
+                and conflict.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+                for conflict in selected.values()
+            ):
+                verified_exchange = self.require_active_exchange(
+                    dataset=dataset,
+                    user_id=user_id,
+                    device_id=device_id,
+                    exchange=personal_context_exchange,
+                    store=guarded_store,
+                )
+
+            invalid_personal_context_items = {
+                index
+                for index, (
+                    conflict_id,
+                    _action,
+                    resolution_envelope,
+                    expected_local_envelope_id,
+                    expected_remote_envelope_id,
+                    idempotency_key,
+                ) in enumerate(resolutions)
+                if (
+                    selected[conflict_id] is not None
+                    and selected[conflict_id].domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+                    and (
+                        expected_local_envelope_id is None
+                        or expected_remote_envelope_id is None
+                        or idempotency_key is None
+                        or (
+                            resolution_envelope is not None
+                            and resolution_envelope.domain
+                            not in PERSONAL_CONTEXT_SYNC_DOMAINS
+                        )
+                    )
+                )
+            }
+            resolved: list[tuple[int, SyncConflict]] = []
+            rejected: list[int] = []
+            for index, (
+                conflict_id,
+                action,
+                resolution_envelope,
+                _expected_local_envelope_id,
+                _expected_remote_envelope_id,
+                _idempotency_key,
+            ) in enumerate(resolutions):
+                conflict = selected[conflict_id]
+                if conflict is None or index in invalid_personal_context_items:
+                    rejected.append(index)
+                    continue
+                try:
+                    with guarded_store.conflict_resolution_savepoint():
+                        outcome = self.resolve_conflict(
+                            user_id=user_id,
+                            dataset_id=dataset_id,
+                            conflict_id=conflict_id,
+                            action=action,
+                            resolution_envelope=resolution_envelope,
+                            resolved_by_device_id=device_id,
+                            notes=None,
+                            personal_context_exchange=personal_context_exchange,
+                            _conflict=conflict,
+                            _store=guarded_store,
+                            _verified_personal_context_exchange=verified_exchange,
+                        )
+                except Exception:  # noqa: BLE001 - preserve per-item API outcomes.
+                    rejected.append(index)
+                    continue
+                selected[conflict_id] = outcome
+                resolved.append((index, outcome))
+            return resolved, rejected, verified_exchange
 
     def resolve_conflict(
         self,
@@ -4968,16 +6643,39 @@ class SyncV2Service:
         resolved_by_envelope_id: str | None = None,
         resolved_by_device_id: str | None = None,
         notes: str | None = None,
+        require_personal_context_conflict: bool = False,
+        personal_context_exchange: object | None = None,
+        _conflict: SyncConflict | None = None,
+        _store: SyncV2Store | None = None,
+        _verified_personal_context_exchange: PersonalContextExchangeProof | None = None,
     ) -> SyncConflict:
-        conflict = self.store.get_conflict(conflict_id)
+        active_store = _store or self.store
+        conflict = _conflict or active_store.get_conflict(conflict_id)
         if conflict is None:
             raise SyncStoreError("Sync conflict was not found or is not accessible")
         if dataset_id is not None and conflict.dataset_id != dataset_id:
             raise SyncStoreError("Sync conflict was not found or is not accessible")
+        if require_personal_context_conflict and not conflict.domain.startswith("personal_context."):
+            raise SyncStoreError("Personal Context conflict identity is not valid for this conflict")
         try:
-            dataset = self._require_dataset_access(user_id=user_id, dataset_id=conflict.dataset_id)
+            dataset = self._require_dataset_access(
+                user_id=user_id,
+                dataset_id=conflict.dataset_id,
+                store=active_store,
+            )
         except SyncStoreError as exc:
             raise SyncStoreError("Sync conflict was not found or is not accessible") from exc
+        if (
+            conflict.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+            and _verified_personal_context_exchange is None
+        ):
+            self.require_active_exchange(
+                dataset=dataset,
+                user_id=user_id,
+                device_id=resolved_by_device_id,
+                exchange=personal_context_exchange,
+                store=active_store,
+            )
         if action not in {"overwrite", "duplicate_rename", "skip"}:
             raise SyncStoreError(f"Sync conflict resolution action is not supported: {action}")
         if conflict.status != "unresolved":
@@ -4988,11 +6686,16 @@ class SyncV2Service:
                 resolved_by_envelope_id=resolved_by_envelope_id,
                 resolved_by_device_id=resolved_by_device_id,
                 notes=notes,
+                store=active_store,
             ):
                 return conflict
             raise SyncStoreError("Sync conflict is already resolved")
         if resolved_by_device_id is not None:
-            self._require_registered_device(user_id, resolved_by_device_id)
+            self._require_registered_device(
+                user_id,
+                resolved_by_device_id,
+                store=active_store,
+            )
         if action in {"overwrite", "duplicate_rename"} and resolution_envelope is None:
             raise SyncStoreError(f"Sync {action} requires a resolution envelope")
         if action == "skip" and resolution_envelope is not None:
@@ -5004,7 +6707,11 @@ class SyncV2Service:
                     "Sync resolution envelope contains reserved routing metadata"
                 )
             resolution_device_id = resolved_by_device_id or resolution_envelope.device_id
-            self._require_registered_device(user_id, resolution_device_id or "")
+            self._require_registered_device(
+                user_id,
+                resolution_device_id or "",
+                store=active_store,
+            )
             if resolution_envelope.dataset_id != dataset.dataset_id:
                 raise SyncStoreError("Sync resolution envelope dataset_id must match the conflict dataset")
             if resolution_envelope.domain != conflict.domain:
@@ -5025,7 +6732,7 @@ class SyncV2Service:
 
         if conflict.server_sequence is None:
             raise SyncStoreError("Sync conflict has no canonical source envelope")
-        source = self.store.get_envelope_by_server_cursor(conflict.server_sequence)
+        source = active_store.get_envelope_by_server_cursor(conflict.server_sequence)
         if (
             source is None
             or source.dataset_id != dataset.dataset_id
@@ -5035,7 +6742,7 @@ class SyncV2Service:
         ):
             raise SyncStoreError("Sync conflict source envelope was not found")
 
-        with self.store.materialization_guard(
+        with active_store.materialization_guard(
             [source],
             require_predecessors=False,
         ) as guarded_store:
@@ -5147,6 +6854,7 @@ class SyncV2Service:
         resolved_by_envelope_id: str | None,
         resolved_by_device_id: str | None,
         notes: str | None,
+        store: SyncV2Store | None = None,
     ) -> bool:
         if action != conflict.resolution_action or notes != conflict.resolution_notes:
             return False
@@ -5161,6 +6869,7 @@ class SyncV2Service:
                 conflict.dataset_id,
                 resolution_envelope,
                 effective_device_id=effective_device_id,
+                store=store,
             )
             if existing is None:
                 return False
@@ -5173,11 +6882,12 @@ class SyncV2Service:
         resolution_envelope: SyncEnvelopeCreate,
         *,
         effective_device_id: str | None,
+        store: SyncV2Store | None = None,
     ) -> SyncEnvelope | None:
         if resolution_envelope.dataset_id != dataset_id:
             return None
         try:
-            return self.store.get_existing_envelope_for_idempotency(
+            return (store or self.store).get_existing_envelope_for_idempotency(
                 replace(
                     resolution_envelope,
                     device_id=effective_device_id,
@@ -5737,10 +7447,16 @@ class SyncV2Service:
                 return tuple(heads)
             offset += page_size
 
-    def _require_registered_device(self, user_id: str, device_id: str) -> SyncDevice:
+    def _require_registered_device(
+        self,
+        user_id: str,
+        device_id: str,
+        *,
+        store: SyncV2Store | None = None,
+    ) -> SyncDevice:
         if not device_id:
             raise SyncStoreError("Sync device was not found or is not accessible")
-        device = self.store.get_device(user_id, device_id)
+        device = (store or self.store).get_device(user_id, device_id)
         if (
             device is not None
             and device.revoked_at is None
@@ -5749,8 +7465,14 @@ class SyncV2Service:
             return device
         raise SyncStoreError("Sync device was not found or is not accessible")
 
-    def _require_dataset_access(self, *, user_id: str, dataset_id: str) -> SyncDataset:
-        dataset = self.store.get_dataset(dataset_id)
+    def _require_dataset_access(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        store: SyncV2Store | None = None,
+    ) -> SyncDataset:
+        dataset = (store or self.store).get_dataset(dataset_id)
         if dataset is None or dataset.archived_at is not None:
             raise SyncStoreError("Sync dataset was not found or is not accessible")
         if dataset.scope_type == "personal":
@@ -7995,15 +9717,145 @@ class SyncV2Service:
             for domain, versions in advertised.items()
         }
 
+    def _restore_recovery_page(
+        self,
+        *,
+        dataset: SyncDataset,
+        envelopes: Sequence[SyncEnvelope],
+        page_limit: int,
+        budget: _PersonalContextRecoveryBudget,
+    ) -> tuple[list[SyncEnvelope], int | None]:
+        """Restore selected authority without crossing the pull deadline."""
+
+        restored: list[SyncEnvelope] = []
+        for envelope in envelopes[:page_limit]:
+            if (
+                envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+                and not budget.deadline_open()
+            ):
+                return restored, envelope.server_sequence
+            clear = self._restore_personal_context_from_storage(dataset, envelope)
+            if (
+                envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+                and not budget.deadline_open()
+            ):
+                return restored, envelope.server_sequence
+            restored.append(clear)
+        return restored, None
+
+    def _verify_personal_context_pull_authority(
+        self,
+        *,
+        dataset: SyncDataset,
+        user_id: str,
+        envelope: SyncEnvelope,
+        budget: _PersonalContextRecoveryBudget,
+    ) -> bool:
+        """Authenticate pull authority against its exact acknowledged source."""
+
+        if envelope.server_cursor is None or not budget.can_inspect():
+            return False
+        state = dataset.metadata.get("personal_context")
+        profile_id = state.get("profile_id") if isinstance(state, Mapping) else None
+        if not isinstance(profile_id, str):
+            return False
+        try:
+            from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+                PersonalContextPublicationRelayStore,
+            )
+
+            canonical_service = self._personal_context_service_for_user(user_id)
+            if not budget.deadline_open():
+                return False
+            publication_store = PersonalContextPublicationRelayStore(
+                canonical_service._repository.database
+            )
+            source = publication_store.acknowledged_source_for_authority(
+                profile_id=profile_id,
+                deterministic_envelope_id=envelope.client_envelope_id,
+                server_cursor=envelope.server_cursor,
+                budget=budget,
+            )
+            if source is None or not budget.deadline_open():
+                return False
+            self._verify_personal_context_authority_receipt(
+                dataset=dataset,
+                stored=envelope,
+                row=source,
+                user_id=user_id,
+                sync_store=self.store,
+                source_claim_guarded=True,
+                recovery_budget=budget,
+            )
+        except (
+            AttributeError,
+            KeyError,
+            RuntimeError,
+            SyncStoreError,
+            TypeError,
+            ValueError,
+        ):
+            return False
+        return budget.deadline_open()
+
+    def _recovery_now_ns(self) -> int:
+        """Read the injectable recovery clock without freezing the default."""
+
+        if self._recovery_clock_ns is not None:
+            return self._recovery_clock_ns()
+        return monotonic_ns()
+
+    def _coordinate_personal_context_recovery(
+        self,
+        *,
+        dataset: SyncDataset,
+        user_id: str,
+        after_server_cursor: int | None,
+        enabled: bool,
+    ) -> _PersonalContextRecoveryBudget:
+        """Run every PC pull mode under one absolute deadline and row budget."""
+
+        if not enabled:
+            return _PersonalContextRecoveryBudget(
+                deadline_ns=2**63 - 1,
+                remaining_rows=self.settings.max_pull_page_size + 1,
+                clock_ns=self._recovery_now_ns,
+            )
+        budget = _PersonalContextRecoveryBudget(
+            deadline_ns=self._recovery_now_ns() + 100_000_000,
+            remaining_rows=100,
+            clock_ns=self._recovery_now_ns,
+        )
+        state = dataset.metadata.get("personal_context")
+        profile_id = state.get("profile_id") if isinstance(state, Mapping) else None
+        relay: PersonalContextRelayResult | None = None
+        if (
+            enabled
+            and self.personal_context_relay is not None
+            and isinstance(profile_id, str)
+        ):
+            relay = self.personal_context_relay.relay_profile(
+                user_id=user_id,
+                profile_id=profile_id,
+                dataset_id=dataset.dataset_id,
+                after_server_cursor=after_server_cursor,
+                budget=budget,
+            )
+        budget.relay = relay
+        return budget
+
     def _pull_versioned(
         self,
         *,
         dataset: SyncDataset,
         device: SyncDevice,
+        user_id: str,
+        verified_personal_context_exchange: PersonalContextExchangeProof | None,
         cursor: str | int | None,
         streams: Sequence[tuple[SyncDomain, int]],
         page_size: int | None,
         include_own_changes: bool,
+        recovery: _PersonalContextRecoveryBudget,
     ) -> SyncPullResult:
         """Pull a token-paginated page without advancing past hidden conflicts."""
 
@@ -8035,24 +9887,61 @@ class SyncV2Service:
             page_size or self.settings.max_pull_page_size,
             self.settings.max_pull_page_size,
         )
-        raw_envelopes, visible, blocker_cursor = self._scan_versioned_pull_page(
-            dataset_id=dataset.dataset_id,
-            device_id=device.device_id,
-            watermarks=watermarks,
-            page_limit=page_limit,
-            include_own_changes=include_own_changes,
+        personal_context_state = dataset.metadata.get("personal_context")
+        raw_envelopes, visible, blocker_cursor, source_exhausted = (
+            self._scan_versioned_pull_page(
+                dataset=dataset,
+                user_id=user_id,
+                dataset_id=dataset.dataset_id,
+                device_id=device.device_id,
+                watermarks=watermarks,
+                page_limit=page_limit,
+                include_own_changes=include_own_changes,
+                personal_context_egress_authorized=(
+                    verified_personal_context_exchange is not None
+                ),
+                budget=recovery,
+                profile_id=(
+                    personal_context_state.get("profile_id")
+                    if isinstance(personal_context_state, Mapping)
+                    else None
+                ),
+                integrity_key_id=(
+                    personal_context_state.get("integrity_key_id")
+                    if isinstance(personal_context_state, Mapping)
+                    else None
+                ),
+                purge_generation=(
+                    personal_context_state.get("purge_generation")
+                    if isinstance(personal_context_state, Mapping)
+                    else None
+                ),
+            )
         )
-        page = visible[:page_limit]
+        page, restore_barrier = self._restore_recovery_page(
+            dataset=dataset,
+            envelopes=visible,
+            page_limit=page_limit,
+            budget=recovery,
+        )
         has_visible_lookahead = len(visible) > page_limit
-        has_more = has_visible_lookahead or len(raw_envelopes) > page_limit
+        has_more = (
+            has_visible_lookahead
+            or restore_barrier is not None
+            or not source_exhausted
+        )
         safe_raw_envelopes = [
             envelope
             for envelope in raw_envelopes
-            if blocker_cursor is None or envelope.server_sequence < blocker_cursor
+            if (blocker_cursor is None or envelope.server_sequence < blocker_cursor)
+            and (
+                restore_barrier is None
+                or envelope.server_sequence < restore_barrier
+            )
         ]
         boundary = (
             page[-1].server_sequence
-            if has_visible_lookahead and page
+            if has_visible_lookahead and page and restore_barrier is None
             else max(
                 (envelope.server_sequence for envelope in safe_raw_envelopes),
                 default=0,
@@ -8105,29 +9994,25 @@ class SyncV2Service:
     def _scan_versioned_pull_page(
         self,
         *,
+        dataset: SyncDataset,
+        user_id: str,
         dataset_id: str,
         device_id: str,
         watermarks: Mapping[tuple[SyncDomain, int], int],
         page_limit: int,
         include_own_changes: bool,
-    ) -> tuple[list[SyncEnvelope], list[SyncEnvelope], int | None]:
-        """Return raw and visible versioned candidates plus any blocking cursor."""
+        personal_context_egress_authorized: bool,
+        budget: _PersonalContextRecoveryBudget,
+        profile_id: object,
+        integrity_key_id: object,
+        purge_generation: object,
+    ) -> tuple[list[SyncEnvelope], list[SyncEnvelope], int | None, bool]:
+        """Incrementally interleave signed streams under the shared PC budget."""
 
-        candidates: dict[int, SyncEnvelope] = {}
-        for (domain, adapter_version), watermark in watermarks.items():
-            for envelope in self.store.list_envelopes_after(
-                dataset_id,
-                watermark,
-                limit=page_limit + 1,
-                domains=[domain],
-                adapter_versions=[adapter_version],
-                status="accepted",
-                exclude_device_id=None if include_own_changes else device_id,
-            ):
-                candidates[envelope.server_sequence] = envelope
-        raw = sorted(candidates.values(), key=lambda item: item.server_sequence)[
-            : page_limit + 1
-        ]
+        scan_watermarks = dict(watermarks)
+        exhausted_streams: set[tuple[SyncDomain, int]] = set()
+        raw: list[SyncEnvelope] = []
+        visible: list[SyncEnvelope] = []
         blocker = self.store.get_unresolved_materialization_conflict(dataset_id)
         blocker_cursor = (
             blocker.server_sequence
@@ -8136,13 +10021,91 @@ class SyncV2Service:
             != SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION
             else None
         )
-        visible = [
-            envelope
-            for envelope in raw
-            if envelope.apply_status not in {"conflict", "superseded"}
-            and (blocker_cursor is None or envelope.server_sequence < blocker_cursor)
-        ]
-        return raw, visible, blocker_cursor
+        candidates: dict[tuple[SyncDomain, int], SyncEnvelope] = {}
+
+        def load_candidate(stream: tuple[SyncDomain, int]) -> bool:
+            if not budget.can_inspect():
+                return False
+            domain, adapter_version = stream
+            rows = self.store.list_envelopes_after(
+                dataset_id,
+                scan_watermarks[stream],
+                limit=1,
+                domains=[domain],
+                adapter_versions=[adapter_version],
+                status="accepted",
+                exclude_device_id=(
+                    None
+                    if include_own_changes
+                    or domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+                    else device_id
+                ),
+            )
+            if not rows:
+                exhausted_streams.add(stream)
+                return True
+            if not budget.consume():
+                return False
+            candidates[stream] = rows[0]
+            return True
+
+        for stream in scan_watermarks:
+            if not load_candidate(stream):
+                return raw, visible, blocker_cursor, False
+
+        while (
+            candidates
+            and budget.deadline_open()
+            and len(visible) <= page_limit
+        ):
+            stream, envelope = min(
+                candidates.items(),
+                key=lambda candidate: candidate[1].server_sequence,
+            )
+            if (
+                blocker_cursor is not None
+                and envelope.server_sequence >= blocker_cursor
+            ):
+                break
+            classification: Literal["hidden", "authority", "barrier"] | None = None
+            if envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+                if not budget.deadline_open():
+                    break
+                classification = self.store.classify_personal_context_recovery_row(
+                    envelope,
+                    profile_id=profile_id,
+                    integrity_key_id=integrity_key_id,
+                    purge_generation=purge_generation,
+                    authority_verifier=lambda candidate: (
+                        self._verify_personal_context_pull_authority(
+                            dataset=dataset,
+                            user_id=user_id,
+                            envelope=candidate,
+                            budget=budget,
+                        )
+                    ),
+                    budget=budget,
+                )
+                if not budget.deadline_open() or classification == "barrier":
+                    break
+            raw.append(envelope)
+            scan_watermarks[stream] = envelope.server_sequence
+            candidates.pop(stream)
+            if (
+                classification != "hidden"
+                and envelope.apply_status not in {"conflict", "superseded"}
+                and _personal_context_pull_visible(
+                    envelope,
+                    authorized=personal_context_egress_authorized,
+                )
+            ):
+                visible.append(envelope)
+            if len(visible) > page_limit:
+                break
+            if not load_candidate(stream):
+                break
+        source_exhausted = len(exhausted_streams) == len(scan_watermarks)
+        return raw, visible, blocker_cursor, source_exhausted
 
     def _pull_token_secret(self) -> bytes:
         secret = (
@@ -8390,6 +10353,7 @@ class SyncV2Service:
         page_limit: int,
         include_own_changes: bool,
         adapter_versions: Sequence[int] | None = None,
+        personal_context_egress_authorized: bool = False,
     ) -> tuple[list[SyncEnvelope], list[SyncEnvelope]]:
         raw = self.store.list_envelopes_after(
             dataset_id,
@@ -8415,6 +10379,10 @@ class SyncV2Service:
             and (
                 blocker_cursor is None
                 or envelope.server_sequence < blocker_cursor
+            )
+            and _personal_context_pull_visible(
+                envelope,
+                authorized=personal_context_egress_authorized,
             )
         ]
         return raw, visible
@@ -8996,7 +10964,7 @@ def _personal_context_link_is_complete(
     return (
         isinstance(state.get("profile_id"), str)
         and isinstance(state.get("integrity_key_id"), str)
-        and isinstance(state.get("purge_generation"), int)
+        and type(state.get("purge_generation")) is int
         and store.has_personal_context_link_receipt(
             user_id=user_id,
             dataset_id=dataset.dataset_id,
@@ -9005,6 +10973,24 @@ def _personal_context_link_is_complete(
             integrity_key_id=state["integrity_key_id"],
             purge_generation=state["purge_generation"],
         )
+    )
+
+
+def _personal_context_pull_visible(
+    envelope: SyncEnvelope,
+    *,
+    authorized: bool,
+) -> bool:
+    """Keep every Personal Context ingress row out of all pull cursor modes."""
+
+    if envelope.domain not in PERSONAL_CONTEXT_SYNC_DOMAINS:
+        return True
+    authority = envelope.authority
+    return bool(
+        authorized
+        and envelope.apply_status == "applied"
+        and authority is not None
+        and authority.role == "home_authority"
     )
 
 

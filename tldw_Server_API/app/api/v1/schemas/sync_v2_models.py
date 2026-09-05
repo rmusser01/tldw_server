@@ -31,6 +31,14 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     sync_v2_server_supported_adapter_versions,
     validate_notes_note_upsert_payload,
 )
+from tldw_Server_API.app.core.Sync.v2.personal_context_ongoing_contract import (
+    PersonalContextActivationReceipt,
+    PersonalContextAuthorityMetadata,
+    PersonalContextExchangeProof,
+    PersonalContextPurgeReceipt,
+    PersonalContextRelayContinuation,
+    validate_client_personal_context_metadata,
+)
 
 SyncDomain = Literal[
     "notes.note",
@@ -327,8 +335,13 @@ class PersonalContextSyncCapabilitiesResponse(BaseModel):
 
     available: bool = False
     blockers: list[str] = Field(
-        default_factory=lambda: ["personal_context_profile_key_unavailable"]
+        default_factory=lambda: ["personal_context_profile_key_unavailable"],
+        max_length=8,
     )
+    ongoing_sync_version: Literal[0, 1] = 0
+    ongoing_sync_blockers: list[str] = Field(default_factory=list, max_length=8)
+    activation_epoch: str | None = Field(None, min_length=16, max_length=256)
+    continuity_token: str | None = Field(None, min_length=16, max_length=256)
     authorization_policy: Literal["server_trusted_v1"] = "server_trusted_v1"
     min_schema_version: Literal[1] = 1
     max_schema_version: Literal[1] = 1
@@ -342,7 +355,50 @@ class PersonalContextSyncCapabilitiesResponse(BaseModel):
     max_proposals_per_session: int = Field(25, ge=25)
     max_unresolved_proposals: int = Field(200, ge=200)
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "anyOf": [
+                {"properties": {
+                    "activation_epoch": {"type": "null"},
+                    "continuity_token": {"type": "null"},
+                }},
+                {
+                    "required": ["activation_epoch", "continuity_token"],
+                    "properties": {
+                        "activation_epoch": {"type": "string"},
+                        "continuity_token": {"type": "string"},
+                    },
+                },
+            ],
+            "if": {
+                "required": ["ongoing_sync_version"],
+                "properties": {"ongoing_sync_version": {"const": 1}},
+            },
+            "then": {
+                "required": ["activation_epoch", "continuity_token"],
+                "properties": {
+                    "activation_epoch": {"type": "string"},
+                    "continuity_token": {"type": "string"},
+                    "ongoing_sync_blockers": {"maxItems": 0},
+                },
+            },
+        },
+    )
+
+    @model_validator(mode="after")
+    def validate_ongoing_state(self) -> PersonalContextSyncCapabilitiesResponse:
+        """Keep ongoing synchronization unavailable until all readiness is present."""
+
+        if (self.activation_epoch is None) != (self.continuity_token is None):
+            raise ValueError("activation epoch and continuity token must appear together")
+        if self.ongoing_sync_version == 1 and (
+            self.ongoing_sync_blockers
+            or self.activation_epoch is None
+            or self.continuity_token is None
+        ):
+            raise ValueError("ongoing sync version 1 requires an unblocked continuity pair")
+        return self
 
 
 class SyncCapabilitiesResponse(BaseModel):
@@ -1151,6 +1207,7 @@ class SyncPersonalContextBootstrapRequest(BaseModel):
         max_length=32,
     )
     expected_purge_generation: int | None = Field(None, ge=0)
+    ongoing_sync_version: Literal[1] | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -1296,6 +1353,8 @@ class SyncPersonalContextBootstrapResponse(BaseModel):
     integrity_key_id: str
     key_record_id: str
     wrapped_key_blob: str
+    activation: PersonalContextActivationReceipt | None = None
+    personal_context_exchange: PersonalContextExchangeProof | None = None
 
     @field_validator("quotas")
     @classmethod
@@ -1316,6 +1375,53 @@ class SyncPersonalContextLinkCompleteRequest(BaseModel):
     bootstrap_cursor: str
 
     model_config = ConfigDict(extra="forbid")
+
+
+class SyncPersonalContextActivationAcknowledgeRequest(BaseModel):
+    """Strict device acknowledgement for a version-one activation receipt."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    dataset_id: StrictStr = Field(min_length=1, max_length=128)
+    device_id: StrictStr = Field(min_length=1, max_length=128)
+    activation_id: StrictStr = Field(min_length=16, max_length=128)
+    baseline_digest: StrictStr = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    local_receipt_id: StrictStr = Field(min_length=16, max_length=128)
+    personal_context_exchange: PersonalContextExchangeProof
+
+
+class SyncPersonalContextActivationAcknowledgeResponse(BaseModel):
+    """Version-one activation acknowledgement receipt."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    receipt: PersonalContextActivationReceipt
+    personal_context_exchange: PersonalContextExchangeProof
+
+
+class SyncPersonalContextPurgeRequest(BaseModel):
+    """Strict signed device request for a Personal Context global purge."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    dataset_id: StrictStr = Field(min_length=1, max_length=128)
+    device_id: StrictStr = Field(min_length=1, max_length=128)
+    request_id: StrictStr = Field(min_length=16, max_length=128)
+    expected_purge_generation: StrictInt = Field(ge=0)
+    idempotency_key: StrictStr = Field(min_length=16, max_length=128)
+    signature: StrictStr = Field(min_length=32, max_length=512)
+
+
+class SyncPersonalContextPurgeResponse(BaseModel):
+    """Version-one receipt for a device-originated global purge request."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    receipt: PersonalContextPurgeReceipt
 
 
 class SyncRestoreManifestDataset(BaseModel):
@@ -1823,6 +1929,7 @@ class SyncV2Envelope(BaseModel):
     apply_error_code: str | None = None
     apply_error_message: str | None = None
     applied_at: str | None = None
+    authority: PersonalContextAuthorityMetadata | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -1986,6 +2093,20 @@ class SyncPushRequest(BaseModel):
     idempotency_key: str | None = None
     last_known_cursor: str | None = None
     options: SyncPushOptions = Field(default_factory=SyncPushOptions)
+    personal_context_exchange: PersonalContextExchangeProof | None = None
+
+    @model_validator(mode="after")
+    def _validate_personal_context_authority(self) -> SyncPushRequest:
+        """Reserve home authority metadata for internal server publication only."""
+
+        for envelope in self.envelopes:
+            authority = envelope.authority
+            if authority is None:
+                continue
+            if not envelope.domain.startswith("personal_context."):
+                raise ValueError("Personal Context authority metadata requires a Personal Context envelope")
+            validate_client_personal_context_metadata(authority)
+        return self
 
 
 class SyncPushAcceptedEnvelope(BaseModel):
@@ -2033,6 +2154,9 @@ class SyncPushConflictEnvelope(BaseModel):
         validation_alias=AliasChoices("server_cursor", "server_sequence"),
     )
     message: str | None = None
+    expected_local_envelope_id: str | None = Field(None, min_length=16, max_length=128)
+    expected_remote_envelope_id: str | None = Field(None, min_length=16, max_length=128)
+    authority_candidate: SyncV2EnvelopeResponse | None = None
 
     @property
     def entity_id(self) -> str:
@@ -2053,6 +2177,7 @@ class SyncPushResponse(BaseModel):
     rejected: list[SyncPushRejectedEnvelope] = Field(default_factory=list)
     conflicts: list[SyncPushConflictEnvelope] = Field(default_factory=list)
     next_cursor: str | None = None
+    personal_context_exchange: PersonalContextExchangeProof | None = None
 
 
 class SyncPullResponse(BaseModel):
@@ -2062,6 +2187,8 @@ class SyncPullResponse(BaseModel):
     envelopes: list[SyncV2EnvelopeResponse] = Field(default_factory=list)
     next_cursor: str | None = None
     has_more: bool = False
+    personal_context_relay: PersonalContextRelayContinuation | None = None
+    personal_context_exchange: PersonalContextExchangeProof | None = None
 
 
 class SyncRepairRequest(BaseModel):
@@ -2189,6 +2316,9 @@ class SyncConflictResolution(BaseModel):
     conflict_id: str = Field(..., min_length=1)
     action: ConflictResolutionAction
     resolution_envelope: SyncV2Envelope | None = None
+    expected_local_envelope_id: str | None = Field(None, min_length=16, max_length=128)
+    expected_remote_envelope_id: str | None = Field(None, min_length=16, max_length=128)
+    idempotency_key: str | None = Field(None, min_length=16, max_length=128)
 
     @model_validator(mode="after")
     def _validate_resolution_envelope(self) -> SyncConflictResolution:
@@ -2196,6 +2326,14 @@ class SyncConflictResolution(BaseModel):
             raise ValueError("duplicate_rename requires a resolution_envelope")
         if self.action == "skip" and self.resolution_envelope is not None:
             raise ValueError("skip must not include a resolution_envelope")
+        if self.resolution_envelope is not None:
+            authority = self.resolution_envelope.authority
+            if authority is not None:
+                if not self.resolution_envelope.domain.startswith("personal_context."):
+                    raise ValueError(
+                        "Personal Context authority metadata requires a Personal Context envelope"
+                    )
+                validate_client_personal_context_metadata(authority)
         return self
 
     model_config = ConfigDict(extra="forbid")
@@ -2207,6 +2345,17 @@ class SyncConflictResolveRequest(BaseModel):
     dataset_id: str = Field(..., min_length=1)
     device_id: str = Field(..., min_length=1)
     resolutions: list[SyncConflictResolution] = Field(default_factory=list, min_length=1)
+    personal_context_exchange: PersonalContextExchangeProof | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SyncConflictListResponse(BaseModel):
+    """Proof-bearing version-one response for a Personal Context conflict list."""
+
+    dataset_id: str
+    conflicts: list[SyncConflictRecord] = Field(default_factory=list, max_length=20)
+    personal_context_exchange: PersonalContextExchangeProof
 
     model_config = ConfigDict(extra="forbid")
 
@@ -2251,6 +2400,7 @@ class SyncConflictResolveResponse(BaseModel):
     server_cursor: int | None = Field(None, ge=0)
     resolved: list[SyncConflictResolveResolvedItem] = Field(default_factory=list)
     rejected: list[SyncConflictResolveRejectedItem] = Field(default_factory=list)
+    personal_context_exchange: PersonalContextExchangeProof | None = None
 
 
 class SyncKeyRecoveryBundleRequest(BaseModel):
@@ -2409,6 +2559,7 @@ __all__ = [
     "SyncNotesAttachmentReplaceIntent",
     "SyncCapabilitiesResponse",
     "SyncConflictRecord",
+    "SyncConflictListResponse",
     "SyncConflictResolution",
     "SyncConflictResolveRequest",
     "SyncConflictResolveResolvedItem",
@@ -2444,12 +2595,16 @@ __all__ = [
     "SyncProfileBootstrapResponse",
     "SyncPersonalContextBootstrapRequest",
     "SyncPersonalContextBootstrapResponse",
+    "SyncPersonalContextActivationAcknowledgeRequest",
+    "SyncPersonalContextActivationAcknowledgeResponse",
     "SyncPersonalContextBootstrapErrorResponse",
     "SyncPersonalContextBootstrapErrorDetail",
     "SyncPersonalContextSchemaAttention",
     "SyncPersonalContextQuotaAttention",
     "SyncPersonalContextPurgeAttention",
     "SyncPersonalContextLinkCompleteRequest",
+    "SyncPersonalContextPurgeRequest",
+    "SyncPersonalContextPurgeResponse",
     "SyncNotesAttachmentBootstrapDiagnosticsResponse",
     "SyncNotesAttachmentCleanupSampleResponse",
     "SyncNotesOrganizationStatusResponse",

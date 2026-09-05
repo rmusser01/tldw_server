@@ -74,6 +74,35 @@ def test_canonical_bodies_never_appear_in_database_sidecars_or_logs(tmp_path, mo
     assert runtime_canary not in captured.out + captured.err
 
 
+def test_publication_journal_keeps_domain_labels_and_payloads_out_of_durable_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Journal publication keeps canonical content and domain labels encrypted."""
+
+    payload_canary = "PUBLICATION-PAYLOAD-CANARY-DO-NOT-PERSIST-PLAINTEXT"
+    domain_label = "personal_context.record"
+    monkeypatch.setenv("TLDW_PERSONAL_CONTEXT_MASTER_KEY", encoded_master_key(b"a"))
+    repository = PersonalContextRepository(
+        PersonalizationDB.for_path(tmp_path / "Personalization.db")
+    )
+    repository.create_profile(manifest(), global_scope())
+    repository.commit_record_and_manifest(
+        preference_record(value=payload_canary),
+        manifest().model_copy(
+            update={"revision": 1, "current_version_id": "manifest-v2"}
+        ),
+        expected_record_version=None,
+        expected_manifest_version="manifest-v1",
+    )
+    repository.close()
+
+    durable = _durable_bytes(tmp_path)
+
+    assert payload_canary.encode() not in durable
+    assert domain_label.encode() not in durable
+
+
 def test_every_canonical_record_kind_stays_out_of_durable_storage(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("TLDW_PERSONAL_CONTEXT_MASTER_KEY", encoded_master_key(b"a"))
     repository = PersonalContextRepository(PersonalizationDB.for_path(tmp_path / "Personalization.db"))

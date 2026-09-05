@@ -1366,6 +1366,62 @@ class SyncEnvelope:
         if self.object_revision is None and isinstance(self.entity_version, int):
             object.__setattr__(self, "object_revision", self.entity_version)
 
+    @property
+    def authority(self) -> Any | None:
+        """Return validated Personal Context role metadata from persisted routing."""
+
+        if self.domain not in PERSONAL_CONTEXT_SYNC_DOMAINS:
+            return None
+        raw = self.routing_metadata.get("personal_context_authority")
+        if not isinstance(raw, Mapping):
+            return None
+        from .personal_context_ongoing_contract import PersonalContextAuthorityMetadata
+
+        try:
+            return PersonalContextAuthorityMetadata.model_validate(raw)
+        except ValueError:
+            return None
+
+
+def resolve_personal_context_ingress_result_revision(
+    *,
+    object_revision: object,
+    base_server_cursor: object,
+    base_object_revision: object,
+    base_object_hash: object,
+    base_version: object,
+) -> int | None:
+    """Resolve an ingress result revision from its immutable wire lineage."""
+
+    maximum = 2**63 - 1
+    if object_revision is not None:
+        if type(object_revision) is not int or object_revision < 1 or object_revision > maximum:
+            return None
+        return object_revision
+
+    base_values = (base_server_cursor, base_object_revision, base_object_hash)
+    if all(value is None for value in base_values):
+        return 1 if base_version is None else None
+    if any(value is None for value in base_values):
+        return None
+    if (
+        type(base_server_cursor) is not int
+        or base_server_cursor < 1
+        or base_server_cursor > maximum
+        or type(base_object_revision) is not int
+        or base_object_revision < 1
+        or base_object_revision >= maximum
+        or not isinstance(base_object_hash, str)
+        or not base_object_hash.strip()
+    ):
+        return None
+    if base_version is not None and not (
+        (isinstance(base_version, str) and bool(base_version.strip()))
+        or (type(base_version) is int and base_version == base_object_revision)
+    ):
+        return None
+    return base_object_revision + 1
+
 
 def _validate_mutation_group_metadata(
     *,

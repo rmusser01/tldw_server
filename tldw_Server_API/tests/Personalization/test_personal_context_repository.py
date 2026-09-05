@@ -59,6 +59,10 @@ def test_existing_personalization_database_gains_canonical_schema_and_transactio
         "personal_context_object_heads",
         "personal_context_runtime_heads",
         "personal_context_receipts",
+        "personal_context_publication_profiles",
+        "personal_context_publication_batches",
+        "personal_context_publication_rows",
+        "personal_context_ingress_receipts",
     }.issubset(tables)
 
 
@@ -80,6 +84,44 @@ def test_personalization_transaction_rolls_back_on_failure(tmp_path) -> None:
     assert count == 0
 
 
+def test_publication_failure_rolls_back_the_canonical_record_and_batch(
+    repository: PersonalContextRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A journal failure must leave neither side of an authority write visible."""
+
+    repository.create_profile(manifest(), global_scope())
+
+    def fail_publication(*_args: object, **_kwargs: object) -> None:
+        """Inject a journal write failure before the enclosing transaction commits."""
+
+        raise RuntimeError("publication write failed")
+
+    monkeypatch.setattr(repository, "_append_publication", fail_publication)
+
+    with pytest.raises(RuntimeError, match="publication write failed"):
+        repository.commit_record_and_manifest(
+            preference_record(),
+            ProfileManifest.model_validate(
+                {
+                    **manifest().model_dump(mode="python"),
+                    "revision": 1,
+                    "updated_at": manifest().updated_at + timedelta(seconds=1),
+                    "current_version_id": "manifest-v2",
+                }
+            ),
+            expected_record_version=None,
+            expected_manifest_version="manifest-v1",
+        )
+
+    assert repository.get_record("profile-a", "record-a") is None
+    assert repository.get_manifest("profile-a") == manifest()
+    with repository.database.transaction() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM personal_context_publication_batches"
+        ).fetchone()[0] == 1
+
+
 def test_profile_manifest_scope_and_record_roundtrip(repository) -> None:
     repository.create_profile(manifest(), global_scope())
     record = preference_record()
@@ -89,6 +131,30 @@ def test_profile_manifest_scope_and_record_roundtrip(repository) -> None:
     assert repository.get_manifest("profile-a") == manifest()
     assert repository.get_scope("profile-a", "profile-a-global") == global_scope()
     assert repository.get_record("profile-a", "record-a") == record
+
+
+def test_key_rotation_rewraps_publication_rows_with_the_profile_key(
+    repository: PersonalContextRepository,
+) -> None:
+    """Rotating a profile key rewraps every durable publication row to its version."""
+
+    repository.create_profile(manifest(), global_scope())
+    repository.commit_record_version(preference_record(), expected_version_id=None)
+
+    rotated = repository.rotate_encryption_key("profile-a")
+
+    with repository.database.transaction() as connection:
+        key_versions = {
+            row[0]
+            for row in connection.execute(
+                """
+                SELECT key_version FROM personal_context_publication_rows
+                WHERE profile_id = ?
+                """,
+                ("profile-a",),
+            ).fetchall()
+        }
+    assert key_versions == {rotated.key_version}
 
 
 def test_profile_reopens_through_personalization_database_for_user(tmp_path, monkeypatch) -> None:

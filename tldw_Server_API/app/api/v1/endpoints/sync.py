@@ -51,6 +51,7 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncBlobUploadCreateRequest,
     SyncBlobUploadSessionResponse,
     SyncCapabilitiesResponse,
+    SyncConflictListResponse,
     SyncConflictRecord,
     SyncConflictResolveRejectedItem,
     SyncConflictResolveRequest,
@@ -77,11 +78,15 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncKeyRotationPreviewRequest,
     SyncKeyRotationResponse,
     SyncNotesAttachmentBootstrapDiagnosticsResponse,
+    SyncPersonalContextActivationAcknowledgeRequest,
+    SyncPersonalContextActivationAcknowledgeResponse,
     SyncPersonalContextBootstrapErrorDetail,
     SyncPersonalContextBootstrapErrorResponse,
     SyncPersonalContextBootstrapRequest,
     SyncPersonalContextBootstrapResponse,
     SyncPersonalContextLinkCompleteRequest,
+    SyncPersonalContextPurgeRequest,
+    SyncPersonalContextPurgeResponse,
     SyncProfileBootstrapRequest,
     SyncProfileBootstrapResponse,
     SyncProfileResponse,
@@ -123,6 +128,9 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncDeviceBlobIdAckCreate,
     SyncDeviceDomainAckCreate,
     SyncEnvelopeCreate,
+)
+from tldw_Server_API.app.core.Sync.v2.personal_context_ongoing_contract import (
+    PersonalContextExchangeProof,
 )
 from tldw_Server_API.app.core.Sync.v2.profile import PersonalContextBootstrapError
 from tldw_Server_API.app.core.Sync.v2.security import (
@@ -288,6 +296,14 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
         return HTTPException(status_code=status_code, detail=detail)
     if isinstance(exc, SyncStoreError):
         lowered = str(exc).lower()
+        if "personal_context_activation_required" in lowered:
+            return HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error_code": "personal_context_activation_required",
+                    "message": "An active Personal Context exchange is required.",
+                },
+            )
         notes_task_activation_errors = {
             "notes_task_sync_domains_incomplete": (
                 status.HTTP_400_BAD_REQUEST,
@@ -588,6 +604,7 @@ def _core_envelope_from_api(envelope: SyncV2Envelope) -> SyncEnvelopeCreate:
             "status",
             "apply_status",
             "encryption_policy",
+            "authority",
         },
     )
     return SyncEnvelopeCreate(**payload)
@@ -617,6 +634,38 @@ def _api_conflict_from_core(conflict: Any) -> SyncConflictRecord:
 
 def _api_capabilities_from_core(capabilities: Any) -> SyncCapabilitiesResponse:
     return SyncCapabilitiesResponse(**asdict(capabilities))
+
+
+def _validate_personal_context_query_proof(
+    activation_epoch: str | None,
+    continuity_token: str | None,
+) -> PersonalContextExchangeProof | None:
+    """Reject incomplete version-one exchange proofs before service access."""
+
+    if (activation_epoch is None) == (continuity_token is None):
+        if activation_epoch is None:
+            return None
+        try:
+            return PersonalContextExchangeProof(
+                ongoing_sync_version=1,
+                activation_epoch=activation_epoch,
+                continuity_token=continuity_token,
+            )
+        except ValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "error_code": "personal_context_exchange_invalid",
+                    "message": "Personal Context exchange proof is invalid.",
+                },
+            ) from exc
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail={
+            "error_code": "personal_context_exchange_incomplete",
+            "message": "Personal Context activation epoch and continuity token must appear together.",
+        },
+    )
 
 
 def _api_profile_from_core(profile: Any) -> SyncProfileResponse:
@@ -1609,6 +1658,7 @@ def push_sync_v2_envelopes(
             envelopes=[_core_envelope_from_api(envelope) for envelope in request.envelopes],
             base_server_cursor=request.base_server_cursor,
             stop_on_conflict=request.options.stop_on_conflict,
+            personal_context_exchange=request.personal_context_exchange,
         )
     except Exception as exc:
         raise _safe_sync_v2_http_error(
@@ -1624,6 +1674,7 @@ def push_sync_v2_envelopes(
         rejected=[SyncPushRejectedEnvelope(**asdict(item)) for item in result.rejected],
         conflicts=[SyncPushConflictEnvelope(**asdict(item)) for item in result.conflicts],
         next_cursor=result.next_cursor,
+        personal_context_exchange=result.personal_context_exchange,
     )
 
 
@@ -1641,9 +1692,38 @@ def pull_sync_v2_envelopes(
     include_same_device_echoes: bool | None = Query(None),
     page_size: int | None = Query(None, ge=1, include_in_schema=False),
     include_own_changes: bool | None = Query(None, include_in_schema=False),
+    personal_context_activation_epoch: str | None = Query(None, min_length=16, max_length=256),
+    personal_context_continuity_token: str | None = Query(None, min_length=16, max_length=256),
     user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
-):
+) -> SyncPullResponse:
+    """Return one authorized envelope page with verified Personal Context progress.
+
+    Args:
+        dataset_id: Dataset owned by the authenticated user.
+        device_id: Registered device receiving the page.
+        cursor: Opaque checkpoint from the previous pull.
+        domains: Optional domain selection.
+        limit: Maximum envelopes requested in this page.
+        include_same_device_echoes: Include envelopes from the requesting device.
+        page_size: Legacy alias used when limit is absent.
+        include_own_changes: Legacy alias for same-device echoes.
+        personal_context_activation_epoch: Activation identity, paired with token.
+        personal_context_continuity_token: Continuity proof, paired with epoch.
+        user: Authenticated request principal.
+        service: User-bound Sync service supplied by dependency injection.
+
+    Returns:
+        Envelopes, next cursor, continuation status, and verified exchange metadata.
+
+    Raises:
+        HTTPException: If proof, access, cursor, or service validation fails.
+    """
+
+    personal_context_exchange = _validate_personal_context_query_proof(
+        personal_context_activation_epoch,
+        personal_context_continuity_token,
+    )
     effective_page_size = limit if limit is not None else page_size
     effective_include_own_changes = (
         include_same_device_echoes
@@ -1659,6 +1739,7 @@ def pull_sync_v2_envelopes(
             domains=domains,
             page_size=effective_page_size,
             include_own_changes=effective_include_own_changes,
+            personal_context_exchange=personal_context_exchange,
         )
     except Exception as exc:
         raise _safe_sync_v2_http_error(
@@ -1681,34 +1762,75 @@ def pull_sync_v2_envelopes(
         ],
         next_cursor=result.next_cursor,
         has_more=result.has_more,
+        personal_context_relay=result.personal_context_relay,
+        personal_context_exchange=result.personal_context_exchange,
     )
 
 
 @router.get(
     "/conflicts",
-    response_model=list[SyncConflictRecord],
+    response_model=list[SyncConflictRecord] | SyncConflictListResponse,
     summary="List Sync v2 conflicts",
 )
 def list_sync_v2_conflicts(
     dataset_id: str,
     conflict_status: ConflictStatus | None = Query(None, alias="status"),
+    domain: SyncDomain | None = Query(None),
+    device_id: str | None = Query(None, min_length=1),
+    limit: int = Query(
+        20, ge=1, le=20,
+        description="Page size; advance offset until a short or empty page is returned.",
+    ),
+    offset: int = Query(
+        0, ge=0, description="Number of matching conflicts to skip in stable creation/ID order.",
+    ),
+    personal_context_activation_epoch: str | None = Query(None, min_length=16, max_length=256),
+    personal_context_continuity_token: str | None = Query(None, min_length=16, max_length=256),
     user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
-):
+) -> list[SyncConflictRecord] | SyncConflictListResponse:
+    """Return a bounded conflict page after verifying selected Personal Context.
+
+    Returns:
+        A bare list for pages without Personal Context; otherwise conflicts,
+        dataset ID, and the verified exchange in SyncConflictListResponse.
+
+    Raises:
+        HTTPException: If access, query proof, or selected-page authorization fails.
+    """
+
+    personal_context_exchange = _validate_personal_context_query_proof(
+        personal_context_activation_epoch,
+        personal_context_continuity_token,
+    )
     try:
-        conflicts = service.list_conflicts(
+        conflicts, verified_exchange = service.list_conflicts_with_exchange(
             user_id=_sync_user_id(user),
             dataset_id=dataset_id,
             status=conflict_status,
+            domain=domain,
+            limit=limit,
+            offset=offset,
+            device_id=device_id,
+            personal_context_exchange=personal_context_exchange,
         )
     except Exception as exc:
         raise _safe_sync_v2_http_error(
             exc,
             user_id=_sync_user_id(user),
             dataset_id=dataset_id,
+            device_id=device_id,
+            domain=domain,
             conflict_status=conflict_status,
         ) from exc
-    return [_api_conflict_from_core(conflict) for conflict in conflicts]
+    api_conflicts = [_api_conflict_from_core(conflict) for conflict in conflicts]
+    if verified_exchange is None:
+        return api_conflicts
+    return SyncConflictListResponse(
+        dataset_id=dataset_id,
+        conflicts=api_conflicts,
+        personal_context_exchange=verified_exchange,
+    )
 
 
 @router.post(
@@ -1725,40 +1847,57 @@ def resolve_sync_v2_conflicts(
     resolved: list[SyncConflictResolveResolvedItem] = []
     rejected: list[SyncConflictResolveRejectedItem] = []
     server_cursors: list[int] = []
-    for resolution in request.resolutions:
-        resolution_envelope = (
-            _core_envelope_from_api(resolution.resolution_envelope)
-            if resolution.resolution_envelope is not None
-            else None
-        )
-        try:
-            conflict = service.resolve_conflict(
-                user_id=user_id,
-                dataset_id=request.dataset_id,
-                conflict_id=resolution.conflict_id,
-                action=resolution.action,
-                resolution_envelope=resolution_envelope,
-                resolved_by_device_id=request.device_id,
-                notes=None,
+    try:
+        decisions = [
+            (
+                resolution.conflict_id,
+                resolution.action,
+                (
+                    _core_envelope_from_api(resolution.resolution_envelope)
+                    if resolution.resolution_envelope is not None
+                    else None
+                ),
+                resolution.expected_local_envelope_id,
+                resolution.expected_remote_envelope_id,
+                resolution.idempotency_key,
             )
-        except Exception as exc:
-            logger.bind(
-                error_type=type(exc).__name__,
+            for resolution in request.resolutions
+        ]
+        resolution_results, rejected_indexes, verified_exchange = (
+            service.resolve_conflicts_batch(
                 user_id=user_id,
                 dataset_id=request.dataset_id,
                 device_id=request.device_id,
-                conflict_id=resolution.conflict_id,
-            ).warning("Sync v2 conflict resolution item failed")
-            rejected.append(
-                SyncConflictResolveRejectedItem(
-                    conflict_id=resolution.conflict_id,
-                    action=resolution.action,
-                    error_code="sync_conflict_resolution_failed",
-                    message="Conflict resolution could not be applied.",
-                    retryable=False,
-                )
+                resolutions=decisions,
+                personal_context_exchange=request.personal_context_exchange,
             )
-            continue
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=user_id,
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+        ) from exc
+    for index in rejected_indexes:
+        resolution = request.resolutions[index]
+        logger.bind(
+            user_id=user_id,
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+            conflict_id=resolution.conflict_id,
+        ).warning("Sync v2 conflict resolution item failed")
+        rejected.append(
+            SyncConflictResolveRejectedItem(
+                conflict_id=resolution.conflict_id,
+                action=resolution.action,
+                error_code="sync_conflict_resolution_failed",
+                message="Conflict resolution could not be applied.",
+                retryable=False,
+            )
+        )
+    for index, conflict in resolution_results:
+        resolution = request.resolutions[index]
         if conflict.server_cursor is not None:
             server_cursors.append(conflict.server_cursor)
         resolved.append(
@@ -1775,6 +1914,45 @@ def resolve_sync_v2_conflicts(
         server_cursor=max(server_cursors, default=None),
         resolved=resolved,
         rejected=rejected,
+        personal_context_exchange=verified_exchange,
+    )
+
+
+@router.post(
+    "/personal-context/activation/acknowledge",
+    response_model=SyncPersonalContextActivationAcknowledgeResponse,
+    summary="Acknowledge a Personal Context ongoing-sync activation",
+    dependencies=[Depends(check_rate_limit)],
+)
+def acknowledge_personal_context_activation(
+    request: SyncPersonalContextActivationAcknowledgeRequest,
+    service: SyncV2Service = Depends(get_sync_v2_service),
+) -> SyncPersonalContextActivationAcknowledgeResponse:
+    """Reserve the versioned activation-acknowledgement route until activation is ready."""
+
+    del request, service
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={"code": "personal_context_ongoing_sync_unavailable"},
+    )
+
+
+@router.post(
+    "/personal-context/purge",
+    response_model=SyncPersonalContextPurgeResponse,
+    summary="Purge Personal Context through Sync v2",
+    dependencies=[Depends(check_rate_limit)],
+)
+def purge_personal_context_everywhere(
+    request: SyncPersonalContextPurgeRequest,
+    service: SyncV2Service = Depends(get_sync_v2_service),
+) -> SyncPersonalContextPurgeResponse:
+    """Reserve the signed versioned purge route until the purge owner is ready."""
+
+    del request, service
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={"code": "personal_context_ongoing_sync_unavailable"},
     )
 
 

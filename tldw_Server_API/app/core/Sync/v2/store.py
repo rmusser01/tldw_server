@@ -5,12 +5,19 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from copy import copy
-from typing import Any
+from dataclasses import dataclass, field
+from time import monotonic_ns
+from typing import Any, Literal
 
-from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.DB_Management.Sync_DB import (
+    PersonalContextHistoryShredReceipt,
+    SyncDatabase,
+)
 
 from .errors import SyncStoreError
 from .models import (
+    PERSONAL_CONTEXT_SYNC_DOMAINS,
+    SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION,
     ConflictStatus,
     SyncApplyStatus,
     SyncAttachment,
@@ -58,6 +65,46 @@ from .models import (
     SyncObjectState,
     SyncRestoreManifestStats,
 )
+from .personal_context_relay import PersonalContextRecoveryBudget
+
+
+@dataclass(frozen=True, slots=True)
+class PersonalContextAuthorityScan:
+    """Filtered egress with its independent raw scan checkpoint."""
+
+    raw_scan_watermark: int
+    visible_envelopes: list[SyncEnvelope]
+    has_visible_lookahead: bool
+    source_exhausted: bool = False
+    raw_rows_scanned: int = 0
+    raw_envelopes: list[SyncEnvelope] = field(default_factory=list)
+
+
+def _personal_context_row_is_structurally_shredded(
+    envelope: SyncEnvelope,
+) -> bool:
+    """Recognize cleanup output without trusting its mutable routing marker alone."""
+
+    routing = envelope.routing_metadata
+    return bool(
+        isinstance(routing, Mapping)
+        and routing.get("retention_state") == "shredded"
+        and envelope.stable_key is None
+        and envelope.mutation_group_id is None
+        and envelope.mutation_step is None
+        and envelope.mutation_step_count is None
+        and envelope.mutation_plan_hash is None
+        and envelope.base_object_hash is None
+        and envelope.base_version is None
+        and envelope.entity_version is None
+        and not envelope.dependencies
+        and envelope.payload_ciphertext is None
+        and envelope.payload == {}
+        and envelope.payload_clear == {}
+        and envelope.payload_hash is None
+        and envelope.payload_size_bytes == 0
+        and envelope.encryption_metadata == {}
+    )
 
 
 class SyncV2Store:
@@ -80,6 +127,14 @@ class SyncV2Store:
     ) -> Iterator[SyncV2Store]:
         """Hold the durable dataset lock and one Sync transaction for projection."""
 
+        if self._connection is not None:
+            if require_predecessors:
+                self.db.require_materialization_predecessors_applied(
+                    envelopes,
+                    connection=self._connection,
+                )
+            yield self
+            return
         keys = [
             (envelope.dataset_id, envelope.domain, envelope.object_id)
             for envelope in envelopes
@@ -101,6 +156,65 @@ class SyncV2Store:
                     connection=connection,
                 )
             yield guarded
+
+    @contextmanager
+    def conflict_resolution_guard(self, dataset_id: str) -> Iterator[SyncV2Store]:
+        """Hold one dataset snapshot and projection fence for a resolution batch."""
+
+        with self.db.conflict_resolution_transaction(dataset_id) as connection:
+            guarded = copy(self)
+            guarded._connection = connection
+            yield guarded
+
+    @contextmanager
+    def conflict_resolution_savepoint(self) -> Iterator[SyncV2Store]:
+        """Contain one resolution item inside an active batch transaction."""
+
+        if self._connection is None:
+            raise SyncStoreError("Sync conflict resolution guard is required")
+        with self.db.conflict_resolution_savepoint(connection=self._connection):
+            yield self
+
+    @contextmanager
+    def personal_context_authority_guard(
+        self,
+        dataset_id: str,
+        profile_id: str,
+    ) -> Iterator[SyncV2Store]:
+        """Hold the dataset transaction before entering an authority source guard."""
+
+        with self.db.materialization_transaction(
+            [(dataset_id, "personal_context.manifest", profile_id)]
+        ) as connection:
+            guarded = copy(self)
+            guarded._connection = connection
+            yield guarded
+
+    @contextmanager
+    def personal_context_bootstrap_guard(
+        self,
+        *,
+        user_id: str,
+        streams: Sequence[tuple[SyncDomain, int]],
+    ) -> Iterator[tuple[SyncV2Store, SyncDataset, dict[tuple[SyncDomain, int], int]]]:
+        """Resolve and bind bootstrap transport state in one Sync transaction."""
+
+        with self.db.personal_context_bootstrap_transaction(
+            user_id=user_id,
+            streams=streams,
+        ) as (dataset, watermarks, connection):
+            guarded = copy(self)
+            guarded._connection = connection
+            yield guarded, dataset, watermarks
+
+    def commit_personal_context_authority(self) -> None:
+        """Commit the authority transaction while its external source guard is held."""
+
+        if self._connection is None:
+            raise SyncStoreError("Personal Context authority guard is required")
+        self.db.commit_personal_context_authority_transaction(
+            connection=self._connection
+        )
 
     @contextmanager
     def retention_guard(self, dataset_id: str, blob_id: str) -> Iterator[SyncV2Store]:
@@ -159,7 +273,11 @@ class SyncV2Store:
         )
 
     def get_device(self, user_id: str, device_id: str) -> SyncDevice | None:
-        return self.db.get_device(user_id, device_id)
+        return self.db.get_device(
+            user_id,
+            device_id,
+            connection=self._connection,
+        )
 
     def enroll_dataset(self, dataset: SyncDatasetCreate) -> SyncDataset:
         return self.db.enroll_dataset(dataset)
@@ -187,6 +305,28 @@ class SyncV2Store:
             integrity_key_id=integrity_key_id,
             purge_generation=purge_generation,
             link_state=link_state,
+            connection=self._connection,
+        )
+
+    def personal_context_authority_dataset_for_user(
+        self,
+        user_id: str,
+    ) -> SyncDataset | None:
+        """Return the user's sole active Personal Context authority dataset."""
+
+        return self.db.personal_context_authority_dataset(user_id=user_id)
+
+    def personal_context_dataset_for_profile(
+        self,
+        *,
+        user_id: str,
+        profile_id: str,
+    ) -> SyncDataset | None:
+        """Return one exact active profile binding or fail closed on ambiguity."""
+
+        return self.db.personal_context_authority_dataset(
+            user_id=user_id,
+            profile_id=profile_id,
         )
 
     def ensure_personal_context_transport_domains(
@@ -267,10 +407,19 @@ class SyncV2Store:
             profile_id=profile_id,
             integrity_key_id=integrity_key_id,
             purge_generation=purge_generation,
+            connection=self._connection,
         )
 
-    def list_datasets_for_user(self, user_id: str) -> list[SyncDataset]:
-        return self.db.list_datasets_for_user(user_id)
+    def list_datasets_for_user(
+        self,
+        user_id: str,
+        *,
+        include_archived: bool = False,
+    ) -> list[SyncDataset]:
+        return self.db.list_datasets_for_user(
+            user_id,
+            include_archived=include_archived,
+        )
 
     def list_devices_for_user(
         self,
@@ -892,6 +1041,250 @@ class SyncV2Store:
             connection=self._connection,
         )
 
+    def scan_personal_context_authority(
+        self,
+        dataset_id: str,
+        *,
+        after_server_cursor: int,
+        limit: int,
+        row_budget: int = 100,
+        wall_time_ms: int = 100,
+        deadline_ns: int | None = None,
+        budget: PersonalContextRecoveryBudget | None = None,
+        domains: Sequence[SyncDomain] | None = None,
+        adapter_versions: Sequence[int] | None = None,
+        exclude_device_id: str | None = None,
+        profile_id: str | None = None,
+        integrity_key_id: str | None = None,
+        purge_generation: int | None = None,
+        authority_verifier: Callable[[SyncEnvelope], bool] | None = None,
+    ) -> PersonalContextAuthorityScan:
+        """Scan a mixed page without exposing or advancing past unsafe PC rows."""
+
+        if budget is None:
+            if row_budget < 1 or wall_time_ms < 1:
+                raise ValueError("Personal Context scan limits must be positive")
+            budget = PersonalContextRecoveryBudget(
+                deadline_ns=deadline_ns
+                or monotonic_ns() + wall_time_ms * 1_000_000,
+                remaining_rows=row_budget,
+                clock_ns=monotonic_ns,
+            )
+        raw_cursor = after_server_cursor
+        starting_rows = budget.remaining_rows
+        visible: list[SyncEnvelope] = []
+        safe_raw: list[SyncEnvelope] = []
+        source_exhausted = False
+        selected_domains = tuple(domains or PERSONAL_CONTEXT_SYNC_DOMAINS)
+        conflict = self.get_unresolved_materialization_conflict(dataset_id)
+        conflict_cursor = (
+            conflict.server_sequence
+            if conflict is not None
+            and conflict.conflict_type
+            != SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION
+            else None
+        )
+        while budget.can_inspect() and len(visible) <= limit:
+            chunk_limit = min(budget.remaining_rows, max(1, limit + 1))
+            raw = self.list_envelopes_after(
+                dataset_id,
+                raw_cursor,
+                limit=chunk_limit,
+                domains=selected_domains,
+                adapter_versions=adapter_versions,
+                status="accepted",
+                exclude_device_id=None,
+            )
+            if not raw:
+                source_exhausted = True
+                break
+            barrier = False
+            bounded = False
+            for envelope in raw:
+                if not budget.consume():
+                    bounded = True
+                    break
+                if (
+                    conflict_cursor is not None
+                    and envelope.server_sequence >= conflict_cursor
+                ):
+                    barrier = True
+                    break
+                if envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+                    if not budget.deadline_open():
+                        bounded = True
+                        break
+                    classification = self.classify_personal_context_recovery_row(
+                        envelope,
+                        profile_id=profile_id,
+                        integrity_key_id=integrity_key_id,
+                        purge_generation=purge_generation,
+                        authority_verifier=authority_verifier,
+                        budget=budget,
+                    )
+                    if not budget.deadline_open():
+                        bounded = True
+                        break
+                    if classification == "barrier":
+                        barrier = True
+                        break
+                raw_cursor = envelope.server_cursor or raw_cursor
+                safe_raw.append(envelope)
+                if envelope.domain not in PERSONAL_CONTEXT_SYNC_DOMAINS:
+                    if (
+                        (
+                            exclude_device_id is None
+                            or envelope.device_id != exclude_device_id
+                        )
+                        and envelope.apply_status not in {"conflict", "superseded"}
+                    ):
+                        visible.append(envelope)
+                elif classification == "authority":
+                    visible.append(envelope)
+            if barrier or bounded:
+                break
+            if len(raw) < chunk_limit:
+                source_exhausted = True
+                break
+        return PersonalContextAuthorityScan(
+            raw_scan_watermark=raw_cursor,
+            visible_envelopes=visible[:limit],
+            has_visible_lookahead=len(visible) > limit,
+            source_exhausted=source_exhausted,
+            raw_rows_scanned=starting_rows - budget.remaining_rows,
+            raw_envelopes=safe_raw,
+        )
+
+    def classify_personal_context_recovery_row(
+        self,
+        envelope: SyncEnvelope,
+        *,
+        profile_id: str | None,
+        integrity_key_id: str | None,
+        purge_generation: int | None,
+        authority_verifier: Callable[[SyncEnvelope], bool] | None = None,
+        budget: PersonalContextRecoveryBudget | None = None,
+    ) -> Literal["hidden", "authority", "barrier"]:
+        """Classify a raw Personal Context row using durable provenance facts."""
+
+        if _personal_context_row_is_structurally_shredded(envelope):
+            return "hidden"
+        if self._personal_context_ingress_is_attested(envelope, budget=budget):
+            return "hidden"
+
+        routing = envelope.routing_metadata
+        routed_generation = (
+            routing.get("purge_generation")
+            if isinstance(routing, Mapping)
+            else None
+        )
+        current_route = bool(
+            isinstance(routing, Mapping)
+            and isinstance(profile_id, str)
+            and bool(profile_id)
+            and routing.get("profile_id") == profile_id
+            and isinstance(integrity_key_id, str)
+            and bool(integrity_key_id)
+            and routing.get("integrity_key_id") == integrity_key_id
+            and isinstance(routed_generation, int)
+            and not isinstance(routed_generation, bool)
+            and isinstance(purge_generation, int)
+            and not isinstance(purge_generation, bool)
+            and routed_generation == purge_generation
+        )
+        authority = envelope.authority
+        if (
+            current_route
+            and authority is not None
+            and authority.role == "home_authority"
+            and envelope.apply_status == "applied"
+            and authority_verifier is not None
+            and authority_verifier(envelope)
+        ):
+            return "authority"
+        return "barrier"
+
+    def _personal_context_ingress_is_attested(
+        self,
+        envelope: SyncEnvelope,
+        *,
+        budget: PersonalContextRecoveryBudget | None = None,
+    ) -> bool:
+        cursor = envelope.server_cursor
+        if cursor is None:
+            return False
+        if budget is not None and not budget.can_inspect():
+            return False
+        receipt = self.get_personal_context_ingress_receipt(cursor)
+        if budget is not None:
+            if receipt is not None and not budget.consume_returned():
+                return False
+            if not budget.deadline_open():
+                return False
+        authority = envelope.authority
+        return bool(
+            isinstance(receipt, Mapping)
+            and envelope.status == "accepted"
+            and envelope.apply_status == "applied"
+            and authority is not None
+            and authority.role == "client_ingress"
+            and receipt.get("server_sequence") == cursor
+            and receipt.get("dataset_id") == envelope.dataset_id
+            and receipt.get("device_id") == envelope.device_id
+            and receipt.get("device_id") != "server-origin"
+            and receipt.get("client_envelope_id") == envelope.client_envelope_id
+            and receipt.get("wire_entity_version")
+            == str(envelope.entity_version)
+        )
+
+    def mark_personal_context_ingress_applied(
+        self,
+        *,
+        server_cursor: int,
+        receipt: Any,
+    ) -> SyncEnvelope:
+        """Terminalize only the exact ingress whose canonical receipt was verified."""
+
+        envelope = self.get_envelope_by_server_cursor(server_cursor)
+        if (
+            envelope is None
+            or envelope.client_envelope_id != receipt.client_envelope_id
+            or not receipt.receipt_id.strip()
+            or envelope.authority is None
+            or envelope.authority.role != "client_ingress"
+        ):
+            raise SyncStoreError("personal_context_ingress_receipt_mismatch")
+        return self.db.mark_personal_context_ingress_applied(
+            server_cursor=server_cursor,
+            receipt={
+                "dataset_id": receipt.dataset_id,
+                "device_id": receipt.device_id,
+                "client_envelope_id": receipt.client_envelope_id,
+                "canonical_payload_digest": receipt.canonical_payload_digest,
+                "purge_generation": receipt.purge_generation,
+                "resulting_object_id": receipt.resulting_object_id,
+                "resulting_version_id": receipt.resulting_version_id,
+                "manifest_revision": receipt.manifest_revision,
+                "manifest_version_id": receipt.manifest_version_id,
+                "publication_batch_id": receipt.publication_batch_id,
+                "profile_publication_sequence": receipt.profile_publication_sequence,
+                "receipt_id": receipt.receipt_id,
+                "wire_entity_version": receipt.wire_entity_version,
+            },
+            connection=self._connection,
+        )
+
+    def get_personal_context_ingress_receipt(
+        self,
+        server_cursor: int,
+    ) -> Mapping[str, Any] | None:
+        """Read the canonical apply receipt bound to one exact ingress cursor."""
+
+        return self.db.get_personal_context_ingress_receipt(
+            server_cursor,
+            connection=self._connection,
+        )
+
     def summarize_domain_envelopes(
         self,
         dataset_id: str,
@@ -980,6 +1373,19 @@ class SyncV2Store:
             connection=self._connection,
         )
 
+    def get_envelope_by_client_id(
+        self,
+        dataset_id: str,
+        client_envelope_id: str,
+    ) -> SyncEnvelope | None:
+        """Resolve a deterministic envelope ID before reconstructing its original CAS base."""
+
+        return self.db.get_envelope_by_client_id(
+            dataset_id,
+            client_envelope_id,
+            connection=self._connection,
+        )
+
     def get_object_state(
         self,
         dataset_id: str,
@@ -1049,6 +1455,54 @@ class SyncV2Store:
             apply_status=apply_status,
             apply_error_code=apply_error_code,
             apply_error_message=apply_error_message,
+            connection=self._connection,
+        )
+
+    def discard_pending_personal_context_authority(
+        self,
+        **identity: Any,
+    ) -> Literal["removed", "absent", "applied", "mismatch"]:
+        """Classify or remove one exact invisible authority row."""
+
+        return self.db.discard_pending_personal_context_authority(
+            **identity,
+            connection=self._connection,
+        )
+
+    def _shred_authorized_personal_context_history(
+        self,
+        claim: object,
+    ) -> PersonalContextHistoryShredReceipt:
+        """Scrub history only through one target-bound verified claim."""
+
+        from tldw_Server_API.app.core.DB_Management.Personal_Context_Repository import (
+            _validate_direct_purge_cleanup_claim,
+        )
+
+        if self._connection is not None:
+            raise SyncStoreError("Personal Context cleanup owns its Sync transaction")
+        try:
+            _validate_direct_purge_cleanup_claim(
+                claim,
+                expected_store=self,
+                expected_database=self.db,
+            )
+        except PermissionError as exc:
+            raise SyncStoreError("Personal Context cleanup intent is unauthorized") from exc
+        return self.db._shred_authorized_personal_context_profile_history(claim)
+
+    def mark_personal_context_authority_applied(
+        self,
+        server_cursor: int,
+        **identity: Any,
+    ) -> SyncEnvelope:
+        """Apply one verified authority row inside its existing Sync guard."""
+
+        if self._connection is None:
+            raise SyncStoreError("Personal Context authority finalize requires a guard")
+        return self.db.mark_personal_context_authority_applied(
+            server_cursor,
+            **identity,
             connection=self._connection,
         )
 
@@ -1131,11 +1585,31 @@ class SyncV2Store:
         dataset_id: str,
         *,
         status: ConflictStatus | None = None,
+        domain: SyncDomain | None = None,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[SyncConflict]:
-        return self.db.list_conflicts(dataset_id, status=status)
+        return self.db.list_conflicts(
+            dataset_id,
+            status=status,
+            domain=domain,
+            limit=limit,
+            offset=offset,
+        )
 
-    def get_conflict(self, conflict_id: str) -> SyncConflict | None:
-        return self.db.get_conflict(conflict_id, connection=self._connection)
+    def get_conflict(
+        self,
+        conflict_id: str,
+        *,
+        dataset_id: str | None = None,
+        for_update: bool = False,
+    ) -> SyncConflict | None:
+        return self.db.get_conflict(
+            conflict_id,
+            dataset_id=dataset_id,
+            connection=self._connection,
+            for_update=for_update,
+        )
 
     def get_unresolved_conflict_for_envelope(
         self,

@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from threading import Event
 from typing import Any, cast
@@ -27,6 +28,9 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import (
     DatabaseBackendFactory,
+)
+from tldw_Server_API.app.core.DB_Management.backends.postgresql_backend import (
+    PostgreSQLBackend,
 )
 from tldw_Server_API.app.core.DB_Management.Sync_DB import (
     SYNC_POSTGRES_SCHEMA,
@@ -294,6 +298,192 @@ class _PostgresPersonalContextReceiptBackend:
         if normalized.startswith("SELECT * FROM sync_datasets"):
             return QueryResult(rows=[dict(self.dataset_row)], rowcount=1)
         return QueryResult(rows=[], rowcount=1)
+
+
+class _CoercibleDeleted:
+    def __bool__(self) -> bool:
+        return False
+
+    def __int__(self) -> int:
+        return 0
+
+
+class _PostgresPersonalContextAuthorityFinalizeBackend:
+    config = DatabaseConfig(backend_type=BackendType.POSTGRESQL)
+
+    def __init__(self, *, deleted: object, seeded: bool = True) -> None:
+        self.calls: list[tuple[str, tuple[Any, ...] | None, Any]] = []
+        self.boolean_bindings: list[tuple[str, int, object]] = []
+        self.connection = object()
+        self.dataset_row = {
+            "dataset_id": "dataset-1",
+            "owner_user_id": "user-1",
+            "scope_type": "personal",
+            "encryption_policy": "server_trusted_v1",
+            "domain_set_json": json.dumps(["personal_context.record"]),
+            "metadata_json": "{}",
+            "workspace_id": None,
+            "created_at": "2026-05-10T00:00:00+00:00",
+            "updated_at": "2026-05-10T00:00:00+00:00",
+            "archived_at": None,
+        }
+        authority_row = {
+            "server_sequence": 7,
+            "dataset_id": "dataset-1",
+            "client_envelope_id": "authority-envelope-1",
+            "device_id": "server-origin",
+            "domain": "personal_context.record",
+            "entity_id": "record-1",
+            "operation": "tombstone" if deleted is True else "upsert",
+            "object_revision": 2,
+            "payload_hash": "hmac-sha256-v1:" + "a" * 64,
+            "payload_json": "{}",
+            "payload_clear_json": "{}",
+            "dependency_json": "[]",
+            "encryption_metadata_json": "{}",
+            "routing_metadata_json": json.dumps(
+                {
+                    "profile_id": "profile-1",
+                    "purge_generation": 0,
+                    "personal_context_authority": {
+                        "role": "home_authority",
+                        "publication_batch_id": "batch-1",
+                        "profile_publication_sequence": 3,
+                        "batch_ordinal": 0,
+                        "batch_size": 2,
+                    },
+                }
+            ),
+            "schema_version": 1,
+            "adapter_version": 1,
+            "deleted": deleted,
+            "status": "accepted",
+            "apply_status": "pending",
+        }
+        self.row = authority_row if seeded else None
+        self.object_state: dict[str, Any] | None = None
+        self.fail_projection_once = False
+        self._transaction_depth = 0
+
+    @contextmanager
+    def transaction(self, connection=None):
+        outermost = self._transaction_depth == 0
+        row_before = None if self.row is None else dict(self.row)
+        state_before = None if self.object_state is None else dict(self.object_state)
+        self._transaction_depth += 1
+        try:
+            yield connection or self.connection
+        except BaseException:
+            if outermost:
+                self.row = row_before
+                self.object_state = state_before
+            raise
+        finally:
+            self._transaction_depth -= 1
+
+    def get_last_insert_id(self, connection=None) -> None:
+        return None
+
+    def _bind_insert(
+        self,
+        table: str,
+        statement: str,
+        params: tuple[Any, ...],
+    ) -> dict[str, Any]:
+        columns = [
+            column.strip()
+            for column in statement.split("(", 1)[1].split(")", 1)[0].split(",")
+        ]
+        values = dict(zip(columns, params, strict=True))
+        deleted_index = columns.index("deleted")
+        deleted = values["deleted"]
+        self.boolean_bindings.append((table, deleted_index, deleted))
+        if type(deleted) is not bool:
+            raise BackendDatabaseError(
+                f"PostgreSQL BOOLEAN binding {table}.deleted requires bool; "
+                f"got {type(deleted).__name__}"
+            )
+        return values
+
+    def execute(
+        self,
+        statement: str,
+        params: tuple[Any, ...] | None = None,
+        connection: Any = None,
+    ) -> QueryResult:
+        prepared_statement, prepared_params = PostgreSQLBackend._prepare_query(
+            cast(Any, self), statement, params
+        )
+        assert prepared_params is None or isinstance(prepared_params, tuple)
+        normalized = " ".join(prepared_statement.split())
+        self.calls.append((normalized, prepared_params, connection))
+        if normalized.startswith("SELECT * FROM sync_datasets"):
+            return QueryResult(rows=[dict(self.dataset_row)], rowcount=1)
+        if normalized.startswith("SELECT conflict.*") or normalized.startswith(
+            "SELECT envelope.*"
+        ):
+            return QueryResult(rows=[], rowcount=0)
+        if normalized.startswith("INSERT INTO sync_envelopes"):
+            assert prepared_params is not None
+            self.row = {
+                **self._bind_insert(
+                    "sync_envelopes", prepared_statement, prepared_params
+                ),
+                "server_sequence": 7,
+            }
+            return QueryResult(rows=[], rowcount=1)
+        if normalized.startswith("SELECT * FROM sync_envelopes"):
+            rows = [] if self.row is None else [dict(self.row)]
+            return QueryResult(rows=rows, rowcount=len(rows))
+        if normalized.startswith("SELECT latest_server_cursor FROM sync_current_heads"):
+            rows = [] if self.row is None else [{"latest_server_cursor": 7}]
+            return QueryResult(rows=rows, rowcount=len(rows))
+        if normalized.startswith("UPDATE sync_envelopes"):
+            assert self.row is not None
+            self.row["apply_status"] = "applied"
+            self.row["applied_at"] = (
+                None if prepared_params is None else prepared_params[0]
+            )
+            return QueryResult(rows=[], rowcount=1)
+        if normalized.startswith("INSERT INTO sync_object_state"):
+            assert prepared_params is not None
+            values = self._bind_insert(
+                "sync_object_state", prepared_statement, prepared_params
+            )
+            if self.fail_projection_once:
+                self.fail_projection_once = False
+                raise BackendDatabaseError("injected projection bind failure")
+            self.object_state = values
+            return QueryResult(rows=[], rowcount=1)
+        if normalized.startswith("SELECT * FROM sync_object_state"):
+            rows = [] if self.object_state is None else [dict(self.object_state)]
+            return QueryResult(rows=rows, rowcount=len(rows))
+        return QueryResult(rows=[], rowcount=0)
+
+
+def _personal_context_authority_envelope(*, deleted: bool) -> SyncEnvelopeCreate:
+    return _envelope(
+        client_envelope_id="authority-envelope-1",
+        device_id="server-origin",
+        domain="personal_context.record",
+        object_id="record-1",
+        operation="tombstone" if deleted else "upsert",
+        object_revision=1,
+        payload_hash="hmac-sha256-v1:" + "a" * 64,
+        payload={},
+        deleted=deleted,
+        routing_metadata={
+            "profile_id": "profile-1",
+            "purge_generation": 0,
+            "personal_context_authority": {
+                "role": "home_authority",
+                "publication_batch_id": "batch-1",
+                "profile_publication_sequence": 3,
+                "batch_ordinal": 0,
+                "batch_size": 2,
+            },
+        },
+    )
 
 
 class _PostgresPersonalContextBindingBackend:
@@ -2874,6 +3064,192 @@ def test_postgres_personal_context_receipt_locks_binding_before_upsert() -> None
     assert statements[lock_index].endswith("FOR UPDATE")
     assert lock_index < upsert_index
     assert len({connection for _statement, _params, connection in backend.calls}) == 1
+
+
+@pytest.mark.parametrize("deleted", [False, True], ids=["live", "tombstone"])
+def test_postgres_personal_context_authority_stage_binds_native_deleted_bool(
+    deleted: bool,
+) -> None:
+    """The actual staged-envelope INSERT binds PostgreSQL BOOLEAN as bool."""
+
+    backend = _PostgresPersonalContextAuthorityFinalizeBackend(
+        deleted=deleted,
+        seeded=False,
+    )
+    db = SyncDatabase.__new__(SyncDatabase)
+    db.backend = cast(Any, backend)
+
+    stored = db._insert_envelope_in_transaction(
+        _personal_context_authority_envelope(deleted=deleted),
+        connection=backend.connection,
+    )
+
+    assert stored.deleted is deleted
+    assert backend.boolean_bindings == [("sync_envelopes", 32, deleted)]
+    stage_statement = next(
+        statement
+        for statement, _params, _connection in backend.calls
+        if statement.startswith("INSERT INTO sync_envelopes")
+    )
+    assert "%s" in stage_statement
+    assert "?" not in stage_statement
+
+
+@pytest.mark.parametrize("deleted", [False, True], ids=["live", "tombstone"])
+def test_postgres_personal_context_authority_finalize_binds_bool_and_retries_rollback(
+    deleted: bool,
+) -> None:
+    """Projection rollback and retry retain native PostgreSQL BOOLEAN binding."""
+
+    backend = _PostgresPersonalContextAuthorityFinalizeBackend(deleted=deleted)
+    backend.fail_projection_once = True
+    db = SyncDatabase.__new__(SyncDatabase)
+    db.backend = cast(Any, backend)
+    arguments = {
+        "server_cursor": 7,
+        "dataset_id": "dataset-1",
+        "client_envelope_id": "authority-envelope-1",
+        "profile_id": "profile-1",
+        "purge_generation": 0,
+        "publication_batch_id": "batch-1",
+        "profile_publication_sequence": 3,
+        "batch_ordinal": 0,
+        "batch_size": 2,
+        "connection": backend.connection,
+    }
+
+    with pytest.raises(BackendDatabaseError, match="injected projection bind failure"):
+        db.mark_personal_context_authority_applied(**arguments)
+
+    assert backend.row is not None
+    assert backend.row["apply_status"] == "pending"
+    assert backend.object_state is None
+
+    stored = db.mark_personal_context_authority_applied(**arguments)
+    retried = db.mark_personal_context_authority_applied(**arguments)
+
+    assert stored.apply_status == "applied"
+    assert stored.deleted is deleted
+    assert retried.apply_status == "applied"
+    projection_bindings = [
+        binding
+        for binding in backend.boolean_bindings
+        if binding[0] == "sync_object_state"
+    ]
+    assert projection_bindings == [
+        ("sync_object_state", 6, deleted),
+        ("sync_object_state", 6, deleted),
+    ]
+    assert all(type(value) is bool for _table, _index, value in projection_bindings)
+
+
+@pytest.mark.parametrize(
+    ("raw_deleted", "expected"),
+    [(False, False), (True, True), (0, False), (1, True)],
+    ids=["postgres-false", "postgres-true", "sqlite-zero", "sqlite-one"],
+)
+def test_personal_context_authority_finalize_accepts_native_backend_deleted_values(
+    raw_deleted: object,
+    expected: bool,
+) -> None:
+    """Finalization normalizes exact PostgreSQL booleans and SQLite integers."""
+
+    backend = _PostgresPersonalContextAuthorityFinalizeBackend(deleted=raw_deleted)
+    db = SyncDatabase.__new__(SyncDatabase)
+    db.backend = cast(Any, backend)
+    projected = []
+
+    def capture_projection(state, *, connection) -> None:
+        projected.append((state, connection))
+
+    db.upsert_object_state = capture_projection
+    arguments = {
+        "server_cursor": 7,
+        "dataset_id": "dataset-1",
+        "client_envelope_id": "authority-envelope-1",
+        "profile_id": "profile-1",
+        "purge_generation": 0,
+        "publication_batch_id": "batch-1",
+        "profile_publication_sequence": 3,
+        "batch_ordinal": 0,
+        "batch_size": 2,
+        "connection": object(),
+    }
+
+    stored = db.mark_personal_context_authority_applied(**arguments)
+    retried = db.mark_personal_context_authority_applied(**arguments)
+
+    assert stored.deleted is expected
+    assert retried.apply_status == "applied"
+    assert len(projected) == 1
+    assert projected[0][0].deleted is expected
+    assert sum(
+        statement.startswith("UPDATE sync_envelopes")
+        for statement, _params, _connection in backend.calls
+    ) == 1
+
+
+@pytest.mark.parametrize(
+    "raw_deleted",
+    ["0", 0.0, Decimal(0), None, _CoercibleDeleted()],
+    ids=["string", "float", "decimal", "none", "coercible"],
+)
+def test_personal_context_authority_finalize_rejects_coercible_deleted_values(
+    raw_deleted: object,
+) -> None:
+    """Finalization does not coerce malformed backend deletion values."""
+
+    backend = _PostgresPersonalContextAuthorityFinalizeBackend(deleted=raw_deleted)
+    db = SyncDatabase.__new__(SyncDatabase)
+    db.backend = cast(Any, backend)
+    projected = []
+    db.upsert_object_state = lambda state, *, connection: projected.append(
+        (state, connection)
+    )
+
+    with pytest.raises(SyncStoreError, match="authority_finalize_raced"):
+        db.mark_personal_context_authority_applied(
+            7,
+            dataset_id="dataset-1",
+            client_envelope_id="authority-envelope-1",
+            profile_id="profile-1",
+            purge_generation=0,
+            publication_batch_id="batch-1",
+            profile_publication_sequence=3,
+            batch_ordinal=0,
+            batch_size=2,
+            connection=object(),
+        )
+
+    assert projected == []
+    assert backend.row["apply_status"] == "pending"
+
+
+def test_personal_context_authority_finalize_rejects_numpy_deleted_values() -> None:
+    """NumPy scalar lookalikes are not accepted as backend-native deletion values."""
+
+    numpy = pytest.importorskip("numpy")
+    for raw_deleted in (numpy.bool_(False), numpy.int64(0)):
+        backend = _PostgresPersonalContextAuthorityFinalizeBackend(deleted=raw_deleted)
+        db = SyncDatabase.__new__(SyncDatabase)
+        db.backend = cast(Any, backend)
+        db.upsert_object_state = lambda state, *, connection: pytest.fail(
+            "malformed deleted value reached projection"
+        )
+
+        with pytest.raises(SyncStoreError, match="authority_finalize_raced"):
+            db.mark_personal_context_authority_applied(
+                7,
+                dataset_id="dataset-1",
+                client_envelope_id="authority-envelope-1",
+                profile_id="profile-1",
+                purge_generation=0,
+                publication_batch_id="batch-1",
+                profile_publication_sequence=3,
+                batch_ordinal=0,
+                batch_size=2,
+                connection=object(),
+            )
 
 
 def test_postgres_personal_context_transport_snapshot_locks_before_watermark_read() -> None:

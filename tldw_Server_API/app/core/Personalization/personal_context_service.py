@@ -9,8 +9,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from loguru import logger
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 from tldw_profile_core import (
     ActorType,
@@ -31,7 +32,12 @@ from tldw_profile_core import (
     SyncMode,
 )
 
+from tldw_Server_API.app.core.DB_Management.Personal_Context_Repository import (
+    _DIRECT_CONFIRMED_FULL_PROFILE_PURGE,
+    DirectPurgeCleanupIntent,
+)
 from tldw_Server_API.app.core.exceptions import (
+    PersonalContextError,
     ProfileConflictError,
     ProfileKeyCollisionError,
     ProfileNotFoundError,
@@ -42,6 +48,10 @@ from tldw_Server_API.app.core.Personalization.personal_context_export import (
     RECOVERY_EXPORT_CONFIRMATION,
     encrypt_recovery_export,
     require_confirmation,
+)
+from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+    CanonicalApplyReceipt,
+    IngressIdentity,
 )
 from tldw_Server_API.app.core.Personalization.personal_context_repository import (
     PersonalContextRepository,
@@ -64,6 +74,9 @@ from tldw_Server_API.app.core.Personalization.personal_context_runtime_policy im
 _PayloadAdapter = TypeAdapter(ProfilePayload)
 _ControlsAdapter = TypeAdapter(ProfileControls)
 _SemanticKeyAdapter = TypeAdapter(SemanticKey)
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
 
 
 class ProfileOperationalState(StrEnum):
@@ -127,11 +140,112 @@ class PersonalContextService:
         clock: Callable[[], datetime] | None = None,
         id_factory: Callable[[str], str] | None = None,
         workspace_access: Callable[[str], bool] | None = None,
+        after_commit_relay: Callable[[str], None] | None = None,
+        after_commit_purge_cleanup: Callable[[DirectPurgeCleanupIntent], None]
+        | None = None,
     ) -> None:
         self._repository = repository
         self._clock = clock or (lambda: datetime.now(UTC))
         self._id_factory = id_factory or (lambda label: f"{label}-{uuid.uuid4()}")
         self._workspace_access = workspace_access or (lambda _workspace_id: False)
+        self._after_commit_relay = after_commit_relay
+        self._after_commit_purge_cleanup = after_commit_purge_cleanup
+
+    def set_after_commit_relay(self, callback: Callable[[str], None] | None) -> None:
+        """Install the best-effort relay hook after authenticated wiring exists."""
+
+        self._after_commit_relay = callback
+
+    def set_after_commit_purge_cleanup(
+        self,
+        callback: Callable[[DirectPurgeCleanupIntent], None] | None,
+    ) -> None:
+        """Install the direct-purge-only cleanup worker after authenticated wiring."""
+
+        self._after_commit_purge_cleanup = callback
+
+    def _run_direct_purge_cleanup(
+        self,
+        *,
+        profile_id: str | None = None,
+        purge_generation: int | None = None,
+    ) -> str:
+        """Claim and execute only a previously minted direct-purge cleanup intent."""
+
+        if self._after_commit_purge_cleanup is None:
+            return "none"
+        owner_token = self._id_factory("purge-cleanup-owner")
+        intent = self._repository.claim_direct_purge_cleanup(
+            owner_token=owner_token,
+            profile_id=profile_id,
+            purge_generation=purge_generation,
+        )
+        if intent is None:
+            return "none"
+        try:
+            self._after_commit_purge_cleanup(intent)
+            if not self._repository.checkpoint_direct_purge_storage():
+                raise PersonalContextError("Personal Context retention checkpoint is incomplete")
+            self._repository.complete_direct_purge_cleanup(intent)
+        except Exception:  # noqa: BLE001 - cleanup debt remains durable and retryable.
+            try:
+                self._repository.release_direct_purge_cleanup(intent)
+            except Exception:  # noqa: BLE001 - an expired owner fence remains recoverable.
+                return "failed"
+            return "failed"
+        return "complete"
+
+    def cleanup_sync_history(
+        self,
+        intent: DirectPurgeCleanupIntent,
+        *,
+        user_id: str,
+        sync: SyncV2Service,
+    ) -> None:
+        """Verify and scrub every active or archived dataset bound to a purged profile.
+
+        Args:
+            intent: Live direct-purge intent claimed from this service's repository.
+            user_id: Authenticated owner whose Sync datasets may be inspected.
+            sync: Injected Sync service providing dataset storage and shredding.
+
+        Raises:
+            PermissionError: If the repository cannot authenticate the live intent.
+            SyncStoreError: If the verified capability cannot authorize Sync cleanup.
+            DatabaseError: If storage cleanup fails; its durable debt stays retryable.
+        """
+
+        for dataset in sync.store.list_datasets_for_user(user_id, include_archived=True):
+            state = dataset.metadata.get("personal_context")
+            if not isinstance(state, dict) or state.get("profile_id") != getattr(
+                intent, "profile_id", None
+            ):
+                continue
+            claim = self._repository.verify_direct_purge_cleanup_claim(
+                intent,
+                user_id=user_id,
+                dataset_id=dataset.dataset_id,
+                store=sync.store,
+                database=sync.store.db,
+            )
+            sync.shred_authorized_personal_context_history(claim)
+
+    def _relay_after_commit(self, profile_id: str) -> None:
+        """Schedule recovery only after the canonical transaction committed."""
+
+        if self._after_commit_relay is None:
+            return
+        try:
+            self._after_commit_relay(profile_id)
+        except Exception:  # noqa: BLE001 - post-commit delivery must be isolated.
+            # Relay debt is durable; mutation success must never depend on egress.
+            try:
+                logger.opt(exception=False).warning(
+                    "personal_context_after_commit_relay_failed: durable recovery pending"
+                )
+            except Exception:  # noqa: BLE001 - a failing log sink cannot undo a commit.
+                return
+            return
 
     def _now(self) -> datetime:
         value = self._clock()
@@ -414,6 +528,7 @@ class PersonalContextService:
                 raise ProfileConflictError(
                     "Personal context profile already exists"
                 ) from exc
+            self._relay_after_commit(planned.manifest.profile_id)
             return planned.manifest
 
         now = self._now()
@@ -445,6 +560,7 @@ class PersonalContextService:
             )
         except ProfileAlreadyExistsError as exc:
             raise ProfileConflictError("Personal context profile already exists") from exc
+        self._relay_after_commit(manifest.profile_id)
         return manifest
 
     def apply_sync_object(
@@ -624,6 +740,28 @@ class PersonalContextService:
             raise ProfileConflictError("Personal context changed concurrently") from exc
         raise ValueError("Unsupported Personal Context Sync domain")
 
+    def apply_sync_ingress(
+        self,
+        *,
+        identity: IngressIdentity,
+        domain: str,
+        value: ProfileManifest | ProfileScope | ProfileRecord | ProfileProposal | Mapping[str, Any],
+        base_object_hash: str | None,
+    ) -> CanonicalApplyReceipt:
+        """Materialize one authenticated client envelope with replay-safe receipt."""
+
+        try:
+            receipt = self._repository.apply_ingress_and_publish(
+                identity=identity,
+                domain=domain,
+                value=value,
+                base_object_hash=base_object_hash,
+            )
+            self._relay_after_commit(self._profile_id())
+            return receipt
+        except (ConcurrentProfileUpdateError, ProfileSemanticKeyCollisionError) as exc:
+            raise ProfileConflictError("Personal context changed concurrently") from exc
+
     def get_manifest(self) -> ProfileManifest:
         """Return the authenticated user's manifest."""
 
@@ -662,6 +800,7 @@ class PersonalContextService:
             )
         except ConcurrentProfileUpdateError as exc:
             raise ProfileConflictError("Personal context profile changed") from exc
+        self._relay_after_commit(manifest.profile_id)
         return scope
 
     def workspace_id_for_scope(self, scope_id: str) -> str:
@@ -775,6 +914,7 @@ class PersonalContextService:
             raise ProfileKeyCollisionError("Active semantic key already exists") from exc
         except ConcurrentProfileUpdateError as exc:
             raise ProfileConflictError("Personal context profile changed") from exc
+        self._relay_after_commit(manifest.profile_id)
         return record
 
     def create_manual_record(self, **values: Any) -> ProfileRecord:
@@ -898,6 +1038,7 @@ class PersonalContextService:
             raise ProfileKeyCollisionError("Active semantic key already exists") from exc
         except ConcurrentProfileUpdateError as exc:
             raise ProfileConflictError("Personal context record changed") from exc
+        self._relay_after_commit(manifest.profile_id)
         return replacement
 
     def update_record(
@@ -992,6 +1133,7 @@ class PersonalContextService:
             )
         except ConcurrentProfileUpdateError as exc:
             raise ProfileConflictError("Personal context proposal changed") from exc
+        self._relay_after_commit(profile_id)
         return proposal
 
     def _current_proposals(self, profile_id: str) -> tuple[ProfileProposal, ...]:
@@ -1244,9 +1386,26 @@ class PersonalContextService:
             raise ValueError("purge mode must be everywhere")
         if confirmation != "DELETE EVERYWHERE":
             raise ValueError("confirmation must be exactly 'DELETE EVERYWHERE'")
-        manifest = self._writable_manifest()
+        manifest = self._manifest()
         if manifest.purge_generation != expected_purge_generation:
+            existing_intent = self._repository.direct_purge_cleanup(
+                manifest.profile_id,
+                purge_generation=manifest.purge_generation,
+            )
+            if (
+                manifest.purge_generation == expected_purge_generation + 1
+                and existing_intent is not None
+                and existing_intent.old_generation_through == expected_purge_generation
+            ):
+                self._run_direct_purge_cleanup(
+                    profile_id=manifest.profile_id,
+                    purge_generation=manifest.purge_generation,
+                )
+                self._relay_after_commit(manifest.profile_id)
+                return manifest
             raise ProfileConflictError("Personal context purge generation changed")
+        if not self._repository.list_scopes(manifest.profile_id, limit=1):
+            raise ProfileUnsupportedOperationError("profile_purge_pending")
         next_manifest = self._next_manifest(manifest)
         barrier = ProfileManifest.model_validate(
             {
@@ -1258,7 +1417,13 @@ class PersonalContextService:
             self._repository.purge_profile(
                 barrier,
                 expected_manifest_version=manifest.current_version_id,
+                journal_destruction_authorization=_DIRECT_CONFIRMED_FULL_PROFILE_PURGE,
             )
         except ConcurrentProfileUpdateError as exc:
             raise ProfileConflictError("Personal context profile changed") from exc
+        self._run_direct_purge_cleanup(
+            profile_id=manifest.profile_id,
+            purge_generation=barrier.purge_generation,
+        )
+        self._relay_after_commit(manifest.profile_id)
         return barrier

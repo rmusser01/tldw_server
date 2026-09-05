@@ -24,6 +24,9 @@ from tldw_Server_API.app.core.DB_Management.Sync_DB import SYNC_DB_FILENAME, Syn
 from tldw_Server_API.app.core.Personalization.companion_user_ids import (
     resolve_existing_companion_storage_user_id,
 )
+from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+    PersonalContextPublicationRelayStore,
+)
 from tldw_Server_API.app.core.Personalization.personal_context_repository import (
     PersonalContextRepository,
 )
@@ -72,6 +75,7 @@ from .notes_link_bootstrap import NotesLinkBootstrapper
 from .notes_organization_bootstrap import NotesOrganizationBootstrapper
 from .notes_task_activity_bootstrap import NotesTaskActivityBootstrapper
 from .notes_task_bootstrap import NotesTaskBootstrapper
+from .personal_context_relay import PersonalContextRelay
 from .security import server_trusted_encryption_status_from_env
 from .service import (
     SyncV2Service,
@@ -172,7 +176,7 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
         adapters=adapters,
         materializers=materializers,
     )
-    return SyncV2Service(
+    service = SyncV2Service(
         store=store,
         adapters=adapters,
         materializers=materializers,
@@ -191,6 +195,53 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
             "SYNC_V2_PERSONAL_CONTEXT_AUTHORITY_ID", "tldw-server"
         ),
     )
+    publication_service = _personal_context_service_for_user(user_id)
+    service.personal_context_relay = PersonalContextRelay(
+        publications=PersonalContextPublicationRelayStore(
+            publication_service._repository.database
+        ),
+        stage_authority=service.stage_personal_context_authority,
+        finalize_authority=service.finalize_personal_context_authority,
+        cancel_authority=service.cancel_personal_context_authority,
+    )
+    def relay_after_commit(profile_id: str) -> None:
+        """Best-effort recovery hook; durable journal debt survives all failures."""
+
+        dataset = store.personal_context_dataset_for_profile(
+            user_id=user_id,
+            profile_id=profile_id,
+        )
+        if dataset is None:
+            return
+        service.personal_context_relay.relay_profile(
+            user_id=user_id,
+            profile_id=profile_id,
+            dataset_id=dataset.dataset_id,
+            after_server_cursor=None,
+        )
+
+    publication_service.set_after_commit_relay(relay_after_commit)
+
+    def purge_cleanup_after_commit(intent: object) -> None:
+        """Scrub all Sync datasets bound to an already-authorized direct purge."""
+
+        for dataset in store.list_datasets_for_user(user_id, include_archived=True):
+            state = dataset.metadata.get("personal_context")
+            if not isinstance(state, Mapping) or state.get("profile_id") != getattr(
+                intent, "profile_id", None
+            ):
+                continue
+            claim = publication_service._repository.verify_direct_purge_cleanup_claim(
+                intent,
+                user_id=user_id,
+                dataset_id=dataset.dataset_id,
+                store=store,
+                database=store.db,
+            )
+            service.shred_authorized_personal_context_history(claim)
+
+    publication_service.set_after_commit_purge_cleanup(purge_cleanup_after_commit)
+    return service
 
 
 def _validate_notes_organization_components(

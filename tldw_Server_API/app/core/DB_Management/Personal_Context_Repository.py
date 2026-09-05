@@ -7,10 +7,12 @@ import hmac
 import json
 import secrets
 import sqlite3
+import time
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel, ValidationError
 from tldw_profile_core import (
@@ -21,6 +23,7 @@ from tldw_profile_core import (
     ProposalState,
     RecordState,
     ScopeKind,
+    SyncMode,
     canonical_bytes,
 )
 from tldw_profile_core.canonical import canonical_json_bytes
@@ -33,6 +36,13 @@ from tldw_Server_API.app.core.Personalization.personal_context_crypto import (
     EncryptedEnvelope,
     EnvelopeAuthenticationError,
     EnvelopeCipher,
+)
+from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+    CanonicalApplyReceipt,
+    IngressIdentity,
+    PersonalContextPublicationJournal,
+    PublicationBatchReceipt,
+    PublicationObject,
 )
 from tldw_Server_API.app.core.Personalization.personal_context_repository_models import (
     ConcurrentProfileUpdateError,
@@ -53,12 +63,183 @@ _MAX_RECORD_HEADS = 1_000
 _MAX_SCOPE_HEADS = 1_000
 _MAX_LIST_ROWS = 1_000
 _SYNC_HISTORY_KEY_LABEL = b"tldw-personal-context-sync-history-v1"
+_DIRECT_CONFIRMED_FULL_PROFILE_PURGE = object()
+_DIRECT_PURGE_CLEANUP_ORIGIN = "direct_confirmed_full_profile_purge"
+_DIRECT_PURGE_CLAIM_SECONDS = 60
+_VERIFIED_DIRECT_PURGE_EXECUTION = object()
+_DIRECT_PURGE_CAPABILITY_SIGNING_KEY = secrets.token_bytes(32)
+
+
+@dataclass(frozen=True, slots=True)
+class DirectPurgeCleanupIntent:
+    """Content-free authority for one direct-purge retention cleanup."""
+
+    intent_id: str
+    profile_id: str
+    old_generation_through: int
+    purge_generation: int
+    state: Literal["pending", "claimed", "complete"]
+    owner_token: str | None
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class _VerifiedDirectPurgeCleanupClaim:
+    """Opaque live-journal claim bound to one authenticated Sync target."""
+
+    _repository: PersonalContextRepository
+    _intent: DirectPurgeCleanupIntent
+    _user_id: str
+    _dataset_id: str
+    _store: object
+    _database: object
+    _provenance: object
+    _authentication_tag: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class _DirectPurgeCleanupExecution:
+    """Validated immutable target snapshot for destructive Sync SQL."""
+
+    repository: PersonalContextRepository
+    intent: DirectPurgeCleanupIntent
+    user_id: str
+    dataset_id: str
+    store: object
+    database: object
+
+    @property
+    def profile_id(self) -> str:
+        return self.intent.profile_id
+
+    @property
+    def old_generation_through(self) -> int:
+        return self.intent.old_generation_through
+
+    @property
+    def purge_generation(self) -> int:
+        return self.intent.purge_generation
+
+
+def _direct_purge_capability_tag(
+    *,
+    repository: PersonalContextRepository,
+    intent: DirectPurgeCleanupIntent,
+    user_id: str,
+    dataset_id: str,
+    store: object,
+    database: object,
+) -> bytes:
+    """Authenticate every scalar and object-identity cleanup target."""
+
+    source_database = object.__getattribute__(repository, "_database")
+    payload = canonical_json_bytes(
+        {
+            "repository_identity": id(repository),
+            "source_database_identity": id(source_database),
+            "store_identity": id(store),
+            "database_identity": id(database),
+            "user_id": user_id,
+            "dataset_id": dataset_id,
+            "intent_id": intent.intent_id,
+            "profile_id": intent.profile_id,
+            "old_generation_through": intent.old_generation_through,
+            "purge_generation": intent.purge_generation,
+            "state": intent.state,
+            "owner_token": intent.owner_token,
+        }
+    )
+    return hmac.new(
+        _DIRECT_PURGE_CAPABILITY_SIGNING_KEY,
+        payload,
+        hashlib.sha256,
+    ).digest()
+
+
+def _validate_direct_purge_cleanup_claim(
+    claim: object,
+    *,
+    expected_store: object | None = None,
+    expected_database: object | None = None,
+) -> _DirectPurgeCleanupExecution:
+    """Return a live target snapshot only for an exact untampered capability."""
+
+    if type(claim) is not _VerifiedDirectPurgeCleanupClaim:
+        raise PermissionError("direct purge execution capability type is invalid")
+    repository = object.__getattribute__(claim, "_repository")
+    raw_intent = object.__getattribute__(claim, "_intent")
+    user_id = object.__getattribute__(claim, "_user_id")
+    dataset_id = object.__getattribute__(claim, "_dataset_id")
+    store = object.__getattribute__(claim, "_store")
+    database = object.__getattribute__(claim, "_database")
+    provenance = object.__getattribute__(claim, "_provenance")
+    authentication_tag = object.__getattribute__(claim, "_authentication_tag")
+    if (
+        type(repository) is not PersonalContextRepository
+        or type(raw_intent) is not DirectPurgeCleanupIntent
+        or type(user_id) is not str
+        or not user_id
+        or type(dataset_id) is not str
+        or not dataset_id
+        or store is None
+        or database is None
+        or provenance is not _VERIFIED_DIRECT_PURGE_EXECUTION
+        or type(authentication_tag) is not bytes
+        or (expected_store is not None and store is not expected_store)
+        or (expected_database is not None and database is not expected_database)
+        or type(raw_intent.intent_id) is not str
+        or not raw_intent.intent_id
+        or type(raw_intent.profile_id) is not str
+        or not raw_intent.profile_id
+        or type(raw_intent.old_generation_through) is not int
+        or raw_intent.old_generation_through < 0
+        or type(raw_intent.purge_generation) is not int
+        or raw_intent.purge_generation != raw_intent.old_generation_through + 1
+        or raw_intent.state != "claimed"
+        or type(raw_intent.owner_token) is not str
+        or not raw_intent.owner_token
+    ):
+        raise PermissionError("direct purge execution target is invalid")
+    intent = DirectPurgeCleanupIntent(
+        intent_id=raw_intent.intent_id,
+        profile_id=raw_intent.profile_id,
+        old_generation_through=raw_intent.old_generation_through,
+        purge_generation=raw_intent.purge_generation,
+        state=raw_intent.state,
+        owner_token=raw_intent.owner_token,
+    )
+    expected_tag = _direct_purge_capability_tag(
+        repository=repository,
+        intent=intent,
+        user_id=user_id,
+        dataset_id=dataset_id,
+        store=store,
+        database=database,
+    )
+    if not hmac.compare_digest(authentication_tag, expected_tag):
+        raise PermissionError("direct purge execution capability was modified")
+    PersonalContextRepository._require_live_direct_purge_cleanup_claim(
+        repository,
+        intent,
+    )
+    return _DirectPurgeCleanupExecution(
+        repository=repository,
+        intent=intent,
+        user_id=user_id,
+        dataset_id=dataset_id,
+        store=store,
+        database=database,
+    )
 
 
 def _now_text() -> str:
+    return _now_datetime().isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _now_datetime() -> datetime:
+    """Return a profile-core-compatible millisecond UTC timestamp."""
+
     now = datetime.now(UTC)
-    now = now.replace(microsecond=now.microsecond // 1000 * 1000)
-    return now.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return now.replace(microsecond=now.microsecond // 1000 * 1000)
 
 
 class PersonalContextRepository:
@@ -83,6 +264,11 @@ class PersonalContextRepository:
             "personal_context_object_heads",
             "personal_context_runtime_heads",
             "personal_context_receipts",
+            "personal_context_publication_profiles",
+            "personal_context_publication_batches",
+            "personal_context_publication_rows",
+            "personal_context_ingress_receipts",
+            "personal_context_purge_cleanup_intents",
         }
         with self._database.transaction() as connection:
             tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
@@ -117,10 +303,93 @@ class PersonalContextRepository:
             return canonical_bytes(value)
         return canonical_json_bytes(value)
 
+    @classmethod
+    def _canonical_digest(cls, value: BaseModel | Mapping[str, Any]) -> str:
+        """Return the exact canonical-byte digest used for ingress identity."""
+
+        return "sha256:" + hashlib.sha256(cls._canonical_payload(value)).hexdigest()
+
     @staticmethod
     def _integrity_tag(key: bytes, plaintext: bytes) -> str:
         digest = hmac.new(key, plaintext, hashlib.sha256).hexdigest()
         return f"hmac-sha256-v1:{digest}"
+
+    @staticmethod
+    def _publication_object(
+        value: BaseModel | Mapping[str, Any],
+        *,
+        domain: str,
+        object_id: str,
+        version_id: str,
+        role: str = "semantic",
+        operation: str = "upsert",
+    ) -> PublicationObject:
+        """Build an encrypted-only source-publication payload from canonical bytes."""
+
+        return PublicationObject(
+            domain=domain,
+            object_id=object_id,
+            version_id=version_id,
+            operation=operation,  # type: ignore[arg-type]
+            role=role,  # type: ignore[arg-type]
+            canonical=PersonalContextRepository._canonical_payload(value),
+        )
+
+    def _append_publication(
+        self,
+        connection: sqlite3.Connection,
+        keys: ProfileKeyMaterial,
+        *,
+        manifest: ProfileManifest,
+        semantic: Sequence[PublicationObject] = (),
+        ingress: IngressIdentity | None = None,
+    ) -> PublicationBatchReceipt:
+        """Append semantic objects before the exact canonical manifest when supplied."""
+
+        objects = list(semantic)
+        if semantic or ingress is not None:
+            objects.append(
+                self._publication_object(
+                    manifest,
+                    domain="personal_context.manifest",
+                    object_id=manifest.profile_id,
+                    version_id=manifest.current_version_id,
+                    role="manifest",
+                )
+            )
+        else:
+            objects = [
+                self._publication_object(
+                    manifest,
+                    domain="personal_context.manifest",
+                    object_id=manifest.profile_id,
+                    version_id=manifest.current_version_id,
+                    role="manifest",
+                )
+            ]
+        return PersonalContextPublicationJournal(keys).append_batch(
+            connection,
+            profile_id=manifest.profile_id,
+            purge_generation=manifest.purge_generation,
+            objects=objects,
+            ingress=ingress,
+            manifest=manifest if ingress is not None else None,
+            now=_now_text(),
+        )
+
+    def _current_manifest_for_publication(
+        self,
+        connection: sqlite3.Connection,
+        profile_id: str,
+        keys: ProfileKeyMaterial,
+    ) -> ProfileManifest:
+        row = self._head_row(connection, profile_id, "manifest", profile_id)
+        if row is None:
+            raise ConcurrentProfileUpdateError("manifest head changed concurrently")
+        try:
+            return ProfileManifest.model_validate_json(self._decrypt_row(row, keys))
+        except ValidationError:
+            raise ProfileIntegrityError("Canonical object validation failed") from None
 
     def _insert_encrypted(
         self,
@@ -471,6 +740,10 @@ class PersonalContextRepository:
                 UNION ALL SELECT 1 FROM personal_context_object_heads
                 UNION ALL SELECT 1 FROM personal_context_runtime_heads
                 UNION ALL SELECT 1 FROM personal_context_receipts
+                UNION ALL SELECT 1 FROM personal_context_publication_profiles
+                UNION ALL SELECT 1 FROM personal_context_publication_batches
+                UNION ALL SELECT 1 FROM personal_context_publication_rows
+                UNION ALL SELECT 1 FROM personal_context_ingress_receipts
                 LIMIT 1
                 """
             ).fetchone()
@@ -484,6 +757,19 @@ class PersonalContextRepository:
                 global_scope,
                 runtime_policy=runtime_policy,
                 runtime_version_id=runtime_version_id,
+            )
+            self._append_publication(
+                connection,
+                keys,
+                manifest=manifest,
+                semantic=(
+                    self._publication_object(
+                        global_scope,
+                        domain="personal_context.scope",
+                        object_id=global_scope.scope_id,
+                        version_id=global_scope.version_id,
+                    ),
+                ),
             )
 
     def reserve_sync_profile(
@@ -504,6 +790,10 @@ class PersonalContextRepository:
                 UNION ALL SELECT 1 FROM personal_context_object_heads
                 UNION ALL SELECT 1 FROM personal_context_runtime_heads
                 UNION ALL SELECT 1 FROM personal_context_receipts
+                UNION ALL SELECT 1 FROM personal_context_publication_profiles
+                UNION ALL SELECT 1 FROM personal_context_publication_batches
+                UNION ALL SELECT 1 FROM personal_context_publication_rows
+                UNION ALL SELECT 1 FROM personal_context_ingress_receipts
                 LIMIT 1
                 """
             ).fetchone()
@@ -650,6 +940,10 @@ class PersonalContextRepository:
                 UNION ALL SELECT 1 FROM personal_context_object_heads
                 UNION ALL SELECT 1 FROM personal_context_runtime_heads
                 UNION ALL SELECT 1 FROM personal_context_receipts
+                UNION ALL SELECT 1 FROM personal_context_publication_profiles
+                UNION ALL SELECT 1 FROM personal_context_publication_batches
+                UNION ALL SELECT 1 FROM personal_context_publication_rows
+                UNION ALL SELECT 1 FROM personal_context_ingress_receipts
                 LIMIT 1
                 """
             ).fetchone()
@@ -675,11 +969,302 @@ class PersonalContextRepository:
                 runtime_policy=runtime_policy,
                 runtime_version_id=runtime_version_id,
             )
+            self._append_publication(
+                connection,
+                keys,
+                manifest=manifest,
+                semantic=(
+                    self._publication_object(
+                        global_scope,
+                        domain="personal_context.scope",
+                        object_id=global_scope.scope_id,
+                        version_id=global_scope.version_id,
+                    ),
+                ),
+            )
 
     def get_manifest(self, profile_id: str) -> ProfileManifest | None:
         """Return one authenticated manifest without cross-profile fallback."""
 
         return self._read_model(profile_id, "manifest", profile_id, ProfileManifest)
+
+    def apply_ingress_and_publish(
+        self,
+        *,
+        identity: IngressIdentity,
+        domain: str,
+        value: ProfileManifest | ProfileScope | ProfileRecord | ProfileProposal | Mapping[str, Any],
+        base_object_hash: str | None,
+    ) -> CanonicalApplyReceipt:
+        """Atomically accept one ingress object and its authority publication."""
+
+        with self._database.transaction(immediate=True) as connection:
+            if domain == "personal_context.record":
+                record = ProfileRecord.model_validate(value)
+                if record.controls.sync_mode is SyncMode.DEVICE_ONLY:
+                    raise ValueError("Device-only records cannot synchronize")
+                profile_id = record.profile_id
+                object_type = "record"
+                object_id = record.record_id
+                version_id = record.version_id
+                operation = "tombstone" if record.state is RecordState.DELETED else "upsert"
+            elif domain == "personal_context.scope":
+                scope = ProfileScope.model_validate(value)
+                profile_id = scope.profile_id
+                object_type = "scope"
+                object_id = scope.scope_id
+                version_id = scope.version_id
+                operation = "upsert"
+            elif domain == "personal_context.proposal":
+                proposal = ProfileProposal.model_validate(value)
+                if (
+                    proposal.proposed_record is not None
+                    and proposal.proposed_record.controls.sync_mode is SyncMode.DEVICE_ONLY
+                ):
+                    raise ValueError("Device-only proposals cannot synchronize")
+                profile_id = proposal.profile_id
+                object_type = "proposal"
+                object_id = proposal.proposal_id
+                version_id = str(uuid.uuid4())
+                operation = "upsert"
+            elif domain == "personal_context.manifest":
+                manifest = ProfileManifest.model_validate(value)
+                profile_id = manifest.profile_id
+                object_type = "manifest"
+                object_id = manifest.profile_id
+                version_id = manifest.current_version_id
+                operation = "upsert"
+            else:
+                raise ValueError("Unsupported Personal Context Sync domain")
+            canonical_input: BaseModel | Mapping[str, Any]
+            if object_type == "record":
+                canonical_input = record
+            elif object_type == "scope":
+                canonical_input = scope
+            elif object_type == "proposal":
+                canonical_input = proposal
+            else:
+                canonical_input = manifest
+            if identity.canonical_payload_digest != self._canonical_digest(canonical_input):
+                raise ValueError("ingress canonical payload digest is invalid")
+            expected_wire_version = (
+                "sync-proposal-sha256:"
+                + hashlib.sha256(canonical_bytes(canonical_input)).hexdigest()
+                if object_type == "proposal"
+                else version_id
+            )
+            if identity.wire_entity_version != expected_wire_version:
+                raise ValueError("ingress wire entity version is invalid")
+            keys = self._keys.load(profile_id, connection=connection)
+            replay = PersonalContextPublicationJournal(keys).read_ingress_receipt(
+                connection,
+                identity,
+            )
+            if replay is not None:
+                return replay
+            current = self._current_manifest_for_publication(connection, profile_id, keys)
+            if identity.purge_generation != current.purge_generation:
+                raise ConcurrentProfileUpdateError("ingress purge generation changed")
+            if object_type == "manifest":
+                current_hashes = {
+                    self._canonical_digest(current),
+                    self._integrity_tag(keys.integrity_key, self._canonical_payload(current)),
+                }
+                if base_object_hash not in current_hashes:
+                    raise ConcurrentProfileUpdateError("manifest head changed concurrently")
+                self._validate_manifest_transition(
+                    current, manifest, expected_version_id=current.current_version_id
+                )
+                self._insert_manifest_revision(
+                    connection, keys, manifest, expected_version_id=current.current_version_id
+                )
+                batch = self._append_publication(
+                    connection, keys, manifest=manifest, ingress=identity
+                )
+                return CanonicalApplyReceipt(
+                    resulting_object_id=manifest.profile_id,
+                    resulting_version_id=manifest.current_version_id,
+                    manifest_revision=manifest.revision,
+                    manifest_version_id=manifest.current_version_id,
+                    purge_generation=manifest.purge_generation,
+                    publication_batch_id=batch.publication_batch_id,
+                    profile_publication_sequence=batch.profile_publication_sequence,
+                    receipt_id=PersonalContextPublicationJournal._receipt_id(identity),
+                    dataset_id=identity.dataset_id,
+                    device_id=identity.device_id,
+                    client_envelope_id=identity.client_envelope_id,
+                    canonical_payload_digest=identity.canonical_payload_digest,
+                    wire_entity_version=identity.wire_entity_version,
+                )
+            existing = self._head_row(connection, profile_id, object_type, object_id)
+            expected_version = None if existing is None else str(existing["version_id"])
+            existing_value: BaseModel | None = None
+            if existing is not None:
+                try:
+                    model_type = {
+                        "record": ProfileRecord,
+                        "scope": ProfileScope,
+                        "proposal": ProfileProposal,
+                    }[object_type]
+                    existing_value = model_type.model_validate_json(
+                        self._decrypt_row(existing, keys)
+                    )
+                except (KeyError, ValidationError):
+                    raise ProfileIntegrityError("Canonical object validation failed") from None
+            expected_base_hashes = (
+                {None}
+                if existing_value is None
+                else {
+                    self._canonical_digest(existing_value),
+                    self._integrity_tag(
+                        keys.integrity_key,
+                        self._canonical_payload(existing_value),
+                    ),
+                }
+            )
+            if base_object_hash not in expected_base_hashes:
+                raise ConcurrentProfileUpdateError("canonical object changed concurrently")
+            if object_type == "record":
+                if record.parent_version_id != expected_version:
+                    raise ConcurrentProfileUpdateError("record parent does not match head")
+                scope_row = self._head_row(connection, profile_id, "scope", record.scope_id)
+                if scope_row is None:
+                    raise KeyError("Personal context scope not found")
+                if existing_value is not None:
+                    existing_record = ProfileRecord.model_validate(existing_value)
+                    if (
+                        existing_record.state is RecordState.DELETED
+                        or record.scope_id != existing_record.scope_id
+                        or record.kind is not existing_record.kind
+                        or record.created_at != existing_record.created_at
+                        or record.updated_at < existing_record.updated_at
+                        or record.version_id == existing_record.version_id
+                    ):
+                        raise ConcurrentProfileUpdateError("record head changed concurrently")
+                self._validate_new_head_quota(
+                    connection, profile_id, object_type, _MAX_RECORD_HEADS,
+                    expected_version_id=expected_version,
+                )
+                self._validate_semantic_key_available(
+                    connection, keys, record,
+                    excluding_record_id=None if expected_version is None else record.record_id,
+                )
+                canonical_value: BaseModel | Mapping[str, Any] = record
+            elif object_type == "scope":
+                if existing_value is not None:
+                    existing_scope = ProfileScope.model_validate(existing_value)
+                    if (
+                        scope.kind is not existing_scope.kind
+                        or scope.created_at != existing_scope.created_at
+                        or scope.updated_at < existing_scope.updated_at
+                        or scope.version_id == existing_scope.version_id
+                    ):
+                        raise ConcurrentProfileUpdateError("scope head changed concurrently")
+                elif scope.kind is ScopeKind.GLOBAL:
+                    scope_rows = connection.execute(
+                        """
+                        SELECT versions.*
+                        FROM personal_context_object_heads AS heads
+                        JOIN personal_context_object_versions AS versions
+                          ON versions.profile_id = heads.profile_id
+                         AND versions.object_type = heads.object_type
+                         AND versions.object_id = heads.object_id
+                         AND versions.version_id = heads.current_version_id
+                        WHERE heads.profile_id = ? AND heads.object_type = 'scope'
+                        """,
+                        (profile_id,),
+                    ).fetchall()
+                    for scope_row in scope_rows:
+                        candidate = ProfileScope.model_validate_json(
+                            self._decrypt_row(scope_row, keys)
+                        )
+                        if candidate.kind is ScopeKind.GLOBAL:
+                            raise ConcurrentProfileUpdateError(
+                                "global scope changed concurrently"
+                            )
+                self._validate_new_head_quota(
+                    connection, profile_id, object_type, _MAX_SCOPE_HEADS,
+                    expected_version_id=expected_version,
+                )
+                canonical_value = scope
+            else:
+                scope_row = self._head_row(connection, profile_id, "scope", proposal.scope_id)
+                if scope_row is None:
+                    raise KeyError("Personal context scope not found")
+                if proposal.state is ProposalState.PENDING:
+                    if existing is not None:
+                        raise ConcurrentProfileUpdateError("proposal head changed concurrently")
+                    canonical_value = proposal
+                else:
+                    if existing_value is None:
+                        raise ConcurrentProfileUpdateError("proposal head changed concurrently")
+                    existing_proposal = ProfileProposal.model_validate(existing_value)
+                    if existing_proposal.state is not ProposalState.PENDING:
+                        raise ConcurrentProfileUpdateError("proposal head changed concurrently")
+                    expected_receipt = ProfileProposal.model_validate(
+                        {
+                            **existing_proposal.model_dump(mode="python"),
+                            "state": proposal.state,
+                            "proposed_record": None,
+                            "confidence": None,
+                        }
+                    )
+                    if expected_receipt != proposal:
+                        raise ConcurrentProfileUpdateError("proposal head changed concurrently")
+                    canonical_value = self._replace_proposal_with_receipt(
+                        connection,
+                        keys,
+                        existing,
+                        existing_proposal,
+                        proposal.state,
+                        version_id=version_id,
+                    )
+            if object_type != "proposal" or proposal.state is ProposalState.PENDING:
+                self._insert_encrypted(
+                    connection, keys, profile_id=profile_id, object_type=object_type,
+                    object_id=object_id, version_id=version_id,
+                    parent_version_id=expected_version, value=canonical_value,
+                )
+                self._set_head(
+                    connection, profile_id=profile_id, object_type=object_type,
+                    object_id=object_id, version_id=version_id,
+                    expected_version_id=expected_version,
+                )
+            next_manifest = ProfileManifest.model_validate(
+                {
+                    **current.model_dump(mode="python"),
+                    "revision": current.revision + 1,
+                    "updated_at": _now_datetime(),
+                    "current_version_id": str(uuid.uuid4()),
+                }
+            )
+            self._insert_manifest_revision(
+                connection, keys, next_manifest,
+                expected_version_id=current.current_version_id,
+            )
+            semantic = self._publication_object(
+                canonical_value, domain=domain, object_id=object_id,
+                version_id=version_id, operation=operation,
+            )
+            batch = self._append_publication(
+                connection, keys, manifest=next_manifest,
+                semantic=(semantic,), ingress=identity,
+            )
+            return CanonicalApplyReceipt(
+                resulting_object_id=object_id,
+                resulting_version_id=version_id,
+                manifest_revision=next_manifest.revision,
+                manifest_version_id=next_manifest.current_version_id,
+                purge_generation=next_manifest.purge_generation,
+                publication_batch_id=batch.publication_batch_id,
+                profile_publication_sequence=batch.profile_publication_sequence,
+                receipt_id=PersonalContextPublicationJournal._receipt_id(identity),
+                dataset_id=identity.dataset_id,
+                device_id=identity.device_id,
+                client_envelope_id=identity.client_envelope_id,
+                canonical_payload_digest=identity.canonical_payload_digest,
+                wire_entity_version=identity.wire_entity_version,
+            )
 
     def get_scope(self, profile_id: str, scope_id: str) -> ProfileScope | None:
         """Return one authenticated scope for the exact profile."""
@@ -717,6 +1302,62 @@ class PersonalContextRepository:
                 ).fetchone()
                 is not None
             )
+
+    def compact_pre_activation(self, profile_id: str, *, through_sequence: int) -> int:
+        """Mark superseded source bodies for later compaction below one watermark.
+
+        The exact encrypted bytes remain recoverable until the activation owner
+        completes its independent relay/coverage protocol.  This method only
+        advances content-free row state and never touches a newer sequence.
+        """
+
+        if through_sequence < 1:
+            raise ValueError("publication watermark must be positive")
+        with self._database.transaction(immediate=True) as connection:
+            keys = self._keys.load(profile_id, connection=connection)
+            profile_row = connection.execute(
+                """
+                SELECT next_sequence FROM personal_context_publication_profiles
+                WHERE profile_id = ?
+                """,
+                (profile_id,),
+            ).fetchone()
+            if profile_row is None or through_sequence >= int(profile_row["next_sequence"]):
+                raise ValueError("publication watermark is not an exact committed head")
+            whole_batch = connection.execute(
+                """
+                SELECT 1 FROM personal_context_publication_batches
+                WHERE profile_id = ? AND profile_publication_sequence = ?
+                """,
+                (profile_id, through_sequence),
+            ).fetchone()
+            if whole_batch is None:
+                raise ValueError("publication watermark is not an exact committed head")
+            rows = connection.execute(
+                """
+                SELECT * FROM personal_context_publication_rows
+                WHERE profile_id = ? AND profile_publication_sequence <= ?
+                  AND row_state != 'shredded'
+                ORDER BY profile_publication_sequence, batch_ordinal
+                """,
+                (profile_id, through_sequence),
+            ).fetchall()
+            journal = PersonalContextPublicationJournal(keys)
+            latest: dict[tuple[str, str], sqlite3.Row] = {}
+            decoded: list[tuple[sqlite3.Row, tuple[str, str]]] = []
+            for row in rows:
+                domain, _canonical = journal.decrypt_row(row)
+                identity = (domain, str(row["opaque_object_id"]))
+                latest[identity] = row
+                decoded.append((row, identity))
+            superseded = [
+                row
+                for row, identity in decoded
+                if latest[identity] is not row
+            ]
+            for row in superseded:
+                journal.transition_row_state(connection, row, row_state="staged")
+            return len(superseded)
 
     def has_sync_profile_reservation(self) -> bool:
         """Return whether the only durable state is one content-free key reservation."""
@@ -1066,6 +1707,7 @@ class PersonalContextRepository:
                 manifest,
                 expected_version_id=expected_version_id,
             )
+            self._append_publication(connection, keys, manifest=manifest)
 
     def commit_scope_and_manifest(
         self,
@@ -1154,6 +1796,19 @@ class PersonalContextRepository:
                 manifest,
                 expected_version_id=expected_manifest_version,
             )
+            self._append_publication(
+                connection,
+                keys,
+                manifest=manifest,
+                semantic=(
+                    self._publication_object(
+                        scope,
+                        domain="personal_context.scope",
+                        object_id=scope.scope_id,
+                        version_id=scope.version_id,
+                    ),
+                ),
+            )
 
     def commit_scope(
         self,
@@ -1216,6 +1871,21 @@ class PersonalContextRepository:
                 version_id=scope.version_id,
                 expected_version_id=expected_version_id,
             )
+            self._append_publication(
+                connection,
+                keys,
+                manifest=self._current_manifest_for_publication(
+                    connection, scope.profile_id, keys
+                ),
+                semantic=(
+                    self._publication_object(
+                        scope,
+                        domain="personal_context.scope",
+                        object_id=scope.scope_id,
+                        version_id=scope.version_id,
+                    ),
+                ),
+            )
 
     def commit_record_version(
         self,
@@ -1266,6 +1936,26 @@ class PersonalContextRepository:
                 object_id=record.record_id,
                 version_id=record.version_id,
                 expected_version_id=expected_version_id,
+            )
+            self._append_publication(
+                connection,
+                keys,
+                manifest=self._current_manifest_for_publication(
+                    connection, record.profile_id, keys
+                ),
+                semantic=(
+                    self._publication_object(
+                        record,
+                        domain="personal_context.record",
+                        object_id=record.record_id,
+                        version_id=record.version_id,
+                        operation=(
+                            "tombstone"
+                            if record.state is RecordState.DELETED
+                            else "upsert"
+                        ),
+                    ),
+                ),
             )
 
     def commit_record_and_manifest(
@@ -1338,6 +2028,24 @@ class PersonalContextRepository:
                 keys,
                 manifest,
                 expected_version_id=expected_manifest_version,
+            )
+            self._append_publication(
+                connection,
+                keys,
+                manifest=manifest,
+                semantic=(
+                    self._publication_object(
+                        record,
+                        domain="personal_context.record",
+                        object_id=record.record_id,
+                        version_id=record.version_id,
+                        operation=(
+                            "tombstone"
+                            if record.state is RecordState.DELETED
+                            else "upsert"
+                        ),
+                    ),
+                ),
             )
 
     def get_record(self, profile_id: str, record_id: str) -> ProfileRecord | None:
@@ -1451,6 +2159,21 @@ class PersonalContextRepository:
                 version_id=version_id,
                 expected_version_id=None,
             )
+            self._append_publication(
+                connection,
+                keys,
+                manifest=self._current_manifest_for_publication(
+                    connection, proposal.profile_id, keys
+                ),
+                semantic=(
+                    self._publication_object(
+                        proposal,
+                        domain="personal_context.proposal",
+                        object_id=proposal.proposal_id,
+                        version_id=version_id,
+                    ),
+                ),
+            )
 
     def get_proposal(
         self,
@@ -1513,13 +2236,28 @@ class PersonalContextRepository:
                     raise ConcurrentProfileUpdateError(
                         "synced proposal receipt differs from pending content"
                     )
-                self._replace_proposal_with_receipt(
+                receipt = self._replace_proposal_with_receipt(
                     connection,
                     keys,
                     row,
                     current,
                     proposal.state,
                     version_id=version_id,
+                )
+                self._append_publication(
+                    connection,
+                    keys,
+                    manifest=self._current_manifest_for_publication(
+                        connection, proposal.profile_id, keys
+                    ),
+                    semantic=(
+                        self._publication_object(
+                            receipt,
+                            domain="personal_context.proposal",
+                            object_id=receipt.proposal_id,
+                            version_id=version_id,
+                        ),
+                    ),
                 )
                 return
 
@@ -1556,6 +2294,21 @@ class PersonalContextRepository:
                     proposal.proposal_id,
                     version_id,
                     _now_text(),
+                ),
+            )
+            self._append_publication(
+                connection,
+                keys,
+                manifest=self._current_manifest_for_publication(
+                    connection, proposal.profile_id, keys
+                ),
+                semantic=(
+                    self._publication_object(
+                        proposal,
+                        domain="personal_context.proposal",
+                        object_id=proposal.proposal_id,
+                        version_id=version_id,
+                    ),
                 ),
             )
 
@@ -1647,6 +2400,21 @@ class PersonalContextRepository:
                 state,
                 version_id=version_id,
             )
+            self._append_publication(
+                connection,
+                keys,
+                manifest=self._current_manifest_for_publication(
+                    connection, profile_id, keys
+                ),
+                semantic=(
+                    self._publication_object(
+                        resolved,
+                        domain="personal_context.proposal",
+                        object_id=resolved.proposal_id,
+                        version_id=version_id,
+                    ),
+                ),
+            )
         return resolved
 
     def reject_proposal(
@@ -1698,7 +2466,7 @@ class PersonalContextRepository:
             if proposal.state is not ProposalState.PENDING:
                 raise ValueError("only pending proposals may be accepted")
             if proposal.expires_at <= datetime.now(UTC):
-                return self._replace_proposal_with_receipt(
+                receipt = self._replace_proposal_with_receipt(
                     connection,
                     keys,
                     proposal_row,
@@ -1706,6 +2474,22 @@ class PersonalContextRepository:
                     ProposalState.EXPIRED,
                     version_id=receipt_version,
                 )
+                self._append_publication(
+                    connection,
+                    keys,
+                    manifest=self._current_manifest_for_publication(
+                        connection, profile_id, keys
+                    ),
+                    semantic=(
+                        self._publication_object(
+                            receipt,
+                            domain="personal_context.proposal",
+                            object_id=receipt.proposal_id,
+                            version_id=receipt_version,
+                        ),
+                    ),
+                )
+                return receipt
             _row, current_manifest = self._read_manifest_for_update(
                 connection,
                 profile_id,
@@ -1771,6 +2555,30 @@ class PersonalContextRepository:
                 ProposalState.ACCEPTED,
                 version_id=receipt_version,
             )
+            self._append_publication(
+                connection,
+                keys,
+                manifest=manifest,
+                semantic=(
+                    self._publication_object(
+                        record,
+                        domain="personal_context.record",
+                        object_id=record.record_id,
+                        version_id=record.version_id,
+                        operation=(
+                            "tombstone"
+                            if record.state is RecordState.DELETED
+                            else "upsert"
+                        ),
+                    ),
+                    self._publication_object(
+                        receipt,
+                        domain="personal_context.proposal",
+                        object_id=receipt.proposal_id,
+                        version_id=receipt_version,
+                    ),
+                ),
+            )
         return receipt
 
     def _validate_semantic_key_available(
@@ -1823,10 +2631,40 @@ class PersonalContextRepository:
         manifest: ProfileManifest,
         *,
         expected_manifest_version: str,
+        journal_destruction_authorization: object | None = None,
     ) -> None:
-        """Advance the purge barrier and remove every readable profile body."""
+        """Advance the purge barrier and remove every readable profile body.
+
+        Only the service's confirmed direct full-profile purge may pass the
+        private authorization capability that destroys old journal DEKs.
+        Replica/materializer purge application deliberately omits it.
+        """
+
+        if journal_destruction_authorization not in (
+            None,
+            _DIRECT_CONFIRMED_FULL_PROFILE_PURGE,
+        ):
+            raise PermissionError("direct purge authorization is invalid")
+        destroy_journal_bodies = (
+            journal_destruction_authorization is _DIRECT_CONFIRMED_FULL_PROFILE_PURGE
+        )
 
         with self._database.transaction(immediate=True) as connection:
+            if destroy_journal_bodies and not self._database.retention_prerequisites_verified(
+                connection
+            ):
+                raise ProfileIntegrityError(
+                    "Canonical SQLite retention prerequisites are not verified"
+                )
+            lease = connection.execute(
+                """
+                SELECT 1 FROM personal_context_publication_relay_leases
+                WHERE profile_id = ? AND expires_at_ns > ?
+                """,
+                (manifest.profile_id, time.time_ns()),
+            ).fetchone()
+            if lease is not None:
+                raise ConcurrentProfileUpdateError("Personal context relay is active")
             keys = self._keys.load(manifest.profile_id, connection=connection)
             _row, current = self._read_manifest_for_update(
                 connection,
@@ -1845,6 +2683,108 @@ class PersonalContextRepository:
                 keys,
                 manifest,
                 expected_version_id=expected_manifest_version,
+            )
+            self._append_publication(connection, keys, manifest=manifest)
+            if destroy_journal_bodies:
+                old_ingress_receipts = connection.execute(
+                    """
+                    SELECT DISTINCT receipts.dataset_id, receipts.device_id,
+                           receipts.client_envelope_id, receipts.receipt_id,
+                           receipts.purge_generation,
+                           receipts.publication_batch_id,
+                           receipts.profile_publication_sequence
+                    FROM personal_context_ingress_receipts AS receipts
+                    JOIN personal_context_publication_batches AS batches
+                      ON batches.publication_batch_id = receipts.publication_batch_id
+                     AND batches.profile_publication_sequence = receipts.profile_publication_sequence
+                     AND batches.purge_generation = receipts.purge_generation
+                    JOIN personal_context_publication_rows AS result
+                      ON result.profile_id = batches.profile_id
+                     AND result.publication_batch_id = batches.publication_batch_id
+                     AND result.profile_publication_sequence = batches.profile_publication_sequence
+                     AND result.opaque_object_id = receipts.resulting_object_id
+                     AND result.opaque_version_id = receipts.resulting_version_id
+                    JOIN personal_context_publication_rows AS published_manifest
+                      ON published_manifest.profile_id = batches.profile_id
+                     AND published_manifest.publication_batch_id = batches.publication_batch_id
+                     AND published_manifest.profile_publication_sequence = batches.profile_publication_sequence
+                     AND published_manifest.role = 'manifest'
+                     AND published_manifest.opaque_version_id = receipts.resulting_manifest_version_id
+                    WHERE batches.profile_id = ? AND batches.purge_generation < ?
+                    """,
+                    (manifest.profile_id, manifest.purge_generation),
+                ).fetchall()
+                for receipt in old_ingress_receipts:
+                    deleted = connection.execute(
+                        """
+                        DELETE FROM personal_context_ingress_receipts
+                        WHERE dataset_id = ? AND device_id = ?
+                          AND client_envelope_id = ? AND receipt_id = ?
+                          AND purge_generation = ? AND publication_batch_id = ?
+                          AND profile_publication_sequence = ?
+                        """,
+                        (
+                            receipt["dataset_id"],
+                            receipt["device_id"],
+                            receipt["client_envelope_id"],
+                            receipt["receipt_id"],
+                            receipt["purge_generation"],
+                            receipt["publication_batch_id"],
+                            receipt["profile_publication_sequence"],
+                        ),
+                    )
+                    if deleted.rowcount != 1:
+                        raise ProfileIntegrityError(
+                            "Canonical ingress receipt changed during direct purge"
+                        )
+                old_publication_rows = connection.execute(
+                    """
+                    SELECT rows.*
+                    FROM personal_context_publication_rows AS rows
+                    JOIN personal_context_publication_batches AS batches
+                      ON batches.profile_id = rows.profile_id
+                     AND batches.profile_publication_sequence = rows.profile_publication_sequence
+                    WHERE rows.profile_id = ? AND batches.purge_generation < ?
+                    """,
+                    (manifest.profile_id, manifest.purge_generation),
+                ).fetchall()
+                for publication_row in old_publication_rows:
+                    PersonalContextPublicationJournal.cryptographically_shred_row(
+                        connection,
+                        publication_row,
+                    )
+                now = _now_text()
+                inserted = connection.execute(
+                    """
+                    INSERT INTO personal_context_purge_cleanup_intents(
+                        intent_id, profile_id, old_generation_through,
+                        purge_generation, origin, state, owner_token,
+                        claim_expires_at_ns, created_at, updated_at, completed_at
+                    ) VALUES (?, ?, ?, ?, ?, 'pending', NULL, NULL, ?, ?, NULL)
+                    ON CONFLICT(profile_id, purge_generation) DO NOTHING
+                    """,
+                    (
+                        str(uuid.uuid4()),
+                        manifest.profile_id,
+                        current.purge_generation,
+                        manifest.purge_generation,
+                        _DIRECT_PURGE_CLEANUP_ORIGIN,
+                        now,
+                        now,
+                    ),
+                )
+                if inserted.rowcount != 1:
+                    raise ProfileIntegrityError(
+                        "Direct purge cleanup intent already exists"
+                    )
+            connection.execute(
+                """
+                UPDATE personal_context_publication_batches
+                SET status = 'purge_terminal', updated_at = ?
+                WHERE profile_id = ? AND purge_generation < ?
+                  AND status != 'purge_terminal'
+                """,
+                (_now_text(), manifest.profile_id, manifest.purge_generation),
             )
             connection.execute(
                 """
@@ -1874,6 +2814,261 @@ class PersonalContextRepository:
                 "DELETE FROM personal_context_receipts WHERE profile_id = ?",
                 (manifest.profile_id,),
             )
+
+    @staticmethod
+    def _direct_purge_cleanup_intent(row: sqlite3.Row) -> DirectPurgeCleanupIntent:
+        """Decode one content-free cleanup-intent row."""
+
+        state = str(row["state"])
+        if state not in {"pending", "claimed", "complete"}:
+            raise ProfileIntegrityError("Direct purge cleanup intent state is invalid")
+        return DirectPurgeCleanupIntent(
+            intent_id=str(row["intent_id"]),
+            profile_id=str(row["profile_id"]),
+            old_generation_through=int(row["old_generation_through"]),
+            purge_generation=int(row["purge_generation"]),
+            state=state,
+            owner_token=None if row["owner_token"] is None else str(row["owner_token"]),
+        )
+
+    def direct_purge_cleanup(
+        self,
+        profile_id: str,
+        *,
+        purge_generation: int,
+    ) -> DirectPurgeCleanupIntent | None:
+        """Return one already-authorized cleanup intent without claiming it."""
+
+        with self._database.transaction() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM personal_context_purge_cleanup_intents
+                WHERE profile_id = ? AND purge_generation = ? AND origin = ?
+                """,
+                (profile_id, purge_generation, _DIRECT_PURGE_CLEANUP_ORIGIN),
+            ).fetchone()
+        return None if row is None else self._direct_purge_cleanup_intent(row)
+
+    def completed_direct_purge_cleanup(
+        self,
+        profile_id: str,
+        *,
+        purge_generation: int,
+    ) -> DirectPurgeCleanupIntent | None:
+        """Return one completed cleanup intent for idempotency verification."""
+
+        intent = self.direct_purge_cleanup(
+            profile_id,
+            purge_generation=purge_generation,
+        )
+        return intent if intent is not None and intent.state == "complete" else None
+
+    def _require_live_direct_purge_cleanup_claim(
+        self,
+        intent: DirectPurgeCleanupIntent,
+    ) -> None:
+        """Re-read the exact claimed direct-purge journal row or fail closed."""
+
+        if intent.state != "claimed" or intent.owner_token is None:
+            raise PermissionError("direct purge cleanup claim is not live")
+        with self._database.transaction() as connection:
+            row = connection.execute(
+                """
+                SELECT 1 FROM personal_context_purge_cleanup_intents
+                WHERE intent_id = ? AND profile_id = ?
+                  AND old_generation_through = ? AND purge_generation = ?
+                  AND origin = ? AND state = 'claimed' AND owner_token = ?
+                  AND claim_expires_at_ns > ?
+                """,
+                (
+                    intent.intent_id,
+                    intent.profile_id,
+                    intent.old_generation_through,
+                    intent.purge_generation,
+                    _DIRECT_PURGE_CLEANUP_ORIGIN,
+                    intent.owner_token,
+                    time.time_ns(),
+                ),
+            ).fetchone()
+        if row is None:
+            raise PermissionError("direct purge cleanup claim is not live")
+
+    def verify_direct_purge_cleanup_claim(
+        self,
+        intent: DirectPurgeCleanupIntent,
+        *,
+        user_id: str,
+        dataset_id: str,
+        store: object,
+        database: object,
+    ) -> _VerifiedDirectPurgeCleanupClaim:
+        """Issue an opaque capability for one exact live claim and Sync target."""
+
+        if not user_id or not dataset_id or store is None or database is None:
+            raise ValueError("direct purge cleanup execution target is invalid")
+        self._require_live_direct_purge_cleanup_claim(intent)
+        return _VerifiedDirectPurgeCleanupClaim(
+            _repository=self,
+            _intent=intent,
+            _user_id=user_id,
+            _dataset_id=dataset_id,
+            _store=store,
+            _database=database,
+            _provenance=_VERIFIED_DIRECT_PURGE_EXECUTION,
+            _authentication_tag=_direct_purge_capability_tag(
+                repository=self,
+                intent=intent,
+                user_id=user_id,
+                dataset_id=dataset_id,
+                store=store,
+                database=database,
+            ),
+        )
+
+    def checkpoint_direct_purge_storage(self) -> bool:
+        """Confirm the application-owned canonical WAL no longer holds old frames."""
+
+        return self._database.checkpoint_retention_history()
+
+    def claim_direct_purge_cleanup(
+        self,
+        *,
+        owner_token: str,
+        profile_id: str | None = None,
+        purge_generation: int | None = None,
+    ) -> DirectPurgeCleanupIntent | None:
+        """Owner-fence the oldest pending or expired direct-purge cleanup intent."""
+
+        if not owner_token or len(owner_token.encode("utf-8")) > 256:
+            raise ValueError("cleanup owner token is invalid")
+        if (profile_id is None) != (purge_generation is None):
+            raise ValueError("cleanup profile and generation filters must be paired")
+        now_ns = time.time_ns()
+        expires_ns = now_ns + (_DIRECT_PURGE_CLAIM_SECONDS * 1_000_000_000)
+        filters = ""
+        params: list[Any] = [owner_token, now_ns, _DIRECT_PURGE_CLEANUP_ORIGIN]
+        if profile_id is not None and purge_generation is not None:
+            filters = " AND profile_id = ? AND purge_generation = ?"
+            params.extend((profile_id, purge_generation))
+        with self._database.transaction(immediate=True) as connection:
+            row = connection.execute(
+                f"""
+                SELECT * FROM personal_context_purge_cleanup_intents
+                WHERE (state = 'pending' OR (state = 'claimed' AND owner_token = ?)
+                       OR (state = 'claimed' AND claim_expires_at_ns <= ?))
+                  AND origin = ?{filters}
+                ORDER BY created_at, intent_id
+                LIMIT 1
+                """,  # nosec B608 - only the fixed optional predicate is composed.
+                tuple(params),
+            ).fetchone()
+            if row is None:
+                return None
+            updated = connection.execute(
+                """
+                UPDATE personal_context_purge_cleanup_intents
+                SET state = 'claimed', owner_token = ?, claim_expires_at_ns = ?,
+                    updated_at = ?
+                WHERE intent_id = ? AND origin = ?
+                  AND (state = 'pending' OR (state = 'claimed' AND owner_token = ?)
+                       OR (state = 'claimed' AND claim_expires_at_ns <= ?))
+                """,
+                (
+                    owner_token,
+                    expires_ns,
+                    _now_text(),
+                    row["intent_id"],
+                    _DIRECT_PURGE_CLEANUP_ORIGIN,
+                    owner_token,
+                    now_ns,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise ProfileIntegrityError("Direct purge cleanup claim raced")
+            claimed = connection.execute(
+                "SELECT * FROM personal_context_purge_cleanup_intents WHERE intent_id = ?",
+                (row["intent_id"],),
+            ).fetchone()
+        if claimed is None:
+            raise ProfileIntegrityError("Direct purge cleanup claim disappeared")
+        return self._direct_purge_cleanup_intent(claimed)
+
+    def release_direct_purge_cleanup(self, intent: DirectPurgeCleanupIntent) -> None:
+        """Return one failed owned claim to pending for prompt recovery."""
+
+        if intent.state != "claimed" or intent.owner_token is None:
+            raise ValueError("cleanup intent is not owner-claimed")
+        with self._database.transaction(immediate=True) as connection:
+            updated = connection.execute(
+                """
+                UPDATE personal_context_purge_cleanup_intents
+                SET state = 'pending', owner_token = NULL,
+                    claim_expires_at_ns = NULL, updated_at = ?
+                WHERE intent_id = ? AND profile_id = ? AND purge_generation = ?
+                  AND state = 'claimed' AND owner_token = ? AND origin = ?
+                """,
+                (
+                    _now_text(),
+                    intent.intent_id,
+                    intent.profile_id,
+                    intent.purge_generation,
+                    intent.owner_token,
+                    _DIRECT_PURGE_CLEANUP_ORIGIN,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise ProfileIntegrityError("Direct purge cleanup release lost ownership")
+
+    def complete_direct_purge_cleanup(self, intent: DirectPurgeCleanupIntent) -> None:
+        """Complete exactly one cleanup claim under its current owner fence."""
+
+        if intent.state != "claimed" or intent.owner_token is None:
+            raise ValueError("cleanup intent is not owner-claimed")
+        now = _now_text()
+        with self._database.transaction(immediate=True) as connection:
+            updated = connection.execute(
+                """
+                UPDATE personal_context_purge_cleanup_intents
+                SET state = 'complete', claim_expires_at_ns = NULL,
+                    updated_at = ?, completed_at = ?
+                WHERE intent_id = ? AND profile_id = ? AND purge_generation = ?
+                  AND state = 'claimed' AND owner_token = ? AND origin = ?
+                  AND claim_expires_at_ns > ?
+                """,
+                (
+                    now,
+                    now,
+                    intent.intent_id,
+                    intent.profile_id,
+                    intent.purge_generation,
+                    intent.owner_token,
+                    _DIRECT_PURGE_CLEANUP_ORIGIN,
+                    time.time_ns(),
+                ),
+            )
+            if updated.rowcount != 1:
+                completed = connection.execute(
+                    """
+                    SELECT state, owner_token
+                    FROM personal_context_purge_cleanup_intents
+                    WHERE intent_id = ? AND profile_id = ? AND purge_generation = ?
+                      AND origin = ?
+                    """,
+                    (
+                        intent.intent_id,
+                        intent.profile_id,
+                        intent.purge_generation,
+                        _DIRECT_PURGE_CLEANUP_ORIGIN,
+                    ),
+                ).fetchone()
+                if (
+                    completed is None
+                    or completed["state"] != "complete"
+                    or completed["owner_token"] != intent.owner_token
+                ):
+                    raise ProfileIntegrityError(
+                        "Direct purge cleanup completion lost ownership"
+                    )
 
     def proposal_version_count(self, profile_id: str, proposal_id: str) -> int:
         """Return retained proposal version count for privacy evidence."""
@@ -2016,6 +3211,74 @@ class PersonalContextRepository:
                 )
                 if updated.rowcount != 1:
                     raise ConcurrentProfileUpdateError("encrypted object changed concurrently")
+            publication_rows = connection.execute(
+                """
+                SELECT * FROM personal_context_publication_rows
+                WHERE profile_id = ? AND row_state != 'shredded'
+                """,
+                (profile_id,),
+            ).fetchall()
+            for row in publication_rows:
+                envelope = EncryptedEnvelope(
+                    algorithm=str(row["algorithm"]),
+                    nonce=bytes(row["nonce"]),
+                    wrapped_dek=bytes(row["wrapped_dek"]),
+                    wrapped_dek_nonce=bytes(row["wrapped_dek_nonce"]),
+                    ciphertext=bytes(row["ciphertext"]),
+                    key_version=int(row["key_version"]),
+                )
+                aad = PersonalContextPublicationJournal._aad(
+                    profile_id=profile_id,
+                    batch_id=str(row["publication_batch_id"]),
+                    sequence=int(row["profile_publication_sequence"]),
+                    ordinal=int(row["batch_ordinal"]),
+                    batch_size=int(row["batch_size"]),
+                    role=str(row["role"]),
+                    purge_generation=int(row["purge_generation"]),
+                    object_id=str(row["opaque_object_id"]),
+                    version_id=str(row["opaque_version_id"]),
+                    operation=str(row["operation"]),
+                    deterministic_envelope_id=str(row["deterministic_envelope_id"]),
+                    integrity_tag=str(row["integrity_tag"]),
+                    sync_server_cursor=(
+                        None
+                        if row["sync_server_cursor"] is None
+                        else int(row["sync_server_cursor"])
+                    ),
+                    row_state=str(row["row_state"]),
+                )
+                try:
+                    rewrapped = cipher.rewrap(
+                        envelope,
+                        aad,
+                        new_encryption_key,
+                        new_key_version=new_key_version,
+                    )
+                except EnvelopeAuthenticationError:
+                    raise ProfileIntegrityError(
+                        "Encrypted publication authentication failed"
+                    ) from None
+                updated = connection.execute(
+                    """
+                    UPDATE personal_context_publication_rows
+                    SET wrapped_dek = ?, wrapped_dek_nonce = ?, key_version = ?
+                    WHERE profile_id = ? AND profile_publication_sequence = ?
+                      AND batch_ordinal = ? AND key_version = ?
+                    """,
+                    (
+                        rewrapped.wrapped_dek,
+                        rewrapped.wrapped_dek_nonce,
+                        rewrapped.key_version,
+                        profile_id,
+                        row["profile_publication_sequence"],
+                        row["batch_ordinal"],
+                        current_keys.key_version,
+                    ),
+                )
+                if updated.rowcount != 1:
+                    raise ConcurrentProfileUpdateError(
+                        "encrypted publication changed concurrently"
+                    )
             return self._keys.replace_encryption_key(
                 profile_id,
                 encryption_key=new_encryption_key,

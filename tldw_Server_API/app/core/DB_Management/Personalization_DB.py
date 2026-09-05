@@ -282,8 +282,121 @@ class PersonalizationDB:
                         PRIMARY KEY (profile_id, receipt_id)
                     );
 
+                    CREATE TABLE IF NOT EXISTS personal_context_publication_profiles (
+                        profile_id TEXT PRIMARY KEY,
+                        next_sequence INTEGER NOT NULL CHECK (next_sequence >= 1),
+                        activation_covered_through_sequence INTEGER NOT NULL DEFAULT 0,
+                        purge_generation INTEGER NOT NULL CHECK (purge_generation >= 0),
+                        activation_epoch TEXT,
+                        continuity_token TEXT,
+                        updated_at TEXT NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS personal_context_publication_relay_leases (
+                        profile_id TEXT PRIMARY KEY,
+                        owner_token TEXT NOT NULL,
+                        expires_at_ns INTEGER NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS personal_context_publication_relay_attention (
+                        profile_id TEXT NOT NULL,
+                        profile_publication_sequence INTEGER NOT NULL,
+                        error_code TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        PRIMARY KEY (profile_id, profile_publication_sequence)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS personal_context_purge_cleanup_intents (
+                        intent_id TEXT PRIMARY KEY,
+                        profile_id TEXT NOT NULL,
+                        old_generation_through INTEGER NOT NULL CHECK (old_generation_through >= 0),
+                        purge_generation INTEGER NOT NULL CHECK (purge_generation = old_generation_through + 1),
+                        origin TEXT NOT NULL CHECK (origin = 'direct_confirmed_full_profile_purge'),
+                        state TEXT NOT NULL CHECK (state IN ('pending','claimed','complete')),
+                        owner_token TEXT,
+                        claim_expires_at_ns INTEGER,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        completed_at TEXT,
+                        CHECK (
+                            (state = 'pending' AND owner_token IS NULL AND claim_expires_at_ns IS NULL AND completed_at IS NULL)
+                            OR (state = 'claimed' AND owner_token IS NOT NULL AND claim_expires_at_ns IS NOT NULL AND completed_at IS NULL)
+                            OR (state = 'complete' AND owner_token IS NOT NULL AND claim_expires_at_ns IS NULL AND completed_at IS NOT NULL)
+                        ),
+                        UNIQUE (profile_id, purge_generation)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS personal_context_publication_batches (
+                        profile_id TEXT NOT NULL,
+                        profile_publication_sequence INTEGER NOT NULL,
+                        publication_batch_id TEXT NOT NULL,
+                        purge_generation INTEGER NOT NULL,
+                        batch_size INTEGER NOT NULL CHECK (batch_size >= 1),
+                        status TEXT NOT NULL CHECK (status IN ('pending','relaying','complete','covered_by_activation','purge_terminal')),
+                        activation_id TEXT,
+                        baseline_digest TEXT,
+                        sync_receipt_id TEXT,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        PRIMARY KEY (profile_id, profile_publication_sequence),
+                        UNIQUE (profile_id, publication_batch_id)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS personal_context_publication_rows (
+                        profile_id TEXT NOT NULL,
+                        profile_publication_sequence INTEGER NOT NULL,
+                        publication_batch_id TEXT NOT NULL,
+                        batch_ordinal INTEGER NOT NULL CHECK (batch_ordinal >= 0),
+                        batch_size INTEGER NOT NULL CHECK (batch_size >= 1),
+                        purge_generation INTEGER NOT NULL CHECK (purge_generation >= 0),
+                        role TEXT NOT NULL CHECK (role IN ('semantic','manifest','purge_barrier')),
+                        opaque_object_id TEXT NOT NULL,
+                        opaque_version_id TEXT NOT NULL,
+                        operation TEXT NOT NULL CHECK (operation IN ('upsert','tombstone')),
+                        algorithm TEXT NOT NULL,
+                        key_version INTEGER NOT NULL,
+                        nonce BLOB NOT NULL,
+                        wrapped_dek BLOB NOT NULL,
+                        wrapped_dek_nonce BLOB NOT NULL,
+                        ciphertext BLOB NOT NULL,
+                        integrity_tag TEXT NOT NULL,
+                        payload_size_bytes INTEGER NOT NULL CHECK (payload_size_bytes >= 0),
+                        deterministic_envelope_id TEXT NOT NULL,
+                        sync_server_cursor INTEGER,
+                        row_state TEXT NOT NULL CHECK (row_state IN ('pending','staged','acknowledged','shredded')),
+                        PRIMARY KEY (profile_id, profile_publication_sequence, batch_ordinal),
+                        UNIQUE (profile_id, deterministic_envelope_id),
+                        FOREIGN KEY (profile_id, profile_publication_sequence)
+                            REFERENCES personal_context_publication_batches(profile_id, profile_publication_sequence)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS personal_context_ingress_receipts (
+                        dataset_id TEXT NOT NULL,
+                        device_id TEXT NOT NULL,
+                        client_envelope_id TEXT NOT NULL,
+                        canonical_payload_digest TEXT NOT NULL,
+                        purge_generation INTEGER NOT NULL CHECK (purge_generation >= 0),
+                        wire_entity_version TEXT NOT NULL,
+                        resulting_object_id TEXT NOT NULL,
+                        resulting_version_id TEXT NOT NULL,
+                        resulting_manifest_revision INTEGER NOT NULL CHECK (resulting_manifest_revision >= 0),
+                        resulting_manifest_version_id TEXT NOT NULL,
+                        publication_batch_id TEXT NOT NULL,
+                        profile_publication_sequence INTEGER NOT NULL CHECK (profile_publication_sequence >= 1),
+                        receipt_id TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        PRIMARY KEY (dataset_id, device_id, client_envelope_id),
+                        UNIQUE (receipt_id)
+                    );
+
                     CREATE INDEX IF NOT EXISTS idx_personal_context_heads_type
                         ON personal_context_object_heads(profile_id, object_type, object_id);
+                    CREATE INDEX IF NOT EXISTS idx_personal_context_publication_rows_state
+                        ON personal_context_publication_rows(profile_id, row_state, profile_publication_sequence, batch_ordinal);
+                    CREATE INDEX IF NOT EXISTS idx_personal_context_publication_batches_status
+                        ON personal_context_publication_batches(profile_id, status, profile_publication_sequence);
+                    CREATE INDEX IF NOT EXISTS idx_personal_context_purge_cleanup_state
+                        ON personal_context_purge_cleanup_intents(state, created_at, intent_id);
                     """
                 )
                 conn.commit()
@@ -333,6 +446,52 @@ class PersonalizationDB:
         except (sqlite3.Error, TypeError, ValueError):
             return False
 
+    def checkpoint_retention_history(self) -> bool:
+        """Rewrite free pages and require an empty application-owned WAL."""
+
+        with self._lock:
+            connection = self._connect()
+            try:
+                if not self.retention_prerequisites_verified(connection):
+                    return False
+                connection.execute("VACUUM")
+                freelist = connection.execute("PRAGMA freelist_count").fetchone()
+                if freelist is None or int(freelist[0]) != 0:
+                    return False
+                prior_timeout = connection.execute("PRAGMA busy_timeout").fetchone()
+                connection.execute("PRAGMA busy_timeout = 0")
+                try:
+                    checkpoint = connection.execute(
+                        "PRAGMA wal_checkpoint(TRUNCATE)"
+                    ).fetchone()
+                finally:
+                    timeout = 5000 if prior_timeout is None else int(prior_timeout[0])
+                    connection.execute(f"PRAGMA busy_timeout = {timeout}")
+                if checkpoint is None or tuple(map(int, checkpoint)) != (0, 0, 0):
+                    return False
+                wal_path = Path(f"{self.db_path}-wal")
+                return not wal_path.exists() or wal_path.stat().st_size == 0
+            except (OSError, sqlite3.Error, TypeError, ValueError):
+                return False
+            finally:
+                connection.close()
+
+    @staticmethod
+    def retention_prerequisites_verified(connection: sqlite3.Connection) -> bool:
+        """Return whether destructive retention work is safe on this connection."""
+
+        try:
+            secure_delete = connection.execute("PRAGMA secure_delete").fetchone()
+            journal_mode = connection.execute("PRAGMA journal_mode").fetchone()
+            return (
+                secure_delete is not None
+                and int(secure_delete[0]) == 1
+                and journal_mode is not None
+                and str(journal_mode[0]).lower() == "wal"
+            )
+        except (sqlite3.Error, TypeError, ValueError):
+            return False
+
     def _migrate_schema(self) -> None:
         """Add columns that may be missing in databases created before schema updates."""
         migrations: list[tuple[str, str, str]] = [
@@ -357,6 +516,11 @@ class PersonalizationDB:
             ("companion_goals", "progress_mode", "TEXT NOT NULL DEFAULT 'manual'"),
             ("companion_goals", "derivation_key", "TEXT"),
             ("companion_goals", "evidence_json", "TEXT NOT NULL DEFAULT '[]'"),
+            (
+                "personal_context_ingress_receipts",
+                "wire_entity_version",
+                "TEXT NOT NULL DEFAULT ''",
+            ),
         ]
         with self._lock:
             conn = self._connect()

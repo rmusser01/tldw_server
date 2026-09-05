@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
 from pathlib import Path
 from typing import Any
 
@@ -65,6 +66,9 @@ from tldw_Server_API.app.core.Sync.v2.service import (
     SyncV2Settings,
 )
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
+from tldw_Server_API.tests.Personalization.personal_context_test_support import (
+    preference_record,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -87,6 +91,32 @@ def _ready_encryption():
         server_trusted_enabled=True,
         auth_mode="multi_user",
     )
+
+
+def _seed_persisted_personal_context_exchange(
+    service: SyncV2Service,
+    dataset_id: str,
+) -> dict[str, object]:
+    """Seed the future activation owner state without exposing an HTTP route."""
+
+    dataset = service.store.get_dataset(dataset_id)
+    assert dataset is not None
+    metadata = dict(dataset.metadata)
+    state = dict(metadata["personal_context"])
+    proof: dict[str, object] = {
+        "ongoing_sync_version": 1,
+        "activation_epoch": "epoch_0123456789abcdef",
+        "continuity_token": "continuity_0123456789abcdef",
+    }
+    state.update(proof)
+    metadata["personal_context"] = state
+    with service.store.db.backend.transaction() as connection:
+        service.store.db.execute(
+            "UPDATE sync_datasets SET metadata_json = ? WHERE dataset_id = ?",
+            (json.dumps(metadata, sort_keys=True), dataset_id),
+            connection=connection,
+        )
+    return proof
 
 
 def _not_ready_encryption():
@@ -230,6 +260,10 @@ def test_capabilities_endpoint_reports_supported_domains_and_encryption_posture(
         "max_proposals_per_turn": 5,
         "max_proposals_per_session": 25,
         "max_unresolved_proposals": 200,
+        "ongoing_sync_version": 0,
+        "ongoing_sync_blockers": [],
+        "activation_epoch": None,
+        "continuity_token": None,
     }
     assert body["domain_schemas"]["notes.note"]["upsert"]["properties"] == {
         "title": {"type": "string", "max_length": 255},
@@ -1128,6 +1162,192 @@ def test_pull_endpoint_maps_versioned_token_errors(
     assert response.json()["detail"]["error_code"] == error_code
 
 
+def test_ongoing_personal_context_routes_fail_closed_while_version_zero(
+    client: TestClient,
+) -> None:
+    acknowledgment = client.post(
+        "/api/v1/sync/personal-context/activation/acknowledge",
+        json={
+            "dataset_id": "dataset_0123456789abcdef",
+            "device_id": "device_0123456789abcdef",
+            "activation_id": "activation_0123456789abcdef",
+            "baseline_digest": "a" * 64,
+            "local_receipt_id": "receipt_0123456789abcdef",
+            "personal_context_exchange": {
+                "ongoing_sync_version": 1,
+                "activation_epoch": "epoch_0123456789abcdef",
+                "continuity_token": "continuity_0123456789abcdef",
+            },
+        },
+    )
+    purge = client.post(
+        "/api/v1/sync/personal-context/purge",
+        json={
+            "dataset_id": "dataset_0123456789abcdef",
+            "device_id": "device_0123456789abcdef",
+            "request_id": "request_0123456789abcdef",
+            "expected_purge_generation": 0,
+            "idempotency_key": "purge_0123456789abcdef",
+            "signature": "s" * 32,
+        },
+    )
+
+    assert acknowledgment.status_code == 409
+    assert purge.status_code == 409
+    assert acknowledgment.json()["detail"] == {
+        "code": "personal_context_ongoing_sync_unavailable"
+    }
+    assert purge.json()["detail"] == {
+        "code": "personal_context_ongoing_sync_unavailable"
+    }
+
+
+@pytest.mark.parametrize("path", ["pull", "conflicts"])
+def test_ongoing_personal_context_query_proof_rejects_half_present_pair(
+    client: TestClient,
+    path: str,
+) -> None:
+    response = client.get(
+        f"/api/v1/sync/{path}",
+        params={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "personal_context_activation_epoch": "epoch_0123456789abcdef",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["error_code"] == "personal_context_exchange_incomplete"
+
+
+def test_conflict_list_page_is_bounded_to_twenty_items(client: TestClient) -> None:
+    response = client.get(
+        "/api/v1/sync/conflicts",
+        params={"dataset_id": "dataset-1", "limit": 21},
+    )
+
+    assert response.status_code == 422
+
+
+def test_conflict_list_offset_reaches_every_record(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    """Clients can traverse bounded conflict pages through the public endpoint."""
+
+    sync_service.enroll_dataset(
+        user_id="user-1", dataset_id="dataset-paging", domains=["notes.note"]
+    )
+    for index in range(25):
+        sync_service.store.insert_conflict(
+            SyncConflictCreate(
+                conflict_id=f"paging-{index:02d}",
+                dataset_id="dataset-paging",
+                domain="notes.note",
+                object_id=f"note-{index}",
+                conflict_type="revision_mismatch",
+            )
+        )
+    pages = [
+        client.get(
+            "/api/v1/sync/conflicts",
+            params={"dataset_id": "dataset-paging", "limit": 20, "offset": offset},
+        )
+        for offset in (0, 20, 40)
+    ]
+    assert all(page.status_code == 200 for page in pages)
+    assert [len(page.json()) for page in pages] == [20, 5, 0]
+    assert len({item["conflict_id"] for page in pages for item in page.json()}) == 25
+    assert client.get(
+        "/api/v1/sync/conflicts",
+        params={"dataset_id": "dataset-paging", "offset": -1},
+    ).status_code == 422
+
+
+def test_non_personal_context_conflict_list_ignores_unverified_pc_proof(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.register_device(
+        user_id="user-1",
+        device_id="device-1",
+        display_name="Trusted laptop",
+        client_type="chatbook",
+    )
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+    )
+    legacy_response = client.get(
+        "/api/v1/sync/conflicts",
+        params={"dataset_id": "dataset-1"},
+    )
+    response = client.get(
+        "/api/v1/sync/conflicts",
+        params={
+            "dataset_id": "dataset-1",
+            "personal_context_activation_epoch": "epoch_0123456789abcdef",
+            "personal_context_continuity_token": "continuity_0123456789abcdef",
+        },
+    )
+
+    assert legacy_response.status_code == 200
+    assert legacy_response.json() == []
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_notes_skip_with_exchange_proof_stays_domain_native(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.register_device(
+        user_id="user-1",
+        device_id="device-1",
+        display_name="Trusted laptop",
+        client_type="chatbook",
+    )
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+    )
+    sync_service.store.insert_conflict(
+        SyncConflictCreate(
+            conflict_id="conflict-non-personal-context",
+            dataset_id="dataset-1",
+            domain="notes.note",
+            object_id="note-1",
+            conflict_type="revision_mismatch",
+        )
+    )
+
+    response = client.post(
+        "/api/v1/sync/conflicts/resolve",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "personal_context_exchange": {
+                "ongoing_sync_version": 1,
+                "activation_epoch": "epoch_0123456789abcdef",
+                "continuity_token": "continuity_0123456789abcdef",
+            },
+            "resolutions": [
+                {
+                    "conflict_id": "conflict-non-personal-context",
+                    "action": "skip",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["resolved"] == []
+    assert response.json()["rejected"][0]["conflict_id"] == "conflict-non-personal-context"
+    assert sync_service.store.get_conflict("conflict-non-personal-context").status == "unresolved"
+
+
 def test_background_sync_policy_lease_and_status_endpoints(
     client: TestClient,
     sync_service: SyncV2Service,
@@ -1370,7 +1590,12 @@ def test_attachment_bootstrap_diagnostics_enforces_ingress_rate_limit(
 
 @pytest.mark.parametrize(
     "path",
-    ["/personal-context/bootstrap", "/personal-context/complete"],
+    [
+        "/personal-context/bootstrap",
+        "/personal-context/complete",
+        "/personal-context/activation/acknowledge",
+        "/personal-context/purge",
+    ],
 )
 def test_personal_context_mutation_routes_declare_rate_limit_dependency(
     path: str,
@@ -3212,6 +3437,7 @@ def test_personal_context_endpoints_use_real_factory_bootstrap_and_complete_flow
 ) -> None:
     """The typed flow plans read-only state and materializes it only on completion."""
 
+    factory_personal_context_service._recovery_clock_ns = lambda: 0
     client = _client_for_factory_service(factory_personal_context_service)
     missing = client.post(
         "/api/v1/sync/personal-context/bootstrap",
@@ -3320,29 +3546,100 @@ def test_personal_context_endpoints_use_real_factory_bootstrap_and_complete_flow
         integrity_key_id=integrity_key_id,
         purge_generation=body["purge_generation"],
     )
+    exchange = _seed_persisted_personal_context_exchange(
+        factory_personal_context_service,
+        body["dataset_id"],
+    )
+    seeded = factory_personal_context_service.store.get_dataset(body["dataset_id"])
+    assert seeded is not None
+    assert seeded.metadata["personal_context"] == {
+        **seeded.metadata["personal_context"],
+        **exchange,
+    }
+    seeded_state = seeded.metadata["personal_context"]
+    assert seeded_state["link_state"] == "complete"
+    assert factory_personal_context_service.store.has_personal_context_link_receipt(
+        user_id="101",
+        dataset_id=body["dataset_id"],
+        device_id="pc-device",
+        profile_id=seeded_state["profile_id"],
+        integrity_key_id=seeded_state["integrity_key_id"],
+        purge_generation=seeded_state["purge_generation"],
+    )
+    assert factory_personal_context_service.verified_active_exchange(
+        user_id="101",
+        dataset_id=body["dataset_id"],
+        device_id="pc-device",
+        exchange=type("Proof", (), exchange)(),
+    ).model_dump(mode="json") == exchange
+    missing_exchange = client.get(
+        "/api/v1/sync/pull",
+        params={
+            "dataset_id": body["dataset_id"],
+            "device_id": "pc-device",
+            "domain": "personal_context.record",
+        },
+    )
+    tampered_exchange = client.get(
+        "/api/v1/sync/pull",
+        params={
+            "dataset_id": body["dataset_id"],
+            "device_id": "pc-device",
+            "domain": "personal_context.record",
+            "personal_context_activation_epoch": exchange["activation_epoch"],
+            "personal_context_continuity_token": "tampered_0123456789abcdef",
+        },
+    )
+    verified_exchange = client.get(
+        "/api/v1/sync/pull",
+        params={
+            "dataset_id": body["dataset_id"],
+            "device_id": "pc-device",
+            "domain": "personal_context.record",
+            "personal_context_activation_epoch": exchange["activation_epoch"],
+            "personal_context_continuity_token": exchange["continuity_token"],
+        },
+    )
+    assert missing_exchange.status_code == 409
+    assert tampered_exchange.status_code == 409
+    assert {
+        missing_exchange.json()["detail"]["error_code"],
+        tampered_exchange.json()["detail"]["error_code"],
+    } == {"personal_context_activation_required"}
+    assert verified_exchange.status_code == 200, verified_exchange.text
+    assert verified_exchange.json()["personal_context_exchange"] == exchange
 
-    manifest_payload = manifest.model_dump(mode="json")
-    manifest_canonical = canonical_json_bytes(manifest_payload)
-    manifest_tag = hmac.new(integrity_key, manifest_canonical, hashlib.sha256)
+    record_payload = {
+        **preference_record(
+            manifest.profile_id,
+            record_id="client-record-e2e",
+            version_id="client-record-e2e-v1",
+        ).model_dump(mode="json"),
+        "scope_id": canonical.list_scopes()[0].scope_id,
+    }
+    record_canonical = canonical_json_bytes(record_payload)
+    record_tag = hmac.new(integrity_key, record_canonical, hashlib.sha256)
     push = client.post(
         "/api/v1/sync/push",
         json={
             "dataset_id": body["dataset_id"],
             "device_id": "pc-device",
+            "personal_context_exchange": exchange,
             "envelopes": [
                 {
                     "dataset_id": body["dataset_id"],
-                    "client_envelope_id": "pc-device:manifest:1",
+                    "client_envelope_id": "pc-device:record:1",
                     "device_id": "pc-device",
-                    "domain": "personal_context.manifest",
+                    "domain": "personal_context.record",
                     "operation": "upsert",
-                    "object_id": manifest.profile_id,
+                    "object_id": record_payload["record_id"],
+                    "parent_id": record_payload["scope_id"],
                     "adapter_version": 1,
                     "schema_version": 1,
-                    "payload": manifest_payload,
-                    "payload_hash": f"hmac-sha256-v1:{manifest_tag.hexdigest()}",
-                    "payload_size_bytes": len(manifest_canonical),
-                    "entity_version": manifest.current_version_id,
+                    "payload": record_payload,
+                    "payload_hash": f"hmac-sha256-v1:{record_tag.hexdigest()}",
+                    "payload_size_bytes": len(record_canonical),
+                    "entity_version": record_payload["version_id"],
                     "routing_metadata": {
                         "integrity_key_id": integrity_key_id,
                         "profile_id": manifest.profile_id,
@@ -3354,9 +3651,52 @@ def test_personal_context_endpoints_use_real_factory_bootstrap_and_complete_flow
         },
     )
     assert push.status_code == 200, push.text
+    assert push.json()["personal_context_exchange"] == exchange
     assert [item["client_envelope_id"] for item in push.json()["accepted"]] == [
-        "pc-device:manifest:1"
+        "pc-device:record:1"
     ], push.json()
+    recovery_cursor = None
+    recovered_body = None
+    for _attempt in range(10):
+        recovery_params = {
+            "dataset_id": body["dataset_id"],
+            "device_id": "pc-device",
+            "domain": "personal_context.record",
+            "personal_context_activation_epoch": exchange["activation_epoch"],
+            "personal_context_continuity_token": exchange["continuity_token"],
+        }
+        if recovery_cursor is not None:
+            recovery_params["cursor"] = recovery_cursor
+        recovered = client.get("/api/v1/sync/pull", params=recovery_params)
+        assert recovered.status_code == 200, recovered.text
+        recovered_body = recovered.json()
+        recovery_cursor = recovered_body["next_cursor"]
+        if recovered_body["envelopes"]:
+            break
+    assert recovered_body is not None
+    assert recovered_body["personal_context_relay"]["state"] == "complete", (
+        recovered_body["personal_context_relay"]
+    )
+    assert [item["object_id"] for item in recovered_body["envelopes"]] == [
+        record_payload["record_id"]
+    ], recovered_body
+    assert recovered_body["envelopes"][0]["payload"] == record_payload
+    assert recovered_body["envelopes"][0]["routing_metadata"][
+        "personal_context_authority"
+    ]["role"] == "home_authority"
+    repeated = client.get(
+        "/api/v1/sync/pull",
+        params={
+            "dataset_id": body["dataset_id"],
+            "device_id": "pc-device",
+            "domain": "personal_context.record",
+            "cursor": recovered_body["next_cursor"],
+            "personal_context_activation_epoch": exchange["activation_epoch"],
+            "personal_context_continuity_token": exchange["continuity_token"],
+        },
+    )
+    assert repeated.status_code == 200, repeated.text
+    assert repeated.json()["envelopes"] == []
 
 
 def test_personal_context_bootstrap_response_exposes_effective_zero_quota(
@@ -3637,6 +3977,10 @@ def test_personal_context_push_surfaces_receipt_storage_failure_without_reconcil
             "bootstrap_cursor": body["cursor"],
         },
     ).status_code == 204
+    exchange = _seed_persisted_personal_context_exchange(
+        factory_personal_context_service,
+        body["dataset_id"],
+    )
 
     original_execute = factory_personal_context_service.store.db.execute
 
@@ -3655,6 +3999,7 @@ def test_personal_context_push_surfaces_receipt_storage_failure_without_reconcil
         json={
             "dataset_id": body["dataset_id"],
             "device_id": "pc-device",
+            "personal_context_exchange": exchange,
             "envelopes": [
                 {
                     "dataset_id": body["dataset_id"],

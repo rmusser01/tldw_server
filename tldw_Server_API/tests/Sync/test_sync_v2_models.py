@@ -19,10 +19,13 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncBlobUploadCreateRequest,
     SyncBlobUploadSessionResponse,
     SyncCapabilitiesResponse,
+    SyncConflictListResponse,
     SyncConflictResolveRequest,
     SyncDatasetEnrollRequest,
     SyncKeyRecoveryBundleRecord,
     SyncKeyRecoveryBundleRequest,
+    SyncPersonalContextActivationAcknowledgeRequest,
+    SyncPersonalContextPurgeRequest,
     SyncPushRequest,
     SyncPushResponse,
     SyncRestoreCompletenessResponse,
@@ -72,6 +75,84 @@ def _encryption_policy_model_classes():
         api_sync_models.SyncEncryptionPolicyMetadata,
         core_sync_models.SyncEncryptionPolicyMetadata,
     )
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        ({"object_revision": 7}, 7),
+        ({"object_revision": True}, None),
+        ({"object_revision": 0}, None),
+        ({"object_revision": 2**63}, None),
+        ({}, 1),
+        (
+            {
+                "base_server_cursor": 8,
+                "base_object_revision": 4,
+                "base_object_hash": "sha256:base",
+                "base_version": "record-v4",
+            },
+            5,
+        ),
+        ({"base_server_cursor": 8}, None),
+        (
+            {
+                "base_server_cursor": True,
+                "base_object_revision": 4,
+                "base_object_hash": "sha256:base",
+            },
+            None,
+        ),
+        (
+            {
+                "base_server_cursor": 8,
+                "base_object_revision": 0,
+                "base_object_hash": "sha256:base",
+            },
+            None,
+        ),
+        (
+            {
+                "base_server_cursor": 8,
+                "base_object_revision": 2**63 - 1,
+                "base_object_hash": "sha256:base",
+            },
+            None,
+        ),
+        (
+            {
+                "base_server_cursor": 8,
+                "base_object_revision": 4,
+                "base_object_hash": "",
+            },
+            None,
+        ),
+        (
+            {
+                "base_server_cursor": 8,
+                "base_object_revision": 4,
+                "base_object_hash": "sha256:base",
+                "base_version": 3,
+            },
+            None,
+        ),
+        ({"base_version": "unexpected-genesis-base"}, None),
+    ],
+)
+def test_personal_context_ingress_result_revision_is_strict(
+    values: dict[str, object],
+    expected: int | None,
+) -> None:
+    fields: dict[str, object] = {
+        "object_revision": None,
+        "base_server_cursor": None,
+        "base_object_revision": None,
+        "base_object_hash": None,
+        "base_version": None,
+    }
+    fields.update(values)
+
+    assert core_sync_models.resolve_personal_context_ingress_result_revision(**fields) == expected
 
 
 def _m1_envelope_payload(**overrides):
@@ -170,6 +251,10 @@ def test_personal_context_capability_contract_is_typed_and_bounded() -> None:
     assert capabilities.personal_context.model_dump() == {
         "available": False,
         "blockers": ["personal_context_profile_key_unavailable"],
+        "ongoing_sync_version": 0,
+        "ongoing_sync_blockers": [],
+        "activation_epoch": None,
+        "continuity_token": None,
         "authorization_policy": "server_trusted_v1",
         "min_schema_version": 1,
         "max_schema_version": 1,
@@ -1307,6 +1392,34 @@ def test_conflict_resolution_request_rejects_skip_with_resolution_envelope():
         )
 
 
+def test_conflict_resolution_rejects_client_home_authority_claim() -> None:
+    with pytest.raises(ValidationError, match="home authority"):
+        SyncConflictResolveRequest.model_validate(
+            {
+                "dataset_id": "dataset-1",
+                "device_id": "device-1",
+                "resolutions": [
+                    {
+                        "conflict_id": "conflict-1",
+                        "action": "duplicate_rename",
+                        "resolution_envelope": _m1_envelope_payload(
+                            client_envelope_id="env-resolution-home-authority",
+                            domain="personal_context.record",
+                            object_id="note-copy",
+                            authority={
+                                "role": "home_authority",
+                                "publication_batch_id": "batch_0123456789abcdef",
+                                "profile_publication_sequence": 1,
+                                "batch_ordinal": 0,
+                                "batch_size": 1,
+                            },
+                        ),
+                    }
+                ],
+            }
+        )
+
+
 def test_conflict_batch_endpoint_resolves_locked_m1_request_shape():
     from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
     from tldw_Server_API.app.api.v1.endpoints.sync import resolve_sync_v2_conflicts
@@ -1316,33 +1429,49 @@ def test_conflict_batch_endpoint_resolves_locked_m1_request_shape():
         def __init__(self):
             self.calls = []
 
-        def resolve_conflict(self, **kwargs):
-            self.calls.append(kwargs)
-            public_action = kwargs["action"]
-            server_cursor = 123 if public_action == "duplicate_rename" else 12
-            envelope_id = (
-                "srv_env_000000000123"
-                if public_action == "duplicate_rename"
-                else kwargs.get("resolved_by_envelope_id")
-            )
-            return SyncConflict(
-                conflict_id=kwargs["conflict_id"],
-                dataset_id="dataset-1",
-                domain="notes.note",
-                object_id="note-1",
-                conflict_type="version_divergence",
-                status="dismissed" if public_action == "skip" else "resolved",
-                base_envelope_id=None,
-                local_envelope_id=None,
-                remote_envelope_id=None,
-                server_cursor=server_cursor,
-                metadata={},
-                created_at="2026-05-23T18:12:44Z",
-                resolved_at="2026-05-23T18:13:44Z",
-                resolved_by_device_id=kwargs["resolved_by_device_id"],
-                resolved_by_envelope_id=envelope_id,
-                resolution_action=public_action,
-            )
+        def resolve_conflicts_batch(self, **kwargs):
+            results = []
+            for index, resolution in enumerate(kwargs["resolutions"]):
+                conflict_id, public_action, resolution_envelope, *_fields = resolution
+                call = {
+                    "conflict_id": conflict_id,
+                    "dataset_id": kwargs["dataset_id"],
+                    "action": public_action,
+                    "resolution_envelope": resolution_envelope,
+                }
+                self.calls.append(call)
+                server_cursor = 123 if public_action == "duplicate_rename" else 12
+                envelope_id = (
+                    "srv_env_000000000123"
+                    if public_action == "duplicate_rename"
+                    else None
+                )
+                results.append(
+                    (
+                        index,
+                        SyncConflict(
+                            conflict_id=conflict_id,
+                            dataset_id="dataset-1",
+                            domain="notes.note",
+                            object_id="note-1",
+                            conflict_type="version_divergence",
+                            status=(
+                                "dismissed" if public_action == "skip" else "resolved"
+                            ),
+                            base_envelope_id=None,
+                            local_envelope_id=None,
+                            remote_envelope_id=None,
+                            server_cursor=server_cursor,
+                            metadata={},
+                            created_at="2026-05-23T18:12:44Z",
+                            resolved_at="2026-05-23T18:13:44Z",
+                            resolved_by_device_id=kwargs["device_id"],
+                            resolved_by_envelope_id=envelope_id,
+                            resolution_action=public_action,
+                        ),
+                    )
+                )
+            return results, [], None
 
     service = FakeSyncService()
     request = SyncConflictResolveRequest.model_validate(
@@ -1491,6 +1620,157 @@ def test_push_request_requires_top_level_device_id():
             {
                 "dataset_id": "dataset-1",
                 "envelopes": [_m1_envelope_payload()],
+            }
+        )
+
+
+def _ongoing_exchange_proof() -> dict[str, object]:
+    return {
+        "ongoing_sync_version": 1,
+        "activation_epoch": "epoch_0123456789abcdef",
+        "continuity_token": "continuity_0123456789abcdef",
+    }
+
+
+def test_ongoing_sync_models_preserve_version_zero_until_readiness() -> None:
+    capabilities = api_sync_models.PersonalContextSyncCapabilitiesResponse()
+
+    assert capabilities.ongoing_sync_version == 0
+    assert capabilities.ongoing_sync_blockers == []
+    assert capabilities.activation_epoch is None
+    assert capabilities.continuity_token is None
+
+    with pytest.raises(ValidationError):
+        api_sync_models.PersonalContextSyncCapabilitiesResponse.model_validate(
+            {
+                "ongoing_sync_version": 1,
+                "activation_epoch": "epoch_0123456789abcdef",
+                "continuity_token": "continuity_0123456789abcdef",
+                "ongoing_sync_blockers": ["personal_context_transport_unavailable"],
+            }
+        )
+
+
+def test_ongoing_exchange_shapes_are_available_on_sync_boundaries() -> None:
+    proof = _ongoing_exchange_proof()
+    push = SyncPushRequest.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "personal_context_exchange": proof,
+        }
+    )
+    pull = api_sync_models.SyncPullResponse.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "personal_context_relay": {
+                "state": "personal_context_relay_pending",
+                "scan_watermark": "cursor_0123456789abcdef",
+            },
+            "personal_context_exchange": proof,
+        }
+    )
+    response = SyncPushResponse.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "personal_context_exchange": proof,
+        }
+    )
+
+    assert push.personal_context_exchange is not None
+    assert pull.personal_context_relay is not None
+    assert response.personal_context_exchange == push.personal_context_exchange
+
+
+def test_personal_context_conflict_list_response_requires_a_proof() -> None:
+    proof = _ongoing_exchange_proof()
+    response = SyncConflictListResponse.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "conflicts": [],
+            "personal_context_exchange": proof,
+        }
+    )
+
+    assert response.personal_context_exchange.ongoing_sync_version == 1
+    with pytest.raises(ValidationError):
+        SyncConflictListResponse.model_validate(
+            {"dataset_id": "dataset-1", "conflicts": []}
+        )
+
+
+def test_conflict_request_defers_personal_context_shape_to_loaded_conflict() -> None:
+    proof = _ongoing_exchange_proof()
+    request = SyncConflictResolveRequest.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "personal_context_exchange": proof,
+            "resolutions": [
+                {
+                    "conflict_id": "conflict_0123456789abcdef",
+                    "action": "skip",
+                }
+            ],
+        }
+    )
+    unproven = SyncConflictResolveRequest.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "resolutions": [
+                {
+                    "conflict_id": "conflict_0123456789abcdef",
+                    "action": "skip",
+                    "expected_local_envelope_id": "local_0123456789abcdef",
+                    "expected_remote_envelope_id": "remote_0123456789abcdef",
+                    "idempotency_key": "resolve_0123456789abcdef",
+                }
+            ],
+        }
+    )
+
+    assert request.resolutions[0].idempotency_key is None
+    assert unproven.resolutions[0].idempotency_key == "resolve_0123456789abcdef"
+
+
+def test_ongoing_activation_and_purge_requests_are_strict() -> None:
+    proof = _ongoing_exchange_proof()
+    acknowledgment = SyncPersonalContextActivationAcknowledgeRequest.model_validate(
+        {
+            "dataset_id": "dataset_0123456789abcdef",
+            "device_id": "device_0123456789abcdef",
+            "activation_id": "activation_0123456789abcdef",
+            "baseline_digest": "a" * 64,
+            "local_receipt_id": "receipt_0123456789abcdef",
+            "personal_context_exchange": proof,
+        }
+    )
+    purge = SyncPersonalContextPurgeRequest.model_validate(
+        {
+            "dataset_id": "dataset_0123456789abcdef",
+            "device_id": "device_0123456789abcdef",
+            "request_id": "request_0123456789abcdef",
+            "expected_purge_generation": 0,
+            "idempotency_key": "purge_0123456789abcdef",
+            "signature": "s" * 32,
+        }
+    )
+
+    assert acknowledgment.personal_context_exchange.ongoing_sync_version == 1
+    assert purge.expected_purge_generation == 0
+    with pytest.raises(ValidationError):
+        SyncPersonalContextActivationAcknowledgeRequest.model_validate(
+            {
+                **acknowledgment.model_dump(),
+                "baseline_digest": "!" + "a" * 64,
+            }
+        )
+    with pytest.raises(ValidationError):
+        SyncPersonalContextPurgeRequest.model_validate(
+            {
+                **purge.model_dump(),
+                "unexpected": "field",
             }
         )
 

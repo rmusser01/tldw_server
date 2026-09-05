@@ -8,6 +8,9 @@ Related task: TASK-13144
 
 Related ADR: `backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md`
 
+Ongoing-sync extension:
+`Docs/superpowers/specs/2026-09-02-personal-context-ongoing-sync-design.md`
+
 ## Purpose
 
 The server is one encrypted canonical peer for the same Personal Context
@@ -25,8 +28,8 @@ boundary.
 Both applications use `tldw-profile-core` contract version `0.1.0`. The
 accepted Chatbook source snapshot is:
 
-- source commit: `fcb54d736aff7145bf91421fa5f57cf2c5e0ed6d`
-- contract digest: `a1e0868dcd873a0c94eb0405934983466ceed68fced4b749489226d9932a5e9b`
+- source commit: `d95ba31c18e5667fdaab6266873b336518b0da9a`
+- contract digest: `421672c5cc0e43481280b3cf5a5a63fe01f44bf33255353e1cd9a6dbc2f2e7d0`
 
 The digest covers each relative path plus its bytes for the package metadata,
 Python contract modules, JSON Schema, and all v1 conformance fixtures in
