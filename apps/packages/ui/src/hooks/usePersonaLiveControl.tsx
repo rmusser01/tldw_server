@@ -268,10 +268,13 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
         idempotencyKey: generateStableId("persona-live"),
         surface: normalizedSurface
       })
-      if (!mountedRef.current || generation !== mountGenerationRef.current) {
-        throw new Error(STREAM_CONNECT_ERROR)
+      // Start persists or resumes a user-owned session, not a mount-owned
+      // resource. Preserve a successful result after unmount: stopping it could
+      // close the session already resumed by another mount/client. Only fence
+      // local state here; sendText separately cancels stale send continuations.
+      if (mountedRef.current && generation === mountGenerationRef.current) {
+        applyFocusedSession(session)
       }
-      applyFocusedSession(session)
       return session
     },
     [applyFocusedSession, normalizedDefaultPersonaId, normalizedSurface]

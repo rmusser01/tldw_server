@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-05 15:29'
-updated_date: '2026-09-05 15:58'
+updated_date: '2026-09-05 16:41'
 labels: []
 dependencies: []
 references:
@@ -50,6 +50,8 @@ Coordinating agent notified to restart backend port 9101 for real Chromium UAT; 
 Real Chromium now selects the authenticated stream protocol, sends a benign greeting, and receives notice plus tool_plan. Final browser rerun after all frontend lifecycle repairs also passed; no plan approved or executed. Root verification54 targeted backend tests and production Bandit0 findings. Evidence in final-live-browser.json and UAT report.
 
 Coordinated final validation: 265 focused frontend tests, 54 backend tests, production Bandit0 findings, scoped frontend ESLint0 errors (warnings documented), unchanged Python lint baseline, real browser evidence and limitations recorded in Docs/Reviews/MIGU_BUDDY_UAT_2026_09_05.md. Repository-wide typechecking remains limited by80 diagnostics across6 unchanged unrelated files; no full suite run.
+
+Qodo review: added pytest.MonkeyPatch, marker and credential parameter types, None return type, and safe-negotiation docstring to modified WebSocket test. Reverified54 backend tests passing. Production endpoint unchanged by this review repair.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

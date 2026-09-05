@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-05 14:55'
-updated_date: '2026-09-05 15:58'
+updated_date: '2026-09-05 16:36'
 labels: []
 dependencies: []
 references:
@@ -24,6 +24,7 @@ Live Migu UAT: Start succeeds, but Send repeatedly reports Persona live stream f
 - [x] #1 The real development WebUI can send Buddy text after Strict Mode effect remounts.
 - [x] #2 Actual unmount still cancels pending handshakes and releases sockets; failed sends retain the unsent draft.
 - [x] #3 Stale startup or overlapping list responses cannot overwrite a newer started/focused session or the latest loading/error state.
+- [x] #4 A successful persistent session Start resolving after unmount returns the backend result without stale UI writes or terminating a reusable user session; stale sends remain cancelled.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -33,9 +34,10 @@ Live Migu UAT: Start succeeds, but Send repeatedly reports Persona live stream f
 2. Restore mount readiness on effect setup and fence asynchronous sends/connections by mount generation while retaining socket and timer cleanup.
 3. Reproduce and fence stale startup/overlapping list responses by mount generation and request order, preserving newer Start/Focus results.
 4. Run the focused hook Vitest tests and touched-file checks, record red/green evidence; parent will perform real WebUI UAT.
+5. Qodo review follow-up: inspect backend create/resume and ownership contract, reproduce successful pending Start incorrectly rejecting on unmount, preserve its successful persistent result without stale UI writes, and cover shared-session StrictMode resume without destructive cleanup.
 ADR required: no
 ADR path: N/A
-Reason: routine bug fix preserving the existing hook lifecycle and stream contract.
+Reason: routine bug fix preserving existing persistent session ownership, resume, hook lifecycle and stream contracts.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -52,12 +54,18 @@ Real development-WebUI UAT and final task completion remain with coordinating ag
 Review follow-up: reproduced the remaining startup/list race before changing production code. Five regressions failed: a discarded StrictMode list erased a new Start; earlier same-mount lists erased Start/Focus; older list success/failure ended the latest request loading state. Reload now fences sessions/focus/error/loading writes by mount generation and request sequence. Successful Start/Focus invalidates earlier snapshots and clears their obsolete loading state. Final focused hook suite: 21 passed; touched-file ESLint has no findings (existing root pages-directory notice only); git diff --check clean. Coordinating agent notified that final browser UAT can proceed. This follow-up changes only the frontend hook/tests and task record.
 
 Coordinated final validation: 265 focused frontend tests, 54 backend tests, production Bandit0 findings, scoped frontend ESLint0 errors (warnings documented), unchanged Python lint baseline, real browser evidence and limitations recorded in Docs/Reviews/MIGU_BUDDY_UAT_2026_09_05.md. Repository-wide typechecking remains limited by80 diagnostics across6 unchanged unrelated files; no full suite run.
+
+Qodo PR2884 follow-up: Start now returns the successful backend session result even if the requesting mount has ended, while guarding only local focus/state writes. sendText retains its independent generation fence and cancels stale sends. Automatic stop was deliberately rejected: create_or_resume_live_session can return an existing nonterminal user-owned session; its response has no exclusive mount ownership or created/resumed provenance, and its idempotency key is overwritten even when resuming. Closing that session could terminate work resumed by another mount/client. Persistent sessions remain listable/resumable across component lifetimes.
+
+Red: the new pending-Start/unmount regression failed with promise rejected STREAM_CONNECT_ERROR (1 failed, 22 passed). Green: bun x vitest run ../packages/ui/src/hooks/__tests__/usePersonaLiveControl.test.tsx from apps/tldw-frontend passed 23 tests, including discarded StrictMode send returning either a different session or the same session used by the current mount. Existing backend contract tests create_resume_compatible_reuses_active_session and stop_marks_closed_and_clears_focus passed (2 passed, 39 deselected). Scoped ESLint run from repository root with apps/tldw-frontend/eslint.config.mjs passed without findings; existing root pages-directory configuration notice remains. An initial frontend-directory ESLint invocation ignored shared files; it was replaced by the effective root run. git diff --check clean. Bandit not applicable to this TS/TSX-only follow-up. No additional browser UAT or full suite run; no backend contract changes. ADR not required: preserves existing persistent ownership/resume behavior.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Strict Mode readiness and stale session-list races repaired. Final clean Chromium page sends Buddy text and receives the real backend plan. Lifecycle/retry regressions pass; visible outcome handling remains separate TASK-13180.
+
+Qodo lifecycle follow-up preserves successful Start outcomes after unmount and shared persistent sessions while keeping stale sends cancelled; 23 focused hook tests and 2 backend ownership contract tests passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

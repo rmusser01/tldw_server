@@ -141,3 +141,186 @@ it("releases the previous source when the pack changes", async () => {
   expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:migu");
   expect(fetchWithAuth).toHaveBeenCalledTimes(2);
 });
+
+it("loads only the displayed frame in a large protected pack", async () => {
+  const pack = Object.fromEntries(
+    Array.from({ length: 256 }, (_, index) => {
+      const id = index === 0 ? "frame" : `unused-${index}`;
+      return [
+        id,
+        { ...assets.frame, id, url: path.replace("/frame/", `/${id}/`) },
+      ];
+    }),
+  );
+  render(<SpriteFrameRenderer {...props} assets={pack} />);
+  await waitFor(() =>
+    expect(screen.getByTestId("persona-visual-frame")).toBeInTheDocument(),
+  );
+  expect(fetchWithAuth).toHaveBeenCalledTimes(1);
+  expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+});
+
+it("evicts old blobs as different large frames are displayed", async () => {
+  const pack = {
+    ...assets,
+    next: {
+      ...assets.frame,
+      id: "next",
+      url: path.replace("/frame/", "/next/"),
+    },
+  };
+  const states = {
+    ...manifest,
+    states: {
+      idle: { animation_id: "idle" },
+      thinking: { animation_id: "next" },
+    },
+    animations: {
+      ...manifest.animations,
+      next: { frames: [{ asset_id: "next" }] },
+    },
+  };
+  fetchWithAuth.mockResolvedValue({
+    ok: true,
+    data: new ArrayBuffer(10 * 1024 * 1024),
+  });
+  URL.createObjectURL = vi
+    .fn()
+    .mockReturnValueOnce("blob:first")
+    .mockReturnValueOnce("blob:next");
+  const view = render(
+    <SpriteFrameRenderer {...props} assets={pack} manifest={states} />,
+  );
+  await waitFor(() =>
+    expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
+      "src",
+      "blob:first",
+    ),
+  );
+  expect(fetchWithAuth).toHaveBeenCalledTimes(1);
+  view.rerender(
+    <SpriteFrameRenderer
+      {...props}
+      assets={pack}
+      manifest={states}
+      state="thinking"
+    />,
+  );
+  await waitFor(() =>
+    expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
+      "src",
+      "blob:next",
+    ),
+  );
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:first");
+  expect(URL.revokeObjectURL).not.toHaveBeenCalledWith("blob:next");
+  view.unmount();
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:next");
+});
+
+it("reuses recent frames and releases older frames in a long animation", async () => {
+  const pack = Object.fromEntries(
+    Array.from({ length: 12 }, (_, index) => {
+      const id = `frame-${index}`;
+      return [
+        id,
+        { ...assets.frame, id, url: path.replace("/frame/", `/${id}/`) },
+      ];
+    }),
+  );
+  let nextUrl = 0;
+  URL.createObjectURL = vi.fn(() => `blob:${nextUrl++}`);
+  const withFrame = (id: string) => ({
+    ...manifest,
+    animations: { idle: { frames: [{ asset_id: id }] } },
+  });
+  const view = render(
+    <SpriteFrameRenderer
+      {...props}
+      assets={pack}
+      manifest={withFrame("frame-0")}
+    />,
+  );
+  for (let index = 0; index < 12; index++) {
+    view.rerender(
+      <SpriteFrameRenderer
+        {...props}
+        assets={pack}
+        manifest={withFrame(`frame-${index}`)}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
+        "src",
+        `blob:${index}`,
+      ),
+    );
+  }
+  expect(URL.revokeObjectURL).toHaveBeenCalledTimes(4);
+  view.rerender(
+    <SpriteFrameRenderer
+      {...props}
+      assets={pack}
+      manifest={withFrame("frame-10")}
+    />,
+  );
+  await waitFor(() =>
+    expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
+      "src",
+      "blob:10",
+    ),
+  );
+  expect(fetchWithAuth).toHaveBeenCalledTimes(12);
+  view.unmount();
+  expect(URL.revokeObjectURL).toHaveBeenCalledTimes(12);
+});
+
+it("aborts an abandoned frame request and ignores its late completion", async () => {
+  let finish!: (value: unknown) => void;
+  fetchWithAuth.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const pack = {
+    ...assets,
+    next: {
+      ...assets.frame,
+      id: "next",
+      url: path.replace("/frame/", "/next/"),
+    },
+  };
+  const states = {
+    ...manifest,
+    states: {
+      idle: { animation_id: "idle" },
+      thinking: { animation_id: "next" },
+    },
+    animations: {
+      ...manifest.animations,
+      next: { frames: [{ asset_id: "next" }] },
+    },
+  };
+  const view = render(
+    <SpriteFrameRenderer {...props} assets={pack} manifest={states} />,
+  );
+  const firstSignal = fetchWithAuth.mock.calls[0][1].signal;
+  view.rerender(
+    <SpriteFrameRenderer
+      {...props}
+      assets={pack}
+      manifest={states}
+      state="thinking"
+    />,
+  );
+  await waitFor(() =>
+    expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
+      "src",
+      "blob:migu",
+    ),
+  );
+  expect(firstSignal.aborted).toBe(true);
+  await act(async () => finish({ ok: true, data: new ArrayBuffer(1) }));
+  expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+});

@@ -173,7 +173,6 @@ export const SpriteFrameRenderer: React.FC<SpriteFrameRendererProps> = ({
   className,
   onRenderError
 }) => {
-  const resolveAssetUrl = usePersonaVisualAssetUrls(assets)
   const resolved = React.useMemo(
     () => resolveAnimationForState(manifest, state),
     [manifest, state]
@@ -195,6 +194,7 @@ export const SpriteFrameRenderer: React.FC<SpriteFrameRendererProps> = ({
 
   const frame = frames[frameIndex] ?? frames[0]
   const asset = frame ? assets[frame.asset_id] : null
+  const resolveAssetUrl = usePersonaVisualAssetUrls(assets, asset ?? null)
   const assetUrl = asset ? resolveAssetUrl(asset) : null
 
   React.useEffect(() => {

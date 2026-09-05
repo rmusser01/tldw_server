@@ -321,6 +321,26 @@ describe("usePersonaLiveControl", () => {
     expect(result.current.focusedSession?.sessionId).toBe("sess-created")
   })
 
+  it("returns a successful persistent Start after unmount without stopping the session", async () => {
+    const pendingStart = deferred<PersonaLiveSessionSummary>()
+    const resumed = session({ sessionId: "sess-shared", isFocused: true })
+    mocks.createPersonaLiveSession.mockReturnValueOnce(pendingStart.promise)
+    const { result, unmount } = renderHook(() =>
+      usePersonaLiveControl({ autoLoad: false })
+    )
+    let startPromise!: Promise<PersonaLiveSessionSummary>
+    act(() => {
+      startPromise = result.current.startTextSession("persona-1")
+    })
+    unmount()
+    pendingStart.resolve(resumed)
+
+    await expect(startPromise).resolves.toEqual(resumed)
+    expect(result.current.focusedSession).toBeNull()
+    expect(mocks.stopPersonaLiveSession).not.toHaveBeenCalled()
+    expect(MockWebSocket.instances).toHaveLength(0)
+  })
+
   it("stops the focused session and refreshes summaries", async () => {
     mocks.listPersonaLiveSessions
       .mockResolvedValueOnce({
@@ -407,67 +427,71 @@ describe("usePersonaLiveControl", () => {
     }
   )
 
-  it("cancels a send from the discarded StrictMode mount before its session resolves", async () => {
-    let resolveDiscarded!: (value: PersonaLiveSessionSummary) => void
-    mocks.createPersonaLiveSession
-      .mockImplementationOnce(
-        () =>
-          new Promise<PersonaLiveSessionSummary>((resolve) => {
-            resolveDiscarded = resolve
+  it.each(["sess-discarded", "sess-current"])(
+    "cancels a discarded StrictMode send without stopping returned session %s",
+    async (returnedSessionId) => {
+      let resolveDiscarded!: (value: PersonaLiveSessionSummary) => void
+      mocks.createPersonaLiveSession
+        .mockImplementationOnce(
+          () =>
+            new Promise<PersonaLiveSessionSummary>((resolve) => {
+              resolveDiscarded = resolve
+            })
+        )
+        .mockResolvedValueOnce(
+          session({ sessionId: "sess-current", isFocused: true })
+        )
+      const sends: ReturnType<
+        ReturnType<typeof usePersonaLiveControl>["sendText"]
+      >[] = []
+      const { result } = renderHook(
+        () => {
+          const live = usePersonaLiveControl({
+            autoLoad: false,
+            defaultPersonaId: "persona-1"
           })
+          const { sendText } = live
+          React.useEffect(() => {
+            sends.push(
+              sendText("hello", { clientMessageId: `mount-${sends.length}` })
+            )
+          }, [sendText])
+          return live
+        },
+        { wrapper: React.StrictMode }
       )
-      .mockResolvedValueOnce(
-        session({ sessionId: "sess-current", isFocused: true })
-      )
-    const sends: ReturnType<
-      ReturnType<typeof usePersonaLiveControl>["sendText"]
-    >[] = []
-    const { result } = renderHook(
-      () => {
-        const live = usePersonaLiveControl({
-          autoLoad: false,
-          defaultPersonaId: "persona-1"
-        })
-        const { sendText } = live
-        React.useEffect(() => {
-          sends.push(
-            sendText("hello", { clientMessageId: `mount-${sends.length}` })
-          )
-        }, [sendText])
-        return live
-      },
-      { wrapper: React.StrictMode }
-    )
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1))
-    const ws = MockWebSocket.instances[0]
-    await act(async () => {
-      resolveDiscarded(
-        session({ sessionId: "sess-discarded", isFocused: true })
-      )
-    })
-    expect(result.current.focusedSession?.sessionId).toBe("sess-current")
-    expect(result.current.lastSendError).toBeNull()
-    expect(result.current.streamState).toBe("connecting")
+      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1))
+      const ws = MockWebSocket.instances[0]
+      await act(async () => {
+        resolveDiscarded(
+          session({ sessionId: returnedSessionId, isFocused: true })
+        )
+      })
+      expect(result.current.focusedSession?.sessionId).toBe("sess-current")
+      expect(result.current.lastSendError).toBeNull()
+      expect(result.current.streamState).toBe("connecting")
+      expect(mocks.stopPersonaLiveSession).not.toHaveBeenCalled()
 
-    await act(async () => {
-      ws.emitOpen()
-      await Promise.all(sends)
-    })
-    expect(await sends[0]).toMatchObject({
-      ok: false,
-      clientMessageId: "mount-0"
-    })
-    expect(await sends[1]).toEqual({ ok: true, clientMessageId: "mount-1" })
-    expect(getSentPayloads(ws)).toEqual([
-      {
-        type: "user_message",
-        session_id: "sess-current",
-        client_message_id: "mount-1",
-        text: "hello"
-      }
-    ])
-  })
+      await act(async () => {
+        ws.emitOpen()
+        await Promise.all(sends)
+      })
+      expect(await sends[0]).toMatchObject({
+        ok: false,
+        clientMessageId: "mount-0"
+      })
+      expect(await sends[1]).toEqual({ ok: true, clientMessageId: "mount-1" })
+      expect(getSentPayloads(ws)).toEqual([
+        {
+          type: "user_message",
+          session_id: "sess-current",
+          client_message_id: "mount-1",
+          text: "hello"
+        }
+      ])
+    }
+  )
 
   it("does not create a socket when configuration resolves after unmount", async () => {
     let resolveConfig!: (value: { serverUrl: string; apiKey: string }) => void

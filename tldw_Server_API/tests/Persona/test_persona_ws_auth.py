@@ -162,7 +162,10 @@ def test_persona_stream_auth_failure_rejects_before_stream_start(monkeypatch, cr
 
 @pytest.mark.parametrize("marker", [None, "bearer", "Bearer", "unsupported"])
 @pytest.mark.parametrize("valid_credential", [True, False])
-def test_persona_stream_negotiates_only_safe_auth_marker(monkeypatch, marker, valid_credential):
+def test_persona_stream_negotiates_only_safe_auth_marker(
+    monkeypatch: pytest.MonkeyPatch, marker: str | None, valid_credential: bool
+) -> None:
+    """Verify safe bearer-marker negotiation for valid and invalid credentials."""
     monkeypatch.setattr(persona_ep, "is_persona_enabled", lambda: True)
     monkeypatch.setattr(persona_ep, "get_settings", lambda: SimpleNamespace(AUTH_MODE="single_user"))
     monkeypatch.setattr(persona_ep, "resolve_client_ip", lambda *_args, **_kwargs: "127.0.0.1")
