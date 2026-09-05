@@ -12,10 +12,10 @@ const OptionAdminWatchlistsItems = () => {
             <h1 style={{ marginBottom: 4, fontSize: "1.5rem", fontWeight: 600 }}>
               Watchlists Items
             </h1>
+            {/* ItemsTab renders the "review collected updates" line itself;
+                this wrapper only adds the guidance it can't know (#2891). */}
             <p style={{ marginBottom: 16, color: "var(--color-text-secondary, #888)" }}>
-              Review collected updates, alert matches, and briefing candidates
-              across your watchlists. Create and configure watchlists on the
-              Watchlists page.
+              Create and configure watchlists on the Watchlists page.
             </p>
             <ItemsTab />
           </div>

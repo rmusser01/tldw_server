@@ -350,6 +350,11 @@ export const ItemsTab: React.FC = () => {
   const [sources, setSources] = useState<WatchlistSource[]>([])
   const [sourcesLoading, setSourcesLoading] = useState(false)
   const [sourcesLoaded, setSourcesLoaded] = useState(false)
+  // No watchlist feeds exist at all (confirmed by a successful load): there
+  // is nothing to triage, so the saved-views / bulk-action machinery hides
+  // behind the create-first-watchlist empty state (#2899 I5).
+  const trulyEmptyWatchlists =
+    sourcesLoaded && !sourcesLoading && sources.length === 0
   const [sourcesCappedAtLimit, setSourcesCappedAtLimit] = useState(false)
   const [sourceSearch, setSourceSearch] = useState("")
   const [runs, setRuns] = useState<WatchlistRun[]>([])
@@ -2540,6 +2545,8 @@ export const ItemsTab: React.FC = () => {
                 />
               </div>
 
+              {!trulyEmptyWatchlists ? (
+              <>
               <div className="rounded-lg border border-border bg-surface/70 p-2.5">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
@@ -2752,6 +2759,8 @@ export const ItemsTab: React.FC = () => {
                 </p>
 
               </div>
+              </>
+              ) : null}
             </div>
 
             <div
@@ -2767,7 +2776,7 @@ export const ItemsTab: React.FC = () => {
                 <Empty
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
                   description={
-                    sourcesLoaded && !sourcesLoading && sources.length === 0
+                    trulyEmptyWatchlists
                       ? t(
                           "watchlists:items.emptyNoWatchlists",
                           "No watchlist feeds yet. Create a watchlist to start collecting updates."
@@ -2775,10 +2784,7 @@ export const ItemsTab: React.FC = () => {
                       : t("watchlists:items.empty", "No updates found")
                   }
                 >
-                  {sourcesLoaded &&
-                  !sourcesLoading &&
-                  sources.length === 0 &&
-                  navigate ? (
+                  {trulyEmptyWatchlists && navigate ? (
                     <Button type="primary" onClick={() => navigate("/watchlists")}>
                       {t("watchlists:items.createWatchlist", "Create a watchlist")}
                     </Button>
