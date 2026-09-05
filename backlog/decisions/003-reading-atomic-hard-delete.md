@@ -144,7 +144,7 @@ The user approved extending durable reservations and existing storage exclusion
 to generic file mutations, preserving unmanaged rename/conversion. The detailed
 contract is in
 `Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md`
-(amended spec independently reviewed; user written-spec approval pending).
+(amended spec independently reviewed and user approved after `8dc255fcca`).
 It introduces a bounded output operation journal,
 not fake Reading parents or a public job system. All conflicting output/ownership
 writers honor its path and row reservations. Copy-before-commit preserves sources;
@@ -166,6 +166,8 @@ admission and bounded write intervals keep large producers from exhausting
 unbounded staging space or monopolizing exclusion. Producers use the reserved
 private stage, not untracked external scratch. These requirements reuse the
 journal and lock; they do not introduce a reader journal or general outbox service.
+Implementation checkpoints are in
+`Docs/superpowers/plans/2026-09-05-reading-output-file-reservations.md`.
 
 ## Alternatives and consequences
 

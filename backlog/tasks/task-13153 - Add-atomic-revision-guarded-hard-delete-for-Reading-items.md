@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-03 02:27'
-updated_date: '2026-09-05 16:47'
+updated_date: '2026-09-05 17:06'
 labels:
   - collections
   - reading-list
@@ -52,5 +52,5 @@ diagnostic-privacy behavior are covered.
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-ADR required: yes; existing ADR-003 amended. User approved durable reservations after three isolated SQLite file-damage probes. Detailed spec: Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md. Covers bounded generic operation journal, per-user storage binding, cross-writer path/row reservations, copy-before-commit, no-clobber publication, identity-checked crash recovery and fail-closed activation. Occupied destinations reject rather than overwrite; missing source rejects physical changes. Initial review resolved uncertain commit acknowledgement, abort witness ordering and source identity. Follow-up user-requested amendments add descriptor-bound reading, fs_done-separated idempotent original-target history delivery, finite byte admission and bounded journal-backed streaming without untracked external scratch. Re-review found and resolved ownership/reader-volume namespace mismatch; required evidence includes same-user two-volume same-filename reads. Final independent review approved with no remaining serious spec issues. Documentation-only verification: git diff --check; no production changes or new runtime test claims. 2207a84fc1 remains the last code checkpoint with 146 targeted passes. Written-spec user approval is required before implementation planning. Capability absent; TASK-13153 In Progress.
+ADR required: yes; existing ADR-003 applies. User approved the independently reviewed written spec after 8dc255fcca. Spec: Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md. Implementation plan: Docs/superpowers/plans/2026-09-05-reading-output-file-reservations.md. Independent plan review passed after correcting existing-live history receiver disposal and protected Watchlist/internal reader coverage. Ten inline checkpoints: inert binding/journal and immutable output incarnation; shared row/path/resource claims; bounded file protocol/recovery; descriptor-bound downloads; original-instance idempotent history delivery; PATCH/delete/purge integration; text and Reading producers; audio/subtitle producers; offline activation and independent recovery; integrated verification/docs. Reuses revision fence and POSIX descriptor context, no public jobs API or new dependency. Next is Task 1 schema/journal TDD. Production implementation has not started for this sub-plan; last code checkpoint remains 2207a84fc1 with historical 146 targeted passes. Plan-only checks: existing paths, independent review and git diff --check. Capability remains absent. Parent-plan HTTP/DTO/reconciliation/release work remains required; TASK-13153 In Progress.
 <!-- SECTION:PLAN:END -->

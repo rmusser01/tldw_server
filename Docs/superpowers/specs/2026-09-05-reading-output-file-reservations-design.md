@@ -1,7 +1,7 @@
 # Reading-safe generic output file mutations
 
 Date: 2026-09-05 · Task: TASK-13153
-Status: amended spec independently reviewed; awaiting user written-spec approval
+Status: amended spec independently reviewed and user approved; implementation planning
 Governing decision: `backlog/decisions/003-reading-atomic-hard-delete.md`.
 Amends the generic-writer portion of `2026-09-04-reading-atomic-hard-delete-design.md`.
 
@@ -415,5 +415,6 @@ streaming without a separate external scratch lifecycle. Re-review found one
 related namespace gap; protected reads now reject ownership/volume mismatch and
 require a two-volume same-filename regression. The final bounded independent
 review approved with no remaining serious spec issues. These are documentation
-changes, not implemented or runtime-verified safeguards. Written-spec user
-approval remains required before implementation planning.
+changes, not implemented or runtime-verified safeguards. The user subsequently
+approved the written spec after checkpoint `8dc255fcca`. Implementation planning
+is recorded in `Docs/superpowers/plans/2026-09-05-reading-output-file-reservations.md`.

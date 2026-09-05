@@ -474,6 +474,14 @@ same-filename two-volume regression. Final independent review approved with no
 remaining serious spec issues. No implementation slice or runtime evidence is
 added here. The written-spec user-approval gate remains pending.
 
+Subsequent user approval after `8dc255fcca` completed the written-spec gate.
+The generic-file work is now decomposed in
+`Docs/superpowers/plans/2026-09-05-reading-output-file-reservations.md` (independent
+plan review passed after correcting receiver state transitions and reader coverage).
+Inline execution remains the selected workflow. This
+sub-plan does not complete the remaining parent-plan HTTP, DTO, reconciliation
+or capability-release work, and adds no production verification claim.
+
 ### Managed archive immutability checkpoint (approved 2026-09-05)
 
 ADR required: yes. ADR path: `backlog/decisions/003-reading-atomic-hard-delete.md`.
