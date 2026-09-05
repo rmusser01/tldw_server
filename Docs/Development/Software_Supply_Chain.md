@@ -101,6 +101,17 @@ It then produces complete Trivy JSON, policy-adjusted decisions,
 workspace SBOM explicitly contains the WebUI, browser extension, and shared UI
 workspace roots. The Admin UI remains a separate lock and SBOM.
 
+The dependency inventory is generated from the canonical parent Bun lock.
+Child package identities are derived from their checked-in package manifests
+because those directories do not own individual Bun locks. These identity
+records do not replace or relax the required-only locked dependency inventory.
+Verify this boundary from an activated project environment with Docker available:
+
+```bash
+TLDW_TEST_SBOM_DOCKER=1 python -m pytest -q \
+  tldw_Server_API/tests/Supply_Chain/test_bun_package_metadata_integration.py
+```
+
 The Trivy vulnerability database must have a valid schema and an `UpdatedAt`
 no more than 24 hours old (with five minutes of clock-skew tolerance). The
 workflow downloads it once, records the scanner and database metadata, and
