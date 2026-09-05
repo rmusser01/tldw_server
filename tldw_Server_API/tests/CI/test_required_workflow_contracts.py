@@ -817,6 +817,28 @@ def test_linux_311_smoke_is_sharded_for_timeout_control() -> None:
     assert "test-results-linux-3.11-smoke" not in run_script
 
 
+@pytest.mark.parametrize("job_name", [
+    "full-suite-linux-312-shards",
+    "full-suite-linux-313-shards",
+    "full-suite-macos-312-shards",
+    "full-suite-os-313-release-shards",
+    "full-suite-windows-312-shards",
+])
+def test_supply_chain_tests_are_collected_by_each_full_suite(job_name: str) -> None:
+    """Release safety regressions must not silently disappear from any platform."""
+    from Helper_Scripts.ci.check_shard_coverage import find_uncovered
+
+    job = _load(".github/workflows/ci.yml")["jobs"][job_name]
+    patterns = [
+        pattern
+        for shard in job["strategy"]["matrix"]["shard"]
+        for pattern in shard["paths"].split()
+    ]
+    files = [path.as_posix() for path in Path("tldw_Server_API/tests/Supply_Chain").glob("test_*.py")]
+    assert files
+    assert find_uncovered(files, patterns) == []
+
+
 def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
     workflow = _load(".github/workflows/ci.yml")
     matrix_jobs = [
@@ -1280,6 +1302,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "Logging",
             "Security",
             "Setup",
+            "Supply_Chain",
             "Usage",
             "Utils",
             "helpers",
