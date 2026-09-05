@@ -1,5 +1,16 @@
 # Testing Evidence Lessons
 
+## SQLite non-INTEGER primary keys need explicit NOT NULL
+
+**Incident (TASK-13153, 2026-09-04):** Review of Reading output ownership found
+`output_id BIGINT PRIMARY KEY` accepted NULL on SQLite, bypassing the composite
+foreign-key reference check. The trusted registration path always read a real
+output first, so happy-path and foreign-user tests did not expose the schema gap.
+
+**Evidence and rule:** A direct-SQL NULL insertion test failed before explicit
+`NOT NULL` was added, then passed. Declare non-null identity constraints explicitly
+for cross-backend schemas; PostgreSQL primary-key behavior is not SQLite evidence.
+
 ## Matching numeric IDs do not establish cross-domain ownership
 
 **Incident (TASK-13153, 2026-09-04):** Media update hooks passed Media IDs directly

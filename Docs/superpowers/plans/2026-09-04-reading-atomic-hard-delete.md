@@ -188,6 +188,49 @@ Highlight verification (Server virtual environment):
   case each). Changed-line Black, compilation of all 13 touched Python files,
   and `git diff --check` pass.
 
+Output-ownership foundation checkpoint (2026-09-04): the idempotent schema now
+includes `reading_output_ownership`, keyed by a non-null output ID with same-user
+composite foreign keys to the item/output and an explicit opaque storage namespace.
+References restrict deletion rather than cascading away ownership evidence. The
+trusted database registration primitive validates an owned surviving Reading
+parent, live Reading archive output, positive expected revision and nonempty
+namespace; insert and parent token advancement share the writer fence/transaction.
+Identical ownership replay is a no-op (even with its original token), while changed
+parent/volume claims conflict. Editable output metadata cannot assign or transfer
+ownership. No namespace is guessed and no automatic legacy backfill is performed.
+
+This is deliberately NOT production adoption: the primitive has no service/HTTP
+caller, and its later staging/reconciliation caller must prove artifact provenance
+and mounted-volume authority. Existing generic output mutation/purge paths are not
+revision-aware yet; no archives are registered through these paths at this stage.
+The audit found file-first deletion in `outputs.py` (single delete, purge, rename
+and generated-output cleanup) and `outputs_purge_scheduler.py`, plus standalone
+output UPDATE/DELETE SQL in `outputs_service.py` and CollectionsDatabase. These
+must be integrated with durable cleanup before production ownership registration
+is enabled. Same-user shared-file references and pending-path reservations remain
+part of that integration. Do not treat the new foreign keys alone as file safety.
+
+Review exposed SQLite's nullable non-INTEGER primary-key behavior; a direct-SQL
+NULL regression failed before explicit NOT NULL fixed it. The existing fresh-table
+bootstrap test also caught the foundation adding revision with ALTER on new stores;
+both fresh CREATE definitions now contain revision, with legacy migration retained.
+Scoped re-review found both corrections addressed with no new actionable issues.
+ADR required: existing ADR-003 applies; no new ownership decision is introduced.
+Stage 1, cleanup/readiness, guarded deletion and the overall task remain incomplete;
+capability stays absent.
+
+Ownership foundation verification (Server virtual environment, 2026-09-04):
+
+- `python -m pytest tldw_Server_API/tests/Collections/test_reading_revision_mutations.py tldw_Server_API/tests/Collections/test_output_artifact_idempotency.py tldw_Server_API/tests/Collections/test_collections_schema_bootstrap.py -k 'not postgres' -q --tb=short`: 64 passed, 59 deselected.
+- `TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_reading_revision_mutations.py -k '(output_ownership or schema or migration or search_path) and postgres' -q --tb=short`: 18 passed, 1 intentional SQLite parameter skip in the PostgreSQL-only search-path test, 97 deselected. All selected PostgreSQL cases executed on the existing service.
+- New ownership cases failed before the schema/registration implementation; the
+  NULL constraint regression failed before NOT NULL was added. Concurrent replay,
+  rollback, immutable association, stale revision, wrong user, invalid origin/type,
+  migration re-entry and direct-SQL reference checks are covered.
+- New tests pass Ruff/Black, touched production ranges pass Black, compilation and
+  diff checks pass. Scoped Bandit reports zero findings/errors; the production
+  module retains the same nine previously recorded Ruff findings. No full suite.
+
 - [x] Add a real database fixture using `tmp_path` and the existing `CollectionsDatabase.from_backend` pattern. Use the following record constructor in the new test module:
 
 ```python

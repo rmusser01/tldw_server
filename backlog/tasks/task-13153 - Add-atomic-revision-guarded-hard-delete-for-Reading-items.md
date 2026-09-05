@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-03 02:27'
-updated_date: '2026-09-05 02:02'
+updated_date: '2026-09-05 02:16'
 labels:
   - collections
   - reading-list
@@ -52,5 +52,5 @@ diagnostic-privacy behavior are covered.
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-ADR required: yes. ADR path: backlog/decisions/003-reading-atomic-hard-delete.md. Reason: persisted aggregate revisions, destructive preconditions, ownership and durable cleanup. Design: Docs/superpowers/specs/2026-09-04-reading-atomic-hard-delete-design.md. Plan: Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md. Stage 1 remains in progress: schema/clock, item/tag, note-link and highlight writers are implemented with explicit-connection atomic revision changes and no-op detection. Highlights require an owned surviving Reading parent; reanchor computes outside the lock and rechecks the snapshot revision before applying. Removed four erroneous Media-ID-to-Reading-highlight hooks per ADR-003. Save results refresh revision/timestamp after reanchor while preserving creation flags. Real SQLite/PostgreSQL collision, ownership, rollback and late-reanchor tests and existing API/Media regressions pass; commands and counts are in the plan. Independent review found a stale save result, reproduced and fixed; re-review found no outstanding issues. Next: output ownership/purge integration, alternate deletion guards, complete DTO snapshots, then durable artifact cleanup and guarded-delete readiness. Capability remains absent. Existing PostgreSQL test service only, TLDW_TEST_NO_DOCKER=1; no container replacement authorized.
+ADR required: yes. ADR path: backlog/decisions/003-reading-atomic-hard-delete.md. Reason: persisted aggregate revisions, destructive preconditions, ownership and durable cleanup. Design: Docs/superpowers/specs/2026-09-04-reading-atomic-hard-delete-design.md. Plan: Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md. Stage 1 in progress: schema/clock and item/tag/note-link/highlight writers complete as partial checkpoints. Structural output ownership foundation now has same-user restrictive FKs, explicit namespace and revision-guarded idempotent registration. No production archive/adoption/reconciliation caller is wired; trusted callers must later verify volume and provenance. Output metadata cannot assign ownership. Review caught nullable SQLite BIGINT primary key, fixed with reproduced NULL constraint regression; fresh bootstrap revision omission also fixed. File-first deletion exists in outputs endpoint/scheduler and standalone SQL in outputs service: integrate durable cleanup, shared paths and reservations before enabling registration. Next: output mutation/purge routing, staging/adoption and reconciliation, then full DTO snapshots and guarded-delete readiness. Capability stays absent. Focused evidence and remaining work are in the plan; existing PostgreSQL service only with TLDW_TEST_NO_DOCKER=1.
 <!-- SECTION:PLAN:END -->

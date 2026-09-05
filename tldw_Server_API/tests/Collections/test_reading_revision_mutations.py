@@ -394,6 +394,209 @@ def test_revision_clock_survives_schema_reinitialization(db):
     assert second > first
 
 
+def make_archive_output(db):
+    return db.create_output_artifact(
+        type_="reading_archive",
+        title="Capture archive",
+        format_="md",
+        storage_path="capture.md",
+        metadata_json='{"item_id": 99999}',
+    )
+
+
+def test_explicit_output_ownership_advances_once_and_survives_schema_reinit(db):
+    item = make_reading(db)
+    output = make_archive_output(db)
+    db.register_reading_output_ownership(
+        item.id, output.id, expected_revision=item.revision, storage_namespace_id="test-volume"
+    )
+    linked = db.get_content_item(item.id)
+    assert linked.revision == item.revision + 1
+    db.ensure_schema()
+    db.register_reading_output_ownership(
+        item.id, output.id, expected_revision=item.revision, storage_namespace_id="test-volume"
+    )
+    assert db.get_content_item(item.id) == linked
+    row = db.backend.execute("SELECT * FROM reading_output_ownership WHERE output_id = ?", (output.id,)).first
+    assert row["item_id"] == item.id
+    assert row["user_id"] == db.user_id
+    assert row["storage_namespace_id"] == "test-volume"
+
+
+def test_output_ownership_cannot_be_created_or_reassigned_by_metadata(db):
+    item = make_reading(db)
+    output = make_archive_output(db)
+    db.ensure_schema()
+    assert db.backend.execute("SELECT COUNT(*) FROM reading_output_ownership", ()).scalar == 0
+    db.register_reading_output_ownership(
+        item.id, output.id, expected_revision=item.revision, storage_namespace_id="test-volume"
+    )
+    db.update_output_artifact_metadata(output.id, metadata_json='{"item_id": 123456}')
+    row = db.backend.execute("SELECT item_id FROM reading_output_ownership WHERE output_id = ?", (output.id,)).first
+    assert row["item_id"] == item.id
+
+
+def test_stale_output_ownership_registration_changes_nothing(db):
+    from tldw_Server_API.app.core.DB_Management.Collections_DB import ReadingRevisionConflict
+
+    item = make_reading(db)
+    output = make_archive_output(db)
+    before = db.update_content_item(item.id, title="Newer capture")
+    with pytest.raises(ReadingRevisionConflict):
+        db.register_reading_output_ownership(
+            item.id, output.id, expected_revision=item.revision, storage_namespace_id="test-volume"
+        )
+    assert db.get_content_item(item.id) == before
+    assert db.backend.execute("SELECT COUNT(*) FROM reading_output_ownership", ()).scalar == 0
+
+
+@pytest.mark.parametrize("conflict", ["parent", "namespace"])
+def test_existing_output_ownership_cannot_be_reassigned(db, conflict):
+    from tldw_Server_API.app.core.DB_Management.Collections_DB import ReadingArtifactOwnershipConflict
+
+    item = make_reading(db)
+    output = make_archive_output(db)
+    db.register_reading_output_ownership(
+        item.id, output.id, expected_revision=item.revision, storage_namespace_id="test-volume"
+    )
+    other = db.upsert_content_item(
+        origin="reading",
+        url="https://example.org/other",
+        canonical_url=None,
+        domain=None,
+        title="Other",
+        summary=None,
+        content_hash="other",
+        word_count=1,
+        published_at=None,
+    )
+    target = other if conflict == "parent" else db.get_content_item(item.id)
+    before = db.get_content_item(target.id)
+    with pytest.raises(ReadingArtifactOwnershipConflict):
+        db.register_reading_output_ownership(
+            target.id,
+            output.id,
+            expected_revision=target.revision,
+            storage_namespace_id="other-volume" if conflict == "namespace" else "test-volume",
+        )
+    assert db.get_content_item(target.id) == before
+    row = db.backend.execute("SELECT * FROM reading_output_ownership WHERE output_id = ?", (output.id,)).first
+    assert row["item_id"] == item.id
+    assert row["storage_namespace_id"] == "test-volume"
+
+
+def test_output_ownership_registration_rolls_back_on_revision_failure(db, monkeypatch):
+    item = make_reading(db)
+    output = make_archive_output(db)
+    before = db.get_content_item(item.id)
+    allocate = db._next_reading_revision
+
+    def fail(conn):
+        allocate(conn)
+        raise RuntimeError("abort ownership")
+
+    monkeypatch.setattr(db, "_next_reading_revision", fail)
+    with pytest.raises(RuntimeError, match="abort ownership"):
+        db.register_reading_output_ownership(
+            item.id, output.id, expected_revision=item.revision, storage_namespace_id="test-volume"
+        )
+    assert db.backend.execute("SELECT COUNT(*) FROM reading_output_ownership", ()).scalar == 0
+    assert db.get_content_item(item.id) == before
+
+
+def test_output_ownership_requires_same_user_parent_and_output(db):
+    from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
+
+    item = make_reading(db)
+    output = make_archive_output(db)
+    foreign = CollectionsDatabase.from_backend(user_id="781", backend=db.backend)
+    other = make_reading(foreign)
+    with pytest.raises(KeyError):
+        foreign.register_reading_output_ownership(
+            item.id, output.id, expected_revision=item.revision, storage_namespace_id="test-volume"
+        )
+    with pytest.raises(KeyError):
+        foreign.register_reading_output_ownership(
+            other.id, output.id, expected_revision=other.revision, storage_namespace_id="test-volume"
+        )
+    with pytest.raises(DatabaseError):
+        with db.transaction() as conn:
+            db.backend.execute(
+                "INSERT INTO reading_output_ownership (user_id, item_id, output_id, storage_namespace_id) VALUES (?, ?, ?, ?)",
+                (foreign.user_id, other.id, output.id, "test-volume"),
+                connection=conn,
+            )
+    assert db.backend.execute("SELECT COUNT(*) FROM reading_output_ownership", ()).scalar == 0
+
+
+def test_concurrent_output_ownership_registration_advances_once(db):
+    item = make_reading(db)
+    output = make_archive_output(db)
+    ready = Barrier(2)
+
+    def register():
+        ready.wait(timeout=10)
+        return db.register_reading_output_ownership(
+            item.id, output.id, expected_revision=item.revision, storage_namespace_id="test-volume"
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        futures = [workers.submit(register) for _ in range(2)]
+        assert sorted(future.result(timeout=15) for future in futures) == [False, True]
+    assert db.get_content_item(item.id).revision == item.revision + 1
+
+
+@pytest.mark.parametrize("invalid", ["origin", "type", "revision", "namespace"])
+def test_output_ownership_rejects_invalid_registration(db, invalid):
+    item = make_reading(db, origin="watchlist" if invalid == "origin" else "reading")
+    output = db.create_output_artifact(
+        type_="summary" if invalid == "type" else "reading_archive",
+        title="Output",
+        format_="md",
+        storage_path="capture.md",
+    )
+    before = db.get_content_item(item.id)
+    with pytest.raises((KeyError, ValueError)):
+        db.register_reading_output_ownership(
+            item.id,
+            output.id,
+            expected_revision=0 if invalid == "revision" else item.revision,
+            storage_namespace_id="" if invalid == "namespace" else "test-volume",
+        )
+    assert db.backend.execute("SELECT COUNT(*) FROM reading_output_ownership", ()).scalar == 0
+    assert db.get_content_item(item.id) == before
+
+
+def test_output_ownership_foreign_keys_prevent_dangling_associations(db):
+    from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
+
+    item = make_reading(db)
+    output = make_archive_output(db)
+    db.register_reading_output_ownership(
+        item.id, output.id, expected_revision=item.revision, storage_namespace_id="test-volume"
+    )
+    for table, row_id in [("content_items", item.id), ("outputs", output.id)]:
+        with pytest.raises(DatabaseError):
+            with db.transaction() as conn:
+                db.backend.execute(f"DELETE FROM {table} WHERE id = ?", (row_id,), connection=conn)
+    assert db.get_content_item(item.id).revision > item.revision
+    assert db.get_output_artifact(output.id).id == output.id
+
+
+def test_output_ownership_requires_nonnull_output_identity(db):
+    from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
+
+    item = make_reading(db)
+    with pytest.raises(DatabaseError):
+        with db.transaction() as conn:
+            db.backend.execute(
+                "INSERT INTO reading_output_ownership (user_id, item_id, output_id, storage_namespace_id) VALUES (?, ?, NULL, ?)",
+                (db.user_id, item.id, "test-volume"),
+                connection=conn,
+            )
+    assert db.backend.execute("SELECT COUNT(*) FROM reading_output_ownership", ()).scalar == 0
+
+
 def test_note_links_advance_revision_only_when_membership_changes(db):
     item = make_reading(db)
     link = db.link_note_to_content_item(item_id=item.id, note_id="external-note")

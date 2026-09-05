@@ -72,6 +72,14 @@ _COLLECTIONS_NONCRITICAL_EXCEPTIONS = (
 )
 
 
+class ReadingRevisionConflict(RuntimeError):
+    """The confirmed Reading revision no longer describes the current aggregate."""
+
+
+class ReadingArtifactOwnershipConflict(RuntimeError):
+    """An output cannot be assigned to the requested Reading owner or volume."""
+
+
 def _count_row_total(row: Any) -> int:
     if not row:
         return 0
@@ -2251,7 +2259,8 @@ class CollectionsDatabase:
                 source_id BIGINT,
                 read_at TEXT,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                revision BIGINT NOT NULL DEFAULT 1 CHECK (revision > 0)
             );
 
             CREATE UNIQUE INDEX IF NOT EXISTS ux_content_items_user_canonical ON content_items(user_id, canonical_url) WHERE canonical_url IS NOT NULL;
@@ -2403,7 +2412,8 @@ class CollectionsDatabase:
                 source_id INTEGER,
                 read_at TEXT,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                revision BIGINT NOT NULL DEFAULT 1 CHECK (revision > 0)
             );
 
             CREATE UNIQUE INDEX IF NOT EXISTS ux_content_items_user_canonical ON content_items(user_id, canonical_url) WHERE canonical_url IS NOT NULL;
@@ -2626,10 +2636,14 @@ class CollectionsDatabase:
             backend = self.backend
             clock_table = "reading_revision_clock"
             items_table = "content_items"
+            outputs_table = "outputs"
+            ownership_table = "reading_output_ownership"
             if backend.backend_type == BackendType.POSTGRESQL:
                 # Match the backend's public-schema metadata contract, not search_path.
                 clock_table = "public.reading_revision_clock"
                 items_table = "public.content_items"
+                outputs_table = "public.outputs"
+                ownership_table = "public.reading_output_ownership"
                 # Serialize first-time DDL before a clock row exists to lock.
                 backend.execute("SELECT pg_advisory_xact_lock(13153)", (), connection=conn)
                 columns = backend.get_table_info("content_items", connection=conn)
@@ -2659,6 +2673,31 @@ class CollectionsDatabase:
                 f"WHEN value < (SELECT COALESCE(MAX(revision), 0) FROM {items_table}) "
                 f"THEN (SELECT COALESCE(MAX(revision), 0) FROM {items_table}) ELSE value END "
                 "WHERE id = 1",
+                (),
+                connection=conn,
+            )
+            # Composite references enforce same-user ownership even for direct SQL.
+            backend.execute(
+                f"CREATE UNIQUE INDEX IF NOT EXISTS ux_reading_parent_user_id ON {items_table}(user_id, id)",
+                (),
+                connection=conn,
+            )
+            backend.execute(
+                f"CREATE UNIQUE INDEX IF NOT EXISTS ux_reading_output_user_id ON {outputs_table}(user_id, id)",
+                (),
+                connection=conn,
+            )
+            backend.execute(
+                f"CREATE TABLE IF NOT EXISTS {ownership_table} ("
+                "output_id BIGINT NOT NULL PRIMARY KEY, user_id TEXT NOT NULL, item_id BIGINT NOT NULL, "
+                "storage_namespace_id TEXT NOT NULL CHECK (length(trim(storage_namespace_id)) > 0), "
+                f"FOREIGN KEY (user_id, item_id) REFERENCES {items_table}(user_id, id) ON DELETE RESTRICT, "
+                f"FOREIGN KEY (user_id, output_id) REFERENCES {outputs_table}(user_id, id) ON DELETE RESTRICT)",
+                (),
+                connection=conn,
+            )
+            backend.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_reading_output_owner ON {ownership_table}(user_id, item_id)",
                 (),
                 connection=conn,
             )
@@ -5096,16 +5135,65 @@ class CollectionsDatabase:
             raise KeyError("output_not_found")
         return self.get_output_artifact(output_id)
 
-    def get_output_artifact(self, output_id: int, include_deleted: bool = False) -> CollectionsDatabase.OutputArtifactRow:
+    def get_output_artifact(
+        self, output_id: int, include_deleted: bool = False, *, connection: Any | None = None
+    ) -> CollectionsDatabase.OutputArtifactRow:
         cond = "id = ? AND user_id = ?" + ("" if include_deleted else " AND deleted = 0")
         q = (
             "SELECT id, user_id, job_id, run_id, type, title, format, storage_path, metadata_json, workspace_tag, created_at, media_item_id, chatbook_path, idempotency_key "  # nosec B608
             f"FROM outputs WHERE {cond}"
         )
-        row = self.backend.execute(q, (output_id, self.user_id)).first
+        row = self.backend.execute(q, (output_id, self.user_id), connection=connection).first
         if not row:
             raise KeyError("output_not_found")
         return CollectionsDatabase.OutputArtifactRow(**row)
+
+    def register_reading_output_ownership(
+        self,
+        item_id: int,
+        output_id: int,
+        *,
+        expected_revision: int,
+        storage_namespace_id: str,
+    ) -> bool:
+        """Register explicit archive ownership; return False for an identical replay.
+
+        This database primitive does not prove filesystem authority. Its trusted
+        caller must first validate the volume and artifact provenance. Archive
+        staging and legacy reconciliation are not wired to this primitive yet.
+        """
+        if type(expected_revision) is not int or expected_revision <= 0:
+            raise ValueError("invalid_expected_revision")
+        if not isinstance(storage_namespace_id, str) or not storage_namespace_id.strip():
+            raise ValueError("invalid_storage_namespace")
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            parent = self._get_reading_parent(item_id, conn)
+            output = self.get_output_artifact(output_id, connection=conn)
+            if output.type != "reading_archive":
+                raise ValueError("reading_archive_required")
+            existing = self.backend.execute(
+                "SELECT user_id, item_id, storage_namespace_id FROM reading_output_ownership WHERE output_id = ?",
+                (output_id,),
+                connection=conn,
+            ).first
+            if existing:
+                if (existing["user_id"], existing["item_id"], existing["storage_namespace_id"]) == (
+                    self.user_id,
+                    item_id,
+                    storage_namespace_id,
+                ):
+                    return False
+                raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
+            if parent.revision != expected_revision:
+                raise ReadingRevisionConflict("reading_revision_conflict")
+            self.backend.execute(
+                "INSERT INTO reading_output_ownership (user_id, item_id, output_id, storage_namespace_id) VALUES (?, ?, ?, ?)",
+                (self.user_id, item_id, output_id, storage_namespace_id),
+                connection=conn,
+            )
+            self._advance_reading_parent(item_id, conn)
+            return True
 
     def delete_output_artifact(self, output_id: int, *, hard: bool = False) -> bool:
         row = self.backend.execute(
