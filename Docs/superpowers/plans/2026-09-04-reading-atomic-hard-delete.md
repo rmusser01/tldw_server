@@ -44,7 +44,7 @@
 
 ## Stage 1: Persist revisions and fence every Reading mutation
 
-**Status:** In Progress — revision schema/clock foundation implemented; writer integration remains.
+**Status:** In Progress — revision schema/clock and item/tag writer integration implemented; child writer and ownership integration remains.
 **Goal:** Every returned token describes one coherent aggregate version.
 **Success Criteria:** Migration, no-op, child-write, reuse and snapshot cases pass on both backends.
 **Tests:** New revision module plus existing service/highlight/note-link/import suites.
@@ -87,7 +87,37 @@ multi-schema Collections support.
 The final PG-focused run has one intentional skip: the SQLite parameter of the
 PostgreSQL-only search-path test. No PostgreSQL case was skipped as unavailable.
 
-- [ ] Add a real database fixture using `tmp_path` and the existing `CollectionsDatabase.from_backend` pattern. Use the following record constructor in the new test module:
+Item-writer checkpoint (2026-09-04): `upsert_content_item()` and
+`update_content_item()` now acquire the clock fence before reading and use one
+explicit connection for item fields, tags, FTS and revision allocation. A compound
+Reading edit advances once; normalized Reading no-ops preserve both revision and
+timestamp. Generic Watchlist refresh timestamps retain their previous semantics.
+ID, URL, Media-ID and list readers return the persisted token; aggregate reads
+share a snapshot with their tags. The existing transaction/snapshot primitives are
+reused, with no new dependencies. The database-local clock deliberately serializes
+these writers across users; finer-grained allocation is outside this contract.
+
+Rollback and synchronized two-connection tests cover insertion, compound updates,
+identical upserts and reads spanning another writer's commit. Strict transactional
+FTS failures exposed stale per-instance flags after memoized schema initialization;
+each new adapter now detects its actual search capabilities. The existing import
+regression and the new later-adapter test reproduce and cover that correction.
+Independent review and scoped compatibility re-review found no outstanding issues.
+Child note-link/highlight writers, output associations/purges, alternate deletion
+entry points and DTO exposure remain unguarded/unimplemented in this partial
+checkpoint. The capability remains absent; no atomic hard-delete behavior is claimed.
+
+Checkpoint verification (Server virtual environment, 2026-09-04):
+
+- `python -m pytest tldw_Server_API/tests/Collections/test_reading_revision_mutations.py -k 'not postgres' -q --tb=short`: 21 passed, 23 deselected.
+- `TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_reading_revision_mutations.py tldw_Server_API/tests/Collections/test_collections_postgres_integration.py -k postgres -q --tb=short`: 24 passed, 1 intentional SQLite-parameter skip, 21 deselected. All selected PostgreSQL cases ran against the real test service.
+- `python -m pytest tldw_Server_API/tests/Collections/test_reading_service.py tldw_Server_API/tests/Collections/test_reading_note_links_db.py tldw_Server_API/tests/Collections/test_reading_import_export.py tldw_Server_API/tests/Collections/test_content_items_fts_contentless.py -q --tb=short`: 42 passed.
+- New tests pass Ruff and Black; changed production ranges pass Black;
+  compilation and `git diff --check` pass. Production Ruff reports the same
+  nine baseline findings as the preceding foundation commit. Scoped Bandit
+  reports zero findings and no analysis errors. No full-suite run was performed.
+
+- [x] Add a real database fixture using `tmp_path` and the existing `CollectionsDatabase.from_backend` pattern. Use the following record constructor in the new test module:
 
 ```python
 def make_reading(db):
@@ -107,7 +137,7 @@ def test_noop_preserves_revision(db):
     assert changed.revision > item.revision
 ```
 
-- [ ] Run the new revision test and confirm failure is the absent revision behavior, not fixture setup.
+- [x] Run the new revision test and confirm failure is the absent revision behavior, not fixture setup.
 
 ```bash
 python -m pytest tldw_Server_API/tests/Collections/test_reading_revision_mutations.py -q

@@ -247,6 +247,7 @@ class ContentItemRow:
     tags: list[str]
     is_new: bool = False
     content_changed: bool = False
+    revision: int = 1
 
 
 @dataclass
@@ -681,6 +682,9 @@ class CollectionsDatabase:
             # "the tables exist" says nothing about whether their contents are
             # current. Only the schema DDL above is safe to skip.
             self._seed_watchlists_output_templates()
+
+        # Schema memoization skips DDL, not per-instance search capability detection.
+        self._refresh_fts_capabilities()
 
     @classmethod
     def for_user(cls, user_id: int | str) -> CollectionsDatabase:
@@ -2659,6 +2663,21 @@ class CollectionsDatabase:
                 connection=conn,
             )
 
+    def _lock_reading_revision_clock(self, connection: Any) -> None:
+        """Serialize aggregate writers before reading their current state."""
+        clock_table = (
+            "public.reading_revision_clock"
+            if self.backend.backend_type == BackendType.POSTGRESQL
+            else "reading_revision_clock"
+        )
+        result = self.backend.execute(
+            f"UPDATE {clock_table} SET value = value WHERE id = 1",  # nosec B608: fixed identifiers
+            (),
+            connection=connection,
+        )
+        if result.rowcount != 1:
+            raise DatabaseError("Reading revision clock unavailable")
+
     def _next_reading_revision(self, connection: Any) -> int:
         """Allocate a positive token inside the caller's mutation transaction."""
         clock_table = (
@@ -2694,6 +2713,7 @@ class CollectionsDatabase:
         if not self._fts_available:
             return
         if self.backend.backend_type != BackendType.SQLITE:
+            self._fts_available = False
             return
         try:
             row = self.backend.execute(
@@ -2705,6 +2725,9 @@ class CollectionsDatabase:
                 """,
                 (),
             ).first
+            if row is None:
+                self._fts_available = False
+                return
             ddl = str((row or {}).get("sql") or "").lower()
             # content='' tables are contentless unless explicitly created with contentless_delete=1.
             if "content=''" in ddl and "contentless_delete=1" not in ddl:
@@ -2949,7 +2972,7 @@ class CollectionsDatabase:
             or "malformed match expression" in msg
         )
 
-    def ensure_collection_tag_ids(self, names: Iterable[str]) -> list[int]:
+    def ensure_collection_tag_ids(self, names: Iterable[str], *, connection: Any | None = None) -> list[int]:
         normed: list[str] = []
         seen: set[str] = set()
         for raw in names or []:
@@ -2965,42 +2988,24 @@ class CollectionsDatabase:
 
         ids: list[int] = []
         select_sql = "SELECT id FROM collection_tags WHERE user_id = ? AND name = ?"
-        insert_sql = "INSERT INTO collection_tags (user_id, name) VALUES (?, ?)"
+        insert_sql = "INSERT INTO collection_tags (user_id, name) VALUES (?, ?) ON CONFLICT (user_id, name) DO NOTHING"
         for nm in normed:
             select_params = (self.user_id, nm)
-            row = self.backend.execute(select_sql, select_params).first
-            if row:
-                ids.append(int(row.get("id")))
-                continue
-            insert_exc: Exception | None = None
-            tag_id: int | None = None
-            try:
-                res = self._execute_insert(insert_sql, (self.user_id, nm))
-                tag_id = self._extract_lastrowid(res)
-            except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
-                insert_exc = exc
-            if tag_id is None:
-                row = self.backend.execute(select_sql, select_params).first
-                if row:
-                    tag_id = int(row.get("id"))
-            if tag_id is None:
-                if insert_exc:
-                    raise insert_exc
+            self.backend.execute(insert_sql, select_params, connection=connection)
+            row = self.backend.execute(select_sql, select_params, connection=connection).first
+            if row is None:
                 raise DatabaseError("Failed to ensure collection tag id")
-            ids.append(tag_id)
+            ids.append(int(row["id"]))
         return ids
 
-    def _replace_item_tags(self, item_id: int, tag_ids: Iterable[int]) -> None:
-        self.backend.execute("DELETE FROM content_item_tags WHERE item_id = ?", (item_id,))
+    def _replace_item_tags(self, item_id: int, tag_ids: Iterable[int], *, connection: Any | None = None) -> None:
+        self.backend.execute("DELETE FROM content_item_tags WHERE item_id = ?", (item_id,), connection=connection)
         for tag_id in tag_ids or []:
-            try:
-                self.backend.execute(
-                    "INSERT INTO content_item_tags (item_id, tag_id) VALUES (?, ?)",
-                    (item_id, tag_id),
-                )
-            except DatabaseError:
-                # Ignore unique violations (already linked)
-                continue
+            self.backend.execute(
+                "INSERT INTO content_item_tags (item_id, tag_id) VALUES (?, ?) ON CONFLICT (item_id, tag_id) DO NOTHING",
+                (item_id, tag_id),
+                connection=connection,
+            )
 
     def _fetch_tags_for_item_ids(
         self,
@@ -3018,7 +3023,9 @@ class CollectionsDatabase:
             FROM content_item_tags cit
             JOIN collection_tags ct ON ct.id = cit.tag_id
             WHERE cit.item_id IN ({placeholders})
-            """.format_map(locals()),  # nosec B608
+            """.format_map(
+                locals()
+            ),  # nosec B608
             tuple(ids),
             connection=connection,
         ).rows
@@ -3046,6 +3053,7 @@ class CollectionsDatabase:
         previous_tags: list[str] | None = None,
         previous_metadata_json: str | None = None,
         has_previous_entry: bool = False,
+        connection: Any | None = None,
     ) -> None:
         if not self._fts_available:
             return
@@ -3055,9 +3063,14 @@ class CollectionsDatabase:
                 tags=tags,
                 metadata_json=metadata_json,
             )
-            had_previous = has_previous_entry or any(
-                value is not None for value in (previous_title, previous_summary, previous_notes, previous_metadata_json)
-            ) or bool(previous_tags)
+            had_previous = (
+                has_previous_entry
+                or any(
+                    value is not None
+                    for value in (previous_title, previous_summary, previous_notes, previous_metadata_json)
+                )
+                or bool(previous_tags)
+            )
 
             if had_previous:
                 previous_metadata_text = self._build_content_fts_metadata_text(
@@ -3069,6 +3082,7 @@ class CollectionsDatabase:
                     self.backend.execute(
                         "DELETE FROM content_items_fts WHERE rowid = ?",
                         (item_id,),
+                        connection=connection,
                     )
                 else:
                     # Contentless FTS5 tables require the special delete command with the old indexed values.
@@ -3078,12 +3092,16 @@ class CollectionsDatabase:
                         VALUES('delete', ?, ?, ?, ?)
                         """,
                         (item_id, previous_title or "", previous_summary or "", previous_metadata_text),
+                        connection=connection,
                     )
             self.backend.execute(
                 "INSERT INTO content_items_fts(rowid, title, summary, metadata) VALUES (?, ?, ?, ?)",
                 (item_id, title or "", summary or "", metadata_text),
+                connection=connection,
             )
         except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
+            if connection is not None:
+                raise
             logger.debug(f"Collections FTS update failed for item {item_id}: {exc}")
 
     def _delete_content_fts_entry(
@@ -3158,59 +3176,72 @@ class CollectionsDatabase:
             tags=tags or [],
             is_new=is_new,
             content_changed=content_changed,
+            revision=int(row["revision"]),
         )
 
-    def get_content_item(self, item_id: int) -> ContentItemRow:
+    def get_content_item(self, item_id: int, *, connection: Any | None = None) -> ContentItemRow:
+        if connection is None:
+            with self._read_snapshot() as snapshot:
+                return self.get_content_item(item_id, connection=snapshot)
         row = self.backend.execute(
             """
             SELECT id, user_id, origin, origin_type, origin_id, url, canonical_url, domain,
                    title, summary, notes, content_hash, word_count, published_at, status, favorite,
-                   metadata_json, media_id, job_id, run_id, source_id, read_at, created_at, updated_at
+                   metadata_json, media_id, job_id, run_id, source_id, read_at, created_at, updated_at, revision
             FROM content_items
             WHERE id = ? AND user_id = ?
             """,
             (item_id, self.user_id),
+            connection=connection,
         ).first
         if not row:
             raise KeyError("content_item_not_found")
-        tags_map = self._fetch_tags_for_item_ids([item_id])
+        tags_map = self._fetch_tags_for_item_ids([item_id], connection=connection)
         return self._row_to_content_item(row, tags_map.get(item_id, []))
 
-    def get_content_item_by_media_id(self, media_id: int) -> ContentItemRow:
+    def get_content_item_by_media_id(self, media_id: int, *, connection: Any | None = None) -> ContentItemRow:
+        if connection is None:
+            with self._read_snapshot() as snapshot:
+                return self.get_content_item_by_media_id(media_id, connection=snapshot)
         row = self.backend.execute(
             """
             SELECT id, user_id, origin, origin_type, origin_id, url, canonical_url, domain,
                    title, summary, notes, content_hash, word_count, published_at, status, favorite,
-                   metadata_json, media_id, job_id, run_id, source_id, read_at, created_at, updated_at
+                   metadata_json, media_id, job_id, run_id, source_id, read_at, created_at, updated_at, revision
             FROM content_items
             WHERE media_id = ? AND user_id = ?
             """,
             (media_id, self.user_id),
+            connection=connection,
         ).first
         if not row:
             raise KeyError("content_item_not_found")
         item_id = int(row.get("id"))
-        tags_map = self._fetch_tags_for_item_ids([item_id])
+        tags_map = self._fetch_tags_for_item_ids([item_id], connection=connection)
         return self._row_to_content_item(row, tags_map.get(item_id, []))
 
-    def get_content_item_by_url(self, url: str) -> ContentItemRow | None:
+    def get_content_item_by_url(self, url: str, *, connection: Any | None = None) -> ContentItemRow | None:
         if not url:
             return None
+        if connection is None:
+            with self._read_snapshot() as snapshot:
+                return self.get_content_item_by_url(url, connection=snapshot)
         row = self.backend.execute(
             """
             SELECT id, user_id, origin, origin_type, origin_id, url, canonical_url, domain,
                    title, summary, notes, content_hash, word_count, published_at, status, favorite,
-                   metadata_json, media_id, job_id, run_id, source_id, read_at, created_at, updated_at
+                   metadata_json, media_id, job_id, run_id, source_id, read_at, created_at, updated_at, revision
             FROM content_items
             WHERE user_id = ? AND (canonical_url = ? OR url = ?)
             ORDER BY updated_at DESC, id DESC
             LIMIT 1
             """,
             (self.user_id, url, url),
+            connection=connection,
         ).first
         if not row:
             return None
-        tags_map = self._fetch_tags_for_item_ids([int(row.get("id"))])
+        tags_map = self._fetch_tags_for_item_ids([int(row.get("id"))], connection=connection)
         return self._row_to_content_item(row, tags_map.get(int(row.get("id")), []))
 
     @staticmethod
@@ -3816,8 +3847,38 @@ class CollectionsDatabase:
         tags: Iterable[str] | None = None,
         merge_tags: bool = False,
         preserve_existing_on_null: bool = False,
+        _connection: Any | None = None,
     ) -> ContentItemRow:
         """Insert or update a content item record and attach tags."""
+        if _connection is None:
+            with self.transaction() as conn:
+                return self.upsert_content_item(
+                    origin=origin,
+                    origin_type=origin_type,
+                    origin_id=origin_id,
+                    url=url,
+                    canonical_url=canonical_url,
+                    domain=domain,
+                    title=title,
+                    summary=summary,
+                    notes=notes,
+                    content_hash=content_hash,
+                    word_count=word_count,
+                    published_at=published_at,
+                    status=status,
+                    favorite=favorite,
+                    metadata=metadata,
+                    media_id=media_id,
+                    job_id=job_id,
+                    run_id=run_id,
+                    source_id=source_id,
+                    read_at=read_at,
+                    tags=tags,
+                    merge_tags=merge_tags,
+                    preserve_existing_on_null=preserve_existing_on_null,
+                    _connection=conn,
+                )
+        self._lock_reading_revision_clock(_connection)
         now = _utcnow_iso()
         canonical = canonical_url or url
 
@@ -3838,8 +3899,11 @@ class CollectionsDatabase:
                            metadata_json, media_id, job_id, run_id, source_id, read_at, created_at, updated_at
                     FROM content_items
                     WHERE user_id = ? AND {column} = ?
-                    """.format_map(locals()),  # nosec B608
+                    """.format_map(
+                        locals()
+                    ),  # nosec B608
                     (self.user_id, value),
+                    connection=_connection,
                 ).first
                 if row:
                     return row, int(row.get("id"))
@@ -3904,7 +3968,9 @@ class CollectionsDatabase:
         existing_row, item_id = _lookup_existing()
         existing_tags_for_fts: list[str] | None = None
         if existing_row and item_id is not None:
-            existing_tags_for_fts = self._fetch_tags_for_item_ids([int(item_id)]).get(int(item_id), [])
+            existing_tags_for_fts = self._fetch_tags_for_item_ids([int(item_id)], connection=_connection).get(
+                int(item_id), []
+            )
         if existing_row and preserve_existing_on_null:
             preserved = _apply_preserve(existing_row)
             origin_type = preserved["origin_type"]
@@ -3928,161 +3994,89 @@ class CollectionsDatabase:
         canonical, domain_val, favorite_int, status_val = _refresh_derived()
         metadata_json = _build_metadata_json(existing_row)
 
-        prev_hash = existing_row.get("content_hash") if existing_row else None
-        created = False
-        content_changed = False
-
-        if item_id is None:
+        created = item_id is None
+        content_changed = created or existing_row.get("content_hash") != content_hash
+        reading_change = origin == "reading" or bool(existing_row and existing_row.get("origin") == "reading")
+        values = {
+            "origin": origin,
+            "origin_type": origin_type,
+            "origin_id": origin_id,
+            "url": url,
+            "canonical_url": canonical,
+            "domain": domain_val,
+            "title": title,
+            "summary": summary,
+            "notes": notes,
+            "content_hash": content_hash,
+            "word_count": word_count,
+            "published_at": published_at,
+            "status": status_val,
+            "favorite": favorite_int,
+            "metadata_json": metadata_json,
+            "media_id": media_id,
+            "job_id": job_id,
+            "run_id": run_id,
+            "source_id": source_id,
+            "read_at": read_at,
+        }
+        changes = {key: value for key, value in values.items() if created or value != existing_row.get(key)}
+        if not created and "metadata_json" in changes:
             try:
-                res = self._execute_insert(
-                    """
-                    INSERT INTO content_items (
-                        user_id, origin, origin_type, origin_id, url, canonical_url, domain, title, summary,
-                        notes, content_hash, word_count, published_at, status, favorite, metadata_json, media_id,
-                        job_id, run_id, source_id, read_at, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        self.user_id,
-                        origin,
-                        origin_type,
-                        origin_id,
-                        url,
-                        canonical,
-                        domain_val,
-                        title,
-                        summary,
-                        notes,
-                        content_hash,
-                        word_count,
-                        published_at,
-                        status_val,
-                        favorite_int,
-                        metadata_json,
-                        media_id,
-                        job_id,
-                        run_id,
-                        source_id,
-                        read_at,
-                        now,
-                        now,
-                    ),
-                )
-                item_id = self._extract_lastrowid(res)
-                if not item_id:
-                    raise DatabaseError("Failed to insert content item")
-                created = True
-                content_changed = True
-            except DatabaseError as exc:
-                if not self._is_unique_violation(exc):
-                    raise
-                existing_row, item_id = _lookup_existing()
-                if not existing_row or item_id is None:
-                    raise
-                existing_tags_for_fts = self._fetch_tags_for_item_ids([int(item_id)]).get(int(item_id), [])
-                if preserve_existing_on_null:
-                    preserved = _apply_preserve(existing_row)
-                    origin_type = preserved["origin_type"]
-                    origin_id = preserved["origin_id"]
-                    url = preserved["url"]
-                    canonical_url = preserved["canonical_url"]
-                    domain = preserved["domain"]
-                    title = preserved["title"]
-                    summary = preserved["summary"]
-                    notes = preserved["notes"]
-                    content_hash = preserved["content_hash"]
-                    word_count = preserved["word_count"]
-                    published_at = preserved["published_at"]
-                    status = preserved["status"]
-                    media_id = preserved["media_id"]
-                    job_id = preserved["job_id"]
-                    run_id = preserved["run_id"]
-                    source_id = preserved["source_id"]
-                    read_at = preserved["read_at"]
-                canonical, domain_val, favorite_int, status_val = _refresh_derived()
-                metadata_json = _build_metadata_json(existing_row)
-                prev_hash = existing_row.get("content_hash")
-
-        if item_id is not None and not created:
-            fields: list[str] = [
-                "origin = ?",
-                "origin_type = ?",
-                "origin_id = ?",
-                "url = ?",
-                "canonical_url = ?",
-                "domain = ?",
-                "title = ?",
-                "summary = ?",
-                "notes = ?",
-                "content_hash = ?",
-                "word_count = ?",
-                "published_at = ?",
-                "status = ?",
-                "favorite = ?",
-                "metadata_json = ?",
-                "media_id = ?",
-                "job_id = ?",
-                "run_id = ?",
-                "source_id = ?",
-                "read_at = ?",
-                "updated_at = ?",
-            ]
-            params = (
-                origin,
-                origin_type,
-                origin_id,
-                url,
-                canonical,
-                domain_val,
-                title,
-                summary,
-                notes,
-                content_hash,
-                word_count,
-                published_at,
-                status_val,
-                favorite_int,
-                metadata_json,
-                media_id,
-                job_id,
-                run_id,
-                source_id,
-                read_at,
-                now,
-                item_id,
-                self.user_id,
-            )
-            self.backend.execute(
-                f"UPDATE content_items SET {', '.join(fields)} WHERE id = ? AND user_id = ?",  # nosec B608
-                params,
-            )
-            content_changed = not (prev_hash == content_hash or prev_hash is None and content_hash is None)
-
+                if json.loads(metadata_json or "{}") == json.loads(existing_row.get("metadata_json") or "{}"):
+                    changes.pop("metadata_json")
+            except (TypeError, ValueError):
+                pass
+        normalized_tags = existing_tags_for_fts or []
         if tags is not None:
-            tag_list = list(tags)
-            if merge_tags and not created:
-                existing_tags = self._fetch_tags_for_item_ids([int(item_id or 0)]).get(int(item_id or 0), [])
-                if existing_tags:
-                    tag_list = list(dict.fromkeys([*existing_tags, *tag_list]))
-            tag_ids = self.ensure_collection_tag_ids(tag_list)
-            self._replace_item_tags(item_id, tag_ids)
-
-        row = self.get_content_item(item_id)
-        with contextlib.suppress(_COLLECTIONS_NONCRITICAL_EXCEPTIONS):
-            self._update_content_fts_entry(
-                item_id,
-                title=row.title,
-                summary=row.summary,
-                notes=row.notes,
-                tags=row.tags,
-                metadata_json=row.metadata_json,
-                previous_title=(existing_row.get("title") if existing_row else None),
-                previous_summary=(existing_row.get("summary") if existing_row else None),
-                previous_notes=(existing_row.get("notes") if existing_row else None),
-                previous_tags=existing_tags_for_fts,
-                previous_metadata_json=(existing_row.get("metadata_json") if existing_row else None),
-                has_previous_entry=bool(existing_row),
+            normalized_tags = sorted(
+                {self._normalize_collection_tag(str(tag)) for tag in tags if tag and str(tag).strip()}
+                | (set(normalized_tags) if merge_tags else set())
             )
+        tags_changed = normalized_tags != (existing_tags_for_fts or [])
+        if not created and not changes and not tags_changed and reading_change:
+            return self.get_content_item(item_id, connection=_connection)
+        changes["updated_at"] = now
+        if reading_change:
+            changes["revision"] = self._next_reading_revision(_connection)
+        if created:
+            changes.update(user_id=self.user_id, created_at=now)
+            columns = ", ".join(changes)
+            placeholders = ", ".join("?" for _ in changes)
+            result = self._execute_insert(
+                f"INSERT INTO content_items ({columns}) VALUES ({placeholders})",  # nosec B608: fixed fields
+                tuple(changes.values()),
+                connection=_connection,
+            )
+            item_id = self._extract_lastrowid(result)
+            if not item_id:
+                raise DatabaseError("Failed to insert content item")
+        else:
+            fields = ", ".join(f"{key} = ?" for key in changes)
+            self.backend.execute(
+                f"UPDATE content_items SET {fields} WHERE id = ? AND user_id = ?",  # nosec B608: fixed fields
+                (*changes.values(), item_id, self.user_id),
+                connection=_connection,
+            )
+        if tags_changed:
+            tag_ids = self.ensure_collection_tag_ids(normalized_tags, connection=_connection)
+            self._replace_item_tags(item_id, tag_ids, connection=_connection)
+
+        row = self.get_content_item(item_id, connection=_connection)
+        self._update_content_fts_entry(
+            item_id,
+            title=row.title,
+            summary=row.summary,
+            notes=row.notes,
+            tags=row.tags,
+            metadata_json=row.metadata_json,
+            previous_title=(existing_row.get("title") if existing_row else None),
+            previous_summary=(existing_row.get("summary") if existing_row else None),
+            previous_notes=(existing_row.get("notes") if existing_row else None),
+            previous_tags=existing_tags_for_fts,
+            previous_metadata_json=(existing_row.get("metadata_json") if existing_row else None),
+            has_previous_entry=bool(existing_row),
+            connection=_connection,
+        )
         row.is_new = created
         row.content_changed = content_changed
         return row
@@ -4220,7 +4214,7 @@ class CollectionsDatabase:
                     ci.id, ci.user_id, ci.origin, ci.origin_type, ci.origin_id, ci.url, ci.canonical_url,
                     ci.domain, ci.title, ci.summary, ci.notes, ci.content_hash, ci.word_count, ci.published_at,
                     ci.status, ci.favorite, ci.metadata_json, ci.media_id, ci.job_id, ci.run_id,
-                    ci.source_id, ci.read_at, ci.created_at, ci.updated_at
+                    ci.source_id, ci.read_at, ci.created_at, ci.updated_at, ci.revision
                 {base_from}
                 WHERE {where_sql}
                 {group_by}
@@ -4292,57 +4286,55 @@ class CollectionsDatabase:
         read_at: str | None = None,
         clear_read_at: bool = False,
     ) -> ContentItemRow:
-        """Update persisted content item fields and tags."""
-        existing = self.get_content_item(item_id)
-        updates: list[str] = []
-        params: list[Any] = []
-        if status is not None:
-            updates.append("status = ?")
-            params.append(status)
-        if favorite is not None:
-            updates.append("favorite = ?")
-            params.append(1 if favorite else 0)
-        if title is not None:
-            updates.append("title = ?")
-            params.append(title)
-        if summary is not None:
-            updates.append("summary = ?")
-            params.append(summary)
-        if notes is not None:
-            updates.append("notes = ?")
-            params.append(notes)
-        if read_at is not None or clear_read_at:
-            updates.append("read_at = ?")
-            params.append(read_at)
-
-        metadata_json = None
-        if metadata is not None:
-            current_meta: dict[str, Any] = {}
-            if existing.metadata_json:
-                try:
-                    current_meta = json.loads(existing.metadata_json)
-                except _COLLECTIONS_NONCRITICAL_EXCEPTIONS:
-                    current_meta = {}
-            current_meta.update(metadata)
-            metadata_json = json.dumps(current_meta, ensure_ascii=False)
-            updates.append("metadata_json = ?")
-            params.append(metadata_json)
-
-        if updates:
-            updates.append("updated_at = ?")
-            params.append(_utcnow_iso())
-            params.extend([item_id, self.user_id])
-            self.backend.execute(
-                f"UPDATE content_items SET {', '.join(updates)} WHERE id = ? AND user_id = ?",  # nosec B608
-                tuple(params),
+        """Atomically update fields, tags, search content and the Reading revision."""
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            existing = self.get_content_item(item_id, connection=conn)
+            reading_item = existing.origin == "reading"
+            proposed = {
+                "status": status,
+                "favorite": favorite,
+                "title": title,
+                "summary": summary,
+                "notes": notes,
+            }
+            changes = {
+                field: value
+                for field, value in proposed.items()
+                if value is not None and (not reading_item or value != getattr(existing, field))
+            }
+            if (read_at is not None or clear_read_at) and (not reading_item or read_at != existing.read_at):
+                changes["read_at"] = read_at
+            if metadata is not None:
+                current = self._json_loads_dict(existing.metadata_json)
+                merged = {**current, **metadata}
+                if not reading_item or merged != current:
+                    changes["metadata_json"] = json.dumps(merged, ensure_ascii=False)
+            normalized_tags = (
+                existing.tags
+                if tags is None
+                else sorted({self._normalize_collection_tag(str(tag)) for tag in tags if tag and str(tag).strip()})
             )
-
-        if tags is not None:
-            tag_ids = self.ensure_collection_tag_ids(tags)
-            self._replace_item_tags(item_id, tag_ids)
-
-        try:
-            tgt = self.get_content_item(item_id)
+            tags_changed = normalized_tags != existing.tags
+            if not changes and not tags_changed:
+                return existing
+            if "favorite" in changes:
+                changes["favorite"] = int(changes["favorite"])
+            if changes or reading_item:
+                changes["updated_at"] = _utcnow_iso()
+            if reading_item:
+                changes["revision"] = self._next_reading_revision(conn)
+            if changes:
+                updates = ", ".join(f"{field} = ?" for field in changes)
+                self.backend.execute(
+                    f"UPDATE content_items SET {updates} WHERE id = ? AND user_id = ?",  # nosec B608: fixed field names
+                    (*changes.values(), item_id, self.user_id),
+                    connection=conn,
+                )
+            if tags_changed:
+                tag_ids = self.ensure_collection_tag_ids(normalized_tags, connection=conn)
+                self._replace_item_tags(item_id, tag_ids, connection=conn)
+            tgt = self.get_content_item(item_id, connection=conn)
             self._update_content_fts_entry(
                 item_id,
                 title=tgt.title,
@@ -4356,14 +4348,9 @@ class CollectionsDatabase:
                 previous_tags=existing.tags,
                 previous_metadata_json=existing.metadata_json,
                 has_previous_entry=True,
+                connection=conn,
             )
-        except _COLLECTIONS_NONCRITICAL_EXCEPTIONS:
-            pass
-
-        row = self.get_content_item(item_id)
-        row.is_new = False
-        row.content_changed = False
-        return row
+            return tgt
 
     def delete_content_item(self, item_id: int) -> None:
         """Delete a content item and its tags/FTS entry."""

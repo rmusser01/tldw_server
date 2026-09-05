@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-03 02:27'
-updated_date: '2026-09-05 01:02'
+updated_date: '2026-09-05 01:37'
 labels:
   - collections
   - reading-list
@@ -52,5 +52,5 @@ diagnostic-privacy behavior are covered.
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-ADR required: yes. ADR path: backlog/decisions/003-reading-atomic-hard-delete.md. Reason: persisted aggregate revisions, destructive preconditions, ownership and durable cleanup. Design: Docs/superpowers/specs/2026-09-04-reading-atomic-hard-delete-design.md. Plan: Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md. Stage 1 in progress: persisted revision column and transactional clock implemented with focused tests; corrected pre-existing PostgreSQL bootstrap column inspection. Production writer integration, DTO exposure, artifact ownership/cleanup and guarded endpoint remain unimplemented. Capability stays absent. PostgreSQL checks use the existing test service with TLDW_TEST_NO_DOCKER=1; no container replacement is authorized.
+ADR required: yes. ADR path: backlog/decisions/003-reading-atomic-hard-delete.md. Reason: persisted aggregate revisions, destructive preconditions, ownership and durable cleanup. Design: Docs/superpowers/specs/2026-09-04-reading-atomic-hard-delete-design.md. Plan: Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md. Stage 1 remains in progress: revision schema/clock and item/tag writer integration are implemented. Upsert/update fence before reads and use one transaction for fields, tags, FTS and the token; coherent ID/URL/Media-ID/list reads expose persisted revisions internally. Reading no-ops preserve revision/timestamp; generic refresh timestamps are preserved. Repeated-adapter FTS detection fixes a reproduced import regression. Independent review and compatibility re-review found no outstanding issues. Child note-link/highlight writers, output ownership/purge and alternate deletion guards, DTO exposure, cleanup and endpoint remain unimplemented; capability stays absent. Focused verification is recorded in the linked plan. PostgreSQL checks use the existing service with TLDW_TEST_NO_DOCKER=1; no container replacement is authorized.
 <!-- SECTION:PLAN:END -->

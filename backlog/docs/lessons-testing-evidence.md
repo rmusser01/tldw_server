@@ -1,5 +1,19 @@
 # Testing Evidence Lessons
 
+## Memoized schema setup does not initialize per-adapter runtime flags
+
+**Incident (TASK-13153, 2026-09-04):** Making Reading item, tag and FTS writes
+transactional exposed an existing import regression: a later Collections adapter
+assumed ordinary FTS deletion support after schema memoization skipped setup.
+SQLite rejected its DELETE against the contentless FTS table. A single-adapter
+test missed this; the reproducer needed repeated construction to hit the memo.
+
+**Evidence and rule:** Running search-capability detection for every adapter,
+including disabling FTS on PostgreSQL, made the later-adapter update/search test
+and the existing import-preserves-fields test pass. Cache shared DDL work, not
+per-instance state initialization. Include repeated production-factory construction
+when testing adapters with memoized bootstrap.
+
 ## PostgreSQL bootstrap cannot identify duplicate columns from sanitized errors
 
 **Incident (TASK-13153, 2026-09-04):** The first real PostgreSQL revision test

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -39,9 +40,9 @@ def db(request, monkeypatch, tmp_path):
     return CollectionsDatabase.for_user(780)
 
 
-def make_reading(db):
+def make_reading(db, *, origin="reading"):
     return db.upsert_content_item(
-        origin="reading",
+        origin=origin,
         url="https://example.org/a",
         canonical_url="https://example.org/a",
         domain="example.org",
@@ -52,6 +53,197 @@ def make_reading(db):
         published_at=None,
         tags=["news"],
     )
+
+
+def test_item_edits_advance_once_and_equivalent_values_are_noops(db):
+    original = make_reading(db)
+    changed = db.update_content_item(
+        original.id,
+        title="Changed",
+        tags=[" news ", "new", "new"],
+        metadata={"one": 1, "two": 2},
+        favorite=True,
+    )
+    assert changed.revision == original.revision + 1
+    same = db.update_content_item(
+        original.id,
+        title="Changed",
+        tags=["new", "news"],
+        metadata={"two": 2, "one": 1},
+        favorite=True,
+    )
+    assert same.revision == changed.revision
+    assert same.updated_at == changed.updated_at
+    assert same.tags == ["new", "news"]
+    assert json.loads(same.metadata_json) == {"one": 1, "two": 2}
+
+
+def test_upsert_identical_record_is_noop_and_changes_advance(db):
+    original = make_reading(db)
+    same = make_reading(db)
+    assert same.revision == original.revision
+    assert same.updated_at == original.updated_at
+    db.update_content_item(original.id, title="Changed")
+    before = db.get_content_item(original.id)
+    restored = make_reading(db)
+    assert restored.title == "Original"
+    assert restored.revision == before.revision + 1
+
+
+def test_nonreading_upsert_keeps_existing_refresh_timestamp_semantics(db, monkeypatch):
+    original = make_reading(db, origin="watchlist")
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.DB_Management.Collections_DB._utcnow_iso",
+        lambda: "2099-01-01T00:00:00+00:00",
+    )
+    refreshed = make_reading(db, origin="watchlist")
+    assert refreshed.updated_at == "2099-01-01T00:00:00+00:00"
+    assert refreshed.revision == original.revision
+
+
+def test_nonreading_explicit_update_keeps_timestamp_semantics(db, monkeypatch):
+    original = make_reading(db, origin="watchlist")
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.DB_Management.Collections_DB._utcnow_iso",
+        lambda: "2099-01-01T00:00:00+00:00",
+    )
+    refreshed = db.update_content_item(original.id, title=original.title)
+    assert refreshed.updated_at == "2099-01-01T00:00:00+00:00"
+    assert refreshed.revision == original.revision
+
+
+def test_recreated_reading_item_never_reuses_deleted_revision(db):
+    original = make_reading(db)
+    db.delete_content_item(original.id)
+    recreated = make_reading(db)
+    assert recreated.revision > original.revision
+
+
+def test_failed_tag_write_rolls_back_item_and_revision(db, monkeypatch):
+    original = make_reading(db)
+    clock = db.backend.execute("SELECT value FROM reading_revision_clock WHERE id = 1", ()).scalar
+    original_replace = db._replace_item_tags
+
+    def replace_then_fail(*args, **kwargs):
+        original_replace(*args, **kwargs)
+        raise RuntimeError("abort tags")
+
+    monkeypatch.setattr(db, "_replace_item_tags", replace_then_fail)
+    with pytest.raises(RuntimeError, match="abort tags"):
+        db.update_content_item(original.id, title="Do not save", tags=["replacement"])
+    remaining = db.get_content_item(original.id)
+    assert remaining.title == "Original"
+    assert remaining.tags == ["news"]
+    assert remaining.revision == original.revision
+    assert db.backend.execute("SELECT value FROM reading_revision_clock WHERE id = 1", ()).scalar == clock
+
+
+def test_failed_insert_rolls_back_item_tags_and_clock(db, monkeypatch):
+    clock = db.backend.execute("SELECT value FROM reading_revision_clock WHERE id = 1", ()).scalar
+    replace = db._replace_item_tags
+
+    def replace_then_fail(*args, **kwargs):
+        replace(*args, **kwargs)
+        raise RuntimeError("abort insert")
+
+    monkeypatch.setattr(db, "_replace_item_tags", replace_then_fail)
+    with pytest.raises(RuntimeError, match="abort insert"):
+        make_reading(db)
+    assert db.list_content_items(origin="reading")[1] == 0
+    assert db.backend.execute("SELECT COUNT(*) FROM content_item_tags", ()).scalar == 0
+    assert db.backend.execute("SELECT value FROM reading_revision_clock WHERE id = 1", ()).scalar == clock
+
+
+def test_concurrent_identical_upserts_create_one_item_and_revision(db):
+    ready = Barrier(2)
+
+    def save():
+        ready.wait(timeout=10)
+        return make_reading(db)
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        first, second = [workers.submit(save) for _ in range(2)]
+        rows = [first.result(timeout=15), second.result(timeout=15)]
+    assert rows[0].id == rows[1].id
+    assert rows[0].revision == rows[1].revision
+    assert sorted(row.is_new for row in rows) == [False, True]
+
+
+def test_read_paths_return_persisted_revision(db):
+    original = make_reading(db)
+    changed = db.update_content_item(original.id, notes="New notes")
+    assert db.get_content_item(original.id).revision == changed.revision
+    assert db.get_content_item_by_url(original.url).revision == changed.revision
+    rows, total = db.list_content_items(origin="reading")
+    assert total == 1
+    assert rows[0].revision == changed.revision
+    db.backend.execute("UPDATE content_items SET media_id = 42 WHERE id = ?", (original.id,))
+    assert db.get_content_item_by_media_id(42).revision == changed.revision
+
+
+def test_fts_failure_rolls_back_item_tags_and_revision(db, monkeypatch):
+    original = make_reading(db)
+    before = db.get_content_item(original.id)
+
+    def fail_index(*args, **kwargs):
+        raise RuntimeError("index unavailable")
+
+    monkeypatch.setattr(db, "_update_content_fts_entry", fail_index)
+    with pytest.raises(RuntimeError, match="index unavailable"):
+        db.update_content_item(original.id, title="Not committed", tags=["not-committed"])
+    assert db.get_content_item(original.id) == before
+
+
+def test_concurrent_disjoint_item_updates_preserve_both_changes(db):
+    original = make_reading(db)
+    ready = Barrier(2)
+
+    def update(**kwargs):
+        ready.wait(timeout=10)
+        return db.update_content_item(original.id, **kwargs).revision
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        first = workers.submit(update, title="Edited")
+        second = workers.submit(update, notes="Annotated")
+        revisions = [first.result(timeout=15), second.result(timeout=15)]
+    final = db.get_content_item(original.id)
+    assert len(set(revisions)) == 2
+    assert final.revision == max(revisions)
+    assert final.title == "Edited"
+    assert final.notes == "Annotated"
+
+
+def test_url_read_keeps_tags_and_revision_in_one_snapshot(db, monkeypatch):
+    original = make_reading(db)
+    fetch = db._fetch_tags_for_item_ids
+    armed = True
+
+    def fetch_after_other_writer(item_ids, *, connection=None):
+        nonlocal armed
+        if armed:
+            armed = False
+            with ThreadPoolExecutor(max_workers=1) as workers:
+                workers.submit(db.update_content_item, original.id, tags=["changed"]).result(timeout=15)
+        return fetch(item_ids, connection=connection)
+
+    monkeypatch.setattr(db, "_fetch_tags_for_item_ids", fetch_after_other_writer)
+    snapshot = db.get_content_item_by_url(original.url)
+    assert snapshot.tags == ["news"]
+    assert snapshot.revision == original.revision
+    assert db.get_content_item(original.id).tags == ["changed"]
+
+
+def test_later_adapters_update_existing_item_and_search_index(db):
+    original = make_reading(db)
+    # First construction may create the file; only subsequent constructions hit the schema memo.
+    CollectionsDatabase.from_backend(user_id=db.user_id, backend=db.backend)
+    second = CollectionsDatabase.from_backend(user_id=db.user_id, backend=db.backend)
+    changed = second.update_content_item(original.id, title="Replacement")
+    assert changed.revision > original.revision
+    matches, total = second.list_content_items(origin="reading", q="Replacement")
+    assert total == 1
+    assert matches[0].id == original.id
+    assert second.list_content_items(origin="reading", q="Original")[1] == 0
 
 
 def test_revision_clock_survives_schema_reinitialization(db):
