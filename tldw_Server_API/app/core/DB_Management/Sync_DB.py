@@ -2795,6 +2795,15 @@ class SyncDatabase:
                        AND status = 'accepted'
                        AND server_sequence < ?
                        AND apply_status NOT IN ('applied', 'superseded')
+                       AND NOT (
+                           domain IN ('personal_context.record', 'personal_context.scope', 'personal_context.proposal', 'personal_context.manifest', 'personal_context.purge') AND apply_status = 'conflict'
+                           AND EXISTS (
+                               SELECT 1 FROM sync_conflicts AS review
+                                WHERE review.dataset_id = sync_envelopes.dataset_id
+                                  AND review.server_sequence = sync_envelopes.server_sequence
+                                  AND review.status = 'unresolved' AND review.remote_envelope_id IS NOT NULL
+                           )
+                       )
                      ORDER BY server_sequence ASC
                      LIMIT 1
                     """,
@@ -7530,6 +7539,7 @@ class SyncDatabase:
                    AND conflict.status = 'unresolved'
                    AND envelope.status = 'accepted'
                    AND envelope.apply_status = 'conflict'
+                   AND conflict.domain NOT IN ('personal_context.record', 'personal_context.scope', 'personal_context.proposal', 'personal_context.manifest', 'personal_context.purge')
                  ORDER BY envelope.server_sequence ASC
                  LIMIT 1
                 """,
@@ -8913,6 +8923,8 @@ class SyncDatabase:
                 return "applied"
             if row.get("apply_status") != "pending":
                 return "mismatch"
+            if self.envelope_is_conflict_pinned(dataset_id, client_envelope_id, connection=connection):
+                return "mismatch"
             current = _first(
                 self.execute(
                     """SELECT latest_server_cursor FROM sync_current_heads
@@ -10194,6 +10206,44 @@ class SyncDatabase:
             return None
         return _conflict_from_row(row)
 
+    def list_conflict_pinned_envelopes(
+        self,
+        dataset_id: str,
+        *,
+        limit: int = 1000,
+        connection: Any | None = None,
+    ) -> list[SyncEnvelope]:
+        """Return immutable candidates still owned by an unresolved review."""
+        rows = self.execute(
+            """SELECT envelope.* FROM sync_envelopes AS envelope
+                WHERE envelope.dataset_id = ? AND EXISTS (
+                    SELECT 1 FROM sync_conflicts AS review
+                     WHERE review.dataset_id = envelope.dataset_id AND review.status = 'unresolved'
+                       AND (review.local_envelope_id = envelope.client_envelope_id
+                         OR review.remote_envelope_id = envelope.client_envelope_id)
+                ) ORDER BY envelope.server_sequence LIMIT ?""",
+            (dataset_id, limit),
+            connection=connection,
+        ).rows
+        return [_envelope_from_row(row) for row in rows]
+
+    def envelope_is_conflict_pinned(
+        self,
+        dataset_id: str,
+        envelope_id: str,
+        *,
+        connection: Any | None = None,
+    ) -> bool:
+        """Check retention ownership in the caller's guarded storage transaction."""
+        return bool(
+            self.execute(
+                """SELECT 1 FROM sync_conflicts WHERE dataset_id = ? AND status = 'unresolved'
+                 AND (local_envelope_id = ? OR remote_envelope_id = ?) LIMIT 1""",
+                (dataset_id, envelope_id, envelope_id),
+                connection=connection,
+            ).rows
+        )
+
     def get_unresolved_conflict_for_envelope(
         self,
         dataset_id: str,
@@ -10439,11 +10489,11 @@ class SyncDatabase:
                             AND resolution_action = ?
                             AND (
                                 resolved_by_device_id = ?
-                                OR (resolved_by_device_id IS NULL AND ? IS NULL)
+                                OR (resolved_by_device_id IS NULL AND CAST(? AS TEXT) IS NULL)
                             )
                             AND (
                                 resolution_notes = ?
-                                OR (resolution_notes IS NULL AND ? IS NULL)
+                                OR (resolution_notes IS NULL AND CAST(? AS TEXT) IS NULL)
                             )
                         )
                    )
@@ -12455,6 +12505,18 @@ class SyncDatabase:
         now = utcnow_iso()
         with self.backend.transaction(connection) as conn:
             self._require_dataset_domain(dataset_id, domain, connection=conn)
+            pinned = self.execute(
+                """SELECT 1 FROM sync_envelopes AS envelope
+                    WHERE envelope.dataset_id = ? AND envelope.domain = ? AND envelope.server_sequence <= ?
+                      AND EXISTS (SELECT 1 FROM sync_conflicts AS review
+                          WHERE review.dataset_id = envelope.dataset_id AND review.status = 'unresolved'
+                            AND (review.local_envelope_id = envelope.client_envelope_id
+                              OR review.remote_envelope_id = envelope.client_envelope_id)) LIMIT 1""",
+                (dataset_id, domain, through_server_sequence),
+                connection=conn,
+            ).rows
+            if pinned:
+                raise SyncStoreError("retention_conflict_pinned")
             existing = _first(
                 self.execute(
                     """
