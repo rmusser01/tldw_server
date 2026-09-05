@@ -479,6 +479,71 @@ Unfinished: public file-first delete/purge/transcode handlers and scheduler,
 managed file-option semantics, bounded runtime cleanup/readiness, legacy
 reconciliation and remaining aggregate writer routing. No capability activation.
 
+Approved API/scheduler disposal slice (2026-09-05; ADR-003 amended):
+
+1. Add failing real-backend tests for nonmutating metadata-only managed rejection,
+   soft-delete compatibility, explicit deferred disposal, false-option purge skips,
+   failed-transaction file preservation and locked retention renewal/custom grace.
+2. Preserve the existing bool DB deletion interface for trusted internal callers;
+   expose the committed deletion's path/managed classification to API services so
+   they never rely on a pre-lock ownership/path snapshot for file disposal.
+3. Enforce explicit managed file permission under the clock. Share the backend
+   purge predicate for candidate discovery and in-transaction recheck.
+4. Route single API deletion, API purge and scheduler through that boundary.
+   Managed files remain for durable cleanup; unrelated files use confined,
+   best-effort post-commit unlink. Report actual removals and update TTS history
+   only for removed records. No new retained-file schema or dependency.
+5. Run targeted SQLite/PostgreSQL and existing API/service regressions, scoped
+   formatter/lint/Bandit checks, independent review, and commit a checkpoint.
+   Other file mutators and full readiness remain later work; capability stays absent.
+
+API/scheduler disposal implementation (2026-09-05): a committed `DeletedOutput`
+snapshot carries the path, managed ownership and surviving-reference protection.
+The existing bool interface remains available to trusted internal callers. Public
+deletion supplies explicit file permission, enforced under the clock; metadata-only
+managed hard deletion returns 409 and false-option purges skip it. Explicit managed
+removal leaves durable cleanup to the namespace-aware worker. Generic file deletion
+is confined and best effort after the DB commit, never before rollback can occur.
+The API and scheduler use the same backend retention predicate for discovery and
+locked recheck, honoring custom grace and include-retention selection. Counts reflect
+actual removals; scheduler history updates follow only committed deletions. Existing
+audiobook accounting is retained, with size measurement before mutation locks.
+
+Review reproduced an unowned shared output acquiring Reading ownership after the
+delete commit but before unlink. All surviving same-user file references now block
+direct unlink, with conservative basename comparison for legacy absolute paths and
+escaped LIKE literals. Another failing regression caught a resolver leaking a
+rejected symlink filename through nested logging; resolver failure messages are now
+static. Scoped re-review found no outstanding actionable issues. A later real PG
+run exposed the query converter treating `LIKE ? ESCAPE` as JSONB syntax; prepared
+statement inspection isolated it and `LIKE (?) ESCAPE` fixed the targeted PG cases.
+The incident is recorded in the testing-evidence lessons, without changing the
+shared SQL parser in this task.
+
+Other file-mutating routes, cleanup startup/readiness, legacy reconciliation,
+production archive adoption, aggregate/collection writer routing and DTO exposure
+remain unfinished. This does not solve the pre-existing general unowned-file
+attachment lifecycle or activate `hasReadingOptimisticDeletesV1`. No new retained-file
+schema, dependency, PR or merge is included. ADR-003 carries the approved policy;
+TASK-13153 remains In Progress.
+
+API/scheduler checkpoint verification (existing Server virtual environment):
+
+- Initial new-route red run: 13 expected SQLite failures and 2 compatibility passes.
+  Shared-alias, both review findings and the legacy absolute alias each had failing
+  regressions before their corrections. Existing log tests were updated to the new
+  DB/service boundary rather than preserving fake raw-SQL behavior.
+- `TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_reading_output_disposal_routes.py tldw_Server_API/tests/Collections/test_reading_output_deletion.py tldw_Server_API/tests/Services/test_outputs_service.py tldw_Server_API/tests/Collections/test_items_and_outputs_api.py tldw_Server_API/tests/Services/test_outputs_purge_scheduler_truthiness.py -k 'not postgres' --timeout=30 -q --tb=short`: 100 passed, 42 deselected.
+- After the final parenthesized SQL correction, reran all new-route SQLite cases:
+  20 passed, 20 deselected (overlaps the preceding 100).
+- `TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_reading_output_disposal_routes.py tldw_Server_API/tests/Collections/test_reading_output_deletion.py -k postgres --timeout=30 -x -q --tb=short`: 42 passed, 42 deselected on the existing real PostgreSQL service; no skips or Docker provisioning. An earlier failing broad PG run was interrupted to isolate the query-conversion defect; only this final run is completion evidence.
+- Total distinct targeted cases: 142. No full suite ran. Existing warnings remain;
+  new/rewritten tests pass Ruff, changed ranges pass Black, compilation and diff
+  checks pass. Scoped Bandit has zero findings/errors. Production Ruff retains the
+  same 12 baseline findings (9 DB, 1 service, 1 scheduler, 1 endpoint); the existing
+  API test module retains its same 4 baseline findings. No new lint findings.
+- Read-only review and re-review completed, with both findings addressed.
+
 **Interfaces:** Create `drain_reading_artifact_cleanup(db: CollectionsDatabase, *, storage_namespace_id: str, limit: int = 100) -> int` in the cleanup service; returns completed intent count. Reservations have a namespace, unique token, lease deadline and `staged|owned|pending` lifecycle. Adoption requires matching token, unexpired lease, surviving item and original revision. Worker claim and output registration serialize on the database fence. Namespace identity is provisioned and verified against a volume marker, not inferred from the database or hostname.
 
 Storage prerequisite slice: implement explicit, idempotent namespace provisioning

@@ -17,6 +17,8 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.backends.factory import close_all_backends
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.core.DB_Management.Collections_DB import DeletedOutput
+from tldw_Server_API.app.services import outputs_service
 from tldw_Server_API.app.core.DB_Management.media_db.errors import InputError
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.exceptions import InvalidStoragePathError
@@ -912,9 +914,11 @@ async def test_outputs_create_generic_failure_log_is_sanitized(monkeypatch):
 @pytest.mark.asyncio
 async def test_outputs_delete_tts_history_failure_log_is_sanitized(monkeypatch):
     class _CollectionsDB:
-        def delete_output_artifact(self, _output_id: int, *, hard: bool) -> bool:
-            assert hard is False
-            return True
+        user_id = 123
+
+        def delete_output_artifact_record(self, _output_id: int, **kwargs):
+            assert kwargs["hard"] is False
+            return DeletedOutput("output.md", False)
 
     class _MediaDB:
         def mark_tts_history_artifacts_deleted_for_output(self, **_kwargs: Any) -> None:
@@ -976,7 +980,7 @@ async def test_outputs_purge_db_delete_failure_log_is_sanitized(monkeypatch):
     logger = _LoggerStub()
     monkeypatch.setattr(outputs_endpoint, "logger", logger)
     monkeypatch.setattr(outputs_endpoint, "find_outputs_to_purge", lambda **_kwargs: {777: "output.md"})
-    monkeypatch.setattr(outputs_endpoint, "delete_outputs_by_ids", _raise_delete_failure)
+    monkeypatch.setattr(outputs_endpoint, "delete_output_with_file", _raise_delete_failure)
 
     result = await outputs_endpoint.purge_outputs(
         payload=outputs_endpoint.OutputsPurgeRequest(delete_files=False),
@@ -997,6 +1001,9 @@ async def test_outputs_purge_file_delete_failure_log_is_sanitized(monkeypatch):
     class _CollectionsDB:
         user_id = 123
 
+        def delete_output_artifact_record(self, *_args, **_kwargs):
+            return DeletedOutput("output.md", False)
+
     class _OutputPath:
         def exists(self) -> bool:
             return True
@@ -1006,10 +1013,10 @@ async def test_outputs_purge_file_delete_failure_log_is_sanitized(monkeypatch):
 
     logger = _LoggerStub()
     monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_service, "logger", logger)
     monkeypatch.setattr(outputs_endpoint, "find_outputs_to_purge", lambda **_kwargs: {777: "output.md"})
-    monkeypatch.setattr(outputs_endpoint, "delete_outputs_by_ids", lambda **_kwargs: 1)
-    monkeypatch.setattr(outputs_endpoint, "_normalize_output_storage_path_for_user", lambda **_kwargs: "output.md")
-    monkeypatch.setattr(outputs_endpoint, "_resolve_output_path_for_user", lambda *_args: _OutputPath())
+    monkeypatch.setattr(outputs_service, "normalize_output_storage_path", lambda *_args: "output.md")
+    monkeypatch.setattr(outputs_service, "_resolve_output_path_for_user", lambda *_args: _OutputPath())
 
     result = await outputs_endpoint.purge_outputs(
         payload=outputs_endpoint.OutputsPurgeRequest(delete_files=True),
@@ -1018,7 +1025,7 @@ async def test_outputs_purge_file_delete_failure_log_is_sanitized(monkeypatch):
     )
 
     assert result == {"removed": 1, "files_deleted": 0}
-    assert logger.warnings == ["outputs.purge: failed to delete file"]
+    assert logger.warnings == ["outputs.delete: failed to delete file"]
     logged = "\n".join(logger.warnings)
     assert "777" not in logged
     assert "output.md" not in logged

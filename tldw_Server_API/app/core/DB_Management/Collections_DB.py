@@ -80,6 +80,19 @@ class ReadingArtifactOwnershipConflict(RuntimeError):
     """An output cannot be assigned to the requested Reading owner or volume."""
 
 
+class ReadingFileDeletionRequired(RuntimeError):
+    """Managed output removal requires explicit permission for file cleanup."""
+
+
+@dataclass(frozen=True)
+class DeletedOutput:
+    """Committed output snapshot; managed paths may only use durable cleanup."""
+
+    storage_path: str
+    managed: bool
+    shared: bool = False
+
+
 def _count_row_total(row: Any) -> int:
     if not row:
         return 0
@@ -5658,6 +5671,24 @@ class CollectionsDatabase:
             return result.rowcount == 1
 
     def delete_output_artifact(self, output_id: int, *, hard: bool = False, purge_before: str | None = None) -> bool:
+        """Trusted internal deletion, including durable managed-file disposal."""
+        return (
+            self.delete_output_artifact_record(
+                output_id, hard=hard, delete_managed_files=True, purge_before=purge_before
+            )
+            is not None
+        )
+
+    def delete_output_artifact_record(
+        self,
+        output_id: int,
+        *,
+        hard: bool = False,
+        delete_managed_files: bool = False,
+        purge_before: str | None = None,
+        soft_deleted_grace_days: int = 30,
+        include_retention: bool = True,
+    ) -> DeletedOutput | None:
         """Delete output metadata, fencing any Reading owner and durable disposal.
 
         For managed archives hard deletion schedules file cleanup; callers must
@@ -5670,7 +5701,7 @@ class CollectionsDatabase:
             (output_id, self.user_id),
         ).first
         if not row:
-            return False
+            return None
         deleted_flag = int(row["deleted"] if isinstance(row, dict) else row[4] or 0)
         output_type = row["type"] if isinstance(row, dict) else row[1]
         metadata_json = row["metadata_json"] if isinstance(row, dict) else row[2]
@@ -5690,23 +5721,41 @@ class CollectionsDatabase:
                 connection=conn,
             ).first
             if not current or (not hard and current["deleted"]):
-                return False
+                return None
             if purge_before is not None:
-                predicate, params = self._output_purge_predicate(purge_before)
+                predicate, params = self._output_purge_predicate(
+                    purge_before, soft_deleted_grace_days, include_retention
+                )
                 eligible = self.backend.execute(
                     f"SELECT 1 FROM outputs WHERE id = ? AND user_id = ? AND ({predicate})",  # nosec B608: fixed predicate
                     (output_id, self.user_id, *params),
                     connection=conn,
                 ).first
                 if not eligible:
-                    return False
+                    return None
             owner = self.backend.execute(
                 "SELECT item_id, storage_namespace_id FROM reading_output_ownership WHERE output_id = ? AND user_id = ?",
                 (output_id, self.user_id),
                 connection=conn,
             ).first
             parent = self._get_reading_parent(owner["item_id"], conn) if owner else None
+            # Any surviving reference may acquire Reading ownership after commit.
+            # Generic outputs lack namespace authority, so compare conservatively.
+            # Legacy absolute paths can name the same file as a relative filename.
+            filename = current["storage_path"].replace("\\", "/").rsplit("/", 1)[-1].lower()
+            suffix = "%/" + filename.replace("^", "^^").replace("%", "^%").replace("_", "^_")
+            shared_path = bool(
+                self.backend.execute(
+                    "SELECT 1 FROM outputs WHERE user_id = ? AND id <> ? "
+                    "AND (lower(replace(storage_path, ?, '/')) = ? "
+                    "OR lower(replace(storage_path, ?, '/')) LIKE (?) ESCAPE '^') LIMIT 1",
+                    (self.user_id, output_id, "\\", filename, "\\", suffix),
+                    connection=conn,
+                ).first
+            )
             if parent and hard:
+                if not delete_managed_files:
+                    raise ReadingFileDeletionRequired("reading_file_deletion_required")
                 if current["type"] != "reading_archive":
                     raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
                 self._queue_reading_output_disposal(parent, [{**current, **owner}], conn)
@@ -5760,7 +5809,7 @@ class CollectionsDatabase:
                 self.update_audiobook_output_usage(-size_bytes)
             except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
                 logger.warning("audiobook_quota: failed to decrement usage: {}", exc)
-        return ok
+        return DeletedOutput(storage_path=current["storage_path"], managed=bool(owner), shared=shared_path)
 
     def get_output_artifact_by_title(
         self, title: str, format_: str | None = None, include_deleted: bool = False
@@ -8560,19 +8609,30 @@ class CollectionsDatabase:
         ).rows
         return sum(self.delete_output_artifact(row["id"], hard=True, purge_before=now) for row in rows)
 
-    def _output_purge_predicate(self, now: str) -> tuple[str, tuple[str, str]]:
+    def find_outputs_to_purge(
+        self, now: str, soft_deleted_grace_days: int = 30, include_retention: bool = True
+    ) -> dict[int, str]:
+        """Select candidates; deletion must recheck the same policy under its fence."""
+        predicate, params = self._output_purge_predicate(now, soft_deleted_grace_days, include_retention)
+        rows = self.backend.execute(
+            f"SELECT id, storage_path FROM outputs WHERE user_id = ? AND ({predicate})",  # nosec B608: fixed predicate
+            (self.user_id, *params),
+        ).rows
+        return {row["id"]: row["storage_path"] for row in rows}
+
+    def _output_purge_predicate(
+        self, now: str, soft_deleted_grace_days: int = 30, include_retention: bool = True
+    ) -> tuple[str, tuple[Any, ...]]:
         """Share the same backend retention predicate for scanning and rechecking."""
         if self.backend.backend_type == BackendType.POSTGRESQL:
-            return (
-                "(retention_until IS NOT NULL AND retention_until::timestamptz <= ?) OR "
-                "(deleted = 1 AND deleted_at IS NOT NULL AND (?::timestamptz - deleted_at::timestamptz) >= INTERVAL '30 days')",
-                (now, now),
-            )
-        return (
-            "(retention_until IS NOT NULL AND retention_until <= ?) OR "
-            "(deleted = 1 AND deleted_at IS NOT NULL AND julianday(?) - julianday(deleted_at) >= 30)",
-            (now, now),
-        )
+            retention = "retention_until IS NOT NULL AND retention_until::timestamptz <= ?"
+            grace = "deleted = 1 AND deleted_at IS NOT NULL AND (?::timestamptz - deleted_at::timestamptz) >= (? * INTERVAL '1 day')"
+        else:
+            retention = "retention_until IS NOT NULL AND retention_until <= ?"
+            grace = "deleted = 1 AND deleted_at IS NOT NULL AND julianday(?) - julianday(deleted_at) >= ?"
+        if include_retention:
+            return f"({retention}) OR ({grace})", (now, now, soft_deleted_grace_days)
+        return grace, (now, soft_deleted_grace_days)
 
     # ------------------------
     # File artifacts API

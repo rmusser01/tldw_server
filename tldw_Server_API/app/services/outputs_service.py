@@ -216,33 +216,33 @@ def _resolve_output_path_for_user(user_id: int, path_value: str | PathlibPath) -
     try:
         base_resolved = base_dir.resolve(strict=False)
     except Exception as e:
-        logger.error(f"outputs: failed to resolve outputs base dir for user {user_id}: {e}")
+        logger.error("outputs: failed to resolve outputs base dir")
         raise HTTPException(status_code=500, detail="storage_unavailable") from e
 
     # Defense-in-depth: treat path_value as untrusted and reduce to a safe filename under base_dir.
     # Normalize the candidate to a single relative filename component.
     candidate = path_value if isinstance(path_value, PathlibPath) else PathlibPath(path_value)
     if candidate.is_absolute():
-        logger.warning(f"outputs: absolute paths are not allowed for outputs: {candidate}")
+        logger.warning("outputs: absolute paths are not allowed for outputs")
         raise HTTPException(status_code=400, detail="invalid_path")
     if len(candidate.parts) != 1:
-        logger.warning(f"outputs: nested output paths are not allowed: {candidate}")
+        logger.warning("outputs: nested output paths are not allowed")
         raise HTTPException(status_code=400, detail="invalid_path")
 
     # Restrict to the final component to prevent directory traversal such as "../".
     candidate_name = candidate.name
     if not candidate_name or candidate_name in (".", ".."):
-        logger.warning(f"outputs: empty output path component from {path_value!r}")
+        logger.warning("outputs: empty output path component")
         raise HTTPException(status_code=400, detail="invalid_path")
 
     # Reject any path separators to ensure this remains a simple filename.
     if os.sep in candidate_name or (os.altsep and os.altsep in candidate_name):
-        logger.warning(f"outputs: path separator detected in output filename: {candidate_name!r}")
+        logger.warning("outputs: path separator detected in output filename")
         raise HTTPException(status_code=400, detail="invalid_path")
 
     # Enforce a conservative filename pattern (alphanumeric, underscore, dash, dot).
     if not re.match(r"^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$", candidate_name):
-        logger.warning(f"outputs: invalid characters in output filename: {candidate_name!r}")
+        logger.warning("outputs: invalid characters in output filename")
         raise HTTPException(status_code=400, detail="invalid_path")
 
     try:
@@ -252,14 +252,14 @@ def _resolve_output_path_for_user(user_id: int, path_value: str | PathlibPath) -
             error_factory=lambda _exc: HTTPException(status_code=400, detail="invalid_path"),
         )
     except Exception as e:
-        logger.warning(f"outputs: invalid output path {path_value}: {e}")
+        logger.warning("outputs: invalid output path")
         raise HTTPException(status_code=400, detail="invalid_path") from e
     if resolved_str is None:
         raise HTTPException(status_code=400, detail="invalid_path")
     resolved = PathlibPath(resolved_str)
 
     if not resolved.is_relative_to(base_resolved):
-        logger.warning(f"outputs: output path outside base dir: {resolved}")
+        logger.warning("outputs: output path outside base dir")
         raise HTTPException(status_code=400, detail="invalid_path")
     return resolved
 
@@ -551,35 +551,48 @@ def find_outputs_to_purge(
     soft_deleted_grace_days: int,
     include_retention: bool,
 ) -> dict[int, str]:
-    """Return a mapping of output_id -> storage_path for purge candidates.
+    """Use the same backend-specific policy as the transactional delete recheck."""
+    return cdb.find_outputs_to_purge(now_iso, soft_deleted_grace_days, include_retention)
 
-    Combines retention-based and aged soft-deleted selections.
+
+def delete_output_with_file(
+    cdb,
+    user_id: int,
+    output_id: int,
+    *,
+    hard: bool = False,
+    delete_file: bool = False,
+    purge_before: str | None = None,
+    soft_deleted_grace_days: int = 30,
+    include_retention: bool = True,
+) -> tuple[bool, bool]:
+    """Commit metadata first; managed files are disposed only by durable cleanup.
+
+    Returns actual record/file removals, never counts a queued unlink as complete.
+    Legacy unowned file removal remains best effort and confined to user storage.
     """
-    paths: dict[int, str] = {}
-    # Retention-based candidates
-    if include_retention:
+    if str(user_id) != str(cdb.user_id):
+        raise ValueError("output_user_mismatch")
+    deleted = cdb.delete_output_artifact_record(
+        output_id,
+        hard=hard,
+        delete_managed_files=delete_file,
+        purge_before=purge_before,
+        soft_deleted_grace_days=soft_deleted_grace_days,
+        include_retention=include_retention,
+    )
+    if deleted is None:
+        return False, False
+    if hard and delete_file and not deleted.managed and not deleted.shared:
         try:
-            cur = cdb.backend.execute(
-                "SELECT id, storage_path FROM outputs WHERE user_id = ? AND retention_until IS NOT NULL AND retention_until <= ?",
-                (cdb.user_id, now_iso),
-            )
-            for row in cur.rows:
-                rid = int(row["id"]) if isinstance(row, dict) else int(row[0])
-                paths[rid] = row["storage_path"] if isinstance(row, dict) else row[1]
-        except _OUTPUTS_DB_FALLBACK_EXCEPTIONS as e:
-            logger.warning(f"outputs_service.purge: retention scan failed: {e}")
-    # Soft-deleted grace candidates
-    try:
-        cur2 = cdb.backend.execute(
-            "SELECT id, storage_path FROM outputs WHERE user_id = ? AND deleted = 1 AND deleted_at IS NOT NULL AND julianday(?) - julianday(deleted_at) >= ?",
-            (cdb.user_id, now_iso, soft_deleted_grace_days),
-        )
-        for row in cur2.rows:
-            rid = int(row["id"]) if isinstance(row, dict) else int(row[0])
-            paths[rid] = row["storage_path"] if isinstance(row, dict) else row[1]
-    except _OUTPUTS_DB_FALLBACK_EXCEPTIONS as e:
-        logger.warning(f"outputs_service.purge: soft-deleted scan failed: {e}")
-    return paths
+            filename = normalize_output_storage_path(user_id, deleted.storage_path)
+            path = _resolve_output_path_for_user(user_id, filename)
+            if path.exists():
+                path.unlink()
+                return True, True
+        except (HTTPException, InvalidStoragePathError, OSError):
+            logger.warning("outputs.delete: failed to delete file")
+    return True, False
 
 
 def delete_outputs_by_ids(cdb, user_id: int, ids: list[int]) -> int:

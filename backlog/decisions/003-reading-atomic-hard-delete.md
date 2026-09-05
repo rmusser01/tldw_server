@@ -72,6 +72,17 @@ shared references prevent scheduling unlink. New Reading archives use random,
 exclusive-create names that are never intentionally reused. Do not hold the item
 transaction during scraping, rendering or filesystem I/O.
 
+Managed-output file policy (user approved 2026-09-05): generic output hard deletion
+with `delete_file=false` rejects structurally owned Reading archives with 409
+`reading_file_deletion_required`, without mutation. Purges with `delete_files=false`
+skip these archives. Soft deletion retains ownership and files; unrelated outputs
+keep their file-retention options. Explicit file deletion queues managed cleanup
+in the deletion transaction, never unlinks first. Enforce permission under the
+ownership fence, not only in an API precheck. Retention eligibility is rechecked
+there using the requested grace period and retention selection. No retained-file
+lifecycle is added: deleting ownership while promising indefinite file retention
+would otherwise discard the authority needed for later capture cleanup.
+
 Background completion must recheck the surviving parent and captured revision
 under the write fence. It cannot recreate the item via upsert after deletion.
 Stale completion rejects its item update and disposes of its privately staged

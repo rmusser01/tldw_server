@@ -106,6 +106,17 @@ retention feature flag. Invalid paths remain blocked and observable, never unlin
 
 ## Rollout and evidence
 
+### Approved generic-output file policy
+
+Hard deleting a structurally owned Reading archive through `/outputs/{id}` requires
+`delete_file=true`; otherwise return 409 `reading_file_deletion_required` without
+mutation. API/scheduled purges with `delete_files=false` skip managed archives.
+Soft deletion and unrelated outputs keep their existing retention semantics.
+Explicit managed file removal commits a durable intent before any unlink; the
+existing `file_deleted`/`files_deleted` counts describe actual immediate removals,
+not queued work. Permission and purge eligibility are enforced under the DB fence.
+This user-approved clarification avoids introducing a retained-file lifecycle.
+
 Stop old writers before upgrade. Migrate before advertising the capability. Keep
 the capability absent/false until all transaction and lifecycle tests pass, including
 real PostgreSQL tests (a skipped backend suite is not evidence).

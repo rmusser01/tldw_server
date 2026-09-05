@@ -1,5 +1,19 @@
 # Testing Evidence Lessons
 
+## PostgreSQL placeholder heuristics can mistake LIKE parameters for JSONB operators
+
+**Incident (TASK-13153, 2026-09-05):** A shared-file guard using `LIKE ? ESCAPE '^'`
+passed SQLite but failed real PostgreSQL execution. Inspecting the prepared
+statement showed the shared converter had preserved that question mark as a JSONB
+operator while converting the other parameters. The surrounding LIKE/ESCAPE words
+triggered its expression heuristic.
+
+**Evidence and rule:** Parenthesizing the parameter as `LIKE (?) ESCAPE '^'`
+avoids the ambiguous shape without changing the matching policy or broadening this
+task into SQL-parser work. Check the prepared statement when a parameterized query
+works on SQLite but fails through the PostgreSQL adapter; do not assume SQL accepted
+by the database is necessarily passed through unchanged by its adapter.
+
 ## Conservative path comparisons must not discard cleanup authority
 
 **Incident (TASK-13153, 2026-09-04):** Review of guarded Reading deletion found

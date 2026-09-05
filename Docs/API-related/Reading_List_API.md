@@ -427,6 +427,27 @@ JSONL line example:
 
 ## Archive
 
+### Managed archive output deletion
+
+For structurally managed Reading archives, `DELETE /api/v1/outputs/{id}?hard=true`
+also requires `delete_file=true`. Without it the API returns 409
+`reading_file_deletion_required` without changing the archive or its file. Soft
+deletion keeps the file and its ownership record. Unowned outputs retain their
+existing file-retention options; a surviving shared reference protects its file.
+
+Explicit managed deletion commits durable file cleanup before removing metadata.
+The returned `file_deleted=false` means no file was synchronously unlinked, not
+that the logical deletion failed; do not repeat DELETE to finish cleanup. API and
+scheduled output purges with `delete_files=false` skip managed archives. Purge
+counts include only records actually removed and files actually unlinked, not
+queued cleanup. Both retention and the selected soft-delete grace period are
+rechecked when deletion commits.
+
+This managed lifecycle is being rolled out under TASK-13153. It does not by itself
+enable the optimistic Reading-delete capability or reconcile legacy archives.
+
+### Create an archive
+
 `POST /api/v1/reading/items/{id}/archive`
 
 Request:
