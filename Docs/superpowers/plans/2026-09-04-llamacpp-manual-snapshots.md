@@ -72,7 +72,7 @@ snapshot ID/token count, safe error code and state:
 `validating|saving|verifying|restoring|complete|failed|outcome_unknown`.
 Never serialize internal filesystem paths or request tokens into responses.
 
-## Stage 1 / TASK-13161: Private storage and compatibility
+### Task 1: Private storage and compatibility (TASK-13161)
 
 **Files:** Create the models/store/compatibility modules above and
 `tldw_Server_API/tests/LLM_Local/test_llamacpp_snapshot_store.py`,
@@ -129,7 +129,7 @@ def test_unknown_and_changed_model_never_match():
 - [ ] Fingerprint content, executable, projector and canonical effective options/adapters. Check file identity before/after hashing. Unknown mutable state is unsupported, not compatible. Test mismatches individually; model aliases and paths are not identity.
 - [ ] Run new tests plus `test_llamacpp_profile_store.py`, touched-file lint/format and Bandit. Record evidence and commit the reviewed stage.
 
-## Stage 2 / TASK-13162: Fenced operations and admin API
+### Task 2: Fenced operations and admin API (TASK-13162)
 
 **Files:** Create `llamacpp_snapshot_operations.py`,
 `tldw_Server_API/tests/LLM_Local/test_llamacpp_snapshot_operations.py` and
@@ -174,7 +174,7 @@ Extend existing supervisor/process-runner tests.
 - [ ] Use central checked egress with captured server-owned origin, no mutation retry or cross-origin redirect. Validate response slot, basename and counts against the operation; recheck generation before success. Keep working files quarantined until child death. Do not infer death from timeout or a reused PID.
 - [ ] Run the new API/operation tests, existing supervisor/process-runner/admin tests, touched-file static checks and Bandit. Record the fault-injection results and commit the reviewed stage.
 
-## Stage 3 / TASK-13163: Admin workflow and live reuse proof
+### Task 3: Admin workflow and live reuse proof (TASK-13163)
 
 **Files:** Create
 `apps/packages/ui/src/components/Option/Admin/LlamacppSnapshotsPanel.tsx` and

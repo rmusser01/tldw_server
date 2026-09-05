@@ -1,11 +1,11 @@
 ---
 id: TASK-13159
 title: Design admin-only manual llama.cpp slot snapshots
-status: In Progress
+status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-05 02:14'
-updated_date: '2026-09-05 02:17'
+updated_date: '2026-09-05 02:56'
 labels: []
 dependencies: []
 documentation:
@@ -36,20 +36,22 @@ Inspect current dev and upstream contract; write linked design and proposed ADR;
 
 <!-- SECTION:NOTES:BEGIN -->
 Written design and proposed ADR-043 cover manual admin-only managed-runtime snapshots. Source review baseline: origin/dev c5dfe0ff73; upstream server API documentation checked. Self-review covered authorization, storage ownership, uncertain outcomes, lifecycle conflicts and explicit non-goals. Runtime tests and Bandit skipped: documentation-only. Written-spec approval remains pending; no production functionality implemented.
+
+Requester approved the written spec and chose subagent-driven implementation. Linked implementation plan and tasks13161-13163 created. Documentation-only verification recorded; runtime tests and Bandit not applicable to this design task.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Design and wireframe ready for requester review. Implementation planning follows written-spec approval.
+Written design approved; implementation tracked separately.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

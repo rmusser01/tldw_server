@@ -1,10 +1,11 @@
 ---
 id: TASK-13162
 title: Expose fenced manual llama.cpp snapshot operations
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@codex'
 created_date: '2026-09-05 02:19'
-updated_date: '2026-09-05 02:27'
+updated_date: '2026-09-05 02:55'
 labels: []
 dependencies:
   - TASK-13161
@@ -27,6 +28,12 @@ Allow administrators to save and restore managed runtime caches without duplicat
 - [ ] #3 Timeouts after dispatch quarantine the launch; stop recovery works and Pause/Resume remain manual process actions.
 - [ ] #4 Targeted API, supervisor, shutdown and crash-injection tests pass with checked egress.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Execute Task2 of Docs/superpowers/plans/2026-09-04-llamacpp-manual-snapshots.md. ADR required yes; ADR043 covers runtime ownership and single-dispatch operations. TDD and targeted security/lifecycle review required.
+<!-- SECTION:PLAN:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

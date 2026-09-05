@@ -1,7 +1,8 @@
 # ADR-043: Managed llama.cpp manual slot snapshots
 
-Status: Proposed
+Status: Accepted
 Date: 2026-09-04
+Decision owner: Requester approved written design and subagent-driven implementation.
 Related task: TASK-13159
 Design: [Manual slot snapshots](../Design/2026-09-04-llamacpp-manual-slot-snapshots.md)
 
@@ -53,6 +54,6 @@ deployments must reject requests at a non-owner instead of acting on a different
 process. Disk encryption remains an operator concern. No new database schema is
 required by this proposal; manifests and receipts are versioned local files.
 
-This proposal does not authorize implementation or supersede ADR-003 globally.
+This decision does not supersede ADR-003 globally.
 Any later Jobs integration must preserve single-dispatch and runtime-owner
 constraints, and must not turn a recovery event into an automatic restore.
