@@ -413,7 +413,19 @@ class LlamaCppSupervisor:
                         store.close()
                         raise
 
-                self._snapshots = await disk_call(create)
+                creation = asyncio.create_task(asyncio.to_thread(create))
+                try:
+                    self._snapshots = await asyncio.shield(creation)
+                except asyncio.CancelledError:
+                    # A completed factory owns a lock descriptor: retain it for shutdown
+                    # even when the request that initialized it has disconnected.
+                    while not creation.done():
+                        try:
+                            await asyncio.shield(creation)
+                        except asyncio.CancelledError:
+                            continue
+                    self._snapshots = creation.result()
+                    raise
             return self._snapshots
 
     async def _cleanup_dead_snapshot_launches(self):

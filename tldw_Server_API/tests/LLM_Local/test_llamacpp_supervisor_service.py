@@ -263,6 +263,33 @@ async def test_default_profile_compatibility_path_cannot_change_reserved_snapsho
     await supervisor.shutdown()
 
 
+async def test_cancelled_snapshot_factory_keeps_created_owner_for_shutdown(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_supervisor_service as module
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore
+
+    config = make_config(tmp_path)
+    supervisor = LlamaCppSupervisor(config=config, store=JsonLlamaCppProfileStore(tmp_path / "profiles.json"))
+    entered, release = threading.Event(), threading.Event()
+    original = module.SnapshotOperations
+
+    def slow_factory(*args, **kwargs):
+        entered.set()
+        release.wait(5)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(module, "SnapshotOperations", slow_factory)
+    initialization = asyncio.create_task(supervisor._snapshot_service())
+    assert await asyncio.to_thread(entered.wait, 2)
+    initialization.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await initialization
+    assert supervisor._snapshots is not None
+    await supervisor.shutdown()
+    with SnapshotStore(tmp_path / "llamacpp-snapshots"):
+        pass
+
+
 class StopFailingRunnerFactory(FakeRunnerFactory):
     def __call__(self, config: LlamaCppConfig, profile_id: str) -> FakeRunner:
         if profile_id == "one":
