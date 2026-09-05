@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-04 03:35'
-updated_date: '2026-09-05 02:10'
+updated_date: '2026-09-05 02:17'
 labels:
   - personal-context
   - sync
@@ -56,6 +56,8 @@ Prove the remediated encrypted Personal Context relay through the production ser
 
 <!-- SECTION:NOTES:BEGIN -->
 Certified the production Personal Context authority relay through real factory dependencies, FastAPI TestClient, durable Personalization and Sync stores, restart recovery, exact-once encrypted egress, checkpoint progression, privacy boundaries, and the single-authority-dataset invariant. Final candidate 8ee4c2227df533dbff3dea303c7838c1ba01d4d6 passed 25/25 certification tests with genuine PostgreSQL executed and no skip; the exact 14-file matrix passed 773/773; the affected bootstrap/store gate passed 241 with 2 existing skips and only eight approved-head baselines deselected. Scoped Ruff with no cache, Bandit, git diff, and the three-phase artifact/canary inventory passed. Both final independent reviewers approved with no Critical, Important, or Minor findings. ADR-002 remains governing; no new ADR was required. Artifact claims cover application-owned custody only and exclude external or operator backups, exported recovery bundles, and prior-process memory. Protocol version remains 0; no schema or public API was added.
+
+Published with the certified relay in PR #2868 against dev: https://github.com/rmusser01/tldw_server/pull/2868. Verification applies to implementation 8ee4c2227d; subsequent changes only close and link task records.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
