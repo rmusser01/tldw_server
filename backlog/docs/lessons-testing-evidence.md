@@ -104,7 +104,7 @@ or add broad suppressions merely to make a report formatter succeed.
 
 ## 2026-09-05 — Buddy UAT exposed transport and lifecycle gaps hidden by test doubles
 
-TASK-13182's setup smoke test ignored `expected_version`, so it passed while a real defaults save followed by checkpoint advancement returned 409. Enforcing optimistic version checks in the test reproduced the failure. TASK-13178's direct Python WebSocket probe accepted a server handshake without a selected subprotocol, while Chromium rejected the same handshake before sending any message. Require the browser's protocol contract in the auth regression and verify the real browser boundary. During review, discarded Strict Mode loads and A→B→A persona switches also exposed stale-completion cases that a single switch/remount test did not cover.
+TASK-13182's setup smoke test ignored `expected_version`, so it passed while a real defaults save followed by checkpoint advancement returned 409. Enforcing optimistic version checks in the test reproduced the failure. TASK-13184's direct Python WebSocket probe accepted a server handshake without a selected subprotocol, while Chromium rejected the same handshake before sending any message. Require the browser's protocol contract in the auth regression and verify the real browser boundary. During review, discarded Strict Mode loads and A→B→A persona switches also exposed stale-completion cases that a single switch/remount test did not cover.
 
 
 ## 2026-09-05 — Match CI runtime and await usable editor state

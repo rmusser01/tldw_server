@@ -1,5 +1,5 @@
 ---
-id: TASK-13178
+id: TASK-13184
 title: Negotiate safe Persona stream auth subprotocol for browser clients
 status: Done
 assignee:
@@ -52,6 +52,7 @@ Real Chromium now selects the authenticated stream protocol, sends a benign gree
 Coordinated final validation: 265 focused frontend tests, 54 backend tests, production Bandit0 findings, scoped frontend ESLint0 errors (warnings documented), unchanged Python lint baseline, real browser evidence and limitations recorded in Docs/Reviews/MIGU_BUDDY_UAT_2026_09_05.md. Repository-wide typechecking remains limited by80 diagnostics across6 unchanged unrelated files; no full suite run.
 
 Qodo review: added pytest.MonkeyPatch, marker and credential parameter types, None return type, and safe-negotiation docstring to modified WebSocket test. Reverified54 backend tests passing. Production endpoint unchanged by this review repair.
+Rebase provenance: originally TASK-13178. Latest dev69c96ef715 independently allocated13178 to email summarization. Buddy WebSocket record renumbered to13184 during authorized collision closeout; the dev record is preserved.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

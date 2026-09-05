@@ -57,7 +57,7 @@ The isolated `codex/migu-server-buddy-uat` branch repairs six concrete failures:
 - **TASK-13175:** clamp expanded/content-resized Buddy bounds before paint, constrain dock height, and scroll the compact controls.
 - **TASK-13176:** fetch server-owned visual content through the existing authenticated binary transport, render disposable object URLs, retain failures until sources change, and abort/revoke on cleanup. Both sprite frames and generated candidate thumbnails share this path; external asset URLs do not receive credentials.
 - **TASK-13183:** restore Strict Mode mount readiness and fence stale asynchronous session/stream work.
-- **TASK-13178:** real Chromium then exposed the server's missing WebSocket subprotocol selection. After successful authentication, select only the offered bearer marker, never its credential. Invalid authentication remains rejected.
+- **TASK-13184:** real Chromium then exposed the server's missing WebSocket subprotocol selection. After successful authentication, select only the offered bearer marker, never its credential. Invalid authentication remains rejected.
 - **TASK-13179:** actual quickstart startup exposed a missing public `/health` rewrite. Next now forwards that path only in quickstart mode to the configured backend's public endpoint.
 
 These are routine repairs to existing contracts; no new ADR is required. TASK-13180 records the separate stream-outcome/approval feedback gap and TASK-13181 records cookie-authentication coverage.
@@ -68,7 +68,7 @@ Fresh synthetic persona `e0a442a5-3861-4529-a332-a5391626f51f` (Migu UAT Repaire
 
 Migu Marker Basic was copied and explicitly activated as pack `559d3eb8-9bde-4e0c-b01e-46440708e5a7`. Builder and Buddy frames decoded at 96×96 from blob URLs backed by authenticated PNG 200 responses on backend port 9101. [DOM/network evidence](assets/migu-buddy-uat-2026-09-05/repaired-desktop.json), [desktop screenshot](assets/migu-buddy-uat-2026-09-05/repaired-desktop.png).
 
-At 1280×720 the expanded dock was `(938.55,229,325.45,416)`, bottom645. At1280×360 it was `(938.55,16,325.45,328)`, bottom344. The popover scrolled 112px and the bottom navigation link ended at328px, within360px. [Small viewport geometry](assets/migu-buddy-uat-2026-09-05/repaired-short-viewport.json), [scroll proof](assets/migu-buddy-uat-2026-09-05/repaired-scroll-proof.json), [screenshot](assets/migu-buddy-uat-2026-09-05/repaired-short-viewport.png). The small-height screenshot intentionally retains the intermediate handshake error; it demonstrates readable error and navigation containment before TASK-13178 was loaded.
+At 1280×720 the expanded dock was `(938.55,229,325.45,416)`, bottom645. At1280×360 it was `(938.55,16,325.45,328)`, bottom344. The popover scrolled 112px and the bottom navigation link ended at328px, within360px. [Small viewport geometry](assets/migu-buddy-uat-2026-09-05/repaired-short-viewport.json), [scroll proof](assets/migu-buddy-uat-2026-09-05/repaired-scroll-proof.json), [screenshot](assets/migu-buddy-uat-2026-09-05/repaired-short-viewport.png). The small-height screenshot intentionally retains the intermediate handshake error; it demonstrates readable error and navigation containment before TASK-13184 was loaded.
 
 After the handshake repair, Buddy Start→Send established `ws://127.0.0.1:9101/api/v1/persona/stream` and received a notice plus `tool_plan` from the real backend. [Browser stream evidence](assets/migu-buddy-uat-2026-09-05/repaired-live-browser.json), [post-send screenshot](assets/migu-buddy-uat-2026-09-05/repaired-send.png). No tool plan was approved or executed.
 
@@ -96,7 +96,7 @@ After the final stale-response fixes and a clean browser reload, defaults saving
 
 ### Final handoff
 
-TASK-13182,13175,13183,13178,13179 are Done. TASK-13176 remains In Progress because its quickstart acceptance is blocked by TASK-13181. TASK-13180 and13181 are recorded as high-priority follow-ups.
+TASK-13182,13175,13183,13184,13179 are Done. TASK-13176 remains In Progress because its quickstart acceptance is blocked by TASK-13181. TASK-13180 and13181 are recorded as high-priority follow-ups.
 
 Final real pointer drag moved the repaired dock from `(938.55,16)` to `(738.55,56)`; the asynchronous Stop completed and disabled its control. [Drag evidence](assets/migu-buddy-uat-2026-09-05/final-drag.json), [completed stop](assets/migu-buddy-uat-2026-09-05/final-stop.json). The initial immediate post-click stop flag is false because the API was still pending; the separate completion evidence is true.
 
@@ -117,3 +117,7 @@ Task provenance: Buddy lifecycle was originally TASK-13177; rebase onto dc0b7455
 ### CI runtime follow-up
 
 The shared-UI CI shard exposed editor test synchronization races absent from the initial Node26 frontend-config run. Replaying the failing file with Node20 and the CI deterministic config reproduced4 failures/60 passes. Tests now await manifest-initialized selections, custom-state options, and completed candidate-review feedback before the next action. The Node20 editor suite passes64/64; the original shard context plus both renderer suites passes93/93 across six files. Assertions remain intact, no timeout was increased, and production behavior is unchanged by this test-only follow-up. Scoped test-file ESLint has zero errors and47 existing any-type warnings. These checks supplement the earlier271 frontend/54 backend results; they are overlapping suites, not additional unique tests.
+
+Final base update: rebase onto dev69c96ef715 preserved every code patch (range-diff equivalent). Buddy WebSocket task was originally13178 and now uses TASK-13184 because the new dev email-summarization task independently uses13178. No product scope changed.
+
+Verification on dev69c96ef715 rebase:93 Node20 shared-UI tests across six files and54 backend tests pass again. All task IDs introduced by this PR are unique; diff whitespace checks pass.
