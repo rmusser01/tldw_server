@@ -55,13 +55,31 @@ async def process_emails_endpoint(
     db: Any = Depends(get_media_db_for_user),
     form_data: ProcessEmailsForm = Depends(get_process_emails_form),
     files: list[UploadFile] | None = File(None),
-):
+) -> JSONResponse:
     """
     Modularized wrapper for the legacy /process-emails endpoint.
 
     Uses TempDirManager, save_uploaded_files, and run_batch_processor for input
     handling and batch orchestration while preserving the legacy response shape
     and status-code semantics.
+
+    Args:
+        request: HTTP request used to acquire the authenticated owner's prompt database.
+        current_user: Authenticated owner whose saved email instructions apply when
+            analysis is enabled and no explicit system prompt was supplied.
+        db: Owner's media database, used only for optional chunking-template lookup.
+        form_data: Validated processing options, including provider, prompt and container flags.
+        files: Uploaded EML files or explicitly enabled ZIP, MBOX and PST/OST containers.
+
+    Returns:
+        JSON batch results without media persistence: HTTP 200 on success, 207
+        for item-level failures, or 400 when no processable results remain.
+
+    Raises:
+        HTTPException: HTTP 400 when no files are supplied, or a prompt database
+            dependency error before input processing.
+        ServicePromptCorruptOverride: Saved email instructions are invalid; input
+            processing does not start and the lookup worker releases its connection.
     """
 
     if not files:

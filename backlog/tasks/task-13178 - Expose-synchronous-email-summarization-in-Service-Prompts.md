@@ -1,10 +1,10 @@
 ---
 id: TASK-13178
 title: Expose synchronous email summarization in Service Prompts
-status: Done
+status: In Progress
 assignee: []
 created_date: '2026-09-05 16:09'
-updated_date: '2026-09-05 16:31'
+updated_date: '2026-09-05 16:36'
 labels: []
 dependencies: []
 references:
@@ -46,6 +46,10 @@ Implementation and independent review complete. Added owner-scoped email instruc
 Final verification: 200 backend passed, 2 existing PST skips, 9 existing warnings; 197 shared frontend passed; 5 targeted WebUI Settings passed. Bandit zero findings across 4 production Python files; compilation and scoped Ruff lint/format passed. Email library baseline I001/SIM103 verified unchanged. Official OpenAPI export, generated TypeScript and fingerprint check passed; removing only 3 new email form fields reproduces dev fingerprint. Independent final review: no remaining findings. Temporary node_modules links removed. Full repo suite, full frontend typecheck, live provider/browser and actual libpff binary integration not run. Implementation complete; awaiting user integration choice.
 
 User authorized push and PR creation. Opened PR #2887 against dev: https://github.com/rmusser01/tldw_server/pull/2887. Implementation commit a904a802b3f602785310e008dd4bcf238d5c6739. PR body records local verification, known skips and pending human Change summary before merge.
+
+User requested latest-dev rebase, all PR review comments addressed and merge. Rebased cleanly onto dc0b7455f2 (documentation-only dev changes); range-diff confirms both implementation commits unchanged. Qodo posted zero bugs and four rule findings: endpoint architecture placement, missing return annotation, endpoint docstring, and form docstring. Reviewing dispositions; human Change summary still pending.
+
+Qodo findings 2-4 addressed with JSONResponse return annotation and endpoint/form documentation. Finding 1 disposition: retain API-owned authenticated DB acquisition and worker lifecycle; existing core resolver owns decoding, validation and deployment defaults, so moving API dependencies or adding a callback wrapper would add coupling without relocating prompt semantics. Post-rebase and post-correction focused runs each passed 112 tests. Ruff lint/format, compilation, Bandit zero findings, official OpenAPI export/typegen/fingerprint checks passed; only public endpoint description changed in the schema. No new runtime behavior in review fixes.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

@@ -569,6 +569,27 @@ async def get_process_emails_form(
     Dependency that parses multipart/form-data into a ProcessEmailsForm.
 
     Used by /media/process-emails (no DB persistence).
+
+    Args:
+        request: HTTP request used to distinguish an omitted system prompt from
+            an explicitly empty multipart field before model validation.
+        system_prompt: Explicit system instructions; empty text is preserved and
+            omission permits the endpoint to resolve saved instructions/defaults.
+        api_provider: Canonical analysis provider, taking precedence over api_name
+            when nonempty. Credentials remain the shared analyzer's responsibility.
+        api_name: Legacy provider alias used when api_provider is absent or empty.
+        summarize_recursively: Enable the analyzer's recursive summary passes;
+            this does not enable analysis itself or analyze nested attachments.
+
+    Remaining multipart fields supply source metadata, analysis/chunking options,
+    container acceptance flags and attachment-depth limits to ProcessEmailsForm.
+
+    Returns:
+        ProcessEmailsForm with validated options, normalized provider fields and
+        preserved explicit-system-prompt presence.
+
+    Raises:
+        HTTPException: HTTP 422 when the supplied options fail model validation.
     """
     try:
         # Preserve explicit empty text before validation, as in EPUB parsing.

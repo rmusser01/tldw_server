@@ -63,3 +63,23 @@ Full repository tests, full frontend typechecking, live browser/provider runs,
 and real libpff binary integration were not performed. The two existing PST
 integration skips require libpff and/or a supplied real fixture. New container
 tests exercise application traversal/conversion, not libpff's binary parser.
+
+## PR #2887 review follow-up
+
+Rebased cleanly onto `dc0b7455f2` (documentation-only changes); range-diff
+confirmed the implementation commits were unchanged. Qodo reported zero bugs
+and four rule findings. Added the endpoint's `JSONResponse` return annotation
+and documented endpoint inputs/results/errors and form provider precedence,
+recursive behavior, explicit prompt presence, validation and return type.
+Regenerated the public OpenAPI description and fingerprint with official tools.
+
+Retained API-owned authenticated database acquisition and worker-local cleanup.
+The existing core resolver already owns saved-part decoding, validation and
+deployment-default selection. Moving HTTP dependencies into core would add
+coupling; adding a callback/service wrapper would not move any prompt semantics.
+This preserves the established lazy request snapshot and DB-free core callers.
+
+Post-rebase and post-review validation each passed 112 focused backend tests.
+Ruff lint/format, compilation, Bandit (zero findings) and official OpenAPI
+export/type generation/fingerprint validation passed. No runtime behavior
+changed during this review correction; frontend code remains unchanged.
