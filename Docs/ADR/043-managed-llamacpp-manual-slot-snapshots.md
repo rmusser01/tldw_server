@@ -3,7 +3,7 @@
 Status: Accepted
 Date: 2026-09-04
 Decision owner: Requester approved written design and subagent-driven implementation.
-Related task: TASK-13184
+Related task: TASK-13191
 Design: [Manual slot snapshots (repository source)](https://github.com/rmusser01/tldw_server/blob/3869302734f194b9389b37543c0e25fd6af7d5fa/Docs/Design/2026-09-04-llamacpp-manual-slot-snapshots.md)
 
 ## Context
@@ -58,7 +58,7 @@ This decision does not supersede ADR-003 globally.
 Any later Jobs integration must preserve single-dispatch and runtime-owner
 constraints, and must not turn a recovery event into an automatic restore.
 
-## Review hardening (2026-09-05, TASK-13183)
+## Review hardening (2026-09-05, TASK-13190)
 
 Bind every storage traversal to the locked root's device/inode identity. A
 replacement root must fail closed before creating descendants; pathname equality

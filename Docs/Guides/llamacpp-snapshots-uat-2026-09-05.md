@@ -79,8 +79,10 @@ task remains open and production support remains gated. The PR must not claim
 general model support or conversation resumption from these cache tests.
 
 The rebase revealed independently reused Backlog IDs. With the requester's
-explicit approval, the six snapshot tasks were renumbered to TASK-13184 through
-TASK-13189; TASK-13189 tracks this verification/PR work. Unrelated dev tasks keep
-their original IDs. TASK-13183 records the migration and review/merge follow-up.
+explicit approval, the six snapshot tasks were initially renumbered to TASK-13184
+through TASK-13189. A later Buddy rebase required an approved second move: the
+design record is now TASK-13191 and TASK-13185–TASK-13189 retain their IDs;
+TASK-13189 tracks this verification/PR work. Unrelated dev tasks keep their
+original IDs. TASK-13190 records the migration and review/merge follow-up.
 The requester has supplied the human-written Change summary and authorized merge
 of the gated implementation after review and required checks pass.

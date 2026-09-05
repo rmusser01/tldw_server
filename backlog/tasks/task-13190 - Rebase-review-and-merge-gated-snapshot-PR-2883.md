@@ -1,11 +1,11 @@
 ---
-id: TASK-13183
+id: TASK-13190
 title: Rebase review and merge gated snapshot PR 2883
 status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-05 16:44'
-updated_date: '2026-09-05 17:29'
+updated_date: '2026-09-05 18:17'
 labels: []
 dependencies: []
 ---
@@ -50,6 +50,8 @@ Qodo remediation integrated with RED/GREEN evidence: 338 targeted backend/docs t
 Independent final review found one additional staged-filename ownership gap. A controller-level collision regression first failed with deleted evidence, then passed after cleanup required a successful staging result retained across disk-call cancellation. Updated operations module: 42 tests passed. Shared Admin/runtime UI: 64 tests passed. OpenAPI drift check and generated TypeScript typecheck passed. Strict docs build passed with existing temporary serial git-plugin config (host multiprocessing constraint; canonical repository config unchanged). No new review requests beyond the same 14 Qodo inline findings. Latest dev advanced with email-summary PR2887; rebase again before publishing.
 
 Final review P2 re-review confirmed resolved. Rebased all 25 commits onto latest dev 69c96ef715 (PR2887); only generated fingerprint conflicts, both resolved by canonical export/type generation. Rebased review fix commit 152d8ea8af. Fresh post-rebase 13-file matrix: 339 passed, one opt-in live skip, ten warnings; generated TypeScript check passed. Await exact-head CI and any follow-up review before merge; user human Change summary preserved verbatim.
+
+Requester explicitly approved direct renumbering of the two new Buddy collisions after latest-dev rebase: snapshot review/merge record 13183→13190 and snapshot design record 13184→13191. Buddy records retain 13183/13184 unchanged. Rebased onto dev86eb9e517c; preserved both independent entries in the only lessons-document conflict. No snapshot runtime/UI code changed during this rebase. Fresh matrix339 passed/one opt-in live skip/ten warnings; canonical fingerprint matches. Await final-head CI after publishing.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

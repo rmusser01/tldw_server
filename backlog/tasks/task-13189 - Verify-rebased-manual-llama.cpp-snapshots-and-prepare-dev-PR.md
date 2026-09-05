@@ -38,7 +38,7 @@ Rebased on dev 2742468a19. Fixed reviewed missing-fcntl ordinary-profile deletio
 
 Created draft PR https://github.com/rmusser01/tldw_server/pull/2883 against dev. Verification/PR scope is complete; this does not close the original snapshot acceptance work or authorize production support/merge. Disposable browser, API, frontend and native child shutdown verified; generated UI build output moved outside the worktree and temporary dependency link removed.
 
-Subsequent requester approval resolved the direct-renumbering gate: this verification record moved from 13174 to 13189, with the five snapshot design/implementation tasks now 13184–13188. Human-written PR Change summary was supplied; PR is ready for review and requester authorized merge of the gated implementation after Qodo feedback and required checks. Remaining acceptance limits unchanged; current merge work tracked in TASK-13183.
+Subsequent requester approval resolved the direct-renumbering gate: this verification record moved from 13174 to 13189, with the five snapshot design/implementation tasks initially numbered 13184–13188. The final Buddy rebase required another approved move of the design record to TASK-13191. Human-written PR Change summary was supplied; PR is ready for review and requester authorized merge of the gated implementation after Qodo feedback and required checks. Remaining acceptance limits unchanged; current merge work tracked in TASK-13190.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

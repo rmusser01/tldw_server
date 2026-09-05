@@ -1,11 +1,11 @@
 ---
-id: TASK-13184
+id: TASK-13191
 title: Design admin-only manual llama.cpp slot snapshots
 status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-05 02:14'
-updated_date: '2026-09-05 02:56'
+updated_date: '2026-09-05 18:17'
 labels: []
 dependencies: []
 documentation:
@@ -38,6 +38,8 @@ Inspect current dev and upstream contract; write linked design and proposed ADR;
 Written design and proposed ADR-043 cover manual admin-only managed-runtime snapshots. Source review baseline: origin/dev c5dfe0ff73; upstream server API documentation checked. Self-review covered authorization, storage ownership, uncertain outcomes, lifecycle conflicts and explicit non-goals. Runtime tests and Bandit skipped: documentation-only. Written-spec approval remains pending; no production functionality implemented.
 
 Requester approved the written spec and chose subagent-driven implementation. Linked implementation plan and tasks13186-13188 created. Documentation-only verification recorded; runtime tests and Bandit not applicable to this design task.
+
+Requester approved this second collision migration after PR2884 landed on dev: historical snapshot design ID13184 moved to13191. Buddy task13184 remains unchanged; design status and acceptance history preserved.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

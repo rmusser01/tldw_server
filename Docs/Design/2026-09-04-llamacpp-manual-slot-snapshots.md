@@ -1,7 +1,7 @@
 # Manual llama.cpp slot snapshots
 
 Status: Approved by requester for implementation planning. No implementation in this change.
-Task: TASK-13184. Baseline: origin/dev c5dfe0ff73.
+Task: TASK-13191. Baseline: origin/dev c5dfe0ff73.
 
 ADR required: yes
 ADR path: Docs/ADR/043-managed-llamacpp-manual-slot-snapshots.md
