@@ -43,6 +43,7 @@ export class ChatPage {
     const contentCandidates = message.locator(
       "p, pre, li, blockquote, h1, h2, h3, h4, h5, h6"
     )
+    const structuredContentCount = await contentCandidates.count().catch(() => 0)
     const candidateTexts = (await contentCandidates.allTextContents().catch(() => []))
       .map((text) => this.normalizeMessageText(text))
       .filter((text) => Boolean(text) && !this.isMessageChrome(text))
@@ -50,6 +51,8 @@ export class ChatPage {
     if (candidateTexts.length > 0) {
       return candidateTexts.join("\n")
     }
+
+    if (structuredContentCount > 0) return ""
 
     return (((await message.textContent().catch(() => "")) || "")
       .split(/\n+/)
@@ -84,10 +87,10 @@ export class ChatPage {
     }
   }
 
-  private async ensureModelSelected(): Promise<void> {
+  private async ensureModelSelected(force = false): Promise<void> {
     const modelChip = this.page.getByTestId("model-selector").first()
     const chipVisible = await modelChip.isVisible().catch(() => false)
-    if (chipVisible) {
+    if (!force && chipVisible) {
       const chipLabel =
         (await modelChip.getAttribute("aria-label").catch(() => null))
         || (await modelChip.getAttribute("title").catch(() => null))
@@ -174,8 +177,7 @@ export class ChatPage {
     }
 
     await firstChoice.click()
-
-    await expect(selectModelTrigger).not.toBeVisible({ timeout: 10_000 }).catch(() => {})
+    await expect(firstChoice).toBeHidden({ timeout: 10_000 })
   }
 
   constructor(page: Page) {
@@ -270,11 +272,28 @@ export class ChatPage {
     // Find and click send button (data-testid="chat-send")
     const sendButton = this.page.getByTestId("chat-send")
 
-    if ((await sendButton.count()) > 0 && (await sendButton.isVisible())) {
-      await sendButton.click()
-    } else {
-      // Fallback to keyboard submit
-      await input.press("Enter")
+    const submitMessage = async () => {
+      if ((await sendButton.count()) > 0 && (await sendButton.isVisible())) {
+        await sendButton.click()
+      } else {
+        await input.press("Enter")
+      }
+    }
+
+    await submitMessage()
+    const submitted = await expect(input)
+      .toHaveValue("", { timeout: 2_000 })
+      .then(() => true)
+      .catch(() => false)
+    if (submitted) return
+
+    const modelRequired = this.page
+      .getByRole("alert")
+      .filter({ hasText: /Please select a model/i })
+    if (await modelRequired.isVisible().catch(() => false)) {
+      await this.ensureModelSelected(true)
+      await submitMessage()
+      await expect(input).toHaveValue("", { timeout: 10_000 })
     }
   }
 

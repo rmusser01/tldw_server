@@ -26,6 +26,17 @@ const {
 } = evidenceModule;
 
 const maxLogBytes = 1024 * 1024;
+type EvidenceFinalizationOptions = {
+  evidence: ReturnType<typeof createSkillsCertificationEvidence>;
+  runtime?: { baseRoot: string; markerPath: string; root: string };
+  scanArtifacts?: (root: string, options?: { additionalSecrets?: string[] }) => void;
+  summaryInput?: ReturnType<typeof passingSummaryInput>;
+  syntheticKey?: string;
+  teardownOutcome?: PromiseSettledResult<unknown>;
+};
+const finalizeEvidence = finalizeSkillsCertificationEvidence as unknown as (
+  options: EvidenceFinalizationOptions
+) => Promise<ReturnType<typeof buildCertificationSummary>>;
 const temporaryRoots: string[] = [];
 const primaryCategoryOrder = [
   'preflight',
@@ -311,7 +322,7 @@ describe('Skills certification evidence finalization', () => {
     const fixture = createFixture('no-runtime');
     const scanArtifacts = vi.fn();
 
-    const summary = await finalizeSkillsCertificationEvidence({
+    const summary = await finalizeEvidence({
       evidence: fixture.evidence,
       runtime: undefined,
       scanArtifacts,
@@ -364,7 +375,7 @@ describe('Skills certification evidence finalization', () => {
   it('retains teardown failure in the sanitized summary and final status', async () => {
     const fixture = createFixture('teardown-failure');
 
-    const summary = await finalizeSkillsCertificationEvidence({
+    const summary = await finalizeEvidence({
       ...finalizationOptions(fixture),
       teardownOutcome: {
         reason: new Error(`teardown leaked ${SKILLS_CERT_API_KEY}`),
@@ -390,7 +401,7 @@ describe('Skills certification evidence finalization', () => {
     mkdirSync(nestedRoot, { recursive: true });
     writeFileSync(markerPath, 'tldw-skills-certification-runtime\n', 'utf8');
 
-    const summary = await finalizeSkillsCertificationEvidence({
+    const summary = await finalizeEvidence({
       ...finalizationOptions(fixture),
       runtime: {
         ...fixture.runtime,

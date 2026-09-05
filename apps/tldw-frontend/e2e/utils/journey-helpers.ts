@@ -271,12 +271,14 @@ type AdvanceQuickIngestToConfigureStepOptions = {
 
 type DismissQuickIngestOptions = {
   duringProcessing?: boolean
+  terminal?: boolean
   timeoutMs?: number
 }
 
 const clickQuickIngestCloseControl = async (
   page: Page,
-  dialog: Locator
+  dialog: Locator,
+  options: Pick<DismissQuickIngestOptions, "terminal"> = {}
 ): Promise<void> => {
   const doneButton = dialog
     .getByRole("button", { name: /close the ingest wizard|done/i })
@@ -290,6 +292,12 @@ const clickQuickIngestCloseControl = async (
   if (await closeButton.isVisible({ timeout: 1_000 }).catch(() => false)) {
     await closeButton.click()
     return
+  }
+
+  if (options.terminal) {
+    throw new Error(
+      "Quick Ingest terminal dialog is missing a visible Done or modal close control; refusing Escape fallback"
+    )
   }
 
   await page.keyboard.press("Escape")
@@ -481,7 +489,7 @@ export async function dismissQuickIngest(
     return
   }
 
-  await clickQuickIngestCloseControl(page, dialog)
+  await clickQuickIngestCloseControl(page, dialog, options)
 
   const minimizeButton = page
     .getByRole("button", { name: /minimize to background/i })
@@ -876,11 +884,13 @@ export async function ingestAndWaitForReady(
 
   await waitForQuickIngestCompletionUi(quickIngestDialog, timeoutMs)
 
-  return (
+  const mediaId =
     (await completedMediaIdPromise) ??
     extractMediaId(body) ??
     String(body.id ?? ingestJobIds[0] ?? body.batch_id ?? "unknown")
-  )
+
+  await dismissQuickIngest(page, { terminal: true })
+  return mediaId
 }
 
 /**

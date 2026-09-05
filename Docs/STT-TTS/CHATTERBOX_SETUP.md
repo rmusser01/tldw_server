@@ -31,6 +31,11 @@ pip install chatterbox-tts
 pip install -e .[TTS_chatterbox_lang]
 ```
 
+The language extra contains only registry-backed preprocessors. The optional
+`russian_text_stresser` integration is source-only and is not included in
+published package metadata or the deterministic production lock; install and
+review it separately if your deployment requires Russian stress preprocessing.
+
 If you need the optional Perth watermark runtime, install it manually from source. It is not bundled in `tldw-server` package metadata because PyPI rejects direct Git dependencies.
 ```bash
 git clone https://github.com/resemble-ai/Perth.git

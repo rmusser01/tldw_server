@@ -2222,6 +2222,9 @@ class WatchlistsDatabase:
     def update_source(self, source_id: int, patch: dict[str, Any]) -> SourceRow:
         if not patch:
             return self.get_source(source_id)
+        url_changed = False
+        if patch.get("url") is not None:
+            url_changed = str(patch["url"]) != str(self.get_source(source_id).url)
         fields = []
         params: list[Any] = []
         for key in ("name", "url", "source_type", "active", "settings_json", "status"):
@@ -2231,6 +2234,15 @@ class WatchlistsDatabase:
                 if key == "active":
                     val = 1 if bool(val) else 0
                 params.append(val)
+        if url_changed:
+            fields.extend(
+                [
+                    "etag = NULL",
+                    "last_modified = NULL",
+                    "defer_until = NULL",
+                    "consec_not_modified = 0",
+                ]
+            )
         if fields:
             fields.append("updated_at = ?")
             params.append(_utcnow_iso())

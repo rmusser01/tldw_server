@@ -6,7 +6,7 @@ name: tldw-production-monitoring
 
 services:
   metrics-credential-init:
-    image: ${TLDW_APP_IMAGE:?Set the same immutable tldw app image used by the production stack}
+    image: ${TLDW_APP_IMAGE:?Set TLDW_APP_IMAGE to version tag plus @sha256 digest}
     user: "0:0"
     entrypoint: ["python", "-c"]
     command:
@@ -119,7 +119,7 @@ services:
     restart: "no"
 
   prometheus:
-    image: ${PROMETHEUS_IMAGE:?Set an exact Prometheus image}
+    image: ${PROMETHEUS_IMAGE:?Set PROMETHEUS_IMAGE to version tag plus @sha256 digest}
     user: "${PROMETHEUS_UID:?Set the numeric UID used by the pinned Prometheus image}:${PROMETHEUS_GID:?Set the numeric GID used by the pinned Prometheus image}"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
@@ -146,7 +146,7 @@ services:
       - monitoring
 
   alertmanager:
-    image: ${ALERTMANAGER_IMAGE:?Set an exact Alertmanager image}
+    image: ${ALERTMANAGER_IMAGE:?Set ALERTMANAGER_IMAGE to version tag plus @sha256 digest}
     volumes:
       - ${ALERTMANAGER_CONFIG:?Set an absolute operator-managed Alertmanager config file}:/etc/alertmanager/alertmanager.yml:ro
     command:
@@ -163,7 +163,7 @@ services:
       - monitoring
 
   grafana:
-    image: ${GRAFANA_IMAGE:?Set an exact Grafana image}
+    image: ${GRAFANA_IMAGE:?Set GRAFANA_IMAGE to version tag plus @sha256 digest}
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:?Set GRAFANA_ADMIN_USER before starting Grafana}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD before starting Grafana}

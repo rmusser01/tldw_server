@@ -15,7 +15,16 @@ class FakeChild extends EventEmitter {
   }
 }
 
-function command(name: string, child: FakeChild) {
+type ProcessCommand = {
+  args: string[];
+  child: FakeChild;
+  command: string;
+  cwd: string;
+  env: Record<string, string>;
+  name: string;
+};
+
+function command(name: string, child: FakeChild): ProcessCommand {
   return {
     args: [],
     child,
@@ -26,18 +35,54 @@ function command(name: string, child: FakeChild) {
   };
 }
 
+type ProcessRecord = ProcessCommand & {
+  loggingErrors?: Error[];
+  pid: number;
+};
+
+type ProcessRegistry = {
+  spawn: (command: ProcessCommand, logPath: string) => ProcessRecord;
+  stop: (record: ProcessRecord) => Promise<void>;
+  teardown: () => Promise<void>;
+  wait: (record: ProcessRecord) => Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
+};
+
+type ProcessRegistryOptions = {
+  closeTimeoutMs?: number;
+  platform?: NodeJS.Platform;
+  probeProcessTree?: (target: number) => boolean | Promise<boolean>;
+  probeTimeoutMs?: number;
+  spawnLoggedProcess?: (command: ProcessCommand & { logPath: string }) => ProcessRecord;
+  stopProcessTree?: (record: ProcessRecord, options?: { timeoutMs?: number }) => void | Promise<void>;
+  stopTimeoutMs?: number;
+};
+
+const createTypedProcessRegistry = createProcessRegistry as unknown as (
+  options?: ProcessRegistryOptions
+) => ProcessRegistry;
+const installTypedSignalHandlers = installCertificationSignalHandlers as unknown as (options: {
+  onSignal?: (signal: string, teardown: Promise<void>) => void;
+  processObject?: EventEmitter;
+  registry: ProcessRegistry;
+}) => () => void;
+
+type HarnessOptions = Pick<
+  ProcessRegistryOptions,
+  "closeTimeoutMs" | "platform" | "probeProcessTree" | "probeTimeoutMs" | "stopProcessTree"
+>;
+
 function createHarness({
   closeTimeoutMs = 50,
-  platform = 'linux',
-  probeProcessTree = vi.fn(async () => false),
+  platform = 'linux' as NodeJS.Platform,
+  probeProcessTree = vi.fn(async (_target: number) => false),
   probeTimeoutMs = 50,
-  stopProcessTree = vi.fn(async () => undefined),
-} = {}) {
+  stopProcessTree = vi.fn(async (_record: ProcessRecord) => undefined),
+}: HarnessOptions = {}) {
   const spawnLoggedProcess = vi.fn((specification) => ({
     ...specification,
     pid: specification.child.pid,
   }));
-  const registry = createProcessRegistry({
+  const registry = createTypedProcessRegistry({
     closeTimeoutMs,
     platform,
     probeProcessTree,
@@ -111,7 +156,7 @@ describe('Skills certification process registry', () => {
       loggingErrors: [new Error('log sink failed')],
       pid: child.pid,
     };
-    const loggingRegistry = createProcessRegistry({
+    const loggingRegistry = createTypedProcessRegistry({
       closeTimeoutMs: 50,
       probeProcessTree: vi.fn(async () => false),
       spawnLoggedProcess: vi.fn(() => record),
@@ -131,7 +176,7 @@ describe('Skills certification process registry', () => {
       .fn()
       .mockImplementationOnce(() => new Promise<void>((resolve) => (resolveFirstStop = resolve)))
       .mockResolvedValueOnce(undefined);
-    const registry = createProcessRegistry({
+    const registry = createTypedProcessRegistry({
       probeProcessTree: vi.fn(async () => false),
       spawnLoggedProcess: vi.fn(() => record),
       stopProcessTree,
@@ -380,7 +425,7 @@ describe('Skills certification signal handlers', () => {
     const { registry } = createHarness();
     const teardown = vi.spyOn(registry, 'teardown').mockReturnValue(teardownPromise);
 
-    const removeHandlers = installCertificationSignalHandlers({
+    const removeHandlers = installTypedSignalHandlers({
       onSignal,
       processObject,
       registry,
@@ -422,7 +467,7 @@ describe('Skills certification signal handlers', () => {
       throw new Error('callback exploded');
     });
 
-    const removeHandlers = installCertificationSignalHandlers({
+    const removeHandlers = installTypedSignalHandlers({
       onSignal,
       processObject,
       registry,

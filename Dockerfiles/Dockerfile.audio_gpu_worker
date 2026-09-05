@@ -1,25 +1,59 @@
-FROM python:3.11-slim
+FROM python:3.11.16-slim-trixie@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534 AS builder
 
-# System dependencies (ffmpeg for audio conversion if needed)
+COPY --from=ghcr.io/astral-sh/uv:0.12.7@sha256:95f2aa1fe59274951cfe9b0cbc7972e879ff1004bc8945d130a32eb0dbd85945 /uv /uvx /bin/
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_PROJECT_ENVIRONMENT=/opt/tldw-venv \
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
-    python3-pyaudio \
-    build-essential \
-    portaudio19-dev \
-    python3-dev \
+        build-essential \
+        portaudio19-dev \
+        python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Install from pyproject (editable)
-COPY pyproject.toml /app/pyproject.toml
-COPY README.md /app/README.md
+COPY pyproject.toml uv.lock README.md LICENSE /app/
+COPY LICENSES /app/LICENSES
 COPY tldw_Server_API /app/tldw_Server_API
-COPY Config_Files /app/Config_Files
-RUN pip install --no-cache-dir -e .
+COPY apps/mcp-unified/src /app/apps/mcp-unified/src
+COPY packages/tldw_profile_core /app/packages/tldw_profile_core
 
-ENV PYTHONUNBUFFERED=1
-ENV AUDIO_JOBS_WORKER_ENABLED=false
+RUN --mount=type=cache,id=tldw-uv-cache,target=/root/.cache/uv \
+    uv sync --locked --no-dev --no-editable
+
+
+FROM python:3.11.16-slim-trixie@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534 AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ffmpeg \
+        libportaudio2 \
+    && rm -rf \
+        /var/lib/apt/lists/* \
+        /usr/local/bin/pip* \
+        /usr/local/lib/python*/site-packages/_distutils_hack \
+        /usr/local/lib/python*/site-packages/pip \
+        /usr/local/lib/python*/site-packages/pip-*.dist-info \
+        /usr/local/lib/python*/site-packages/pkg_resources \
+        /usr/local/lib/python*/site-packages/setuptools \
+        /usr/local/lib/python*/site-packages/setuptools-*.dist-info
+
+WORKDIR /app
+
+COPY --from=builder /opt/tldw-venv /opt/tldw-venv
+COPY tldw_Server_API/Config_Files /app/Config_Files
+
+RUN mkdir -p /app/Databases/user_databases
+
+ENV PATH="/opt/tldw-venv/bin:${PATH}" \
+    PYTHONUNBUFFERED=1 \
+    AUDIO_JOBS_WORKER_ENABLED=false \
+    TLDW_CONFIG_DIR=/app/Config_Files \
+    USER_DB_BASE_DIR=/app/Databases/user_databases \
+    DATABASE_URL=sqlite:////app/Databases/users.db
 
 # Run the GPU transcription-only worker
 CMD ["python", "-m", "tldw_Server_API.app.services.audio_transcribe_gpu_worker"]

@@ -7,7 +7,7 @@ x-tldw-env-file: &tldw-env-file
 
 services:
   preflight:
-    image: ${TLDW_APP_IMAGE:?Set immutable TLDW_APP_IMAGE}
+    image: ${TLDW_APP_IMAGE:?Set TLDW_APP_IMAGE to version tag plus @sha256 digest}
     user: "0:0"
     read_only: true
     cap_drop:
@@ -33,7 +33,7 @@ services:
     restart: "no"
 
   caddy:
-    image: ${CADDY_IMAGE:?Set exact CADDY_IMAGE version or digest}
+    image: ${CADDY_IMAGE:?Set CADDY_IMAGE to version tag plus @sha256 digest}
     restart: unless-stopped
     environment:
       TLDW_PUBLIC_DOMAIN: ${TLDW_PUBLIC_DOMAIN:?Set TLDW_PUBLIC_DOMAIN}
@@ -52,7 +52,7 @@ services:
       - caddy_config:/config
 
   app:
-    image: ${TLDW_APP_IMAGE:?Set immutable TLDW_APP_IMAGE}
+    image: ${TLDW_APP_IMAGE:?Set TLDW_APP_IMAGE to version tag plus @sha256 digest}
     restart: unless-stopped
     env_file:
       - *tldw-env-file
@@ -96,7 +96,7 @@ services:
       start_period: 30s
 
   postgres:
-    image: ${POSTGRES_IMAGE:?Set exact POSTGRES_IMAGE version or digest}
+    image: ${POSTGRES_IMAGE:?Set POSTGRES_IMAGE to version tag plus @sha256 digest}
     restart: unless-stopped
     env_file:
       - *tldw-env-file
@@ -111,7 +111,7 @@ services:
       retries: 12
 
   redis:
-    image: ${REDIS_IMAGE:?Set exact REDIS_IMAGE version or digest}
+    image: ${REDIS_IMAGE:?Set REDIS_IMAGE to version tag plus @sha256 digest}
     restart: unless-stopped
     env_file:
       - *tldw-env-file

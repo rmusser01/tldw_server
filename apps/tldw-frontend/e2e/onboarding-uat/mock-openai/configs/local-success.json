@@ -27,6 +27,41 @@
     "chat_completions": {
       "patterns": [
         {
+          "match": { "content_regex": "(?is)^Generate flashcards from:\\s+.+$" },
+          "response_file": "chat/flashcards.json",
+          "priority": 20
+        },
+        {
+          "match": { "content_regex": "(?i)^What is Playwright\\? Use the ingested content to answer\\.$" },
+          "response_file": "chat/playwright-grounded.json",
+          "priority": 20
+        },
+        {
+          "match": { "content_regex": "(?s)^Given the EVIDENCE snippets and a CLAIM, decide if the claim is Supported, Refuted, or NotEnoughInfo\\. Return JSON as \\{\\\"label\\\": \\\"supported\\|refuted\\|nei\\\", \\\"confidence\\\": float, \\\"rationale\\\": str\\}\\.\\s+CLAIM: The mitochondria is the powerhouse of the cell\\.\\s+EVIDENCE:\\n\\[doc:flashcards-source\\] The mitochondria is the powerhouse of the cell\\.\\n\\nDNA stands for deoxyribonucleic acid\\.\\n\\nPhotosynthesis converts light energy into chemical energy\\.\\n\\nThe human body has 206 bones\\.\\n\\nWater boils at 100 degrees Celsius at sea level\\.$" },
+          "response_file": "chat/flashcard-claim-verdict.json",
+          "priority": 20
+        },
+        {
+          "match": { "content_regex": "(?s)^You are a helpful AI assistant\\. Use the following context to answer the user's question\\.\\nIf the context doesn't contain relevant information, say so clearly\\.\\n\\nContext:\\n\\[Source [0-9]+: [^\\n]+ \\([^\\n]+\\)\\]\\n(?:playwright-grounded\\n)?Playwright is an open-source framework for reliable end-to-end browser testing\\.\\n+\\nQuestion: Playwright\\n\\nAnswer:$" },
+          "response_file": "chat/playwright-grounded.json",
+          "priority": 20
+        },
+        {
+          "match": { "content_regex": "(?s)^You are a helpful AI assistant\\. Use the following context to answer the user's question\\.\\nIf the context doesn't contain relevant information, say so clearly\\.\\n\\nContext:\\n\\[Source [0-9]+: (?P<task2c_fixture>task2c-playwright-\\d+-[a-z0-9]{6}) \\(media_db\\)\\]\\nPlaywright is an open-source framework for reliable end-to-end browser testing\\.\\nFixture token: (?P=task2c_fixture)\\n+\\nQuestion: Playwright (?P=task2c_fixture)\\n\\nAnswer:$" },
+          "response_file": "chat/playwright-grounded.json",
+          "priority": 20
+        },
+        {
+          "match": { "content_regex": "(?s)^You are a helpful AI assistant\\. Use the following context to answer the user's question\\.\\nIf the context doesn't contain relevant information, say so clearly\\.\\n\\nContext:\\n\\[Source [0-9]+: Context \\(context\\)\\]\\nPlaywright is an open-source framework for reliable end-to-end browser testing\\.\\n\\nFixture token: (?P<task2c_context_fixture>task2c-playwright-\\d+-[a-z0-9]{6})\\n+\\nQuestion: Playwright (?P=task2c_context_fixture)\\n\\nAnswer:$" },
+          "response_file": "chat/playwright-grounded.json",
+          "priority": 20
+        },
+        {
+          "match": { "content_regex": "(?s)^You are a helpful AI assistant\\. Use the following context to answer the user's question\\.\\nIf the context doesn't contain relevant information, say so clearly\\.\\n\\nContext:\\n\\[Source [0-9]+: (?P<task2c_stream_fixture>task2c-playwright-\\d+-[a-z0-9]{6}) \\(media_db\\)\\]\\nPlaywright is an open-source framework for reliable end-to-end browser testing\\.\\n+\\nQuestion: Playwright (?P=task2c_stream_fixture)\\n\\nAnswer:$" },
+          "response_file": "chat/playwright-grounded.json",
+          "priority": 20
+        },
+        {
           "match": { "system_prompt": "LIVE_TIER_ANALYSIS_ONE" },
           "response_file": "chat/analysis-one.json",
           "priority": 30

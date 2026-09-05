@@ -2,11 +2,15 @@
 # - Multi-stage build keeps compiler/dev packages out of runtime image.
 # - Runtime includes ffmpeg + libmagic + PortAudio runtime libs.
 
-FROM python:3.12-slim AS builder
+FROM python:3.12.14-slim-trixie@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea AS builder
+
+COPY --from=ghcr.io/astral-sh/uv:0.12.7@sha256:95f2aa1fe59274951cfe9b0cbc7972e879ff1004bc8945d130a32eb0dbd85945 /uv /uvx /bin/
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    UV_PROJECT_ENVIRONMENT=/opt/tldw-venv \
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
@@ -17,33 +21,41 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy packaging metadata, legal corpus, and source to build/install python deps.
-COPY pyproject.toml README.md LICENSE /app/
+# Copy the complete locked build context before installing the project.
+COPY pyproject.toml uv.lock README.md LICENSE /app/
 COPY LICENSES /app/LICENSES
 COPY tldw_Server_API /app/tldw_Server_API
 COPY apps/mcp-unified/src /app/apps/mcp-unified/src
+COPY packages/tldw_profile_core /app/packages/tldw_profile_core
 
-RUN pip install --upgrade pip && \
-    pip install --prefix=/install .
+RUN --mount=type=cache,id=tldw-uv-cache,target=/root/.cache/uv \
+    uv sync --locked --no-dev --no-editable
 
 
-FROM python:3.12-slim AS runtime
+FROM python:3.12.14-slim-trixie@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PYTHONUNBUFFERED=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
         libmagic1 \
         libportaudio2 \
         ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf \
+        /var/lib/apt/lists/* \
+        /usr/local/bin/pip* \
+        /usr/local/lib/python*/site-packages/_distutils_hack \
+        /usr/local/lib/python*/site-packages/pip \
+        /usr/local/lib/python*/site-packages/pip-*.dist-info \
+        /usr/local/lib/python*/site-packages/pkg_resources \
+        /usr/local/lib/python*/site-packages/setuptools \
+        /usr/local/lib/python*/site-packages/setuptools-*.dist-info
 
 WORKDIR /app
 
-# Bring in installed Python deps from the builder image.
-COPY --from=builder /install /usr/local
+# Bring in the exact locked environment from the builder image.
+COPY --from=builder /opt/tldw-venv /opt/tldw-venv
 
 # Create runtime user up front so content copies can avoid recursive chown.
 RUN useradd -m -u 10001 appuser
@@ -68,7 +80,8 @@ ARG PORT=8000
 ARG UVICORN_WORKERS=4
 ARG LOG_LEVEL=info
 
-ENV PYTHONPATH=/app/tldw_Server_API \
+ENV PATH="/opt/tldw-venv/bin:${PATH}" \
+    PYTHONPATH=/app/tldw_Server_API \
     HOST=${HOST} \
     PORT=${PORT} \
     UVICORN_WORKERS=${UVICORN_WORKERS} \
