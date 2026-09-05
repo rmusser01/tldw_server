@@ -1,11 +1,11 @@
 ---
 id: TASK-13161
 title: Relay ordered Personal Context authority publications through Sync V2
-status: In Progress
+status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-03 13:39'
-updated_date: '2026-09-04 03:20'
+updated_date: '2026-09-05 02:09'
 labels:
   - personal-context
   - sync
@@ -28,12 +28,12 @@ Recoverably relay server canonical publication batches into Sync V2 and material
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 After-commit and pull-time relay share one recoverable per-profile lease and claim only the earliest nonterminal publication sequence.
-- [ ] #2 Semantic authority envelopes become durable before their manifest sibling; deterministic IDs and ordinal receipts make every crash point idempotent.
-- [ ] #3 Client-authored envelopes remain ingress-only and become applied only after the canonical Personalization receipt is verified; accepted ingress is never pull-visible.
-- [ ] #4 Personal Context pull filters to verified applied home-authority egress, separates raw scan watermarks from delivered/application checkpoints, and cannot be spoofed by a registered client.
-- [ ] #5 Pull-time recovery stops at the fixed 100-row/100-millisecond budget and returns personal_context_relay_pending without skipping unavailable authority data.
-- [ ] #6 SQLite interruption, interleaved-relay, cursor-pagination, reserved-identity, poisoned-batch, and privacy tests pass.
+- [x] #1 After-commit and pull-time relay share one recoverable per-profile lease and claim only the earliest nonterminal publication sequence.
+- [x] #2 Semantic authority envelopes become durable before their manifest sibling; deterministic IDs and ordinal receipts make every crash point idempotent.
+- [x] #3 Client-authored envelopes remain ingress-only and become applied only after the canonical Personalization receipt is verified; accepted ingress is never pull-visible.
+- [x] #4 Personal Context pull filters to verified applied home-authority egress, separates raw scan watermarks from delivered/application checkpoints, and cannot be spoofed by a registered client.
+- [x] #5 Pull-time recovery stops at the fixed 100-row/100-millisecond budget and returns personal_context_relay_pending without skipping unavailable authority data.
+- [x] #6 SQLite interruption, interleaved-relay, cursor-pagination, reserved-identity, poisoned-batch, and privacy tests pass.
 - [x] #7 ADR required: no new ADR; backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md governs ordered cross-database relay.
 <!-- AC:END -->
 
@@ -53,15 +53,21 @@ ADR required: no new ADR. Existing backlog/decisions/002-personal-context-profil
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Round-5 targeted verification completed successfully (331 focused tests, Ruff, Bandit, and diff hygiene), but final review rejected completion. TASK-13161 remains In Progress because crash-orphan cleanup, poison-versus-retry classification, exact shared recovery-budget enforcement, legacy empty-wire receipt backfill safety, compatibility of Personal Context conflict proof gates with unrelated Sync conflicts, production-factory/HTTP recovery evidence, and stale ciphertext retention/cleanup are not yet resolved to the acceptance standard. [ADR-002](../decisions/002-personal-context-profile-authority-sync-and-encryption.md) remains the governing decision. No additional fix work is included in this housekeeping change.
+The ordered Personal Context authority relay is complete through the independently approved remediation chain: TASK-13166 head 37d2c4abdc bound confirmation identity and receipts; TASK-13167 head 7190ead127 hardened legacy empty-wire receipt backfill; TASK-13168 head 4f54f80621 made staging and compensation crash-safe; TASK-13169 head ae5eb04151 enforced authorized purge and stale-ciphertext custody; TASK-13170 final head 4261bfd1ac unified the exact 100-row and 100-millisecond recovery budget and immutable authority lineage; TASK-13171 head cabdaf36f2 enforced selected-operation exchange proof while preserving Sync V2 compatibility; TASK-13172 approved candidate 8ee4c2227df533dbff3dea303c7838c1ba01d4d6 certified the production factory, restart, PostgreSQL race, single-dataset invariant, privacy, and exact-once paths. Final evidence is 25/25 certification with genuine PostgreSQL and no skip, 773/773 exact 14-file matrix, and 241 affected passes plus 2 existing skips with eight approved-head baselines deselected. Ruff, Bandit, git diff, and artifact scans passed. Every child received final independent specification and code or security approval; the final TASK-13172 rechecks reported no Critical, Important, or Minor findings. Canonical SDD reports and progress are updated, and incident-backed lessons are retained in backlog/docs/lessons-testing-evidence.md; closure produced no new incident requiring another lesson. ADR-002 remains governing with no new ADR. Custody guarantees cover application-owned active SQLite databases, WAL and SHM files, controlled diagnostics, logs, migration snapshots, and application-owned backup fixtures; they do not claim physical deletion from external or operator backups, exported recovery bundles, or prior-process memory. The one known fake-PostgreSQL link-binding baseline and seven legacy bootstrap activation-proof baselines remain explicitly documented; the genuine PostgreSQL race passed. Protocol version remains 0 and no schema or public API was added.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+TASK-13161 is complete: ordered recoverable Personal Context authority publication, verified ingress materialization, filtered encrypted egress, bounded recovery, crash and purge safety, and compatibility gates are implemented and independently approved through TASK-13166 to TASK-13172.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

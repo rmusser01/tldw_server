@@ -1,11 +1,11 @@
 ---
 id: TASK-13172
 title: Certify Personal Context relay and close TASK-13161
-status: In Progress
+status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-04 03:35'
-updated_date: '2026-09-04 23:55'
+updated_date: '2026-09-05 02:10'
 labels:
   - personal-context
   - sync
@@ -36,14 +36,14 @@ Prove the remediated encrypted Personal Context relay through the production ser
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Production server-factory and TestClient flows prove direct canonical mutation, client ingress, authority publication, encrypted pull, and exact-once replay through real persistence boundaries.
-- [ ] #2 After-commit relay failure is isolated from the accepted ingress response, durable debt survives restart, recovery runs before a later push or pull, and the authority result is published exactly once.
-- [ ] #3 The crash, race, poison, receipt, exact-budget, activation-proof, conflict, and retention matrices from TASK-13166 through TASK-13171 pass together without weakening their assertions.
-- [ ] #4 The single authoritative Personal Context dataset invariant is enforced and tested across configuration and runtime lookup.
-- [ ] #5 No client-ingress row, hidden pending authority row, plaintext protected value, wrapped key, or content-derived diagnostic can leave its authorized boundary, and version-zero behavior remains compatible.
-- [ ] #6 Targeted pytest suites, Ruff, Bandit, artifact scans, and git diff checks pass; the full repository suite is not run unless the user explicitly requests it.
-- [ ] #7 TASK-13161 is marked Done only after independent specification and code-quality review accepts every original criterion and Definition-of-Done item; the final report, documentation, and any incident-backed lesson are updated.
-- [ ] #8 ADR required: no new ADR; backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md remains the governing decision.
+- [x] #1 Production server-factory and TestClient flows prove direct canonical mutation, client ingress, authority publication, encrypted pull, and exact-once replay through real persistence boundaries.
+- [x] #2 After-commit relay failure is isolated from the accepted ingress response, durable debt survives restart, recovery runs before a later push or pull, and the authority result is published exactly once.
+- [x] #3 The crash, race, poison, receipt, exact-budget, activation-proof, conflict, and retention matrices from TASK-13166 through TASK-13171 pass together without weakening their assertions.
+- [x] #4 The single authoritative Personal Context dataset invariant is enforced and tested across configuration and runtime lookup.
+- [x] #5 No client-ingress row, hidden pending authority row, plaintext protected value, wrapped key, or content-derived diagnostic can leave its authorized boundary, and version-zero behavior remains compatible.
+- [x] #6 Targeted pytest suites, Ruff, Bandit, artifact scans, and git diff checks pass; the full repository suite is not run unless the user explicitly requests it.
+- [x] #7 TASK-13161 is marked Done only after independent specification and code-quality review accepts every original criterion and Definition-of-Done item; the final report, documentation, and any incident-backed lesson are updated.
+- [x] #8 ADR required: no new ADR; backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md remains the governing decision.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -55,20 +55,21 @@ Prove the remediated encrypted Personal Context relay through the production ser
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Phase A review round 1 is being remediated; TASK-13172 and TASK-13161 remain In Progress and closure-only AC/DoD remain unchecked pending independent re-review. The initial candidate's authority bind fence is retained, including same-target idempotence, exact-one fail-closed runtime lookup, and a pre-created-candidate concurrency precondition. Review RED/GREEN added the missing pre-effect boundary: sole-authority resolution, deterministic conditional default creation, domain enrollment/state creation, watermark capture, and authoritative binding now share one rollback-capable Sync transaction, so an existing non-default authority is reused without default creation and an interleaved rejection leaves no dataset/domain side effect. Certification diagnostics use content-free boolean/fixed-digest comparisons; a forced-failure subprocess proves captured pytest output excludes all protected canaries. The combined lifecycle uses production `main.app` router registration, leaves both production service dependency functions intact, overrides authentication only, and proves factory/cache traversal. The repository PostgreSQL fixture executed a real synchronized two-connection bind race (1 passed in 4.72s) with exactly one winner. The stable artifact run passed 1/1 in 26.20s at `/tmp/task13172-review1-green-artifacts-rerun`, scanning active Personalization/Sync/Notes DB/WAL/SHM files before both backend resets and at final-active state, plus controlled content-free log, diagnostic, migration snapshot, and application-owned SQLite backup fixtures. Plaintext, ingress, diagnostic-marker, and raw-key canaries were absent; wrapped material appeared only in the authorized Sync DB/WAL or encrypted backup boundary. Its path-only inventory records explicit custody limits and excludes external/operator backups, exported recovery bundles, and prior-process memory without claiming deletion outside application custody. Final 14-file/static/self-review gates and a fix-round commit remain pending. No full suite is authorized. ADR required: no new ADR; ADR-002 continues to govern.
-Review-round-1 final candidate evidence: post-self-review certification passed 9/9 with 4 warnings in 114.19s at `/tmp/task13172-review1-final-certification`, with PostgreSQL required and executed. The exact 14-file matrix passed 757/757 across groups 162+93+215+287. Ruff passed; Bandit exited 0 with existing parser/nosec warnings; `git diff --check` passed. The final phase-aware inventory is `/tmp/task13172-review1-final-certification/test_production_http_relay_deb0/certification-evidence/artifact-inventory.json`; an independent scan found no protected canary, while wrapped material was classified only in authorized Sync DB/WAL and controlled encrypted backup custody. Eight additional owning-suite failures were reproduced 8/8 at detached approved head `cabdaf36f2`: one known fake-PostgreSQL binding baseline and seven legacy bootstrap activation-proof baselines. Their test files and the production activation gate are unchanged by this candidate; none was weakened or fixed. Self-review corrected nondeterministic set hashing and explicitly checks that rejected bootstrap does not invoke key wrapping. No full suite was run. Phase A remains pending independent re-review; TASK-13172 and TASK-13161 remain In Progress and all closure-only AC/DoD items remain unchecked.
-The final evidence paragraph supersedes the preceding in-progress checkpoint's statement that gates and the fix-round commit were still pending; only the independent re-review and closure phase remain pending.
-Review-round-2 remediation adds central pre-effect validation for every Personal Context authority target and stricter reuse validation for an existing deterministic Chatbook default ID. Workspace-scoped, archived, wrong-policy, invalid-default-marker, and malformed-generation targets now fail closed before dataset/domain/binding/key/envelope/cursor/link mutation; valid non-default authority reuse and same-target idempotence remain intact. The certification fixture now requires active Sync/Notes WAL+SHM observations at both pre-reset phases and retires every tracked factory-created Sync backend, including the final active instance, before proving caches empty. Final post-self-review certification passed 18/18 with genuine PostgreSQL at `/tmp/task13172-round2-final-post-self-review`; the exact 14-file matrix passed 766/766; affected bootstrap/store coverage passed 241 with 2 existing skips and only the 8 approved-head baselines explicitly deselected; Ruff, Bandit, diff, and the 39-record artifact/canary inventory passed. Self-review strengthened the rejection digest to cover every dataset column, then passed the 12-case invariant set. Phase A remains pending same-reviewer specification and code/security re-review; TASK-13172 and TASK-13161 remain In Progress and all closure-only AC/DoD boxes remain unchecked.
-Both round-2 reviewers approved with no Critical or Important findings. Review-round-3 addresses the two retained Minor hardening findings only: direct binding now requires exact non-empty string identity/state inputs and an exact nonnegative integer purge generation before opening a transaction, and certification explicitly requires Sync/Notes WAL+SHM in the final-active phase as well as both pre-reset phases. The focused malformed-input test moved from 6 failed/1 passed to 7 passed and proves no transaction entry or dataset/domain/transport mutation. Final certification passed 25/25 with genuine PostgreSQL at `/tmp/task13172-round3-final-certification`; the exact 14-file matrix passed 773/773; affected bootstrap/store coverage remained 241 passed and 2 existing skips with only the eight approved baselines deselected. Ruff with `--no-cache`, Bandit, diff, and the independent artifact canary scan passed; the final 33-record inventory contains all twelve required WAL/SHM phase-category pairs. Phase A remains pending both same-reviewer final scoped rechecks; TASK-13172 and TASK-13161 remain In Progress and every closure-only AC/DoD box remains unchecked.
-Round-3 self-review found no further defect: the production diff is limited to the existing content-free pre-transaction validation guard, and the regression uses the real store method while forcing any transaction entry to fail. No schema, API, protocol version, task status, or closure checkbox changed.
+Certified the production Personal Context authority relay through real factory dependencies, FastAPI TestClient, durable Personalization and Sync stores, restart recovery, exact-once encrypted egress, checkpoint progression, privacy boundaries, and the single-authority-dataset invariant. Final candidate 8ee4c2227df533dbff3dea303c7838c1ba01d4d6 passed 25/25 certification tests with genuine PostgreSQL executed and no skip; the exact 14-file matrix passed 773/773; the affected bootstrap/store gate passed 241 with 2 existing skips and only eight approved-head baselines deselected. Scoped Ruff with no cache, Bandit, git diff, and the three-phase artifact/canary inventory passed. Both final independent reviewers approved with no Critical, Important, or Minor findings. ADR-002 remains governing; no new ADR was required. Artifact claims cover application-owned custody only and exclude external or operator backups, exported recovery bundles, and prior-process memory. Protocol version remains 0; no schema or public API was added.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+TASK-13172 certification and independent review are complete. Candidate 8ee4c2227d is approved, all targeted gates are green, documented baseline skips and custody limits are retained, and TASK-13161 is closed from the accepted child evidence.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
