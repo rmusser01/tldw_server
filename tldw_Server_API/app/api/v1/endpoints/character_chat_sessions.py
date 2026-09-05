@@ -45,14 +45,18 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_
 from tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps import (
     get_request_routing_decision_store,
 )
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 
 # Schemas
 from tldw_Server_API.app.api.v1.schemas.chat_conversation_schemas import (
     ConversationScopeParams,
 )
+from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
+    DEFAULT_LLM_PROVIDER,
+)
 from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
-    AuthorNoteInfoResponse,
     AssistantOverlaySettings,
+    AuthorNoteInfoResponse,
     CharacterChatCompletionPrepRequest,
     CharacterChatCompletionPrepResponse,
     CharacterChatCompletionV2Request,
@@ -61,6 +65,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
     CharacterChatStreamPersistResponse,
     ChatLinkedResearchRunsListResponse,
     ChatSessionCreate,
+    ChatSessionListItem,
     ChatSessionListResponse,
     ChatSessionResponse,
     ChatSessionUpdate,
@@ -73,20 +78,16 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
     GreetingSelectResponse,
     LorebookDiagnosticExportResponse,
     MessageResponse,
-    PromptPreviewResponse,
     PresetCreate,
     PresetDetail,
     PresetListResponse,
     PresetTokenInfo,
     PresetUpdate,
+    PromptPreviewResponse,
 )
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
-    DEFAULT_LLM_PROVIDER,
-)
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
-from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
 from tldw_Server_API.app.api.v1.utils.deprecation import build_deprecation_headers
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
 from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
     apply_llm_provider_overrides_to_listing,
     capture_provider_override_call_snapshot,
@@ -115,14 +116,26 @@ from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (
     post_message_to_conversation,
     replace_placeholders,
 )
+from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
+    PENDING_GREETING_SETTINGS_KEY,
+    PROMPT_COMPLETION_SETTING_CLASSIFICATION,
+    build_pending_greeting_authority,
+    collect_character_greeting_texts,
+    create_character_conversation,
+    load_character_greeting_source,
+    materialize_roleplay_behavior_settings,
+    reject_resumable_behavior_credentials,
+    validate_resumable_behavior_boole,
+)
+from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
+    ChatSettingsSizeError,
+    INTERNAL_CHAT_SETTINGS_KEYS,
+    validate_chat_settings_storage,
+)
 
 # Rate limiting
 from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import (
     get_character_rate_limiter,
-)
-from tldw_Server_API.app.core.Character_Chat.world_book_prompt_context import (
-    apply_world_book_prompt_context,
-    build_world_book_prompt_context,
 )
 
 # Import shared constants
@@ -134,17 +147,20 @@ from tldw_Server_API.app.core.Character_Chat.constants import (
     THROTTLE_CACHE_MAX_KEYS,
     THROTTLE_STALE_SECONDS,
 )
+from tldw_Server_API.app.core.Character_Chat.world_book_prompt_context import (
+    apply_world_book_prompt_context,
+    build_world_book_prompt_context,
+)
 
 MAX_STREAM_PERSIST_USAGE_BYTES = 4_096
-from tldw_Server_API.app.core.testing import is_truthy
-from tldw_Server_API.app.core.Character_Chat.modules.character_generation_presets import (
-    resolve_character_generation_settings,
-)
 from tldw_Server_API.app.core.Character_Chat.emote_directives import (
     CharacterEmoteEvent,
     append_character_emote_prompt_instruction,
     resolve_character_emote_completion,
     validate_emote_events_for_text,
+)
+from tldw_Server_API.app.core.Character_Chat.modules.character_generation_presets import (
+    resolve_character_generation_settings,
 )
 from tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets import (
     DEFAULT_PROMPT_PRESET,
@@ -156,10 +172,6 @@ from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
     sanitize_sender_name,
 )
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
-from tldw_Server_API.app.core.Persona.exemplar_prompt_assembly import (
-    PersonaExemplarPromptAssembly,
-    assemble_persona_exemplar_prompt,
-)
 
 # Chat helpers and utilities
 # For chat completions
@@ -189,25 +201,16 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     provider_stream_error_payload,
     sanitized_provider_stream_exception,
 )
+from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
     ConflictError,
     InputError,
 )
-from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
-from tldw_Server_API.app.core.Sync.v2.server_origin import (
-    SyncServerOriginIdempotencyConflictError,
-    SyncServerOriginMaterializationError,
-    SyncServerOriginMutationNotSupportedError,
-    capture_server_origin_mutation,
-    get_active_server_origin_sync_service_for_user,
-    server_origin_object_id,
-    server_origin_stable_key,
-)
-from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
-from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
+from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
 from tldw_Server_API.app.core.LLM_Calls.routing import (
     InMemoryRoutingDecisionStore,
     RouterRequest,
@@ -229,12 +232,26 @@ from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provi
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
 from tldw_Server_API.app.core.Research.service import ResearchService
 from tldw_Server_API.app.core.LLM_Calls.sse import ensure_sse_line, normalize_provider_line, sse_done
-
+from tldw_Server_API.app.core.Persona.exemplar_prompt_assembly import (
+    PersonaExemplarPromptAssembly,
+    assemble_persona_exemplar_prompt,
+)
 # Completion schemas centralized in schemas/chat_session_schemas.py
 from tldw_Server_API.app.core.Streaming.streams import SSEStream
+from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
+from tldw_Server_API.app.core.Sync.v2.server_origin import (
+    SyncServerOriginIdempotencyConflictError,
+    SyncServerOriginMaterializationError,
+    SyncServerOriginMutationNotSupportedError,
+    capture_server_origin_mutation,
+    get_active_server_origin_sync_service_for_user,
+    server_origin_object_id,
+    server_origin_stable_key,
+)
+from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
+from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Utils.common import parse_boolean
 from tldw_Server_API.app.core.Visual_Identities.service import VisualIdentityService
-from tldw_Server_API.app.core.config import load_and_log_configs
 
 from .llm_providers import get_configured_providers
 
@@ -270,7 +287,6 @@ CHARACTER_STREAM_NEXT_TIMEOUT_SECONDS = 300.0
 CHARACTER_STREAM_CLOSE_TIMEOUT_SECONDS = 5.0
 
 THROTTLE_WINDOW_SIZE = 100
-MAX_CHAT_SETTINGS_BYTES = 200_000
 MAX_AUTHOR_NOTE_CHARS = 20_000
 MAX_ASSISTANT_OVERLAY_TEXT_CHARS = MAX_AUTHOR_NOTE_CHARS
 DEFAULT_AUTO_SUMMARY_THRESHOLD_MESSAGES = 40
@@ -1752,43 +1768,84 @@ def reset_complete_windows() -> None:
 # Helper Functions
 # ========================================================================
 
-def _convert_db_conversation_to_response(
+def _conversation_list_item_fields(
     conv_data: dict[str, Any],
     *,
     settings: Optional[dict[str, Any]] = None,
-) -> ChatSessionResponse:
-    """Convert database conversation to response model."""
+) -> dict[str, Any]:
+    """Build fields shared by list and detail conversation responses."""
     character_id = conv_data.get('character_id')
     assistant_kind = conv_data.get('assistant_kind')
     assistant_id = conv_data.get('assistant_id')
     if assistant_id is None and assistant_kind == "character" and character_id is not None:
         assistant_id = str(character_id)
-    return ChatSessionResponse(
-        id=conv_data.get('id', ''),
-        scope_type=conv_data.get("scope_type") or "global",
-        workspace_id=conv_data.get("workspace_id"),
-        character_id=character_id,
-        character_name=conv_data.get('character_name'),
-        assistant_kind=assistant_kind,
-        assistant_id=assistant_id,
-        assistant_name=conv_data.get('assistant_name'),
-        persona_memory_mode=conv_data.get('persona_memory_mode'),
-        title=conv_data.get('title'),
-        rating=conv_data.get('rating'),
-        state=conv_data.get('state', 'in-progress'),
-        topic_label=conv_data.get('topic_label'),
-        cluster_id=conv_data.get('cluster_id'),
-        source=conv_data.get('source'),
-        external_ref=conv_data.get('external_ref'),
-        created_at=conv_data.get('created_at', datetime.now(timezone.utc)),
-        last_modified=conv_data.get('last_modified', datetime.now(timezone.utc)),
-        message_count=conv_data.get('message_count', 0),
-        version=conv_data.get('version', 1),
-        parent_conversation_id=conv_data.get('parent_conversation_id'),
-        root_id=conv_data.get('root_id'),
-        forked_from_message_id=conv_data.get('forked_from_message_id'),
-        settings=settings,
+    return {
+        "id": conv_data.get('id', ''),
+        "scope_type": conv_data.get("scope_type") or "global",
+        "workspace_id": conv_data.get("workspace_id"),
+        "character_id": character_id,
+        "character_name": conv_data.get('character_name'),
+        "assistant_kind": assistant_kind,
+        "assistant_id": assistant_id,
+        "assistant_name": conv_data.get('assistant_name'),
+        "persona_memory_mode": conv_data.get('persona_memory_mode'),
+        "title": conv_data.get('title'),
+        "rating": conv_data.get('rating'),
+        "state": conv_data.get('state', 'in-progress'),
+        "topic_label": conv_data.get('topic_label'),
+        "cluster_id": conv_data.get('cluster_id'),
+        "source": conv_data.get('source'),
+        "external_ref": conv_data.get('external_ref'),
+        "created_at": conv_data.get('created_at', datetime.now(timezone.utc)),
+        "last_modified": conv_data.get('last_modified', datetime.now(timezone.utc)),
+        "version": conv_data.get('version', 1),
+        "parent_conversation_id": conv_data.get('parent_conversation_id'),
+        "root_id": conv_data.get('root_id'),
+        "forked_from_message_id": conv_data.get('forked_from_message_id'),
+        "settings": settings,
+        "message_count": conv_data.get('message_count', 0),
+    }
+
+
+def _convert_db_conversation_to_response(
+    conv_data: dict[str, Any],
+    *,
+    settings: Optional[dict[str, Any]] = None,
+    resume_state: Optional[dict[str, Any]] = None,
+) -> ChatSessionResponse:
+    """Convert database conversation to detail response model."""
+    state = resume_state or {}
+    snapshot = state.get("behavior_snapshot") or {"status": "missing"}
+    tail = state.get("tail") or {"message_id": None, "message_version": None}
+    detail_fields = _conversation_list_item_fields(conv_data, settings=settings)
+    detail_fields["message_count"] = state.get(
+        "message_count",
+        conv_data.get('message_count', 0),
     )
+    return ChatSessionResponse(
+        **detail_fields,
+        behavior_snapshot={
+            "status": snapshot.get("status", "missing"),
+            "schema_version": snapshot.get("schema_version"),
+            "digest": snapshot.get("digest"),
+        },
+        resume_eligible=bool(state.get("resume_eligible", False)),
+        resume_ineligible_reason=state.get(
+            "resume_ineligible_reason", "behavior_snapshot_missing"
+        ),
+        settings_version=state.get("settings_version"),
+        history_version=state.get("history_version"),
+        tail=tail,
+    )
+
+
+def _convert_db_conversation_to_list_item(
+    conv_data: dict[str, Any],
+    *,
+    settings: Optional[dict[str, Any]] = None,
+) -> ChatSessionListItem:
+    """Convert a conversation without materializing detail-only resume authority."""
+    return ChatSessionListItem(**_conversation_list_item_fields(conv_data, settings=settings))
 
 
 def _assistant_display_name(record: Mapping[str, Any] | None) -> str | None:
@@ -1975,20 +2032,26 @@ def _validate_chat_settings_payload(
     strip_invalid_deep_research: bool = False,
 ) -> dict[str, Any]:
     """Validate settings payload size, shape, and known enum fields."""
-    settings = dict(settings)
     try:
-        encoded = json.dumps(settings).encode("utf-8")
-    except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid settings payload: {exc}"
-        ) from exc
-
-    if len(encoded) > MAX_CHAT_SETTINGS_BYTES:
+        settings = validate_chat_settings_storage(settings)
+    except ChatSettingsSizeError as exc:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"Settings payload exceeds {MAX_CHAT_SETTINGS_BYTES} bytes"
-        )
+            detail=str(exc),
+        ) from exc
+    except InputError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    try:
+        validate_resumable_behavior_boole(settings)
+    except InputError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
 
     author_note = settings.get("authorNote")
     if isinstance(author_note, str) and len(author_note) > MAX_AUTHOR_NOTE_CHARS:
@@ -2243,18 +2306,17 @@ def _validate_chat_settings_payload(
                 detail="Invalid summary.updatedAt. Expected ISO timestamp string"
             )
     try:
-        normalized_encoded = json.dumps(settings).encode("utf-8")
-    except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid settings payload: {exc}"
-        ) from exc
-    if len(normalized_encoded) > MAX_CHAT_SETTINGS_BYTES:
+        return validate_chat_settings_storage(settings)
+    except ChatSettingsSizeError as exc:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"Settings payload exceeds {MAX_CHAT_SETTINGS_BYTES} bytes"
-        )
-    return settings
+            detail=str(exc),
+        ) from exc
+    except InputError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
 
 def _parse_iso_timestamp(value: Any) -> Optional[float]:
@@ -2875,6 +2937,50 @@ def _merge_conversation_settings(
     return merged
 
 
+_INTERNAL_CHAT_SETTINGS_KEYS = INTERNAL_CHAT_SETTINGS_KEYS
+_BEHAVIOR_SETTING_KEYS = frozenset(
+    key
+    for key, classification in PROMPT_COMPLETION_SETTING_CLASSIFICATION.items()
+    if classification == "behavior"
+)
+
+
+def _public_chat_settings(settings: Any) -> dict[str, Any]:
+    """Return a detached settings payload without internal resume-contract state."""
+    public = dict(settings) if isinstance(settings, Mapping) else {}
+    for key in _INTERNAL_CHAT_SETTINGS_KEYS:
+        public.pop(key, None)
+    return public
+
+
+def _validate_final_chat_settings_storage(
+    settings: Mapping[str, Any],
+    *,
+    resume_state: Mapping[str, Any],
+    conversation: Mapping[str, Any],
+) -> dict[str, Any]:
+    snapshot = resume_state.get("behavior_snapshot")
+    snapshot_valid = isinstance(snapshot, Mapping) and snapshot.get("status") == "valid"
+    try:
+        return validate_chat_settings_storage(
+            settings,
+            reject_credentials=snapshot_valid,
+            allow_internal=True,
+            behavior_snapshot=snapshot,
+            conversation=conversation,
+        )
+    except ChatSettingsSizeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=str(exc),
+        ) from exc
+    except InputError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+
 def _normalize_note_text(value: Any) -> str:
     if not isinstance(value, str):
         return ""
@@ -3286,59 +3392,8 @@ def _resolve_chat_turn_context(
     }
 
 
-def _normalize_greeting_values(value: Any) -> list[str]:
-    def _normalize_string_entries(entries: list[Any]) -> list[str]:
-        normalized: list[str] = []
-        for entry in entries:
-            if not isinstance(entry, str):
-                continue
-            trimmed_entry = entry.strip()
-            if trimmed_entry:
-                normalized.append(trimmed_entry)
-        return normalized
-
-    if isinstance(value, str):
-        trimmed = value.strip()
-        if not trimmed:
-            return []
-        try:
-            parsed = json.loads(trimmed)
-        except json.JSONDecodeError:
-            return [trimmed]
-        if isinstance(parsed, list):
-            return _normalize_string_entries(parsed)
-        if isinstance(parsed, str):
-            try:
-                nested_parsed = json.loads(parsed)
-            except json.JSONDecodeError:
-                return [trimmed]
-            if isinstance(nested_parsed, list):
-                return _normalize_string_entries(nested_parsed)
-        return [trimmed]
-    if isinstance(value, list):
-        return _normalize_string_entries(value)
-    return []
-
-
 def _collect_character_greeting_texts(character: dict[str, Any]) -> list[str]:
-    greeting_fields = (
-        "greeting",
-        "first_message",
-        "firstMessage",
-        "greet",
-        "alternate_greetings",
-        "alternateGreetings",
-    )
-    greetings: list[str] = []
-    seen: set[str] = set()
-    for field_name in greeting_fields:
-        values = _normalize_greeting_values(character.get(field_name))
-        for value in values:
-            if value in seen:
-                continue
-            seen.add(value)
-            greetings.append(value)
-    return greetings
+    return collect_character_greeting_texts(character)
 
 
 def _compute_greetings_checksum(character: dict[str, Any]) -> str:
@@ -3836,8 +3891,8 @@ def _maybe_trigger_character_memory_extraction(
 
     def _run_extraction() -> None:
         from tldw_Server_API.app.api.v1.endpoints.character_memory import (
-            get_or_create_character_persona_profile,
             _persona_id_for_character,
+            get_or_create_character_persona_profile,
         )
         from tldw_Server_API.app.core.Character_Chat.modules.character_memory_extraction import (
             extract_character_memories,
@@ -4069,6 +4124,26 @@ def _summary_matches_existing(
     return _safe_int(existing_summary.get("compressedCount")) == compressed_count
 
 
+def _get_completion_settings_row(
+    db: CharactersRAGDB,
+    chat_id: str,
+    *,
+    owner_user_id: str,
+) -> dict[str, Any] | None:
+    """Read settings with the history fence observed before prompt derivation."""
+    if not callable(getattr(db, "get_roleplay_resume_state", None)):
+        return db.get_conversation_settings(chat_id)
+    state = db.get_roleplay_resume_state(
+        chat_id,
+        owner_client_id=owner_user_id,
+    )
+    return {
+        "settings": dict(state.get("settings") or {}),
+        "settings_version": state.get("settings_version") or 0,
+        "history_version": state.get("history_version") or 0,
+    }
+
+
 def _persist_auto_summary_to_settings(
     db: CharactersRAGDB,
     chat_id: str,
@@ -4079,6 +4154,8 @@ def _persist_auto_summary_to_settings(
     threshold: int,
     window: int,
     compressed_count: int,
+    expected_settings_version: int | None = None,
+    expected_history_version: int | None = None,
 ) -> None:
     existing_summary = settings.get("summary")
     if _summary_matches_existing(
@@ -4110,8 +4187,88 @@ def _persist_auto_summary_to_settings(
     merged_settings["updatedAt"] = now_iso
 
     try:
-        merged_settings = _validate_chat_settings_payload(merged_settings)
-        db.upsert_conversation_settings(chat_id, merged_settings)
+        # The caller-supplied summary fields are public settings. Existing
+        # roleplay authority is server-owned and is validated coherently below
+        # after locking the resume state.
+        _validate_chat_settings_payload(_public_chat_settings(merged_settings))
+        if callable(getattr(db, "get_roleplay_resume_state", None)) and callable(
+            getattr(db, "transaction", None)
+        ):
+            with db.transaction() as conn:
+                resume_state = db.get_roleplay_resume_state(
+                    chat_id,
+                    conn=conn,
+                    lock_for_update=True,
+                    owner_client_id=str(getattr(db, "client_id", "") or ""),
+                )
+                conversation = resume_state.get("conversation")
+                if not isinstance(conversation, Mapping):
+                    return
+                if expected_settings_version is None or expected_history_version is None:
+                    return
+                if int(resume_state.get("settings_version") or 0) != int(
+                    expected_settings_version
+                ):
+                    return
+                if int(resume_state.get("history_version") or 0) != int(
+                    expected_history_version
+                ):
+                    return
+                current_settings = dict(resume_state.get("settings") or {})
+                if _summary_matches_existing(
+                    current_settings.get("summary"),
+                    content=content,
+                    source_from_id=source_from_id,
+                    source_to_id=source_to_id,
+                    threshold=threshold,
+                    window=window,
+                    compressed_count=compressed_count,
+                ):
+                    return
+                current_settings["summary"] = merged_settings["summary"]
+                current_settings["schemaVersion"] = merged_settings["schemaVersion"]
+                current_settings["updatedAt"] = merged_settings["updatedAt"]
+                snapshot = resume_state.get("behavior_snapshot")
+                if isinstance(snapshot, Mapping) and snapshot.get("status") == "valid":
+                    materialized = materialize_roleplay_behavior_settings(
+                        conn,
+                        conversation=conversation,
+                        resume_state=resume_state,
+                        merged_settings=current_settings,
+                        owner_user_id=str(conversation.get("client_id") or ""),
+                        changed_keys={"summary"},
+                    )
+                    if materialized is not None:
+                        current_settings["roleplayBehaviorV1"] = materialized
+                        current_settings["roleplayResumeV1"] = {
+                            "resumeEligible": True,
+                            "resumeIneligibleReason": None,
+                            "effectiveCompletion": materialized["values"][
+                                "effective_completion"
+                            ],
+                        }
+                current_settings = validate_chat_settings_storage(
+                    current_settings,
+                    reject_credentials=(
+                        isinstance(resume_state.get("behavior_snapshot"), Mapping)
+                        and resume_state["behavior_snapshot"].get("status") == "valid"
+                    ),
+                    allow_internal=True,
+                    behavior_snapshot=resume_state.get("behavior_snapshot"),
+                    conversation=conversation,
+                )
+                db.upsert_conversation_settings(
+                    chat_id,
+                    current_settings,
+                    conn=conn,
+                    expected_settings_version=resume_state["settings_version"] or 0,
+                )
+        else:
+            db.upsert_conversation_settings(
+                chat_id,
+                merged_settings,
+                expected_settings_version=expected_settings_version,
+            )
     except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
         logger.debug(
             "Non-fatal: failed to persist auto-summary settings for chat {}: {}",
@@ -4208,6 +4365,16 @@ def _apply_auto_summary_to_prompt_messages(
             threshold=threshold,
             window=window,
             compressed_count=len(compressible),
+            expected_settings_version=(
+                (settings_row or {}).get("settings_version") or 0
+            )
+            if isinstance(settings_row, Mapping)
+            else 0,
+            expected_history_version=(
+                (settings_row or {}).get("history_version") or 0
+            )
+            if isinstance(settings_row, Mapping)
+            else 0,
         )
 
     return summarized_messages, summary_content
@@ -4492,6 +4659,8 @@ async def create_chat_session(
             'workspace_id': session_data.workspace_id,
         }
 
+        created_with_factory = False
+        seed_status: Optional[str] = None
         if sync_service is not None:
             try:
                 capture_server_origin_mutation(
@@ -4507,6 +4676,48 @@ async def create_chat_session(
             except Exception as sync_exc:
                 raise _chat_sync_http_error(sync_exc) from sync_exc
             created_id = chat_id
+        elif character is not None:
+            created_id = create_character_conversation(
+                db,
+                conversation_data=conv_data,
+                participant_character_ids=session_data.participant_character_ids,
+                prompt_preset_id=session_data.prompt_preset_id,
+                memory_by_character_id=session_data.memory_by_character_id,
+                provider=session_data.provider,
+                model=session_data.model,
+                sampling={
+                    field: getattr(session_data, field)
+                    for field in (
+                        "temperature",
+                        "top_p",
+                        "repetition_penalty",
+                        "stop",
+                    )
+                    if field in session_data.model_fields_set
+                }
+                or None,
+                seed_first_message=seed_first_message,
+                greeting_strategy=greeting_strategy,
+                greeting_alternate_index=alternate_index,
+            )
+            if seed_first_message:
+                created_state = db.get_roleplay_resume_state(created_id)
+                snapshot_payload = (
+                    (created_state.get("behavior_snapshot") or {}).get("payload")
+                    or {}
+                )
+                snapshot_participants = snapshot_payload.get("participants") or []
+                accepted_greeting = (
+                    snapshot_participants[0].get("greeting")
+                    if snapshot_participants
+                    else {}
+                )
+                seed_status = (
+                    "ok"
+                    if str((accepted_greeting or {}).get("content") or "").strip()
+                    else "no_greeting"
+                )
+            created_with_factory = True
         else:
             # Add to database
             created_id = db.add_conversation(conv_data)
@@ -4525,8 +4736,12 @@ async def create_chat_session(
             )
 
         # Optionally seed the chat with a greeting (first_message or alternate)
-        seed_status: Optional[str] = None
-        if seed_first_message and character is not None and sync_service is None:
+        if (
+            seed_first_message
+            and character is not None
+            and sync_service is None
+            and not created_with_factory
+        ):
             try:
                 raw_name = character.get('name') or 'Assistant'
                 choice_text: Optional[str] = None
@@ -4564,7 +4779,7 @@ async def create_chat_session(
             seed_status = "no_greeting"
 
         # Persist a greetings checksum so staleness can be detected later.
-        if character is not None and sync_service is None:
+        if character is not None and sync_service is None and not created_with_factory:
             try:
                 checksum = _compute_greetings_checksum(character)
                 updated_settings = db.upsert_conversation_settings(
@@ -4599,11 +4814,15 @@ async def create_chat_session(
                 db,
                 created_conv,
                 str(current_user.id),
-            )
+            ),
+            resume_state=db.get_roleplay_resume_state(created_id),
         )
 
     except HTTPException:
         raise
+    except InputError as e:
+        logger.warning("Invalid chat-session creation input: {}", e)
+        raise map_db_error_to_http(e) from e
     except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error creating chat session: {e}", exc_info=True)
         raise HTTPException(
@@ -4866,18 +5085,13 @@ async def get_chat_session(
         scope = _resolve_chat_scope(scope_type, workspace_id)
         conversation = db.get_conversation_by_id(chat_id)
         _verify_chat_ownership(conversation, current_user.id, chat_id, scope)
-
-        # Get message count efficiently
-        try:
-            conversation['message_count'] = db.count_messages_for_conversation(chat_id)
-        except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS:
-            messages = db.get_messages_for_conversation(chat_id, limit=1000)
-            conversation['message_count'] = len(messages) if messages else 0
+        resume_state = db.get_roleplay_resume_state(chat_id)
 
         settings_payload: Optional[dict[str, Any]] = None
         if include_settings:
-            settings_row = db.get_conversation_settings(chat_id)
-            settings_payload = (settings_row or {}).get("settings") or {}
+            settings_payload = _public_chat_settings(
+                resume_state.get("settings")
+            )
 
         return _convert_db_conversation_to_response(
             _attach_conversation_assistant_names(
@@ -4886,6 +5100,7 @@ async def get_chat_session(
                 str(current_user.id),
             ),
             settings=settings_payload,
+            resume_state=resume_state,
         )
 
     except HTTPException:
@@ -5101,7 +5316,11 @@ async def prepare_chat_completion(
         # Fields are validated by Pydantic; avoid redundant int() casting
         limit = body.limit
         offset = body.offset
-        settings_row = db.get_conversation_settings(chat_id)
+        settings_row = _get_completion_settings_row(
+            db,
+            chat_id,
+            owner_user_id=str(current_user.id),
+        )
 
         messages = db.get_messages_for_conversation(chat_id, limit=limit, offset=offset) or []
         # Filter deleted
@@ -5501,7 +5720,11 @@ async def prompt_assembly_preview(
 
         user_name = conversation.get("user_name", "User")
         include_ctx = bool(body.include_character_context)
-        settings_row = db.get_conversation_settings(chat_id)
+        settings_row = _get_completion_settings_row(
+            db,
+            chat_id,
+            owner_user_id=str(current_user.id),
+        )
         settings = _extract_settings(settings_row) if isinstance(settings_row, dict) else {}
 
         messages = db.get_messages_for_conversation(chat_id, limit=body.limit, offset=body.offset) or []
@@ -5851,7 +6074,11 @@ async def character_chat_completion(
         offset = body.offset
         stream_requested = bool(body.stream)
         save_to_db = body.save_to_db
-        settings_row = db.get_conversation_settings(chat_id)
+        settings_row = _get_completion_settings_row(
+            db,
+            chat_id,
+            owner_user_id=str(current_user.id),
+        )
         history_messages = db.get_messages_for_conversation(chat_id, limit=1000, offset=0) or []
         history_messages = [m for m in history_messages if not m.get('deleted')]
         turn_context = _resolve_chat_turn_context(
@@ -7083,15 +7310,15 @@ async def list_chat_sessions(
             user_conversations,
             user_id_str,
         )
-
-        chats: list[ChatSessionResponse] = []
+        chats: list[ChatSessionListItem] = []
         for conv in user_conversations:
             settings_payload: Optional[dict[str, Any]] = None
             if include_settings:
                 settings_row = db.get_conversation_settings(conv['id'])
-                settings_payload = (settings_row or {}).get("settings") or {}
+                stored_settings = (settings_row or {}).get("settings")
+                settings_payload = _public_chat_settings(stored_settings)
             chats.append(
-                _convert_db_conversation_to_response(
+                _convert_db_conversation_to_list_item(
                     _attach_conversation_assistant_names_from_lookups(
                         conv,
                         character_names=character_names,
@@ -7203,7 +7430,8 @@ async def update_chat_session(
                 db,
                 updated_conv,
                 str(current_user.id),
-            )
+            ),
+            resume_state=db.get_roleplay_resume_state(chat_id),
         )
 
     except ConflictError as e:
@@ -7242,7 +7470,9 @@ async def get_chat_settings(
         _verify_chat_ownership(conversation, current_user.id, chat_id, scope)
 
         settings_row = db.get_conversation_settings(chat_id)
-        settings = (settings_row.get("settings") or {}) if settings_row else {}
+        settings = _public_chat_settings(
+            (settings_row.get("settings") or {}) if settings_row else {}
+        )
         # Internal bootstrap metadata alone should not count as user-visible settings.
         if settings and set(settings.keys()) <= {"greetingsChecksum"}:
             settings = {}
@@ -7318,31 +7548,128 @@ async def update_chat_settings(
         conversation = db.get_conversation_by_id(chat_id)
         _verify_chat_ownership(conversation, current_user.id, chat_id, scope)
 
+        reserved_keys = _INTERNAL_CHAT_SETTINGS_KEYS.intersection(
+            (payload.settings or {}).keys()
+        )
+        if reserved_keys:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"{sorted(reserved_keys)[0]} is reserved resume-contract state",
+            )
+
         incoming_settings = _validate_chat_settings_payload(
             payload.settings or {},
             owner_user_id=str(current_user.id),
         )
 
-        existing_row = db.get_conversation_settings(chat_id)
-        existing_settings = (existing_row or {}).get("settings") or {}
-        merged_settings = _merge_conversation_settings(existing_settings, incoming_settings)
-        merged_settings = _validate_chat_settings_payload(
-            merged_settings,
-            owner_user_id=str(current_user.id),
-        )
+        with db.transaction() as conn:
+            resume_state = db.get_roleplay_resume_state(
+                chat_id,
+                conn=conn,
+                lock_for_update=True,
+                owner_client_id=str(current_user.id),
+            )
+            conversation = resume_state.get("conversation")
+            _verify_chat_ownership(conversation, current_user.id, chat_id, scope)
+            existing_settings = resume_state.get("settings") or {}
+            merged_settings = _merge_conversation_settings(
+                existing_settings,
+                incoming_settings,
+            )
+            internal_settings = {
+                key: existing_settings[key]
+                for key in _INTERNAL_CHAT_SETTINGS_KEYS
+                if key in existing_settings
+            }
+            merged_settings = _validate_chat_settings_payload(
+                _public_chat_settings(merged_settings),
+                owner_user_id=str(current_user.id),
+            )
+            merged_settings.update(internal_settings)
 
-        if not db.upsert_conversation_settings(chat_id, merged_settings):
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update chat settings")
+            snapshot = resume_state.get("behavior_snapshot")
+            snapshot_valid = (
+                isinstance(snapshot, Mapping) and snapshot.get("status") == "valid"
+            )
+            if snapshot_valid:
+                reject_resumable_behavior_credentials(incoming_settings)
+            if snapshot_valid and _BEHAVIOR_SETTING_KEYS.intersection(incoming_settings):
+                materialized = materialize_roleplay_behavior_settings(
+                    conn,
+                    conversation=conversation,
+                    resume_state=resume_state,
+                    merged_settings=merged_settings,
+                    owner_user_id=str(current_user.id),
+                    changed_keys=set(incoming_settings),
+                )
+                if materialized is not None:
+                    merged_settings["roleplayBehaviorV1"] = materialized
+                    merged_settings.pop(PENDING_GREETING_SETTINGS_KEY, None)
+                    merged_settings["roleplayResumeV1"] = {
+                        "resumeEligible": True,
+                        "resumeIneligibleReason": None,
+                        "effectiveCompletion": materialized["values"][
+                            "effective_completion"
+                        ],
+                    }
+                elif "greetingSelectionId" in incoming_settings or (
+                    incoming_settings.get("useCharacterDefault") is True
+                ):
+                    selection_id = merged_settings.get("greetingSelectionId")
+                    if (
+                        incoming_settings.get("useCharacterDefault") is True
+                        and "greetingSelectionId" not in incoming_settings
+                    ):
+                        selection_id = None
+                        merged_settings["greetingSelectionId"] = None
+                    if isinstance(selection_id, str) and selection_id.strip():
+                        pending_greeting = build_pending_greeting_authority(
+                            conn,
+                            conversation=conversation,
+                            resume_state=resume_state,
+                            selection_id=selection_id,
+                        )
+                        merged_settings[PENDING_GREETING_SETTINGS_KEY] = pending_greeting
+                        merged_settings["greetingsChecksum"] = pending_greeting["values"][
+                            "greetings_checksum"
+                        ]
+                    else:
+                        merged_settings.pop(PENDING_GREETING_SETTINGS_KEY, None)
+
+            merged_settings = _validate_final_chat_settings_storage(
+                merged_settings,
+                resume_state=resume_state,
+                conversation=conversation,
+            )
+
+            if not db.upsert_conversation_settings(
+                chat_id,
+                merged_settings,
+                conn=conn,
+                expected_settings_version=resume_state["settings_version"] or 0,
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to update chat settings",
+                )
 
         settings_row = db.get_conversation_settings(chat_id)
 
         return ChatSettingsResponse(
             conversation_id=chat_id,
-            settings=(settings_row or {}).get("settings") or merged_settings,
+            settings=_public_chat_settings(
+                (settings_row or {}).get("settings") or merged_settings
+            ),
             last_modified=(settings_row or {}).get("last_modified") or datetime.now(timezone.utc),
         )
     except HTTPException:
         raise
+    except ConflictError as exc:
+        logger.warning(f"Concurrent settings update for {chat_id}: {exc}")
+        raise map_db_error_to_http(exc) from exc
+    except InputError as exc:
+        logger.warning(f"Invalid behavior settings for {chat_id}: {exc}")
+        raise map_db_error_to_http(exc) from exc
     except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
         logger.error(f"Error updating chat settings for {chat_id}: {exc}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update chat settings") from exc
@@ -7577,7 +7904,8 @@ async def restore_chat_session(
                     db,
                     conversation,
                     str(current_user.id),
-                )
+                ),
+                resume_state=db.get_roleplay_resume_state(chat_id),
             )
 
         if _active_chat_sync_service(current_user, scope) is not None:
@@ -7597,7 +7925,8 @@ async def restore_chat_session(
                 db,
                 restored,
                 str(current_user.id),
-            )
+            ),
+            resume_state=db.get_roleplay_resume_state(chat_id),
         )
 
     except ConflictError as e:
@@ -8245,25 +8574,129 @@ async def select_greeting(
     """Select a specific greeting by index and update the chat settings."""
     conversation = db.get_conversation_by_id(chat_id)
     _verify_chat_ownership(conversation, current_user.id, chat_id)
-
-    character_id = conversation.get("character_id")
-    character = db.get_character_card_by_id(character_id) if character_id else {}
-    if not character:
-        character = {}
-
-    greetings_texts = _collect_character_greeting_texts(character)
-    if body.index < 0 or body.index >= len(greetings_texts):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Greeting index {body.index} out of range (0..{len(greetings_texts) - 1})",
-        )
-
-    settings_row = db.get_conversation_settings(chat_id)
-    settings = (settings_row or {}).get("settings") or {}
-    checksum = _compute_greetings_checksum(character)
-    settings["greetingSelectionId"] = f"greeting:{body.index}:selected"
-    settings["greetingsChecksum"] = checksum
-    if not db.upsert_conversation_settings(chat_id, settings):
+    selected_greeting_text = ""
+    try:
+        if callable(getattr(db, "get_roleplay_resume_state", None)) and callable(
+            getattr(db, "transaction", None)
+        ):
+            with db.transaction() as conn:
+                resume_state = db.get_roleplay_resume_state(
+                    chat_id,
+                    conn=conn,
+                    lock_for_update=True,
+                    owner_client_id=str(current_user.id),
+                )
+                conversation = resume_state.get("conversation")
+                _verify_chat_ownership(conversation, current_user.id, chat_id)
+                character_id = conversation.get("character_id")
+                if character_id is None:
+                    raise InputError("Conversation has no primary character.")
+                character = load_character_greeting_source(
+                    conn,
+                    character_id=int(character_id),
+                    lock_for_update=True,
+                )
+                greetings_texts = _collect_character_greeting_texts(character)
+                if body.index < 0 or body.index >= len(greetings_texts):
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=(
+                            f"Greeting index {body.index} out of range "
+                            f"(0..{len(greetings_texts) - 1})"
+                        ),
+                    )
+                selected_greeting_text = greetings_texts[body.index]
+                checksum = _compute_greetings_checksum(character)
+                settings = dict(resume_state.get("settings") or {})
+                settings["greetingSelectionId"] = f"greeting:{body.index}:selected"
+                settings["greetingsChecksum"] = checksum
+                snapshot = resume_state.get("behavior_snapshot")
+                if isinstance(snapshot, Mapping) and snapshot.get("status") == "valid":
+                    materialized = materialize_roleplay_behavior_settings(
+                        conn,
+                        conversation=conversation,
+                        resume_state=resume_state,
+                        merged_settings=settings,
+                        owner_user_id=str(current_user.id),
+                        changed_keys={"greetingSelectionId", "greetingsChecksum"},
+                    )
+                    if materialized is not None:
+                        settings["roleplayBehaviorV1"] = materialized
+                        settings.pop(PENDING_GREETING_SETTINGS_KEY, None)
+                        stored_greeting = materialized["values"].get("greeting")
+                        if isinstance(stored_greeting, Mapping):
+                            selected_greeting_text = str(
+                                stored_greeting.get("content") or selected_greeting_text
+                            )
+                        settings["roleplayResumeV1"] = {
+                            "resumeEligible": True,
+                            "resumeIneligibleReason": None,
+                            "effectiveCompletion": materialized["values"][
+                                "effective_completion"
+                            ],
+                        }
+                    else:
+                        pending_greeting = build_pending_greeting_authority(
+                            conn,
+                            conversation=conversation,
+                            resume_state=resume_state,
+                            selection_id=settings["greetingSelectionId"],
+                        )
+                        settings[PENDING_GREETING_SETTINGS_KEY] = pending_greeting
+                        pending_value = pending_greeting["values"].get("greeting")
+                        if isinstance(pending_value, Mapping):
+                            selected_greeting_text = str(
+                                pending_value.get("content") or selected_greeting_text
+                            )
+                        settings["greetingsChecksum"] = pending_greeting["values"][
+                            "greetings_checksum"
+                        ]
+                settings = _validate_final_chat_settings_storage(
+                    settings,
+                    resume_state=resume_state,
+                    conversation=conversation,
+                )
+                updated = db.upsert_conversation_settings(
+                    chat_id,
+                    settings,
+                    conn=conn,
+                    expected_settings_version=resume_state["settings_version"] or 0,
+                )
+        else:
+            character_id = conversation.get("character_id")
+            character = db.get_character_card_by_id(character_id) if character_id else {}
+            if not character:
+                character = {}
+            greetings_texts = _collect_character_greeting_texts(character)
+            if body.index < 0 or body.index >= len(greetings_texts):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        f"Greeting index {body.index} out of range "
+                        f"(0..{len(greetings_texts) - 1})"
+                    ),
+                )
+            selected_greeting_text = greetings_texts[body.index]
+            checksum = _compute_greetings_checksum(character)
+            settings_row = db.get_conversation_settings(chat_id)
+            settings = dict((settings_row or {}).get("settings") or {})
+            settings["greetingSelectionId"] = f"greeting:{body.index}:selected"
+            settings["greetingsChecksum"] = checksum
+            updated = db.upsert_conversation_settings(
+                chat_id,
+                settings,
+                expected_settings_version=(settings_row or {}).get(
+                    "settings_version"
+                )
+                or 0,
+            )
+    except ConflictError as exc:
+        raise map_db_error_to_http(exc) from exc
+    except InputError as exc:
+        raise map_db_error_to_http(exc) from exc
+    except (CharactersRAGDBError, NotFoundError) as exc:
+        raise map_db_error_to_http(exc) from exc
+    if not updated:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to persist greeting selection",
@@ -8272,7 +8705,7 @@ async def select_greeting(
     return GreetingSelectResponse(
         chat_id=chat_id,
         selected_index=body.index,
-        greeting_preview=greetings_texts[body.index][:120],
+        greeting_preview=selected_greeting_text[:120],
         checksum_updated=True,
     )
 

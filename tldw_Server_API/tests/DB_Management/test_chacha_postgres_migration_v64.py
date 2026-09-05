@@ -17,6 +17,12 @@ from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBack
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
+@pytest.fixture(autouse=True)
+def _pin_v64_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise the v64 contract without introducing later schema artifacts."""
+    monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 64)
+
+
 class _FakeTransaction:
     def __enter__(self) -> object:
         return object()

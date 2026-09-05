@@ -39,8 +39,14 @@ from loguru import logger
 
 from tldw_Server_API.app.core.config import ACTUAL_PROJECT_ROOT, load_comprehensive_config, settings as core_settings
 from tldw_Server_API.app.core.testing import is_truthy
+from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
+    validate_chat_settings_storage,
+)
 
-from ..DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
+from ..DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    CharactersRAGDBError,
+)
 from ..DB_Management.db_path_utils import DatabasePaths
 from ..Notes.organization_capture import active_coordinator, capture_note_upsert, stable_note_id
 from ..Templating.template_renderer import (
@@ -4308,22 +4314,80 @@ class ChatbookService:
         extra_metadata: dict[str, Any] | None = None,
     ) -> bool:
         """Merge OpenWebUI import metadata into conversation settings."""
-        current = self.db.get_conversation_settings(conversation_id) or {}
-        settings = current.get("settings") if isinstance(current, dict) else {}
-        if not isinstance(settings, dict):
-            settings = {}
         metadata = dict(chat.source_metadata)
         if extra_metadata:
             metadata.update(extra_metadata)
-        merged = dict(settings)
-        merged["openwebui_import"] = {
-            "source": "openwebui",
-            "external_ref": external_ref,
-            "history_current_id": chat.history_current_id,
-            "branched": chat.is_branched,
-            "metadata": metadata,
-        }
-        return bool(self.db.upsert_conversation_settings(conversation_id, merged))
+
+        def merge(settings: dict[str, Any]) -> dict[str, Any]:
+            merged = dict(settings)
+            merged["openwebui_import"] = {
+                "source": "openwebui",
+                "external_ref": external_ref,
+                "history_current_id": chat.history_current_id,
+                "branched": chat.is_branched,
+                "metadata": metadata,
+            }
+            return merged
+
+        return self._persist_openwebui_settings_mutation(
+            conversation_id,
+            merge,
+            operation="conversation metadata",
+        )
+
+    def _persist_openwebui_settings_mutation(
+        self,
+        conversation_id: str,
+        merge: Callable[[dict[str, Any]], dict[str, Any] | None],
+        *,
+        operation: str,
+    ) -> bool:
+        """Lock, validate, and CAS one OpenWebUI settings mutation."""
+        try:
+            with self.db.transaction() as conn:
+                resume_state = self.db.get_roleplay_resume_state(
+                    conversation_id,
+                    conn=conn,
+                    lock_for_update=True,
+                )
+                settings = resume_state.get("settings")
+                merged = merge(dict(settings) if isinstance(settings, dict) else {})
+                if merged is None:
+                    return False
+                conversation = resume_state.get("conversation")
+                if not isinstance(conversation, dict):
+                    return False
+                character_id = conversation.get("character_id")
+                snapshot = resume_state.get("behavior_snapshot")
+                snapshot_valid = (
+                    isinstance(snapshot, dict) and snapshot.get("status") == "valid"
+                )
+                validated = validate_chat_settings_storage(
+                    merged,
+                    reject_credentials=snapshot_valid,
+                    allow_internal=True,
+                    behavior_snapshot=snapshot,
+                    conversation={"character_id": character_id},
+                )
+                settings_version = resume_state.get("settings_version")
+                return bool(
+                    self.db.upsert_conversation_settings(
+                        conversation_id,
+                        validated,
+                        conn=conn,
+                        expected_settings_version=(
+                            settings_version if isinstance(settings_version, int) else 0
+                        ),
+                    )
+                )
+        except (CharactersRAGDBError, ValueError) as exc:
+            logger.warning(
+                "OpenWebUI {} settings write failed for {}: {}",
+                operation,
+                conversation_id,
+                exc,
+            )
+            return False
 
     def _record_openwebui_import_mapping(
         self,
@@ -4336,30 +4400,31 @@ class ChatbookService:
         imported_at: str | None = None,
     ) -> bool:
         """Persist hydration-scope metadata for an imported OpenWebUI conversation."""
-        current = self.db.get_conversation_settings(conversation_id) or {}
-        settings = current.get("settings") if isinstance(current, dict) else {}
-        if not isinstance(settings, dict):
-            settings = {}
-        openwebui_import = settings.get("openwebui_import")
-        if not isinstance(openwebui_import, dict):
-            return False
-        metadata = openwebui_import.get("metadata")
-        if not isinstance(metadata, dict):
-            metadata = {}
-        merged_metadata = dict(metadata)
-        merged_metadata["import_scope_id"] = str(import_scope_id)
-        merged_metadata["source_kind"] = str(source_format)
-        merged_metadata["imported_at"] = imported_at or datetime.now(timezone.utc).isoformat()
-        if source_user_id is not None:
-            merged_metadata["source_user_id"] = str(source_user_id)
-        if source_user_label is not None:
-            merged_metadata["source_user_label"] = str(source_user_label)
+        def merge(settings: dict[str, Any]) -> dict[str, Any] | None:
+            openwebui_import = settings.get("openwebui_import")
+            if not isinstance(openwebui_import, dict):
+                return None
+            metadata = openwebui_import.get("metadata")
+            merged_metadata = dict(metadata) if isinstance(metadata, dict) else {}
+            merged_metadata["import_scope_id"] = str(import_scope_id)
+            merged_metadata["source_kind"] = str(source_format)
+            merged_metadata["imported_at"] = imported_at or datetime.now(timezone.utc).isoformat()
+            if source_user_id is not None:
+                merged_metadata["source_user_id"] = str(source_user_id)
+            if source_user_label is not None:
+                merged_metadata["source_user_label"] = str(source_user_label)
 
-        merged_openwebui_import = dict(openwebui_import)
-        merged_openwebui_import["metadata"] = merged_metadata
-        merged_settings = dict(settings)
-        merged_settings["openwebui_import"] = merged_openwebui_import
-        return bool(self.db.upsert_conversation_settings(conversation_id, merged_settings))
+            merged_openwebui_import = dict(openwebui_import)
+            merged_openwebui_import["metadata"] = merged_metadata
+            merged_settings = dict(settings)
+            merged_settings["openwebui_import"] = merged_openwebui_import
+            return merged_settings
+
+        return self._persist_openwebui_settings_mutation(
+            conversation_id,
+            merge,
+            operation="import mapping",
+        )
 
     def _rollback_openwebui_conversation(
         self,

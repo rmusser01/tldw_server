@@ -762,6 +762,8 @@ def test_client(test_env_vars, character_db):
         is_admin=True,
         is_active=True
     )
+    original_client_id = character_db.client_id
+    character_db.client_id = str(test_user.id)
 
     # Override database dependency
     def override_get_chacha_db_for_user():
@@ -795,6 +797,7 @@ def test_client(test_env_vars, character_db):
 
     # Restore API key
     settings_instance.SINGLE_USER_API_KEY = original_api_key
+    character_db.client_id = original_client_id
 
 @pytest.fixture
 def auth_headers():

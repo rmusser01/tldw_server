@@ -5,6 +5,14 @@ from fastapi import FastAPI, HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as sessions
 from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import GreetingSelectRequest
+from tldw_Server_API.app.core.Character_Chat import character_conversation_factory
+from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
+    build_materialized_behavior_controls,
+)
+from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import (
+    build_materialized_behavior_settings,
+)
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError, InputError
 
 
 @pytest.mark.unit
@@ -214,6 +222,22 @@ def test_merge_conversation_settings_preserves_unknown_keys():
 
 
 @pytest.mark.unit
+def test_public_chat_settings_hides_internal_resume_contract_keys_without_mutation():
+    stored = {
+        "schemaVersion": 2,
+        "authorNote": "visible",
+        "roleplayResumeV1": {"resumeEligible": True},
+        "roleplayBehaviorV1": {"schemaVersion": 1, "values": {}},
+    }
+
+    public = sessions._public_chat_settings(stored)
+
+    assert public == {"schemaVersion": 2, "authorNote": "visible"}
+    assert "roleplayResumeV1" in stored
+    assert "roleplayBehaviorV1" in stored
+
+
+@pytest.mark.unit
 def test_merge_conversation_settings_preserves_assistant_overlay_payload():
     server = {
         "schemaVersion": 2,
@@ -250,9 +274,17 @@ def test_persist_auto_summary_settings_upsert_does_not_touch_conversation_metada
         def __init__(self) -> None:
             self.upsert_calls = 0
             self.update_conversation_calls = 0
+            self.expected_settings_version: int | None = None
 
-        def upsert_conversation_settings(self, conversation_id: str, settings: dict[str, object]) -> bool:
+        def upsert_conversation_settings(
+            self,
+            conversation_id: str,
+            settings: dict[str, object],
+            *,
+            expected_settings_version: int | None = None,
+        ) -> bool:
             self.upsert_calls += 1
+            self.expected_settings_version = expected_settings_version
             return True
 
         def update_conversation(self, conversation_id: str, update_data: dict[str, object], expected_version: int) -> bool:
@@ -272,9 +304,11 @@ def test_persist_auto_summary_settings_upsert_does_not_touch_conversation_metada
         threshold=10,
         window=20,
         compressed_count=3,
+        expected_settings_version=7,
     )
 
     assert db.upsert_calls == 1
+    assert db.expected_settings_version == 7
     assert db.update_conversation_calls == 0
 
 
@@ -368,6 +402,9 @@ def test_openapi_exposes_chat_trash_query_params_and_routes():
 @pytest.mark.asyncio
 async def test_select_greeting_returns_500_when_settings_persist_fails():
     class _StubDB:
+        def __init__(self) -> None:
+            self.expected_settings_version: int | None = None
+
         def get_conversation_by_id(self, chat_id: str) -> dict[str, object]:
             return {"id": chat_id, "client_id": "1", "character_id": 7}
 
@@ -375,10 +412,60 @@ async def test_select_greeting_returns_500_when_settings_persist_fails():
             return {"id": character_id, "name": "Test Character", "first_message": "Hello!", "alternate_greetings": ["Hi!"]}
 
         def get_conversation_settings(self, chat_id: str) -> dict[str, object]:
-            return {"settings": {}}
+            return {"settings": {}, "settings_version": 4}
 
-        def upsert_conversation_settings(self, chat_id: str, settings: dict[str, object]) -> bool:
+        def upsert_conversation_settings(
+            self,
+            chat_id: str,
+            settings: dict[str, object],
+            *,
+            expected_settings_version: int | None = None,
+        ) -> bool:
+            self.expected_settings_version = expected_settings_version
             return False
+
+    class _StubUser:
+        id = "1"
+
+    db = _StubDB()
+    with pytest.raises(HTTPException) as exc_info:
+        await sessions.select_greeting(
+            chat_id="chat-1",
+            body=GreetingSelectRequest(index=0),
+            db=db,  # type: ignore[arg-type]
+            current_user=_StubUser(),  # type: ignore[arg-type]
+        )
+
+    assert exc_info.value.status_code == 500
+    assert "Failed to persist greeting selection" in str(exc_info.value.detail)
+    assert db.expected_settings_version == 4
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_select_greeting_returns_409_on_concurrent_settings_change():
+    class _StubDB:
+        def get_conversation_by_id(self, chat_id: str) -> dict[str, object]:
+            return {"id": chat_id, "client_id": "1", "character_id": 7}
+
+        def get_character_card_by_id(self, character_id: int) -> dict[str, object]:
+            return {
+                "id": character_id,
+                "name": "Test Character",
+                "first_message": "Hello!",
+            }
+
+        def get_conversation_settings(self, chat_id: str) -> dict[str, object]:
+            return {"settings": {}, "settings_version": 4}
+
+        def upsert_conversation_settings(
+            self,
+            chat_id: str,
+            settings: dict[str, object],
+            *,
+            expected_settings_version: int | None = None,
+        ) -> bool:
+            raise ConflictError("stale settings")
 
     class _StubUser:
         id = "1"
@@ -391,5 +478,146 @@ async def test_select_greeting_returns_500_when_settings_persist_fails():
             current_user=_StubUser(),  # type: ignore[arg-type]
         )
 
-    assert exc_info.value.status_code == 500
-    assert "Failed to persist greeting selection" in str(exc_info.value.detail)
+    assert exc_info.value.status_code == 409
+
+
+@pytest.mark.unit
+def test_prompt_completion_settings_inventory_classifies_every_consumed_control():
+    expected_behavior_fields = {
+        "assistantOverlay",
+        "authorNote",
+        "authorNoteEnabled",
+        "authorNoteExcludeFromPrompt",
+        "authorNoteGmOnly",
+        "authorNoteInjectionPosition",
+        "authorNotePlacement",
+        "authorNotePosition",
+        "autoSummaryEnabled",
+        "autoSummaryMessageThreshold",
+        "autoSummaryRecentWindow",
+        "autoSummaryThresholdMessages",
+        "autoSummaryWindowMessages",
+        "characterMemoryById",
+        "chatGenerationOverride",
+        "chatPresetOverrideId",
+        "conversationContext",
+        "generationOverrides",
+        "greetingEnabled",
+        "greetingScope",
+        "greetingSelectionId",
+        "memoryScope",
+        "model",
+        "participantCharacterIds",
+        "participant_character_ids",
+        "pinnedMessageIds",
+        "presetScope",
+        "promptPreset",
+        "prompt_preset",
+        "provider",
+        "summary",
+        "turnTakingMode",
+        "useCharacterDefault",
+    }
+    inventory = getattr(sessions, "PROMPT_COMPLETION_SETTING_CLASSIFICATION", {})
+    assert expected_behavior_fields <= {
+        key for key, classification in inventory.items() if classification == "behavior"
+    }
+
+
+@pytest.mark.unit
+def test_materialized_behavior_record_rejects_oversize_payload():
+    values = {
+        "base_snapshot": {
+            "schema_version": 1,
+            "digest": "sha256:" + ("0" * 64),
+        },
+        "behavior_controls": {
+            "applied_overrides": {},
+            "author_note": {
+                "enabled": True,
+                "gm_only": False,
+                "exclude_from_prompt": False,
+                "position": "before_system",
+            },
+            "auto_summary": {
+                "enabled": False,
+                "threshold_messages": 40,
+                "window_messages": 12,
+            },
+            "greeting": {
+                "enabled": True,
+                "scope": "chat",
+                "selection_id": None,
+                "use_character_default": True,
+            },
+            "memory_scope": "shared",
+            "pinned_message_ids": [],
+            "preset_scope": "character",
+            "prompt_context": {},
+            "turn_taking_mode": "single",
+        },
+        "effective_completion": {
+            "provider": "local-llm",
+            "model": "local-test",
+            "sampling": {
+                "temperature": 0.7,
+                "top_p": 1.0,
+                "repetition_penalty": 1.0,
+                "stop": [],
+            },
+        },
+        "memory": {"author_note": "x" * (1024 * 1024)},
+    }
+    with pytest.raises(InputError, match="exceeds maximum"):
+        build_materialized_behavior_settings(values)
+
+
+@pytest.mark.unit
+def test_materialized_reference_ids_are_deduplicated_and_bounded_before_lookup():
+    normalize_participants = getattr(
+        character_conversation_factory,
+        "normalize_materialized_participant_ids",
+        None,
+    )
+    normalize_world_books = getattr(
+        character_conversation_factory,
+        "normalize_materialized_world_book_ids",
+        None,
+    )
+    assert callable(normalize_participants)
+    assert callable(normalize_world_books)
+    assert normalize_participants(1, [1, "2", 2, 3, "3"]) == [1, 2, 3]
+    assert normalize_world_books([1, "1", 2, 2, 3]) == [1, 2, 3]
+    with pytest.raises(InputError, match="at most 33"):
+        normalize_participants(1, list(range(2, 35)))
+    with pytest.raises(InputError, match="at most 64"):
+        normalize_world_books(list(range(1, 66)))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("authorNoteEnabled", "false"),
+        ("authorNoteGmOnly", 1),
+        ("authorNoteExcludeFromPrompt", 0),
+        ("greetingEnabled", "true"),
+        ("useCharacterDefault", 1),
+        ("autoSummaryEnabled", "false"),
+    ],
+)
+def test_materialized_behavior_controls_reject_non_boolean_known_flags(
+    field: str,
+    value: object,
+) -> None:
+    with pytest.raises(InputError, match=field):
+        build_materialized_behavior_controls({field: value})
+
+
+@pytest.mark.unit
+def test_settings_endpoint_rejects_non_boolean_behavior_flags() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        sessions._validate_chat_settings_payload({"greetingEnabled": "false"})
+
+    assert exc_info.value.status_code == 422
+    assert "greetingEnabled" in str(exc_info.value.detail)

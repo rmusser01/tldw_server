@@ -41,6 +41,18 @@ class TransactionPassthroughError(Exception):
     """Sanitized domain failure that may cross a rolled-back DB transaction."""
 
 
+class BehaviorSnapshotValidationError(ValueError):
+    """Raised when a character behavior snapshot violates its closed schema."""
+
+
+class CharacterBehaviorSourceDrift(RuntimeError):
+    """Raised when character behavior sources change during materialization."""
+
+
+class ConversationSettingsTargetMissing(RuntimeError):
+    """Force rollback when settings outlive their live conversation target."""
+
+
 class WebhookError(TransactionPassthroughError):
     """Expected webhook domain failure with no caller-controlled message text."""
 

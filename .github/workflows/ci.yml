@@ -1402,6 +1402,7 @@ jobs:
               tldw_Server_API/tests/Visual_Identities
           - name: chat-character-unit-core
             paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py
               tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_cards_fts_bootstrap.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_chat_default_provider.py
@@ -1441,6 +1442,7 @@ jobs:
               tldw_Server_API/tests/Visual_Identities
           - name: chat-character-integration-api
             paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py

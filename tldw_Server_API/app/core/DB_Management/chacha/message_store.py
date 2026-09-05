@@ -3,9 +3,13 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from contextlib import nullcontext
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    DatabaseError as BackendDatabaseError,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     _CHACHA_NONCRITICAL_EXCEPTIONS,
     BackendType,
@@ -46,7 +50,76 @@ class MessageStore:
     # Message creation
     # ------------------------------------------------------------------
 
-    def add_message(self, msg_data: dict[str, Any]) -> str | None:
+    @staticmethod
+    def _row_value(row: Any, key: str, index: int = 0) -> Any:
+        if isinstance(row, dict):
+            return row.get(key)
+        mapping = getattr(row, "_mapping", None)
+        if mapping is not None:
+            return mapping.get(key)
+        try:
+            return row[key]
+        except (IndexError, KeyError, TypeError):
+            return row[index]
+
+    def _advance_history_version(self, conn: Any, conversation_id: str) -> None:
+        """Advance the resume history fence within the message mutation transaction."""
+        cursor = conn.execute(
+            "UPDATE conversations "
+            "SET history_version = history_version + 1, last_modified = ? "
+            "WHERE id = ? AND deleted = FALSE",
+            (self._db._get_current_utc_timestamp_iso(), conversation_id),
+        )
+        if cursor.rowcount != 1:
+            raise InputError(  # noqa: TRY003
+                f"Cannot mutate message history: Conversation ID '{conversation_id}' not found or deleted."
+            )
+
+    def lock_message_for_edit(self, message_id: str, *, conn: Any) -> None:
+        """Lock a live PostgreSQL message before its conversation is locked."""
+        if self._db.backend_type != BackendType.POSTGRESQL:
+            return
+        row = conn.execute(
+            "SELECT id FROM messages "
+            "WHERE id = ? AND deleted = FALSE "
+            "FOR UPDATE",
+            (message_id,),
+        ).fetchone()
+        if row is None:
+            raise ConflictError(
+                f"Message ID {message_id} is no longer available for editing.",
+                entity="messages",
+                entity_id=message_id,
+            )
+
+    def lock_message_metadata_for_edit(self, message_id: str, *, conn: Any) -> None:
+        """Ensure and lock message metadata before the conversation row."""
+        if self._db.backend_type != BackendType.POSTGRESQL:
+            return
+        conn.execute(
+            "INSERT INTO message_metadata(message_id, last_modified) "
+            "VALUES (?, CURRENT_TIMESTAMP) "
+            "ON CONFLICT(message_id) DO NOTHING",
+            (message_id,),
+        )
+        row = conn.execute(
+            "SELECT message_id FROM message_metadata "
+            "WHERE message_id = ? FOR UPDATE",
+            (message_id,),
+        ).fetchone()
+        if row is None:
+            raise ConflictError(
+                f"Message metadata for {message_id} is no longer available.",
+                entity="message_metadata",
+                entity_id=message_id,
+            )
+
+    def add_message(
+        self,
+        msg_data: dict[str, Any],
+        *,
+        conn: Any | None = None,
+    ) -> str | None:
         """
         Adds a new message to a conversation, optionally with image data.
 
@@ -163,8 +236,9 @@ class MessageStore:
                 timestamp, msg_data.get('ranking'), now, client_id, 1, 0
             )
         try:
-            with self._db.transaction():
-                conv_cursor = self._db.execute_query(
+            transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+            with transaction as transaction_conn:
+                conv_cursor = transaction_conn.execute(
                     "SELECT 1 FROM conversations WHERE id = ? AND deleted = FALSE",
                     (msg_data['conversation_id'],),
                 )
@@ -172,9 +246,10 @@ class MessageStore:
                     raise InputError(  # noqa: TRY003, TRY301
                         f"Cannot add message: Conversation ID '{msg_data['conversation_id']}' not found or deleted."
                     )
-                self._db.execute_query(query, params)
+                transaction_conn.execute(query, params)
                 if normalized_images:
-                    self._insert_message_images(msg_id, normalized_images)
+                    self._insert_message_images(msg_id, normalized_images, conn=transaction_conn)
+                self._advance_history_version(transaction_conn, msg_data['conversation_id'])
             logger.info(
                 'Added message ID: {} to conversation {} (Images stored: {}).',
                 msg_id,
@@ -190,6 +265,15 @@ class MessageStore:
                     entity_id=msg_id,
                 ) from e
             raise CharactersRAGDBError(f"Database integrity error adding message: {e}") from e  # noqa: TRY003
+        except BackendDatabaseError as e:
+            error_text = str(e).lower()
+            if "duplicate key" in error_text or "unique constraint" in error_text:
+                raise ConflictError(  # noqa: TRY003
+                    f"Message with ID '{msg_id}' already exists.",
+                    entity="messages",
+                    entity_id=msg_id,
+                ) from e
+            raise CharactersRAGDBError(f"Database error adding message: {e}") from e  # noqa: TRY003
         except InputError:
             raise
         except CharactersRAGDBError as e:
@@ -200,7 +284,13 @@ class MessageStore:
     # Image helpers
     # ------------------------------------------------------------------
 
-    def _insert_message_images(self, message_id: str, images: list[tuple[bytes, str]]) -> None:
+    def _insert_message_images(
+        self,
+        message_id: str,
+        images: list[tuple[bytes, str]],
+        *,
+        conn: Any | None = None,
+    ) -> None:
         """Insert or replace message images for the given message."""
         if not images:
             return
@@ -220,7 +310,10 @@ class MessageStore:
             "image_data=excluded.image_data, image_mime_type=excluded.image_mime_type, "
             "created_at=CURRENT_TIMESTAMP"
         )
-        self._db.execute_many(query, params, commit=False)
+        if conn is not None:
+            conn.executemany(query, params)
+        else:
+            self._db.execute_many(query, params, commit=False)
 
     def append_message_image(
         self,
@@ -229,6 +322,7 @@ class MessageStore:
         mime_type: str,
         *,
         commit: bool = True,
+        conn: Any | None = None,
     ) -> int:
         """Append one image to a message after the current maximum image position."""
         if isinstance(image_bytes, memoryview):
@@ -249,31 +343,48 @@ class MessageStore:
                 f"Message image attachment exceeds maximum size of {max_image_bytes} bytes"
             )
 
-        def _append_once() -> int:
-            cursor = self._db.execute_query(
-                "SELECT COALESCE(MAX(position), -1) + 1 FROM message_images WHERE message_id = ?",
+        def _append_once(transaction_conn: Any, *, use_db_executor: bool = False) -> int:
+            def _execute(query: str, params: tuple[Any, ...]) -> Any:
+                if use_db_executor:
+                    return self._db.execute_query(query, params)
+                return transaction_conn.execute(query, params)
+
+            message_cursor = _execute(
+                "SELECT conversation_id FROM messages WHERE id = ? AND deleted = FALSE",
+                (message_id,),
+            )
+            message_row = message_cursor.fetchone()
+            if message_row is None:
+                raise InputError(  # noqa: TRY003
+                    f"Cannot append image: Message ID '{message_id}' not found or deleted."
+                )
+            conversation_id = str(self._row_value(message_row, "conversation_id"))
+
+            cursor = _execute(
+                "SELECT COALESCE(MAX(position), -1) + 1 AS next_position "
+                "FROM message_images WHERE message_id = ?",
                 (message_id,),
             )
             row = cursor.fetchone()
-            position = int(row[0] if row is not None else 0)
-            self._db.execute_query(
+            position = int(self._row_value(row, "next_position") if row is not None else 0)
+            _execute(
                 """
                 INSERT INTO message_images (message_id, position, image_data, image_mime_type)
                 VALUES (?, ?, ?, ?)
                 """,
                 (message_id, position, bytes(image_bytes), str(mime_type)),
-                commit=False,
             )
+            self._advance_history_version(transaction_conn, conversation_id)
             return position
 
-        def _append_with_retries(*, transactional: bool) -> int:
+        def _append_with_retries(existing_conn: Any | None = None) -> int:
             last_error: Exception | None = None
             for _ in range(5):
                 try:
-                    if transactional:
-                        with self._db.transaction():
-                            return _append_once()
-                    return _append_once()
+                    if existing_conn is not None:
+                        return _append_once(existing_conn, use_db_executor=True)
+                    with self._db.transaction() as owned_conn:
+                        return _append_once(owned_conn, use_db_executor=True)
                 except sqlite3.IntegrityError as exc:
                     last_error = exc
                     continue
@@ -281,9 +392,11 @@ class MessageStore:
                 f"Concurrent append conflict for message image positions on message_id={message_id}",
             ) from last_error
 
+        if conn is not None:
+            return _append_once(conn)
         if not commit:
-            return _append_with_retries(transactional=False)
-        return _append_with_retries(transactional=True)
+            return _append_with_retries(self._db.get_connection())
+        return _append_with_retries()
 
     def get_message_images(self, message_id: str) -> list[dict[str, Any]]:
         """Fetch all images associated with a message, ordered by position."""
@@ -672,33 +785,35 @@ class MessageStore:
                 existing_versions,
             )
 
-        message_id = self.add_message(
-            {
-                "id": projection_id,
-                "conversation_id": conversation_id,
-                "parent_message_id": parent_message_id,
-                "sender": sender,
-                "content": content or "",
-                "timestamp": timestamp,
-                "ranking": ranking,
-                "client_id": sync_client_id,
-            }
-        )
-        if message_id is None:
-            raise CharactersRAGDBError("Failed to append Sync v2 message projection.")  # noqa: TRY003
-        if object_revision != 1:
-            self._db.execute_query(
-                "UPDATE messages SET version = ?, client_id = ? WHERE id = ?",
-                (object_revision, sync_client_id, message_id),
-                commit=True,
+        with self._db.transaction() as conn:
+            message_id = self.add_message(
+                {
+                    "id": projection_id,
+                    "conversation_id": conversation_id,
+                    "parent_message_id": parent_message_id,
+                    "sender": sender,
+                    "content": content or "",
+                    "timestamp": timestamp,
+                    "ranking": ranking,
+                    "client_id": sync_client_id,
+                },
+                conn=conn,
             )
-        self._set_sync_v2_message_metadata_or_raise(
-            message_id=message_id,
-            stable_message_id=normalized_stable_id,
-            payload_hash=payload_hash,
-            object_revision=object_revision,
-            projection_conflict=is_conflict,
-        )
+            if message_id is None:
+                raise CharactersRAGDBError("Failed to append Sync v2 message projection.")  # noqa: TRY003
+            if object_revision != 1:
+                conn.execute(
+                    "UPDATE messages SET version = ?, client_id = ? WHERE id = ?",
+                    (object_revision, sync_client_id, message_id),
+                )
+            self._set_sync_v2_message_metadata_or_raise(
+                message_id=message_id,
+                stable_message_id=normalized_stable_id,
+                payload_hash=payload_hash,
+                object_revision=object_revision,
+                projection_conflict=is_conflict,
+                conn=conn,
+            )
         return {
             "message_id": message_id,
             "stable_message_id": normalized_stable_id,
@@ -747,12 +862,17 @@ class MessageStore:
             )
 
         matched_ids = {str(version["id"]) for version in matched_versions}
-        target_ids = [str(version["id"]) for version in existing_versions]
         now = self._db._get_current_utc_timestamp_iso()
-        updated = 0
+        affected_conversation_ids = {
+            str(version["conversation_id"])
+            for version in existing_versions
+            if not bool(version["deleted"])
+        }
         with self._db.transaction() as conn:
-            for target_id in target_ids:
-                cursor = conn.execute(
+            for version in existing_versions:
+                if bool(version["deleted"]):
+                    continue
+                conn.execute(
                     """
                     UPDATE messages
                        SET deleted = ?,
@@ -761,30 +881,31 @@ class MessageStore:
                            client_id = ?
                      WHERE id = ?
                     """,
-                    (True, now, object_revision, sync_client_id, target_id),
+                    (True, now, object_revision, sync_client_id, version["id"]),
                 )
-                updated += cursor.rowcount
-        if updated == 0:
-            raise ConflictError(  # noqa: TRY003
-                "Message not found for Sync v2 tombstone.",
-                entity="messages",
-                entity_id=normalized_stable_id,
-            )
-        for version in existing_versions:
-            sync_meta = dict(((version.get("metadata") or {}).get("extra") or {}).get("sync_v2") or {})
-            sync_meta.setdefault("stable_message_id", normalized_stable_id)
-            sync_meta.setdefault("payload_hash", object_hash if str(version["id"]) in matched_ids else "")
-            sync_meta.update(
-                {
-                    "object_revision": object_revision,
-                    "tombstoned": True,
-                }
-            )
-            persisted = self.set_message_metadata_extra(version["id"], {"sync_v2": sync_meta}, merge=True)
-            if not persisted:
-                raise CharactersRAGDBError(  # noqa: TRY003
-                    f"Failed to persist Sync v2 tombstone metadata for message {version['id']}."
+            for version in existing_versions:
+                sync_meta = dict(((version.get("metadata") or {}).get("extra") or {}).get("sync_v2") or {})
+                sync_meta.setdefault("stable_message_id", normalized_stable_id)
+                sync_meta.setdefault("payload_hash", object_hash if str(version["id"]) in matched_ids else "")
+                sync_meta.update(
+                    {
+                        "object_revision": object_revision,
+                        "tombstoned": True,
+                    }
                 )
+                persisted = self.set_message_metadata_extra(
+                    version["id"],
+                    {"sync_v2": sync_meta},
+                    merge=True,
+                    conn=conn,
+                    _advance_history=False,
+                )
+                if not persisted:
+                    raise CharactersRAGDBError(  # noqa: TRY003
+                        f"Failed to persist Sync v2 tombstone metadata for message {version['id']}."
+                    )
+            for affected_conversation_id in sorted(affected_conversation_ids):
+                self._advance_history_version(conn, affected_conversation_id)
         return True
 
     def get_messages_by_sync_stable_id(
@@ -843,6 +964,7 @@ class MessageStore:
         payload_hash: str,
         object_revision: int,
         projection_conflict: bool,
+        conn: Any | None = None,
     ) -> None:
         persisted = self.set_message_metadata_extra(
             message_id,
@@ -855,6 +977,8 @@ class MessageStore:
                 }
             },
             merge=True,
+            conn=conn,
+            _advance_history=False,
         )
         if not persisted:
             raise CharactersRAGDBError(  # noqa: TRY003
@@ -1094,7 +1218,14 @@ class MessageStore:
     # Message update
     # ------------------------------------------------------------------
 
-    def update_message(self, message_id: str, update_data: dict[str, Any], expected_version: int) -> bool | None:
+    def update_message(
+        self,
+        message_id: str,
+        update_data: dict[str, Any],
+        expected_version: int,
+        *,
+        conn: Any | None = None,
+    ) -> bool | None:
         """
         Updates an existing message using optimistic locking.
 
@@ -1171,8 +1302,14 @@ class MessageStore:
         query = f"UPDATE messages SET {', '.join(current_fields_to_update_sql)} WHERE id = ? AND version = ? AND deleted = FALSE"  # nosec B608
 
         try:
-            with self._db.transaction() as conn:
-                current_db_version = self._db._get_current_db_version(conn, "messages", "id", message_id)
+            transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+            with transaction as transaction_conn:
+                current_db_version = self._db._get_current_db_version(
+                    transaction_conn,
+                    "messages",
+                    "id",
+                    message_id,
+                )
 
                 if current_db_version != expected_version:
                     raise ConflictError(  # noqa: TRY003, TRY301
@@ -1180,11 +1317,17 @@ class MessageStore:
                         entity="messages", entity_id=message_id
                     )
 
-                cursor = conn.execute(query, final_params_for_execute)
+                conversation_row = transaction_conn.execute(
+                    "SELECT conversation_id FROM messages WHERE id = ?",
+                    (message_id,),
+                ).fetchone()
+                cursor = transaction_conn.execute(query, final_params_for_execute)
 
                 if cursor.rowcount == 0:
-                    check_again_cursor = conn.execute("SELECT version, deleted FROM messages WHERE id = ?",
-                                                      (message_id,))
+                    check_again_cursor = transaction_conn.execute(
+                        "SELECT version, deleted FROM messages WHERE id = ?",
+                        (message_id,),
+                    )
                     final_state = check_again_cursor.fetchone()
                     msg = f"Update for message ID {message_id} (expected v{expected_version}) affected 0 rows."
                     if not final_state:
@@ -1195,6 +1338,10 @@ class MessageStore:
                         msg = f"Message ID {message_id} version changed to {final_state['version']} concurrently."
                     raise ConflictError(msg, entity="messages", entity_id=message_id)  # noqa: TRY301
 
+                self._advance_history_version(
+                    transaction_conn,
+                    str(self._row_value(conversation_row, "conversation_id")),
+                )
                 logger.info(
                     f"Updated message ID {message_id} from version {expected_version} to version {next_version_val}. Fields updated: {fields_to_update_sql if fields_to_update_sql else 'None'}")
                 return True
@@ -1215,7 +1362,13 @@ class MessageStore:
     # Soft delete
     # ------------------------------------------------------------------
 
-    def soft_delete_message(self, message_id: str, expected_version: int) -> bool | None:
+    def soft_delete_message(
+        self,
+        message_id: str,
+        expected_version: int,
+        *,
+        conn: Any | None = None,
+    ) -> bool | None:
         """
         Soft-deletes a message using optimistic locking.
 
@@ -1243,12 +1396,20 @@ class MessageStore:
         params = (now, next_version_val, self._db.client_id, message_id, expected_version)
 
         try:
-            with self._db.transaction() as conn:
+            transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+            with transaction as transaction_conn:
                 try:
-                    current_db_version = self._db._get_current_db_version(conn, "messages", "id", message_id)
+                    current_db_version = self._db._get_current_db_version(
+                        transaction_conn,
+                        "messages",
+                        "id",
+                        message_id,
+                    )
                 except ConflictError:
-                    check_status_cursor = conn.execute("SELECT deleted, version FROM messages WHERE id = ?",
-                                                       (message_id,))
+                    check_status_cursor = transaction_conn.execute(
+                        "SELECT deleted, version FROM messages WHERE id = ?",
+                        (message_id,),
+                    )
                     record_status = check_status_cursor.fetchone()
                     if record_status and record_status['deleted']:
                         logger.info(f"Message ID {message_id} already soft-deleted. Success (idempotent).")
@@ -1261,11 +1422,17 @@ class MessageStore:
                         entity="messages", entity_id=message_id
                     )
 
-                cursor = conn.execute(query, params)
+                conversation_row = transaction_conn.execute(
+                    "SELECT conversation_id FROM messages WHERE id = ?",
+                    (message_id,),
+                ).fetchone()
+                cursor = transaction_conn.execute(query, params)
 
                 if cursor.rowcount == 0:
-                    check_again_cursor = conn.execute("SELECT version, deleted FROM messages WHERE id = ?",
-                                                      (message_id,))
+                    check_again_cursor = transaction_conn.execute(
+                        "SELECT version, deleted FROM messages WHERE id = ?",
+                        (message_id,),
+                    )
                     final_state = check_again_cursor.fetchone()
                     msg = f"Soft delete for message ID {message_id} (expected v{expected_version}) affected 0 rows."
                     if not final_state:
@@ -1279,6 +1446,10 @@ class MessageStore:
                         msg = f"Soft delete for message ID {message_id} (expected v{expected_version}) affected 0 rows."
                     raise ConflictError(msg, entity="messages", entity_id=message_id)  # noqa: TRY301
 
+                self._advance_history_version(
+                    transaction_conn,
+                    str(self._row_value(conversation_row, "conversation_id")),
+                )
                 logger.info(
                     f"Soft-deleted message ID {message_id} (was v{expected_version}), new version {next_version_val}.")
                 return True
@@ -1376,7 +1547,62 @@ class MessageStore:
     # Message metadata
     # ------------------------------------------------------------------
 
-    def add_message_metadata(self, message_id: str, tool_calls: Any | None = None, extra: Any | None = None) -> bool:
+    @staticmethod
+    def _metadata_json_value(value: Any) -> Any:
+        """Decode stored JSON text while accepting backend-decoded JSON values."""
+        return json.loads(value) if isinstance(value, str) else value
+
+    def _add_message_metadata_with_conn(
+        self,
+        message_id: str,
+        tool_calls: Any | None,
+        extra: Any | None,
+        conn: Any,
+        *,
+        advance_history: bool = True,
+    ) -> bool:
+        cursor = conn.execute(
+            "SELECT m.conversation_id, mm.message_id AS metadata_message_id, "
+            "mm.tool_calls_json, mm.extra_json "
+            "FROM messages m LEFT JOIN message_metadata mm ON mm.message_id = m.id "
+            "WHERE m.id = ?",
+            (message_id,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return False
+
+        metadata_message_id = self._row_value(row, "metadata_message_id", 1)
+        if metadata_message_id is not None:
+            stored_tool_calls = self._metadata_json_value(self._row_value(row, "tool_calls_json", 2))
+            stored_extra = self._metadata_json_value(self._row_value(row, "extra_json", 3))
+            if stored_tool_calls == tool_calls and stored_extra == extra:
+                return True
+
+        conn.execute(
+            "INSERT INTO message_metadata(message_id, tool_calls_json, extra_json, last_modified) "
+            "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
+            "ON CONFLICT(message_id) DO UPDATE SET tool_calls_json=excluded.tool_calls_json, "
+            "extra_json=excluded.extra_json, last_modified=CURRENT_TIMESTAMP",
+            (
+                message_id,
+                json.dumps(tool_calls) if tool_calls is not None else None,
+                json.dumps(extra) if extra is not None else None,
+            ),
+        )
+        if advance_history:
+            conversation_id = str(self._row_value(row, "conversation_id"))
+            self._advance_history_version(conn, conversation_id)
+        return True
+
+    def add_message_metadata(
+        self,
+        message_id: str,
+        tool_calls: Any | None = None,
+        extra: Any | None = None,
+        *,
+        conn: Any | None = None,
+    ) -> bool:
         """Upsert per-message metadata such as tool calls.
 
         Stores JSON-serialized metadata in an auxiliary table `message_metadata`.
@@ -1384,68 +1610,50 @@ class MessageStore:
         """
         try:
             self._db._ensure_message_metadata_table()
-            if self._db.backend_type == BackendType.SQLITE:
-                query = (
-                    "INSERT INTO message_metadata(message_id, tool_calls_json, extra_json, last_modified) "
-                    "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
-                    "ON CONFLICT(message_id) DO UPDATE SET tool_calls_json=excluded.tool_calls_json, "
-                    "extra_json=excluded.extra_json, last_modified=CURRENT_TIMESTAMP"
-                )
-                self._db.execute_query(
-                    query,
-                    (
-                        message_id,
-                        json.dumps(tool_calls) if tool_calls is not None else None,
-                        json.dumps(extra) if extra is not None else None,
-                    ),
-                    commit=True,
-                )
-                return True
-
-            upsert = (
-                "INSERT INTO message_metadata(message_id, tool_calls_json, extra_json, last_modified) "
-                "VALUES (%s, %s, %s, NOW()) "
-                "ON CONFLICT (message_id) DO UPDATE SET tool_calls_json = EXCLUDED.tool_calls_json, "
-                "extra_json = EXCLUDED.extra_json, last_modified = NOW()"
-            )
-            self._db.backend.execute(
-                upsert,
-                (
+            transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+            with transaction as transaction_conn:
+                return self._add_message_metadata_with_conn(
                     message_id,
-                    json.dumps(tool_calls) if tool_calls is not None else None,
-                    json.dumps(extra) if extra is not None else None,
-                ),
-            )
-            return True  # noqa: TRY300
+                    tool_calls,
+                    extra,
+                    transaction_conn,
+                )
         except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
+            if conn is not None:
+                raise
             logger.warning(f"add_message_metadata failed for message {message_id}: {e}")
             return False
 
-    def get_message_metadata(self, message_id: str) -> dict[str, Any] | None:
+    def get_message_metadata(
+        self,
+        message_id: str,
+        *,
+        conn: Any | None = None,
+    ) -> dict[str, Any] | None:
         """Fetch metadata for a message if present."""
         try:
             self._db._ensure_message_metadata_table()
-            if self._db.backend_type == BackendType.SQLITE:
-                cursor = self._db.execute_query(
-                    "SELECT tool_calls_json, extra_json, last_modified FROM message_metadata WHERE message_id = ?",
+            if conn is not None:
+                cursor = conn.execute(
+                    "SELECT tool_calls_json, extra_json, last_modified "
+                    "FROM message_metadata WHERE message_id = ?",
                     (message_id,),
                 )
-                row = cursor.fetchone()
-                if not row:
-                    return None
-                tc, ex, lm = row
             else:
-                result = self._db.backend.execute(
-                    "SELECT tool_calls_json, extra_json, last_modified FROM message_metadata WHERE message_id = %s",
-                    (message_id,)
+                cursor = self._db.execute_query(
+                    "SELECT tool_calls_json, extra_json, last_modified "
+                    "FROM message_metadata WHERE message_id = ?",
+                    (message_id,),
                 )
-                r = result.fetchone()
-                if not r:
-                    return None
-                tc, ex, lm = r
+            row = cursor.fetchone()
+            if not row:
+                return None
+            tc = self._row_value(row, "tool_calls_json")
+            ex = self._row_value(row, "extra_json", 1)
+            lm = self._row_value(row, "last_modified", 2)
             return {
-                "tool_calls": json.loads(tc) if tc else None,
-                "extra": json.loads(ex) if ex else None,
+                "tool_calls": self._metadata_json_value(tc) if tc is not None else None,
+                "extra": self._metadata_json_value(ex) if ex is not None else None,
                 "last_modified": lm,
             }
         except _CHACHA_NONCRITICAL_EXCEPTIONS:
@@ -1496,7 +1704,51 @@ class MessageStore:
         except _CHACHA_NONCRITICAL_EXCEPTIONS:
             return {}
 
-    def set_message_metadata_extra(self, message_id: str, extra: dict[str, Any], merge: bool = True) -> bool:
+    def _get_message_metadata_for_merge(
+        self,
+        message_id: str,
+        conn: Any,
+    ) -> dict[str, Any] | None:
+        """Read metadata under the row lock used by PostgreSQL merge writers."""
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            conn.execute(
+                "INSERT INTO message_metadata(message_id, last_modified) "
+                "SELECT id, CURRENT_TIMESTAMP FROM messages WHERE id = ? "
+                "ON CONFLICT(message_id) DO NOTHING",
+                (message_id,),
+            )
+            query = (
+                "SELECT tool_calls_json, extra_json, last_modified "
+                "FROM message_metadata WHERE message_id = ? FOR UPDATE"
+            )
+        else:
+            query = (
+                "SELECT tool_calls_json, extra_json, last_modified "
+                "FROM message_metadata WHERE message_id = ?"
+            )
+
+        row = conn.execute(query, (message_id,)).fetchone()
+        if row is None:
+            # SQLite merge writers retain the existing create-on-first-write
+            # behavior; the downstream message join still rejects missing IDs.
+            return {} if self._db.backend_type == BackendType.SQLITE else None
+        tool_calls = self._row_value(row, "tool_calls_json")
+        extra = self._row_value(row, "extra_json", 1)
+        return {
+            "tool_calls": self._metadata_json_value(tool_calls) if tool_calls is not None else None,
+            "extra": self._metadata_json_value(extra) if extra is not None else None,
+            "last_modified": self._row_value(row, "last_modified", 2),
+        }
+
+    def set_message_metadata_extra(
+        self,
+        message_id: str,
+        extra: dict[str, Any],
+        merge: bool = True,
+        *,
+        conn: Any | None = None,
+        _advance_history: bool = True,
+    ) -> bool:
         """Set or merge structured extra metadata for a message.
 
         Expected shape for `extra`:
@@ -1510,25 +1762,38 @@ class MessageStore:
         tool_results are merged key-wise.
         """
         try:
-            current = self.get_message_metadata(message_id) or {}
-            current_extra = current.get('extra') or {}
-            if merge and isinstance(current_extra, dict) and isinstance(extra, dict):
-                merged = dict(current_extra)
-                # Merge tool_results specially
-                tr_existing = merged.get('tool_results') if isinstance(merged.get('tool_results'), dict) else {}
-                tr_incoming = extra.get('tool_results') if isinstance(extra.get('tool_results'), dict) else {}
-                if tr_existing or tr_incoming:
-                    merged['tool_results'] = {**tr_existing, **tr_incoming}
-                # Merge top-level keys (favor incoming)
-                for k, v in extra.items():
-                    if k == 'tool_results':
-                        continue
-                    merged[k] = v
-                new_extra = merged
-            else:
-                new_extra = extra
-            return self.add_message_metadata(message_id, tool_calls=current.get('tool_calls'), extra=new_extra)
+            self._db._ensure_message_metadata_table()
+            transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+            with transaction as transaction_conn:
+                current = self._get_message_metadata_for_merge(message_id, transaction_conn)
+                if current is None:
+                    return False
+                current_extra = current.get('extra') or {}
+                if merge and isinstance(current_extra, dict) and isinstance(extra, dict):
+                    merged = dict(current_extra)
+                    # Merge tool_results specially
+                    tr_existing = merged.get('tool_results') if isinstance(merged.get('tool_results'), dict) else {}
+                    tr_incoming = extra.get('tool_results') if isinstance(extra.get('tool_results'), dict) else {}
+                    if tr_existing or tr_incoming:
+                        merged['tool_results'] = {**tr_existing, **tr_incoming}
+                    # Merge top-level keys (favor incoming)
+                    for k, v in extra.items():
+                        if k == 'tool_results':
+                            continue
+                        merged[k] = v
+                    new_extra = merged
+                else:
+                    new_extra = extra
+                return self._add_message_metadata_with_conn(
+                    message_id,
+                    current.get('tool_calls'),
+                    new_extra,
+                    transaction_conn,
+                    advance_history=_advance_history,
+                )
         except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
+            if conn is not None:
+                raise
             logger.warning(f"set_message_metadata_extra failed for {message_id}: {e}")
             return False
 
@@ -1561,27 +1826,11 @@ class MessageStore:
         Returns:
             bool: True if successful, False otherwise
         """
-        try:
-            # Get current metadata to preserve other extra fields
-            current = self.get_message_metadata(message_id) or {}
-            current_extra = current.get('extra') or {}
-
-            if merge and isinstance(current_extra, dict):
-                # Merge: preserve existing extra fields, update rag_context
-                new_extra = dict(current_extra)
-                new_extra['rag_context'] = rag_context
-            else:
-                # Replace: only keep rag_context
-                new_extra = {'rag_context': rag_context}
-
-            return self.add_message_metadata(
-                message_id,
-                tool_calls=current.get('tool_calls'),
-                extra=new_extra
-            )
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"set_message_rag_context failed for {message_id}: {e}")
-            return False
+        return self.set_message_metadata_extra(
+            message_id,
+            {"rag_context": rag_context},
+            merge=merge,
+        )
 
     def get_message_rag_context(self, message_id: str) -> dict[str, Any] | None:
         """

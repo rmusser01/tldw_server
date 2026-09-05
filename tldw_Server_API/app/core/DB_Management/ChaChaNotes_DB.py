@@ -699,8 +699,8 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 64  # Schema v64 adds durable Notes graph suggestion persistence
-    _POSTGRES_SCHEMA_VERSION = 64
+    _CURRENT_SCHEMA_VERSION = 65  # Schema v65 adds character-conversation resume state
+    _POSTGRES_SCHEMA_VERSION = 65
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
     _NOTE_TASK_V60_TABLES = (
@@ -7201,6 +7201,102 @@ END;
 $shared_workspace_chat_v61_verify$;
 """
 
+    _MIGRATION_SQL_V64_TO_V65 = """
+CREATE TABLE conversation_behavior_snapshots(
+  conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+  status TEXT NOT NULL CHECK(status IN ('valid','missing','invalid')),
+  schema_version INTEGER,
+  canonical_json TEXT,
+  digest TEXT,
+  size_bytes INTEGER,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CHECK(
+    (
+      status = 'valid'
+      AND schema_version IS NOT NULL
+      AND schema_version >= 1
+      AND canonical_json IS NOT NULL
+      AND digest IS NOT NULL
+      AND length(digest) = 71
+      AND substr(digest, 1, 7) = 'sha256:'
+      AND substr(digest, 8) NOT GLOB '*[^0-9a-f]*'
+      AND size_bytes IS NOT NULL
+      AND size_bytes >= 1
+      AND length(CAST(canonical_json AS BLOB)) = size_bytes
+    )
+    OR
+    (
+      status IN ('missing','invalid')
+      AND schema_version IS NULL
+      AND canonical_json IS NULL
+      AND digest IS NULL
+      AND size_bytes IS NULL
+    )
+  )
+);
+CREATE INDEX idx_conversation_behavior_snapshots_status
+  ON conversation_behavior_snapshots(status);
+CREATE INDEX idx_conversation_behavior_snapshots_digest
+  ON conversation_behavior_snapshots(digest);
+ALTER TABLE conversations
+  ADD COLUMN history_version INTEGER NOT NULL DEFAULT 1 CHECK(history_version >= 1);
+ALTER TABLE conversation_settings
+  ADD COLUMN settings_version INTEGER NOT NULL DEFAULT 1 CHECK(settings_version >= 1);
+
+UPDATE db_schema_version
+   SET version = 65
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version = 64;
+"""
+
+    _MIGRATION_SQL_V64_TO_V65_POSTGRES = """
+CREATE TABLE conversation_behavior_snapshots(
+  conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+  status TEXT NOT NULL CHECK(status IN ('valid','missing','invalid')),
+  schema_version INTEGER,
+  canonical_json TEXT,
+  digest TEXT,
+  size_bytes INTEGER,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CHECK(
+    (
+      status = 'valid'
+      AND schema_version IS NOT NULL
+      AND schema_version >= 1
+      AND canonical_json IS NOT NULL
+      AND digest IS NOT NULL
+      AND digest ~ '^sha256:[0-9a-f]{64}$'
+      AND size_bytes IS NOT NULL
+      AND size_bytes >= 1
+      AND octet_length(canonical_json) = size_bytes
+    )
+    OR
+    (
+      status IN ('missing','invalid')
+      AND schema_version IS NULL
+      AND canonical_json IS NULL
+      AND digest IS NULL
+      AND size_bytes IS NULL
+    )
+  )
+);
+CREATE INDEX idx_conversation_behavior_snapshots_status
+  ON conversation_behavior_snapshots(status);
+CREATE INDEX idx_conversation_behavior_snapshots_digest
+  ON conversation_behavior_snapshots(digest);
+ALTER TABLE conversations
+  ADD COLUMN history_version INTEGER NOT NULL DEFAULT 1
+  CHECK (history_version >= 1);
+ALTER TABLE conversation_settings
+  ADD COLUMN settings_version INTEGER NOT NULL DEFAULT 1
+  CHECK (settings_version >= 1);
+
+UPDATE db_schema_version
+   SET version = 65
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version = 64;
+"""
+
     _MIGRATION_SQL_V10_TO_V11_POSTGRES = """
 ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 """
@@ -7313,6 +7409,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         from tldw_Server_API.app.core.DB_Management.chacha.character_store import (
             CharacterStore,
         )
+        from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import (
+            ConversationResumeStore,
+        )
         from tldw_Server_API.app.core.DB_Management.chacha.conversation_store import (
             ConversationStore,
         )
@@ -7346,6 +7445,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         self.character_store = CharacterStore(self)
         self.conversation_store = ConversationStore(self)
+        self.conversation_resume_store = ConversationResumeStore(self)
         self.message_store = MessageStore(self)
         self.note_store = NoteStore(self)
         self.moodboard_sync_store = MoodboardSyncStore(self)
@@ -8279,6 +8379,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (61, "_migrate_from_v61_to_v62_sqlite"),
             (62, "_migrate_from_v62_to_v63_sqlite"),
             (63, "_migrate_from_v63_to_v64_sqlite"),
+            (64, "_migrate_from_v64_to_v65"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -17315,6 +17416,56 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         for statement in build_chacha_rls_sql():
             self.backend.execute(statement, connection=conn)
 
+    def _migration_v65_checkpoint(self, stage: str) -> None:
+        """No-op failpoint used to verify atomic v65 migrations."""
+
+    def _migrate_from_v64_to_v65(self, conn: sqlite3.Connection) -> None:
+        """Migrate schema from V64 to V65 (character resume snapshot state)."""
+        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V64 to V65 for DB: {self.db_path_str}...")
+        try:
+            ddl, _, _version_update = self._MIGRATION_SQL_V64_TO_V65.partition(
+                "UPDATE db_schema_version"
+            )
+            for statement in split_sql_statements(ddl):
+                conn.execute(statement)
+            self._migration_v65_checkpoint("schema-created")
+            conn.execute(
+                "UPDATE db_schema_version SET version = 65 WHERE schema_name = ? AND version = 64",
+                (self._SCHEMA_NAME,),
+            )
+            final_version = self._get_db_version(conn)
+            if final_version != 65:
+                raise SchemaError(  # noqa: TRY003, TRY301
+                    f"[{self._SCHEMA_NAME}] Migration V64->V65 failed version check. Expected 65, got: {final_version}"
+                )
+            logger.info(f"[{self._SCHEMA_NAME}] Migration to V65 completed.")
+        except sqlite3.Error as exc:
+            logger.error(f"[{self._SCHEMA_NAME}] Migration V64->V65 failed: {exc}", exc_info=True)
+            raise SchemaError(f"Migration V64->V65 failed for '{self._SCHEMA_NAME}': {exc}") from exc  # noqa: TRY003
+        except RuntimeError as exc:
+            raise SchemaError(f"Migration V64->V65 checkpoint failed: {exc}") from exc  # noqa: TRY003
+        except SchemaError:
+            raise
+
+    def _migrate_from_v64_to_v65_postgres(self, conn: Any) -> None:
+        """Migrate PostgreSQL schema from V64 to V65 in the caller transaction."""
+        ddl, _, _version_update = self._MIGRATION_SQL_V64_TO_V65_POSTGRES.partition(
+            "UPDATE db_schema_version"
+        )
+        for statement in split_sql_statements(ddl):
+            self.backend.execute(statement, connection=conn)
+        self._migration_v65_checkpoint("schema-created")
+        result = self.backend.execute(
+            "UPDATE db_schema_version SET version = %s "
+            "WHERE schema_name = %s AND version = %s RETURNING version",
+            (65, self._SCHEMA_NAME, 64),
+            connection=conn,
+        )
+        if result is None or result.rowcount != 1:
+            raise SchemaError(  # noqa: TRY003
+                f"[{self._SCHEMA_NAME}] Migration V64->V65 did not advance exactly one V64 schema row."
+            )
+
     def _ensure_persona_persistence_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Ensure persona persistence tables and columns exist for drifted SQLite schemas."""
         try:
@@ -20087,6 +20238,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 63 and current_db_version == 62:
                         self._migrate_from_v62_to_v63_sqlite(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 64 and current_db_version == 63:
+                        self._migrate_from_v63_to_v64_sqlite(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 65 and current_db_version == 64:
+                        self._migrate_from_v64_to_v65(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -20527,6 +20684,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 64 and current_db_version == 63:
                     self._migrate_from_v63_to_v64_sqlite(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 65 and current_db_version == 64:
+                    self._migrate_from_v64_to_v65(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -24530,6 +24690,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if current_version < 64:
                 self._migrate_from_v63_to_v64_postgres(conn)
                 current_version = 64
+            if target_version >= 65 and current_version < 65:
+                self._migrate_from_v64_to_v65_postgres(conn)
+                current_version = 65
             self._runtime_schema_version = current_version
 
             if current_version > target_version:
@@ -42410,6 +42573,18 @@ for _conversation_store_method in (
     )
 
 
+for _conversation_resume_store_method in (
+    "put_behavior_snapshot",
+    "get_conversation_behavior_snapshot",
+    "get_roleplay_resume_state",
+):
+    setattr(
+        CharactersRAGDB,
+        _conversation_resume_store_method,
+        _delegate_store_method("conversation_resume_store", _conversation_resume_store_method),
+    )
+
+
 for _character_store_method in (
     "add_character_card",
     "get_character_card_by_id",
@@ -42450,6 +42625,8 @@ for _character_store_method in (
 
 for _message_store_method in (
     "add_message",
+    "lock_message_for_edit",
+    "lock_message_metadata_for_edit",
     "append_message_from_sync",
     "tombstone_message_from_sync",
     "get_messages_by_sync_stable_id",

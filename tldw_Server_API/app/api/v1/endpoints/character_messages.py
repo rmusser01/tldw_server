@@ -4,18 +4,24 @@ API endpoints for message management within character chat sessions.
 Provides CRUD operations for messages in conversations.
 """
 
+import uuid
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional
-import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Response, status
 from loguru import logger
 from pydantic import ValidationError
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    User,
+    get_request_user,
+    require_expected_user,
+)
+
 # Database and authentication dependencies
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
-from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
 # Schemas
 from tldw_Server_API.app.api.v1.schemas.chat_conversation_schemas import (
@@ -27,21 +33,22 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
     MessageResponse,
     MessageUpdate,
 )
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    get_request_user,
-    require_expected_user,
-    User,
-)
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
 # Character chat helpers
 from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (
-    edit_message_content,
     find_messages_in_conversation,
     map_sender_to_role,
     post_message_to_conversation,
     remove_message_from_conversation,
     replace_placeholders,
     retrieve_message_details,
+)
+from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
+    materialize_roleplay_behavior_settings,
+)
+from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
+    validate_chat_settings_storage,
 )
 
 # Rate limiting
@@ -56,6 +63,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.server_origin import (
     SyncServerOriginIdempotencyConflictError,
@@ -268,11 +276,13 @@ def _verify_message_access(
     message_id: str,
     user_id: int,
     scope: ConversationScopeParams | None = None,
+    *,
+    include_deleted: bool = False,
 ) -> dict[str, Any]:
     """
     Verify user has access to a message using DB abstractions.
     """
-    message = db.get_message_by_id(message_id)
+    message = db.get_message_by_id(message_id, include_deleted=include_deleted)
     if not message:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -968,14 +978,13 @@ async def edit_message(
         await rate_limiter.check_rate_limit(current_user.id, "message_edit")
 
         # Verify message access
-        message = _verify_message_access(db, message_id, current_user.id, scope)
-
-        # Check version
-        if message.get('version', 1) != expected_version:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Version mismatch. Expected {expected_version}, found {message.get('version', 1)}"
-            )
+        message = _verify_message_access(
+            db,
+            message_id,
+            current_user.id,
+            scope,
+            include_deleted=True,
+        )
         if _active_message_sync_service(current_user, scope) is not None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -985,37 +994,105 @@ async def edit_message(
                 },
             )
 
-        content_updated = False
-        if update_data.content is not None and str(update_data.content).strip():
-            success = edit_message_content(
-                db,
+        content_updated = bool(
+            update_data.content is not None and str(update_data.content).strip()
+        )
+        metadata_updated = update_data.pinned is not None
+        conversation = db.get_conversation_by_id(message["conversation_id"])
+        if not isinstance(conversation, Mapping):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Chat session {message['conversation_id']} not found",
+            )
+        with db.transaction() as conn:
+            db.lock_message_for_edit(message_id, conn=conn)
+            if metadata_updated:
+                db.lock_message_metadata_for_edit(message_id, conn=conn)
+            resume_state = db.get_roleplay_resume_state(
+                message["conversation_id"],
+                conn=conn,
+                lock_for_update=True,
+                owner_client_id=str(current_user.id),
+            )
+            conversation = resume_state.get("conversation")
+            if not isinstance(conversation, Mapping):
+                raise InputError("Conversation resume state is incomplete")
+            update_payload = {
+                "content": (
+                    update_data.content
+                    if content_updated
+                    else str(message.get("content") or "")
+                )
+            }
+            if not db.update_message(
                 message_id,
-                update_data.content,
+                update_payload,
                 expected_version,
-            )
-            if not success:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Failed to update message content",
-                )
-            content_updated = True
+                conn=conn,
+            ):
+                raise InputError("Failed to update message")
 
-        metadata_updated = False
-        if update_data.pinned is not None:
-            metadata_updated = db.set_message_metadata_extra(
-                message_id,
-                {"pinned": bool(update_data.pinned)},
-                merge=True,
-            )
-            if not metadata_updated:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Failed to update message metadata",
+            if metadata_updated:
+                metadata_updated = db.set_message_metadata_extra(
+                    message_id,
+                    {"pinned": bool(update_data.pinned)},
+                    merge=True,
+                    conn=conn,
+                    _advance_history=False,
                 )
+                if not metadata_updated:
+                    raise InputError("Failed to update message metadata")
+                chat_settings = dict(resume_state.get("settings") or {})
+                pinned_ids = [
+                    str(item)
+                    for item in chat_settings.get("pinnedMessageIds") or []
+                    if item is not None
+                ]
+                if update_data.pinned and message_id not in pinned_ids:
+                    pinned_ids.append(message_id)
+                elif not update_data.pinned:
+                    pinned_ids = [item for item in pinned_ids if item != message_id]
+                chat_settings["pinnedMessageIds"] = pinned_ids
+                snapshot = resume_state.get("behavior_snapshot")
+                if isinstance(snapshot, Mapping) and snapshot.get("status") == "valid":
+                    materialized = materialize_roleplay_behavior_settings(
+                        conn,
+                        conversation=conversation,
+                        resume_state=resume_state,
+                        merged_settings=chat_settings,
+                        owner_user_id=str(current_user.id),
+                        changed_keys={"pinnedMessageIds"},
+                    )
+                    if materialized is not None:
+                        chat_settings["roleplayBehaviorV1"] = materialized
+                        chat_settings["roleplayResumeV1"] = {
+                            "resumeEligible": True,
+                            "resumeIneligibleReason": None,
+                            "effectiveCompletion": materialized["values"][
+                                "effective_completion"
+                            ],
+                        }
+                chat_settings = validate_chat_settings_storage(
+                    chat_settings,
+                    reject_credentials=(
+                        isinstance(resume_state.get("behavior_snapshot"), Mapping)
+                        and resume_state["behavior_snapshot"].get("status") == "valid"
+                    ),
+                    allow_internal=True,
+                    behavior_snapshot=resume_state.get("behavior_snapshot"),
+                    conversation=conversation,
+                )
+                if not db.upsert_conversation_settings(
+                    message["conversation_id"],
+                    chat_settings,
+                    conn=conn,
+                    expected_settings_version=resume_state["settings_version"] or 0,
+                ):
+                    raise InputError("Failed to update resumable chat settings")
 
         # Update conversation metadata (last_modified/version) via DB abstraction
         conv = db.get_conversation_by_id(message["conversation_id"])
-        if conv and (content_updated or metadata_updated):
+        if conv and content_updated:
             try:
                 db.update_conversation(
                     message["conversation_id"],
@@ -1063,7 +1140,9 @@ async def edit_message(
     except ConflictError as e:
         logger.warning(f"Conflict editing message {message_id}: {e}")
         raise map_db_error_to_http(e) from e
-    except CharactersRAGDBError as exc:
+    except InputError as exc:
+        raise map_db_error_to_http(exc) from exc
+    except (CharactersRAGDBError, NotFoundError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to edit message") from exc
     except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error editing message {message_id}: {e}", exc_info=True)
