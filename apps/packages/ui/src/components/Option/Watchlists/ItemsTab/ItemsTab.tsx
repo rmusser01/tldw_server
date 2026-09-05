@@ -2239,7 +2239,7 @@ export const ItemsTab: React.FC = () => {
         <p className="text-sm text-text-muted">
           {t(
             "watchlists:items.description",
-            "Review collected updates, alert matches, and briefing candidates from this Watchlist."
+            "Review collected updates, alert matches, and briefing candidates across your watchlists."
           )}
         </p>
         <Space>
@@ -2764,8 +2764,21 @@ export const ItemsTab: React.FC = () => {
               ) : items.length === 0 ? (
                 <Empty
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={t("watchlists:items.empty", "No updates found")}
-                />
+                  description={
+                    orderedSources.length === 0
+                      ? t(
+                          "watchlists:items.emptyNoWatchlists",
+                          "No watchlist feeds yet. Create a watchlist to start collecting updates."
+                        )
+                      : t("watchlists:items.empty", "No updates found")
+                  }
+                >
+                  {orderedSources.length === 0 && navigate ? (
+                    <Button type="primary" onClick={() => navigate("/watchlists")}>
+                      {t("watchlists:items.createWatchlist", "Create a watchlist")}
+                    </Button>
+                  ) : null}
+                </Empty>
               ) : (
                 sortedItems.map((item) => {
                   const selected = item.id === selectedItemId
