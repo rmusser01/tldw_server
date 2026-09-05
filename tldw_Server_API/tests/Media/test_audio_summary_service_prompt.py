@@ -34,6 +34,7 @@ def test_audio_form_preserves_each_prompt_presence(value: str | None) -> None:
 
     @app.post("/parse")
     async def parse(form: ProcessAudiosForm = Depends(get_process_audios_form)) -> dict[str, str | None]:
+        """Expose the validated multipart prompt values without endpoint repair."""
         return {"system": form.system_prompt, "user": form.custom_prompt}
 
     fields = {"api_name": (None, "openai")}
@@ -46,7 +47,11 @@ def test_audio_form_preserves_each_prompt_presence(value: str | None) -> None:
 
 
 @pytest.fixture
-def context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, client_with_single_user) -> Iterator[SimpleNamespace]:
+def context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    client_with_single_user: tuple[TestClient, object],
+) -> Iterator[SimpleNamespace]:
     """Retain real prompt storage, audio processing and analyzer assembly."""
     client, _ = client_with_single_user
     buffer = BytesIO()
@@ -67,17 +72,21 @@ def context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, client_with_single_
     )
 
     async def current_user() -> User:
+        """Select the authenticated owner for each test request."""
         return User(id=state.owner, username=f"owner-{state.owner}")
 
     async def get_db(request: Request, user: User) -> PromptsDatabase:
+        """Record owner lookups while returning real prompt databases."""
         state.reads.append(user.id)
         return state.databases[user.id]
 
     def transcribe(**kwargs: Any) -> list[dict[str, Any]]:
+        """Replace external speech recognition with a deterministic transcript."""
         state.transcriptions.append(kwargs)
         return [{"start_seconds": 0, "end_seconds": 1, "Text": state.transcript}]
 
     def adapter(**kwargs: Any) -> str:
+        """Capture the real analyzer's model request without network access."""
         state.calls.append(kwargs)
         return "Report due Friday."
 
@@ -91,12 +100,18 @@ def context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, client_with_single_
         database.close_connection()
 
 
-def save(context: SimpleNamespace, system="Saved system {literal}", user="Saved user {literal}", *, owner=1):
+def save(
+    context: SimpleNamespace,
+    system: str = "Saved system {literal}",
+    user: str = "Saved user {literal}",
+    *,
+    owner: int = 1,
+) -> ServicePromptOverrideRow:
     """Store a full pair without bypassing real database serialization."""
     return context.databases[owner].save_service_prompt_override(PROMPT_ID, {"system": system, "user": user}, None)
 
 
-def process(context: SimpleNamespace, *, count=1, **options: str) -> dict[str, Any]:
+def process(context: SimpleNamespace, *, count: int = 1, **options: str) -> dict[str, Any]:
     """Submit real WAV uploads through the authenticated route."""
     response = context.client.post(
         "/api/v1/media/process-audios",
@@ -156,6 +171,7 @@ def test_inactive_analysis_does_not_read_prompts(context: SimpleNamespace, optio
 
 @pytest.mark.parametrize("legacy", ["", "anthropic"])
 def test_canonical_audio_provider_takes_precedence(context: SimpleNamespace, legacy: str) -> None:
+    """Canonical provider selection wins over an absent or conflicting legacy alias."""
     save(context)
     process(context, api_provider="openai", api_name=legacy)
     assert context.calls[0]["api_name"] == "openai"
@@ -171,6 +187,7 @@ def test_pair_is_frozen_across_files_and_recursive_passes(
     original = summary._summarize_via_adapter
 
     def edit_during_analysis(**kwargs: Any) -> str:
+        """Change future settings and owner scope during the first model call."""
         if not context.calls:
             database = context.databases[1]
             try:
@@ -201,6 +218,7 @@ def test_pair_is_frozen_across_files_and_recursive_passes(
 def test_lookup_closes_its_worker_connection_before_processing(
     context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, corrupt: bool
 ) -> None:
+    """Successful and corrupt lookups both close their actual worker connection."""
     database = context.databases[1]
     database.save_service_prompt_override(
         PROMPT_ID, {"wrong": "corrupt"} if corrupt else {"system": "S", "user": "U"}, None
@@ -209,10 +227,12 @@ def test_lookup_closes_its_worker_connection_before_processing(
     original_read, original_close = database.get_service_prompt_override, database.close_connection
 
     def read(definition_id: str) -> ServicePromptOverrideRow | None:
+        """Observe the worker that opens the real lookup connection."""
         reads.append(threading.get_ident())
         return original_read(definition_id)
 
     def close() -> None:
+        """Release the real connection and record its cleanup worker."""
         original_close()
         closes.append(threading.get_ident())
 

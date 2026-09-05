@@ -1,10 +1,10 @@
 ---
 id: TASK-13185
 title: Expose synchronous audio summarization in Service Prompts
-status: Done
+status: In Progress
 assignee: []
 created_date: '2026-09-05 18:15'
-updated_date: '2026-09-05 18:32'
+updated_date: '2026-09-05 18:46'
 labels: []
 dependencies: []
 ---
@@ -37,6 +37,10 @@ Approved design: Docs/Design/audio-summary-service-prompt.md. Incremental slice 
 Final verification: 236 backend regressions passed (10 warnings), 198 shared UI tests passed, and 5 targeted WebUI Settings tests passed. Independent reviewer approved with no remaining actionable findings. Compileall and Ruff lint passed for touched runtime/tests; changed endpoint/registry/form/tests formatted. Existing audio_batch formatting drift is present at base and was not swept into this feature. Bandit touched runtime scope: zero findings/errors (/tmp/bandit_audio_service_prompt.json). Official OpenAPI export, TypeScript generation, and fingerprint check passed (2068 paths/3133 schemas). Full repository suite, full frontend typecheck/build, live browser/STT/provider calls were not run locally; tests replace external transcription/model boundaries. No implementation blockers; PR/integration not yet requested.
 
 PR created against dev: https://github.com/rmusser01/tldw_server/pull/2901. Implementation commit 3b126b37d98ee6a963cca856b3563cae8ebe8647. Branch and worktree retained for review; no merge or recurring monitor requested in this step.
+
+PR2901 review follow-up authorized: latest dev remains 86eb9e517c; rebase is already up to date. Qodo posted three rule comments: endpoint architecture, test helper type hints and docstrings. Verify and address before merge.
+
+Qodo fixes: fully annotated the new audio test helpers and added first-statement docstrings to every function in the new module. All125 focused tests pass; Ruff lint/format and AST annotation/docstring audit pass. Runtime code unchanged. Architecture suggestion reviewed and declined in-thread: core owns decoding/validation/defaults, HTTP boundary owns lazy authenticated acquisition and same-worker cleanup. Existing independent review approved this boundary. Scheduled heartbeat creation was rejected by auto-review; continuing current-session work only.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
