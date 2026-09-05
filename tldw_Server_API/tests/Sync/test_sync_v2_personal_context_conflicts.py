@@ -464,6 +464,103 @@ def test_new_activation_between_batch_check_and_canonical_decision_rejects(linke
     assert sync.store.get_conflict(conflict.conflict_id).status == "unresolved"
 
 
+@pytest.mark.parametrize(
+    "boundary,replay,collision",
+    [
+        ("capture", False, False),
+        ("staging", False, True),
+        ("capture", True, False),
+        ("staging", True, True),
+    ],
+)
+def test_candidate_activation_transition_rejects_and_new_activation_recovers(
+    linked, monkeypatch, boundary, replay, collision
+):
+    from tldw_Server_API.app.core.Personalization.personal_context_activation import PersonalContextActivationService
+    from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
+    from tldw_Server_API.app.core.Sync.v2.personal_context_conflicts import PersonalContextConflictService
+
+    canonical, sync, dataset_id, old_exchange, record = linked
+    if replay:
+        previous, incoming = _conflict(linked, collision=collision)
+    else:
+        previous = None
+        incoming = _envelope(
+            linked,
+            record.model_copy(
+                update={
+                    "record_id": "activation-collision-record" if collision else record.record_id,
+                    "version_id": "activation-conflict-version",
+                    "parent_version_id": None,
+                }
+            ),
+            "activation-conflict-envelope",
+        )
+    conflict_id = PersonalContextConflictService.conflict_id(dataset_id, _DEVICE_ID, incoming.client_envelope_id)
+    before = canonical.get_manifest()
+    original_capture = type(canonical).capture_sync_conflict
+    original_journal = canonical.get_sync_conflict(conflict_id) if replay else None
+    prepared = []
+
+    def transition(owner):
+        prepared.append(
+            PersonalContextActivationService(owner._repository).prepare(
+                record.profile_id, device_id=_DEVICE_ID, fresh=True
+            )
+        )
+
+    def capture_across_transition(owner, **identity):
+        if boundary == "capture":
+            transition(owner)
+        journal = original_capture(owner, **identity)
+        if boundary == "staging":
+            transition(owner)
+        return journal
+
+    with monkeypatch.context() as fault:
+        fault.setattr(type(canonical), "capture_sync_conflict", capture_across_transition)
+        with pytest.raises(SyncStoreError, match="personal_context_activation_required"):
+            _push(linked, incoming)
+    assert canonical.get_manifest() == before
+    if replay or boundary == "staging":
+        journal = canonical.get_sync_conflict(conflict_id)
+        if replay:
+            assert journal == original_journal
+        else:
+            assert sync.store.get_conflict(conflict_id) is None
+    else:
+        with canonical._repository.database.transaction() as connection:
+            assert (
+                connection.execute(
+                    "SELECT COUNT(*) FROM personal_context_object_heads WHERE object_type = 'sync_conflict'"
+                ).fetchone()[0]
+                == 0
+            )
+    with pytest.raises(SyncStoreError, match="personal_context_activation_required"):
+        sync.require_active_exchange(
+            dataset=sync.store.get_dataset(dataset_id), user_id=_USER_ID, device_id=_DEVICE_ID, exchange=old_exchange
+        )
+    newer = PersonalContextExchangeProof.model_validate(_seed_exchange(sync, dataset_id))
+    assert canonical._repository.load_activation(prepared[0].activation_id).state == "active"
+    if boundary == "staging" and not replay:
+        changed = _envelope(
+            linked,
+            ProfileRecord.model_validate({**incoming.payload, "version_id": "changed-activation-retry"}),
+            incoming.client_envelope_id,
+        )
+        denied = _push((canonical, sync, dataset_id, newer, record), changed)
+        assert not denied.conflicts and not denied.accepted
+        assert denied.rejected[0].error_code == "idempotency_conflict"
+        assert canonical.get_sync_conflict(conflict_id) == journal
+    resumed = _push((canonical, sync, dataset_id, newer, record), incoming)
+    assert len(resumed.conflicts) == 1, [(item.error_code, item.retryable) for item in resumed.rejected]
+    if previous is not None:
+        assert asdict(resumed.conflicts[0]) == asdict(previous)
+    elif boundary == "staging":
+        assert resumed.conflicts[0].expected_remote_envelope_id == journal["remote_envelope_id"]
+    assert resumed.personal_context_exchange == newer
+
+
 def _conflict(linked, *, collision=False):
     canonical, sync, dataset_id, exchange, original = linked
     local = ProfileRecord.model_validate(
@@ -962,5 +1059,7 @@ def test_candidate_replay_acquires_sync_fence_before_canonical_lock(linked, monk
     monkeypatch.setattr(sync.store, "conflict_resolution_guard", tracked_guard)
     monkeypatch.setattr(type(canonical), "capture_sync_conflict", capture_under_sync_fence)
     source = sync.store.get_envelope_by_client_id(dataset_id, incoming.client_envelope_id)
-    replay = sync._ensure_personal_context_conflict_candidate(sync.store.get_dataset(dataset_id), source, sync.store)
+    replay = sync._ensure_personal_context_conflict_candidate(
+        sync.store.get_dataset(dataset_id), source, sync.store, exchange=_exchange
+    )
     assert replay.expected_remote_envelope_id == conflict.expected_remote_envelope_id

@@ -28,7 +28,7 @@ class PersonalContextConflictService:
             uuid.uuid5(uuid.NAMESPACE_URL, f"tldw:personal-context:conflict:{dataset_id}:{device_id}:{envelope_id}")
         )
 
-    def ensure_authority_candidate(self, *, dataset: Any, source: Any) -> Any:
+    def ensure_authority_candidate(self, *, dataset: Any, source: Any, exchange: Any) -> Any:
         """Attach an authenticated immutable candidate before a terminal response."""
         canonical = self.sync._personal_context_service_for_user(dataset.owner_user_id)
         clear = self.sync._restore_personal_context_from_storage(dataset, source)
@@ -46,11 +46,14 @@ class PersonalContextConflictService:
             local_payload=clear.payload,
             local_envelope_digest=self._local_envelope_digest(clear),
             purge_generation=state["purge_generation"],
+            exchange=exchange,
         )
         with canonical.sync_conflict_staging_guard(
             conflict_id,
             dataset_id=dataset.dataset_id,
+            device_id=source.device_id,
             purge_generation=state["purge_generation"],
+            exchange=exchange,
         ) as journal:
             return self._attach_candidate(dataset, source, canonical, journal)
 

@@ -1098,10 +1098,20 @@ class PersonalContextRepository:
         conflict_id: str,
         *,
         dataset_id: str,
+        device_id: str,
         purge_generation: int,
+        exchange: PersonalContextExchangeProof,
     ) -> Iterator[dict[str, Any]]:
         """Keep canonical authority alive through local protected Sync attachment."""
         with self._database.transaction(immediate=True) as connection:
+            self.validate_activation_exchange(
+                profile_id=profile_id,
+                device_id=device_id,
+                dataset_id=dataset_id,
+                activation_epoch=exchange.activation_epoch,
+                continuity_token=exchange.continuity_token,
+                _connection=connection,
+            )
             keys = self._keys.load(profile_id, connection=connection)
             manifest = self._current_manifest_for_publication(connection, profile_id, keys)
             self._require_current_writable_manifest_state(connection, profile_id, keys)
@@ -1109,7 +1119,7 @@ class PersonalContextRepository:
             if row is None or manifest.purge_generation != purge_generation:
                 raise ConcurrentProfileUpdateError("Personal Context conflict authority changed")
             journal = json.loads(self._decrypt_row(row, keys))
-            if journal["dataset_id"] != dataset_id or journal["purge_generation"] != purge_generation:
+            if journal["dataset_id"] != dataset_id or journal["device_id"] != device_id or journal["purge_generation"] != purge_generation:
                 raise ConcurrentProfileUpdateError("Personal Context conflict authority changed")
             yield journal
 
@@ -1126,9 +1136,18 @@ class PersonalContextRepository:
         local_payload: Mapping[str, Any],
         local_envelope_digest: str,
         purge_generation: int,
+        exchange: PersonalContextExchangeProof,
     ) -> dict[str, Any]:
         """Commit immutable heads and private narrow freezes before Sync reports conflict."""
         with self._database.transaction(immediate=True) as connection:
+            self.validate_activation_exchange(
+                profile_id=profile_id,
+                device_id=device_id,
+                dataset_id=dataset_id,
+                activation_epoch=exchange.activation_epoch,
+                continuity_token=exchange.continuity_token,
+                _connection=connection,
+            )
             keys = self._keys.load(profile_id, connection=connection)
             manifest = self._current_manifest_for_publication(connection, profile_id, keys)
             self._require_current_writable_manifest_state(connection, profile_id, keys)
