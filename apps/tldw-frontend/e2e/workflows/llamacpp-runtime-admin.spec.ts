@@ -2,11 +2,7 @@ import type { Page, Route } from '@playwright/test';
 import { test, expect, assertNoCriticalErrors } from '../utils/fixtures';
 import { AdminPage } from '../utils/page-objects';
 
-const fulfillJson = async (
-  route: Route,
-  data: unknown,
-  status = 200
-): Promise<void> => {
+const fulfillJson = async (route: Route, data: unknown, status = 200): Promise<void> => {
   await route.fulfill({
     status,
     contentType: 'application/json',
@@ -317,22 +313,14 @@ async function mockManagedRuntimeAdmin(page: Page): Promise<{
 
   await page.route('**/api/v1/llamacpp/profiles/*/use-in-chat', (route) => {
     if (route.request().method() !== 'POST') {
-      return fulfillJson(
-        route,
-        { error: 'Method not allowed in use-in-chat mock' },
-        405
-      );
+      return fulfillJson(route, { error: 'Method not allowed in use-in-chat mock' }, 405);
     }
     const match = route
       .request()
       .url()
       .match(/\/llamacpp\/profiles\/([^/]+)\/use-in-chat$/);
     if (!match?.[1]) {
-      return fulfillJson(
-        route,
-        { error: 'Invalid profile ID in URL for use-in-chat mock' },
-        400
-      );
+      return fulfillJson(route, { error: 'Invalid profile ID in URL for use-in-chat mock' }, 400);
     }
     useInChatProfileIds.push(decodeURIComponent(match[1]));
     return fulfillJson(route, {
@@ -344,9 +332,7 @@ async function mockManagedRuntimeAdmin(page: Page): Promise<{
     });
   });
 
-  await page.route('**/api/v1/llamacpp/profiles', (route) =>
-    fulfillJson(route, { profiles })
-  );
+  await page.route('**/api/v1/llamacpp/profiles', (route) => fulfillJson(route, { profiles }));
 
   await page.route('**/api/v1/llamacpp/instances', (route) =>
     fulfillJson(route, {
@@ -359,6 +345,144 @@ async function mockManagedRuntimeAdmin(page: Page): Promise<{
 }
 
 test.describe('llama.cpp managed runtime admin smoke', () => {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    test(`manual snapshot confirmations and reload recovery, mocked API, ${colorScheme} narrow viewport`, async ({
+      authedPage: page,
+    }, testInfo) => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.emulateMedia({ colorScheme });
+      await page.addInitScript((mode) => {
+        localStorage.setItem('theme', mode);
+        localStorage.setItem('tldw:themePreset', 'default');
+        localStorage.setItem('tldw:themeMigrationVersion', '1');
+      }, colorScheme);
+      await mockManagedRuntimeAdmin(page);
+      const mutations: Array<{ method: string; path: string; body: unknown }> = [];
+      let operationState = 'restoring';
+      let submitted = false;
+      let deleted = false;
+      let tokens = 0;
+      const snapshot = {
+        snapshot_id: 'snapshot-one',
+        source_slot: 0,
+        created_at: '2026-09-04T14:32:00Z',
+        commit_sequence: 1,
+        byte_count: 600000000,
+        token_count: 8192,
+        compatibility: 'compatible',
+        reasons: [],
+      };
+      await page.route('**/api/v1/llamacpp/profiles', (route) =>
+        fulfillJson(route, {
+          profiles: profiles.map((profile) => ({
+            ...profile,
+            snapshots_enabled: true,
+            snapshot_retention: 10,
+          })),
+        })
+      );
+      await page.route('**/api/v1/llamacpp/profiles/chat-runtime/slots', (route) =>
+        fulfillJson(route, {
+          capability: submitted && operationState === 'restoring' ? 'busy' : 'ready',
+          reason: null,
+          launch_generation: 'launch-one',
+          request_id: `signed-token-${++tokens}`,
+          latest_operation_id: submitted ? 'operation-one' : null,
+          slots: [{ slot_id: 0, busy: false, token_count: 8192 }],
+        })
+      );
+      await page.route('**/api/v1/llamacpp/profiles/chat-runtime/snapshots?*', (route) =>
+        fulfillJson(route, {
+          snapshots: deleted ? [] : [snapshot],
+          total: deleted ? 0 : 1,
+          total_bytes: deleted ? 0 : 600000000,
+          offset: 0,
+          limit: 50,
+          retention: 10,
+        })
+      );
+      const receipt = () => ({
+        profile_id: 'chat-runtime',
+        operation_id: 'operation-one',
+        launch_generation: 'launch-one',
+        kind: 'restore',
+        state: operationState,
+        snapshot_id: 'snapshot-one',
+        token_count: 8192,
+        recovery_action: 'none',
+      });
+      await page.route(
+        '**/api/v1/llamacpp/profiles/chat-runtime/snapshots/snapshot-one/restore',
+        (route) => {
+          mutations.push({
+            method: route.request().method(),
+            path: 'restore',
+            body: route.request().postDataJSON(),
+          });
+          submitted = true;
+          return fulfillJson(route, receipt(), 202);
+        }
+      );
+      await page.route(
+        '**/api/v1/llamacpp/profiles/chat-runtime/snapshot-operations/operation-one',
+        (route) => fulfillJson(route, receipt())
+      );
+      await page.route(
+        '**/api/v1/llamacpp/profiles/chat-runtime/snapshots/snapshot-one',
+        (route) => {
+          mutations.push({ method: route.request().method(), path: 'delete', body: null });
+          deleted = true;
+          return fulfillJson(route, { deleted: true });
+        }
+      );
+      const admin = new AdminPage(page);
+      await admin.gotoSection('llamacpp');
+      await expect(page.locator('html')).toHaveClass(colorScheme === 'dark' ? /dark/ : /light/);
+      await page.getByRole('button', { name: 'Slot snapshots: Chat runtime', exact: true }).click();
+      const panel = page.getByRole('region', { name: 'Slot snapshots', exact: true });
+      await expect(panel.getByRole('button', { name: 'Restore', exact: true })).toBeEnabled();
+      await panel.getByRole('button', { name: 'Restore', exact: true }).click();
+      await expect(panel.getByText(/Failure may also clear it/)).toBeVisible();
+      expect(mutations).toHaveLength(0);
+      await expect(panel.getByRole('combobox', { name: 'Destination slot' })).toBeFocused();
+      await page.keyboard.press('Escape');
+      await expect(panel.getByRole('button', { name: 'Restore', exact: true })).toBeFocused();
+      await panel.getByRole('button', { name: 'Restore', exact: true }).click();
+      await panel.screenshot({ path: testInfo.outputPath(`snapshots-${colorScheme}-390.png`) });
+      expect(await panel.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+        true
+      );
+      await panel.getByRole('button', { name: 'Restore into slot 0' }).click();
+      await expect(panel.getByRole('status')).toContainText('Restoring');
+      expect(mutations).toEqual([
+        {
+          method: 'POST',
+          path: 'restore',
+          body: {
+            slot_id: 0,
+            expected_launch_generation: 'launch-one',
+            request_id: 'signed-token-3',
+            replace_confirmed: true,
+          },
+        },
+      ]);
+      operationState = 'complete';
+      await page.reload();
+      await page.getByRole('button', { name: 'Slot snapshots: Chat runtime', exact: true }).click();
+      await expect(panel.getByRole('status')).toContainText('Complete');
+      await expect(
+        panel.getByText('Open the original conversation in Chatbook to continue.')
+      ).toBeVisible();
+      expect(mutations).toHaveLength(1);
+      await panel.getByRole('button', { name: 'Delete', exact: true }).click();
+      await expect(panel.getByText(/does not erase an active slot/)).toBeVisible();
+      expect(mutations).toHaveLength(1);
+      await panel.getByRole('button', { name: 'Permanently delete snapshot-one' }).click();
+      await expect(panel.getByText(/No saved snapshots/)).toBeVisible();
+      expect(mutations[1]).toEqual({ method: 'DELETE', path: 'delete', body: null });
+    });
+  }
+
   test('shows assets, profile runtimes, warnings, and running-only chat wiring', async ({
     authedPage,
     diagnostics,

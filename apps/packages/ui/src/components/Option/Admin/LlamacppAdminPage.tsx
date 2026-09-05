@@ -15,7 +15,10 @@ import type {
   LlamacppProfile,
   LlamacppProfileCreateRequest,
   LlamacppProfileUpdateRequest,
-  LlamacppRuntime
+  LlamacppRuntime,
+  LlamacppSnapshotSlotsResponse,
+  LlamacppSnapshotCatalogResponse,
+  LlamacppSnapshotOperationResponse
 } from "@/types/llamacpp-admin"
 import {
   buildLlamacppServerArgs,
@@ -35,6 +38,296 @@ import { LlamacppLaunchPanel } from "./LlamacppLaunchPanel"
 import { LlamacppProfilesPanel } from "./LlamacppProfilesPanel"
 import { LlamacppReadinessPanel } from "./LlamacppReadinessPanel"
 import { LlamacppRuntimePanel } from "./LlamacppRuntimePanel"
+import {
+  LlamacppSnapshotsPanel,
+  snapshotOperationActive
+} from "./LlamacppSnapshotsPanel"
+
+/** Profile-scoped network owner. The presentation panel never sends requests. */
+export const LlamacppSnapshotsAdmin = ({
+  profile,
+  generation,
+  runtimeState,
+  onProfileChanged
+}: {
+  profile: LlamacppProfile
+  generation?: string | null
+  runtimeState?: string
+  onProfileChanged: () => void
+}) => {
+  const { t } = useTranslation()
+  const [slots, setSlots] =
+    React.useState<LlamacppSnapshotSlotsResponse | null>(null)
+  const [catalog, setCatalog] =
+    React.useState<LlamacppSnapshotCatalogResponse | null>(null)
+  const [operation, setOperation] =
+    React.useState<LlamacppSnapshotOperationResponse | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
+  const [loading, setLoading] = React.useState(true)
+  const [mutating, setMutating] = React.useState(false)
+  const [uncertain, setUncertain] = React.useState(false)
+  const [offset, setOffset] = React.useState(0)
+  const [revision, refresh] = React.useReducer((n: number) => n + 1, 0)
+  const [visible, setVisible] = React.useState(
+    () => document.visibilityState !== "hidden"
+  )
+  const scope = React.useMemo(
+    () => ({ profileId: profile.profile_id, generation, runtimeState }),
+    [profile.profile_id, generation, runtimeState]
+  )
+  const scopeRef = React.useRef(scope)
+  scopeRef.current = scope
+  const mounted = React.useRef(true)
+  const busyRef = React.useRef(false)
+  const readController = React.useRef<AbortController | null>(null)
+  const uncertainAfter = React.useRef<string | null>(null)
+  React.useEffect(() => {
+    mounted.current = true
+    const change = () => setVisible(document.visibilityState !== "hidden")
+    document.addEventListener("visibilitychange", change)
+    return () => {
+      mounted.current = false
+      readController.current?.abort()
+      document.removeEventListener("visibilitychange", change)
+    }
+  }, [])
+  React.useEffect(() => {
+    readController.current?.abort()
+    setSlots(null)
+    setCatalog(null)
+    setOperation(null)
+    setError(null)
+    setUncertain(false)
+    setMutating(false)
+    setOffset(0)
+    busyRef.current = false
+  }, [scope])
+  React.useEffect(() => {
+    if (!visible) return
+    const controller = new AbortController()
+    readController.current = controller
+    const current = () =>
+      !controller.signal.aborted && scopeRef.current === scope
+    setLoading(true)
+    void (async () => {
+      try {
+        const nextSlots = await tldwClient.getLlamacppSnapshotSlots(
+          profile.profile_id,
+          controller.signal
+        )
+        if (!current()) return
+        const [nextCatalog, nextOperation] = await Promise.all([
+          tldwClient.listLlamacppSnapshots(
+            profile.profile_id,
+            offset,
+            controller.signal
+          ),
+          nextSlots.latest_operation_id
+            ? tldwClient.getLlamacppSnapshotOperation(
+                profile.profile_id,
+                nextSlots.latest_operation_id,
+                controller.signal
+              )
+            : Promise.resolve(null)
+        ])
+        if (!current()) return
+        // Runtime list responses may omit generation. Fence the combined reads
+        // with a second slots observation instead of relying on PID or UI state.
+        const confirmed = await tldwClient.getLlamacppSnapshotSlots(
+          profile.profile_id,
+          controller.signal
+        )
+        if (!current()) return
+        if (
+          (generation && nextSlots.launch_generation !== generation) ||
+          confirmed.launch_generation !== nextSlots.launch_generation ||
+          confirmed.latest_operation_id !== nextSlots.latest_operation_id
+        ) {
+          setSlots(null)
+          setCatalog(null)
+          setOperation(null)
+          setError(
+            t(
+              "settings:admin.snapshots.runtimeChanged",
+              "Runtime changed. Refresh runtime instances before another snapshot action."
+            )
+          )
+          return
+        }
+        setSlots(nextSlots)
+        setCatalog(nextCatalog)
+        const receipt =
+          nextOperation?.profile_id === profile.profile_id &&
+          nextOperation.launch_generation === nextSlots.launch_generation
+            ? nextOperation
+            : null
+        setOperation(receipt)
+        if (receipt && receipt.operation_id !== uncertainAfter.current)
+          setUncertain(false)
+      } catch (caught) {
+        if (current()) {
+          setError(
+            sanitizeAdminErrorMessage(
+              caught,
+              "Snapshot state could not be read. Refresh to recover operation status."
+            )
+          )
+        }
+      } finally {
+        if (current()) setLoading(false)
+      }
+    })()
+    return () => controller.abort()
+  }, [
+    scope,
+    profile.profile_id,
+    profile.snapshots_enabled,
+    profile.snapshot_retention,
+    generation,
+    revision,
+    offset,
+    visible,
+    t
+  ])
+  React.useEffect(() => {
+    if (!visible || !snapshotOperationActive(operation) || loading || error)
+      return
+    const timer = window.setTimeout(refresh, 1500)
+    return () => window.clearTimeout(timer)
+  }, [operation, visible, loading, error])
+  const reload = () => {
+    setError(null)
+    refresh()
+  }
+  const mutate = async (
+    action: "save" | "restore" | "delete" | "stop" | "settings",
+    slotId?: number,
+    snapshotId?: string,
+    settings?: { snapshots_enabled?: boolean; snapshot_retention?: number }
+  ) => {
+    if (busyRef.current) return
+    const captured = scope
+    const current = () => mounted.current && captured === scopeRef.current
+    busyRef.current = true
+    readController.current?.abort()
+    setMutating(true)
+    setError(null)
+    let sent = false
+    try {
+      if (action === "save" || action === "restore") {
+        const controller = new AbortController()
+        readController.current = controller
+        const fresh = await tldwClient.getLlamacppSnapshotSlots(
+          profile.profile_id,
+          controller.signal
+        )
+        if (!current()) return
+        if (
+          !slots?.launch_generation ||
+          fresh.launch_generation !== slots.launch_generation ||
+          fresh.capability !== "ready"
+        ) {
+          throw new Error(
+            "Runtime changed or is not ready. Refresh before another snapshot action."
+          )
+        }
+        const payload = {
+          slot_id: slotId!,
+          expected_launch_generation: fresh.launch_generation,
+          request_id: fresh.request_id
+        }
+        uncertainAfter.current = fresh.latest_operation_id ?? null
+        sent = true
+        const result =
+          action === "save"
+            ? await tldwClient.saveLlamacppSnapshot(profile.profile_id, payload)
+            : await tldwClient.restoreLlamacppSnapshot(
+                profile.profile_id,
+                snapshotId!,
+                { ...payload, replace_confirmed: true }
+              )
+        if (!current()) return
+        if (
+          result.profile_id !== profile.profile_id ||
+          result.launch_generation !== fresh.launch_generation
+        ) {
+          throw new Error("The operation receipt did not match this runtime.")
+        }
+        setOperation(result)
+      } else if (action === "delete") {
+        await tldwClient.deleteLlamacppSnapshot(profile.profile_id, snapshotId!)
+      } else if (action === "stop") {
+        await tldwClient.stopLlamacppProfile(profile.profile_id)
+        if (current()) {
+          setUncertain(false)
+          onProfileChanged()
+        }
+      } else {
+        await tldwClient.updateLlamacppProfile(profile.profile_id, settings!)
+        if (current()) onProfileChanged()
+      }
+    } catch (caught) {
+      if (current()) {
+        // Once POST was attempted, only a durable receipt can settle uncertainty.
+        if (sent) setUncertain(true)
+        setError(
+          sanitizeAdminErrorMessage(
+            caught,
+            "Snapshot action failed. Refresh to inspect its outcome."
+          )
+        )
+      }
+    } finally {
+      if (current()) {
+        busyRef.current = false
+        setMutating(false)
+        setLoading(false)
+        refresh()
+      }
+    }
+  }
+  return (
+    <LlamacppSnapshotsPanel
+      key={`${profile.profile_id}:${generation ?? ""}`}
+      enabled={Boolean(profile.snapshots_enabled)}
+      retention={profile.snapshot_retention ?? 10}
+      slots={slots}
+      catalog={catalog}
+      operation={operation}
+      loading={loading}
+      mutating={mutating}
+      error={error}
+      outcomeUnknown={uncertain}
+      onEnable={(enabled) => {
+        void mutate("settings", undefined, undefined, {
+          snapshots_enabled: enabled
+        })
+      }}
+      onRetention={(retention) => {
+        void mutate("settings", undefined, undefined, {
+          snapshot_retention: retention
+        })
+      }}
+      onRefresh={reload}
+      onPage={(page) => {
+        setOffset(page)
+        setError(null)
+      }}
+      onSave={(slot) => {
+        void mutate("save", slot)
+      }}
+      onRestore={(id, slot) => {
+        void mutate("restore", slot, id)
+      }}
+      onDelete={(id) => {
+        void mutate("delete", undefined, id)
+      }}
+      onStop={() => {
+        void mutate("stop")
+      }}
+    />
+  )
+}
 
 const { Title, Text } = Typography
 const passiveAlertProps = {
@@ -81,7 +374,9 @@ interface LlamacppSettingsPresetV1 {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
-const coerceImportedSettings = (input: unknown): LlamacppServerArgsInput | null => {
+const coerceImportedSettings = (
+  input: unknown
+): LlamacppServerArgsInput | null => {
   if (!isRecord(input)) return null
 
   const maybePreset = input as Partial<LlamacppSettingsPresetV1>
@@ -93,13 +388,22 @@ const coerceImportedSettings = (input: unknown): LlamacppServerArgsInput | null 
     ...source
   } as LlamacppServerArgsInput
 
-  if (typeof merged.contextSize !== "number" || !Number.isFinite(merged.contextSize)) {
+  if (
+    typeof merged.contextSize !== "number" ||
+    !Number.isFinite(merged.contextSize)
+  ) {
     return null
   }
-  if (typeof merged.gpuLayers !== "number" || !Number.isFinite(merged.gpuLayers)) {
+  if (
+    typeof merged.gpuLayers !== "number" ||
+    !Number.isFinite(merged.gpuLayers)
+  ) {
     return null
   }
-  if (merged.splitMode && !["none", "layer", "row"].includes(merged.splitMode)) {
+  if (
+    merged.splitMode &&
+    !["none", "layer", "row"].includes(merged.splitMode)
+  ) {
     merged.splitMode = "layer"
   }
   if (merged.flashAttn && !["auto", "on", "off"].includes(merged.flashAttn)) {
@@ -121,23 +425,36 @@ const coerceImportedSettings = (input: unknown): LlamacppServerArgsInput | null 
 }
 
 export const LlamacppAdminPage: React.FC = () => {
+  const [snapshotProfileId, setSnapshotProfileId] = React.useState<
+    string | null
+  >(null)
   const { t } = useTranslation(["option", "settings", "common"])
   const initialLoadRef = React.useRef(false)
   const presetFileInputRef = React.useRef<HTMLInputElement | null>(null)
   const refreshedDownloadJobIdsRef = React.useRef<Set<string>>(new Set())
   const downloadsInitializedRef = React.useRef(false)
 
-  const [config, setConfig] = React.useState<LlamacppConfigResponse | null>(null)
+  const [config, setConfig] = React.useState<LlamacppConfigResponse | null>(
+    null
+  )
   const [status, setStatus] = React.useState<LlamacppStatus | null>(null)
-  const [inventory, setInventory] = React.useState<LlamacppInventoryResponse | null>(null)
-  const [assets, setAssets] = React.useState<LlamacppAssetsResponse | null>(null)
+  const [inventory, setInventory] =
+    React.useState<LlamacppInventoryResponse | null>(null)
+  const [assets, setAssets] = React.useState<LlamacppAssetsResponse | null>(
+    null
+  )
   const [assetImportPreview, setAssetImportPreview] =
     React.useState<LlamacppAssetImportPreviewResponse | null>(null)
   const [assetDownloads, setAssetDownloads] =
     React.useState<LlamacppAcquisitionJobListResponse | null>(null)
-  const [hardware, setHardware] = React.useState<LlamacppHardwareSnapshotResponse | null>(null)
-  const [runtimeProfiles, setRuntimeProfiles] = React.useState<LlamacppProfile[]>([])
-  const [runtimeInstances, setRuntimeInstances] = React.useState<LlamacppRuntime[]>([])
+  const [hardware, setHardware] =
+    React.useState<LlamacppHardwareSnapshotResponse | null>(null)
+  const [runtimeProfiles, setRuntimeProfiles] = React.useState<
+    LlamacppProfile[]
+  >([])
+  const [runtimeInstances, setRuntimeInstances] = React.useState<
+    LlamacppRuntime[]
+  >([])
 
   const [loadingConfig, setLoadingConfig] = React.useState(false)
   const [loadingStatus, setLoadingStatus] = React.useState(false)
@@ -146,30 +463,44 @@ export const LlamacppAdminPage: React.FC = () => {
   const [loadingRuntimes, setLoadingRuntimes] = React.useState(true)
   const [registeringPath, setRegisteringPath] = React.useState(false)
   const [registeringAssetPath, setRegisteringAssetPath] = React.useState(false)
-  const [previewingAssetFolder, setPreviewingAssetFolder] = React.useState(false)
+  const [previewingAssetFolder, setPreviewingAssetFolder] =
+    React.useState(false)
   const [importingAssetFolder, setImportingAssetFolder] = React.useState(false)
-  const [loadingAssetDownloads, setLoadingAssetDownloads] = React.useState(false)
-  const [startingAssetDownload, setStartingAssetDownload] = React.useState(false)
-  const [cancelingAssetDownloadId, setCancelingAssetDownloadId] = React.useState<string | null>(null)
+  const [loadingAssetDownloads, setLoadingAssetDownloads] =
+    React.useState(false)
+  const [startingAssetDownload, setStartingAssetDownload] =
+    React.useState(false)
+  const [cancelingAssetDownloadId, setCancelingAssetDownloadId] =
+    React.useState<string | null>(null)
 
   const [statusError, setStatusError] = React.useState<string | null>(null)
-  const [inventoryError, setInventoryError] = React.useState<string | null>(null)
+  const [inventoryError, setInventoryError] = React.useState<string | null>(
+    null
+  )
   const [assetError, setAssetError] = React.useState<string | null>(null)
   const [runtimeError, setRuntimeError] = React.useState<string | null>(null)
   const [runtimeUnsupported, setRuntimeUnsupported] = React.useState(false)
   const [adminGuard, setAdminGuard] = React.useState<AdminGuardState>(null)
 
-  const [selectedModelId, setSelectedModelId] = React.useState<string | undefined>()
-  const [settings, setSettings] = React.useState<LlamacppServerArgsInput>(DEFAULT_LLAMACPP_SETTINGS)
+  const [selectedModelId, setSelectedModelId] = React.useState<
+    string | undefined
+  >()
+  const [settings, setSettings] = React.useState<LlamacppServerArgsInput>(
+    DEFAULT_LLAMACPP_SETTINGS
+  )
   const [presetNotice, setPresetNotice] = React.useState<string | null>(null)
   const [actionLoading, setActionLoading] = React.useState(false)
   const [chatActionVisible, setChatActionVisible] = React.useState(false)
   const [chatActionLoading, setChatActionLoading] = React.useState(false)
   const [chatNotice, setChatNotice] = React.useState<string | null>(null)
   const [chatWarnings, setChatWarnings] = React.useState<string[]>([])
-  const [profileActionId, setProfileActionId] = React.useState<string | null>(null)
+  const [profileActionId, setProfileActionId] = React.useState<string | null>(
+    null
+  )
   const [profileError, setProfileError] = React.useState<string | null>(null)
-  const [runtimeActionProfileId, setRuntimeActionProfileId] = React.useState<string | null>(null)
+  const [runtimeActionProfileId, setRuntimeActionProfileId] = React.useState<
+    string | null
+  >(null)
 
   const markAdminGuardFromError = React.useCallback((error: unknown) => {
     const guardState = deriveAdminGuardFromError(error)
@@ -309,7 +640,10 @@ export const LlamacppAdminPage: React.FC = () => {
     } catch (error: unknown) {
       downloadsInitializedRef.current = true
       setAssetError(
-        sanitizeAdminErrorMessage(error, "Failed to load Llama.cpp asset downloads.")
+        sanitizeAdminErrorMessage(
+          error,
+          "Failed to load Llama.cpp asset downloads."
+        )
       )
     } finally {
       setLoadingAssetDownloads(false)
@@ -382,8 +716,10 @@ export const LlamacppAdminPage: React.FC = () => {
   const selectedModelLabel =
     selectedModel?.display_name || selectedModel?.basename || selectedModelId
   const hardwareWarnings = hardware?.warnings || []
-  const inventoryUnavailable = Boolean(inventoryError) || (!loadingInventory && !inventory)
-  const inventoryLoadedOrUnavailable = Boolean(inventory) || inventoryUnavailable
+  const inventoryUnavailable =
+    Boolean(inventoryError) || (!loadingInventory && !inventory)
+  const inventoryLoadedOrUnavailable =
+    Boolean(inventory) || inventoryUnavailable
 
   React.useEffect(() => {
     if (isRunning) {
@@ -407,7 +743,10 @@ export const LlamacppAdminPage: React.FC = () => {
       return true
     } catch (error: unknown) {
       setInventoryError(
-        sanitizeAdminErrorMessage(error, "Failed to register Llama.cpp model path.")
+        sanitizeAdminErrorMessage(
+          error,
+          "Failed to register Llama.cpp model path."
+        )
       )
       markAdminGuardFromError(error)
       return false
@@ -428,7 +767,10 @@ export const LlamacppAdminPage: React.FC = () => {
       return true
     } catch (error: unknown) {
       setAssetError(
-        sanitizeAdminErrorMessage(error, "Failed to register Llama.cpp asset path.")
+        sanitizeAdminErrorMessage(
+          error,
+          "Failed to register Llama.cpp asset path."
+        )
       )
       return false
     } finally {
@@ -446,7 +788,10 @@ export const LlamacppAdminPage: React.FC = () => {
     } catch (error: unknown) {
       setAssetImportPreview(null)
       setAssetError(
-        sanitizeAdminErrorMessage(error, "Failed to preview Llama.cpp asset folder.")
+        sanitizeAdminErrorMessage(
+          error,
+          "Failed to preview Llama.cpp asset folder."
+        )
       )
       return false
     } finally {
@@ -464,7 +809,10 @@ export const LlamacppAdminPage: React.FC = () => {
       return true
     } catch (error: unknown) {
       setAssetError(
-        sanitizeAdminErrorMessage(error, "Failed to import Llama.cpp asset folder.")
+        sanitizeAdminErrorMessage(
+          error,
+          "Failed to import Llama.cpp asset folder."
+        )
       )
       return false
     } finally {
@@ -483,7 +831,10 @@ export const LlamacppAdminPage: React.FC = () => {
       return true
     } catch (error: unknown) {
       setAssetError(
-        sanitizeAdminErrorMessage(error, "Failed to queue Llama.cpp asset download.")
+        sanitizeAdminErrorMessage(
+          error,
+          "Failed to queue Llama.cpp asset download."
+        )
       )
       return false
     } finally {
@@ -500,7 +851,10 @@ export const LlamacppAdminPage: React.FC = () => {
       return true
     } catch (error: unknown) {
       setAssetError(
-        sanitizeAdminErrorMessage(error, "Failed to cancel Llama.cpp asset download.")
+        sanitizeAdminErrorMessage(
+          error,
+          "Failed to cancel Llama.cpp asset download."
+        )
       )
       return false
     } finally {
@@ -729,7 +1083,10 @@ export const LlamacppAdminPage: React.FC = () => {
     const date = new Date().toISOString().slice(0, 10)
     downloadBlob(blob, `llamacpp-settings-preset-${date}.json`)
     setPresetNotice(
-      t("settings:admin.llamacppPresetExported", "Exported Llama.cpp settings preset.")
+      t(
+        "settings:admin.llamacppPresetExported",
+        "Exported Llama.cpp settings preset."
+      )
     )
   }
 
@@ -793,8 +1150,14 @@ export const LlamacppAdminPage: React.FC = () => {
             {...passiveAlertProps}
             title={
               adminGuard === "forbidden"
-                ? t("settings:admin.adminGuardForbiddenTitle", "Admin access required")
-                : t("settings:admin.adminGuardNotFoundTitle", "Admin APIs not available")
+                ? t(
+                    "settings:admin.adminGuardForbiddenTitle",
+                    "Admin access required"
+                  )
+                : t(
+                    "settings:admin.adminGuardNotFoundTitle",
+                    "Admin APIs not available"
+                  )
             }
           >
             <span>
@@ -837,8 +1200,15 @@ export const LlamacppAdminPage: React.FC = () => {
               loading={loadingStatus}
               error={statusError}
               items={[
-                { label: t("settings:admin.llamacppActiveModel", "Model"), value: status?.model, code: true },
-                { label: t("settings:admin.llamacppPort", "Port"), value: status?.port }
+                {
+                  label: t("settings:admin.llamacppActiveModel", "Model"),
+                  value: status?.model,
+                  code: true
+                },
+                {
+                  label: t("settings:admin.llamacppPort", "Port"),
+                  value: status?.port
+                }
               ]}
               onRefresh={loadStatus}
               quickAction={
@@ -853,10 +1223,7 @@ export const LlamacppAdminPage: React.FC = () => {
               }
             />
 
-            <LlamacppReadinessPanel
-              config={config}
-              loading={loadingConfig}
-            />
+            <LlamacppReadinessPanel config={config} loading={loadingConfig} />
 
             <LlamacppAssetsPanel
               assets={assets}
@@ -895,6 +1262,7 @@ export const LlamacppAdminPage: React.FC = () => {
                 />
 
                 <LlamacppRuntimePanel
+                  onSnapshots={setSnapshotProfileId}
                   profiles={runtimeProfiles}
                   runtimes={runtimeInstances}
                   loading={loadingRuntimes}
@@ -909,6 +1277,26 @@ export const LlamacppAdminPage: React.FC = () => {
                     void handleUseProfileInChat(profileId)
                   }}
                 />
+                {runtimeProfiles
+                  .filter((profile) => profile.profile_id === snapshotProfileId)
+                  .map((profile) => {
+                    const runtime = runtimeInstances.find(
+                      (item) => item.profile_id === profile.profile_id
+                    )
+                    return (
+                      <div key={profile.profile_id} className="space-y-2">
+                        <h3 className="font-semibold">{profile.name}</h3>
+                        <LlamacppSnapshotsAdmin
+                          profile={profile}
+                          generation={runtime?.launch_generation}
+                          runtimeState={runtime?.state}
+                          onProfileChanged={() => {
+                            void loadRuntimePlane()
+                          }}
+                        />
+                      </div>
+                    )
+                  })}
               </>
             )}
 
