@@ -355,7 +355,36 @@ class PersonalContextSyncCapabilitiesResponse(BaseModel):
     max_proposals_per_session: int = Field(25, ge=25)
     max_unresolved_proposals: int = Field(200, ge=200)
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "anyOf": [
+                {"properties": {
+                    "activation_epoch": {"type": "null"},
+                    "continuity_token": {"type": "null"},
+                }},
+                {
+                    "required": ["activation_epoch", "continuity_token"],
+                    "properties": {
+                        "activation_epoch": {"type": "string"},
+                        "continuity_token": {"type": "string"},
+                    },
+                },
+            ],
+            "if": {
+                "required": ["ongoing_sync_version"],
+                "properties": {"ongoing_sync_version": {"const": 1}},
+            },
+            "then": {
+                "required": ["activation_epoch", "continuity_token"],
+                "properties": {
+                    "activation_epoch": {"type": "string"},
+                    "continuity_token": {"type": "string"},
+                    "ongoing_sync_blockers": {"maxItems": 0},
+                },
+            },
+        },
+    )
 
     @model_validator(mode="after")
     def validate_ongoing_state(self) -> PersonalContextSyncCapabilitiesResponse:

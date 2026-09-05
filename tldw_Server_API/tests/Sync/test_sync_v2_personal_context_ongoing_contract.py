@@ -6,10 +6,15 @@ import hashlib
 import json
 import subprocess
 import sys
+from itertools import product
 from pathlib import Path
 
 import pytest
+from jsonschema import Draft202012Validator
 
+from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
+    PersonalContextSyncCapabilitiesResponse,
+)
 from tldw_Server_API.app.core.Sync.v2.personal_context_ongoing_contract import (
     PERSONAL_CONTEXT_ONGOING_ENDPOINTS,
     PersonalContextActivationReceipt,
@@ -23,6 +28,62 @@ from tldw_Server_API.app.core.Sync.v2.personal_context_ongoing_contract import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+def test_exported_authority_schema_matches_runtime_cross_field_rules() -> None:
+    """Every omitted/null/populated publication field combination matches runtime."""
+
+    definitions = export_personal_context_ongoing_contract()["$defs"]
+    validator = Draft202012Validator(
+        {"$ref": "#/$defs/PersonalContextAuthorityMetadata", "$defs": definitions}
+    )
+    fields = {
+        "publication_batch_id": "batch_0123456789abcdef",
+        "profile_publication_sequence": 1,
+        "batch_ordinal": 0,
+        "batch_size": 1,
+    }
+    for role, states in product(
+        ("home_authority", "client_ingress"), product(("omitted", "null", "value"), repeat=4)
+    ):
+        payload: dict[str, object] = {"role": role}
+        for (field, value), state in zip(fields.items(), states):
+            if state != "omitted":
+                payload[field] = None if state == "null" else value
+        try:
+            PersonalContextAuthorityMetadata.model_validate(payload)
+            runtime_valid = True
+        except ValueError:
+            runtime_valid = False
+        assert validator.is_valid(payload) == runtime_valid, (role, states)
+
+
+def test_exported_capabilities_schema_matches_runtime_readiness_rules() -> None:
+    """Continuity pairs and version-one readiness agree in the published schema."""
+
+    definitions = export_personal_context_ongoing_contract()["$defs"]
+    validator = Draft202012Validator(
+        {"$ref": "#/$defs/PersonalContextSyncCapabilitiesResponse", "$defs": definitions}
+    )
+    for version, epoch, token, blockers in product(
+        (None, 0, 1), ("omitted", None, "epoch_0123456789abcdef"),
+        ("omitted", None, "token_0123456789abcdef"), (None, [], ["not_ready"]),
+    ):
+        payload: dict[str, object] = {}
+        if version is not None:
+            payload["ongoing_sync_version"] = version
+        if epoch != "omitted":
+            payload["activation_epoch"] = epoch
+        if token != "omitted":
+            payload["continuity_token"] = token
+        if blockers is not None:
+            payload["ongoing_sync_blockers"] = blockers
+        try:
+            PersonalContextSyncCapabilitiesResponse.model_validate(payload)
+            runtime_valid = True
+        except ValueError:
+            runtime_valid = False
+        assert validator.is_valid(payload) == runtime_valid, (version, epoch, token, blockers)
 
 
 def test_exchange_proof_requires_exact_version_epoch_and_token() -> None:

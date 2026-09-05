@@ -37,7 +37,34 @@ class PersonalContextExchangeProof(BaseModel):
 class PersonalContextAuthorityMetadata(BaseModel):
     """Content-free authority identity associated with a Personal Context envelope."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, strict=True,
+        json_schema_extra={
+            "if": {"properties": {"role": {"const": "home_authority"}}},
+            "then": {
+                "required": [
+                    "publication_batch_id", "profile_publication_sequence",
+                    "batch_ordinal", "batch_size",
+                ],
+                "properties": {
+                    field: {"not": {"type": "null"}}
+                    for field in (
+                        "publication_batch_id", "profile_publication_sequence",
+                        "batch_ordinal", "batch_size",
+                    )
+                },
+            },
+            "else": {
+                "properties": {
+                    field: {"type": "null"}
+                    for field in (
+                        "publication_batch_id", "profile_publication_sequence",
+                        "batch_ordinal", "batch_size",
+                    )
+                },
+            },
+        },
+    )
 
     role: Literal["client_ingress", "home_authority"]
     publication_batch_id: StrictStr | None = Field(None, min_length=16, max_length=128)

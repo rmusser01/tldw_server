@@ -75,9 +75,11 @@ def test_canonical_bodies_never_appear_in_database_sidecars_or_logs(tmp_path, mo
 
 
 def test_publication_journal_keeps_domain_labels_and_payloads_out_of_durable_bytes(
-    tmp_path,
-    monkeypatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Journal publication keeps canonical content and domain labels encrypted."""
+
     payload_canary = "PUBLICATION-PAYLOAD-CANARY-DO-NOT-PERSIST-PLAINTEXT"
     domain_label = "personal_context.record"
     monkeypatch.setenv("TLDW_PERSONAL_CONTEXT_MASTER_KEY", encoded_master_key(b"a"))

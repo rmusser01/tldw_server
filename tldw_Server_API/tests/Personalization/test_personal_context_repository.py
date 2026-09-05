@@ -85,14 +85,16 @@ def test_personalization_transaction_rolls_back_on_failure(tmp_path) -> None:
 
 
 def test_publication_failure_rolls_back_the_canonical_record_and_batch(
-    repository,
+    repository: PersonalContextRepository,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A journal failure must leave neither side of an authority write visible."""
 
     repository.create_profile(manifest(), global_scope())
 
-    def fail_publication(*_args, **_kwargs) -> None:
+    def fail_publication(*_args: object, **_kwargs: object) -> None:
+        """Inject a journal write failure before the enclosing transaction commits."""
+
         raise RuntimeError("publication write failed")
 
     monkeypatch.setattr(repository, "_append_publication", fail_publication)
@@ -131,7 +133,11 @@ def test_profile_manifest_scope_and_record_roundtrip(repository) -> None:
     assert repository.get_record("profile-a", "record-a") == record
 
 
-def test_key_rotation_rewraps_publication_rows_with_the_profile_key(repository) -> None:
+def test_key_rotation_rewraps_publication_rows_with_the_profile_key(
+    repository: PersonalContextRepository,
+) -> None:
+    """Rotating a profile key rewraps every durable publication row to its version."""
+
     repository.create_profile(manifest(), global_scope())
     repository.commit_record_version(preference_record(), expected_version_id=None)
 

@@ -1765,7 +1765,17 @@ def list_sync_v2_conflicts(
     personal_context_continuity_token: str | None = Query(None, min_length=16, max_length=256),
     user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
-):
+) -> list[SyncConflictRecord] | SyncConflictListResponse:
+    """Return a bounded conflict page after verifying selected Personal Context.
+
+    Returns:
+        A bare list for pages without Personal Context; otherwise conflicts,
+        dataset ID, and the verified exchange in SyncConflictListResponse.
+
+    Raises:
+        HTTPException: If access, query proof, or selected-page authorization fails.
+    """
+
     personal_context_exchange = _validate_personal_context_query_proof(
         personal_context_activation_epoch,
         personal_context_continuity_token,
@@ -1889,6 +1899,7 @@ def resolve_sync_v2_conflicts(
     "/personal-context/activation/acknowledge",
     response_model=SyncPersonalContextActivationAcknowledgeResponse,
     summary="Acknowledge a Personal Context ongoing-sync activation",
+    dependencies=[Depends(check_rate_limit)],
 )
 def acknowledge_personal_context_activation(
     request: SyncPersonalContextActivationAcknowledgeRequest,
@@ -1907,6 +1918,7 @@ def acknowledge_personal_context_activation(
     "/personal-context/purge",
     response_model=SyncPersonalContextPurgeResponse,
     summary="Purge Personal Context through Sync v2",
+    dependencies=[Depends(check_rate_limit)],
 )
 def purge_personal_context_everywhere(
     request: SyncPersonalContextPurgeRequest,

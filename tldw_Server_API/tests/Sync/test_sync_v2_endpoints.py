@@ -1590,7 +1590,12 @@ def test_attachment_bootstrap_diagnostics_enforces_ingress_rate_limit(
 
 @pytest.mark.parametrize(
     "path",
-    ["/personal-context/bootstrap", "/personal-context/complete"],
+    [
+        "/personal-context/bootstrap",
+        "/personal-context/complete",
+        "/personal-context/activation/acknowledge",
+        "/personal-context/purge",
+    ],
 )
 def test_personal_context_mutation_routes_declare_rate_limit_dependency(
     path: str,
