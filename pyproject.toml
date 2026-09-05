@@ -2,7 +2,7 @@
 # pyproject.toml for tldw_Server_API
 ###########################
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools==84.0.0", "wheel==0.48.0"]
 build-backend = "setuptools.build_meta"
 
 ###########################
@@ -291,7 +291,7 @@ media_wiki = [
 ]
 
 ingestion_email = [
-  "pypff>=0.6.3"
+  "pypff>=0.6.3; python_version >= '3.11'"
 ]
 
 # Web research features
@@ -420,12 +420,12 @@ TTS_echo_tts = [
   "einops>=0.8.0"
 ]
 
-# Optional language preprocessing extras for multilingual text tokenization
+# Registry-backed language preprocessing extras for multilingual text tokenization.
+# russian_text_stresser is source-only and must not enter published metadata.
 TTS_chatterbox_lang = [
   "pykakasi>=2.2.1",          # Japanese romanization -> hiragana
-  "dicta-onnx>=0.2.0",        # Hebrew diacritics
+  "dicta-onnx>=0.2.0; python_version >= '3.11'",  # Hebrew diacritics
   "spacy-pkuseg>=0.0.33",     # Chinese segmentation
-  "russian_text_stresser>=1.0.5",  # Russian stress marks
 ]
 
 # NeuTTS Air (Neuphonic)
@@ -480,6 +480,24 @@ all = [
   "tldw-server[dev,evaluation,data-tools,chunking_multilingual,gradio,ingestion_email,media_wiki,web_research,STT_All,TTS_All,TTS_higgs,TTS_vibevoice,backend_onnx,db_postgres,ocr_points_sglang,gpu_monitoring]"
 ]
 
+[dependency-groups]
+release = [
+  "build==1.6.0",
+  "twine==7.0.0",
+  "setuptools==84.0.0",
+  "wheel==0.48.0",
+]
+
+[tool.uv]
+# Release tooling is never installed with the optional vLLM runtime. Current
+# vLLM metadata caps setuptools below the exact PEP 517/release-tool baseline.
+conflicts = [
+  [
+    { group = "release" },
+    { extra = "backend-vllm" },
+  ],
+]
+
 ###########################
 # Entry Points
 ###########################
@@ -506,7 +524,7 @@ include = [
   "tldw_profile_core",
   "tldw_profile_core.*",
 ]
-namespaces = false
+namespaces = true
 exclude = [
   "tests*",
   "docs*",

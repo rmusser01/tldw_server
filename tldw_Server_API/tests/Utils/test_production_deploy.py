@@ -1161,7 +1161,7 @@ def test_rollback_stops_before_commands_when_swapped_preflight_fails(
         lambda *args, **kwargs: PreflightReport(
             (
                 PreflightIssue(
-                    "mutable_image",
+                    "immutable_image_required",
                     "TLDW_APP_IMAGE",
                     "raw-secret must not appear",
                 ),

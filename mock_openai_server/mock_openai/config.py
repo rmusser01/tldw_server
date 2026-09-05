@@ -32,10 +32,17 @@ class ResponsePattern:
                 if messages:
                     last_message = messages[-1]
                     content = last_message.get("content", "")
-                    if isinstance(content, str):
-                        if not re.search(pattern, content):
-                            return False
-                    else:
+                    if isinstance(content, list):
+                        content = "".join(
+                            part["text"]
+                            for part in content
+                            if (
+                                isinstance(part, dict)
+                                and part.get("type") == "text"
+                                and isinstance(part.get("text"), str)
+                            )
+                        )
+                    if not isinstance(content, str) or not re.search(pattern, content):
                         return False
                 else:
                     return False

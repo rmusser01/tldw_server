@@ -35,6 +35,7 @@ theme:
 
 plugins:
   - git-revision-date-localized:
+      enable_parallel_processing: false
       enable_git_follow: false
       strict: false
       fallback_to_build_date: true

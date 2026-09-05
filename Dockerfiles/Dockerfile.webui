@@ -2,9 +2,18 @@
 # - Builds the WebUI in monorepo workspace mode
 # - Ships a standalone Next.js runtime artifact
 
-FROM oven/bun:1.3.2-debian AS builder
+FROM oven/bun:1.3.2-debian@sha256:ff851006c8b322761d53593e7a78c92d09ec0a6bc09a55f81c9861e614761d9a AS bun-tool
 
-ENV NEXT_TELEMETRY_DISABLED=1
+
+FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS builder
+
+# Bun performs the frozen workspace install; Next.js and its wrapper scripts
+# run under the real Node runtime from this stage.
+COPY --from=bun-tool /usr/local/bin/bun /usr/local/bin/bun
+
+ENV NEXT_TELEMETRY_DISABLED=1 \
+    TLDW_NEXT_BUILD_CPUS=1 \
+    NODE_OPTIONS=--max-old-space-size=6144
 
 WORKDIR /app/apps
 
@@ -41,11 +50,11 @@ ENV TLDW_INTERNAL_API_ORIGIN=${TLDW_INTERNAL_API_ORIGIN}
 
 WORKDIR /app/apps/tldw-frontend
 
-RUN bun /app/apps/tldw-frontend/scripts/validate-networking-config.mjs \
- && bun run build:prod
+RUN node /app/apps/tldw-frontend/scripts/validate-networking-config.mjs \
+ && npm run compile:prod
 
 
-FROM node:20-bookworm-slim AS runtime
+FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS runtime
 
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
@@ -55,6 +64,8 @@ ENV NODE_ENV=production \
     TLDW_INTERNAL_API_ORIGIN=http://app:8000
 
 WORKDIR /app
+
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 
 RUN useradd -m -u 10002 webui
 

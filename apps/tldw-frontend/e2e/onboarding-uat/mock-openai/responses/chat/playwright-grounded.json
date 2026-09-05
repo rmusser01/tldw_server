@@ -1,0 +1,20 @@
+{
+  "id": "chatcmpl-critical-playwright",
+  "object": "chat.completion",
+  "created": 1770000000,
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Playwright is an open-source framework for reliable end-to-end browser testing."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 26,
+    "completion_tokens": 18,
+    "total_tokens": 44
+  }
+}

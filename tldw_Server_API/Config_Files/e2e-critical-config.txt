@@ -1,0 +1,7 @@
+# Minimal configuration for the critical frontend E2E job.
+#
+# Provider credentials and the Custom OpenAI-compatible endpoint/model are
+# deliberately supplied by the workflow environment. Keep this file beside
+# config.txt so resolve_config_root() continues to find canonical Prompt and
+# module YAML assets while avoiding developer-local [Local-API] endpoints.
+[API]
