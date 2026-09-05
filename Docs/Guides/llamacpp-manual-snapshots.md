@@ -168,5 +168,23 @@ The executable hash alone does not describe the corrected dynamic-library
 bundle. No production hash was admitted. TASK-13163 remains open for diagnosis,
 successful measured reuse, and real Admin/Chatbook/Pause/Resume verification.
 
+### Latest ARM64 release retry
+
+At the operator's request, the newest published macOS ARM64 asset was downloaded
+from the official [b10816 release](https://github.com/ggml-org/llama.cpp/releases/tag/b10816)
+into a separate temporary directory. Startup reports build 10816, commit
+`427291b5b`. The archive SHA-256 matches GitHub's release metadata:
+`726ca8e7680203280b72029f92380aaf482e6a48ebe4a73fbe934ccc0bcf2de9`.
+Executable SHA-256:
+`d707b6db4c1397a7383176fba12d339e5b33c7513669d74c8fbc2a76f6979a72`.
+
+The same model and CPU/context/slot settings produced the same failed reuse
+check. Save and restore reported 2770 tokens. The restored request and separate
+cold control each reported 0 cached tokens and 2780 processed tokens. Result:
+1 live failure, 5 metric-validator passes in 179.05 seconds. This retry rules out
+the older installed build as a sufficient explanation; it does not isolate a
+runtime, model, option or integration cause. No support gate was opened and no
+user installation was replaced.
+
 Architecture: [ADR-043](../ADR/043-managed-llamacpp-manual-slot-snapshots.md).
 Approved workflow: [design](../Design/2026-09-04-llamacpp-manual-slot-snapshots.md).

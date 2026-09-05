@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-05 02:19'
-updated_date: '2026-09-05 05:08'
+updated_date: '2026-09-05 05:15'
 labels: []
 dependencies:
   - TASK-13162
@@ -45,12 +45,14 @@ Live verification resumed with user-supplied executable/model paths. Both are re
 User approved isolated runtime repair. Created /private/tmp/llamacpp-snapshot-runtime.xEuJ3u using copied August14 executable/libraries and corrected versioned library links; original installation untouched. --version now succeeds: build10430 commit4c1a0af40. First disposable live run reached runner startup but failed in HTTP User-Agent version lookup because the existing venv lacks tldw-server package metadata. Retrying with supported TLDW_VERSION=0.1.41 from pyproject.toml, no dependency installation or code changes.
 
 Isolated runtime copy verification completed: build10430 commit4c1a0af40. With TLDW_VERSION=0.1.41, live test ran save→stop→start→restore→warm request→separate cold request. Save/restore receipts complete with2770 tokens; artifact266502188 bytes. Live assertion failed because warm timings.cache_n=0 (<80% saved tokens). Result1failed5passed7warnings180.21s. Root cause of zero reuse not yet diagnosed; do not infer successful compatibility from receipts. Logs /private/tmp/llamacpp-snapshot-live-retry.log and XML /private/tmp/llamacpp-snapshot-live-retry.xml. Process check confirms no remaining disposable llama-server; original executable matches copied bytes and original mtmd link remains unchanged. Guide now records negative evidence and exact hashes. Production allowlist remains empty; AC3 unfulfilled.
+
+User requested latest official macOS ARM64 download and retry. Downloaded b10816 archive into /private/tmp/llamacpp-latest-arm64.RlECpI; SHA256726ca8e7680203280b72029f92380aaf482e6a48ebe4a73fbe934ccc0bcf2de9 matches official asset digest. --version build10816 commit427291b5b. Same disposable test/model/settings: save/restore2770 tokens; warm and cold each cached0 processed2780. Result1failed5passed7warnings179.05s. Log /private/tmp/llamacpp-snapshot-live-b10816.log and XML /private/tmp/llamacpp-snapshot-live-b10816.xml. Latest upgrade alone does not resolve reuse; no cause attribution or production support claim. Test children exited; original installation untouched.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implementation reviewed, but live acceptance now fails: isolated corrected runtime saves/restores2770 tokens yet the follow-up request reuses0. Existing user installation unchanged; test processes stopped. TASK13163 remains InProgress pending diagnosis and successful real runtime/client evidence.
+Live cache reuse fails on both supplied build10430 and latest official ARM64 build10816. Both native operations complete but b10816 warm/cold each process2780 tokens with0 reuse. Task remains InProgress for root-cause diagnosis and successful runtime/client evidence; production allowlist stays empty.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
