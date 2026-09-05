@@ -79,7 +79,7 @@ describe("BuddyShellPopover", () => {
     expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Open Full Live View" })).toHaveAttribute(
       "href",
-      "/persona?persona_id=persona-1&tab=live"
+      "/persona?persona_id=persona-1&tab=live&session_id=live-session-1"
     )
     expect(screen.getByRole("link", { name: "Choose/Change Buddy" })).toHaveAttribute(
       "href",
@@ -215,7 +215,7 @@ describe("BuddyShellPopover", () => {
 
     expect(screen.getByRole("link", { name: "Listen" })).toHaveAttribute(
       "href",
-      "/persona?persona_id=persona-1&tab=live"
+      "/persona?persona_id=persona-1&tab=live&session_id=live-session-1"
     )
     expect(screen.queryByRole("link", { name: "Stop listening" })).not.toBeInTheDocument()
   })
@@ -254,7 +254,7 @@ describe("BuddyShellPopover", () => {
 
     expect(screen.getByRole("link", { name: "Stop listening" })).toHaveAttribute(
       "href",
-      "/persona?persona_id=persona-1&tab=live"
+      "/persona?persona_id=persona-1&tab=live&session_id=live-session-1"
     )
     expect(screen.queryByRole("link", { name: "Listen" })).not.toBeInTheDocument()
   })
@@ -294,7 +294,7 @@ describe("BuddyShellPopover", () => {
 
     expect(screen.getByRole("link", { name: "Stop listening" })).toHaveAttribute(
       "href",
-      "/persona?persona_id=persona-1&tab=live"
+      "/persona?persona_id=persona-1&tab=live&session_id=live-session-1"
     )
     expect(screen.queryByRole("link", { name: "Listen" })).not.toBeInTheDocument()
   })
@@ -320,4 +320,56 @@ describe("BuddyShellPopover", () => {
     expect(screen.queryByRole("link", { name: "Listen" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Stop listening" })).not.toBeInTheDocument()
   })
+})
+
+
+it("shows a reply safely and routes review to the focused session", () => {
+  renderPopover({ liveControl: {
+    sessions: [buildLiveSession()], focusedSession: buildLiveSession(), focusedSessionId: "live-session-1",
+    streamState: "open", canSendText: true, pendingFocusSessionId: null,
+    startTextSession: vi.fn(), stopSession: vi.fn(), focusSession: vi.fn(), sendText: vi.fn(),
+    feedback: { sessionId: "live-session-1", personaId: "persona-1", clientMessageId: "m1", status: "reply", text: "<b>Hello friend</b>" }
+  } })
+  expect(screen.getByRole("status")).toHaveTextContent("<b>Hello friend</b>")
+  expect(screen.getByRole("status").querySelector("b")).toBeNull()
+  expect(screen.getByRole("link", { name: "Open Full Live View" }).getAttribute("href")).toContain("session_id=live-session-1")
+})
+
+it("shows review and stream errors but hides feedback from another session", () => {
+  const liveControl = {
+    sessions: [buildLiveSession()], focusedSession: buildLiveSession(), focusedSessionId: "live-session-1",
+    streamState: "open", canSendText: true, pendingFocusSessionId: null,
+    startTextSession: vi.fn(), stopSession: vi.fn(), focusSession: vi.fn(), sendText: vi.fn(),
+    feedback: { sessionId: "live-session-1", personaId: "persona-1", clientMessageId: "m1", status: "review" as const, text: "Review this plan" }
+  }
+  const { rerender } = renderPopover({ liveControl })
+  expect(screen.getByTestId("persona-buddy-approval-needed")).toBeInTheDocument()
+  expect(screen.getByRole("status")).toHaveTextContent("Review this plan")
+  rerender(<MemoryRouter><BuddyShellPopover buddySummary={buildBuddySummary()} personaId="persona-1" liveControl={{ ...liveControl, feedback: { ...liveControl.feedback, status: "error", text: "Provider unavailable" } }} /></MemoryRouter>)
+  expect(screen.getByRole("alert")).toHaveTextContent("Provider unavailable")
+  rerender(<MemoryRouter><BuddyShellPopover buddySummary={buildBuddySummary()} personaId="persona-1" liveControl={{ ...liveControl, feedback: { ...liveControl.feedback, sessionId: "other-session" } }} /></MemoryRouter>)
+  expect(screen.queryByText("Review this plan")).not.toBeInTheDocument()
+})
+
+
+it("renders navigation when no live control or persona is available", () => {
+  renderPopover({ personaId: null, liveControl: null })
+  expect(screen.getByRole("link", { name: "Open Full Live View" })).toHaveAttribute("href", "/persona?tab=live")
+})
+
+
+it("preserves a new draft typed while an earlier send is pending", async () => {
+  let finish!: (value: { ok: boolean; clientMessageId: string }) => void
+  const pending = new Promise<{ ok: boolean; clientMessageId: string }>(resolve => { finish = resolve })
+  renderPopover({ liveControl: {
+    sessions: [buildLiveSession()], focusedSession: buildLiveSession(), focusedSessionId: "live-session-1",
+    streamState: "open", canSendText: true, pendingFocusSessionId: null,
+    startTextSession: vi.fn(), stopSession: vi.fn(), focusSession: vi.fn(), sendText: () => pending
+  } })
+  fireEvent.change(screen.getByTestId("persona-buddy-text-input"), { target: { value: "First draft" } })
+  fireEvent.click(screen.getByRole("button", { name: "Send" }))
+  fireEvent.change(screen.getByTestId("persona-buddy-text-input"), { target: { value: "Next draft" } })
+  finish({ ok: true, clientMessageId: "first" })
+  await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).not.toBeDisabled())
+  expect(screen.getByTestId("persona-buddy-text-input")).toHaveValue("Next draft")
 })

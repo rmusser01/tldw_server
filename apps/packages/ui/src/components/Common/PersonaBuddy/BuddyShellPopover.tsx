@@ -38,6 +38,7 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
 }) => {
   const { t } = useTranslation("common")
   const [draft, setDraft] = React.useState("")
+  const draftRevisionRef = React.useRef(0)
   const [draftClientMessageId, setDraftClientMessageId] =
     React.useState<string | null>(null)
   const [sendError, setSendError] = React.useState<string | null>(null)
@@ -49,14 +50,19 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
         tab: "visuals"
       })
     : null
+  const focusedSession = liveControl?.focusedSession ?? null
   const liveRoute = normalizedPersonaId
     ? buildPersonaGardenRoute({
         personaId: normalizedPersonaId,
-        tab: "live"
+        tab: "live",
+        sessionId: focusedSession?.sessionId
       })
     : buildPersonaGardenRoute({ tab: "live" })
-  const focusedSession = liveControl?.focusedSession ?? null
-  const needsApproval = (focusedSession?.pendingApprovalCount ?? 0) > 0
+  const feedback = liveControl?.feedback && liveControl.feedback.sessionId === focusedSession?.sessionId &&
+    liveControl?.feedback?.personaId === focusedSession?.personaId &&
+    (!normalizedPersonaId || normalizedPersonaId === focusedSession?.personaId)
+    ? liveControl.feedback : null
+  const needsApproval = (focusedSession?.pendingApprovalCount ?? 0) > 0 || feedback?.status === "review"
   const sessionOptions = liveControl?.sessions ?? []
   const voiceCapable = Boolean(
     focusedSession &&
@@ -72,6 +78,7 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
   const handleDraftChange = (
     event: React.ChangeEvent<HTMLTextAreaElement>
   ) => {
+    draftRevisionRef.current += 1
     setDraft(event.target.value)
     setDraftClientMessageId(null)
     setSendError(null)
@@ -80,6 +87,7 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
   const handleSend = async () => {
     const trimmed = draft.trim()
     if (!trimmed || !liveControl || sending) return
+    const draftRevision = draftRevisionRef.current
     setSending(true)
     setSendError(null)
     const clientMessageId =
@@ -90,6 +98,7 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
         await liveControl.startTextSession(normalizedPersonaId || null)
       }
       const result = await liveControl.sendText(trimmed, { clientMessageId })
+      if (draftRevisionRef.current !== draftRevision) return
       if (result.ok) {
         setDraft("")
         setDraftClientMessageId(null)
@@ -159,6 +168,17 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
               className="rounded-md border border-warning/40 bg-warning/10 px-2.5 py-2 text-xs font-medium text-text"
             >
               Needs approval
+            </div>
+          ) : null}
+
+          {feedback ? (
+            <div
+              data-testid="persona-buddy-stream-feedback"
+              role={feedback.status === "error" ? "alert" : "status"}
+              aria-live={feedback.status === "error" ? "assertive" : "polite"}
+              className="max-h-36 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-text"
+            >
+              {feedback.text}
             </div>
           ) : null}
 

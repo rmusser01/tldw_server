@@ -127,6 +127,7 @@ Notes
 
 - Resolution order: path-based mapping (`route_map.by_path`) first, then tag-based mapping (`route_map.by_tag`). Wildcards like `/api/v1/chat/*` match by prefix.
 - Entity derivation: prefers authenticated user (`user:{id}`), then API key id/hash (`api_key:{id|hash}`), then the configured trusted proxy header; otherwise falls back to the physical peer or safe `unknown` sentinel.
+- For policies with user/api_key scopes and no global/ip/entity fallback, governed single-user cookie requests without explicit Authorization or X-API-KEY headers first resolve the canonical AuthNZ principal. All sessions for one owner share the user quota, and endpoint authentication reuses the request's cached AuthContext. Invalid sessions retain canonical authentication errors; cookies are never used as quota identifiers. Existing CSRF and endpoint authorization still apply. See [ADR-044](../../../../Docs/ADR/044-cookie-session-governance-owner-preflight.md).
 - Behavior: performs a pre-check/reserve for the `requests` category before calling the endpoint and commits afterwards. On denial, sets `Retry-After` and `X-RateLimit-*` headers. On success, injects accurate `X-RateLimit-*` headers using a governor `peek` when available.
 - Scope: this middleware enforces **requests only**. Categories such as `tokens`, `streams`, `jobs`, and `minutes` require explicit endpoint-level RG reserve/commit plumbing (for example chat/embeddings tokens, audio streaming concurrency).
 - Enabled automatically whenever `RG_ENABLED=1`.

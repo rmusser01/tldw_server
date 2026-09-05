@@ -5550,3 +5550,144 @@ def test_persona_summary_memory_write_only_for_persistent_mode(
 
     assert has_summary_memory is expected_summary_memory
     assert has_tool_outcome_memory is False
+
+
+@pytest.mark.parametrize(
+    "lifecycle,rewritten", [("closed", False), ("archived", False), ("deleted", False), ("deleted", True)]
+)
+def test_confirm_plan_rechecks_persisted_lifecycle_after_review(tmp_path, monkeypatch, lifecycle, rewritten):
+    sid = "sess_review_lifecycle"
+    if rewritten:
+        monkeypatch.setattr(
+            persona_ep,
+            "_apply_persona_runtime_explorer_to_plan",
+            lambda **kwargs: {
+                "_runtime_explorer_selected": True,
+                "steps": [{"idx": 0, "step_type": "mcp_tool", "tool": "external.fetch", "args": {}}],
+            },
+        )
+    _seed_persona_session(tmp_path, monkeypatch, user_id="1", session_id=sid, mode="session_scoped")
+    manager = SessionManager()
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    with TestClient(fastapi_app) as client:
+        with client.websocket_connect("/api/v1/persona/stream") as ws:
+            json.loads(ws.receive_text())
+            ws.send_json(
+                {
+                    "type": "user_message",
+                    "session_id": sid,
+                    "text": "hello",
+                    "use_memory_context": False,
+                    "use_companion_context": False,
+                }
+            )
+            plan = _recv_until(ws, lambda d: d.get("event") == "tool_plan")
+            if rewritten:
+                assert plan["steps"][0]["step_type"] == "final_answer"
+                assert manager.get_plan(session_id=sid, user_id="1", plan_id=plan["plan_id"]).requires_persisted_session
+            # A full Live read is non-consuming; revocation can occur afterward.
+            assert (
+                manager.get_latest_plan_snapshot(session_id=sid, user_id="1", persona_id="research_assistant")[
+                    "plan_id"
+                ]
+                == plan["plan_id"]
+            )
+            db = CharactersRAGDB(str(DatabasePaths.get_chacha_db_path(1)), client_id="review-lifecycle")
+            try:
+                row = db.get_persona_session(sid, user_id="1")
+                db.update_persona_session(
+                    session_id=sid,
+                    user_id="1",
+                    expected_version=row["version"],
+                    update_data={"deleted": True} if lifecycle == "deleted" else {"status": lifecycle},
+                )
+            finally:
+                db.close_connection()
+            ws.send_json({"type": "confirm_plan", "session_id": sid, "plan_id": plan["plan_id"], "approved_steps": [0]})
+            outcome = _recv_until(
+                ws,
+                lambda d: (
+                    d.get("event") == "tool_call" or d.get("reason_code") in {"SESSION_TERMINAL", "SESSION_NOT_FOUND"}
+                ),
+            )
+            assert outcome["event"] == "notice"
+            assert outcome["reason_code"] == ("SESSION_NOT_FOUND" if lifecycle == "deleted" else "SESSION_TERMINAL")
+            assert manager.get_plan(session_id=sid, user_id="1", plan_id=plan["plan_id"]) is not None
+
+
+def test_queued_same_session_turns_keep_client_message_ids_and_confirmation_resets_them(monkeypatch):
+    manager = SessionManager()
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    sid = "sess_queued_correlation"
+    with TestClient(fastapi_app) as client:
+        with client.websocket_connect("/api/v1/persona/stream") as ws:
+            json.loads(ws.receive_text())
+            for text, client_id in [("first search", "message-a"), ("second search", "message-b")]:
+                ws.send_json(
+                    {
+                        "type": "user_message",
+                        "session_id": sid,
+                        "text": text,
+                        "client_message_id": client_id,
+                        "use_memory_context": False,
+                        "use_companion_context": False,
+                    }
+                )
+            plans = []
+            seen_ids = []
+            while len(plans) < 2:
+                event = json.loads(ws.receive_text())
+                if event.get("session_id") != sid:
+                    continue
+                assert event.get("client_message_id") == ("message-a" if not plans else "message-b")
+                seen_ids.append(event["client_message_id"])
+                if event.get("event") == "tool_plan":
+                    plans.append(event)
+            assert set(seen_ids) == {"message-a", "message-b"}
+            assert plans[0]["steps"][0]["args"] != plans[1]["steps"][0]["args"]
+            ws.send_json(
+                {"type": "confirm_plan", "session_id": sid, "plan_id": plans[1]["plan_id"], "approved_steps": [0]}
+            )
+            called = _recv_until(ws, lambda d: d.get("event") == "tool_call")
+            assert "client_message_id" not in called
+
+
+def test_typed_turn_terminal_notice_is_correlated_and_bounded(tmp_path, monkeypatch):
+    sid = "sess_closed_correlation"
+    _seed_persona_session(tmp_path, monkeypatch, user_id="1", session_id=sid, mode="session_scoped")
+    db = CharactersRAGDB(str(DatabasePaths.get_chacha_db_path(1)), client_id="closed-correlation")
+    try:
+        row = db.get_persona_session(sid, user_id="1")
+        db.update_persona_session(
+            session_id=sid, user_id="1", expected_version=row["version"], update_data={"status": "closed"}
+        )
+    finally:
+        db.close_connection()
+    with TestClient(fastapi_app) as client:
+        with client.websocket_connect("/api/v1/persona/stream") as ws:
+            json.loads(ws.receive_text())
+            ws.send_json({"type": "user_message", "session_id": sid, "text": "hello", "client_message_id": "a" * 140})
+            notice = _recv_until(ws, lambda d: d.get("reason_code") == "SESSION_TERMINAL")
+            assert notice["client_message_id"] == "a" * 128
+
+
+def test_typed_turn_internal_failure_notice_keeps_request_identity(monkeypatch):
+    def fail_policy_lookup(*args, **kwargs):
+        raise RuntimeError("private failure details")
+
+    monkeypatch.setattr(persona_ep, "_load_persona_policy_rules_for_session", fail_policy_lookup)
+    with TestClient(fastapi_app) as client:
+        with client.websocket_connect("/api/v1/persona/stream") as ws:
+            json.loads(ws.receive_text())
+            ws.send_json(
+                {
+                    "type": "user_message",
+                    "session_id": "sess_failed",
+                    "text": "hello",
+                    "client_message_id": "failed-request",
+                }
+            )
+            failure = _recv_until(ws, lambda d: d.get("level") == "error" or d.get("type") == "error")
+            assert failure.get("session_id") == "sess_failed"
+            assert failure.get("client_message_id") == "failed-request"
+            assert "private failure details" not in json.dumps(failure)

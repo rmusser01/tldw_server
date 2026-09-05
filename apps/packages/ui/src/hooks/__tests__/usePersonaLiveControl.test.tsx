@@ -56,6 +56,11 @@ class MockWebSocket {
   onopen: (() => void) | null = null
   onclose: (() => void) | null = null
   onerror: (() => void) | null = null
+  onmessage: ((event: { data: string }) => void) | null = null
+
+  emitMessage(payload: unknown) {
+    this.onmessage?.({ data: JSON.stringify(payload) })
+  }
 
   constructor(
     public readonly url: string,
@@ -779,5 +784,101 @@ describe("usePersonaLiveControl", () => {
     })
     expect(result.current.streamState).toBe("error")
     expect(MockWebSocket.instances[0].readyState).toBe(MockWebSocket.CLOSED)
+  })
+})
+
+
+describe("Buddy incoming stream feedback", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    MockWebSocket.instances = []
+    vi.stubGlobal("WebSocket", MockWebSocket)
+    mocks.ensureConfigForRequest.mockResolvedValue({})
+    mocks.listPersonaLiveSessions.mockResolvedValue({
+      sessions: [session({ isFocused: true })], focusedSessionId: "sess-1"
+    })
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  async function sendMessage() {
+    const hook = renderHook(() => usePersonaLiveControl({ defaultPersonaId: "persona-1" }))
+    await waitFor(() => expect(hook.result.current.loading).toBe(false))
+    let sent!: ReturnType<typeof hook.result.current.sendText>
+    act(() => { sent = hook.result.current.sendText("Hello", { clientMessageId: "msg-1" }) })
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1))
+    const ws = MockWebSocket.instances[0]
+    await act(async () => { ws.emitOpen(); await sent })
+    return { ...hook, ws }
+  }
+
+  it("shows pending then the server reply without sending another command", async () => {
+    const { result, ws } = await sendMessage()
+    expect(result.current.feedback).toMatchObject({ sessionId: "sess-1", status: "pending" })
+    act(() => ws.emitMessage({ event: "assistant_delta", session_id: "sess-1", event_seq: 1, text_delta: "Hello " }))
+    act(() => ws.emitMessage({ event: "assistant_delta", session_id: "sess-1", event_seq: 2, text_delta: "friend" }))
+    expect(result.current.feedback).toMatchObject({ status: "reply", text: "Hello friend" })
+    expect(getSentPayloads(ws)).toEqual([{ type: "user_message", session_id: "sess-1", client_message_id: "msg-1", text: "Hello" }])
+  })
+
+  it("shows review needed for a plan and never confirms it", async () => {
+    const { result, ws } = await sendMessage()
+    act(() => ws.emitMessage({ event: "tool_plan", session_id: "sess-1", persona_id: "persona-1", event_seq: 2, plan_id: "plan-1", steps: [{ tool: "rag_search" }] }))
+    expect(result.current.feedback).toMatchObject({ status: "review", planId: "plan-1" })
+    expect(getSentPayloads(ws)).toHaveLength(1)
+  })
+
+  it("rejects unrelated personas, sessions, old event sequences and frames after focus changes", async () => {
+    const { result, ws } = await sendMessage()
+    act(() => ws.emitMessage({ event: "assistant_delta", session_id: "sess-1", event_seq: 4, text_delta: "Current" }))
+    act(() => {
+      ws.emitMessage({ event: "assistant_delta", session_id: "sess-2", event_seq: 9, text_delta: "Wrong session" })
+      ws.emitMessage({ event: "assistant_delta", session_id: "sess-1", persona_id: "persona-2", event_seq: 9, text_delta: "Wrong persona" })
+      ws.emitMessage({ event: "assistant_delta", session_id: "sess-1", event_seq: 3, text_delta: "Old" })
+      ws.emitMessage({ event: "assistant_delta", session_id: "sess-1", client_message_id: "old-msg", event_seq: 8, text_delta: "Wrong message" })
+    })
+    expect(result.current.feedback?.text).toBe("Current")
+    mocks.focusPersonaLiveSession.mockResolvedValue(session({ sessionId: "sess-2", isFocused: true }))
+    await act(async () => { await result.current.focusSession("sess-2") })
+    act(() => ws.emitMessage({ event: "assistant_delta", session_id: "sess-1", event_seq: 10, text_delta: "Late" }))
+    expect(result.current.feedback).toBeNull()
+  })
+
+  it("shows server errors and interrupted pending sends", async () => {
+    const { result, ws } = await sendMessage()
+    act(() => ws.emitMessage({ event: "notice", session_id: "sess-1", event_seq: 1, level: "error", message: "Provider unavailable" }))
+    expect(result.current.feedback).toMatchObject({ status: "error", text: "Provider unavailable" })
+    await act(async () => { await result.current.sendText("Retry") })
+    act(() => ws.close())
+    expect(result.current.feedback?.status).toBe("error")
+    expect(result.current.feedback?.text).toMatch(/disconnected/i)
+  })
+
+  it("cancels a send when its session is stopped during the socket handshake", async () => {
+    const { result } = renderHook(() => usePersonaLiveControl({ defaultPersonaId: "persona-1" }))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    let sent!: ReturnType<typeof result.current.sendText>
+    act(() => { sent = result.current.sendText("Must not send after stop") })
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1))
+    const ws = MockWebSocket.instances[0]
+    mocks.stopPersonaLiveSession.mockResolvedValue(session({ lifecycle: "stopped" }))
+    mocks.listPersonaLiveSessions.mockResolvedValue({ sessions: [], focusedSessionId: null })
+    await act(async () => { await result.current.stopSession() })
+    let outcome: unknown
+    await act(async () => { ws.emitOpen(); outcome = await sent })
+    expect(outcome).toMatchObject({ ok: false })
+    expect(ws.sent).toHaveLength(0)
+    expect(result.current.feedback).toBeNull()
+  })
+
+  it("bounds reply text and ignores malformed or detached socket frames", async () => {
+    const { result, ws, unmount } = await sendMessage()
+    act(() => {
+      ws.onmessage?.({ data: "not json" })
+      ws.emitMessage(null)
+      ws.emitMessage({ event: "assistant_delta", session_id: "sess-1", event_seq: 1, text_delta: "a".repeat(5000) })
+    })
+    expect(result.current.feedback?.text.length).toBeLessThanOrEqual(4000)
+    unmount()
+    expect(ws.onmessage).toBeNull()
   })
 })

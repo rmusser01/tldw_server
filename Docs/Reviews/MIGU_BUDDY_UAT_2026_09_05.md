@@ -121,3 +121,122 @@ The shared-UI CI shard exposed editor test synchronization races absent from the
 Final base update: rebase onto dev69c96ef715 preserved every code patch (range-diff equivalent). Buddy WebSocket task was originally13178 and now uses TASK-13184 because the new dev email-summarization task independently uses13178. No product scope changed.
 
 Verification on dev69c96ef715 rebase:93 Node20 shared-UI tests across six files and54 backend tests pass again. All task IDs introduced by this PR are unique; diff whitespace checks pass.
+
+## Cookie authentication and review handoff follow-up
+
+The follow-up on `codex/migu-buddy-followups` closes TASK-13181, TASK-13192,
+TASK-13176, and TASK-13180. The earlier failed acceptance results above remain
+historical evidence; quickstart authentication, authenticated Migu images, and
+visible plan review now pass against a real backend.
+
+Legacy user dependencies now accept the canonical validated cookie principal.
+Explicit authorization headers retain precedence, including invalid or blank
+headers. Frontend readiness recognizes an active cookie bound to the exact
+configured origin. Resource Governor ingress resolves that same authenticated
+owner before applying owner-only quotas; it no longer permanently rejects
+cookie traffic with 429 because it has only an IP identity. This preserves
+owner quotas, CSRF, revocation, and cross-user isolation rather than relaxing
+the policy. See [ADR-044](../ADR/044-cookie-session-governance-owner-preflight.md).
+
+Buddy now shows pending, reply, error, and review feedback scoped to its current
+persona/session/turn. Typed stream responses retain their client message ID;
+late turns and obsolete connections cannot overwrite current feedback. The
+full Live link identifies the same persisted session. Explicit Connect reads
+its latest bounded pending plan, with every tool step unselected. Confirmation
+rechecks persisted session ownership and active state, including plans rewritten
+after a policy denial. An incomplete setup permits this explicit review detour
+without marking setup complete. See
+[ADR-045](../ADR/045-persona-live-pending-plan-handoff.md).
+
+### Browser acceptance
+
+- Cookie-only users/me, Persona profiles, notifications, ingestion capabilities,
+  and config/docs-info returned 200. Both builder and dock images decoded at
+  96×96 through authenticated blob loading. [Evidence](assets/migu-buddy-followups-2026-09-05/quickstart-builder.json),
+  [screenshot](assets/migu-buddy-followups-2026-09-05/quickstart-builder.png).
+- Two consecutive synthetic sends received distinct correlated plan envelopes.
+  [Turn correlation](assets/migu-buddy-followups-2026-09-05/correlated-send.json).
+- On the final production snapshot, synthetic text created session
+  `5463d886-f01d-4943-91ce-52a8f3e6caa8` and plan
+  `11938e31a16240d28e51d762e235c8d2`. Buddy visibly requested review. Explicit
+  Connect returned that exact session and plan with the `rag_search` step
+  unchecked; setup remained incomplete. The observed connection command was
+  `voice_config`, with no approval or tool execution.
+  [Send](assets/migu-buddy-followups-2026-09-05/final-send.json),
+  [hydration](assets/migu-buddy-followups-2026-09-05/final-review.json),
+  [screenshot](assets/migu-buddy-followups-2026-09-05/final-review.png).
+- Cancel, Buddy Stop, and Disconnect removed the plan and feedback, disabled
+  Stop, and restored Connect. [Terminal UI](assets/migu-buddy-followups-2026-09-05/final-stop.json).
+
+Final backend run `backend-1788635007440317000` used wrapper 20585 and child
+20594, which the wrapper reaped with exit 0. Its source base was
+`86eb9e517cfdcd2af0987c3fcd01c71facaf9f30`; the tracked diff hash was independently
+checked after exit and matched launch. Untracked paths are inventoried, not
+included in that hash. [Launch identity](assets/migu-buddy-followups-2026-09-05/backend-current-identity.json),
+[exit receipt](assets/migu-buddy-followups-2026-09-05/backend-current-exit.json),
+[source comparison](assets/migu-buddy-followups-2026-09-05/source-verification.json).
+The owned browser, quickstart frontend, and backend were stopped after UAT.
+Synthetic runtime data remains outside the repository; evidence contains no
+cookie values or provider credentials.
+
+### Verification and limits
+
+- Final combined frontend run: **214 tests passed across eight affected suites**
+  under Node20 and the CI deterministic configuration.
+- Persona manager, session detail, WebSocket, and dialogue-tree runtime:
+  **147 targeted Python tests passed**. Cookie integration: **32 passed**;
+  existing auth/resolver/JWT/API-key/WebSocket coverage: **78 passed**.
+  Resource Governor: **15 new tests and 19 existing tests passed**. These scopes
+  overlap with other recorded runs and are not a unique aggregate count.
+- Scoped frontend lint has zero errors and no new changed-line findings.
+  Fatal Python lint passes; full lint retains documented baseline findings.
+  Bandit is clean for the three Persona production files and Governor change;
+  the legacy auth file retains three pre-existing low-severity B106 findings.
+- Repository-wide frontend typechecking still fails with **80 errors in six
+  unchanged Presentation Studio/skills certification files**, and no touched
+  file diagnostics. No full test sweep was run.
+- Server provider replies and live microphone/STT/TTS remain unaccepted. The
+  actual text outcome here was a tool plan. Buddy voice capability remains
+  false; a connection's voice configuration notice is not audio evidence.
+  OpenAI credentials and intentional microphone input remain prerequisites
+  for the outstanding live voice UAT.
+
+Rebased follow-up verification: base `53d683f0ed` introduced independent snapshot
+documentation, so the new Governor task became TASK-13192 and the handoff ADR
+became ADR-045. Both existing and new testing lessons were retained. Production
+patches are range-diff equivalent. On this base, **214 frontend tests and 162
+Persona/Governor Python tests passed**. Live receipts above identify the earlier
+base and are not represented as a second live run after rebase.
+
+### PR #2902 review fixes
+
+Qodo identified that persisted cookie metadata could outlive the HTTP-only
+session while public health remained successful. Four failing connection tests
+reproduced it. Cookie-only readiness now probes the authenticated `/users/me`
+endpoint, including transport recovery; absent, expired, and revoked sessions
+produce an authentication error. The connection and persona-store suites pass
+46 tests, with no new lint findings. Existing whole-frontend typechecking still
+reports the same 80 diagnostics in six unchanged files.
+
+Confirmation admission now belongs to `SessionManager`: runtime ownership,
+retention, lifecycle-snapshot checks and plan consumption share one lock. This
+does not make separate persisted lifecycle writes atomic; ADR-045 explicitly
+documents that boundary. Core tests cover concurrent single consumption and
+rejection without consumption. Session-detail tests are split into focused
+fixture-backed cases. The new step schema has a public-contract docstring.
+
+Governor tests now use public quota snapshots instead of private bucket storage,
+and the fixture has typed documented outputs. `rate_limit` remains a registered
+supplemental marker; `unit` is its sole primary classification. All15 pass with
+strict-marker collection. Published ADR mirrors and the OpenAPI fingerprint are
+regenerated for the new API models. Review fixes have targeted automated
+evidence; the recorded real-browser run above predates these refinements.
+
+Final review check: **178 Persona/Governor tests passed**, published-mirror suite
+**33 passed**, and canonical OpenAPI fingerprint verification passed after
+regenerating frontend declarations (2073 paths, 3142 schemas).
+
+Rebased again onto dev `a61abea39d` after Personal Context activation merged.
+Both independent testing lessons were retained and the combined API fingerprint
+was regenerated. Production patches remain range-diff equivalent; 53 session
+manager/detail tests and the canonical fingerprint check pass on this base.
