@@ -1,10 +1,15 @@
+"""Verify private snapshot publication, recovery, and filesystem ownership fences."""
+
 import errno
 import hashlib
+import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+
+pytestmark = pytest.mark.unit
 
 from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_models import (
     Fingerprint,
@@ -340,3 +345,206 @@ def test_closed_store_rejects_operations_after_new_owner_acquires_root(tmp_path:
         with pytest.raises(SnapshotStoreError, match="closed"):
             first.list("profile_1")
         assert replacement.list("profile_1") == []
+
+
+@pytest.mark.parametrize("entry", ["manifests/broken.json", "snapshots/orphan.bin", "manifests/unknown"])
+def test_retained_state_guard_preserves_uncertain_entries(tmp_path: Path, entry: str):
+    with SnapshotStore(tmp_path / "private") as store:
+        assert store.has_retained_state("profile_1") is False
+        target = store.root / "profile_1" / entry
+        target.write_bytes(b"{")
+        target.chmod(0o600)
+        assert store.has_retained_state("profile_1") is True
+
+
+@pytest.mark.parametrize("boundary", ["directory_fsync", "manifest_write", "manifest_fsync", "manifest_rename"])
+def test_failed_commit_removes_only_its_unpublished_binary(tmp_path: Path, monkeypatch, boundary: str):
+    staged = tmp_path / "staged.bin"
+    staged.write_bytes(b"cache")
+    with SnapshotStore(tmp_path / "private") as store:
+
+        def interrupt(value):
+            if value == boundary:
+                raise OSError("interrupted")
+
+        monkeypatch.setattr(store, "_checkpoint", interrupt)
+        with pytest.raises(OSError, match="interrupted"):
+            store.commit("profile_1", staged, metadata(b"cache"))
+        assert list((store.root / "profile_1/snapshots").iterdir()) == []
+
+
+@pytest.mark.parametrize("operation", ["list", "sequence", "key", "launch", "cleanup"])
+def test_replaced_root_cannot_be_used_under_old_owner_lock(tmp_path: Path, operation: str):
+    root = tmp_path / "private"
+    with SnapshotStore(root) as store:
+        root.rename(tmp_path / "original")
+        with SnapshotStore(root) as replacement:
+            actions = {
+                "list": lambda: store.list("profile_1"),
+                "sequence": lambda: store.allocate_sequence("profile_1"),
+                "key": store.token_key,
+                "launch": lambda: store.launch_directory("profile_1", "launch_1"),
+                "cleanup": lambda: store.cleanup_launch("profile_1", "launch_1"),
+            }
+            with pytest.raises(SnapshotStoreError, match="root"):
+                actions[operation]()
+            assert sorted(path.name for path in root.iterdir()) == [".owner.lock"]
+            assert replacement.list("profile_1") == []
+
+
+def test_restore_accepts_known_generated_name_and_rejects_path_input(tmp_path: Path):
+    staged = tmp_path / "staged.bin"
+    staged.write_bytes(b"cache")
+    with SnapshotStore(tmp_path / "private") as store:
+        store.commit("profile_1", staged, metadata(b"cache"))
+        name = "restore-" + "a" * 32 + ".bin"
+        result = store.stage_restore("profile_1", "snap_1", tmp_path / "working", filename=name)
+        assert result == tmp_path / "working" / name
+        assert result.read_bytes() == b"cache"
+        with pytest.raises(SnapshotStoreError):
+            store.stage_restore("profile_1", "snap_1", tmp_path / "working", filename="../escape")
+
+
+@pytest.mark.parametrize("boundary", ["directory_fsync", "manifest_write", "manifest_fsync"])
+def test_restart_reclaims_proven_never_committed_binary_after_crash(tmp_path: Path, boundary: str):
+    staged = tmp_path / "staged.bin"
+    staged.write_bytes(b"cache")
+    root = tmp_path / "private"
+    pid = os.fork()
+    if pid == 0:
+        try:
+            with SnapshotStore(root) as store:
+
+                def crash(value):
+                    if value == boundary:
+                        os._exit(23)
+
+                store._checkpoint = crash
+                store.commit("profile_1", staged, metadata(b"cache"))
+        finally:
+            os._exit(24)
+    _, status = os.waitpid(pid, 0)
+    assert os.waitstatus_to_exitcode(status) == 23
+    assert (root / "profile_1/snapshots/snap_1.bin").exists()
+    with SnapshotStore(root) as recovered:
+        assert list((root / "profile_1/snapshots").iterdir()) == []
+        assert recovered.list("profile_1") == []
+
+
+def test_restart_preserves_binary_when_previously_committed_manifest_is_lost(tmp_path: Path):
+    staged = tmp_path / "staged.bin"
+    staged.write_bytes(b"cache")
+    root = tmp_path / "private"
+    with SnapshotStore(root) as store:
+        store.commit("profile_1", staged, metadata(b"cache"))
+    (root / "profile_1/manifests/snap_1.json").unlink()
+    with SnapshotStore(root) as recovered:
+        assert (root / "profile_1/snapshots/snap_1.bin").read_bytes() == b"cache"
+        assert recovered.has_retained_state("profile_1") is True
+
+
+def test_root_swap_during_commit_never_publishes_under_replacement(tmp_path: Path, monkeypatch):
+    staged = tmp_path / "staged.bin"
+    staged.write_bytes(b"cache")
+    root = tmp_path / "private"
+    with SnapshotStore(root) as store:
+
+        def swap(boundary):
+            if boundary == "binary_rename":
+                root.rename(tmp_path / "original")
+                root.mkdir(mode=0o700)
+
+        monkeypatch.setattr(store, "_checkpoint", swap)
+        with pytest.raises(SnapshotStoreError, match="root"):
+            store.commit("profile_1", staged, metadata(b"cache"))
+        assert list(root.iterdir()) == []
+
+
+def test_restore_collision_preserves_existing_generated_file(tmp_path: Path):
+    staged = tmp_path / "staged.bin"
+    staged.write_bytes(b"cache")
+    with SnapshotStore(tmp_path / "private") as store:
+        store.commit("profile_1", staged, metadata(b"cache"))
+        working = store.launch_directory("profile_1", "launch_1")
+        name = "restore-" + "a" * 32 + ".bin"
+        existing = working / name
+        existing.write_bytes(b"retained recovery evidence")
+        with pytest.raises(FileExistsError):
+            store.stage_restore("profile_1", "snap_1", working, filename=name)
+        assert existing.read_bytes() == b"retained recovery evidence"
+
+
+def test_commit_closes_source_when_destination_inspection_fails(tmp_path: Path, monkeypatch):
+    staged = tmp_path / "staged.bin"
+    staged.write_bytes(b"cache")
+    with SnapshotStore(tmp_path / "private") as store:
+        store.list("profile_1")
+        (store.root / "profile_1/snapshots/snap_1.bin").symlink_to(staged)
+        original_open = os.open
+        opened = []
+
+        def record_open(path, *args, **kwargs):
+            fd = original_open(path, *args, **kwargs)
+            if path == staged.name:
+                opened.append(fd)
+            return fd
+
+        monkeypatch.setattr(os, "open", record_open)
+        with pytest.raises(SnapshotStoreError):
+            store.commit("profile_1", staged, metadata(b"cache"))
+        for fd in opened:
+            with pytest.raises(OSError):
+                os.fstat(fd)
+
+
+def test_commit_preserves_unknown_pending_journal(tmp_path: Path):
+    staged = tmp_path / "staged.bin"
+    staged.write_bytes(b"cache")
+    with SnapshotStore(tmp_path / "private") as store:
+        store.list("profile_1")
+        pending = store.root / "profile_1/snapshots/.pending-snap_1.json"
+        pending.write_bytes(b"unknown publication evidence")
+        with pytest.raises(SnapshotStoreError):
+            store.commit("profile_1", staged, metadata(b"cache"))
+        assert pending.read_bytes() == b"unknown publication evidence"
+
+
+@pytest.mark.parametrize("evidence", ["corrupt_journal", "different_inode", "existing_manifest", "symlink"])
+def test_restart_preserves_uncertain_journaled_state(tmp_path: Path, evidence: str):
+    root = tmp_path / "private"
+    with SnapshotStore(root) as store:
+        store.list("profile_1")
+    binary = root / "profile_1/snapshots/snap_1.bin"
+    binary.write_bytes(b"recovery evidence")
+    binary.chmod(0o600)
+    info = binary.stat()
+    marker = binary.parent / ".pending-snap_1.json"
+    marker.write_text(
+        json.dumps(
+            {
+                "temporary_name": "." + "a" * 32 + ".tmp",
+                "device": info.st_dev,
+                "inode": info.st_ino + (1 if evidence == "different_inode" else 0),
+            }
+        )
+    )
+    marker.chmod(0o600)
+    if evidence == "corrupt_journal":
+        marker.write_text("{")
+    elif evidence == "existing_manifest":
+        manifest = root / "profile_1/manifests/snap_1.json"
+        manifest.write_text("{")
+        manifest.chmod(0o600)
+    elif evidence == "symlink":
+        original = tmp_path / "original.bin"
+        binary.rename(original)
+        binary.symlink_to(original)
+        with pytest.raises(SnapshotStoreError):
+            SnapshotStore(root)
+        assert original.read_bytes() == b"recovery evidence"
+        assert marker.exists()
+        return
+    with SnapshotStore(root) as recovered:
+        assert recovered.has_retained_state("profile_1") is True
+        assert binary.read_bytes() == b"recovery evidence"
+        assert marker.exists()

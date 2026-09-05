@@ -57,3 +57,31 @@ required by this proposal; manifests and receipts are versioned local files.
 This decision does not supersede ADR-003 globally.
 Any later Jobs integration must preserve single-dispatch and runtime-owner
 constraints, and must not turn a recovery event into an automatic restore.
+
+## Review hardening (2026-09-05, TASK-13183)
+
+Bind every storage traversal to the locked root's device/inode identity. A
+replacement root must fail closed before creating descendants; pathname equality
+alone does not preserve process ownership. Profile deletion requires proven-empty
+binary and manifest directories, including malformed or incomplete entries.
+
+Before publishing a copied binary, durably record its temporary filename and
+device/inode in a private pending-publication marker. Retire that marker durably
+before attempting the manifest rename. Startup may reclaim only matching inodes
+with a valid pending marker and no manifest. An unjournaled binary, mismatched
+inode, corrupt marker, or uncertain manifest publication is retained for operator
+recovery. Inferring an orphan from a missing manifest alone is rejected: a
+previously committed manifest could have been lost. This extends the existing
+manifest-last protocol without changing snapshot or receipt schema versions.
+
+Pre-spawn failures remove their launch files; after a child is created, cleanup
+still requires confirmed exit. Pre-dispatch restore failures remove their known
+staged filename, including cancellation during the copy. Dispatched operations
+with unknown outcomes continue retaining their evidence and quarantine.
+
+Use a bounded, supervisor-service-lifetime hash cache keyed by device, inode,
+size, mtime and ctime. Verify descriptor/path identity around every cache lookup;
+do not cache unstable reads. This avoids repeatedly streaming large models on
+UI refresh without accepting a changed file as the launch identity. No persistent
+hash cache or model-family inference is introduced, and production build admission
+remains gated on separately recorded live evidence.

@@ -88,3 +88,12 @@ class OperationReceipt(BaseModel):
     token_count: int | None = Field(default=None, ge=0)
     error_code: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]{0,127}$")
     format_version: Literal[1] = 1
+
+    @property
+    def recovery_action(self) -> Literal["none", "retry_manually", "stop_runtime"]:
+        """Describe operator recovery without adding a field to durable receipts."""
+        if self.state == "outcome_unknown":
+            return "stop_runtime"
+        if self.state == "failed":
+            return "retry_manually"
+        return "none"

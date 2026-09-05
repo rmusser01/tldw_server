@@ -214,41 +214,43 @@ class LlamaCppProcessRunner:
         command = self._build_command(executable_path, resolved_model_path, host, port, args)
         self.snapshot_generation = uuid4().hex
         self.snapshot_working = None
+        self.snapshot_process = None
         self.snapshot_fingerprint = None
         self.snapshot_executable = executable_path.resolve()
         # Exclude executable/model/origin, which have separate content/origin identity.
         self.snapshot_options = command[7:]
         redacted_command = http_utils.redact_cmd_args(command)
-        if profile.snapshots_enabled:
-            if self.snapshot_store is None:
-                raise ServerError("Snapshot storage owner is unavailable.")
-            self.snapshot_working = await disk_call(
-                self.snapshot_store.launch_directory, self.profile_id, self.snapshot_generation
-            )
-            command.extend(["--slots", "--slot-save-path", str(self.snapshot_working)])
-            self.snapshot_fingerprint = await disk_call(
-                build_fingerprint,
-                model=resolved_model_path,
-                executable=self.snapshot_executable,
-                effective_options=self.snapshot_options,
-                adapters=[],
-            )
-        stdout_target, stderr_target, log_handle, log_file_path = self._open_log_targets()
-        client_host = handler_utils.resolve_client_host(host)
-        base_url = handler_utils.build_base_url(client_host, port)
-
-        self._record_start_attempt(
-            profile=profile,
-            model_path=resolved_model_path,
-            host=host,
-            port=port,
-            endpoint=base_url,
-            log_handle=log_handle,
-            log_file_path=log_file_path,
-            redacted_command=redacted_command,
-        )
-
+        log_handle = None
         try:
+            if profile.snapshots_enabled:
+                if self.snapshot_store is None:
+                    raise ServerError("Snapshot storage owner is unavailable.")
+                self.snapshot_working = await disk_call(
+                    self.snapshot_store.launch_directory, self.profile_id, self.snapshot_generation
+                )
+                command.extend(["--slots", "--slot-save-path", str(self.snapshot_working)])
+                self.snapshot_fingerprint = await disk_call(
+                    build_fingerprint,
+                    model=resolved_model_path,
+                    executable=self.snapshot_executable,
+                    effective_options=self.snapshot_options,
+                    adapters=[],
+                )
+            stdout_target, stderr_target, log_handle, log_file_path = self._open_log_targets()
+            client_host = handler_utils.resolve_client_host(host)
+            base_url = handler_utils.build_base_url(client_host, port)
+
+            self._record_start_attempt(
+                profile=profile,
+                model_path=resolved_model_path,
+                host=host,
+                port=port,
+                endpoint=base_url,
+                log_handle=log_handle,
+                log_file_path=log_file_path,
+                redacted_command=redacted_command,
+            )
+
             process = await self._spawn(command, stdout_target=stdout_target, stderr_target=stderr_target)
             self._process = process
             self.snapshot_process = process
@@ -260,9 +262,18 @@ class LlamaCppProcessRunner:
                 message = "Llama.cpp server failed to start or become ready."
                 self._record_failure(message, process)
                 raise ServerError(message)
-        except Exception as exc:
-            if log_handle is not None and not log_handle.closed:
-                self._close_log_handle()
+        except BaseException as exc:
+            try:
+                if profile.snapshots_enabled and self.snapshot_store is not None and self.snapshot_process is None:
+                    # disk_call finishes a cancelled directory creation but discards its
+                    # result. The known generation still identifies the unowned files.
+                    await disk_call(self.snapshot_store.cleanup_launch, self.profile_id, self.snapshot_generation)
+                    self.snapshot_working = None
+            finally:
+                if log_handle is not None and not log_handle.closed:
+                    log_handle.close()
+            if not isinstance(exc, Exception):
+                raise
             if isinstance(exc, ServerError):
                 raise
             message = f"Exception starting Llama.cpp server: {exc}"
@@ -583,6 +594,7 @@ class LlamaCppProcessRunner:
         return log_handle, log_handle, log_handle, log_path
 
     async def _spawn(self, command: list[str], *, stdout_target: Any, stderr_target: Any) -> asyncio.subprocess.Process:
+        """Spawn a child without losing its ownership if startup is cancelled."""
         create_kwargs: dict[str, Any] = {"stdout": stdout_target, "stderr": stderr_target}
         if platform.system() == "Windows":
             create_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
@@ -590,7 +602,22 @@ class LlamaCppProcessRunner:
             create_kwargs["process_group"] = 0
         else:
             create_kwargs["preexec_fn"] = os.setsid
-        return await asyncio.create_subprocess_exec(*command, **create_kwargs)
+        task = asyncio.create_task(asyncio.create_subprocess_exec(*command, **create_kwargs))
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            # Creation may already have forked a child. Resolve the spawn before
+            # the supervisor records this generation or releases storage ownership.
+            while not task.done():
+                try:
+                    await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    continue
+            process = task.result()
+            self._process = process
+            self.snapshot_process = process
+            self._start_stream_drainers(process)
+            raise
 
     async def _drain_stream(self, stream: Any, label: str) -> None:
         try:

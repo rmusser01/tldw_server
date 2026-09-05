@@ -3,8 +3,9 @@
 #
 # Imports
 import inspect
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Concatenate, Optional, ParamSpec, TypeVar
 
 #
 # Thid-party Libraries
@@ -41,6 +42,7 @@ from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
     LlamaCppSnapshotCatalogResponse,
     LlamaCppSnapshotDeleteResponse,
     LlamaCppSnapshotOperationResponse,
+    LlamaCppSnapshotRequest,
     LlamaCppSnapshotSlotsResponse,
     LlamaCppStartByModelRequest,
     LlamaCppStartByModelResponse,
@@ -48,6 +50,7 @@ from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
     LlamaCppValidationRequest,
     LlamaCppValidationResponse,
 )
+from tldw_Server_API.app.core.exceptions import SnapshotNotFoundError, SnapshotOperationError, SnapshotStoreError
 
 #
 # Local Imports
@@ -70,8 +73,6 @@ from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
     LlamaCppRuntimeState,
 )
 from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_models import SnapshotRequest
-from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_operations import SnapshotOperationError
-from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotNotFoundError, SnapshotStoreError
 from tldw_Server_API.app.core.Local_LLM.llamacpp_supervisor_service import LlamaCppSupervisor
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import InferenceError, ModelNotFoundError, ServerError
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Manager import LLMInferenceManager
@@ -598,20 +599,20 @@ async def register_llamacpp_model_path_endpoint(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-async def _snapshot_call(manager, method, *args):
+_SnapshotParams = ParamSpec("_SnapshotParams")
+_SnapshotResult = TypeVar("_SnapshotResult")
+
+
+async def _snapshot_call(
+    manager: LLMInferenceManager,
+    method: Callable[Concatenate[LlamaCppSupervisor, _SnapshotParams], Awaitable[_SnapshotResult]],
+    *args: _SnapshotParams.args,
+    **kwargs: _SnapshotParams.kwargs,
+) -> _SnapshotResult:
+    """Invoke a supervisor operation and translate its failures to HTTP errors."""
     try:
         supervisor = _resolve_llamacpp_supervisor(manager)
-        result = await getattr(supervisor, method)(*args)
-        if hasattr(result, "model_dump"):
-            result = result.model_dump(mode="json")
-            result["recovery_action"] = (
-                "stop_runtime"
-                if result["state"] == "outcome_unknown"
-                else "retry_manually"
-                if result["state"] == "failed"
-                else "none"
-            )
-        return result
+        return await method(supervisor, *args, **kwargs)
     except Exception as exc:
         raise _supervisor_error_to_http(exc, manager, "Snapshot operation failed.") from exc
 
@@ -621,8 +622,16 @@ async def _snapshot_call(manager, method, *args):
     response_model=LlamaCppSnapshotSlotsResponse,
     dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
 )
-async def snapshot_slots_endpoint(profile_id: str, llm_manager=Depends(_resolve_llm_manager)):
-    return await _snapshot_call(llm_manager, "snapshot_slots", profile_id)
+async def snapshot_slots_endpoint(
+    profile_id: str, llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager)
+) -> LlamaCppSnapshotSlotsResponse:
+    """Return slot capability and a mutation token for the requested profile.
+
+    The injected manager resolves the owner; missing profiles or unavailable
+    ownership produce the corresponding HTTP error.
+    """
+    result = await _snapshot_call(llm_manager, LlamaCppSupervisor.snapshot_slots, profile_id)
+    return LlamaCppSnapshotSlotsResponse.model_validate(result)
 
 
 @router.get(
@@ -634,9 +643,15 @@ async def snapshot_catalog_endpoint(
     profile_id: str,
     offset: int = Query(0, ge=0),
     limit: int = Query(25, ge=1, le=100),
-    llm_manager=Depends(_resolve_llm_manager),
-):
-    return await _snapshot_call(llm_manager, "snapshot_catalog", profile_id, offset, limit)
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+) -> LlamaCppSnapshotCatalogResponse:
+    """List profile snapshots using the validated offset and limit.
+
+    The injected manager resolves the catalog owner. Return public metadata and
+    totals, or an HTTP error for missing profiles, ownership or storage failures.
+    """
+    result = await _snapshot_call(llm_manager, LlamaCppSupervisor.snapshot_catalog, profile_id, offset, limit)
+    return LlamaCppSnapshotCatalogResponse.model_validate(result)
 
 
 @router.post(
@@ -646,11 +661,24 @@ async def snapshot_catalog_endpoint(
     dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
 )
 async def save_snapshot_endpoint(
-    profile_id: str, body: SnapshotRequest, request: Request, llm_manager=Depends(_resolve_llm_manager)
-):
-    return await _snapshot_call(
-        llm_manager, "save_snapshot", profile_id, body, _owner_user_id_from_request(request) or "admin"
+    profile_id: str,
+    body: LlamaCppSnapshotRequest,
+    request: Request,
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+) -> LlamaCppSnapshotOperationResponse:
+    """Accept a save for the profile, slot and generation supplied in the body.
+
+    Use the HTTP request's actor and injected manager to return a durable
+    operation receipt. Invalid runtime state or stale tokens produce HTTP errors.
+    """
+    result = await _snapshot_call(
+        llm_manager,
+        LlamaCppSupervisor.save_snapshot,
+        profile_id,
+        SnapshotRequest.model_validate(body.model_dump()),
+        _owner_user_id_from_request(request) or "admin",
     )
+    return LlamaCppSnapshotOperationResponse.model_validate(result, from_attributes=True)
 
 
 @router.post(
@@ -662,13 +690,25 @@ async def save_snapshot_endpoint(
 async def restore_snapshot_endpoint(
     profile_id: str,
     snapshot_id: str,
-    body: SnapshotRequest,
+    body: LlamaCppSnapshotRequest,
     request: Request,
-    llm_manager=Depends(_resolve_llm_manager),
-):
-    return await _snapshot_call(
-        llm_manager, "restore_snapshot", profile_id, snapshot_id, body, _owner_user_id_from_request(request) or "admin"
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+) -> LlamaCppSnapshotOperationResponse:
+    """Accept restoring the profile's snapshot into the slot selected by the body.
+
+    Use the HTTP request's actor and injected manager to return an operation
+    receipt. Missing snapshots, incompatible state, stale tokens or unconfirmed
+    replacement produce HTTP errors before acceptance.
+    """
+    result = await _snapshot_call(
+        llm_manager,
+        LlamaCppSupervisor.restore_snapshot,
+        profile_id,
+        snapshot_id,
+        SnapshotRequest.model_validate(body.model_dump()),
+        _owner_user_id_from_request(request) or "admin",
     )
+    return LlamaCppSnapshotOperationResponse.model_validate(result, from_attributes=True)
 
 
 @router.delete(
@@ -676,9 +716,16 @@ async def restore_snapshot_endpoint(
     response_model=LlamaCppSnapshotDeleteResponse,
     dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
 )
-async def delete_snapshot_endpoint(profile_id: str, snapshot_id: str, llm_manager=Depends(_resolve_llm_manager)):
-    await _snapshot_call(llm_manager, "delete_snapshot", profile_id, snapshot_id)
-    return {"deleted": True}
+async def delete_snapshot_endpoint(
+    profile_id: str, snapshot_id: str, llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager)
+) -> LlamaCppSnapshotDeleteResponse:
+    """Delete the selected profile snapshot through the injected manager's owner.
+
+    Return deletion confirmation, or an HTTP error for missing snapshots,
+    concurrent mutations, ownership or storage failures.
+    """
+    await _snapshot_call(llm_manager, LlamaCppSupervisor.delete_snapshot, profile_id, snapshot_id)
+    return LlamaCppSnapshotDeleteResponse(deleted=True)
 
 
 @router.get(
@@ -686,8 +733,16 @@ async def delete_snapshot_endpoint(profile_id: str, snapshot_id: str, llm_manage
     response_model=LlamaCppSnapshotOperationResponse,
     dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
 )
-async def snapshot_operation_endpoint(profile_id: str, operation_id: str, llm_manager=Depends(_resolve_llm_manager)):
-    return await _snapshot_call(llm_manager, "snapshot_operation", profile_id, operation_id)
+async def snapshot_operation_endpoint(
+    profile_id: str, operation_id: str, llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager)
+) -> LlamaCppSnapshotOperationResponse:
+    """Read public progress and recovery guidance for a profile's operation ID.
+
+    The injected manager resolves receipt ownership. Missing or cross-profile
+    receipts and unavailable storage produce HTTP errors.
+    """
+    result = await _snapshot_call(llm_manager, LlamaCppSupervisor.snapshot_operation, profile_id, operation_id)
+    return LlamaCppSnapshotOperationResponse.model_validate(result, from_attributes=True)
 
 
 @router.get(

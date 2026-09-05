@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-05 16:44'
-updated_date: '2026-09-05 16:56'
+updated_date: '2026-09-05 17:25'
 labels: []
 dependencies: []
 ---
@@ -42,6 +42,12 @@ User explicitly approved the limited direct-file exception for six-task ID migra
 Migration verified: six new IDs 13184–13189 unique across local/remote inventory, filename/frontmatter match, dependency targets exist, statuses preserved, ten unrelated colliding task files byte-identical to HEAD, unrelated Personal Context lesson text unchanged, source/published ADR byte-identical, whitespace clean. User approval is recorded in thread and scheduled workflow updated to avoid asking again. Documentation-only change; runtime tests and Bandit not applicable.
 
 Post-migration published-docs refresh test module passed: 33 tests, seven baseline warnings. No runtime files changed.
+
+Qodo posted 14 inline findings on PR 2883; read all complete bodies. Remediation plan under existing ADR-043: independent API boundary/types/docstrings fixes; storage root-identity, orphan publication recovery and conservative retained-state detection; bounded stable-identity fingerprint cache to remove repeated model reads; controller launch/pre-dispatch restore cleanup and public-lifecycle regression improvements; classify new tests. Require failing behavioral reproductions for bugs, preserve unknown-outcome artifacts and ownership fences, run combined targeted tests/security, regenerate API contract and respond inline with evidence before merge.
+
+Qodo remediation integrated with RED/GREEN evidence: 338 targeted backend/docs tests passed, one explicitly opt-in live skip, ten environment/fork warnings. All 18 touched Python files pass Ruff formatting and lint (four pre-existing runner BLE001 exceptions retained); touched production Bandit has zero issues/errors. API schemas/docs regenerated. Existing ADR-043 amended with root inode fencing, conservative pending-publication journal recovery, staged cleanup and bounded fingerprint-cache rationale. Production tested-build set remains empty. Independent final review and exact-head CI remain required before merge.
+
+Independent final review found one additional staged-filename ownership gap. A controller-level collision regression first failed with deleted evidence, then passed after cleanup required a successful staging result retained across disk-call cancellation. Updated operations module: 42 tests passed. Shared Admin/runtime UI: 64 tests passed. OpenAPI drift check and generated TypeScript typecheck passed. Strict docs build passed with existing temporary serial git-plugin config (host multiprocessing constraint; canonical repository config unchanged). No new review requests beyond the same 14 Qodo inline findings. Latest dev advanced with email-summary PR2887; rebase again before publishing.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

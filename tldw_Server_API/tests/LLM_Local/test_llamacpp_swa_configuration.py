@@ -10,6 +10,8 @@ from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
 from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import LlamaCppProfile
 from tldw_Server_API.app.core.Local_LLM.llamacpp_server_args import clean_server_args, server_arg_formatters
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.parametrize("value", ["false", "true", 0, 1, None, "", [], {}])
 def test_full_cache_rejects_non_boolean_at_every_input_boundary(value):

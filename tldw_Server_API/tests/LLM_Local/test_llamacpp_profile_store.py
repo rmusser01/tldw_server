@@ -1,3 +1,5 @@
+"""Profile persistence and validation tests using isolated JSON files."""
+
 import json
 from pathlib import Path
 
@@ -11,6 +13,8 @@ from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
     LlamaCppProfileMode,
     LlamaCppProfileStoreError,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def profile(

@@ -12,6 +12,8 @@ from tldw_Server_API.tests.LLM_Local.test_llamacpp_admin_config_api import (
     _ManagerWithoutHandler,
 )
 
+pytestmark = pytest.mark.integration
+
 ROUTES = [
     ("GET", "/slots"),
     ("GET", "/snapshots"),
@@ -74,7 +76,15 @@ def test_all_routes_enforce_rate_limit(method, suffix):
     assert response.status_code == 429
 
 
-def test_real_supervisor_stopped_catalog_token_and_cross_profile_receipts(tmp_path):
+@pytest.mark.parametrize(
+    "state,recovery_action",
+    [
+        ("complete", "none"),
+        ("failed", "retry_manually"),
+        ("outcome_unknown", "stop_runtime"),
+    ],
+)
+def test_real_supervisor_stopped_catalog_token_and_cross_profile_receipts(tmp_path, state, recovery_action):
     from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_store import JsonLlamaCppProfileStore
     from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import LlamaCppProfile
     from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_models import OperationReceipt
@@ -90,16 +100,18 @@ def test_real_supervisor_stopped_catalog_token_and_cross_profile_receipts(tmp_pa
     supervisor = LlamaCppSupervisor(config=config, store=profiles)
     with SnapshotStore(tmp_path / "snapshots") as storage:
         supervisor._snapshots = SnapshotOperations(storage)
-        storage.write_receipt(
-            OperationReceipt(
-                profile_id="p1",
-                operation_id="operation1",
-                launch_generation="generation",
-                request_digest="a" * 64,
-                kind="save",
-                state="complete",
-            )
+        operation = OperationReceipt(
+            profile_id="p1",
+            operation_id="operation1",
+            launch_generation="generation",
+            request_digest="a" * 64,
+            kind="save",
+            state=state,
         )
+        assert operation.recovery_action == recovery_action
+        assert "recovery_action" not in operation.model_dump(mode="json")
+        assert OperationReceipt.model_validate_json(operation.model_dump_json()) == operation
+        storage.write_receipt(operation)
         app = _make_app_with_manager(
             SimpleNamespace(llamacpp_supervisor=supervisor, logger=_ManagerWithoutHandler.logger)
         )
@@ -113,6 +125,7 @@ def test_real_supervisor_stopped_catalog_token_and_cross_profile_receipts(tmp_pa
             assert catalog.status_code == 200 and catalog.json()["total"] == 0
             receipt = client.get("/api/v1/llamacpp/profiles/p1/snapshot-operations/operation1")
             assert receipt.status_code == 200
+            assert receipt.json()["recovery_action"] == recovery_action
             assert "request_digest" not in receipt.json()
             assert "dispatched" not in receipt.json()
             cross = client.get("/api/v1/llamacpp/profiles/p2/snapshot-operations/operation1")

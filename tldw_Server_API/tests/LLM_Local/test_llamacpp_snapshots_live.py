@@ -21,6 +21,8 @@ from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_operations import Snap
 from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
 
+pytestmark = pytest.mark.local_llm_service
+
 
 def completion_metrics(response: dict) -> dict[str, int]:
     """Require native runtime counters; missing counters cannot prove reuse."""

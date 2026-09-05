@@ -18,6 +18,139 @@ from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
 from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_models import SnapshotRequest
 from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore
 
+pytestmark = pytest.mark.integration
+
+
+def test_public_snapshot_errors_share_central_exception_identity():
+    """Catch split exception classes that break the endpoint's error mapping."""
+    from tldw_Server_API.app.core import exceptions
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_snapshot_compatibility as compatibility
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_snapshot_store as storage
+
+    assert ops.SnapshotOperationError is exceptions.SnapshotOperationError
+    assert compatibility.UnstableFingerprintError is exceptions.UnstableFingerprintError
+    for name in (
+        "SnapshotStoreError",
+        "SnapshotCorruptError",
+        "SnapshotNotFoundError",
+        "SnapshotStorageUnavailableError",
+    ):
+        assert getattr(storage, name) is getattr(exceptions, name)
+    error = exceptions.SnapshotOperationError("invalid_request_token", 422)
+    assert str(error) == "invalid_request_token"
+    assert error.code == "invalid_request_token"
+    assert error.status_code == 422
+    assert isinstance(exceptions.SnapshotCorruptError("invalid"), exceptions.SnapshotStoreError)
+
+
+@pytest.mark.parametrize("cancel_copy", [False, True])
+async def test_restore_before_dispatch_removes_staged_bytes(setup, monkeypatch, cancel_copy):
+    """Catch leaked copies after validation failure or cancellation during disk work."""
+    service, store, profile, runner, transport = setup
+    await submit(setup)
+    await finish(service)
+    saved = store.list("p1")[0]
+    entered, release = threading.Event(), threading.Event()
+    original_stage = store.stage_restore
+
+    def stage(*args, **kwargs):
+        path = original_stage(*args, **kwargs)
+        entered.set()
+        if cancel_copy:
+            assert release.wait(5)
+        return path
+
+    async def inspect(**kwargs):
+        result = await transport(**kwargs)
+        if kwargs["method"] == "GET" and entered.is_set():
+            result[0]["is_processing"] = True
+        return result
+
+    monkeypatch.setattr(store, "stage_restore", stage)
+    service.transport = inspect
+    receipt = await service.admit(
+        profile,
+        runner,
+        SnapshotRequest(
+            slot_id=0,
+            expected_launch_generation="generation1",
+            request_id=service.issue_token("p1"),
+            replace_confirmed=True,
+        ),
+        "admin",
+        "restore",
+        saved.snapshot_id,
+    )
+    if cancel_copy:
+        assert await asyncio.to_thread(entered.wait, 2)
+        task = service.tasks[receipt.operation_id]
+        task.cancel()
+        release.set()
+        await task
+    else:
+        await finish(service)
+    assert store.read_receipt("p1", receipt.operation_id).state == "failed"
+    assert list(runner.snapshot_working.iterdir()) == []
+    assert len(transport.calls) == 1  # Only the setup save, never a restore POST.
+    assert store.list("p1")[0].snapshot_id == saved.snapshot_id
+
+
+async def test_service_refreshes_reuse_verified_file_hashes(setup, monkeypatch):
+    """Catch a regression to streaming whole model files on every UI refresh."""
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_snapshot_compatibility as compatibility
+
+    service, _, profile, runner, _ = setup
+    reads = 0
+    original_read = compatibility.os.read
+
+    def read(*args):
+        nonlocal reads
+        reads += 1
+        return original_read(*args)
+
+    monkeypatch.setattr(compatibility.os, "read", read)
+    await service.fingerprint(profile, runner)
+    initial_reads = reads
+    assert initial_reads > 0
+    await service.fingerprint(profile, runner)
+    await service.fingerprint(profile, runner)
+    assert reads == initial_reads
+
+
+async def test_restore_collision_preserves_unowned_working_file(setup, monkeypatch):
+    """Catch coordinator cleanup deleting a file that exclusive creation rejected."""
+    service, store, profile, runner, transport = setup
+    await submit(setup)
+    await finish(service)
+    saved = store.list("p1")[0]
+    original_stage = store.stage_restore
+    existing = None
+
+    def stage(*args, **kwargs):
+        nonlocal existing
+        existing = runner.snapshot_working / kwargs["filename"]
+        existing.write_bytes(b"other operation evidence")
+        return original_stage(*args, **kwargs)
+
+    monkeypatch.setattr(store, "stage_restore", stage)
+    receipt = await service.admit(
+        profile,
+        runner,
+        SnapshotRequest(
+            slot_id=0,
+            expected_launch_generation="generation1",
+            request_id=service.issue_token("p1"),
+            replace_confirmed=True,
+        ),
+        "admin",
+        "restore",
+        saved.snapshot_id,
+    )
+    await finish(service)
+    assert store.read_receipt("p1", receipt.operation_id).state == "failed"
+    assert existing.read_bytes() == b"other operation evidence"
+    assert len(transport.calls) == 1
+
 
 class Runner:
     def __init__(self, model, executable):
@@ -216,6 +349,7 @@ def test_monotonic_sequence_survives_deleting_all_entries(setup):
 
 
 def test_replace_closes_source_descriptor_if_target_open_fails(tmp_path, monkeypatch):
+    store = SnapshotStore(tmp_path / "snapshots")
     original = SnapshotStore._open_directory_fd
     opened = []
 
@@ -226,11 +360,14 @@ def test_replace_closes_source_descriptor_if_target_open_fails(tmp_path, monkeyp
         opened.append(fd)
         return fd
 
-    monkeypatch.setattr(SnapshotStore, "_open_directory_fd", injected)
-    with pytest.raises(OSError):
-        SnapshotStore._replace(tmp_path / "source", tmp_path / "absent" / "target")
-    with pytest.raises(OSError):
-        os.fstat(opened[0])
+    monkeypatch.setattr(SnapshotStore, "_open_directory_fd", staticmethod(injected))
+    try:
+        with pytest.raises(OSError):
+            store._replace(store.root / "source", store.root / "absent" / "target")
+        with pytest.raises(OSError):
+            os.fstat(opened[0])
+    finally:
+        store.close()
 
 
 async def test_disk_full_after_send_preserves_previous_snapshot_without_pruning(setup, monkeypatch):

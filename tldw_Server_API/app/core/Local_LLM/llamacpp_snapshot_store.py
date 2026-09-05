@@ -9,6 +9,7 @@ import os
 import re
 import stat
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 try:
@@ -18,6 +19,12 @@ except ImportError:
 
 from pydantic import BaseModel, Field, ValidationError
 
+from ..exceptions import (
+    SnapshotCorruptError,
+    SnapshotNotFoundError,
+    SnapshotStorageUnavailableError,
+    SnapshotStoreError,
+)
 from .llamacpp_snapshot_models import OperationReceipt, SnapshotMetadata
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
@@ -29,20 +36,12 @@ class _Sequence(BaseModel):
     value: int = Field(ge=0)
 
 
-class SnapshotStoreError(RuntimeError):
-    """Base error for private snapshot storage."""
+class _PendingBinary(BaseModel):
+    """Durable proof that a copied inode has not attempted manifest publication."""
 
-
-class SnapshotCorruptError(SnapshotStoreError):
-    """Raised when committed bytes no longer match their manifest."""
-
-
-class SnapshotNotFoundError(SnapshotStoreError):
-    """Raised when no valid committed snapshot or receipt exists."""
-
-
-class SnapshotStorageUnavailableError(SnapshotStoreError):
-    """Raised when storage exists but cannot be read reliably."""
+    temporary_name: str = Field(pattern=r"^\.[0-9a-f]{32}\.tmp$")
+    device: int
+    inode: int
 
 
 class _MalformedManifestError(SnapshotStoreError):
@@ -55,11 +54,21 @@ class SnapshotStore:
     def __init__(self, root: Path):
         if fcntl is None:
             raise SnapshotStorageUnavailableError("Snapshot storage requires POSIX ownership locking.")
-        self.root = Path(root)
+        self.root = Path(root).absolute()
         self._lock_fd: int | None = None
+        self._root_fd: int | None = None
+        self._root_identity: tuple[int, int] | None = None
         self._owner_pid = os.getpid()
-        self._ensure_private_dir(self.root)
-        self._acquire_owner_lock()
+        try:
+            self._ensure_private_dir(self.root)
+            self._root_fd = self._open_directory_fd(self.root)
+            info = os.fstat(self._root_fd)
+            self._root_identity = (info.st_dev, info.st_ino)
+            self._acquire_owner_lock()
+            self._recover_pending_binaries()
+        except BaseException:
+            self.close()
+            raise
 
     def __enter__(self) -> SnapshotStore:
         return self
@@ -110,11 +119,29 @@ class SnapshotStore:
 
     def close(self) -> None:
         """Release the process ownership fence."""
-        if self._lock_fd is not None:
-            if os.getpid() == self._owner_pid:
-                fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
-            os.close(self._lock_fd)
-            self._lock_fd = None
+        try:
+            if self._lock_fd is not None:
+                try:
+                    if os.getpid() == self._owner_pid:
+                        fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
+                finally:
+                    os.close(self._lock_fd)
+                    self._lock_fd = None
+        finally:
+            if self._root_fd is not None:
+                os.close(self._root_fd)
+                self._root_fd = None
+
+    def has_retained_state(self, profile_id: str) -> bool:
+        """Return false only for proven-empty snapshot and manifest directories.
+
+        Corrupt, incomplete and unknown entries retain profile ownership. Storage
+        inspection errors propagate so a caller cannot mistake them for absence.
+        Receipts and the allocation sequence alone do not retain snapshot bytes.
+        """
+        self._require_open()
+        paths = self._profile_paths(profile_id)
+        return bool(self._list_names(paths["snapshots"]) or self._list_names(paths["manifests"]))
 
     def list(self, profile_id: str) -> list[SnapshotMetadata]:
         """List only snapshots with a valid manifest and regular binary."""
@@ -144,16 +171,18 @@ class SnapshotStore:
             raise SnapshotStoreError("metadata profile does not match storage profile")
         self._validate_id(metadata.snapshot_id)
         paths = self._profile_paths(profile_id)
-        source_fd = self._open_regular_readonly(Path(staged))
-        source_before = os.fstat(source_fd)
         binary = paths["snapshots"] / f"{metadata.snapshot_id}.bin"
         manifest = paths["manifests"] / f"{metadata.snapshot_id}.json"
-        if self._exists(binary) or self._exists(manifest):
-            os.close(source_fd)
+        pending = paths["snapshots"] / f".pending-{metadata.snapshot_id}.json"
+        if self._exists(binary) or self._exists(manifest) or self._exists(pending):
             raise SnapshotStoreError("snapshot ID is already committed")
         temp = paths["snapshots"] / f".{uuid.uuid4().hex}.tmp"
         temp_fd: int | None = None
+        copied_identity: tuple[int, int] | None = None
+        pending_published = False
+        source_fd = self._open_regular_readonly(Path(staged))
         try:
+            source_before = os.fstat(source_fd)
             temp_fd = self._open_exclusive_write(temp)
             digest = hashlib.sha256()
             size = 0
@@ -181,33 +210,58 @@ class SnapshotStore:
             self._checkpoint("copy")
             self._checkpoint("file_fsync")
             os.fsync(temp_fd)
+            copied = os.fstat(temp_fd)
+            copied_identity = (copied.st_dev, copied.st_ino)
             os.close(temp_fd)
             temp_fd = None
+            self._publish_json(
+                pending,
+                _PendingBinary(
+                    temporary_name=temp.name,
+                    device=copied.st_dev,
+                    inode=copied.st_ino,
+                ).model_dump(),
+            )
+            pending_published = True
             self._checkpoint("binary_rename")
             self._replace(temp, binary)
             self._checkpoint("directory_fsync")
             self._fsync_dir(paths["snapshots"])
-            self._publish_json(manifest, metadata.model_dump(mode="json"), checkpoint_prefix="manifest")
+            self._publish_json(
+                manifest,
+                metadata.model_dump(mode="json"),
+                checkpoint_prefix="manifest",
+                before_publish=lambda: self._remove_pending_marker(pending),
+            )
             return metadata
+        except BaseException:
+            if copied_identity is not None and not self._exists(manifest):
+                self._remove_matching_file(binary, copied_identity)
+                if pending_published and self._exists(pending):
+                    self._remove_pending_marker(pending)
+            raise
         finally:
             os.close(source_fd)
             if temp_fd is not None:
                 os.close(temp_fd)
             try:
                 self._unlink(temp)
+                self._fsync_dir(temp.parent)
             except SnapshotNotFoundError:
                 pass
 
-    def stage_restore(self, profile_id: str, snapshot_id: str, working: Path) -> Path:
+    def stage_restore(self, profile_id: str, snapshot_id: str, working: Path, *, filename: str | None = None) -> Path:
         """Copy a verified committed snapshot into a private launch directory."""
         self._require_open()
+        if filename is not None and not re.fullmatch(r"restore-[0-9a-f]{32}\.bin", filename):
+            raise SnapshotStoreError("invalid generated restore filename")
         paths = self._profile_paths(profile_id)
         self._validate_id(snapshot_id)
         metadata = self._read_snapshot(paths, profile_id, snapshot_id)
         self._ensure_private_dir(Path(working))
         source = paths["snapshots"] / f"{snapshot_id}.bin"
         source_fd = self._open_regular_readonly(source)
-        destination = Path(working) / f"restore-{uuid.uuid4().hex}.bin"
+        destination = Path(working) / (filename or f"restore-{uuid.uuid4().hex}.bin")
         destination_fd: int | None = None
         try:
             destination_fd = self._open_exclusive_write(destination)
@@ -222,10 +276,11 @@ class SnapshotStore:
             os.fsync(destination_fd)
             return destination
         except BaseException:
-            try:
-                self._unlink(destination)
-            except SnapshotNotFoundError:
-                pass
+            if destination_fd is not None:
+                try:
+                    self._unlink(destination)
+                except SnapshotNotFoundError:
+                    pass
             raise
         finally:
             os.close(source_fd)
@@ -328,7 +383,7 @@ class SnapshotStore:
         path = self.launch_directory(profile_id, generation)
         for name in self._list_names(path):
             self._unlink(path / name)
-        parent_fd = self._open_directory_fd(path.parent)
+        parent_fd = self._directory_fd(path.parent)
         try:
             os.rmdir(path.name, dir_fd=parent_fd)
             os.fsync(parent_fd)
@@ -376,6 +431,7 @@ class SnapshotStore:
         *,
         replace: bool = False,
         checkpoint_prefix: str | None = None,
+        before_publish: Callable[[], None] | None = None,
     ) -> None:
         if not replace and self._exists(target):
             raise SnapshotStoreError("published file already exists")
@@ -394,6 +450,8 @@ class SnapshotStore:
             os.fsync(fd)
             os.close(fd)
             fd = None
+            if before_publish is not None:
+                before_publish()
             if checkpoint_prefix:
                 self._checkpoint(f"{checkpoint_prefix}_rename")
             self._replace(temp, target)
@@ -405,6 +463,7 @@ class SnapshotStore:
                 os.close(fd)
             try:
                 self._unlink(temp)
+                self._fsync_dir(temp.parent)
             except SnapshotNotFoundError:
                 pass
 
@@ -431,17 +490,19 @@ class SnapshotStore:
     def _acquire_owner_lock(self) -> None:
         lock_path = self.root / ".owner.lock"
         flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0) | self._no_follow_flag()
-        parent_fd = self._open_directory_fd(lock_path.parent)
+        parent_fd = self._directory_fd(lock_path.parent)
         try:
             fd = os.open(lock_path.name, flags, 0o600, dir_fd=parent_fd)
         finally:
             os.close(parent_fd)
-        os.fchmod(fd, 0o600)
         try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise SnapshotStoreError("ownership lock must be regular")
+            os.fchmod(fd, 0o600)
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as exc:
+        except BaseException as exc:
             os.close(fd)
-            if exc.errno in (errno.EACCES, errno.EAGAIN):
+            if isinstance(exc, OSError) and exc.errno in (errno.EACCES, errno.EAGAIN):
                 raise SnapshotStoreError("snapshot root is owned by another process") from exc
             raise
         self._lock_fd = fd
@@ -451,9 +512,8 @@ class SnapshotStore:
         if not _ID_RE.fullmatch(value):
             raise SnapshotStoreError("invalid opaque identifier")
 
-    @staticmethod
-    def _ensure_private_dir(path: Path) -> None:
-        fd = SnapshotStore._open_directory_fd(path, create=True)
+    def _ensure_private_dir(self, path: Path) -> None:
+        fd = self._directory_fd(path, create=True)
         try:
             info = os.fstat(fd)
             if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
@@ -468,10 +528,9 @@ class SnapshotStore:
         finally:
             os.close(fd)
 
-    @staticmethod
-    def _open_regular_readonly(path: Path) -> int:
+    def _open_regular_readonly(self, path: Path) -> int:
         flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | SnapshotStore._no_follow_flag()
-        parent_fd = SnapshotStore._open_directory_fd(path.parent)
+        parent_fd = self._directory_fd(path.parent)
         try:
             fd = os.open(path.name, flags, dir_fd=parent_fd)
         except FileNotFoundError as exc:
@@ -487,9 +546,8 @@ class SnapshotStore:
             raise SnapshotStoreError("file must be regular")
         return fd
 
-    @staticmethod
-    def _require_regular_private_file(path: Path) -> None:
-        fd = SnapshotStore._open_regular_readonly(path)
+    def _require_regular_private_file(self, path: Path) -> None:
+        fd = self._open_regular_readonly(path)
         try:
             info = os.fstat(fd)
             if info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) & 0o077:
@@ -497,10 +555,9 @@ class SnapshotStore:
         finally:
             os.close(fd)
 
-    @staticmethod
-    def _open_exclusive_write(path: Path) -> int:
+    def _open_exclusive_write(self, path: Path) -> int:
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | SnapshotStore._no_follow_flag()
-        parent_fd = SnapshotStore._open_directory_fd(path.parent)
+        parent_fd = self._directory_fd(path.parent)
         try:
             return os.open(path.name, flags, 0o600, dir_fd=parent_fd)
         finally:
@@ -515,9 +572,8 @@ class SnapshotStore:
                 raise OSError(errno.ENOSPC, "short filesystem write")
             view = view[written:]
 
-    @staticmethod
-    def _fsync_dir(path: Path) -> None:
-        fd = SnapshotStore._open_directory_fd(path)
+    def _fsync_dir(self, path: Path) -> None:
+        fd = self._directory_fd(path)
         try:
             os.fsync(fd)
         finally:
@@ -526,6 +582,15 @@ class SnapshotStore:
     def _require_open(self) -> None:
         if self._lock_fd is None or os.getpid() != self._owner_pid:
             raise SnapshotStoreError("snapshot store is closed")
+        fd = self._directory_fd(self.root)
+        os.close(fd)
+
+    def _directory_fd(self, path: Path, *, create: bool = False) -> int:
+        return self._open_directory_fd(
+            path,
+            create=create,
+            expected_root=(self.root, self._root_identity) if self._root_identity is not None else None,
+        )
 
     def _checkpoint(self, _boundary: str) -> None:
         """No-op fault-injection seam used to verify publication recovery."""
@@ -538,7 +603,12 @@ class SnapshotStore:
         return flag
 
     @staticmethod
-    def _open_directory_fd(path: Path, *, create: bool = False) -> int:
+    def _open_directory_fd(
+        path: Path,
+        *,
+        create: bool = False,
+        expected_root: tuple[Path, tuple[int, int]] | None = None,
+    ) -> int:
         """Walk a directory using held descriptors so ancestors cannot be swapped."""
         no_follow = SnapshotStore._no_follow_flag()
         absolute = path if path.is_absolute() else Path.cwd() / path
@@ -565,16 +635,19 @@ class SnapshotStore:
                     raise SnapshotStorageUnavailableError("directory traversal failed") from exc
                 os.close(fd)
                 fd = next_fd
+                if expected_root is not None and absolute.parts[: index + 2] == expected_root[0].parts:
+                    info = os.fstat(fd)
+                    if (info.st_dev, info.st_ino) != expected_root[1]:
+                        raise SnapshotStorageUnavailableError("snapshot root identity changed")
             return fd
         except BaseException:
             os.close(fd)
             raise
 
-    @staticmethod
-    def _replace(source: Path, target: Path) -> None:
-        source_fd = SnapshotStore._open_directory_fd(source.parent)
+    def _replace(self, source: Path, target: Path) -> None:
+        source_fd = self._directory_fd(source.parent)
         try:
-            target_fd = SnapshotStore._open_directory_fd(target.parent)
+            target_fd = self._directory_fd(target.parent)
             try:
                 os.replace(source.name, target.name, src_dir_fd=source_fd, dst_dir_fd=target_fd)
             finally:
@@ -582,9 +655,8 @@ class SnapshotStore:
         finally:
             os.close(source_fd)
 
-    @staticmethod
-    def _unlink(path: Path) -> None:
-        parent_fd = SnapshotStore._open_directory_fd(path.parent)
+    def _unlink(self, path: Path) -> None:
+        parent_fd = self._directory_fd(path.parent)
         try:
             try:
                 os.unlink(path.name, dir_fd=parent_fd)
@@ -593,9 +665,8 @@ class SnapshotStore:
         finally:
             os.close(parent_fd)
 
-    @staticmethod
-    def _exists(path: Path) -> bool:
-        parent_fd = SnapshotStore._open_directory_fd(path.parent)
+    def _exists(self, path: Path) -> bool:
+        parent_fd = self._directory_fd(path.parent)
         flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | SnapshotStore._no_follow_flag()
         try:
             try:
@@ -611,12 +682,77 @@ class SnapshotStore:
         finally:
             os.close(parent_fd)
 
-    @staticmethod
-    def _list_names(path: Path) -> list[str]:
-        fd = SnapshotStore._open_directory_fd(path)
+    def _list_names(self, path: Path) -> list[str]:
+        fd = self._directory_fd(path)
         try:
             return os.listdir(fd)
         except OSError as exc:
             raise SnapshotStorageUnavailableError("snapshot catalog is unavailable") from exc
         finally:
             os.close(fd)
+
+    def _remove_matching_file(self, path: Path, identity: tuple[int, int]) -> None:
+        """Remove only this publication's inode, preserving replaced evidence."""
+        parent_fd = self._directory_fd(path.parent)
+        try:
+            try:
+                info = os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                return
+            if stat.S_ISREG(info.st_mode) and (info.st_dev, info.st_ino) == identity:
+                os.unlink(path.name, dir_fd=parent_fd)
+                os.fsync(parent_fd)
+        finally:
+            os.close(parent_fd)
+
+    def _remove_pending_marker(self, path: Path) -> None:
+        # Retire proof durably BEFORE attempting a manifest rename. After this
+        # point a crash has unknown publication outcome and must preserve bytes.
+        self._unlink(path)
+        self._fsync_dir(path.parent)
+
+    def _recover_pending_binaries(self) -> None:
+        """Reclaim only journaled pre-publication copies under the owner lock.
+
+        A binary without a manifest alone is not proof: its committed manifest
+        could have been lost or corrupted. Missing/invalid journals and any
+        mismatched inode remain operator recovery evidence.
+        """
+        for profile_id in self._list_names(self.root):
+            if not _ID_RE.fullmatch(profile_id):
+                continue
+            profile = self.root / profile_id
+            try:
+                names = self._list_names(profile / "snapshots")
+                self._list_names(profile / "manifests")
+            except SnapshotNotFoundError:
+                continue
+            for name in names:
+                match = re.fullmatch(r"\.pending-([A-Za-z0-9][A-Za-z0-9_-]{0,127})\.json", name)
+                if match is None:
+                    continue
+                marker = profile / "snapshots" / name
+                try:
+                    pending = self._read_model(marker, _PendingBinary)
+                except (_MalformedManifestError, ValidationError, SnapshotNotFoundError):
+                    continue
+                if self._exists(profile / "manifests" / f"{match[1]}.json"):
+                    continue
+                identity = (pending.device, pending.inode)
+                candidates = [profile / "snapshots" / f"{match[1]}.bin", profile / "snapshots" / pending.temporary_name]
+                safe = True
+                for candidate in candidates:
+                    try:
+                        fd = self._open_regular_readonly(candidate)
+                    except SnapshotNotFoundError:
+                        continue
+                    try:
+                        info = os.fstat(fd)
+                        if (info.st_dev, info.st_ino) != identity:
+                            safe = False
+                    finally:
+                        os.close(fd)
+                if safe:
+                    for candidate in candidates:
+                        self._remove_matching_file(candidate, identity)
+                    self._remove_pending_marker(marker)

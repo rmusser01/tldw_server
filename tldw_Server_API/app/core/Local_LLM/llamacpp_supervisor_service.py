@@ -195,7 +195,7 @@ class LlamaCppSupervisor:
         )
         if not storage_absent:
             snapshots = await self._snapshot_service()
-            if await disk_call(snapshots.store.list, profile_id):
+            if await disk_call(snapshots.store.has_retained_state, profile_id):
                 raise SnapshotOperationError("delete_snapshots_first")
         runner = self._runners.get(profile_id)
         if runner is not None:

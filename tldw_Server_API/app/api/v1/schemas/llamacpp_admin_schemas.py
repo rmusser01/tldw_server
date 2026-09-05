@@ -436,13 +436,28 @@ class LlamaCppLifecycleActionResponse(BaseModel):
     message: str | None = None
 
 
+class LlamaCppSnapshotRequest(BaseModel):
+    """Path-free v1 mutation input bound to a selected slot and launch generation."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    slot_id: int = Field(ge=0)
+    expected_launch_generation: str = Field(min_length=1, max_length=128)
+    request_id: str = Field(min_length=1, max_length=512)
+    replace_confirmed: bool = False
+
+
 class LlamaCppSnapshotSlot(BaseModel):
+    """Slot occupancy and cache size, without prompt or cache content."""
+
     slot_id: int
     busy: bool
     token_count: int
 
 
 class LlamaCppSnapshotSlotsResponse(BaseModel):
+    """Snapshot capability, observed slots and token for the next mutation."""
+
     capability: Literal["ready", "stopped", "disabled", "restart_required", "busy", "unsupported", "unavailable"]
     reason: str | None = None
     launch_generation: str | None = None
@@ -452,6 +467,8 @@ class LlamaCppSnapshotSlotsResponse(BaseModel):
 
 
 class LlamaCppSnapshotItem(BaseModel):
+    """Public snapshot metadata and compatibility with the current runtime."""
+
     snapshot_id: str
     source_slot: int
     created_at: str
@@ -463,6 +480,8 @@ class LlamaCppSnapshotItem(BaseModel):
 
 
 class LlamaCppSnapshotCatalogResponse(BaseModel):
+    """Paginated profile catalog with storage totals and retention policy."""
+
     snapshots: list[LlamaCppSnapshotItem]
     total: int
     total_bytes: int
@@ -472,6 +491,8 @@ class LlamaCppSnapshotCatalogResponse(BaseModel):
 
 
 class LlamaCppSnapshotOperationResponse(BaseModel):
+    """Mutation progress and operator recovery guidance, excluding private receipt data."""
+
     profile_id: str
     operation_id: str
     launch_generation: str
@@ -485,4 +506,6 @@ class LlamaCppSnapshotOperationResponse(BaseModel):
 
 
 class LlamaCppSnapshotDeleteResponse(BaseModel):
+    """Confirmation that the selected immutable snapshot was deleted."""
+
     deleted: bool = True

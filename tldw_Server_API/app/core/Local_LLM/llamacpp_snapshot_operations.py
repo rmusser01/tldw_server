@@ -17,10 +17,17 @@ from uuid import uuid4
 import httpx
 
 from tldw_Server_API.app.core import http_client
+from tldw_Server_API.app.core.exceptions import SnapshotOperationError
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 
 from .llamacpp_runtime_models import LlamaCppProfile, LlamaCppRuntimeState
-from .llamacpp_snapshot_compatibility import build_fingerprint, canonical_sha256, compare_fingerprints, hash_file_stable
+from .llamacpp_snapshot_compatibility import (
+    FingerprintHashCache,
+    build_fingerprint,
+    canonical_sha256,
+    compare_fingerprints,
+    hash_file_stable,
+)
 from .llamacpp_snapshot_models import Fingerprint, OperationReceipt, SnapshotMetadata, SnapshotRequest
 from .llamacpp_snapshot_store import SnapshotNotFoundError, SnapshotStore
 
@@ -28,15 +35,6 @@ from .llamacpp_snapshot_store import SnapshotNotFoundError, SnapshotStore
 TESTED_TEXT_BUILD_SHA256: frozenset[str] = frozenset()
 TOKEN_RETENTION_SECONDS = 30 * 86400
 _TERMINAL = {"complete", "failed", "outcome_unknown"}
-
-
-class SnapshotOperationError(RuntimeError):
-    """Safe machine-readable error at the admin operation boundary."""
-
-    def __init__(self, code: str, status_code: int = 409):
-        super().__init__(code)
-        self.code = code
-        self.status_code = status_code
 
 
 async def disk_call(function, *args, **kwargs):
@@ -87,6 +85,7 @@ class SnapshotOperations:
         clock=time.time,
     ):
         self.store = store
+        self._fingerprint_cache = FingerprintHashCache()
         self.transport = transport
         self.supported_builds = TESTED_TEXT_BUILD_SHA256 if supported_builds is None else supported_builds
         self.clock = clock
@@ -191,6 +190,7 @@ class SnapshotOperations:
             executable=runner.snapshot_executable,
             effective_options=runner.snapshot_options,
             adapters=[],
+            cache=self._fingerprint_cache,
         )
         if fingerprint.executable_sha256 not in self.supported_builds:
             raise SnapshotOperationError("unsupported_build", 422)
@@ -369,6 +369,8 @@ class SnapshotOperations:
 
     async def _execute(self, profile, runner, request, receipt, actor_id, fingerprint, source):
         dispatched = False
+        staged: Path | None = None
+        staged_ready = False
         process = runner.snapshot_process
         origin = runner.status().endpoint
         generation = receipt.launch_generation
@@ -379,9 +381,20 @@ class SnapshotOperations:
                     free = await disk_call(shutil.disk_usage, runner.snapshot_working)
                     if free.free < source.byte_count:
                         raise SnapshotOperationError("insufficient_disk_space", 503)
-                    staged = await disk_call(
-                        self.store.stage_restore, profile.profile_id, source.snapshot_id, runner.snapshot_working
-                    )
+                    # Know the filename even when cancellation waits for a disk
+                    # worker but discards its return value.
+                    staged = runner.snapshot_working / f"restore-{uuid4().hex}.bin"
+
+                    def stage_restore() -> None:
+                        nonlocal staged_ready
+                        self.store.stage_restore(
+                            profile.profile_id, source.snapshot_id, runner.snapshot_working, filename=staged.name
+                        )
+                        # disk_call waits for this worker even on cancellation.
+                        # Failed exclusive creation never grants cleanup ownership.
+                        staged_ready = True
+
+                    await disk_call(stage_restore)
                 else:
                     staged = runner.snapshot_working / f"save-{uuid4().hex}.bin"
                 slot = await self._inspect(runner, generation, request.slot_id)
@@ -469,6 +482,11 @@ class SnapshotOperations:
                 else "operation_failed"
             )
             terminal = receipt.model_copy(update={"state": state, "error_code": code, "dispatched": dispatched})
+            if not dispatched and staged_ready and staged is not None:
+                try:
+                    await disk_call(self.store.remove_working_file, profile.profile_id, generation, staged.name)
+                except Exception:  # noqa: BLE001 - cleanup must not hide the operation's failure.
+                    terminal = terminal.model_copy(update={"warning_code": "working_cleanup_failed"})
             if completed:
                 # Cleanup is after durable completion. Its failure cannot turn a
                 # verified save/restore into an uncertain upstream mutation.
