@@ -219,7 +219,11 @@ async def create_user(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.exception("Failed to create user")
+        logger.exception(
+            "Failed to create user (principal={}, username={})",
+            created_by,
+            payload.username,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create user",
@@ -256,7 +260,14 @@ async def list_users(
         )
         return users, total
     except Exception as e:
-        logger.exception("Failed to list users")
+        logger.exception(
+            "Failed to list users (principal={}, page={}, limit={}, role={}, org_id={})",
+            getattr(principal, "user_id", None),
+            page,
+            limit,
+            role,
+            org_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve users",

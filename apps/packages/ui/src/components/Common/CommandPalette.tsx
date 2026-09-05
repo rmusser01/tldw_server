@@ -34,7 +34,11 @@ import {
 } from "@/hooks/useKeyboardShortcuts"
 import { useShortcutConfig } from "@/hooks/keyboard/useShortcutConfig"
 import type { KeyboardShortcut as ConfiguredKeyboardShortcut } from "@/hooks/keyboard/useKeyboardShortcuts"
-import { getCommandPaletteTarget } from "@/routes/route-metadata"
+import {
+  getCommandPaletteTarget,
+  getRouteCommandPaletteLabel
+} from "@/routes/route-metadata"
+import { ADMIN_MODULES } from "@/components/Option/Admin/admin-modules"
 import { RESEARCH_WORKSPACE_PATH } from "@/routes/route-paths"
 import { searchSettings } from "@/data/settings-index"
 import { cn } from "@/libs/utils"
@@ -324,6 +328,34 @@ export function CommandPalette({
         category: "navigation",
         keywords: ["mcp", "hub", "acp", "policy", "server"],
       },
+      // Admin modules, derived from the admin registry so the palette and the
+      // admin surface can't drift apart (2026-09 UX audit finding S1). Labels
+      // come from route metadata to satisfy palette label governance.
+      ...(!isSidepanel
+        ? ([
+            {
+              id: "nav-admin",
+              label: getRouteCommandPaletteLabel("/admin"),
+              description: t(
+                "common:commandPalette.adminOverviewDescription",
+                "Admin Operations overview"
+              ),
+              icon: <Settings className="size-4" />,
+              ...buildRouteCommand("/admin"),
+              category: "navigation" as const,
+              keywords: ["admin", "operations", "server management"],
+            },
+            ...ADMIN_MODULES.map((module) => ({
+              id: `nav${module.route.replaceAll("/", "-")}`,
+              label: getRouteCommandPaletteLabel(module.route),
+              description: module.description,
+              icon: <Settings className="size-4" />,
+              ...buildRouteCommand(module.route),
+              category: "navigation" as const,
+              keywords: ["admin", module.label.toLowerCase()],
+            })),
+          ] as CommandItem[])
+        : []),
       ...(!isSidepanel ? ([
         {
           id: "nav-health",

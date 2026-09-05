@@ -78,7 +78,9 @@ export const AdminRouteShell: React.FC<{
           })}
         </div>
       </nav>
-      <div id="admin-content" className="min-h-0 flex-1">
+      {/* tabIndex={-1} makes the skip-link target programmatically focusable,
+          so activating the link actually moves keyboard focus past the nav. */}
+      <div id="admin-content" tabIndex={-1} className="min-h-0 flex-1 outline-none">
         {children}
       </div>
     </div>

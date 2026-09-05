@@ -356,11 +356,23 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
       })
     : null
 
-  // One page-level status at a time: when the overview endpoint itself is
-  // unavailable, the per-section callouts and empty provider cards below it
-  // only contradict the banner (2026-09 UX audit finding S3).
+  // One page-level status at a time — but only when the overview error means
+  // the workspace-integrations feature is absent from this server (4xx
+  // endpoint-missing codes). The policy/bot/actor panels load from separate
+  // endpoints, so a transient overview failure must not hide their data or
+  // retry actions (2026-09 UX audit finding S3 + PR #2879 review).
+  const overviewErrorStatus =
+    overviewQuery.isError && !overviewQuery.data
+      ? getCapabilityErrorStatus(overviewQuery.error)
+      : null
   const overviewUnavailable =
-    overviewQuery.isError && !overviewQuery.data && !personalIntegrationsUnsupported
+    overviewQuery.isError &&
+    !overviewQuery.data &&
+    !personalIntegrationsUnsupported &&
+    (overviewErrorStatus === 404 ||
+      overviewErrorStatus === 405 ||
+      overviewErrorStatus === 410 ||
+      overviewErrorStatus === 501)
 
   const handlePersonalAction = async (connection: IntegrationConnection, action: string) => {
     if (scope !== "personal" || !isPersonalProvider(connection.provider)) {

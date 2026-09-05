@@ -4,28 +4,60 @@ A fresh single-user SQLite install used to bootstrap the admin row without a
 uuid, which made GET /api/v1/admin/users 500 (UserSummary required a UUID).
 """
 
+import pathlib
+from typing import AsyncIterator
+
 import pytest
+import pytest_asyncio
+
+from tldw_Server_API.app.core.AuthNZ.database import (
+    DatabasePool,
+    get_db_pool,
+    reset_db_pool,
+)
+from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+pytestmark = pytest.mark.unit
 
 
-async def _fresh_pool(tmp_path, monkeypatch, name: str):
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+@pytest_asyncio.fixture
+async def sqlite_pool(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[DatabasePool]:
+    """Yield a fresh SQLite AuthNZ pool and reset shared state afterwards.
 
-    db_path = tmp_path / name
+    Args:
+        tmp_path: Per-test directory for the throwaway SQLite database file.
+        monkeypatch: Used to point AUTH_MODE/DATABASE_URL at that file.
+
+    Yields:
+        The initialized :class:`DatabasePool` for the temporary database.
+    """
+    db_path = tmp_path / "single_user_uuid.db"
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
     await reset_db_pool()
-    return await get_db_pool(), db_path
+    pool = await get_db_pool()
+    try:
+        yield pool
+    finally:
+        await reset_db_pool()
+        reset_settings()
 
 
 @pytest.mark.asyncio
-async def test_ensure_single_user_admin_user_assigns_uuid_sqlite(tmp_path, monkeypatch):
-    from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+async def test_ensure_single_user_admin_user_assigns_uuid_sqlite(
+    sqlite_pool: DatabasePool,
+) -> None:
+    """The bootstrapped single-user admin row must carry a uuid.
 
-    pool, _ = await _fresh_pool(tmp_path, monkeypatch, "single_user_uuid.db")
-    repo = AuthnzUsersRepo(db_pool=pool)
+    Regression: rows created without one made UserSummary validation fail and
+    the admin users list return HTTP 500.
+    """
+    repo = AuthnzUsersRepo(db_pool=sqlite_pool)
 
     await repo.ensure_single_user_admin_user(user_id=1)
 
@@ -36,8 +68,8 @@ async def test_ensure_single_user_admin_user_assigns_uuid_sqlite(tmp_path, monke
 
 @pytest.mark.asyncio
 async def test_ensure_single_user_admin_user_preserves_uuid_sqlite(
-    tmp_path, monkeypatch
-):
+    sqlite_pool: DatabasePool,
+) -> None:
     """Repeated ensure calls (it runs at startup) must not rotate the uuid.
 
     The COALESCE backfill only fills NULL; an already-assigned uuid stays
@@ -46,10 +78,7 @@ async def test_ensure_single_user_admin_user_preserves_uuid_sqlite(
     real legacy database and cannot be reproduced on the current NOT NULL
     schema.)
     """
-    from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
-
-    pool, _ = await _fresh_pool(tmp_path, monkeypatch, "single_user_stable.db")
-    repo = AuthnzUsersRepo(db_pool=pool)
+    repo = AuthnzUsersRepo(db_pool=sqlite_pool)
 
     await repo.ensure_single_user_admin_user(user_id=1)
     first = await repo.get_user_by_id(1)
@@ -65,7 +94,7 @@ async def test_ensure_single_user_admin_user_preserves_uuid_sqlite(
     assert users[0]["uuid"] == first["uuid"]
 
 
-def test_user_summary_tolerates_null_uuid():
+def test_user_summary_tolerates_null_uuid() -> None:
     """One legacy NULL-uuid row must not 500 the admin users list."""
     from tldw_Server_API.app.api.v1.schemas.admin_schemas import UserSummary
 

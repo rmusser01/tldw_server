@@ -100,7 +100,7 @@ export const ADMIN_MODULES: AdminModule[] = [
   {
     route: "/admin/mlx",
     label: "MLX LM",
-    description: "Load and monitor MLX language models on Apple Silicon.",
+    description: "Load and monitor MLX models on Apple Silicon.",
     group: "Local models"
   },
   {
