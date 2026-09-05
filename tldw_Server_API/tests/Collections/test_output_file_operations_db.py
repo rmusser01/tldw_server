@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from threading import Event
+from threading import Barrier, Event
 from uuid import UUID
 
 import pytest
@@ -553,3 +553,152 @@ def test_concurrent_commit_and_abort_have_one_winner(db, first):
     assert db.backend.execute("SELECT COUNT(*) FROM outputs WHERE id = ?", (output.id,)).scalar == (
         0 if first == "commit" else 1
     )
+
+
+def prepare_create(db, *, name="new.md", budget=512, connection=None):
+    return db.prepare_output_file_operation(
+        "test-volume",
+        kind="create",
+        destination_path=name,
+        lease_seconds=120,
+        reserved_bytes=budget,
+        connection=connection,
+    )
+
+
+@pytest.mark.parametrize("limit", ["operation_bytes", "user_pending_bytes", "active_operations"])
+def test_admission_rejects_capacity_before_inserting_operation(db, limit):
+    insert_binding(db, **{limit: 1})
+    if limit == "active_operations":
+        prepare_create(db, name="first.md")
+    before = db.backend.execute("SELECT COUNT(*) FROM output_file_operations").scalar
+    with pytest.raises(RuntimeError, match="^output_storage_capacity$"):
+        prepare_create(db)
+    assert db.backend.execute("SELECT COUNT(*) FROM output_file_operations").scalar == before
+    assert db.backend.execute("SELECT COUNT(*) FROM outputs").scalar == 0
+
+
+@pytest.mark.parametrize("phase", ["prepared", "committed", "aborting"])
+def test_unfinished_files_keep_capacity_even_when_expired_or_blocked(db, phase):
+    insert_binding(db, user_pending_bytes=1024)
+    insert_operation(db, reserved_bytes=1024, phase=phase, last_error="identity_unconfirmed", lease_until=1)
+    with pytest.raises(RuntimeError, match="^output_storage_capacity$"):
+        prepare_create(db, budget=1)
+    assert db.backend.execute("SELECT COUNT(*) FROM output_file_operations").scalar == 1
+
+
+def test_admission_accepts_exact_byte_and_count_boundaries(db):
+    insert_binding(db, operation_bytes=512, user_pending_bytes=1024, active_operations=2)
+    prepare_create(db, name="first.md")
+    prepare_create(db, name="second.md")
+    with pytest.raises(RuntimeError, match="^output_storage_capacity$"):
+        prepare_create(db, budget=0)
+    assert db.backend.execute("SELECT SUM(reserved_bytes) FROM output_file_operations").scalar == 1024
+
+
+@pytest.mark.parametrize("limit", ["user_pending_bytes", "active_operations"])
+def test_concurrent_admission_cannot_overspend(db, limit):
+    insert_binding(db, **{limit: 512 if limit == "user_pending_bytes" else 1})
+    ready = Barrier(2)
+
+    def reserve_budget(name):
+        ready.wait(timeout=15)
+        try:
+            prepare_create(db, name=name)
+        except RuntimeError as exc:
+            assert str(exc) == "output_storage_capacity"
+            return False
+        return True
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        futures = [workers.submit(reserve_budget, name) for name in ("first.md", "second.md")]
+        assert sorted(future.result(timeout=15) for future in futures) == [False, True]
+    assert db.backend.execute("SELECT COUNT(*) FROM output_file_operations").scalar == 1
+
+
+@pytest.mark.parametrize("db", ["sqlite"], indirect=True)
+def test_admission_rejects_fractional_persisted_policy(db):
+    # SQLite BIGINT affinity accepts fractions despite the positive-range CHECK.
+    for field in (
+        "operation_bytes",
+        "user_pending_bytes",
+        "active_operations",
+        "text_input_bytes",
+        "text_output_bytes",
+        "free_space_margin_bytes",
+    ):
+        insert_binding(db, **{field: 2.5})
+        with pytest.raises(RuntimeError, match="^output_storage_unavailable$"):
+            prepare_create(db, budget=1)
+        assert db.backend.execute("SELECT COUNT(*) FROM output_file_operations").scalar == 0
+        db.backend.execute("DELETE FROM output_storage_bindings", ())
+
+
+def test_admission_capacity_is_user_scoped(db):
+    insert_binding(db, active_operations=1, user_pending_bytes=512)
+    prepare_create(db)
+    other = CollectionsDatabase.from_backend(user_id="781", backend=db.backend)
+    insert_binding(other, active_operations=1, user_pending_bytes=512)
+    foreign = prepare_create(other)
+    assert foreign["user_id"] == "781" and foreign["reserved_bytes"] == 512
+
+
+def test_rolled_back_admission_does_not_spend_capacity(db):
+    insert_binding(db, active_operations=1, user_pending_bytes=512)
+    with pytest.raises(RuntimeError, match="rollback admission"):
+        with db.transaction() as conn:
+            prepare_create(db, connection=conn)
+            raise RuntimeError("rollback admission")
+    assert prepare_create(db)["reserved_bytes"] == 512
+    assert db.backend.execute("SELECT COUNT(*) FROM output_file_operations").scalar == 1
+
+
+def test_file_completion_releases_capacity_without_history_ack(db):
+    output, operation = prepared(db)
+    db.backend.execute("UPDATE output_storage_bindings SET active_operations = 1, user_pending_bytes = 512", ())
+    with db.commit_output_file_operation(operation["token"], "test-volume", dispose_history=True) as conn:
+        db.backend.execute("DELETE FROM outputs WHERE id = ?", (output.id,), connection=conn)
+    with pytest.raises(RuntimeError, match="^output_storage_capacity$"):
+        prepare_create(db)
+    assert db.finish_output_file_operation(operation["token"], "test-volume")
+    replacement = prepare_create(db)
+    assert db.get_output_file_operation(operation["token"], "test-volume")["effects_pending"] == 1
+    assert db.ack_output_file_effect(operation["token"], "test-volume", "dispose_history")
+    assert db.get_output_file_operation(replacement["token"], "test-volume") == replacement
+
+
+def test_abort_keeps_capacity_until_file_completion(db):
+    insert_binding(db, active_operations=1)
+    operation = prepare_create(db)
+    assert db.abort_output_file_operation(operation["token"], "test-volume")
+    with pytest.raises(RuntimeError, match="^output_storage_capacity$"):
+        prepare_create(db, name="second.md")
+    assert db.finish_output_file_operation(operation["token"], "test-volume")
+    assert prepare_create(db, name="second.md")["reserved_bytes"] == 512
+
+
+@pytest.mark.parametrize("method,value", [("set_audiobook_output_usage", 80), ("update_audiobook_output_usage", -20)])
+def test_output_and_quota_rollback_on_same_connection(db, method, value):
+    output, operation = prepared(db)
+    db.set_audiobook_output_usage(100)
+    with pytest.raises(RuntimeError, match="rollback accounting"):
+        with db.commit_output_file_operation(operation["token"], "test-volume") as conn:
+            db.backend.execute("DELETE FROM outputs WHERE id = ?", (output.id,), connection=conn)
+            assert getattr(db, method)(value, connection=conn) == 80
+            assert db.get_audiobook_output_usage(connection=conn) == 80
+            raise RuntimeError("rollback accounting")
+    assert db.get_output_artifact(output.id) == output
+    assert db.get_audiobook_output_usage() == 100
+    assert db.get_output_file_operation(operation["token"], "test-volume")["phase"] == "prepared"
+
+
+def test_committed_output_cannot_replay_quota_delta(db):
+    output, operation = prepared(db)
+    db.set_audiobook_output_usage(100)
+    with db.commit_output_file_operation(operation["token"], "test-volume") as conn:
+        db.backend.execute("DELETE FROM outputs WHERE id = ?", (output.id,), connection=conn)
+        assert db.update_audiobook_output_usage(-20, connection=conn) == 80
+    with pytest.raises(RuntimeError, match="^output_operation_conflict$"):
+        with db.commit_output_file_operation(operation["token"], "test-volume") as conn:
+            db.update_audiobook_output_usage(-20, connection=conn)
+    assert db.get_audiobook_output_usage() == 80

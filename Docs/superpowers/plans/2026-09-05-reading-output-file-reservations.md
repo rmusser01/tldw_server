@@ -14,7 +14,7 @@
 **Task:** TASK-13153, In Progress. These are checkpoints within that task, not newly allocated Backlog IDs.
 **Approved spec:** `Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md`, user approved after checkpoint `8dc255fcca`.
 **Parent plan:** `Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md`; this plan replaces its generic-file-writer gap, not its remaining Reading DTO/HTTP/reconciliation/release tasks.
-**Status:** Inline execution in progress. Task 1 schema/identity foundation and transition methods verified on SQLite/PostgreSQL. Shared claims and later tasks remain pending. See checkpoint evidence below.
+**Status:** Inline execution in progress. Task 1 and Task 2a capacity/accounting verified on SQLite/PostgreSQL. Task 2b shared claims and later tasks remain pending. See checkpoint evidence below.
 
 ---
 
@@ -94,6 +94,18 @@ WHERE token = ? AND user_id = ? AND fs_done = 1 AND effects_pending = 0;
 ## Task 2: Enforce shared row/path claims and resource admission
 
 **Files:** Modify `tldw_Server_API/app/core/DB_Management/Collections_DB.py`; extend `tldw_Server_API/tests/Collections/test_output_file_operations_db.py` and `tldw_Server_API/tests/Collections/test_reading_artifact_adoption.py`.
+
+Execution split: Task 2a implements and verifies capacity admission plus explicit
+same-transaction audiobook accounting first. Task 2b then covers shared row/path
+guards across all writers. This keeps each checkpoint independently reviewable;
+neither checkpoint enables runtime file operations or the public capability.
+Task 2a reuses the persisted policy and existing revision fence, counts every
+unfinished filesystem phase, and excludes delivery-only records. Validate policy
+before admission and prove exact bounds, user isolation, rollback and concurrent
+admission on both databases. Zero reserved bytes remains a zero-byte ceiling,
+never unlimited storage; byte-producing orchestration and physical free-space
+checks are still Task 3. Accounting connection propagation is internal and must
+not change existing standalone calls or claim that legacy producers are migrated.
 
 - [ ] Add RED races for all three path columns and the reserved output identity against generic create/update/delete/retention, Reading registration/reserve/adopt/reconciliation and guarded item delete, in both commit orders. Include metadata-only mutations, absolute/case aliases, managed-source alias, shared-unowned source, namespaces and foreign user. No writer may bypass through a direct adapter method.
 - [ ] Run `python -m pytest tldw_Server_API/tests/Collections/test_output_file_operations_db.py -q -k sqlite`.
@@ -296,3 +308,53 @@ Logs: `/private/tmp/task-13153-journal-transitions-{red,green,sqlite,pg}.log`,
 `/private/tmp/task-13153-journal-transitions-bandit.json`.
 Next: Task 2 shared row/path claims and resource admission. Task 1 does not provide
 those guards. TASK-13153 remains In Progress and the public capability stays off.
+
+### Task 2a: Admission capacity and transactional accounting (2026-09-05)
+
+This is the capacity/accounting portion of Task 2, not its cross-writer guards.
+Preparation reads a supported policy and verifies all six stored limits are
+finite positive integers. SQLite integer affinity admits fractions despite a
+positive-range CHECK, so runtime validation is explicit. The same reader is used
+when validating an existing operation. Under the existing revision fence,
+preparation checks the per-operation ceiling and aggregates same-user pending
+bytes/count before inserting the journal record. Every `fs_done=0` phase counts,
+including expired and blocked work; zero-byte operations still consume a slot.
+No source bytes, filesystem free space or producer limits are measured here.
+
+The existing audiobook usage get/set/update helpers now accept an optional
+internal connection. Their standalone behavior is preserved. A caller can compose
+the output write, quota change and journal phase on one transaction; rollback
+restores them together, and the journal rejects replay before a second delta can
+execute. The additive helper itself is not idempotent. Legacy production callers
+have not been migrated and their later integration remains required.
+
+TDD evidence: ten initial admission cases failed for missing capacity/policy
+checks, then the 41-test SQLite journal module passed. Three accounting tests
+failed on missing connection support before that change. Additional tests cover
+user isolation, admission rollback, abort retaining capacity until file completion,
+and file completion releasing capacity despite pending history acknowledgement.
+Independent read-only review found no actionable issues in this checkpoint.
+
+Final verification: 74 non-PostgreSQL passes (48 journal tests, 26 existing
+output-deletion regressions), plus 73 required real PostgreSQL passes with two
+isolated workers (213.39 seconds). Total: 147 distinct passes, no skips.
+The fractional-policy regression is explicitly SQLite-only because PostgreSQL's
+column type does not have that affinity behavior; it is not a skipped PG test.
+New tests pass Ruff/Black; modified production ranges pass Black. Adapter Ruff's
+nine preexisting findings remain unchanged. Compile/diff checks pass and scoped
+Bandit reports no findings or scanner errors.
+
+Verification commands (after environment activation):
+
+```bash
+TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_operations_db.py tldw_Server_API/tests/Collections/test_reading_output_deletion.py -q -k 'not postgres'
+TLDW_TEST_NO_DOCKER=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_operations_db.py tldw_Server_API/tests/Collections/test_reading_output_deletion.py -q -k 'postgres and not sqlite' -n 2
+```
+
+Logs: `/private/tmp/task-13153-output-admission-{red,green}.log`,
+`/private/tmp/task-13153-output-accounting-red.log`,
+`/private/tmp/task-13153-output-capacity-{sqlite,pg}.log`, and
+`/private/tmp/task-13153-output-capacity-bandit.json`.
+Next: Task 2b row/path claims across generic and Reading writers, both-order races,
+recorded-transition exceptions, and ID-reuse protection. Activation stays off;
+the complete Task 2 checklist and full-task acceptance criteria remain unchecked.

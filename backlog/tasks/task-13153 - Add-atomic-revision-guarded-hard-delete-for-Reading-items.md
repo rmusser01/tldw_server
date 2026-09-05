@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-03 02:27'
-updated_date: '2026-09-05 18:39'
+updated_date: '2026-09-05 18:51'
 labels:
   - collections
   - reading-list
@@ -52,5 +52,5 @@ diagnostic-privacy behavior are covered.
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-ADR required: yes; ADR path: backlog/decisions/003-reading-atomic-hard-delete.md. Reason: approved storage and cross-writer contract. Spec and implementation/evidence: Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md and Docs/superpowers/plans/2026-09-05-reading-output-file-reservations.md. Task 1a committed as 1c9650ee14. Task 1b implemented and independently reviewed: scoped journal transitions, bounded original-row fingerprints/intended fields, fresh post-fence lease and protocol checks, atomic caller-owned DB commit context, conditional abort and filesystem/history retirement. Soft-deleted removal and stale deletion-state regressions included. Verified 109 non-PostgreSQL plus 110 real PostgreSQL targeted passes, no skips; new tests and changed-range formatting clean, existing nine adapter Ruff findings unchanged, Bandit/compile/diff checks pass. Next: Task 2 shared row/path claims and resource admission. Filesystem proofs, route integration, activation and capability remain later gated checkpoints. TASK-13153 remains In Progress.
+ADR required: yes; ADR path: backlog/decisions/003-reading-atomic-hard-delete.md. Reason: implements the approved storage contract. Spec/plan: Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md and Docs/superpowers/plans/2026-09-05-reading-output-file-reservations.md. Task 1b committed 2cc7d94af4. Task 2a capacity/accounting implemented and independently reviewed: finite positive persisted policy checks, per-operation/per-user byte and active-count admission under the revision fence, unfinished cleanup retains capacity while fs_done releases it independently of history delivery. Existing audiobook usage methods propagate an explicit connection so output/journal/accounting compose atomically and committed deltas cannot replay. Ten admission and three accounting RED cases verified before fixes. Final evidence: 74 non-PostgreSQL plus 73 required real PostgreSQL targeted passes, no skips; new-test Ruff/Black and changed production-range Black pass; nine preexisting adapter Ruff findings unchanged; Bandit/compile/diff checks pass. Next Task 2b: shared row/path guards across all generic and Reading writers, race and ID-reuse coverage. Filesystem enforcement, producer/route migration, activation and capability remain later gates. TASK-13153 remains In Progress.
 <!-- SECTION:PLAN:END -->

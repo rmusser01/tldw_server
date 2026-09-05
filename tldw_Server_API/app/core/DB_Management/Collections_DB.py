@@ -2893,6 +2893,30 @@ class CollectionsDatabase:
         digest = hashlib.sha256(json.dumps(dict(row), sort_keys=True, default=str).encode("utf-8")).hexdigest()
         return {"incarnation": row["file_incarnation"], "digest": digest}, row["storage_path"]
 
+    def _output_storage_policy(self, storage_namespace_id: str, connection: Any) -> dict[str, Any]:
+        """Read a supported, finite policy without granting filesystem authority."""
+        row = self.backend.execute(
+            "SELECT * FROM output_storage_bindings WHERE user_id = ? AND storage_namespace_id = ?",
+            (self.user_id, storage_namespace_id),
+            connection=connection,
+        ).first
+        if not row or row["protocol_version"] != 1:
+            raise RuntimeError("output_storage_unavailable")
+        # SQLite's integer affinity alone does not exclude fractional values.
+        if any(
+            type(row[field]) is not int or not 1 <= row[field] <= 2**63 - 1
+            for field in (
+                "operation_bytes",
+                "user_pending_bytes",
+                "active_operations",
+                "text_input_bytes",
+                "text_output_bytes",
+                "free_space_margin_bytes",
+            )
+        ):
+            raise RuntimeError("output_storage_unavailable")
+        return dict(row)
+
     def prepare_output_file_operation(
         self,
         storage_namespace_id: str,
@@ -2907,8 +2931,9 @@ class CollectionsDatabase:
     ) -> dict[str, Any]:
         """Persist an internal prepared record, without file or activation authority.
 
-        The future orchestrator must hold verified storage exclusion and perform
-        cross-writer/resource admission before using this record for file I/O.
+        Database capacity admission is atomic with this record. The future
+        orchestrator must hold verified storage exclusion, check physical free
+        space and enforce cross-writer claims before using it for file I/O.
         No runtime caller is enabled by these journal primitives alone.
         """
         if (
@@ -2938,13 +2963,7 @@ class CollectionsDatabase:
         stage = None if kind == "remove" else f".output-stage-{uuid4().hex}"
         with self.transaction() if connection is None else contextlib.nullcontext(connection) as conn:
             self._lock_reading_revision_clock(conn)
-            binding = self.backend.execute(
-                "SELECT protocol_version FROM output_storage_bindings WHERE user_id = ? AND storage_namespace_id = ?",
-                (self.user_id, storage_namespace_id),
-                connection=conn,
-            ).first
-            if not binding or binding["protocol_version"] != 1:
-                raise RuntimeError("output_storage_unavailable")
+            binding = self._output_storage_policy(storage_namespace_id, conn)
             original, source = (
                 ({}, None)
                 if kind == "create"
@@ -2954,6 +2973,18 @@ class CollectionsDatabase:
                 source = self._output_operation_filename(source)
             if destination is not None and source is not None and destination.lower() == source.lower():
                 raise ValueError("output_operation_invalid")
+            usage = self.backend.execute(
+                "SELECT COUNT(*) AS active, COALESCE(SUM(reserved_bytes), 0) AS reserved "
+                "FROM output_file_operations WHERE user_id = ? AND fs_done = 0",
+                (self.user_id,),
+                connection=conn,
+            ).first
+            if (
+                reserved_bytes > binding["operation_bytes"]
+                or usage["active"] >= binding["active_operations"]
+                or reserved_bytes > binding["user_pending_bytes"] - usage["reserved"]
+            ):
+                raise RuntimeError("output_storage_capacity")
             lease_until = int(datetime.now(timezone.utc).timestamp()) + lease_seconds
             self.backend.execute(
                 "INSERT INTO output_file_operations "
@@ -2996,13 +3027,7 @@ class CollectionsDatabase:
 
     def _validate_output_file_operation(self, token: str, storage_namespace_id: str, connection: Any) -> dict[str, Any]:
         row = self.get_output_file_operation(token, storage_namespace_id, connection=connection)
-        binding = self.backend.execute(
-            "SELECT protocol_version FROM output_storage_bindings WHERE user_id = ? AND storage_namespace_id = ?",
-            (self.user_id, storage_namespace_id),
-            connection=connection,
-        ).first
-        if not binding or binding["protocol_version"] != 1:
-            raise RuntimeError("output_storage_unavailable")
+        self._output_storage_policy(storage_namespace_id, connection)
         if (
             row["phase"] != "prepared"
             or row["fs_done"]
@@ -6385,10 +6410,12 @@ class CollectionsDatabase:
         rows = self.backend.execute(sq, tuple(params + [limit, offset])).rows
         return [CollectionsDatabase.OutputArtifactRow(**row) for row in rows], total
 
-    def get_audiobook_output_usage(self) -> int | None:
+    def get_audiobook_output_usage(self, *, connection: Any | None = None) -> int | None:
+        """Read committed-artifact usage, optionally in the output transaction."""
         row = self.backend.execute(
             "SELECT used_bytes FROM audiobook_output_usage WHERE user_id = ?",
             (self.user_id,),
+            connection=connection,
         ).first
         if not row:
             return None
@@ -6398,7 +6425,8 @@ class CollectionsDatabase:
         except (TypeError, ValueError):
             return None
 
-    def set_audiobook_output_usage(self, used_bytes: int) -> int:
+    def set_audiobook_output_usage(self, used_bytes: int, *, connection: Any | None = None) -> int:
+        """Set usage using the caller's connection when composing atomic writes."""
         value = max(0, int(used_bytes))
         now = _utcnow_iso()
         if self.backend.backend_type == BackendType.POSTGRESQL:
@@ -6411,6 +6439,7 @@ class CollectionsDatabase:
                 RETURNING used_bytes
                 """,
                 (self.user_id, value, now),
+                connection=connection,
             ).first
             if row:
                 return int(row["used_bytes"] if isinstance(row, dict) else row[0] or 0)
@@ -6423,10 +6452,16 @@ class CollectionsDatabase:
             SET used_bytes = excluded.used_bytes, updated_at = excluded.updated_at
             """,
             (self.user_id, value, now),
+            connection=connection,
         )
         return value
 
-    def update_audiobook_output_usage(self, delta_bytes: int) -> int:
+    def update_audiobook_output_usage(self, delta_bytes: int, *, connection: Any | None = None) -> int:
+        """Apply a delta once inside the caller's output commit transaction.
+
+        The journal commit context rejects replay before entering its body.
+        This additive helper alone does not provide replay protection.
+        """
         delta = int(delta_bytes or 0)
         now = _utcnow_iso()
         initial = max(0, delta)
@@ -6441,6 +6476,7 @@ class CollectionsDatabase:
                 RETURNING used_bytes
                 """,
                 (self.user_id, initial, now, delta),
+                connection=connection,
             ).first
             if row:
                 return int(row["used_bytes"] if isinstance(row, dict) else row[0] or 0)
@@ -6454,10 +6490,12 @@ class CollectionsDatabase:
                 updated_at = excluded.updated_at
             """,
             (self.user_id, initial, now, delta),
+            connection=connection,
         )
         row = self.backend.execute(
             "SELECT used_bytes FROM audiobook_output_usage WHERE user_id = ?",
             (self.user_id,),
+            connection=connection,
         ).first
         if not row:
             return initial
