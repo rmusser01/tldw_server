@@ -3215,6 +3215,143 @@ class CollectionsDatabase:
             if changed.rowcount != 1:
                 raise RuntimeError("output_operation_conflict")
 
+    def apply_output_file_operation(
+        self,
+        token: str,
+        storage_namespace_id: str,
+        *,
+        publication_identity: dict[str, int] | None = None,
+    ) -> CollectionsDatabase.OutputArtifactRow | None:
+        """Apply only the journal's recorded mutation and accounting atomically.
+
+        Trusted storage callers must first prove and sync no-clobber publication
+        under verified exclusion, and recheck source fingerprint and stage length.
+        This DB-only boundary validates their publication evidence against the
+        immutable stage; it never reads files or supplies filesystem authority.
+        Duplicate commits reject before applying any additive accounting again.
+        """
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            row = self._validate_output_file_operation(token, storage_namespace_id, conn)
+            source = json.loads(row["source_identity_json"]) if row["source_identity_json"] else None
+            stage = json.loads(row["stage_identity_json"]) if row["stage_identity_json"] else None
+            kind = row["kind"]
+            if kind != "create" and source is None:
+                raise RuntimeError("output_operation_conflict")
+            if kind == "remove":
+                if publication_identity is not None or stage is not None or row["written_bytes"]:
+                    raise RuntimeError("output_operation_conflict")
+            elif (
+                stage is None
+                or not isinstance(publication_identity, dict)
+                or publication_identity != {**stage, "nlink": 2}
+                or any(type(value) is not int for value in publication_identity.values())
+            ):
+                raise RuntimeError("output_operation_conflict")
+            current = (
+                None
+                if kind == "create"
+                else self.backend.execute(
+                    "SELECT * FROM outputs WHERE user_id = ? AND id = ?",
+                    (self.user_id, row["output_id"]),
+                    connection=conn,
+                ).first
+            )
+            intended = json.loads(row["intended_json"])
+            if kind == "create" and not {"title", "type", "format"} <= intended.keys():
+                raise ValueError("output_operation_invalid")
+            if current is not None and intended.get("type", current["type"]) != current["type"]:
+                raise ValueError("output_operation_invalid")
+            output_type = intended["type"] if current is None else current["type"]
+            metadata_json = current["metadata_json"] if current is not None else None
+            if kind != "remove":
+                try:
+                    metadata = json.loads(metadata_json) if metadata_json else {}
+                    if not isinstance(metadata, dict):
+                        raise ValueError
+                except (TypeError, ValueError):
+                    raise RuntimeError("output_operation_conflict") from None
+                metadata["byte_size"] = row["written_bytes"]
+                metadata_json = json.dumps(metadata, ensure_ascii=False)
+            delta = 0
+            if _is_audiobook_output_type(output_type):
+                old_size = 0
+                if current is not None and not current["deleted"]:
+                    old_size = _extract_output_byte_size(current["metadata_json"])
+                    if old_size is None:
+                        old_size = source["size"]
+                delta = (row["written_bytes"] if kind != "remove" else 0) - old_size
+                if delta:
+                    usage = self.get_audiobook_output_usage(connection=conn)
+                    if usage is None or not 0 <= usage + delta <= 2**63 - 1:
+                        raise RuntimeError("output_accounting_unavailable")
+            result = None
+            with self.commit_output_file_operation(
+                token, storage_namespace_id, dispose_history=kind == "remove", connection=conn
+            ):
+                if kind == "create":
+                    inserted = self._execute_insert(
+                        "INSERT INTO outputs (user_id, type, title, format, storage_path, metadata_json, "
+                        "created_at, deleted, retention_until, file_incarnation) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+                        (
+                            self.user_id,
+                            output_type,
+                            intended["title"],
+                            intended["format"],
+                            row["destination_path"],
+                            metadata_json,
+                            _utcnow_iso(),
+                            intended.get("retention_until"),
+                            uuid4().hex,
+                        ),
+                        connection=conn,
+                    )
+                    output_id = self._extract_lastrowid(inserted)
+                    if not output_id:
+                        raise DatabaseError("output_creation_failed")
+                    self._assert_output_file_claims(conn, output_id=output_id, exclude_token=token)
+                    self.backend.execute(
+                        "UPDATE output_file_operations SET output_id = ? WHERE token = ? AND user_id = ?",
+                        (output_id, token, self.user_id),
+                        connection=conn,
+                    )
+                else:
+                    output_id = row["output_id"]
+                    if kind == "replace":
+                        changed = self.backend.execute(
+                            "UPDATE outputs SET title = ?, format = ?, storage_path = ?, retention_until = ?, "
+                            "metadata_json = ? WHERE user_id = ? AND id = ?",
+                            (
+                                intended.get("title", current["title"]),
+                                intended.get("format", current["format"]),
+                                row["destination_path"],
+                                intended.get("retention_until", current["retention_until"]),
+                                metadata_json,
+                                self.user_id,
+                                output_id,
+                            ),
+                            connection=conn,
+                        )
+                    else:
+                        changed = self.backend.execute(
+                            "DELETE FROM outputs WHERE user_id = ? AND id = ?",
+                            (self.user_id, output_id),
+                            connection=conn,
+                        )
+                    if changed.rowcount != 1:
+                        raise DatabaseError("output_mutation_failed")
+                if kind != "remove":
+                    self.backend.execute(
+                        "UPDATE output_file_operations SET publication_identity_json = ? "
+                        "WHERE token = ? AND user_id = ?",
+                        (json.dumps(publication_identity, sort_keys=True), token, self.user_id),
+                        connection=conn,
+                    )
+                    result = self.get_output_artifact(output_id, connection=conn)
+                if delta:
+                    self.update_audiobook_output_usage(delta, connection=conn)
+            return result
+
     def abort_output_file_operation(
         self, token: str, storage_namespace_id: str, *, connection: Any | None = None
     ) -> bool:

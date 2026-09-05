@@ -12,9 +12,11 @@
 **ADR path:** `backlog/decisions/003-reading-atomic-hard-delete.md`.
 **Reason:** Implements the approved storage, cross-writer and external-delivery contract.
 **Task:** TASK-13153, In Progress. These are checkpoints within that task, not newly allocated Backlog IDs.
+**PR:** https://github.com/rmusser01/tldw_server/pull/2903 (draft against `dev`,
+opened at `f43549c209` on user request; implementation continues on the same branch).
 **Approved spec:** `Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md`, user approved after checkpoint `8dc255fcca`.
 **Parent plan:** `Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md`; this plan replaces its generic-file-writer gap, not its remaining Reading DTO/HTTP/reconciliation/release tasks.
-**Status:** Inline execution in progress. Task 1, Task 2a, Task 2b and Task 3a staging/write checkpoints verified on SQLite/PostgreSQL. Publication/recovery and later tasks remain pending. See checkpoint evidence below.
+**Status:** Inline execution in progress. Task 1, Task 2a, Task 2b, Task 3a staging/write and Task 3b's DB-owned recorded-commit boundary verified on SQLite/PostgreSQL. Filesystem publication/recovery and later tasks remain pending. See checkpoint evidence below.
 
 ---
 
@@ -132,6 +134,13 @@ adds publication, recorded DB mutation and phase-specific recovery, including
 uncertain commit acknowledgements and the full crash matrix below. No runtime
 caller or activation is enabled by Task 3a; incomplete/ambiguous files retain
 their journal claims, with automatic cleanup still pending Task 3b.
+
+Task 3b begins with a separately verified DB-owned recorded-mutation checkpoint
+in `Collections_DB.py` and `test_output_file_operations_db.py`: publication
+evidence, intended create/replace/remove changes, allocated-ID claims and atomic
+quota/history updates. Services must not issue raw SQL or use a generic writer's
+unvalidated token bypass. Descriptor-relative publication/recovery follows this
+boundary; no file lifecycle is claimed complete by the DB-only checkpoint.
 
 - [ ] Write RED tests against real temporary files for copy-before-commit, occupied destination, absent source, symlink/special/unexplained hardlink, changed source fingerprint, and same DB/different root. Start with service-level replace; no routes yet. Run `python -m pytest tldw_Server_API/tests/Collections/test_output_file_operations_storage.py -q`.
 - [ ] Implement `prepare`, `write_chunk`, `publish_and_commit`, and `recover_due` as a small service using Task 1 methods. Lock order is verified storage context then DB fence. Capture original fingerprint before first read. Reserve before exclusive stage creation; persist stage identity before leaving the first lock interval. No filesystem/network call occurs inside DB mutation transactions. Never reopen the root path after verifying its descriptor.
@@ -505,3 +514,68 @@ Next: Task 3b bounded source-copy orchestration, no-clobber publication, recorde
 DB mutation and phase-specific restart recovery with the remaining crash matrix.
 The complete Task 3 checklist/full-task AC remain unchecked. No push, PR, merge,
 full-suite claim or public capability activation.
+
+### Task 3b database boundary: Recorded output commit (2026-09-05)
+
+PR #2903 was opened as a draft against `dev` at `f43549c209`, as requested,
+before continuing implementation. The PR includes the accumulated checkpoints;
+its description explicitly retains the human-written merge-summary gate and does
+not claim end-to-end readiness.
+
+Adds `CollectionsDatabase.apply_output_file_operation`, a DB-only boundary for
+the forthcoming publication orchestrator. It rechecks the prepared token, live
+lease, original snapshot, scoped ownership/path claims and immutable file evidence
+under the existing fence. Create/replace require caller-provided publication
+identity matching the private stage with its expected two links; remove requires
+source evidence and no stage/publication. These are checks of trusted recorded
+evidence, not filesystem proof: the service must still verify actual files and
+directory durability before invoking this method.
+
+The transaction applies only recorded title/format/retention/path changes,
+preserves other replacement fields and incarnation, stores actual staged byte
+size in metadata, and records publication identity plus committed phase. Creation
+allocates a new incarnation and checks reused IDs against other unfinished claims
+before binding the journal's output ID. Removal records original-incarnation
+history disposal in the same transaction. Same-store audiobook deltas use the
+same connection; absent/underflowing/overflowing usage fails closed instead of
+guessing or doing filesystem recomputation. Existing byte-size metadata supplies
+the previously accounted size, falling back only to the recorded source size.
+Soft-deleted removal does not subtract already-decremented usage again. Activated
+store initialization/reconciliation must establish usage before these writes.
+
+TDD: 14 initial recorded-commit assertions failed on the missing boundary and then
+passed. Additional scoped-authority, reused-ID, accounting, and two-thread duplicate
+commit regressions passed. Independent read-only review found no serious DB-only
+findings. Self-review then added two failing database-suppressed-write cases;
+requiring exactly one updated/deleted output row now rolls those transactions back
+instead of marking an unchanged output committed.
+
+Verified evidence: final SQLite/non-PostgreSQL combined run passes 199 cases in
+24.28 seconds. Broader PostgreSQL regression passes 126 cases in 342.31 seconds;
+that run preceded the final row-count guard. All 25 PostgreSQL recorded-commit
+cases were then rerun after the guard and passed in 76.54 seconds. These runs
+cover 128 distinct PostgreSQL cases (23 repeated), hence 327 distinct targeted
+cases across both backends, with no required-backend skips. Modified tests pass
+Ruff/Black; touched adapter ranges pass Black; compile/diff checks pass and scoped
+Bandit reports zero findings/scanner errors. The adapter's existing nine unrelated
+Ruff findings remain. Independent follow-up review found no concern with the
+final row-count guard.
+
+Verification commands after Server virtual-environment activation:
+
+```bash
+TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_operations_storage.py tldw_Server_API/tests/Collections/test_output_file_operations_db.py tldw_Server_API/tests/Collections/test_output_file_claims_db.py tldw_Server_API/tests/Collections/test_reading_artifact_storage.py tldw_Server_API/tests/Collections/test_reading_artifact_cleanup.py -q -k 'not postgres'
+TLDW_TEST_NO_DOCKER=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_operations_storage.py tldw_Server_API/tests/Collections/test_output_file_operations_db.py tldw_Server_API/tests/Collections/test_reading_artifact_cleanup.py -q -k 'postgres and not sqlite' -n 2 -x
+TLDW_TEST_NO_DOCKER=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_operations_db.py -q -k 'postgres and recorded_ and not sqlite' -n 2 -x
+```
+
+Logs: `/private/tmp/task-13153-recorded-commit-{red,green,guards,rowcount-red}.log`,
+`/private/tmp/task-13153-recorded-commit-sqlite-verified.log`,
+`/private/tmp/task-13153-recorded-commit-pg-final.log`,
+`/private/tmp/task-13153-recorded-commit-pg-focused.log`,
+`/private/tmp/task-13153-recorded-commit-bandit-final.json`.
+
+Next: the Task 3b filesystem orchestrator (copy, no-clobber publication, uncertain
+commit acknowledgement and phase-specific recovery). Producer-specific metadata/
+idempotency mapping, route integration and all rollout gates remain pending.
+No runtime wiring, activation, full-task completion or merge is claimed.

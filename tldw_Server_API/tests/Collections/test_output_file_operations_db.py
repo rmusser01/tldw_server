@@ -6,6 +6,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from threading import Barrier, Event
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
@@ -705,3 +706,246 @@ def test_committed_output_cannot_replay_quota_delta(db):
         with db.commit_output_file_operation(operation["token"], "test-volume") as conn:
             db.update_audiobook_output_usage(-20, connection=conn)
     assert db.get_audiobook_output_usage() == 80
+
+
+def prepared_recorded_mutation(db, *, kind="replace", audiobook=False, deleted=False):
+    insert_binding(db)
+    output = None
+    if kind != "create":
+        output = db.create_output_artifact(
+            type_="audiobook_mp3" if audiobook else "report",
+            title="Original",
+            format_="md",
+            storage_path="source.md",
+            metadata_json='{"byte_size":8,"keep":"unchanged"}',
+        )
+        if deleted:
+            db.delete_output_artifact(output.id, hard=False)
+    intended = {} if kind == "remove" else {"title": "Recorded title", "format": "html", "retention_until": None}
+    if kind == "create":
+        intended["type"] = "audiobook_mp3" if audiobook else "report"
+    row = db.prepare_output_file_operation(
+        "test-volume",
+        kind=kind,
+        output_id=output.id if output else None,
+        destination_path=None if kind == "remove" else "destination.html",
+        intended=intended,
+        reserved_bytes=32,
+        lease_seconds=60,
+    )
+    source = {"dev": 1, "ino": 2, "mode": 32768, "nlink": 1, "size": 8, "mtime_ns": 1, "ctime_ns": 1}
+    stage = {"dev": 1, "ino": 3, "mode": 32768, "nlink": 1}
+    db.record_output_file_progress(
+        row["token"],
+        "test-volume",
+        expected_offset=0,
+        written_bytes=0,
+        source_identity=source if kind != "create" else None,
+        stage_identity=stage if kind != "remove" else None,
+    )
+    if kind != "remove":
+        db.record_output_file_progress(row["token"], "test-volume", expected_offset=0, written_bytes=4)
+    return output, row, {**stage, "nlink": 2}
+
+
+def recorded_commit(db, row, publication):
+    assert hasattr(db, "apply_output_file_operation"), "DB-owned recorded output mutation is missing"
+    return db.apply_output_file_operation(row["token"], "test-volume", publication_identity=publication)
+
+
+@pytest.mark.parametrize("kind", ["create", "replace", "remove"])
+def test_recorded_mutation_commits_only_intended_changes_and_phase(db, kind):
+    output, row, publication = prepared_recorded_mutation(db, kind=kind)
+    result = recorded_commit(db, row, publication if kind != "remove" else None)
+    journal = db.get_output_file_operation(row["token"], "test-volume")
+    assert journal["phase"] == "committed" and not journal["fs_done"]
+    if kind == "remove":
+        assert result is None
+        with pytest.raises(KeyError):
+            db.get_output_artifact(output.id)
+        effects = json.loads(journal["effects_json"])
+        assert effects[0]["incarnation"] == json.loads(row["original_json"])["incarnation"]
+        assert journal["effects_pending"] == 1
+    else:
+        assert result.title == "Recorded title" and result.format == "html"
+        assert result.storage_path == "destination.html"
+        assert journal["output_id"] == result.id
+        assert json.loads(journal["publication_identity_json"]) == publication
+        if kind == "replace":
+            assert result.id == output.id
+            assert result.created_at == output.created_at and result.type == output.type
+            assert json.loads(result.metadata_json)["keep"] == "unchanged"
+        with pytest.raises(RuntimeError, match="^output_file_busy$"):
+            db.update_output_artifact(result.id, title="Too soon")
+
+
+@pytest.mark.parametrize(
+    "problem", ["missing_publication", "wrong_inode", "wrong_links", "missing_stage", "missing_source"]
+)
+def test_recorded_mutation_rejects_unproved_publication(db, problem):
+    output, row, publication = prepared_recorded_mutation(db)
+    if problem == "missing_publication":
+        publication = None
+    elif problem == "wrong_inode":
+        publication["ino"] += 1
+    elif problem == "wrong_links":
+        publication["nlink"] = 1
+    else:
+        column = "stage_identity_json" if problem == "missing_stage" else "source_identity_json"
+        db.backend.execute(f"UPDATE output_file_operations SET {column} = NULL WHERE token = ?", (row["token"],))
+    with pytest.raises(RuntimeError, match="^output_operation_conflict$"):
+        recorded_commit(db, row, publication)
+    assert db.get_output_artifact(output.id) == output
+    assert db.get_output_file_operation(row["token"], "test-volume")["phase"] == "prepared"
+
+
+@pytest.mark.parametrize(
+    "kind,deleted,expected",
+    [("create", False, 24), ("replace", False, 16), ("remove", False, 12), ("remove", True, 20)],
+)
+def test_recorded_audiobook_usage_joins_commit_once(db, kind, deleted, expected):
+    output, row, publication = prepared_recorded_mutation(db, kind=kind, audiobook=True, deleted=deleted)
+    db.set_audiobook_output_usage(20)
+    result = recorded_commit(db, row, publication if kind != "remove" else None)
+    assert db.get_audiobook_output_usage() == expected
+    if result:
+        assert json.loads(result.metadata_json)["byte_size"] == 4
+    with pytest.raises(RuntimeError, match="^output_operation_conflict$"):
+        recorded_commit(db, row, publication if kind != "remove" else None)
+    assert db.get_audiobook_output_usage() == expected
+
+
+def test_recorded_mutation_rolls_back_output_publication_and_usage_together(db, monkeypatch):
+    output, row, publication = prepared_recorded_mutation(db, audiobook=True)
+    db.set_audiobook_output_usage(20)
+    update_usage = db.update_audiobook_output_usage
+
+    def fail_after_accounting(delta, *, connection=None):
+        assert connection is not None
+        update_usage(delta, connection=connection)
+        raise RuntimeError("simulated_commit_failure")
+
+    monkeypatch.setattr(db, "update_audiobook_output_usage", fail_after_accounting)
+    with pytest.raises(RuntimeError, match="^simulated_commit_failure$"):
+        recorded_commit(db, row, publication)
+    assert db.get_output_artifact(output.id) == output
+    assert db.get_audiobook_output_usage() == 20
+    journal = db.get_output_file_operation(row["token"], "test-volume")
+    assert journal["phase"] == "prepared" and journal["publication_identity_json"] is None
+
+
+def test_recorded_mutation_does_not_guess_missing_audiobook_usage(db):
+    output, row, publication = prepared_recorded_mutation(db, audiobook=True)
+    with pytest.raises(RuntimeError, match="^output_accounting_unavailable$"):
+        recorded_commit(db, row, publication)
+    assert db.get_audiobook_output_usage() is None
+    assert db.get_output_artifact(output.id) == output
+
+
+@pytest.mark.parametrize("problem", ["foreign_user", "wrong_volume", "expired", "aborted", "stale_snapshot"])
+def test_recorded_commit_requires_current_scoped_authority(db, problem):
+    output, row, publication = prepared_recorded_mutation(db)
+    target, namespace = db, "test-volume"
+    if problem == "foreign_user":
+        target = CollectionsDatabase.from_backend(user_id="781", backend=db.backend)
+    elif problem == "wrong_volume":
+        namespace = "other-volume"
+    elif problem == "expired":
+        db.backend.execute("UPDATE output_file_operations SET lease_until = 0 WHERE token = ?", (row["token"],))
+    elif problem == "aborted":
+        db.abort_output_file_operation(row["token"], namespace)
+    else:
+        # Incompatible/offline writer: normal APIs are already fenced.
+        db.backend.execute("UPDATE outputs SET title = ? WHERE id = ?", ("Changed elsewhere", output.id))
+    before = db.get_output_artifact(output.id)
+    with pytest.raises((KeyError, RuntimeError)):
+        target.apply_output_file_operation(row["token"], namespace, publication_identity=publication)
+    assert db.get_output_artifact(output.id) == before
+    assert db.get_output_file_operation(row["token"], "test-volume")["phase"] != "committed"
+
+
+def test_recorded_create_rolls_back_if_allocated_sqlite_id_is_still_claimed(db):
+    if db.backend.backend_type.value != "sqlite":
+        pytest.skip("SQLite recycled rowid boundary")
+    _, row, publication = prepared_recorded_mutation(db, kind="create")
+    abandoned = db.create_output_artifact(type_="report", title="Old", format_="md", storage_path="old.md")
+    removal = db.prepare_output_file_operation("test-volume", kind="remove", output_id=abandoned.id, lease_seconds=60)
+    with db.commit_output_file_operation(removal["token"], "test-volume") as conn:
+        db.backend.execute("DELETE FROM outputs WHERE id = ?", (abandoned.id,), connection=conn)
+    with pytest.raises(RuntimeError, match="^output_file_busy$"):
+        recorded_commit(db, row, publication)
+    assert db.backend.execute("SELECT COUNT(*) FROM outputs").scalar == 0
+    assert db.get_output_file_operation(row["token"], "test-volume")["output_id"] is None
+
+
+@pytest.mark.parametrize("usage", [2, 2**63 - 1])
+def test_recorded_accounting_rejects_underflow_and_overflow(db, usage):
+    kind = "replace" if usage == 2 else "create"
+    output, row, publication = prepared_recorded_mutation(db, kind=kind, audiobook=True)
+    db.set_audiobook_output_usage(usage)
+    with pytest.raises(RuntimeError, match="^output_accounting_unavailable$"):
+        recorded_commit(db, row, publication)
+    assert db.get_audiobook_output_usage() == usage
+    assert db.get_output_file_operation(row["token"], "test-volume")["phase"] == "prepared"
+
+
+def test_recorded_removal_accounting_falls_back_to_recorded_size_not_file_io(db, monkeypatch):
+    import tldw_Server_API.app.core.DB_Management.Collections_DB as module
+
+    insert_binding(db)
+    output = db.create_output_artifact(type_="audiobook_mp3", title="Old", format_="mp3", storage_path="old.mp3")
+    row = db.prepare_output_file_operation(
+        "test-volume", kind="remove", output_id=output.id, reserved_bytes=8, lease_seconds=60
+    )
+    db.record_output_file_progress(
+        row["token"],
+        "test-volume",
+        expected_offset=0,
+        written_bytes=0,
+        source_identity={"dev": 1, "ino": 2, "mode": 32768, "nlink": 1, "size": 8, "mtime_ns": 1, "ctime_ns": 1},
+    )
+    db.set_audiobook_output_usage(8)
+    monkeypatch.setattr(
+        module, "_resolve_output_size_bytes", lambda *args: pytest.fail("filesystem access inside commit")
+    )
+    recorded_commit(db, row, None)
+    assert db.get_audiobook_output_usage() == 0
+
+
+def test_recorded_concurrent_commits_apply_one_accounting_delta(db):
+    output, row, publication = prepared_recorded_mutation(db, audiobook=True)
+    db.set_audiobook_output_usage(20)
+    barrier = Barrier(2)
+
+    def commit():
+        adapter = CollectionsDatabase.from_backend(user_id=db.user_id, backend=db.backend)
+        barrier.wait(timeout=10)
+        try:
+            adapter.apply_output_file_operation(row["token"], "test-volume", publication_identity=publication)
+            return "committed"
+        except RuntimeError as exc:
+            return str(exc)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: commit(), range(2)))
+    assert sorted(results) == ["committed", "output_operation_conflict"]
+    assert db.get_audiobook_output_usage() == 16
+
+
+@pytest.mark.parametrize("kind", ["replace", "remove"])
+def test_recorded_commit_rejects_a_database_suppressed_mutation(db, monkeypatch, kind):
+    output, row, publication = prepared_recorded_mutation(db, kind=kind)
+    execute = db.backend.execute
+
+    def suppress_output_write(query, params=(), **kwargs):
+        # Model a database policy/trigger suppressing the row write without an error.
+        if query.startswith("UPDATE outputs SET title") or query.startswith("DELETE FROM outputs WHERE user_id"):
+            return SimpleNamespace(rowcount=0)
+        return execute(query, params, **kwargs)
+
+    monkeypatch.setattr(db.backend, "execute", suppress_output_write)
+    with pytest.raises(DatabaseError, match="^output_mutation_failed$"):
+        recorded_commit(db, row, publication if kind != "remove" else None)
+    assert db.get_output_artifact(output.id) == output
+    journal = db.get_output_file_operation(row["token"], "test-volume")
+    assert journal["phase"] == "prepared" and journal["effects_pending"] == 0
