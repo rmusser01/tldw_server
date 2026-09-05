@@ -286,10 +286,18 @@ def production_factories(
     register_router_specs(production_app, sync_specs)
 
     trace = {"personal_context_factory": 0, "sync_factory": 0}
+    managed_sync_backends: list[object] = []
     actual_personal_context_factory = (
         personal_context_deps.personal_context_service_for_user
     )
     actual_sync_factory = sync_v2_factory.sync_v2_service_for_user
+
+    def track_sync_backend(service: object) -> object:
+        backend = service.store.db.backend
+        if not any(candidate is backend for candidate in managed_sync_backends):
+            managed_sync_backends.append(backend)
+        service._recovery_clock_ns = lambda: 0
+        return service
 
     def traced_personal_context_factory(*args: object, **kwargs: object):
         trace["personal_context_factory"] += 1
@@ -297,9 +305,7 @@ def production_factories(
 
     def traced_sync_factory(user_id: str):
         trace["sync_factory"] += 1
-        service = actual_sync_factory(user_id)
-        service._recovery_clock_ns = lambda: 0
-        return service
+        return track_sync_backend(actual_sync_factory(user_id))
 
     monkeypatch.setattr(
         personal_context_deps,
@@ -314,12 +320,29 @@ def production_factories(
     monkeypatch.setattr(sync_endpoint, "sync_v2_service_for_user", traced_sync_factory)
     try:
         canonical = personal_context_service_for_user(_USER_ID)
-        sync = actual_sync_factory(_USER_ID)
+        sync = track_sync_backend(actual_sync_factory(_USER_ID))
         sync._certification_production_app = production_app
         sync._certification_factory_trace = trace
         yield canonical, sync
     finally:
+        reset_managed_sqlite_backends(backends=managed_sync_backends)
+        _require(
+            all(getattr(backend, "_retired", False) for backend in managed_sync_backends),
+            "managed Sync backend cleanup was incomplete",
+        )
         _clear_factory_caches()
+        _require(
+            all(
+                cached_factory.cache_info().currsize == 0
+                for cached_factory in (
+                    sync_v2_factory._sync_v2_store_for_user,
+                    sync_v2_factory._chacha_notes_db_for_user,
+                    sync_v2_factory._sync_v2_blob_store_for_user,
+                    sync_v2_factory._personal_context_service_for_user,
+                )
+            ),
+            "managed Sync factory cache cleanup was incomplete",
+        )
 
 
 @contextmanager
@@ -427,8 +450,7 @@ def _pull_params(dataset_id: str, cursor: str | None = None) -> dict[str, object
 
 def _dataset_digest(service) -> str:
     rows = service.store.db.execute(
-        """SELECT dataset_id, owner_user_id, domain_set_json, metadata_json, archived_at
-             FROM sync_datasets
+        """SELECT * FROM sync_datasets
             ORDER BY dataset_id"""
     ).rows
     encoded = json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
@@ -449,6 +471,71 @@ def _transport_counts(service) -> dict[str, int]:
             "sync_personal_context_link_receipts",
         )
     }
+
+
+def _domain_state_digest(service) -> str:
+    rows = service.store.db.execute(
+        """SELECT * FROM sync_domain_state
+            ORDER BY dataset_id, domain, adapter_version"""
+    ).rows
+    return _content_digest(rows)
+
+
+def _corrupt_authority_target(service, dataset_id: str, defect: str) -> None:
+    """Install one legacy-invalid target shape without exercising enrollment guards."""
+
+    row = service.store.db.execute(
+        "SELECT * FROM sync_datasets WHERE dataset_id = ?",
+        (dataset_id,),
+    ).rows[0]
+    workspace_id = row["workspace_id"]
+    scope_type = row["scope_type"]
+    encryption_policy = row["encryption_policy"]
+    metadata_json = row["metadata_json"]
+    archived_at = row["archived_at"]
+    if defect == "workspace":
+        workspace_id = "workspace-collision"
+        scope_type = "workspace"
+    elif defect == "archived":
+        archived_at = "2026-09-04T00:00:00+00:00"
+    elif defect == "policy":
+        encryption_policy = "client_managed_v1"
+    elif defect == "default-marker":
+        metadata_json = json.dumps(
+            {"default_personal": True, "client_family": "not-chatbook"}
+        )
+    elif defect == "generation":
+        metadata_json = json.dumps(
+            {
+                "default_personal": True,
+                "client_family": "chatbook",
+                "personal_context": {
+                    "profile_id": "legacy-profile",
+                    "authority_id": "tldw-server",
+                    "integrity_key_id": "legacy-key",
+                    "purge_generation": "invalid",
+                    "link_state": "bootstrap_pending",
+                },
+            }
+        )
+    else:
+        pytest.fail("unsupported certification target defect", pytrace=False)
+    with service.store.db.backend.transaction() as connection:
+        service.store.db.execute(
+            """UPDATE sync_datasets
+                  SET workspace_id = ?, scope_type = ?, encryption_policy = ?,
+                      metadata_json = ?, archived_at = ?
+                WHERE dataset_id = ?""",
+            (
+                workspace_id,
+                scope_type,
+                encryption_policy,
+                metadata_json,
+                archived_at,
+                dataset_id,
+            ),
+            connection=connection,
+        )
 
 
 def _new_dataset(
@@ -601,6 +688,90 @@ def test_bootstrap_reuses_existing_nondefault_authority_without_creating_default
         "bootstrap created an unexpected default",
     )
 
+
+@pytest.mark.parametrize(
+    "defect",
+    ("workspace", "archived", "policy", "default-marker", "generation"),
+)
+def test_bootstrap_rejects_invalid_deterministic_default_before_side_effects(
+    production_factories,
+    defect: str,
+) -> None:
+    """A colliding deterministic ID is never repaired into an authority target."""
+
+    canonical, service = production_factories
+    canonical.create_profile(runtime_enabled=False)
+    dataset_id = f"ds_personal_{_USER_ID}"
+    _new_dataset(service, dataset_id, default_personal=True)
+    _corrupt_authority_target(service, dataset_id, defect)
+    _register_device(service)
+    datasets_before = _dataset_digest(service)
+    domains_before = _domain_state_digest(service)
+    transport_before = _transport_counts(service)
+    actual_wrapper = service.personal_context_key_wrapper
+    _require(actual_wrapper is not None, "key wrapper was unavailable")
+    wrapped = 0
+
+    def record_wrap(**kwargs: object) -> str:
+        nonlocal wrapped
+        wrapped += 1
+        return actual_wrapper(**kwargs)
+
+    service.personal_context_key_wrapper = record_wrap
+    reason_code = None
+    try:
+        service.bootstrap_personal_context(
+            user_id=_USER_ID,
+            device_id=_DEVICE_ID,
+            required_schema_version=1,
+        )
+    except PersonalContextBootstrapError as exc:
+        reason_code = exc.reason_code
+
+    _require(reason_code == _AUTHORITY_ERROR, "invalid default target was not rejected")
+    _require(wrapped == 0, "invalid default target wrapped key material")
+    _require_digest_equal(
+        _dataset_digest(service), datasets_before, "invalid default changed dataset state"
+    )
+    _require_digest_equal(
+        _domain_state_digest(service), domains_before, "invalid default changed domains"
+    )
+    _require_digest_equal(
+        _transport_counts(service), transport_before, "invalid default changed transport"
+    )
+
+
+@pytest.mark.parametrize("defect", ("workspace", "archived", "policy", "generation"))
+def test_direct_bind_rejects_invalid_authority_target_before_side_effects(
+    production_factories,
+    defect: str,
+) -> None:
+    """Direct binding applies the same fail-closed authority-target contract."""
+
+    canonical, service = production_factories
+    canonical.create_profile(runtime_enabled=False)
+    dataset_id = "invalid-direct-authority"
+    _new_dataset(service, dataset_id)
+    _corrupt_authority_target(service, dataset_id, defect)
+    datasets_before = _dataset_digest(service)
+    domains_before = _domain_state_digest(service)
+    transport_before = _transport_counts(service)
+    reason_code = None
+    try:
+        _bind_dataset(service, canonical, dataset_id)
+    except SyncStoreError as exc:
+        reason_code = str(exc)
+
+    _require(reason_code == _AUTHORITY_ERROR, "invalid direct target was not rejected")
+    _require_digest_equal(
+        _dataset_digest(service), datasets_before, "invalid bind changed dataset state"
+    )
+    _require_digest_equal(
+        _domain_state_digest(service), domains_before, "invalid bind changed domains"
+    )
+    _require_digest_equal(
+        _transport_counts(service), transport_before, "invalid bind changed transport"
+    )
 
 def test_bootstrap_rolls_back_default_and_domains_after_interleaved_bind_rejection(
     production_factories,
@@ -1468,6 +1639,20 @@ def test_production_http_relay_debt_survives_restart_and_recovers_on_push_and_pu
                 "application-backup",
             }.issubset(categories),
             "required artifact category was not observed",
+        )
+        observed_phase_categories = {
+            (record["phase"], record["category"]) for record in artifact_records
+        }
+        _require(
+            {
+                (phase, category)
+                for phase in (
+                    "before-first-backend-reset",
+                    "before-second-backend-reset",
+                )
+                for category in ("sync-wal", "sync-shm", "notes-wal", "notes-shm")
+            }.issubset(observed_phase_categories),
+            "required active WAL/SHM phase coverage was not observed",
         )
         _require_digest_equal(
             {record["phase"] for record in artifact_records},

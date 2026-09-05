@@ -4032,6 +4032,35 @@ class SyncDatabase:
             raise SyncStoreError("personal_context_authority_mismatch")
         return dict(state)
 
+    @classmethod
+    def _validate_personal_context_authority_target(
+        cls,
+        row: Mapping[str, Any],
+        *,
+        user_id: str,
+        require_chatbook_default: bool = False,
+    ) -> tuple[dict[str, Any], dict[str, object] | None]:
+        """Validate an authority target before any transport state is mutated."""
+
+        if (
+            row.get("owner_user_id") != user_id
+            or row.get("archived_at") is not None
+            or row.get("scope_type") != "personal"
+            or row.get("workspace_id") is not None
+            or row.get("encryption_policy") != DEFAULT_M1_ENCRYPTION_POLICY
+        ):
+            raise SyncStoreError("personal_context_authority_mismatch")
+        metadata = decode_json(row.get("metadata_json"), default=None)
+        if not isinstance(metadata, dict):
+            raise SyncStoreError("personal_context_authority_mismatch")
+        binding = cls._personal_context_binding_from_row(row)
+        if require_chatbook_default and (
+            metadata.get("default_personal") is not True
+            or metadata.get("client_family") != "chatbook"
+        ):
+            raise SyncStoreError("personal_context_authority_mismatch")
+        return metadata, binding
+
     def _create_default_personal_dataset_in_transaction(
         self,
         *,
@@ -4043,8 +4072,11 @@ class SyncDatabase:
         dataset_id = f"ds_personal_{str(user_id).replace('/', '_').replace(':', '_')}"
         existing = self._get_dataset_row(dataset_id, connection=connection)
         if existing is not None:
-            if existing.get("owner_user_id") != user_id:
-                raise SyncStoreError("personal_context_authority_mismatch")
+            self._validate_personal_context_authority_target(
+                existing,
+                user_id=user_id,
+                require_chatbook_default=True,
+            )
             return existing
         dataset = SyncDatasetCreate(
             dataset_id=dataset_id,
@@ -4163,6 +4195,7 @@ class SyncDatabase:
                     default_rows.append(row)
             if len(bound_rows) > 1:
                 raise SyncStoreError("personal_context_authority_mismatch")
+            require_chatbook_default = not bound_rows and bool(default_rows)
             target = (
                 bound_rows[0]
                 if bound_rows
@@ -4172,6 +4205,11 @@ class SyncDatabase:
                     user_id=user_id,
                     connection=connection,
                 )
+            )
+            self._validate_personal_context_authority_target(
+                target,
+                user_id=user_id,
+                require_chatbook_default=require_chatbook_default,
             )
             target = self._enroll_personal_context_domains_in_transaction(
                 row=target,
@@ -4219,6 +4257,10 @@ class SyncDatabase:
             )
             if row is None:
                 raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
+            metadata, current_binding = self._validate_personal_context_authority_target(
+                row,
+                user_id=user_id,
+            )
             for candidate in owner_rows:
                 if (
                     candidate.get("dataset_id") == dataset_id
@@ -4233,16 +4275,8 @@ class SyncDatabase:
                     raise SyncStoreError("personal_context_authority_mismatch")
                 if candidate_metadata.get("personal_context") is not None:
                     raise SyncStoreError("personal_context_authority_mismatch")
-            metadata = decode_json(row.get("metadata_json"), default={})
-            if not isinstance(metadata, dict):
-                raise SyncStoreError("personal_context_authority_mismatch")
-            current_binding = metadata.get("personal_context")
-            if current_binding is not None and not isinstance(current_binding, dict):
-                raise SyncStoreError("personal_context_authority_mismatch")
             if current_binding is not None:
-                current_generation = current_binding.get("purge_generation", 0)
-                if type(current_generation) is not int or current_generation < 0:
-                    raise SyncStoreError("personal_context_authority_mismatch")
+                current_generation = current_binding["purge_generation"]
                 if purge_generation < current_generation:
                     raise SyncStoreError("personal_context_link_binding_stale")
             expected = dict(expected_binding) if expected_binding is not None else None
@@ -4315,7 +4349,13 @@ class SyncDatabase:
             state = self._personal_context_binding_from_row(row)
             if state is None:
                 continue
-            bound.append((row, state))
+            _metadata, validated_state = self._validate_personal_context_authority_target(
+                row,
+                user_id=user_id,
+            )
+            if validated_state is None:
+                raise SyncStoreError("personal_context_authority_mismatch")
+            bound.append((row, validated_state))
         if len(bound) > 1:
             raise SyncStoreError("personal_context_authority_mismatch")
         if not bound or (
