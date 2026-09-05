@@ -4598,6 +4598,15 @@ class SyncV2Service:
                     )
                 )
                 continue
+            if envelope.domain == "personal_context.manifest":
+                rejected.append(
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="personal_context_manifest_client_forbidden",
+                        message="Linked profile manifests are server-authored",
+                    )
+                )
+                continue
             if has_guard_required_routing_key(envelope.routing_metadata):
                 rejected.append(
                     SyncPushRejected(
@@ -6790,6 +6799,7 @@ class SyncV2Service:
                                 expected_local_envelope_id=expected_local_envelope_id,
                                 expected_remote_envelope_id=expected_remote_envelope_id,
                                 idempotency_key=idempotency_key,
+                                exchange=verified_exchange,
                             )
                         else:
                             outcome = self.resolve_conflict(

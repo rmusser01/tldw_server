@@ -85,6 +85,11 @@ class PersonalContextDomainAdapter:
 
         if envelope.domain != self.domain:
             return self._reject(envelope, "personal_context_domain_mismatch")
+        if (
+            self.domain == "personal_context.manifest"
+            and envelope.routing_metadata.get("personal_context_authority", {}).get("role") == "client_ingress"
+        ):
+            return self._reject(envelope, "personal_context_manifest_client_forbidden")
         if envelope.adapter_version != 1 or envelope.schema_version != 1:
             return self._reject(envelope, "personal_context_schema_unsupported")
         if dataset.encryption_policy != "server_trusted_v1":

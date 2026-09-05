@@ -12,7 +12,7 @@ from tldw_profile_core.canonical import canonical_json_bytes
 
 from .adapters import AdapterAccepted
 from .errors import SyncStoreError
-from .models import SyncConflictCreate, SyncEnvelopeCreate
+from .models import SyncConflictCreate, SyncEnvelopeCreate, normalize_sync_timestamp
 
 
 class PersonalContextConflictService:
@@ -44,6 +44,7 @@ class PersonalContextConflictService:
             domain=source.domain,
             object_id=source.object_id,
             local_payload=clear.payload,
+            local_envelope_digest=self._local_envelope_digest(clear),
             purge_generation=state["purge_generation"],
         )
         with canonical.sync_conflict_staging_guard(
@@ -53,59 +54,88 @@ class PersonalContextConflictService:
         ) as journal:
             return self._attach_candidate(dataset, source, canonical, journal)
 
+    def _candidate_envelope(self, dataset: Any, canonical: Any, journal: Any) -> SyncEnvelopeCreate:
+        """Reconstruct every immutable review field from canonical custody."""
+        state = dataset.metadata["personal_context"]
+        key_id, key = canonical.sync_integrity_key(journal["profile_id"])
+        if (
+            dataset.dataset_id != journal["dataset_id"]
+            or state["profile_id"] != journal["profile_id"]
+            or state["purge_generation"] != journal["purge_generation"]
+            or key_id != journal["integrity_key_id"]
+        ):
+            raise SyncStoreError("Personal Context conflict authority changed")
+        payload = journal["candidate"]
+        encoded = canonical_json_bytes(payload)
+        version = journal["candidate_version_id"]
+        if journal["domain"] == "personal_context.proposal":
+            version = "sync-proposal-sha256:" + hashlib.sha256(encoded).hexdigest()
+        return SyncEnvelopeCreate(
+            dataset_id=journal["dataset_id"],
+            device_id="server-origin",
+            client_envelope_id=journal["remote_envelope_id"],
+            domain=journal["domain"],
+            object_id=journal["candidate_object_id"],
+            entity_version=version,
+            parent_id=payload.get("profile_id")
+            if journal["domain"] == "personal_context.scope"
+            else payload.get("scope_id"),
+            operation="tombstone" if payload.get("state") == "deleted" else "upsert",
+            payload=payload,
+            payload_size_bytes=len(encoded),
+            payload_hash="hmac-sha256-v1:" + hmac.new(key, encoded, hashlib.sha256).hexdigest(),
+            created_at_client=journal["candidate_created_at"],
+            received_at_server=normalize_sync_timestamp(journal["candidate_created_at"]),
+            # Candidates are delivered only by conflict review. They must never
+            # advance current heads or masquerade as a new publication batch.
+            status="conflict",
+            apply_status="applied",
+            routing_metadata={
+                "profile_id": journal["profile_id"],
+                "purge_generation": journal["purge_generation"],
+                "integrity_key_id": key_id,
+                "personal_context_conflict_candidate": journal["conflict_id"],
+                "personal_context_authority": journal["authority"],
+            },
+        )
+
+    def _validate_candidate(self, dataset: Any, candidate: Any, expected: SyncEnvelopeCreate) -> Any:
+        clear_candidate = self.sync._restore_personal_context_from_storage(dataset, candidate)
+        # Cursors and their derived server envelope ID belong to Sync allocation;
+        # every other returned field is fixed by the encrypted canonical journal.
+        immutable = asdict(expected)
+        immutable.pop("server_cursor")
+        immutable.pop("server_sequence")
+        if any(getattr(clear_candidate, field) != value for field, value in immutable.items()):
+            raise SyncStoreError("Personal Context conflict candidate authentication failed")
+        return clear_candidate
+
+    @staticmethod
+    def _local_envelope_digest(source: Any) -> str:
+        immutable = asdict(source)
+        for field in (
+            "server_cursor",
+            "server_sequence",
+            "envelope_id",
+            "received_at_server",
+            "server_timestamp",
+            "apply_status",
+            "apply_error_code",
+            "apply_error_message",
+            "applied_at",
+        ):
+            immutable.pop(field, None)
+        return "sha256:" + hashlib.sha256(canonical_json_bytes(immutable)).hexdigest()
+
     def _attach_candidate(self, dataset: Any, source: Any, canonical: Any, journal: Any) -> Any:
         from .service import SyncPushConflict
 
-        state = dataset.metadata["personal_context"]
         conflict_id = journal["conflict_id"]
+        envelope = self._candidate_envelope(dataset, canonical, journal)
         candidate = self.store.get_envelope_by_client_id(dataset.dataset_id, journal["remote_envelope_id"])
         if candidate is None:
-            key_id, key = canonical.sync_integrity_key(state["profile_id"])
-            payload = journal["candidate"]
-            encoded = canonical_json_bytes(payload)
-            version = journal["candidate_version_id"]
-            if source.domain == "personal_context.proposal":
-                version = "sync-proposal-sha256:" + hashlib.sha256(encoded).hexdigest()
-            envelope = SyncEnvelopeCreate(
-                dataset_id=dataset.dataset_id,
-                device_id="server-origin",
-                client_envelope_id=journal["remote_envelope_id"],
-                domain=source.domain,
-                object_id=journal["candidate_object_id"],
-                entity_version=version,
-                parent_id=payload.get("profile_id")
-                if source.domain == "personal_context.scope"
-                else payload.get("scope_id"),
-                operation="tombstone" if payload.get("state") == "deleted" else "upsert",
-                payload=payload,
-                payload_size_bytes=len(encoded),
-                payload_hash="hmac-sha256-v1:" + hmac.new(key, encoded, hashlib.sha256).hexdigest(),
-                created_at_client=journal["candidate_created_at"],
-                received_at_server=journal["candidate_created_at"],
-                # Candidates are delivered only by conflict review. They must never
-                # advance current heads or masquerade as a new publication batch.
-                status="conflict",
-                apply_status="applied",
-                routing_metadata={
-                    "profile_id": state["profile_id"],
-                    "purge_generation": state["purge_generation"],
-                    "integrity_key_id": key_id,
-                    "personal_context_conflict_candidate": conflict_id,
-                    "personal_context_authority": journal["authority"],
-                },
-            )
             candidate = self.store.insert_envelope(self.sync._protect_personal_context_for_storage(dataset, envelope))
-        clear_candidate = self.sync._restore_personal_context_from_storage(dataset, candidate)
-        if (
-            clear_candidate.payload != journal["candidate"]
-            or clear_candidate.object_id != journal["candidate_object_id"]
-            or clear_candidate.device_id != "server-origin"
-            or clear_candidate.authority is None
-            or clear_candidate.authority.model_dump(mode="json") != journal["authority"]
-            or clear_candidate.apply_status != "applied"
-            or clear_candidate.routing_metadata.get("personal_context_conflict_candidate") != conflict_id
-        ):
-            raise SyncStoreError("Personal Context conflict candidate authentication failed")
+        clear_candidate = self._validate_candidate(dataset, candidate, envelope)
         conflict = self.store.insert_conflict(
             SyncConflictCreate(
                 conflict_id=conflict_id,
@@ -144,6 +174,7 @@ class PersonalContextConflictService:
         expected_local_envelope_id: str,
         expected_remote_envelope_id: str,
         idempotency_key: str,
+        exchange: Any,
     ) -> Any:
         """Validate transport identity and finalize only after the canonical receipt."""
         self.sync._require_registered_device(user_id, device_id, store=self.store)
@@ -169,9 +200,21 @@ class PersonalContextConflictService:
             raise SyncStoreError("Personal Context conflict candidate is unavailable")
         canonical = self.sync._personal_context_service_for_user(user_id)
         journal = canonical.get_sync_conflict(conflict.conflict_id)
-        restored = self.sync._restore_personal_context_from_storage(dataset, remote)
-        if restored.payload != journal["candidate"] or restored.object_id != journal["candidate_object_id"]:
-            raise SyncStoreError("Personal Context conflict candidate authentication failed")
+        self._validate_candidate(dataset, remote, self._candidate_envelope(dataset, canonical, journal))
+        local = self.sync._restore_personal_context_from_storage(dataset, source)
+        local_identity = {
+            "dataset_id": local.dataset_id,
+            "device_id": local.device_id,
+            "local_envelope_id": local.client_envelope_id,
+            "domain": local.domain,
+            "object_id": local.object_id,
+        }
+        if (
+            any(journal[field] != value for field, value in local_identity.items())
+            or journal["local_digest"] != "sha256:" + hashlib.sha256(canonical_json_bytes(local.payload)).hexdigest()
+            or journal["local_envelope_digest"] != self._local_envelope_digest(local)
+        ):
+            raise SyncStoreError("Personal Context local candidate authentication failed")
         command = None
         if resolution_envelope is not None:
             if (
@@ -198,6 +241,7 @@ class PersonalContextConflictService:
             action=action,
             command=command,
             purge_generation=dataset.metadata["personal_context"]["purge_generation"],
+            exchange=exchange,
         )
         if conflict.status == "unresolved":
             self.store.claim_conflict_resolution(

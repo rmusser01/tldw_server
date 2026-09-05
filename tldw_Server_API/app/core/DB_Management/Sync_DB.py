@@ -7895,7 +7895,22 @@ class SyncDatabase:
         *,
         connection: Any,
     ) -> SyncEnvelope:
-        now = utcnow_iso()
+        authority = envelope.routing_metadata.get("personal_context_authority")
+        protected_conflict_candidate = (
+            envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+            and envelope.status == "conflict"
+            and envelope.apply_status == "applied"
+            and envelope.device_id == "server-origin"
+            and bool(envelope.payload_ciphertext)
+            and bool(envelope.routing_metadata.get("personal_context_conflict_candidate"))
+            and isinstance(authority, Mapping)
+            and authority.get("role") == "home_authority"
+        )
+        # Canonical candidate custody fixes these bytes before any Sync allocation.
+        # Ordinary client ingress still receives the server's actual arrival time.
+        now = envelope.received_at_server if protected_conflict_candidate else utcnow_iso()
+        if not now:
+            raise SyncStoreError("Personal Context candidate timestamp is unavailable")
         self.execute(
             """
             INSERT INTO sync_envelopes (

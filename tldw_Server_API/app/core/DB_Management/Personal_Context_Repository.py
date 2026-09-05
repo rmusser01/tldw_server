@@ -1124,6 +1124,7 @@ class PersonalContextRepository:
         domain: str,
         object_id: str,
         local_payload: Mapping[str, Any],
+        local_envelope_digest: str,
         purge_generation: int,
     ) -> dict[str, Any]:
         """Commit immutable heads and private narrow freezes before Sync reports conflict."""
@@ -1143,6 +1144,7 @@ class PersonalContextRepository:
                 "object_id": object_id,
                 "purge_generation": purge_generation,
                 "local_digest": self._canonical_digest(local_payload),
+                "local_envelope_digest": local_envelope_digest,
             }
             existing = self._sync_conflict_head(connection, profile_id, conflict_id)
             if existing is not None:
@@ -1205,6 +1207,7 @@ class PersonalContextRepository:
                 "candidate_object_id": str(current["object_id"]),
                 "candidate_version_id": str(current["version_id"]),
                 "candidate_created_at": str(current["created_at"]),
+                "integrity_key_id": f"personal-context-integrity-v{keys.integrity_key_version}",
                 "authority": {
                     "role": "home_authority",
                     "publication_batch_id": str(source["publication_batch_id"]),
@@ -1229,9 +1232,18 @@ class PersonalContextRepository:
         action: str,
         command: Mapping[str, Any] | None,
         purge_generation: int,
+        exchange: PersonalContextExchangeProof,
     ) -> dict[str, Any]:
         """Commit a reviewed choice and its exact replay receipt in one transaction."""
         with self._database.transaction(immediate=True) as connection:
+            self.validate_activation_exchange(
+                profile_id=profile_id,
+                device_id=device_id,
+                dataset_id=dataset_id,
+                activation_epoch=exchange.activation_epoch,
+                continuity_token=exchange.continuity_token,
+                _connection=connection,
+            )
             keys = self._keys.load(profile_id, connection=connection)
             row = self._sync_conflict_head(connection, profile_id, conflict_id)
             if row is None:
@@ -2234,6 +2246,7 @@ class PersonalContextRepository:
         dataset_id: str,
         activation_epoch: str,
         continuity_token: str,
+        _connection: sqlite3.Connection | None = None,
     ) -> PersonalContextExchangeProof:
         """Return the canonical proof only for an acknowledged current device baseline."""
         try:
@@ -2244,7 +2257,8 @@ class PersonalContextRepository:
             )
         except (TypeError, ValueError):
             raise PersonalContextActivationInputError("personal_context_activation_required") from None
-        with self._database.transaction() as connection:
+        transaction = self._database.transaction() if _connection is None else nullcontext(_connection)
+        with transaction as connection:
             row = connection.execute(
                 """SELECT a.* FROM personal_context_activations a
                    JOIN personal_context_activation_devices d ON d.activation_id = a.activation_id

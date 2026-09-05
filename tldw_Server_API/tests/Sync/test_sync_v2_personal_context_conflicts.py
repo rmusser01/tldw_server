@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 from dataclasses import asdict, replace
 
 import pytest
@@ -28,8 +29,16 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture()
-def linked(production_factories):
+def linked(production_factories, monkeypatch):
     canonical, sync = production_factories
+    relay_type = type(sync.personal_context_relay)
+    original_relay = relay_type.relay_profile
+
+    def deterministic_relay(relay, **kwargs):
+        relay.clock_ns = lambda: 0
+        return original_relay(relay, **kwargs)
+
+    monkeypatch.setattr(relay_type, "relay_profile", deterministic_relay)
     return _link(canonical, sync)
 
 
@@ -55,6 +64,182 @@ def _link(canonical, sync):
         personal_context_exchange=exchange,
     )
     return canonical, sync, initial.dataset_id, exchange, record
+
+
+def _reopen(linked):
+    from tldw_Server_API.app.api.v1.API_Deps.personal_context_deps import personal_context_service_for_user
+    from tldw_Server_API.app.core.DB_Management.backends.factory import reset_managed_sqlite_backends
+    from tldw_Server_API.app.core.Sync.v2 import factory
+    from tldw_Server_API.tests.Sync.test_sync_v2_personal_context_certification import _clear_factory_caches
+
+    canonical, sync, dataset_id, exchange, record = linked
+    backend = sync.store.db.backend
+    reset_managed_sqlite_backends(backends=[backend])
+    _clear_factory_caches()
+    reopened = personal_context_service_for_user(_USER_ID)
+    restarted = factory.sync_v2_service_for_user(_USER_ID)
+    assert reopened._repository.database is not canonical._repository.database
+    assert restarted.store.db.backend is not backend
+    return reopened, restarted, dataset_id, exchange, record
+
+
+@pytest.mark.parametrize("boundary", ["capture", "receipt"])
+def test_reopened_owners_resume_exact_conflict_after_interruption(linked, monkeypatch, boundary):
+    from tldw_Server_API.app.core.Sync.v2.personal_context_conflicts import PersonalContextConflictService
+
+    canonical, sync, dataset_id, _exchange, record = linked
+    if boundary == "capture":
+        incoming = _envelope(
+            linked, record.model_copy(update={"version_id": "interrupted-local-version"}), "interrupted-local-envelope"
+        )
+        with monkeypatch.context() as fault:
+
+            def fail_attachment(*args, **kwargs):
+                raise RuntimeError("injected capture-before-attachment interruption")
+
+            fault.setattr(PersonalContextConflictService, "_attach_candidate", fail_attachment)
+            assert _push(linked, incoming).rejected[0].retryable
+        conflict_id = PersonalContextConflictService.conflict_id(dataset_id, _DEVICE_ID, incoming.client_envelope_id)
+        journal = canonical.get_sync_conflict(conflict_id)
+        runtime = _reopen(linked)
+        replay = _push(runtime, incoming)
+        assert len(replay.conflicts) == 1
+        assert replay.conflicts[0].expected_remote_envelope_id == journal["remote_envelope_id"]
+        assert replay.conflicts[0].authority_candidate.payload == journal["candidate"]
+        assert asdict(_push(runtime, incoming).conflicts[0]) == asdict(replay.conflicts[0])
+    else:
+        conflict, _source = _conflict(linked)
+        replacement = record.model_copy(
+            update={"version_id": "reopened-reviewed-version", "parent_version_id": record.version_id}
+        )
+        command = _envelope(linked, replacement, "reopened-reviewed-envelope", base=record)
+        with monkeypatch.context() as fault:
+
+            def fail_finalize(*args, **kwargs):
+                raise RuntimeError("injected receipt-before-finalization interruption")
+
+            fault.setattr(type(sync.store), "resolve_conflict", fail_finalize)
+            assert _resolve(linked, conflict, "overwrite", command)[1] == [0]
+        manifest = canonical.get_manifest()
+        with canonical._repository.database.transaction() as connection:
+            publications = connection.execute("SELECT COUNT(*) FROM personal_context_publication_batches").fetchone()[0]
+        runtime = _reopen(linked)
+        assert _resolve(runtime, conflict, "overwrite", command)[1] == []
+        assert runtime[0].get_manifest() == manifest
+        assert runtime[0].get_record(record.record_id) == replacement
+        with runtime[0]._repository.database.transaction() as connection:
+            assert (
+                connection.execute("SELECT COUNT(*) FROM personal_context_publication_batches").fetchone()[0]
+                == publications
+            )
+
+
+def test_old_resolution_rejected_after_purge_and_recreation_attempt(linked):
+    from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
+
+    conflict, _source = _conflict(linked)
+    canonical = linked[0]
+    canonical.purge_profile(mode="everywhere", confirmation="DELETE EVERYWHERE", expected_purge_generation=0)
+    runtime = _reopen(linked)
+    with pytest.raises(ProfileConflictError):
+        runtime[0].create_profile()
+    with pytest.raises(SyncStoreError):
+        _resolve(runtime, conflict)
+    assert not runtime[0].list_records()
+    with runtime[0]._repository.database.transaction() as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM personal_context_object_heads WHERE object_type IN ('sync_conflict', 'sync_conflict_receipt')"
+            ).fetchone()[0]
+            == 0
+        )
+
+
+@pytest.mark.parametrize("domain", ["personal_context.scope", "personal_context.proposal"])
+def test_non_record_candidate_replay_and_explicit_choice(linked, domain):
+    from datetime import UTC, datetime, timedelta
+
+    from tldw_Server_API.tests.Personalization.test_personal_context_service import _pending_proposal_for_scope
+
+    canonical, sync, dataset_id, exchange, record = linked
+    scope = canonical.list_scopes()[0]
+    if domain == "personal_context.scope":
+        original = scope
+        local = original.model_copy(update={"version_id": "conflicted-scope-version"})
+        replacement = original.model_copy(update={"version_id": "reviewed-scope-version"})
+        object_id, parent = scope.scope_id, scope.profile_id
+        version, replacement_version = local.version_id, replacement.version_id
+    else:
+        proposal = _pending_proposal_for_scope(
+            canonical, profile_id=record.profile_id, scope_id=scope.scope_id, proposal_id="conflicted-proposal-13163"
+        )
+        now = datetime.now(UTC).replace(microsecond=0)
+        original = canonical.create_proposal(
+            type(proposal).model_validate(
+                {**proposal.model_dump(mode="python"), "created_at": now, "expires_at": now + timedelta(days=90)}
+            )
+        )
+        local = type(original).model_validate({**original.model_dump(mode="python"), "confidence": 0.9})
+        replacement = type(original).model_validate(
+            {**original.model_dump(mode="python"), "state": "rejected", "proposed_record": None, "confidence": None}
+        )
+        object_id, parent = original.proposal_id, original.scope_id
+        version = "sync-proposal-sha256:" + hashlib.sha256(canonical_bytes(local)).hexdigest()
+        replacement_version = "sync-proposal-sha256:" + hashlib.sha256(canonical_bytes(replacement)).hexdigest()
+    sync.pull(
+        user_id=_USER_ID,
+        dataset_id=dataset_id,
+        device_id=_DEVICE_ID,
+        domains=[domain],
+        personal_context_exchange=exchange,
+    )
+    incoming = _whole_object_envelope(linked, local, domain, object_id, version, parent=parent)
+    result = _push(linked, incoming)
+    assert result.conflicts, (
+        [(item.apply_status, item.apply_error_code) for item in result.accepted],
+        [(item.error_code, item.retryable) for item in result.rejected],
+    )
+    conflict = result.conflicts[0]
+    assert conflict.authority_candidate.payload == original.model_dump(mode="json")
+    assert asdict(_push(linked, incoming).conflicts[0]) == asdict(conflict)
+    command = _whole_object_envelope(
+        linked, replacement, domain, object_id, replacement_version, parent=parent, base=original
+    )
+    assert _resolve(linked, conflict, "overwrite", command)[1] == []
+    assert canonical.get_sync_conflict(conflict.conflict_id)["receipt"]["resulting_object_id"] == object_id
+
+
+def test_invalid_purge_envelope_is_rejected_without_review(linked):
+    envelope = replace(
+        _envelope(linked, linked[4], "invalid-purge-envelope"), domain="personal_context.purge", operation="tombstone"
+    )
+    result = _push(linked, envelope)
+    assert (
+        not result.conflicts
+        and not result.accepted
+        and result.rejected[0].error_code == "personal_context_payload_invalid"
+    )
+
+
+def test_conflict_canaries_absent_from_sync_storage_and_diagnostics(linked):
+    from pathlib import Path
+
+    from loguru import logger
+
+    diagnostics = []
+    sink = logger.add(lambda message: diagnostics.append(str(message)))
+    try:
+        conflict, source = _conflict(linked, collision=True)
+        assert _push(linked, source).conflicts
+        assert _resolve(linked, conflict, expected_remote="stale-remote-canary")[1] == [0]
+    finally:
+        logger.remove(sink)
+    for canary in (b"TASK13163-SHARED-CANARY", b"TASK13163-LOCAL-CANARY"):
+        assert canary.decode() not in "".join(diagnostics)
+        for path in (Path(linked[0]._repository.database.db_path), Path(linked[1].store.db.backend.config.sqlite_path)):
+            for artifact in (path, Path(str(path) + "-wal")):
+                if artifact.exists():
+                    assert canary not in artifact.read_bytes()
 
 
 def _envelope(linked, record, envelope_id, *, base=None):
@@ -87,6 +272,152 @@ def _push(linked, envelope):
         envelopes=[envelope],
         personal_context_exchange=exchange,
     )
+
+
+def _whole_object_envelope(linked, value, domain, object_id, version, *, parent=None, base=None):
+    canonical, _sync, dataset_id, _exchange, _record = linked
+    key_id, key = canonical.sync_integrity_key(value.profile_id)
+    payload = canonical_bytes(value)
+    return SyncEnvelopeCreate(
+        dataset_id=dataset_id,
+        device_id=_DEVICE_ID,
+        client_envelope_id=f"review-{domain}-{version}",
+        domain=domain,
+        operation="upsert",
+        object_id=object_id,
+        parent_id=parent,
+        payload=value.model_dump(mode="json"),
+        entity_version=version,
+        payload_hash="hmac-sha256-v1:" + hmac.new(key, payload, hashlib.sha256).hexdigest(),
+        payload_size_bytes=len(payload),
+        base_object_hash=None if base is None else "sha256:" + hashlib.sha256(canonical_bytes(base)).hexdigest(),
+        routing_metadata={"integrity_key_id": key_id, "profile_id": value.profile_id, "purge_generation": 0},
+    )
+
+
+@pytest.mark.parametrize("stale", [False, True])
+def test_linked_client_manifest_rejected_without_conflict_or_publication(linked, stale):
+    canonical, _sync, _dataset, _exchange, _record = linked
+    before = canonical.get_manifest()
+    envelope = _whole_object_envelope(
+        linked,
+        before,
+        "personal_context.manifest",
+        before.profile_id,
+        before.current_version_id,
+        base=None if stale else before,
+    )
+    with canonical._repository.database.transaction() as connection:
+        publications = connection.execute("SELECT COUNT(*) FROM personal_context_publication_batches").fetchone()[0]
+    result = _push(linked, envelope)
+    assert not result.accepted and not result.conflicts and len(result.rejected) == 1
+    assert result.rejected[0].error_code == "personal_context_manifest_client_forbidden"
+    assert canonical.get_manifest() == before
+    with canonical._repository.database.transaction() as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM personal_context_object_heads WHERE object_type = 'sync_conflict'"
+            ).fetchone()[0]
+            == 0
+        )
+        assert (
+            connection.execute("SELECT COUNT(*) FROM personal_context_publication_batches").fetchone()[0]
+            == publications
+        )
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("entity_version", json.dumps("tampered-version-13163")),
+        ("operation", "tombstone"),
+        ("parent_id", "tampered-parent-13163"),
+        ("created_at_client", "2026-01-01T00:00:00+00:00"),
+        ("received_at_server", "2026-01-01T00:00:00+00:00"),
+        ("payload_hash", "hmac-sha256-v1:" + "0" * 64),
+        ("payload_size_bytes", 1),
+        ("routing_metadata_json", None),
+    ],
+)
+def test_tampered_remote_candidate_replay_and_resolution_fail_closed(linked, field, value):
+    conflict, incoming = _conflict(linked)
+    canonical, sync, _dataset, _exchange, _record = linked
+    if field == "routing_metadata_json":
+        metadata = dict(conflict.authority_candidate.routing_metadata)
+        metadata["personal_context_authority"] = {"role": "client_ingress"}
+        value = json.dumps(metadata)
+    # Field names are a closed test parameter list; production never receives them.
+    sync.store.db.execute(
+        f"UPDATE sync_envelopes SET {field} = ? WHERE client_envelope_id = ?",
+        (value, conflict.expected_remote_envelope_id),
+    )
+    before = canonical.get_manifest()
+    replay = _push(linked, incoming)
+    assert not replay.conflicts and replay.rejected[0].retryable
+    assert _resolve(linked, conflict)[1] == [0]
+    assert canonical.get_manifest() == before
+    assert sync.store.get_conflict(conflict.conflict_id).status == "unresolved"
+    assert canonical.get_sync_conflict(conflict.conflict_id)["state"] == "unresolved"
+
+
+@pytest.mark.parametrize("authenticated_body", [False, True])
+def test_tampered_local_ciphertext_cannot_release_review(linked, authenticated_body):
+    conflict, _incoming = _conflict(linked)
+    canonical, sync, _dataset, _exchange, _record = linked
+    if authenticated_body:
+        dataset = sync.store.get_dataset(linked[2])
+        source = sync.store.get_envelope_by_client_id(linked[2], conflict.expected_local_envelope_id)
+        clear = sync._restore_personal_context_from_storage(dataset, source)
+        altered = {**clear.payload, "payload": {**clear.payload["payload"], "value": "tampered-local-body"}}
+        protected = sync._protect_personal_context_for_storage(
+            dataset, replace(clear, payload=altered, payload_clear=altered)
+        )
+        sync.store.db.execute(
+            "UPDATE sync_envelopes SET payload_ciphertext = ?, encryption_metadata_json = ? WHERE client_envelope_id = ?",
+            (
+                protected.payload_ciphertext,
+                json.dumps(protected.encryption_metadata),
+                conflict.expected_local_envelope_id,
+            ),
+        )
+    else:
+        sync.store.db.execute(
+            "UPDATE sync_envelopes SET payload_ciphertext = ? WHERE client_envelope_id = ?",
+            ("invalid-ciphertext", conflict.expected_local_envelope_id),
+        )
+    before = canonical.get_manifest()
+    assert _resolve(linked, conflict)[1] == [0]
+    assert canonical.get_manifest() == before
+    assert sync.store.get_conflict(conflict.conflict_id).status == "unresolved"
+
+
+@pytest.mark.parametrize("committed", [False, True])
+def test_new_activation_between_batch_check_and_canonical_decision_rejects(linked, monkeypatch, committed):
+    from tldw_Server_API.app.core.Personalization.personal_context_activation import PersonalContextActivationService
+
+    conflict, _incoming = _conflict(linked)
+    canonical, sync, _dataset, _exchange, record = linked
+    if committed:
+        with monkeypatch.context() as fault:
+
+            def fail_finalize(*args, **kwargs):
+                raise RuntimeError("injected Sync finalization failure")
+
+            fault.setattr(type(sync.store), "resolve_conflict", fail_finalize)
+            assert _resolve(linked, conflict)[1] == [0]
+    before = canonical.get_manifest()
+    journal = canonical.get_sync_conflict(conflict.conflict_id)
+    original = type(canonical).resolve_sync_conflict
+
+    def transition_then_resolve(owner, **command):
+        PersonalContextActivationService(owner._repository).prepare(record.profile_id, device_id=_DEVICE_ID, fresh=True)
+        return original(owner, **command)
+
+    monkeypatch.setattr(type(canonical), "resolve_sync_conflict", transition_then_resolve)
+    assert _resolve(linked, conflict)[1] == [0]
+    assert canonical.get_manifest() == before
+    assert canonical.get_sync_conflict(conflict.conflict_id) == journal
+    assert sync.store.get_conflict(conflict.conflict_id).status == "unresolved"
 
 
 def _conflict(linked, *, collision=False):
@@ -299,6 +630,9 @@ def test_exact_journal_survives_reopen_rotation_and_contains_no_plaintext(linked
     from pathlib import Path
 
     assert b"TASK13163-" not in Path(path).read_bytes()
+    if not resolved:
+        assert asdict(_push(linked, _source).conflicts[0]) == asdict(conflict)
+    assert _resolve(linked, conflict)[1] == []
 
 
 def test_batch_partial_failure_preserves_stale_item_and_commits_valid_skip(linked):
