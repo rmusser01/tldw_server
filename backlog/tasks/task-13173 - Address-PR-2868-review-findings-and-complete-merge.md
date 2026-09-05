@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-05 02:25'
-updated_date: '2026-09-05 03:52'
+updated_date: '2026-09-05 03:56'
 labels: []
 dependencies: []
 references:
@@ -58,6 +58,8 @@ Round 4 complete locally: fixed all six new Qodo findings. Moved existing purge 
 Round 5 plan: reproduce missing structured operation/attempt context in the existing diagnostic canary tests; add per-call random correlation through scoped Loguru context and fixed operation metadata, preserving retry and sink-failure behavior. Confirm distinct attempts cannot share IDs and context does not leak after return. Rebase on latest dev, regenerate affected artifacts, run targeted regression/security/static checks, reply with evidence. ADR required: no new ADR; existing ADR-002 privacy boundary applies, no stable identity or new persisted state.
 
 Round 5 red-green evidence: all eight diagnostic regressions failed for missing structured operation, then passed after adding a UUID4 relay_attempt_id and fixed operation through scoped Loguru context. Tests verify distinct IDs for successive attempts, no context after return, content-free complete records, sink-failure isolation and subsequent recovery. No persistent identifiers, exception content or new dependencies added. Scoped Ruff/Bandit and diff checks pass. Latest dev advanced only through document-summary prompt work; rebase and final verification follow.
+
+Round 5 final rebase: latest dev a5aa0c8e675116a971156ee6273caeb8928df267; all 68 commits retain identical patches by range-diff, no conflicts. Repinned unchanged contract artifact provenance to source 3ed7a9290baeb21aa8dcf876a793602208f38282. API types regenerated; fingerprint unchanged and drift check passes. Fresh relay-recovery, production certification and contract gate: 78 passed, 22 warnings in 86.38s with PostgreSQL required, no skips. Scoped Ruff/Bandit and diff checks pass. Independent review confirms UUID4 context covers lease acquisition/teardown and exception handling, restores caller context and preserves thread/task isolation, retry and privacy. Remote current-head checks/review and merge remain pending.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
