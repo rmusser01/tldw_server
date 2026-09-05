@@ -689,6 +689,59 @@ def test_bootstrap_reuses_existing_nondefault_authority_without_creating_default
     )
 
 
+def test_bootstrap_rejects_ambiguous_unbound_defaults_before_side_effects(
+    production_factories: tuple[Any, Any],
+) -> None:
+    """Duplicate default markers cannot silently choose a new authority."""
+
+    canonical, service = production_factories
+    canonical.create_profile(runtime_enabled=False)
+    _new_dataset(service, "ambiguous-default-a", default_personal=True)
+    _new_dataset(service, "ambiguous-default-b", default_personal=True)
+    _register_device(service)
+    datasets_before = _dataset_digest(service)
+    domains_before = _domain_state_digest(service)
+    transport_before = _transport_counts(service)
+    wrapper = service.personal_context_key_wrapper
+    wrapped = 0
+
+    def record_wrap(**kwargs: object) -> str:
+        nonlocal wrapped
+        wrapped += 1
+        return wrapper(**kwargs)
+
+    service.personal_context_key_wrapper = record_wrap
+    reason_code = None
+    try:
+        service.bootstrap_personal_context(
+            user_id=_USER_ID,
+            device_id=_DEVICE_ID,
+            required_schema_version=1,
+        )
+    except PersonalContextBootstrapError as exc:
+        reason_code = exc.reason_code
+
+    _require(reason_code == _AUTHORITY_ERROR, "ambiguous defaults were not rejected")
+    _require(wrapped == 0, "ambiguous defaults wrapped key material")
+    _require_digest_equal(
+        _dataset_digest(service), datasets_before, "ambiguous defaults changed datasets"
+    )
+    _require_digest_equal(
+        _domain_state_digest(service), domains_before, "ambiguous defaults changed domains"
+    )
+    _require_digest_equal(
+        _transport_counts(service), transport_before, "ambiguous defaults changed transport"
+    )
+    _bind_dataset(service, canonical, "ambiguous-default-b")
+    bootstrap = service.bootstrap_personal_context(
+        user_id=_USER_ID, device_id=_DEVICE_ID, required_schema_version=1
+    )
+    _require(
+        bootstrap.dataset_id == "ambiguous-default-b",
+        "sole established authority did not take precedence over defaults",
+    )
+
+
 @pytest.mark.parametrize(
     "defect",
     ("workspace", "archived", "policy", "default-marker", "generation"),

@@ -4193,7 +4193,7 @@ class SyncDatabase:
                     and metadata.get("client_family") == "chatbook"
                 ):
                     default_rows.append(row)
-            if len(bound_rows) > 1:
+            if len(bound_rows) > 1 or (not bound_rows and len(default_rows) > 1):
                 raise SyncStoreError("personal_context_authority_mismatch")
             require_chatbook_default = not bound_rows and bool(default_rows)
             target = (
