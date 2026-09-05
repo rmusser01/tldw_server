@@ -584,10 +584,20 @@ async def rg_coverage_audit(
             "(or route_list_limit) to detect truncation."
         ),
     ),
-):
+) -> JSONResponse:
     """Report which endpoints are governor-protected and which are excluded.
 
-    Returns coverage percentage and lists of protected/unprotected routes.
+    Args:
+        limit: Maximum number of entries returned in each of the
+            ``protected_routes`` / ``unprotected_routes`` lists (1-5000,
+            default 50). The ``*_count`` fields always reflect full totals,
+            so clients can detect a truncated list by comparing lengths
+            against the counts or the echoed ``route_list_limit`` (#2890).
+
+    Returns:
+        JSONResponse with total/protected/unprotected counts, coverage
+        percentage, excluded prefixes, the applied ``route_list_limit``,
+        and the (possibly limited) route lists.
     """
     try:
         from tldw_Server_API.app.core.Resource_Governance.coverage_audit import (

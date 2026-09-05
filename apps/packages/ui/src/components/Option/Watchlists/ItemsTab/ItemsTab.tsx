@@ -2545,7 +2545,10 @@ export const ItemsTab: React.FC = () => {
                 />
               </div>
 
-              {!trulyEmptyWatchlists ? (
+              {/* Hide the triage machinery only when there is genuinely
+                  nothing to triage: no feeds AND no (historical) items -
+                  deleting all sources does not delete collected items. */}
+              {!(trulyEmptyWatchlists && !itemsLoading && items.length === 0) ? (
               <>
               <div className="rounded-lg border border-border bg-surface/70 p-2.5">
                 <div className="flex flex-wrap items-center gap-2">

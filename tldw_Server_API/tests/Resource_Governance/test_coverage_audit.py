@@ -179,6 +179,7 @@ class TestAuditGovernorCoverage:
         assert len(result["protected_routes"]) == 50
         assert result["protected_count"] == 60
 
+    @pytest.mark.unit
     def test_route_limit_returns_full_lists(self):
         """route_limit lets admin callers fetch the complete audit (#2890)."""
         routes = [_MockRoute(f"/docs/page{i}", {"GET"}) for i in range(60)]
@@ -189,6 +190,7 @@ class TestAuditGovernorCoverage:
         assert result["unprotected_count"] == 60
         assert result["route_list_limit"] == 1000
 
+    @pytest.mark.unit
     def test_route_list_limit_reported_for_default_cap(self):
         """Clients can detect truncation from the reported list limit (#2890)."""
         routes = [_MockRoute(f"/docs/page{i}", {"GET"}) for i in range(60)]

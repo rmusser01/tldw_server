@@ -284,14 +284,27 @@ const ApiKeyManagementPage: React.FC = () => {
                 size="small"
                 type="primary"
                 onClick={() => {
-                  void navigator.clipboard?.writeText(newKeyValue).then(() => {
-                    message.success(
-                      t("settings:adminApiKeys.newKeyCopied", "Key copied")
-                    )
-                  })
-                  // Masking after copy keeps the secret off screen while the
-                  // operator finishes the rest of the page.
-                  setNewKeyRevealed(false)
+                  void (async () => {
+                    try {
+                      if (!navigator.clipboard?.writeText) {
+                        throw new Error("Clipboard unavailable")
+                      }
+                      await navigator.clipboard.writeText(newKeyValue)
+                      message.success(
+                        t("settings:adminApiKeys.newKeyCopied", "Key copied")
+                      )
+                      // Mask only once the copy actually succeeded - a denied
+                      // clipboard must never hide the only visible credential.
+                      setNewKeyRevealed(false)
+                    } catch {
+                      message.error(
+                        t(
+                          "settings:adminApiKeys.newKeyCopyFailed",
+                          "Could not access the clipboard - select and copy the key manually."
+                        )
+                      )
+                    }
+                  })()
                 }}
               >
                 {t("settings:adminApiKeys.newKeyCopy", "Copy key")}
