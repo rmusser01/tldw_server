@@ -321,6 +321,7 @@ def test_legacy_reset_preserves_existing_defaults(
     context.databases[1].reset_service_prompt_override(PROMPT_ID, row.revision)
 
     def unavailable() -> None:
+        """Force selection of the legacy scraping engine."""
         raise RuntimeError("enhanced unavailable")
 
     monkeypatch.setattr(service, "get_web_scraping_service", unavailable)

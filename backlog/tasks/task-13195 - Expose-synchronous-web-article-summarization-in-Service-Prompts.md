@@ -4,7 +4,7 @@ title: Expose synchronous web article summarization in Service Prompts
 status: In Progress
 assignee: []
 created_date: '2026-09-05 22:49'
-updated_date: '2026-09-05 23:29'
+updated_date: '2026-09-05 23:41'
 labels: []
 dependencies: []
 references:
@@ -49,6 +49,10 @@ Correction after full failure-log inspection: the broad run’s non-semaphore fa
 User explicitly approved committing and opening a PR with the documented broader-test limitations. Proceeding to publish against dev; no merge requested in this step.
 
 Published implementation commit d328765206 on codex/web-summary-service-prompt. PR #2907 opened against dev: https://github.com/rmusser01/tldw_server/pull/2907. Verification limitations are explicit in the PR body. Task remains In Progress pending PR review and integration.
+
+Qodo review posted: zero bugs and three rule findings. Verified two documentation gaps (legacy test helper docstring; resolver module/parameter/return/cleanup contract). Addressing those without behavior changes. Third finding repeats the documented broader-suite limitation explicitly approved by requester; will reply with evidence and preserve the limitation rather than claim a full green suite.
+
+Qodo documentation fixes verified: 35 web-summary integration tests passed; Ruff and format checks passed; touched resolver Bandit reported zero findings. Only docstrings and tracking notes changed. Replied to the broader-suite finding with the existing requester-approved limitation and evidence; required CI remains enforced.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

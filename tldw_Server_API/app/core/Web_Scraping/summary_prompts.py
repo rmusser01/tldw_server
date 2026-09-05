@@ -1,4 +1,9 @@
-"""Request-bound overrides for synchronous web article summarization."""
+"""Resolve request-bound instructions for synchronous web article summarization.
+
+Read saved prompts from caller-supplied owner storage and close the lookup
+connection on its worker, including failed reads. Engine defaults stay local to
+the scraping consumers rather than becoming request overrides.
+"""
 
 from __future__ import annotations
 
@@ -20,6 +25,21 @@ async def resolve_web_summary_overrides(
 
     Only the synchronous HTTP caller supplies owner-bound storage. No lookup is
     needed for disabled summarization or a complete pair of explicit parts.
+
+    Args:
+        payload: Request carrying summarize_checkbox, system_prompt, and
+            custom_prompt. None means an absent part; an empty string is explicit.
+        get_prompts_db: Async factory bound to the authenticated request owner.
+            Its database is read and its worker connection closed in one worker.
+
+    Returns:
+        None when summarization is disabled; otherwise an immutable mapping of
+        saved and explicit system/user parts, with explicit parts taking priority.
+        Missing keys leave the corresponding scraping engine default untouched.
+
+    Raises:
+        ServicePromptCorruptOverride: Saved instructions fail validation.
+        Exception: Database acquisition, lookup, or cleanup errors propagate.
     """
     if not payload.summarize_checkbox:
         return None
