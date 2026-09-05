@@ -190,6 +190,23 @@ class SyncV2Store:
             guarded._connection = connection
             yield guarded
 
+    @contextmanager
+    def personal_context_bootstrap_guard(
+        self,
+        *,
+        user_id: str,
+        streams: Sequence[tuple[SyncDomain, int]],
+    ) -> Iterator[tuple[SyncV2Store, SyncDataset, dict[tuple[SyncDomain, int], int]]]:
+        """Resolve and bind bootstrap transport state in one Sync transaction."""
+
+        with self.db.personal_context_bootstrap_transaction(
+            user_id=user_id,
+            streams=streams,
+        ) as (dataset, watermarks, connection):
+            guarded = copy(self)
+            guarded._connection = connection
+            yield guarded, dataset, watermarks
+
     def commit_personal_context_authority(self) -> None:
         """Commit the authority transaction while its external source guard is held."""
 
@@ -288,6 +305,7 @@ class SyncV2Store:
             integrity_key_id=integrity_key_id,
             purge_generation=purge_generation,
             link_state=link_state,
+            connection=self._connection,
         )
 
     def personal_context_authority_dataset_for_user(

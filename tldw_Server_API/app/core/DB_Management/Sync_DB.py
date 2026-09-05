@@ -2631,44 +2631,60 @@ class SyncDatabase:
                 raise SyncInvalidDomainError(
                     "Personal Context transport stream is not enrolled"
                 )
-            domains = sorted({domain for domain, _version in streams})
-            versions = sorted({version for _domain, version in streams})
-            domain_placeholders = ", ".join("?" for _ in domains)
-            version_placeholders = ", ".join("?" for _ in versions)
-            result = self.execute(
-                f"""
-                SELECT domain,
-                       adapter_version,
-                       MAX(server_sequence) AS watermark,
-                       SUM(
-                           CASE
-                               WHEN apply_status IN ('applied', 'superseded') THEN 0
-                               ELSE 1
-                           END
-                       ) AS projection_debt
-                  FROM sync_envelopes
-                 WHERE dataset_id = ?
-                   AND status = 'accepted'
-                   AND domain IN ({domain_placeholders})
-                   AND adapter_version IN ({version_placeholders})
-                 GROUP BY domain, adapter_version
-                """,  # nosec B608 - placeholders are generated from bounded lists.
-                (dataset_id, *domains, *versions),
+            yield self._personal_context_transport_watermarks_in_transaction(
+                dataset_id=dataset_id,
+                streams=streams,
                 connection=conn,
             )
-            watermarks = dict.fromkeys(expected_streams, 0)
-            for envelope_row in result.rows:
-                stream = (
-                    str(envelope_row["domain"]),
-                    int(envelope_row["adapter_version"]),
-                )
-                if stream in expected_streams:
-                    if int(envelope_row["projection_debt"] or 0) != 0:
-                        raise SyncStoreError(
-                            "personal_context_projection_incomplete"
-                        )
-                    watermarks[stream] = int(envelope_row["watermark"] or 0)
-            yield watermarks
+
+    def _personal_context_transport_watermarks_in_transaction(
+        self,
+        *,
+        dataset_id: str,
+        streams: Sequence[tuple[SyncDomain, int]],
+        connection: Any,
+    ) -> dict[tuple[SyncDomain, int], int]:
+        """Read bounded transport watermarks on the caller-owned transaction."""
+
+        expected_streams = set(streams)
+        if not expected_streams:
+            raise SyncStoreError("personal_context_transport_streams_unavailable")
+        domains = sorted({domain for domain, _version in streams})
+        versions = sorted({version for _domain, version in streams})
+        domain_placeholders = ", ".join("?" for _ in domains)
+        version_placeholders = ", ".join("?" for _ in versions)
+        result = self.execute(
+            f"""
+            SELECT domain,
+                   adapter_version,
+                   MAX(server_sequence) AS watermark,
+                   SUM(
+                       CASE
+                           WHEN apply_status IN ('applied', 'superseded') THEN 0
+                           ELSE 1
+                       END
+                   ) AS projection_debt
+              FROM sync_envelopes
+             WHERE dataset_id = ?
+               AND status = 'accepted'
+               AND domain IN ({domain_placeholders})
+               AND adapter_version IN ({version_placeholders})
+             GROUP BY domain, adapter_version
+            """,  # nosec B608 - placeholders are generated from bounded lists.
+            (dataset_id, *domains, *versions),
+            connection=connection,
+        )
+        watermarks = dict.fromkeys(expected_streams, 0)
+        for envelope_row in result.rows:
+            stream = (
+                str(envelope_row["domain"]),
+                int(envelope_row["adapter_version"]),
+            )
+            if stream in expected_streams:
+                if int(envelope_row["projection_debt"] or 0) != 0:
+                    raise SyncStoreError("personal_context_projection_incomplete")
+                watermarks[stream] = int(envelope_row["watermark"] or 0)
+        return watermarks
 
     def _lock_materialization_dataset(
         self,
@@ -3962,6 +3978,213 @@ class SyncDatabase:
         )
         return bool(result.rows)
 
+    def _lock_personal_context_owner_rows(
+        self,
+        *,
+        user_id: str,
+        connection: Any,
+    ) -> list[dict[str, Any]]:
+        """Serialize all Personal Context binding choices for one owner."""
+
+        if self.backend_type == BackendType.POSTGRESQL:
+            self.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(?, 0)) AS owner_locked",
+                (f"sync-personal-context:{user_id}",),
+                connection=connection,
+            )
+        lock_suffix = (
+            " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        )
+        return self.execute(
+            """SELECT * FROM sync_datasets
+                WHERE owner_user_id = ?
+                ORDER BY dataset_id"""
+            + lock_suffix,  # nosec B608 - backend-controlled row lock suffix.
+            (user_id,),
+            connection=connection,
+        ).rows
+
+    @staticmethod
+    def _personal_context_binding_from_row(
+        row: Mapping[str, Any],
+    ) -> dict[str, object] | None:
+        """Validate one active row's opaque authority binding."""
+
+        metadata = decode_json(row.get("metadata_json"), default=None)
+        if not isinstance(metadata, dict):
+            raise SyncStoreError("personal_context_authority_mismatch")
+        state = metadata.get("personal_context")
+        if state is None:
+            return None
+        if not isinstance(state, dict) or row.get("scope_type") != "personal":
+            raise SyncStoreError("personal_context_authority_mismatch")
+        required = ("profile_id", "authority_id", "integrity_key_id", "link_state")
+        generation = state.get("purge_generation")
+        if (
+            any(
+                not isinstance(state.get(name), str) or not state[name]
+                for name in required
+            )
+            or type(generation) is not int
+            or generation < 0
+            or state.get("link_state") not in {"bootstrap_pending", "complete"}
+        ):
+            raise SyncStoreError("personal_context_authority_mismatch")
+        return dict(state)
+
+    def _create_default_personal_dataset_in_transaction(
+        self,
+        *,
+        user_id: str,
+        connection: Any,
+    ) -> dict[str, Any]:
+        """Create the deterministic Chatbook default on the caller's transaction."""
+
+        dataset_id = f"ds_personal_{str(user_id).replace('/', '_').replace(':', '_')}"
+        existing = self._get_dataset_row(dataset_id, connection=connection)
+        if existing is not None:
+            if existing.get("owner_user_id") != user_id:
+                raise SyncStoreError("personal_context_authority_mismatch")
+            return existing
+        dataset = SyncDatasetCreate(
+            dataset_id=dataset_id,
+            owner_user_id=user_id,
+            scope_type="personal",
+            encryption_policy=DEFAULT_M1_ENCRYPTION_POLICY,
+            domains=list(M1_SYNC_DOMAINS),
+            metadata={"default_personal": True, "client_family": "chatbook"},
+        )
+        self._validate_dataset_contract(dataset)
+        now = utcnow_iso()
+        self.execute(
+            """INSERT INTO sync_datasets (
+                   dataset_id, owner_user_id, workspace_id, scope_type,
+                   encryption_policy, domain_set_json, metadata_json,
+                   created_at, updated_at, archived_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                dataset.dataset_id,
+                dataset.owner_user_id,
+                dataset.workspace_id,
+                dataset.scope_type,
+                dataset.encryption_policy,
+                encode_json(dataset.domains, default=[]),
+                encode_json(dataset.metadata, default={}),
+                now,
+                now,
+                dataset.archived_at,
+            ),
+            connection=connection,
+        )
+        for domain in dataset.domains:
+            self._ensure_domain_state(
+                dataset_id=dataset.dataset_id,
+                domain=domain,
+                adapter_version=1,
+                server_sequence=0,
+                connection=connection,
+            )
+        row = self._get_dataset_row(dataset.dataset_id, connection=connection)
+        if row is None:
+            raise SyncStoreError("personal_context_authority_mismatch")
+        return row
+
+    def _enroll_personal_context_domains_in_transaction(
+        self,
+        *,
+        row: dict[str, Any],
+        user_id: str,
+        connection: Any,
+    ) -> dict[str, Any]:
+        """Enroll transport domains after the entire target set is validated."""
+
+        raw_domains = decode_json(row.get("domain_set_json"), default=None)
+        if not isinstance(raw_domains, list):
+            raise SyncStoreError("personal_context_authority_mismatch")
+        domains = list(dict.fromkeys([*raw_domains, *PERSONAL_CONTEXT_SYNC_DOMAINS]))
+        dataset_id = str(row["dataset_id"])
+        if domains != raw_domains:
+            self.execute(
+                """UPDATE sync_datasets
+                      SET domain_set_json = ?, updated_at = ?
+                    WHERE dataset_id = ? AND owner_user_id = ?""",
+                (encode_json(domains, default=[]), utcnow_iso(), dataset_id, user_id),
+                connection=connection,
+            )
+        for domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+            self._ensure_domain_state(
+                dataset_id=dataset_id,
+                domain=domain,
+                adapter_version=1,
+                server_sequence=0,
+                connection=connection,
+            )
+        updated = self._get_dataset_row(
+            dataset_id,
+            owner_user_id=user_id,
+            connection=connection,
+        )
+        if updated is None:
+            raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
+        return updated
+
+    @contextmanager
+    def personal_context_bootstrap_transaction(
+        self,
+        *,
+        user_id: str,
+        streams: Sequence[tuple[SyncDomain, int]],
+    ) -> Iterator[
+        tuple[SyncDataset, dict[tuple[SyncDomain, int], int], Any]
+    ]:
+        """Keep target choice, transport state, watermark, and binding atomic."""
+
+        if not user_id or not streams:
+            raise SyncStoreError("personal_context_transport_streams_unavailable")
+        with self.backend.transaction() as connection:
+            owner_rows = self._lock_personal_context_owner_rows(
+                user_id=user_id,
+                connection=connection,
+            )
+            active_rows = [row for row in owner_rows if row.get("archived_at") is None]
+            bound_rows: list[dict[str, Any]] = []
+            default_rows: list[dict[str, Any]] = []
+            for row in active_rows:
+                binding = self._personal_context_binding_from_row(row)
+                if binding is not None:
+                    bound_rows.append(row)
+                metadata = decode_json(row.get("metadata_json"), default=None)
+                if (
+                    row.get("scope_type") == "personal"
+                    and isinstance(metadata, dict)
+                    and metadata.get("default_personal") is True
+                    and metadata.get("client_family") == "chatbook"
+                ):
+                    default_rows.append(row)
+            if len(bound_rows) > 1:
+                raise SyncStoreError("personal_context_authority_mismatch")
+            target = (
+                bound_rows[0]
+                if bound_rows
+                else default_rows[0]
+                if default_rows
+                else self._create_default_personal_dataset_in_transaction(
+                    user_id=user_id,
+                    connection=connection,
+                )
+            )
+            target = self._enroll_personal_context_domains_in_transaction(
+                row=target,
+                user_id=user_id,
+                connection=connection,
+            )
+            watermarks = self._personal_context_transport_watermarks_in_transaction(
+                dataset_id=str(target["dataset_id"]),
+                streams=streams,
+                connection=connection,
+            )
+            yield _dataset_from_row(target), watermarks, connection
+
     def bind_personal_context_dataset(
         self,
         *,
@@ -3973,6 +4196,7 @@ class SyncDatabase:
         integrity_key_id: str,
         purge_generation: int,
         link_state: str,
+        connection: Any | None = None,
     ) -> SyncDataset:
         """Merge a canonical Personal Context binding into the locked dataset row."""
 
@@ -3984,20 +4208,11 @@ class SyncDatabase:
             or link_state not in {"bootstrap_pending", "complete"}
         ):
             raise SyncStoreError("personal_context_authority_mismatch")
-        with self.backend.transaction() as connection:
-            lock_suffix = (
-                " FOR UPDATE"
-                if self.backend_type == BackendType.POSTGRESQL
-                else ""
+        with self.backend.transaction(connection) as transaction:
+            owner_rows = self._lock_personal_context_owner_rows(
+                user_id=user_id,
+                connection=transaction,
             )
-            owner_rows = self.execute(
-                """SELECT * FROM sync_datasets
-                    WHERE owner_user_id = ?
-                    ORDER BY dataset_id"""
-                + lock_suffix,  # nosec B608 - backend-controlled row lock suffix.
-                (user_id,),
-                connection=connection,
-            ).rows
             row = next(
                 (candidate for candidate in owner_rows if candidate.get("dataset_id") == dataset_id),
                 None,
@@ -4062,7 +4277,7 @@ class SyncDatabase:
                     dataset_id,
                     user_id,
                 ),
-                connection=connection,
+                connection=transaction,
             )
             for domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
                 self._ensure_domain_state(
@@ -4070,16 +4285,16 @@ class SyncDatabase:
                     domain=domain,
                     adapter_version=1,
                     server_sequence=0,
-                    connection=connection,
+                    connection=transaction,
                 )
             updated = self._get_dataset_row(
                 dataset_id,
                 owner_user_id=user_id,
-                connection=connection,
+                connection=transaction,
             )
             if updated is None:
                 raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
-        return _dataset_from_row(updated)
+            return _dataset_from_row(updated)
 
     def personal_context_authority_dataset(
         self,
@@ -4097,26 +4312,9 @@ class SyncDatabase:
         ).rows
         bound: list[tuple[dict[str, Any], dict[str, object]]] = []
         for row in rows:
-            metadata = decode_json(row.get("metadata_json"), default=None)
-            if not isinstance(metadata, dict):
-                raise SyncStoreError("personal_context_authority_mismatch")
-            state = metadata.get("personal_context")
+            state = self._personal_context_binding_from_row(row)
             if state is None:
                 continue
-            if not isinstance(state, dict):
-                raise SyncStoreError("personal_context_authority_mismatch")
-            required = ("profile_id", "authority_id", "integrity_key_id", "link_state")
-            generation = state.get("purge_generation")
-            if (
-                any(
-                    not isinstance(state.get(name), str) or not state[name]
-                    for name in required
-                )
-                or type(generation) is not int
-                or generation < 0
-                or state.get("link_state") not in {"bootstrap_pending", "complete"}
-            ):
-                raise SyncStoreError("personal_context_authority_mismatch")
             bound.append((row, state))
         if len(bound) > 1:
             raise SyncStoreError("personal_context_authority_mismatch")

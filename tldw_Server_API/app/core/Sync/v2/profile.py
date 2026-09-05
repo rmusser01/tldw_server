@@ -494,38 +494,15 @@ class SyncV2ProfileManager:
             raise PersonalContextBootstrapError(
                 "personal_context_key_custody_unavailable"
             ) from exc
-        dataset = self._default_personal_dataset(user_id)
-        if dataset is None:
-            dataset = self.store.get_or_create_default_personal_dataset(user_id)
-        try:
-            authority_dataset = self.store.personal_context_authority_dataset_for_user(
-                user_id
-            )
-        except SyncStoreError as exc:
-            raise PersonalContextBootstrapError(
-                "personal_context_authority_mismatch"
-            ) from exc
-        if (
-            authority_dataset is not None
-            and authority_dataset.dataset_id != dataset.dataset_id
-        ):
-            raise PersonalContextBootstrapError(
-                "personal_context_authority_mismatch"
-            )
-        dataset = self.store.ensure_personal_context_transport_domains(
-            dataset_id=dataset.dataset_id,
-            user_id=user_id,
-        )
         streams = self.service._pull_adapter_streams(
             device,
             list(PERSONAL_CONTEXT_SYNC_DOMAINS),
         )
         try:
-            with self.store.personal_context_transport_snapshot(
-                dataset.dataset_id,
-                owner_user_id=user_id,
+            with self.store.personal_context_bootstrap_guard(
+                user_id=user_id,
                 streams=streams,
-            ) as candidate_watermarks:
+            ) as (bootstrap_store, dataset, candidate_watermarks):
                 snapshot = canonical_service.plan_sync_bootstrap()
                 manifest = snapshot.manifest
                 integrity_key_id = snapshot.integrity_key_id
@@ -534,11 +511,40 @@ class SyncV2ProfileManager:
                 records = tuple(snapshot.records)
                 proposals = tuple(snapshot.proposals)
                 cursor = snapshot.cursor
+                purge_generation = int(manifest.purge_generation)
+                if (
+                    expected_purge_generation is not None
+                    and expected_purge_generation != purge_generation
+                ):
+                    raise PersonalContextBootstrapError(
+                        "personal_context_purge_generation_stale",
+                        attention={
+                            "kind": "purge_generation_mismatch",
+                            "expected_purge_generation": expected_purge_generation,
+                            "current_purge_generation": purge_generation,
+                        },
+                    )
+                dataset = self._bind_personal_context_dataset(
+                    user_id=user_id,
+                    manifest=manifest,
+                    authority_id=normalized_authority_id,
+                    integrity_key_id=integrity_key_id,
+                    purge_generation=purge_generation,
+                    dataset=dataset,
+                    store=bootstrap_store,
+                )
+        except PersonalContextBootstrapError:
+            raise
         except SyncStoreError as exc:
             if str(exc) == "personal_context_projection_incomplete":
                 raise PersonalContextBootstrapError(
                     "personal_context_projection_incomplete"
                 ) from exc
+            if str(exc) in {
+                "personal_context_authority_mismatch",
+                "personal_context_link_binding_stale",
+            }:
+                raise PersonalContextBootstrapError(str(exc)) from exc
             raise PersonalContextBootstrapError(
                 "personal_context_snapshot_unavailable"
             ) from exc
@@ -546,27 +552,6 @@ class SyncV2ProfileManager:
             raise PersonalContextBootstrapError(
                 "personal_context_snapshot_unavailable"
             ) from exc
-        purge_generation = int(manifest.purge_generation)
-        if (
-            expected_purge_generation is not None
-            and expected_purge_generation != purge_generation
-        ):
-            raise PersonalContextBootstrapError(
-                "personal_context_purge_generation_stale",
-                attention={
-                    "kind": "purge_generation_mismatch",
-                    "expected_purge_generation": expected_purge_generation,
-                    "current_purge_generation": purge_generation,
-                },
-            )
-        dataset = self._bind_personal_context_dataset(
-            user_id=user_id,
-            manifest=manifest,
-            authority_id=normalized_authority_id,
-            integrity_key_id=integrity_key_id,
-            purge_generation=purge_generation,
-            dataset=dataset,
-        )
         key_record = self._device_integrity_key_record(
             user_id=user_id,
             dataset=dataset,
@@ -700,6 +685,7 @@ class SyncV2ProfileManager:
         integrity_key_id: str,
         purge_generation: int,
         dataset: SyncDataset | None = None,
+        store: SyncV2Store | None = None,
     ) -> SyncDataset:
         """Persist only opaque canonical binding state in the Sync dataset."""
 
@@ -713,8 +699,9 @@ class SyncV2ProfileManager:
             or existing_state.get("authority_id") != authority_id
         ):
             raise PersonalContextBootstrapError("personal_context_authority_mismatch")
+        selected_store = store or self.store
         try:
-            return self.store.bind_personal_context_dataset(
+            return selected_store.bind_personal_context_dataset(
                 dataset_id=dataset.dataset_id,
                 user_id=user_id,
                 expected_binding=existing_state,
