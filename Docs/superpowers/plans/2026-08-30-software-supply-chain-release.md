@@ -1447,6 +1447,22 @@ pytest assertions are excluded from that test-file scan. No scanner/admission
 policy or vulnerability exception changed. Real-backend journey investigation
 continues separately; merge remains blocked on exact-head review and admission.
 
+Journey checkpoint: both real Watchlist tests pass after allowing its tracked
+local feed in the isolated critical CI job. The existing localhost suffix
+allowlist and default port checks remain active; private-address blocking is
+disabled only for that fixture job, not production. Six policy regressions clear
+pytest's port bypass and verify fixture access plus rejected unrelated hosts,
+literal private/link-local addresses, and a non-default port. This is not an
+exact-host or resolved-IP restriction. Pinning the Character Chat model removes
+nondeterministic provider selection, but the journey still fails: complete-v2
+normalizes the intended custom provider/model, then raises ChatBadRequestError
+before sending a request to the mock. Direct mock, adapter, credential, and
+perform_chat_api_call probes succeed. Stop further retries at this checkpoint;
+the next diagnostic boundary is complete-v2 request/payload validation. No
+backend implementation, assertions, or timeouts changed. Independent review
+found no material risk in the isolated fixture setup after its wording was
+corrected. Bandit reports only the unchanged test-file `--cov` false positive.
+
 Wait for all required checks and reviewer comments. Resolve every actionable thread with evidence, rerun affected tests, rebase again if `dev` moved, and merge only after:
 
 - all required checks pass;

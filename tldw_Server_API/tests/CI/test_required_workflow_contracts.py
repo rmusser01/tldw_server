@@ -416,10 +416,43 @@ def test_frontend_critical_direct_uvicorn_uses_e2e_isolation_without_test_mode()
     assert env["CUSTOM_OPENAI_API_IP"] == env["OPENAI_API_BASE_URL"]
     assert env["CUSTOM_OPENAI_API_KEY"] == env["OPENAI_API_KEY"]
     assert env["CUSTOM_OPENAI_API_MODEL"] == "local-uat-chat"
+    assert env["TLDW_E2E_CHARACTER_CALLABLE_MODEL"] == (
+        "tldw:custom-openai-api:local-uat-chat"
+    )
+    assert env["WORKFLOWS_EGRESS_ALLOWLIST"] == "localhost"
+    assert env["WORKFLOWS_EGRESS_BLOCK_PRIVATE"] == "false"
+    assert "WORKFLOWS_EGRESS_ALLOWED_PORTS" not in env
     assert env["REDIS_URL"] == "redis://127.0.0.1:6379/0"
     assert env["TLDW_SERVER_URL"] == "http://127.0.0.1:8000"
     assert env["TLDW_API_KEY"] == env["SINGLE_USER_API_KEY"]
     assert env["NEXT_PUBLIC_API_URL"] == env["TLDW_SERVER_URL"]
+
+
+@pytest.mark.parametrize(("url", "allowed"), [
+    ("http://localhost:8080/e2e/feed.xml", True),
+    ("http://localhost:5000/", False),
+    ("http://127.0.0.1:8080/", False),
+    ("http://10.0.0.1:8080/", False),
+    ("http://169.254.169.254/", False),
+    ("http://example.com/", False),
+])
+def test_frontend_fixture_egress_retains_host_and_port_checks(
+    monkeypatch: pytest.MonkeyPatch, url: str, allowed: bool,
+) -> None:
+    """Check actual CI policy without pytest's localhost-port bypass or DNS calls."""
+    import os
+
+    from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
+
+    for key in tuple(os.environ):
+        if "EGRESS" in key or key in {"TESTING", "PYTEST_CURRENT_TEST"}:
+            monkeypatch.delenv(key)
+    env = _load(".github/workflows/frontend-e2e-tiers.yml")["jobs"]["critical"]["env"]
+    for key, value in env.items():
+        if "EGRESS" in key:
+            monkeypatch.setenv(key, str(value))
+    result = evaluate_url_policy(url, resolved_ips_override=["127.0.0.1"])
+    assert result.allowed is allowed
 
 
 def test_frontend_ux_gates_skip_ffmpeg_but_keep_portaudio() -> None:
