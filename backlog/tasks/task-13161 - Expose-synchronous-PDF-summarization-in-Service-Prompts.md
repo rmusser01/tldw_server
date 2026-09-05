@@ -1,10 +1,10 @@
 ---
 id: TASK-13161
 title: Expose synchronous PDF summarization in Service Prompts
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-05 04:03'
-updated_date: '2026-09-05 04:39'
+updated_date: '2026-09-05 04:48'
 labels: []
 dependencies: []
 references:
@@ -47,6 +47,10 @@ PR #2880 review follow-up: Qodo reported canonical api_provider discarded, effec
 Qodo fixes implemented: canonical api_provider wins while legacy api_name remains supported; resolve_service_prompt_default centralizes effective server defaults for PDF and documents, used by normal resolution and reset without a post-delete database reread. Request adapters now consume resolved parts without selecting defaults. Four regression cases failed before implementation; combined PDF/document/registry/API suite now 108 passed, 9 warnings. Ruff lint/format passes on seven changed Python files; Bandit zero findings/errors on five production files. Independent review found no actionable defects. Human sentence recorded verbatim in PR; implementation rationale remains pending. OpenAPI artifact regeneration approval remains pending; do not silently bypass that CI gate.
 
 Broader media/form/provider/permissions regressions also passed: 72 passed, 8 warnings. Total non-overlapping backend verification for review fixes: 180 passed. Final touched-scope compileall and git diff --check passed. Ready to push code-review fixes; OpenAPI generation approval and human rationale remain pending.
+
+Human clarified the implementation rationale: this continues the existing series of PRs incrementally making each prompt user editable. This establishes ownership of the incremental existing-system approach; no further rationale request is needed. Proceed with routine OpenAPI fingerprint/type regeneration under the existing instruction to address all PR issues. Qodo marked both bugs resolved; architecture thread resolved following core-default extraction, evidence-based reply and independent review. License status briefly failed during reevaluation, then passed without changes.
+
+Official OpenAPI exporter regenerated fingerprint c7c4460fe75e00483544cf5a0bc5aba6a57dff0aa3cb164fbd322c20704622a4, exactly matching CI. Frontend types generated successfully using installed openapi-typescript 7.13.0. Fresh exporter --check passed. Removing only PDF api_name/api_provider schema properties in memory reproduces previous ffad0273dc45 fingerprint, proving no unrelated contract drift. Full schema/types remain gitignored per repo tooling; only fingerprint is tracked. Temporary dependency symlink removed. Implementation and review fixes complete; required CI and final merge monitored by pr-2880-review-and-merge. Human what/why rationale recorded and accepted from the existing incremental prompt-editability workstream explanation.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

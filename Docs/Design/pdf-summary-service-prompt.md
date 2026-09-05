@@ -66,5 +66,17 @@ typechecking and live-provider/browser end-to-end tests were not run.
 Qodo follow-up: four failing regressions reproduced canonical-provider omission
 and mismatched Settings defaults. After fixes, the combined PDF/document and
 Service Prompts registry/API suites pass all 108 tests. Independent review of
-the fixes found no actionable issues. OpenAPI artifact drift identified by CI
-is tracked in TASK-13161 and remains an integration gate until regenerated.
+the fixes found no actionable issues. The OpenAPI fingerprint and local frontend
+types were regenerated with the official tooling; a fresh drift check passes.
+Removing only the two new PDF provider properties reproduces the original
+fingerprint, confirming there is no unrelated schema drift.
+
+Rebased onto `dev` commit `3bc8c6a98c` after PR #2868 merged. Only the generated
+OpenAPI fingerprint conflicted; application code was unchanged by the rebase.
+Regeneration preserves the new Sync contract (2068 paths, 3133 schemas), and
+removing only the two PDF provider properties reproduces the new `dev`
+fingerprint. Fresh verification: 108 focused backend tests and the OpenAPI
+drift check pass; frontend API types regenerated successfully. The new base
+also contains an unrelated task with the same numeric ID; this work's record
+is specifically `task-13161 - Expose-synchronous-PDF-summarization-in-Service-Prompts.md`.
+Do not edit the unrelated Personal Context task through ambiguous ID lookup.
