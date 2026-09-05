@@ -221,6 +221,50 @@ def test_invalid_purge_envelope_is_rejected_without_review(linked):
     )
 
 
+def test_signed_invalid_purge_generation_rejected_without_candidate_or_mutation(linked):
+    from tldw_profile_core.canonical import canonical_json_bytes
+
+    canonical, _sync, dataset_id, _exchange, record = linked
+    before = canonical.get_manifest()
+    key_id, key = canonical.sync_integrity_key(record.profile_id)
+    payload = {"schema_version": 1, "profile_id": record.profile_id, "purge_generation": 2}
+    encoded = canonical_json_bytes(payload)
+    envelope = SyncEnvelopeCreate(
+        dataset_id=dataset_id,
+        device_id=_DEVICE_ID,
+        client_envelope_id="invalid-generation-purge",
+        domain="personal_context.purge",
+        operation="tombstone",
+        object_id=record.profile_id,
+        parent_id=None,
+        entity_version=2,
+        payload=payload,
+        payload_size_bytes=len(encoded),
+        payload_hash="hmac-sha256-v1:" + hmac.new(key, encoded, hashlib.sha256).hexdigest(),
+        routing_metadata={"integrity_key_id": key_id, "profile_id": record.profile_id, "purge_generation": 0},
+    )
+    with canonical._repository.database.transaction() as connection:
+        publications = connection.execute("SELECT COUNT(*) FROM personal_context_publication_batches").fetchone()[0]
+    result = _push(linked, envelope)
+    assert not result.accepted and not result.conflicts and len(result.rejected) == 1
+    rejection = result.rejected[0]
+    assert rejection.error_code == "personal_context_purge_generation_invalid"
+    assert not rejection.retryable
+    assert record.profile_id not in rejection.message
+    assert canonical.get_manifest() == before
+    with canonical._repository.database.transaction() as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM personal_context_object_heads WHERE object_type = 'sync_conflict'"
+            ).fetchone()[0]
+            == 0
+        )
+        assert (
+            connection.execute("SELECT COUNT(*) FROM personal_context_publication_batches").fetchone()[0]
+            == publications
+        )
+
+
 def test_conflict_canaries_absent_from_sync_storage_and_diagnostics(linked):
     from pathlib import Path
 

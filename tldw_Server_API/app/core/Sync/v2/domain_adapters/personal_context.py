@@ -126,6 +126,11 @@ class PersonalContextDomainAdapter:
 
         try:
             value = _parse_payload(self.domain, payload)
+            if (
+                self.domain == "personal_context.purge"
+                and value["purge_generation"] != dataset_state["purge_generation"] + 1
+            ):
+                return self._reject(envelope, "personal_context_purge_generation_invalid")
             _validate_envelope_identity(
                 envelope,
                 value,
@@ -388,8 +393,6 @@ def _validate_envelope_identity(
             value["profile_id"],
         )
         entity_version = value["purge_generation"]
-        if value["purge_generation"] != purge_generation + 1:
-            raise PersonalContextSyncIdentityConflict
     if (
         object_id != envelope.object_id
         or parent_id != envelope.parent_id
