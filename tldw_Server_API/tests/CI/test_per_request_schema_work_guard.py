@@ -21,19 +21,25 @@ The invariant: after the first request has verified the schema,
 from __future__ import annotations
 
 import pytest
+from fastapi.testclient import TestClient
 
 WARMUP_REQUESTS = 3
 MEDIA_LISTING = "/api/v1/media/"
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("prewarmed", [False, True], ids=["cold", "prewarmed"])
 def test_warm_media_listing_does_not_reverify_schema(
-    client_user_only, monkeypatch: pytest.MonkeyPatch
+    client_user_only: TestClient, monkeypatch: pytest.MonkeyPatch, prewarmed: bool
 ) -> None:
     """A warm request must not re-run the post-core schema structures."""
     from tldw_Server_API.app.core.DB_Management.media_db.schema.backends import (
         sqlite_helpers,
     )
+
+    if prewarmed:
+        # Reproduce a prior test/request populating the process-wide schema memo.
+        assert client_user_only.get(MEDIA_LISTING).status_code == 200
 
     calls: list[str] = []
     original = sqlite_helpers.ensure_sqlite_post_core_structures
@@ -45,6 +51,9 @@ def test_warm_media_listing_does_not_reverify_schema(
     monkeypatch.setattr(
         sqlite_helpers, "ensure_sqlite_post_core_structures", _spy
     )
+    # Startup or earlier requests may have verified this database before the
+    # spy was installed. Start measurement cold; retain caching thereafter.
+    sqlite_helpers.reset_schema_verification_cache()
 
     for _ in range(WARMUP_REQUESTS):
         assert client_user_only.get(MEDIA_LISTING).status_code == 200
