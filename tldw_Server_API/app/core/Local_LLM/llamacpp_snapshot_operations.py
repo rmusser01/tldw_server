@@ -96,6 +96,7 @@ class SnapshotOperations:
         self.quarantined: dict[str, str] = {}
         self.receipts: dict[str, OperationReceipt] = {}
         self.locks: dict[str, asyncio.Lock] = {}
+        self._admission_lock = asyncio.Lock()
         self.semaphore = asyncio.Semaphore(max(1, concurrency))
         self.accepting = True
         self.deadline = 600.0
@@ -271,7 +272,9 @@ class SnapshotOperations:
         snapshot_id: str | None = None,
     ) -> OperationReceipt:
         profile_id = profile.profile_id
-        async with self.locks.setdefault(profile_id, asyncio.Lock()):
+        async with self._admission_lock, self.locks.setdefault(profile_id, asyncio.Lock()):
+            if not self.accepting:
+                raise SnapshotOperationError("server_shutting_down", 503)
             operation_id = self.validate_token(profile_id, request.request_id)
             digest = canonical_sha256({"request": request.model_dump(), "kind": kind, "snapshot_id": snapshot_id})
             await self.recover(profile_id)
@@ -339,7 +342,11 @@ class SnapshotOperations:
                 raise SnapshotOperationError("invalid_slot_response", 503)
             slot = item.get("id")
             busy = item.get("is_processing")
-            tokens = item.get("n_past")
+            # Source contract: llama.cpp 4d9176092d00586775af140581bb0b558ddc4389,
+            # server-context.cpp server_slot::to_json. No task history means no count.
+            tokens = item.get("n_prompt_tokens")
+            if "n_prompt_tokens" not in item and "id_task" not in item and busy is False:
+                tokens = 0
             if type(slot) is not int or slot < 0 or type(busy) is not bool or type(tokens) is not int or tokens < 0:
                 raise SnapshotOperationError("invalid_slot_response", 503)
             result.append({"slot_id": slot, "busy": busy, "token_count": tokens})
@@ -444,13 +451,15 @@ class SnapshotOperations:
                     except Exception:  # noqa: BLE001 - pruning cannot invalidate a committed save.
                         warning = "retention_partial_failure"
                 self._check_owner(runner, generation)
-                await self._persist(
+                receipt = await self._persist(
                     receipt, state="complete", snapshot_id=source.snapshot_id, token_count=tokens, warning_code=warning
                 )
+                await disk_call(self.store.remove_working_file, profile.profile_id, generation, staged.name)
         except BaseException as exc:  # noqa: BLE001 - cancellation and all faults must retain dispatch evidence.
-            if dispatched:
+            completed = receipt.state == "complete"
+            if dispatched and not completed:
                 self.quarantined[profile.profile_id] = generation
-            state = "outcome_unknown" if dispatched else "failed"
+            state = "complete" if completed else "outcome_unknown" if dispatched else "failed"
             code = (
                 exc.code
                 if isinstance(exc, SnapshotOperationError)
@@ -459,12 +468,17 @@ class SnapshotOperations:
                 else "operation_failed"
             )
             terminal = receipt.model_copy(update={"state": state, "error_code": code, "dispatched": dispatched})
+            if completed:
+                # Cleanup is after durable completion. Its failure cannot turn a
+                # verified save/restore into an uncertain upstream mutation.
+                terminal = receipt.model_copy(update={"warning_code": "working_cleanup_failed"})
             self.receipts[receipt.operation_id] = terminal
             try:
                 await disk_call(self.store.write_receipt, terminal)
             except Exception:  # noqa: BLE001 - preserve the prior durable marker on storage failure.
                 # Existing durable dispatch marker remains the crash-recovery authority.
-                self.quarantined[profile.profile_id] = generation
+                if not completed:
+                    self.quarantined[profile.profile_id] = generation
         finally:
             self._interrupting.discard(receipt.operation_id)
             self.active.pop(profile.profile_id, None)
@@ -502,7 +516,10 @@ class SnapshotOperations:
     async def drain(self, timeout: float = 10.0) -> None:
         """Stop admission, drain boundedly, then cancel owned tasks without abandoning I/O."""
         self.accepting = False
-        tasks = list(self.tasks.values())
+        # Admission may be in an offloaded fingerprint/receipt write. Wait for its
+        # final registration before taking the set that must precede child shutdown.
+        async with self._admission_lock:
+            tasks = list(self.tasks.values())
         if not tasks:
             return
         _, pending = await asyncio.wait(tasks, timeout=timeout)

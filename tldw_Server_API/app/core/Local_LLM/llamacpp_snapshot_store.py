@@ -288,6 +288,17 @@ class SnapshotStore:
         finally:
             os.close(parent_fd)
 
+    def remove_working_file(self, profile_id: str, generation: str, filename: str) -> None:
+        """Remove one generated operation file after its verified completion."""
+        self._require_open()
+        self._validate_id(profile_id)
+        self._validate_id(generation)
+        if not re.fullmatch(r"(?:save|restore)-[0-9a-f]{32}\.bin", filename):
+            raise SnapshotStoreError("invalid generated working filename")
+        directory = self.root / profile_id / "working" / generation
+        self._unlink(directory / filename)
+        self._fsync_dir(directory)
+
     def _profile_paths(self, profile_id: str) -> dict[str, Path]:
         self._validate_id(profile_id)
         profile = self.root / profile_id

@@ -51,7 +51,24 @@ class Transport:
 
     async def __call__(self, **kwargs):
         if kwargs["method"] == "GET":
-            return [{"id": 0, "is_processing": False, "n_ctx": 2048, "n_past": 4, "prompt": "must never escape"}]
+            # Source-derived shape, NOT a live capture: llama.cpp commit
+            # 4d9176092d00586775af140581bb0b558ddc4389 server-context.cpp:686-719.
+            return [
+                {
+                    "id": 0,
+                    "is_processing": False,
+                    "n_ctx": 2048,
+                    "speculative": False,
+                    "id_task": 12,
+                    "n_prompt_tokens": 4,
+                    "n_prompt_tokens_processed": 4,
+                    "n_prompt_tokens_cache": 0,
+                    "params": {},
+                    "next_token": [{"has_next_token": False, "has_new_line": False, "n_remain": 0, "n_decoded": 0}],
+                    "prompt": "must never escape",
+                    "generated": "must never escape",
+                }
+            ]
         self.calls.append(kwargs)
         self.sent.set()
         if self.block:
@@ -470,3 +487,106 @@ async def test_restore_receipt_retains_audit_actor(setup):
     )
     await finish(service)
     assert store.read_receipt("p1", receipt.operation_id).actor_id == "restoring-admin"
+
+
+async def test_repeated_verified_save_restore_keeps_working_bytes_bounded(setup):
+    service, store, profile, runner, _ = setup
+    profile.snapshot_retention = 1
+    for _ in range(3):
+        _, receipt = await submit(setup)
+        await finish(service)
+        assert store.read_receipt("p1", receipt.operation_id).state == "complete"
+        source = store.list("p1")[0]
+        await service.admit(
+            profile,
+            runner,
+            SnapshotRequest(
+                slot_id=0,
+                expected_launch_generation="generation1",
+                request_id=service.issue_token("p1"),
+                replace_confirmed=True,
+            ),
+            "admin",
+            "restore",
+            source.snapshot_id,
+        )
+        await finish(service)
+        assert list(runner.snapshot_working.iterdir()) == []
+        assert len(store.list("p1")) == 1
+
+
+@pytest.mark.parametrize("tokens", [None, -1, True, "4", 1.5])
+async def test_source_derived_slot_shape_rejects_malformed_counts(setup, tokens):
+    service, _, profile, runner, transport = setup
+    original = transport.__call__
+
+    async def malformed(**kwargs):
+        payload = await original(**kwargs)
+        payload[0]["n_prompt_tokens"] = tokens
+        return payload
+
+    service.transport = malformed
+    result = await service.slots(profile, runner)
+    assert result["reason"] == "invalid_slot_response"
+
+
+async def test_source_derived_fresh_idle_slot_without_task_has_zero_tokens(setup):
+    service, _, profile, runner, _ = setup
+
+    async def fresh(**kwargs):
+        return [{"id": 0, "n_ctx": 2048, "speculative": False, "is_processing": False}]
+
+    service.transport = fresh
+    result = await service.slots(profile, runner)
+    assert result["capability"] == "ready"
+    assert result["slots"] == [{"slot_id": 0, "busy": False, "token_count": 0}]
+
+
+async def test_source_derived_busy_slot_is_reported_and_mutation_is_rejected(setup):
+    service, store, profile, runner, transport = setup
+    original = transport.__call__
+
+    async def busy(**kwargs):
+        payload = await original(**kwargs)
+        payload[0]["is_processing"] = True
+        return payload
+
+    service.transport = busy
+    slots = await service.slots(profile, runner)
+    assert slots["slots"] == [{"slot_id": 0, "busy": True, "token_count": 4}]
+    _, receipt = await submit(setup)
+    await finish(service)
+    assert store.read_receipt("p1", receipt.operation_id).error_code == "slot_busy"
+    assert transport.calls == []
+
+
+async def test_unknown_save_preserves_its_working_file(setup):
+    service, store, _, runner, transport = setup
+    original = transport.__call__
+
+    async def wrote_then_disconnected(**kwargs):
+        result = await original(**kwargs)
+        if kwargs["method"] == "POST":
+            raise ConnectionError("acknowledgement lost")
+        return result
+
+    service.transport = wrote_then_disconnected
+    _, receipt = await submit(setup)
+    await finish(service)
+    assert store.read_receipt("p1", receipt.operation_id).state == "outcome_unknown"
+    assert [path.read_bytes() for path in runner.snapshot_working.iterdir()] == [b"cache"]
+
+
+async def test_verified_cleanup_failure_keeps_success_and_reports_warning(setup, monkeypatch):
+    service, store, _, _, _ = setup
+
+    def unavailable(*args):
+        raise OSError(errno.EIO, "working cleanup unavailable")
+
+    monkeypatch.setattr(store, "remove_working_file", unavailable, raising=False)
+    _, receipt = await submit(setup)
+    await finish(service)
+    result = store.read_receipt("p1", receipt.operation_id)
+    assert result.state == "complete"
+    assert result.warning_code == "working_cleanup_failed"
+    assert service.quarantined == {}

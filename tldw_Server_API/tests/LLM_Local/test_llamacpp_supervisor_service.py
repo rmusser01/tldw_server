@@ -290,6 +290,86 @@ async def test_cancelled_snapshot_factory_keeps_created_owner_for_shutdown(tmp_p
         pass
 
 
+async def test_shutdown_waits_for_inflight_snapshot_factory_then_releases_owner(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_supervisor_service as module
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore
+
+    supervisor = LlamaCppSupervisor(
+        config=make_config(tmp_path), store=JsonLlamaCppProfileStore(tmp_path / "profiles.json")
+    )
+    entered, release = threading.Event(), threading.Event()
+    original = module.SnapshotOperations
+
+    def slow_factory(*args, **kwargs):
+        entered.set()
+        release.wait(5)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(module, "SnapshotOperations", slow_factory)
+    initializing = asyncio.create_task(supervisor._snapshot_service())
+    assert await asyncio.to_thread(entered.wait, 2)
+    shutdown = asyncio.create_task(supervisor.shutdown())
+    await asyncio.sleep(0)
+    try:
+        assert not shutdown.done()
+    finally:
+        release.set()
+        await initializing
+        await shutdown
+    with SnapshotStore(tmp_path / "llamacpp-snapshots"):
+        pass
+
+
+async def test_shutdown_drains_admission_that_registers_after_shutdown_begins(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_models import SnapshotRequest
+    from tldw_Server_API.tests.LLM_Local.test_llamacpp_snapshot_operations import Runner, Transport
+
+    config = make_config(tmp_path)
+    model = make_model(config)
+    profiles = JsonLlamaCppProfileStore(tmp_path / "profiles.json")
+    profiles.upsert(LlamaCppProfile(profile_id="p1", name="one", model_path=str(model), snapshots_enabled=True))
+    supervisor = LlamaCppSupervisor(config=config, store=profiles)
+    service = await supervisor._snapshot_service()
+    runner = Runner(model, config.executable_path)
+    runner.snapshot_working = service.store.launch_directory("p1", "generation1")
+    supervisor._runners["p1"] = runner
+    service.supported_builds = {runner.snapshot_fingerprint.executable_sha256}
+    transport = Transport(runner)
+    service.transport = transport
+    stopped_states = []
+
+    async def stop():
+        stopped_states.extend(item.state for item in service.store.list_receipts("p1"))
+        runner.snapshot_process.returncode = 0
+
+    runner.stop = stop
+    entered, release = threading.Event(), threading.Event()
+    original = service.store.write_receipt
+
+    def blocked_receipt(receipt):
+        if receipt.state == "validating":
+            entered.set()
+            release.wait(5)
+        original(receipt)
+
+    monkeypatch.setattr(service.store, "write_receipt", blocked_receipt)
+    admission = asyncio.create_task(
+        supervisor.save_snapshot(
+            "p1",
+            SnapshotRequest(slot_id=0, expected_launch_generation="generation1", request_id=service.issue_token("p1")),
+            "admin",
+        )
+    )
+    assert await asyncio.to_thread(entered.wait, 2)
+    shutdown = asyncio.create_task(supervisor.shutdown())
+    await asyncio.sleep(0)
+    release.set()
+    await admission
+    await shutdown
+    assert stopped_states == ["complete"]
+    assert service.tasks == {}
+
+
 class StopFailingRunnerFactory(FakeRunnerFactory):
     def __call__(self, config: LlamaCppConfig, profile_id: str) -> FakeRunner:
         if profile_id == "one":

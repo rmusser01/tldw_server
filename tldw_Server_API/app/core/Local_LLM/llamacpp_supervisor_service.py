@@ -357,8 +357,11 @@ class LlamaCppSupervisor:
 
     async def shutdown(self) -> None:
         self._shutting_down = True
-        if self._snapshots is not None:
-            await self._snapshots.drain()
+        # A request can be constructing the service while shutdown starts. Its
+        # owner must become visible before we drain admissions or stop children.
+        async with self._snapshot_init_lock:
+            if self._snapshots is not None:
+                await self._snapshots.drain()
         failures: list[tuple[str, BaseException]] = []
         for profile_id in list(self._runners):
             try:
