@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
+from threading import Event
 from uuid import UUID
 
 import pytest
@@ -265,3 +269,287 @@ def test_incarnation_backfill_rolls_back_all_rows_on_failure(db, monkeypatch):
         db.backfill_output_file_incarnations()
     assert len(writes) == 2 and writes[0] is writes[1] and writes[0] is not None
     assert db.backend.execute("SELECT COUNT(*) FROM outputs WHERE file_incarnation IS NULL").scalar == 2
+
+
+def prepared(db, *, kind="remove", **changes):
+    assert hasattr(db, "prepare_output_file_operation"), "journal transitions are not implemented"
+    insert_binding(db)
+    output = make_archive_output(db)
+    fields = {"output_id": output.id, "kind": kind, "lease_seconds": 120, "reserved_bytes": 512}
+    if kind == "replace":
+        fields.update(destination_path="new.md", intended={"title": "New"})
+    fields.update(changes)
+    return output, db.prepare_output_file_operation("test-volume", **fields)
+
+
+def test_prepare_captures_bounded_snapshot_without_changing_output(db):
+    output, operation = prepared(db, kind="replace")
+    assert UUID(operation["token"]).hex == operation["token"]
+    assert operation["phase"] == "prepared" and operation["fs_done"] == 0
+    assert operation["source_path"] == output.storage_path
+    assert operation["stage_path"] not in {output.storage_path, "new.md"}
+    assert json.loads(operation["intended_json"]) == {"title": "New"}
+    assert output.metadata_json not in operation["original_json"]
+    assert db.get_output_artifact(output.id) == output
+    assert db.validate_output_file_operation(operation["token"], "test-volume") == operation
+
+
+def test_prepare_create_has_no_original_row(db):
+    assert hasattr(db, "prepare_output_file_operation")
+    insert_binding(db)
+    operation = db.prepare_output_file_operation(
+        "test-volume",
+        kind="create",
+        destination_path="new.md",
+        intended={"title": "New", "format": "md"},
+        lease_seconds=120,
+        reserved_bytes=512,
+    )
+    assert operation["source_path"] is None and operation["output_id"] is None
+    assert json.loads(operation["original_json"]) == {}
+    assert db.backend.execute("SELECT COUNT(*) FROM outputs").scalar == 0
+
+
+def test_prepare_rejects_invalid_inputs_without_a_journal_row(db):
+    assert hasattr(db, "prepare_output_file_operation")
+    insert_binding(db)
+    output = make_archive_output(db)
+    for patch in (
+        {"kind": "other"},
+        {"lease_seconds": 0},
+        {"lease_seconds": True},
+        {"reserved_bytes": -1},
+        {"reserved_bytes": 0.5},
+        {"destination_path": "../outside.md"},
+        {"destination_path": ".."},
+        {"destination_path": ".reading-storage.lock"},
+        {"intended": {"body": "private body"}},
+        {"intended": {"title": "x" * 32769}},
+        {"intended": {"title": None}},
+    ):
+        fields = {
+            "kind": "replace",
+            "output_id": output.id,
+            "destination_path": "new.md",
+            "lease_seconds": 120,
+            "reserved_bytes": 512,
+        }
+        fields.update(patch)
+        with pytest.raises(ValueError, match="^output_operation_invalid$"):
+            db.prepare_output_file_operation("test-volume", **fields)
+    assert db.backend.execute("SELECT COUNT(*) FROM output_file_operations").scalar == 0
+
+
+def test_prepare_requires_bound_namespace_and_original_output_identity(db):
+    assert hasattr(db, "prepare_output_file_operation")
+    output = make_archive_output(db)
+    with pytest.raises(RuntimeError, match="^output_storage_unavailable$"):
+        db.prepare_output_file_operation("test-volume", kind="remove", output_id=output.id, lease_seconds=120)
+    insert_binding(db)
+    db.backend.execute("UPDATE outputs SET file_incarnation = NULL WHERE id = ?", (output.id,))
+    with pytest.raises(RuntimeError, match="^output_operation_conflict$"):
+        db.prepare_output_file_operation("test-volume", kind="remove", output_id=output.id, lease_seconds=120)
+    assert db.backend.execute("SELECT COUNT(*) FROM output_file_operations").scalar == 0
+
+
+def test_journal_lookups_and_mutations_are_user_and_namespace_scoped(db):
+    _, operation = prepared(db)
+    other = CollectionsDatabase.from_backend(user_id="781", backend=db.backend)
+    for adapter, namespace in ((other, "test-volume"), (db, "wrong-volume")):
+        with pytest.raises(KeyError, match="output_operation_not_found"):
+            adapter.get_output_file_operation(operation["token"], namespace)
+        assert not adapter.abort_output_file_operation(operation["token"], namespace)
+        assert not adapter.finish_output_file_operation(operation["token"], namespace)
+        assert not adapter.ack_output_file_effect(operation["token"], namespace, "dispose_history")
+    assert db.get_output_file_operation(operation["token"], "test-volume")["phase"] == "prepared"
+
+
+def test_expired_operation_cannot_validate_or_commit_but_can_abort(db, monkeypatch):
+    _, operation = prepared(db)
+    db.backend.execute("UPDATE output_file_operations SET lease_until = 1", ())
+    for action in ("validate", "commit"):
+        with pytest.raises(RuntimeError, match="^output_operation_conflict$"):
+            if action == "validate":
+                db.validate_output_file_operation(operation["token"], "test-volume")
+            else:
+                with db.commit_output_file_operation(operation["token"], "test-volume"):
+                    pytest.fail("expired operation entered commit")
+    assert db.abort_output_file_operation(operation["token"], "test-volume")
+    assert not db.abort_output_file_operation(operation["token"], "test-volume")
+
+
+def test_original_snapshot_rechecked_before_commit(db):
+    output, operation = prepared(db)
+    db.update_output_artifact_metadata(output.id, metadata_json='{"private": "changed"}')
+    with pytest.raises(RuntimeError, match="^output_operation_conflict$"):
+        with db.commit_output_file_operation(operation["token"], "test-volume"):
+            pytest.fail("stale snapshot entered commit")
+    assert db.get_output_file_operation(operation["token"], "test-volume")["phase"] == "prepared"
+
+
+def test_commit_and_output_write_share_transaction_and_rollback(db):
+    output, operation = prepared(db, kind="replace")
+    with pytest.raises(RuntimeError, match="rollback checkpoint"):
+        with db.transaction() as outer:
+            with db.commit_output_file_operation(operation["token"], "test-volume", connection=outer) as conn:
+                assert conn is outer
+                db.backend.execute("UPDATE outputs SET title = ? WHERE id = ?", ("New", output.id), connection=conn)
+            assert (
+                db.get_output_file_operation(operation["token"], "test-volume", connection=outer)["phase"]
+                == "committed"
+            )
+            raise RuntimeError("rollback checkpoint")
+    assert db.get_output_artifact(output.id) == output
+    assert db.get_output_file_operation(operation["token"], "test-volume")["phase"] == "prepared"
+
+
+def test_exception_in_commit_body_preserves_prepared_state(db):
+    _, operation = prepared(db)
+    with pytest.raises(RuntimeError, match="write failed"):
+        with db.commit_output_file_operation(operation["token"], "test-volume"):
+            raise RuntimeError("write failed")
+    assert db.get_output_file_operation(operation["token"], "test-volume")["phase"] == "prepared"
+
+
+def test_committed_phase_wins_over_abort_and_cannot_commit_twice(db):
+    output, operation = prepared(db)
+    with db.commit_output_file_operation(operation["token"], "test-volume") as conn:
+        db.backend.execute("DELETE FROM outputs WHERE id = ?", (output.id,), connection=conn)
+    assert not db.abort_output_file_operation(operation["token"], "test-volume")
+    with pytest.raises(RuntimeError, match="^output_operation_conflict$"):
+        with db.commit_output_file_operation(operation["token"], "test-volume"):
+            pytest.fail("committed work was replayed")
+    assert db.get_output_file_operation(operation["token"], "test-volume")["phase"] == "committed"
+
+
+def test_filesystem_completion_keeps_history_until_idempotent_ack(db):
+    output, operation = prepared(db)
+    with pytest.raises(RuntimeError, match="^output_operation_conflict$"):
+        db.finish_output_file_operation(operation["token"], "test-volume")
+    with db.commit_output_file_operation(operation["token"], "test-volume", dispose_history=True) as conn:
+        db.backend.execute("DELETE FROM outputs WHERE id = ?", (output.id,), connection=conn)
+    assert not db.ack_output_file_effect(operation["token"], "test-volume", "dispose_history")
+    assert db.finish_output_file_operation(operation["token"], "test-volume")
+    row = db.get_output_file_operation(operation["token"], "test-volume")
+    assert row["fs_done"] == 1 and row["reserved_bytes"] == 0 and row["effects_pending"] == 1
+    assert json.loads(row["effects_json"])[0]["incarnation"] == json.loads(operation["original_json"])["incarnation"]
+    assert not db.finish_output_file_operation(operation["token"], "test-volume")
+    assert not db.ack_output_file_effect(operation["token"], "test-volume", "unknown")
+    assert db.ack_output_file_effect(operation["token"], "test-volume", "dispose_history")
+    assert not db.ack_output_file_effect(operation["token"], "test-volume", "dispose_history")
+    with pytest.raises(KeyError):
+        db.get_output_file_operation(operation["token"], "test-volume")
+
+
+def test_abort_cleanup_retires_without_touching_output(db):
+    output, operation = prepared(db)
+    assert db.abort_output_file_operation(operation["token"], "test-volume")
+    assert db.finish_output_file_operation(operation["token"], "test-volume")
+    assert not db.finish_output_file_operation(operation["token"], "test-volume")
+    assert db.get_output_artifact(output.id) == output
+
+
+def test_remove_can_commit_a_soft_deleted_output(db):
+    insert_binding(db)
+    output = make_archive_output(db)
+    db.backend.execute("UPDATE outputs SET deleted = 1 WHERE id = ?", (output.id,))
+    operation = db.prepare_output_file_operation("test-volume", kind="remove", output_id=output.id, lease_seconds=120)
+    with db.commit_output_file_operation(operation["token"], "test-volume") as conn:
+        db.backend.execute("DELETE FROM outputs WHERE id = ?", (output.id,), connection=conn)
+    assert db.get_output_file_operation(operation["token"], "test-volume")["phase"] == "committed"
+    assert db.backend.execute("SELECT COUNT(*) FROM outputs WHERE id = ?", (output.id,)).scalar == 0
+
+
+def test_remove_rechecks_original_deletion_state(db):
+    insert_binding(db)
+    output = make_archive_output(db)
+    db.backend.execute("UPDATE outputs SET deleted = 1 WHERE id = ?", (output.id,))
+    operation = db.prepare_output_file_operation("test-volume", kind="remove", output_id=output.id, lease_seconds=120)
+    db.backend.execute("UPDATE outputs SET deleted = 0 WHERE id = ?", (output.id,))
+    with pytest.raises(RuntimeError, match="^output_operation_conflict$"):
+        db.validate_output_file_operation(operation["token"], "test-volume")
+
+
+def test_replace_cannot_target_a_soft_deleted_output(db):
+    insert_binding(db)
+    output = make_archive_output(db)
+    db.backend.execute("UPDATE outputs SET deleted = 1 WHERE id = ?", (output.id,))
+    with pytest.raises(KeyError, match="output_not_found"):
+        db.prepare_output_file_operation(
+            "test-volume", kind="replace", output_id=output.id, destination_path="new.md", lease_seconds=120
+        )
+
+
+def test_validation_rejects_binding_protocol_changed_after_prepare(db):
+    _, operation = prepared(db)
+    db.backend.execute("UPDATE output_storage_bindings SET protocol_version = 2", ())
+    with pytest.raises(RuntimeError, match="^output_storage_unavailable$"):
+        with db.commit_output_file_operation(operation["token"], "test-volume"):
+            pytest.fail("unknown protocol entered commit")
+    assert db.get_output_file_operation(operation["token"], "test-volume")["phase"] == "prepared"
+
+
+def test_lease_is_checked_after_waiting_for_revision_fence(db, monkeypatch):
+    from tldw_Server_API.app.core.DB_Management import Collections_DB as module
+
+    _, operation = prepared(db)
+    lock = db._lock_reading_revision_clock
+
+    class AfterLease(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime.fromtimestamp(operation["lease_until"], timezone.utc) + timedelta(seconds=1)
+
+    def wait_then_lock(conn):
+        lock(conn)
+        monkeypatch.setattr(module, "datetime", AfterLease)
+
+    monkeypatch.setattr(db, "_lock_reading_revision_clock", wait_then_lock)
+    with pytest.raises(RuntimeError, match="^output_operation_conflict$"):
+        with db.commit_output_file_operation(operation["token"], "test-volume"):
+            pytest.fail("lease expired during lock wait")
+
+
+@pytest.mark.parametrize("first", ["commit", "abort"])
+def test_concurrent_commit_and_abort_have_one_winner(db, first):
+    output, operation = prepared(db)
+    locked, contender_started, release = Event(), Event(), Event()
+
+    def transition(action, conn=None):
+        if action == "abort":
+            return db.abort_output_file_operation(operation["token"], "test-volume", connection=conn)
+        try:
+            with db.commit_output_file_operation(operation["token"], "test-volume", connection=conn) as active:
+                db.backend.execute("DELETE FROM outputs WHERE id = ?", (output.id,), connection=active)
+        except RuntimeError as exc:
+            assert str(exc) == "output_operation_conflict"
+            return False
+        return True
+
+    def winner():
+        with db.transaction() as conn:
+            db._lock_reading_revision_clock(conn)
+            locked.set()
+            assert release.wait(timeout=15)
+            return transition(first, conn)
+
+    def contender():
+        contender_started.set()
+        return transition("abort" if first == "commit" else "commit")
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        winning = workers.submit(winner)
+        try:
+            assert locked.wait(timeout=15)
+            losing = workers.submit(contender)
+            assert contender_started.wait(timeout=15)
+        finally:
+            release.set()
+        assert winning.result(timeout=15)
+        assert not losing.result(timeout=15)
+    assert db.get_output_file_operation(operation["token"], "test-volume")["phase"] == (
+        "committed" if first == "commit" else "aborting"
+    )
+    assert db.backend.execute("SELECT COUNT(*) FROM outputs WHERE id = ?", (output.id,)).scalar == (
+        0 if first == "commit" else 1
+    )

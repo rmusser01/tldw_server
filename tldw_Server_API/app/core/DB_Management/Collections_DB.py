@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import hashlib
 import json
 import os
 import re
@@ -43,6 +44,7 @@ from tldw_Server_API.app.core.DB_Management.content_backend import (
     load_content_db_settings,
 )
 from tldw_Server_API.app.core.exceptions import (
+    InvalidStoragePathError,
     InvalidStorageUserIdError,
     StorageUnavailableError,
 )
@@ -2849,6 +2851,307 @@ class CollectionsDatabase:
                         connection=conn,
                     )
                     count += result.rowcount
+
+    @staticmethod
+    def _output_operation_filename(value: str) -> str:
+        """Validate a confined ordinary filename without filesystem access."""
+        if not isinstance(value, str) or not 1 <= len(value) <= 255 or value != value.strip():
+            raise ValueError("output_operation_invalid")
+        try:
+            name = normalize_output_storage_filename(value, allow_absolute=False, reject_relative_with_separators=True)
+        except InvalidStoragePathError:
+            raise ValueError("output_operation_invalid") from None
+        if name.lower() in {
+            ".",
+            "..",
+            ".reading-storage.lock",
+            ".reading-storage-namespace",
+        } or name.lower().startswith(".output-stage-"):
+            raise ValueError("output_operation_invalid")
+        return name
+
+    def _output_operation_snapshot(
+        self, output_id: int, connection: Any, *, include_deleted: bool = False
+    ) -> tuple[dict[str, Any], str]:
+        """Fingerprint the complete original row without journaling its content."""
+        row = self.backend.execute(
+            "SELECT * FROM outputs WHERE user_id = ? AND id = ? AND (deleted = 0 OR ? = 1)",
+            (self.user_id, output_id, int(include_deleted)),
+            connection=connection,
+        ).first
+        if not row:
+            raise KeyError("output_not_found")
+        if (
+            not row["file_incarnation"]
+            or self.backend.execute(
+                "SELECT 1 FROM reading_output_ownership WHERE user_id = ? AND output_id = ?",
+                (self.user_id, output_id),
+                connection=connection,
+            ).first
+        ):
+            raise RuntimeError("output_operation_conflict")
+        digest = hashlib.sha256(json.dumps(dict(row), sort_keys=True, default=str).encode("utf-8")).hexdigest()
+        return {"incarnation": row["file_incarnation"], "digest": digest}, row["storage_path"]
+
+    def prepare_output_file_operation(
+        self,
+        storage_namespace_id: str,
+        *,
+        kind: str,
+        lease_seconds: int,
+        output_id: int | None = None,
+        destination_path: str | None = None,
+        intended: dict[str, Any] | None = None,
+        reserved_bytes: int = 0,
+        connection: Any | None = None,
+    ) -> dict[str, Any]:
+        """Persist an internal prepared record, without file or activation authority.
+
+        The future orchestrator must hold verified storage exclusion and perform
+        cross-writer/resource admission before using this record for file I/O.
+        No runtime caller is enabled by these journal primitives alone.
+        """
+        if (
+            kind not in {"create", "replace", "remove"}
+            or type(lease_seconds) is not int
+            or not 1 <= lease_seconds <= 2**31 - 1
+            or type(reserved_bytes) is not int
+            or not 0 <= reserved_bytes <= 2**63 - 1
+            or (kind == "create" and output_id is not None)
+            or (kind != "create" and (type(output_id) is not int or output_id <= 0))
+            or (kind == "remove" and destination_path is not None)
+        ):
+            raise ValueError("output_operation_invalid")
+        destination = None if kind == "remove" else self._output_operation_filename(destination_path)
+        intended = {} if intended is None else intended
+        if not isinstance(intended, dict) or intended.keys() - {"title", "type", "format", "retention_until"}:
+            raise ValueError("output_operation_invalid")
+        if any(
+            not isinstance(value, str) and not (key == "retention_until" and value is None)
+            for key, value in intended.items()
+        ):
+            raise ValueError("output_operation_invalid")
+        intended_json = json.dumps(intended, sort_keys=True, separators=(",", ":"))
+        if len(intended_json) > 32768 or (kind == "remove" and intended):
+            raise ValueError("output_operation_invalid")
+        token = uuid4().hex
+        stage = None if kind == "remove" else f".output-stage-{uuid4().hex}"
+        with self.transaction() if connection is None else contextlib.nullcontext(connection) as conn:
+            self._lock_reading_revision_clock(conn)
+            binding = self.backend.execute(
+                "SELECT protocol_version FROM output_storage_bindings WHERE user_id = ? AND storage_namespace_id = ?",
+                (self.user_id, storage_namespace_id),
+                connection=conn,
+            ).first
+            if not binding or binding["protocol_version"] != 1:
+                raise RuntimeError("output_storage_unavailable")
+            original, source = (
+                ({}, None)
+                if kind == "create"
+                else self._output_operation_snapshot(output_id, conn, include_deleted=kind == "remove")
+            )
+            if source is not None:
+                source = self._output_operation_filename(source)
+            if destination is not None and source is not None and destination.lower() == source.lower():
+                raise ValueError("output_operation_invalid")
+            lease_until = int(datetime.now(timezone.utc).timestamp()) + lease_seconds
+            self.backend.execute(
+                "INSERT INTO output_file_operations "
+                "(token, user_id, storage_namespace_id, output_id, kind, source_path, source_key, stage_path, stage_key, "
+                "destination_path, destination_key, original_json, intended_json, reserved_bytes, lease_until) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    token,
+                    self.user_id,
+                    storage_namespace_id,
+                    output_id,
+                    kind,
+                    source,
+                    source.lower() if source else None,
+                    stage,
+                    stage,
+                    destination,
+                    destination.lower() if destination else None,
+                    json.dumps(original, sort_keys=True),
+                    intended_json,
+                    reserved_bytes,
+                    lease_until,
+                ),
+                connection=conn,
+            )
+            return self.get_output_file_operation(token, storage_namespace_id, connection=conn)
+
+    def get_output_file_operation(
+        self, token: str, storage_namespace_id: str, *, connection: Any | None = None
+    ) -> dict[str, Any]:
+        """Read one same-user journal record; never resolve or inspect its files."""
+        row = self.backend.execute(
+            "SELECT * FROM output_file_operations WHERE token = ? AND user_id = ? AND storage_namespace_id = ?",
+            (token, self.user_id, storage_namespace_id),
+            connection=connection,
+        ).first
+        if not row:
+            raise KeyError("output_operation_not_found")
+        return dict(row)
+
+    def _validate_output_file_operation(self, token: str, storage_namespace_id: str, connection: Any) -> dict[str, Any]:
+        row = self.get_output_file_operation(token, storage_namespace_id, connection=connection)
+        binding = self.backend.execute(
+            "SELECT protocol_version FROM output_storage_bindings WHERE user_id = ? AND storage_namespace_id = ?",
+            (self.user_id, storage_namespace_id),
+            connection=connection,
+        ).first
+        if not binding or binding["protocol_version"] != 1:
+            raise RuntimeError("output_storage_unavailable")
+        if (
+            row["phase"] != "prepared"
+            or row["fs_done"]
+            or row["lease_until"] <= int(datetime.now(timezone.utc).timestamp())
+        ):
+            raise RuntimeError("output_operation_conflict")
+        if row["output_id"] is not None:
+            original, _ = self._output_operation_snapshot(
+                row["output_id"], connection, include_deleted=row["kind"] == "remove"
+            )
+            if json.dumps(original, sort_keys=True) != row["original_json"]:
+                raise RuntimeError("output_operation_conflict")
+        return row
+
+    def validate_output_file_operation(
+        self, token: str, storage_namespace_id: str, *, connection: Any | None = None
+    ) -> dict[str, Any]:
+        """Recheck prepared phase, current lease and original row after the fence."""
+        with self.transaction() if connection is None else contextlib.nullcontext(connection) as conn:
+            self._lock_reading_revision_clock(conn)
+            return self._validate_output_file_operation(token, storage_namespace_id, conn)
+
+    @contextlib.contextmanager
+    def commit_output_file_operation(
+        self,
+        token: str,
+        storage_namespace_id: str,
+        *,
+        dispose_history: bool = False,
+        connection: Any | None = None,
+    ) -> Generator[Any, None, None]:
+        """Commit the journal with caller-owned DB changes on the yielded connection.
+
+        The trusted caller must apply the recorded output mutation and same-store
+        accounting using this connection only. The body must contain no file or
+        network I/O. Publication/identity checks belong to the storage orchestrator.
+        This context is not an output mutation implementation by itself. With an
+        external connection, its owner must roll back if an exception propagates.
+        """
+        if type(dispose_history) is not bool:
+            raise ValueError("output_operation_invalid")
+        with self.transaction() if connection is None else contextlib.nullcontext(connection) as conn:
+            self._lock_reading_revision_clock(conn)
+            row = self._validate_output_file_operation(token, storage_namespace_id, conn)
+            if dispose_history and row["kind"] != "remove":
+                raise ValueError("output_operation_invalid")
+            effects = []
+            if dispose_history:
+                effects = [
+                    {
+                        "kind": "dispose_history",
+                        "incarnation": json.loads(row["original_json"])["incarnation"],
+                        "deleted_at": _utcnow_iso(),
+                        "acknowledged": False,
+                    }
+                ]
+            yield conn
+            changed = self.backend.execute(
+                "UPDATE output_file_operations SET phase = 'committed', effects_json = ?, effects_pending = ? "
+                "WHERE token = ? AND user_id = ? AND storage_namespace_id = ? AND phase = 'prepared' AND fs_done = 0",
+                (json.dumps(effects, sort_keys=True), len(effects), token, self.user_id, storage_namespace_id),
+                connection=conn,
+            )
+            if changed.rowcount != 1:
+                raise RuntimeError("output_operation_conflict")
+
+    def abort_output_file_operation(
+        self, token: str, storage_namespace_id: str, *, connection: Any | None = None
+    ) -> bool:
+        """Conditionally abort prepared work; committed always wins over abort."""
+        with self.transaction() if connection is None else contextlib.nullcontext(connection) as conn:
+            self._lock_reading_revision_clock(conn)
+            result = self.backend.execute(
+                "UPDATE output_file_operations SET phase = 'aborting' "
+                "WHERE token = ? AND user_id = ? AND storage_namespace_id = ? AND phase = 'prepared' AND fs_done = 0",
+                (token, self.user_id, storage_namespace_id),
+                connection=conn,
+            )
+            return result.rowcount == 1
+
+    def finish_output_file_operation(
+        self, token: str, storage_namespace_id: str, *, connection: Any | None = None
+    ) -> bool:
+        """Record verified file completion, retaining any undelivered effects.
+
+        Caller must hold the verified namespace lock and have completed required
+        identity-checked cleanup/fsync or reference-preservation. No file is read
+        or removed here. Completed/missing records are idempotent no-ops.
+        """
+        with self.transaction() if connection is None else contextlib.nullcontext(connection) as conn:
+            self._lock_reading_revision_clock(conn)
+            try:
+                row = self.get_output_file_operation(token, storage_namespace_id, connection=conn)
+            except KeyError:
+                return False
+            if row["fs_done"]:
+                return False
+            if row["phase"] not in {"committed", "aborting"}:
+                raise RuntimeError("output_operation_conflict")
+            self.backend.execute(
+                "UPDATE output_file_operations SET fs_done = 1, reserved_bytes = 0 "
+                "WHERE token = ? AND user_id = ? AND storage_namespace_id = ? AND fs_done = 0",
+                (token, self.user_id, storage_namespace_id),
+                connection=conn,
+            )
+            self._retire_output_file_operation(token, storage_namespace_id, conn)
+            return True
+
+    def _retire_output_file_operation(self, token: str, storage_namespace_id: str, connection: Any) -> None:
+        self.backend.execute(
+            "DELETE FROM output_file_operations WHERE token = ? AND user_id = ? AND storage_namespace_id = ? "
+            "AND fs_done = 1 AND effects_pending = 0",
+            (token, self.user_id, storage_namespace_id),
+            connection=connection,
+        )
+
+    def ack_output_file_effect(
+        self, token: str, storage_namespace_id: str, effect_kind: str, *, connection: Any | None = None
+    ) -> bool:
+        """Acknowledge one delivered effect without inspecting recycled rows/files."""
+        if effect_kind != "dispose_history":
+            return False
+        with self.transaction() if connection is None else contextlib.nullcontext(connection) as conn:
+            self._lock_reading_revision_clock(conn)
+            try:
+                row = self.get_output_file_operation(token, storage_namespace_id, connection=conn)
+            except KeyError:
+                return False
+            if not row["fs_done"] or row["phase"] != "committed":
+                return False
+            try:
+                effects = json.loads(row["effects_json"])
+            except (TypeError, ValueError):
+                raise RuntimeError("output_operation_conflict") from None
+            if not isinstance(effects, list) or any(not isinstance(effect, dict) for effect in effects):
+                raise RuntimeError("output_operation_conflict")
+            for effect in effects:
+                if effect.get("kind") == effect_kind and effect.get("acknowledged") is False:
+                    effect["acknowledged"] = True
+                    pending = sum(effect.get("acknowledged") is not True for effect in effects)
+                    self.backend.execute(
+                        "UPDATE output_file_operations SET effects_json = ?, effects_pending = ? "
+                        "WHERE token = ? AND user_id = ? AND storage_namespace_id = ? AND fs_done = 1",
+                        (json.dumps(effects, sort_keys=True), pending, token, self.user_id, storage_namespace_id),
+                        connection=conn,
+                    )
+                    self._retire_output_file_operation(token, storage_namespace_id, conn)
+                    return True
+            return False
 
     def _lock_reading_revision_clock(self, connection: Any) -> None:
         """Serialize aggregate writers before reading their current state."""

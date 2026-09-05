@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-03 02:27'
-updated_date: '2026-09-05 17:28'
+updated_date: '2026-09-05 18:39'
 labels:
   - collections
   - reading-list
@@ -52,5 +52,5 @@ diagnostic-privacy behavior are covered.
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-ADR required: yes; ADR-003. Approved spec: Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md. Reviewed implementation plan/evidence: Docs/superpowers/plans/2026-09-05-reading-output-file-reservations.md. Task 1a schema/identity foundation implemented and reviewed: inert constrained binding/journal tables; internal UUID incarnation in generic output creation and trusted Reading adoption; explicit user-scoped transactional offline backfill; no public DTO exposure. Files: Collections_DB.py and new tests/Collections/test_output_file_operations_db.py. TDD RED: eight foundation tests plus separate adoption test failed before implementation. Final verification: 12 SQLite foundation +98 non-PG regressions +106 real PG passes =216 distinct passes. One inapplicable SQLite parameter of a PostgreSQL-only test skipped; no required PG case skipped. Compile, new test Ruff/Black, changed-range Black, diff check and scoped Bandit pass; nine existing adapter Ruff findings and whole-file Black debt unchanged against HEAD. Independent review found no actionable foundation issues. Task 1 is intentionally not complete: transition methods are next, with fresh failing tests. No binding/volume activated, no file mutation or capability enabled. Remaining sub-plan and parent-plan HTTP/DTO/reconciliation/release work pending; TASK-13153 In Progress.
+ADR required: yes; ADR path: backlog/decisions/003-reading-atomic-hard-delete.md. Reason: approved storage and cross-writer contract. Spec and implementation/evidence: Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md and Docs/superpowers/plans/2026-09-05-reading-output-file-reservations.md. Task 1a committed as 1c9650ee14. Task 1b implemented and independently reviewed: scoped journal transitions, bounded original-row fingerprints/intended fields, fresh post-fence lease and protocol checks, atomic caller-owned DB commit context, conditional abort and filesystem/history retirement. Soft-deleted removal and stale deletion-state regressions included. Verified 109 non-PostgreSQL plus 110 real PostgreSQL targeted passes, no skips; new tests and changed-range formatting clean, existing nine adapter Ruff findings unchanged, Bandit/compile/diff checks pass. Next: Task 2 shared row/path claims and resource admission. Filesystem proofs, route integration, activation and capability remain later gated checkpoints. TASK-13153 remains In Progress.
 <!-- SECTION:PLAN:END -->

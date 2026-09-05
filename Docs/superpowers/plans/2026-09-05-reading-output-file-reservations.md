@@ -14,7 +14,7 @@
 **Task:** TASK-13153, In Progress. These are checkpoints within that task, not newly allocated Backlog IDs.
 **Approved spec:** `Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md`, user approved after checkpoint `8dc255fcca`.
 **Parent plan:** `Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md`; this plan replaces its generic-file-writer gap, not its remaining Reading DTO/HTTP/reconciliation/release tasks.
-**Status:** Inline execution in progress. Task 1 schema/identity foundation implemented; transition methods and later tasks remain pending. See checkpoint evidence below.
+**Status:** Inline execution in progress. Task 1 schema/identity foundation and transition methods verified on SQLite/PostgreSQL. Shared claims and later tasks remain pending. See checkpoint evidence below.
 
 ---
 
@@ -76,8 +76,8 @@ Do not split the entire large Collections adapter. Keep its transaction-bearing 
 - [x] Run `python -m pytest tldw_Server_API/tests/Collections/test_output_file_operations_db.py -q -k sqlite`; confirm new behavior fails.
 - [x] Extend `_ensure_reading_revision_schema` using its existing transaction/advisory bootstrap lock and explicit connection. Bindings contain user, namespace, protocol version and validated finite policy. Journal stores the spec's fixed source/stage/destination fields and collision keys, snapshot/intended changes, source/stage/publication identity, lease/retry/error, bounded history payload/status, and byte reservation. Use compact bounded JSON only for finite structured fields, never bodies/credentials. Add due-work and active-user lookup indexes; no general lock table.
 - [x] Add internal immutable `outputs.file_incarnation` (random UUID on insert, retained on rename, never copied on new output/ID reuse). Existing rows receive new tokens in an idempotent stopped-writer backfill; never reset a nonempty token. This is not a public patchable metadata key. `create_output_artifact` remains the ordinary allocator; the existing trusted Reading adoption insert also allocates its own fresh token.
-- [ ] Implement transaction-owned methods `prepare_output_file_operation`, `get_output_file_operation`, `validate_output_file_operation`, `commit_output_file_operation`, `abort_output_file_operation`, `finish_output_file_operation`, and `ack_output_file_effect`. Internal optional `connection` propagates the same DB transaction; public HTTP payloads never accept operation tokens. Fresh lease time is read after the fence, not supplied pre-wait.
-- [ ] Test conditional transitions, unknown token, other user, expiry, unchanged source snapshot, and rollback. Core transition predicates are:
+- [x] Implement transaction-owned methods `prepare_output_file_operation`, `get_output_file_operation`, `validate_output_file_operation`, `commit_output_file_operation`, `abort_output_file_operation`, `finish_output_file_operation`, and `ack_output_file_effect`. Internal optional `connection` propagates the same DB transaction; public HTTP payloads never accept operation tokens. Fresh lease time is read after the fence, not supplied pre-wait.
+- [x] Test conditional transitions, unknown token, other user, expiry, unchanged source snapshot, and rollback. Core transition predicates are:
 
 ```sql
 -- All statements additionally run under the existing revision fence.
@@ -89,7 +89,7 @@ DELETE FROM output_file_operations
 WHERE token = ? AND user_id = ? AND fs_done = 1 AND effects_pending = 0;
 ```
 
-- [ ] Run the new module unfiltered and `python -m pytest tldw_Server_API/tests/Collections/test_reading_revision_mutations.py -q`. Check migration twice on both backends, including reconstructed adapter instances. Review/commit: `feat(reading): persist inert output operation journal (TASK-13153)`.
+- [x] Run the new module unfiltered and `python -m pytest tldw_Server_API/tests/Collections/test_reading_revision_mutations.py -q`. Check migration twice on both backends, including reconstructed adapter instances. Executed as separate complementary backend selections below. Review/commit: `feat(reading): persist inert output operation journal (TASK-13153)`.
 
 ## Task 2: Enforce shared row/path claims and resource admission
 
@@ -242,5 +242,57 @@ cluster unavailability into an error rather than a fixture skip.
 Logs: `/private/tmp/task-13153-journal-schema-{red,green,pg,regressions}.log`,
 `/private/tmp/task-13153-journal-adoption-red.log`,
 `/private/tmp/task-13153-journal-schema-bandit.json`.
-Next: remaining Task 1 transition methods with fresh failing tests. All full-task
+Next at that checkpoint: remaining Task 1 transition methods with fresh failing tests. All full-task
 acceptance criteria remain unchecked and TASK-13153 stays In Progress.
+
+### Task 1b: Dormant journal transitions (2026-09-05)
+
+Implements scoped prepare/get/validate/commit/abort/fs_done/ack methods under the
+existing revision fence. The original-row snapshot stores a complete-row SHA-256
+digest and immutable incarnation, not raw output content. Intended changes are a
+bounded field allowlist. Validation checks the current protocol binding and reads
+fresh lease time after the fence. Removal supports soft-deleted originals while
+replacement remains active-only; deletion-state changes invalidate the snapshot.
+
+Implementation clarification: `commit_output_file_operation` is a transaction
+context, not a CRUD method. It yields the same connection for the trusted caller's
+recorded output mutation and accounting, then updates the journal phase after the
+body succeeds. An exception rolls both back; an explicitly supplied transaction
+must be rolled back by its owner on propagated exceptions. Bodies must be DB-only.
+Later orchestration must supply filesystem proofs and enforce cross-writer claims;
+these primitives alone do not authorize any file operation or runtime activation.
+
+File completion releases reserved bytes independently of pending history effects.
+History acknowledgement is idempotent and cannot retire unfinished file work.
+Committed work cannot become aborting or run its mutation body again.
+
+The first 12 transition tests failed on absent methods with all 12 foundation
+tests still passing. Review then found soft-deleted removal was incorrectly
+excluded. Three further RED cases reproduced that gap and a protocol-version
+change after preparation; the active-only replacement control passed. Fixes now
+pass with additional expiry-after-fence and both-order threaded commit/abort
+coverage. Independent follow-up review found no remaining serious issues within
+this deliberately dormant primitive scope.
+
+Final evidence: 109 non-PostgreSQL targeted passes (31 journal/foundation and 78
+existing revision tests), plus 110 required real PostgreSQL passes with two
+isolated workers (388.89 seconds). Total: 219 distinct passes, no skips. The
+complementary backend selections exclude only the intentionally inapplicable
+SQLite parameter of the PostgreSQL search-path test.
+New test module Ruff/Black, changed production-range Black, compile and diff checks
+pass. Adapter Ruff still reports exactly the same nine findings as HEAD; existing
+whole-file formatting debt is not reformatted. Scoped Bandit has no findings or
+scanner errors. Exact-file checkpoint commit follows this verification.
+
+Verification commands (after environment activation):
+
+```bash
+TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_operations_db.py tldw_Server_API/tests/Collections/test_reading_revision_mutations.py -q -k 'not postgres'
+TLDW_TEST_NO_DOCKER=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_operations_db.py tldw_Server_API/tests/Collections/test_reading_revision_mutations.py -q -k 'postgres and not sqlite' -n 2
+```
+
+Logs: `/private/tmp/task-13153-journal-transitions-{red,green,sqlite,pg}.log`,
+`/private/tmp/task-13153-journal-review-red.log`, and
+`/private/tmp/task-13153-journal-transitions-bandit.json`.
+Next: Task 2 shared row/path claims and resource admission. Task 1 does not provide
+those guards. TASK-13153 remains In Progress and the public capability stays off.
