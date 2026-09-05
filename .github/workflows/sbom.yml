@@ -186,71 +186,34 @@ jobs:
             --spec-version 1.6 \
             --output /out/sbom-apps-workspace.cdx.json \
             /workspace/apps
-          cdxgen \
-            -t bun \
-            --no-recurse \
-            --required-only \
-            --fail-on-error \
-            --no-install-deps \
-            --no-babel \
-            --no-cache \
-            --no-progress \
-            --color never \
-            --exclude "**/.next/**" \
-            --exclude "**/node_modules/**" \
-            --spec-version 1.6 \
-            --output /out/sbom-frontend-root.cdx.json \
-            /workspace/apps/tldw-frontend
-          cdxgen \
-            -t bun \
-            --no-recurse \
-            --required-only \
-            --fail-on-error \
-            --no-install-deps \
-            --no-babel \
-            --no-cache \
-            --no-progress \
-            --color never \
-            --exclude "**/.next/**" \
-            --exclude "**/node_modules/**" \
-            --spec-version 1.6 \
-            --output /out/sbom-extension-root.cdx.json \
-            /workspace/apps/extension
-          cdxgen \
-            -t bun \
-            --no-recurse \
-            --required-only \
-            --fail-on-error \
-            --no-install-deps \
-            --no-babel \
-            --no-cache \
-            --no-progress \
-            --color never \
-            --exclude "**/.next/**" \
-            --exclude "**/node_modules/**" \
-            --spec-version 1.6 \
-            --output /out/sbom-ui-root.cdx.json \
-            /workspace/apps/packages/ui
           python - <<'PY'
           import json
           import os
           import uuid
           from pathlib import Path
+          from urllib.parse import quote
 
           SENSITIVE_ENV_MARKERS = ("TOKEN", "PASSWORD", "SECRET", "API_KEY")
 
           path = Path("artifacts/source-sbom/sbom-apps-workspace.cdx.json")
           payload = json.loads(path.read_text(encoding="utf-8"))
+          # Children have no locks: identify them from checked-in manifests,
+          # while leaving the canonical Bun dependency inventory untouched.
           metadata_roots = []
-          for filename in (
-              "sbom-frontend-root.cdx.json",
-              "sbom-extension-root.cdx.json",
-              "sbom-ui-root.cdx.json",
+          for directory in (
+              "apps/tldw-frontend",
+              "apps/extension",
+              "apps/packages/ui",
           ):
-              metadata_payload = json.loads(
-                  (path.parent / filename).read_text(encoding="utf-8")
-              )
-              metadata_roots.append(metadata_payload["metadata"]["component"])
+              manifest = json.loads(Path(directory, "package.json").read_text(encoding="utf-8"))
+              group, _, name = manifest["name"].rpartition("/")
+              version = manifest["version"]
+              assert isinstance(version, str) and version
+              purl = f"pkg:npm/{quote(manifest['name'], safe='/')}@{quote(version, safe='')}"
+              metadata_roots.append({
+                  "type": "application", "group": group, "name": name,
+                  "version": version, "purl": purl, "bom-ref": purl,
+              })
           metadata_root_ids = {
               (item.get("group", ""), item["name"]) for item in metadata_roots
           }
@@ -283,10 +246,6 @@ jobs:
           }
           assert not any(value in serialized for value in sensitive_values)
           PY
-          rm -f \
-            "$EVIDENCE_DIR/sbom-frontend-root.cdx.json" \
-            "$EVIDENCE_DIR/sbom-extension-root.cdx.json" \
-            "$EVIDENCE_DIR/sbom-ui-root.cdx.json"
           (
             cd "$EVIDENCE_DIR"
             sha256sum sbom-apps-workspace.cdx.json > sbom-apps-workspace.cdx.json.sha256

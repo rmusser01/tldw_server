@@ -194,9 +194,6 @@ def test_bun_sboms_use_pinned_required_only_cdxgen_profiles() -> None:
     assert "/workspace/apps:ro" in apps
     assert '"**/.next/**"' in apps
     assert '"**/node_modules/**"' in apps
-    assert "sbom-frontend-root.cdx.json" in apps
-    assert "sbom-extension-root.cdx.json" in apps
-    assert "sbom-ui-root.cdx.json" in apps
     assert "metadata_root_ids" in apps
     assert '("@tldw", "ui")' in apps
     for root in ("tldw-frontend", "tldw-assistant", "@tldw/ui"):
