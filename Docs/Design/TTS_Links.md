@@ -19,6 +19,28 @@ https://github.com/liampetti/fulloch
 https://huggingface.co/OpenMOSS-Team/models?sort=created
 https://github.com/gokhaneraslan/chatterbox-finetuning
 
+https://github.com/BovineOverlord/Derpy-Turtle-The-Kokoro-Trainer
+https://www.swyx.io/podcast
+
+
+
+https://scenema.ai/audio
+https://github.com/ScenemaAI/scenema-audio
+https://huggingface.co/ScenemaAI/scenema-audio
+
+
+https://github.com/k2-fsa/OmniVoice
+https://huggingface.co/tmdarkbr/echo-tts-gguf
+https://github.com/Cirius0310/echo-tts-cpp
+https://github.com/Cirius0310/echo-tts-cpp/tree/master/examples
+https://github.com/pkalogiros/audiomass
+https://github.com/Zyphra/ZONOS2
+https://huggingface.co/Zyphra/ZONOS2
+https://openmoss.ai/MOSS-TTS-Nano-Demo/
+https://github.com/ekwek1/soprano
+https://github.com/OpenMOSS/MOSS-TTS
+
+
 
 https://huggingface.co/nineninesix/kani-tts-2-en
 https://github.com/nineninesix-ai/kani-tts-2
@@ -26,8 +48,6 @@ https://www.stavros.io/posts/i-made-a-voice-note-taker/
 https://github.com/skylord123/pebble-home-assistant-ws
 https://community.home-assistant.io/t/my-journey-to-a-reliable-and-enjoyable-locally-hosted-voice-assistant/944860
 https://github.com/ekwek1/soprano?tab=readme-ov-file#installation
-https://github.com/FireRedTeam/FireRedVAD
-https://huggingface.co/collections/OpenMOSS-Team/moss-transcribe
 https://huggingface.co/kyutai
 https://huggingface.co/Echo9Zulu/Kokoro-82M-FP16-OpenVINO
 https://github.com/OpenBMB/VoxCPM
@@ -38,7 +58,6 @@ https://github.com/kyutai-labs/pocket-tts
 https://github.com/supertone-inc/supertonic
 https://github.com/k2-fsa/ZipVoice
 
-https://github.com/snakers4/silero-vad
 
 
 Gemma
