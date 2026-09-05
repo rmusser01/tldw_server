@@ -1424,6 +1424,17 @@ Docker image still requires CI verification. Latest dev remains a5aa0c8e6751.
 Commit and publish the reviewed fixes, then respond to the five Qodo threads.
 Vulnerability admission remains blocked; no exception or bypass was approved.
 
+2026-09-05 integration checkpoint: rebased four commits cleanly onto dev
+3bc8c6a98ccd; range-diff preserves each patch. Added the missing Supply_Chain
+directory to all five existing tooling shards and their core coverage inventory,
+with five real coverage-matcher regressions. Updated the stale frontend Docker
+command assertion. The shard guard now reports zero newly uncovered files;
+851 focused Python tests and four frontend contract tests pass. The previous
+head's exact WebUI image built within budget (563.1/779.4 KB gzip) but failed
+vulnerability admission. New SBOM metadata and two real-backend journey failures
+are diagnosed separately and await a scoped repair decision; no security policy,
+timeouts, or assertions were relaxed. All five original Qodo threads are resolved.
+
 Wait for all required checks and reviewer comments. Resolve every actionable thread with evidence, rerun affected tests, rebase again if `dev` moved, and merge only after:
 
 - all required checks pass;
