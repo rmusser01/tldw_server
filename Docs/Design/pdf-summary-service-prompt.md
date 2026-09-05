@@ -20,9 +20,16 @@ No new storage, Settings layout, processor interface or shared processor behavio
 
 The HTTP regressions exposed a prerequisite bug: the PDF multipart dependency
 discarded `api_name`, so the existing processor never received the selected
-provider. Parse and forward that existing schema field, matching document and
-ebook routes. Request credentials remain unsupported; keys come from server
+provider. Parse both canonical `api_provider` and legacy `api_name`, preferring
+the canonical value, and forward through the existing processor argument.
+Request credentials remain unsupported; keys come from server
 configuration. No PDF processor changes are needed.
+
+Review follow-up: resolve deployment defaults in the shared core resolver so
+Settings detail/reset and runtime instructions agree. The same defect affected
+document summaries, so both summary definitions use this path. Static packaged
+defaults remain available separately; editable effective parts use the server
+configuration. Reset still performs no post-deletion owner-storage reread.
 
 ## Stage 1: Compatibility contract
 
@@ -55,3 +62,9 @@ touched-file ESLint passed; extension compile passed. Bandit found no issues
 or scan errors in the three touched production Python files. Independent
 review found no actionable issues. Full repository suites, full shared-UI
 typechecking and live-provider/browser end-to-end tests were not run.
+
+Qodo follow-up: four failing regressions reproduced canonical-provider omission
+and mismatched Settings defaults. After fixes, the combined PDF/document and
+Service Prompts registry/API suites pass all 108 tests. Independent review of
+the fixes found no actionable issues. OpenAPI artifact drift identified by CI
+is tracked in TASK-13161 and remains an integration gate until regenerated.

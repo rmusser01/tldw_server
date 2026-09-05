@@ -108,6 +108,17 @@ def test_pdf_prompt_is_owner_scoped_and_independent_of_document_guidance(context
     assert context.reads == [1, 2]
 
 
+@pytest.mark.parametrize("legacy_provider", ["", "anthropic"])
+def test_canonical_provider_drives_pdf_analysis(context: SimpleNamespace, legacy_provider: str) -> None:
+    """Canonical provider selection must work alone and take precedence over the legacy alias."""
+    save(context, "Use the saved PDF instructions.")
+    process(context, api_name=legacy_provider, api_provider="openai")
+    assert len(context.calls) == 1
+    assert context.calls[0]["api_name"] == "openai"
+    assert context.calls[0]["system_message"] == "Use the saved PDF instructions."
+    assert context.reads == [1]
+
+
 @pytest.mark.parametrize("system", ["Explicit PDF guidance", ""])
 def test_explicit_multipart_prompt_bypasses_saved_override(context: SimpleNamespace, system: str) -> None:
     """Explicit text and empty multipart fields must take precedence over storage."""

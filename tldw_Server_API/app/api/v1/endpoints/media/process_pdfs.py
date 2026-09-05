@@ -69,7 +69,6 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.result_normalization im
     normalise_pdf_result,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Upload_Sink import FileValidator
-from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as summarization
 from tldw_Server_API.app.core.Prompt_Management.service_prompts import resolve_service_prompt
 
 router = APIRouter()
@@ -164,12 +163,7 @@ async def process_pdfs_endpoint(
         def resolve_system_prompt() -> str:
             """Capture PDF instructions and release this worker's connection."""
             try:
-                resolved = resolve_service_prompt(prompts_db, "media.pdf.summarization")
-                return (
-                    resolved.parts["system"]
-                    if resolved.source == "user"
-                    else summarization._resolve_default_system_prompt()
-                )
+                return resolve_service_prompt(prompts_db, "media.pdf.summarization").parts["system"]
             finally:
                 prompts_db.close_connection()
 

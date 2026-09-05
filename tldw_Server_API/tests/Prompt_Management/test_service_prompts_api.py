@@ -23,6 +23,7 @@ from tldw_Server_API.app.core.DB_Management.Prompts_DB import (
     DatabaseError,
     PromptsDatabase,
 )
+from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as summarization
 
 pytestmark = pytest.mark.integration
 
@@ -256,6 +257,25 @@ def test_summary_prompt_can_be_saved_and_reset(api_context: SimpleNamespace, pro
     reset = api_context.client.delete(path, params={"expected_revision": saved.json()["revision"]})
     assert reset.status_code == 200
     assert reset.json()["source"] == "packaged"
+
+
+@pytest.mark.parametrize("prompt_id", ["media.document.summarization", "media.pdf.summarization"])
+def test_summary_settings_uses_deployment_default_for_detail_and_reset(
+    api_context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, prompt_id: str
+) -> None:
+    """Saving an unchanged Settings draft must preserve the actual runtime default."""
+    monkeypatch.setattr(summarization, "load_prompt", lambda *args: "Deployment summary guidance.")
+    path = f"/api/v1/service-prompts/{prompt_id}"
+    detail = api_context.client.get(path)
+    assert detail.status_code == 200
+    assert detail.json()["effective_parts"] == {"system": "Deployment summary guidance."}
+    saved = api_context.client.put(path, json={"parts": detail.json()["effective_parts"], "expected_revision": None})
+    assert saved.status_code == 200
+    assert saved.json()["effective_parts"] == {"system": "Deployment summary guidance."}
+    reset = api_context.client.delete(path, params={"expected_revision": saved.json()["revision"]})
+    assert reset.status_code == 200
+    assert reset.json()["effective_parts"] == {"system": "Deployment summary guidance."}
+    assert reset.json()["saved_parts"] is None
 
 
 def test_title_prompt_can_be_saved_and_reset_through_generic_api(api_context) -> None:

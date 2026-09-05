@@ -1,10 +1,10 @@
 ---
 id: TASK-13161
 title: Expose synchronous PDF summarization in Service Prompts
-status: Done
+status: In Progress
 assignee: []
 created_date: '2026-09-05 04:03'
-updated_date: '2026-09-05 04:26'
+updated_date: '2026-09-05 04:39'
 labels: []
 dependencies: []
 references:
@@ -41,6 +41,12 @@ Approved in this conversation. Fresh worktree codex/pdf-summary-service-prompt f
 Implemented the approved independent PDF literal-system entry with shared Settings metadata and golden defaults. HTTP tests exposed an existing multipart bug: api_name was discarded, preventing analysis. Added only parsing/forwarding of that existing field; credentials remain server-only. RED: 7 backend contract failures and 1 shared Settings failure before implementation. GREEN: PDF/registry/API 89 passed; broader PDF/document, chunking, input-contract, usage-event and permission regressions 95 passed (8 warnings); Settings/service/domain 195 passed. Ruff lint/format and touched-file ESLint passed; ESLint emitted only the shared-file Next pages-directory notice. Extension tsc --noEmit -p tsconfig.compile.json passed (not a full shared-UI typecheck). Bandit scanned the three changed production Python files: zero findings and errors, report /tmp/bandit_pdf_summary_service_prompt.json. Independent review found no Critical, Important or Minor issues. git diff --check passed. Full repository suites, full shared-UI typecheck and live provider/browser E2E were not run. No dependency changes; temporary dependency symlinks removed before commit. Local implementation complete; PR creation/integration awaits the user choice.
 
 User selected push and PR. Opened PR #2880 against dev: https://github.com/rmusser01/tldw_server/pull/2880 . Fresh committed-tree PDF/registry/API verification: 89 passed, 9 warnings. Human-written Change summary remains pending before merge; no merge or review-monitoring automation requested in this step.
+
+PR #2880 review follow-up: Qodo reported canonical api_provider discarded, effective PDF Settings default differing from runtime deployment default, and endpoint workflow layering. Verify and fix actionable findings test-first with minimal reuse of existing core resolver. backend-required additionally reports OpenAPI fingerprint drift from provider form schema; requested approval to regenerate official artifacts. Human supplied what changed but rationale is still pending.
+
+Qodo fixes implemented: canonical api_provider wins while legacy api_name remains supported; resolve_service_prompt_default centralizes effective server defaults for PDF and documents, used by normal resolution and reset without a post-delete database reread. Request adapters now consume resolved parts without selecting defaults. Four regression cases failed before implementation; combined PDF/document/registry/API suite now 108 passed, 9 warnings. Ruff lint/format passes on seven changed Python files; Bandit zero findings/errors on five production files. Independent review found no actionable defects. Human sentence recorded verbatim in PR; implementation rationale remains pending. OpenAPI artifact regeneration approval remains pending; do not silently bypass that CI gate.
+
+Broader media/form/provider/permissions regressions also passed: 72 passed, 8 warnings. Total non-overlapping backend verification for review fixes: 180 passed. Final touched-scope compileall and git diff --check passed. Ready to push code-review fixes; OpenAPI generation approval and human rationale remain pending.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
