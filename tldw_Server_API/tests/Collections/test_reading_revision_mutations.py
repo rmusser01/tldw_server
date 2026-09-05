@@ -404,6 +404,181 @@ def make_archive_output(db):
     )
 
 
+def mutate_output(db, output_id, operation):
+    if operation == "metadata":
+        return db.update_output_artifact_metadata(
+            output_id, metadata_json='{"changed": true}', chatbook_path="book.zip"
+        )
+    if operation == "media":
+        return db.update_output_media_item_id(output_id, 42)
+    if operation == "rename":
+        return db.rename_output_artifact(output_id, "Renamed", "renamed.md")
+    from tldw_Server_API.app.services.outputs_service import update_output_artifact_db
+
+    return update_output_artifact_db(db, output_id, "Converted", "converted.html", "html", "2030-01-01T00:00:00")
+
+
+@pytest.mark.parametrize("operation", ["metadata", "media", "rename", "service"])
+def test_owned_output_updates_advance_once_and_replays_are_noops(db, operation):
+    item = make_reading(db)
+    output = make_archive_output(db)
+    db.register_reading_output_ownership(
+        item.id, output.id, expected_revision=item.revision, storage_namespace_id="test-volume"
+    )
+    before = db.get_content_item(item.id)
+    changed = mutate_output(db, output.id, operation)
+    assert changed != output
+    updated = db.get_content_item(item.id)
+    assert updated.revision == before.revision + 1
+    assert mutate_output(db, output.id, operation) == changed
+    assert db.get_content_item(item.id) == updated
+
+
+@pytest.mark.parametrize("operation", ["metadata", "media", "rename", "service"])
+def test_owned_output_updates_roll_back_with_parent_and_clock(db, monkeypatch, operation):
+    item = make_reading(db)
+    output = make_archive_output(db)
+    db.register_reading_output_ownership(
+        item.id, output.id, expected_revision=item.revision, storage_namespace_id="test-volume"
+    )
+    before = db.get_content_item(item.id)
+    old_row = db.backend.execute("SELECT * FROM outputs WHERE id = ?", (output.id,)).first
+    clock = db.backend.execute("SELECT value FROM reading_revision_clock WHERE id = 1", ()).scalar
+    advance = db._advance_reading_parent
+
+    def fail(item_id, conn):
+        advance(item_id, conn)
+        raise RuntimeError("abort output update")
+
+    monkeypatch.setattr(db, "_advance_reading_parent", fail)
+    with pytest.raises(RuntimeError, match="abort output update"):
+        mutate_output(db, output.id, operation)
+    assert db.backend.execute("SELECT * FROM outputs WHERE id = ?", (output.id,)).first == old_row
+    assert db.get_content_item(item.id) == before
+    assert db.backend.execute("SELECT value FROM reading_revision_clock WHERE id = 1", ()).scalar == clock
+
+
+@pytest.mark.parametrize("operation", ["metadata", "media", "rename", "service"])
+def test_unowned_output_updates_do_not_mutate_reading_items(db, operation):
+    item = make_reading(db)
+    before = db.get_content_item(item.id)
+    output = make_archive_output(db)
+    db.update_output_artifact_metadata(output.id, metadata_json=json.dumps({"item_id": item.id}))
+    mutate_output(db, output.id, operation)
+    assert db.get_content_item(item.id) == before
+    assert db.backend.execute("SELECT COUNT(*) FROM reading_output_ownership", ()).scalar == 0
+
+
+@pytest.mark.parametrize("operation", ["metadata", "media", "rename", "service"])
+def test_output_updates_reject_deleted_and_foreign_rows_without_mutation(db, operation):
+    output = make_archive_output(db)
+    foreign = CollectionsDatabase.from_backend(user_id="781", backend=db.backend)
+    with pytest.raises(KeyError):
+        mutate_output(foreign, output.id, operation)
+    assert db.get_output_artifact(output.id) == output
+    db.delete_output_artifact(output.id)
+    with pytest.raises(KeyError):
+        mutate_output(db, output.id, operation)
+    assert db.get_output_artifact(output.id, include_deleted=True) == output
+
+
+def test_owned_output_metadata_json_normalization_preserves_token(db):
+    item = make_reading(db)
+    output = make_archive_output(db)
+    db.register_reading_output_ownership(
+        item.id, output.id, expected_revision=item.revision, storage_namespace_id="test-volume"
+    )
+    db.update_output_artifact_metadata(output.id, metadata_json='{"a": 1, "b": [true]}')
+    before = db.get_content_item(item.id)
+    old_row = db.get_output_artifact(output.id)
+    db.update_output_artifact_metadata(output.id, metadata_json=' {"b":[true], "a":1} ')
+    assert db.get_content_item(item.id) == before
+    assert db.get_output_artifact(output.id) == old_row
+    db.update_output_artifact_metadata(output.id, metadata_json='{"a": true, "b": [true]}')
+    assert db.get_content_item(item.id).revision == before.revision + 1
+
+
+def test_owned_output_media_link_can_be_cleared(db):
+    item = make_reading(db)
+    output = make_archive_output(db)
+    db.register_reading_output_ownership(
+        item.id, output.id, expected_revision=item.revision, storage_namespace_id="test-volume"
+    )
+    db.update_output_media_item_id(output.id, 42)
+    before = db.get_content_item(item.id)
+    assert db.update_output_media_item_id(output.id, None).media_item_id is None
+    cleared = db.get_content_item(item.id)
+    assert cleared.revision == before.revision + 1
+    db.update_output_media_item_id(output.id, None)
+    assert db.get_content_item(item.id) == cleared
+
+
+def test_concurrent_identical_owned_output_updates_advance_once(db):
+    item = make_reading(db)
+    output = make_archive_output(db)
+    db.register_reading_output_ownership(
+        item.id, output.id, expected_revision=item.revision, storage_namespace_id="test-volume"
+    )
+    before = db.get_content_item(item.id)
+    ready = Barrier(2)
+
+    def update():
+        ready.wait(timeout=10)
+        return mutate_output(db, output.id, "metadata")
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        first, second = [workers.submit(update) for _ in range(2)]
+        assert first.result(timeout=15) == second.result(timeout=15)
+    assert db.get_content_item(item.id).revision == before.revision + 1
+
+
+def test_owned_output_retention_only_updates_advance_once(db):
+    from tldw_Server_API.app.services.outputs_service import update_output_artifact_db
+
+    item = make_reading(db)
+    output = make_archive_output(db)
+    db.register_reading_output_ownership(
+        item.id, output.id, expected_revision=item.revision, storage_namespace_id="test-volume"
+    )
+    before = db.get_content_item(item.id)
+    expiry = "2030-01-01T00:00:00"
+    update_output_artifact_db(db, output.id, None, None, None, expiry)
+    changed = db.get_content_item(item.id)
+    assert changed.revision == before.revision + 1
+    assert db.backend.execute("SELECT retention_until FROM outputs WHERE id = ?", (output.id,)).scalar == expiry
+    update_output_artifact_db(db, output.id, None, None, None, expiry)
+    update_output_artifact_db(db, output.id, None, None, None, None)
+    assert db.get_content_item(item.id) == changed
+
+
+def test_output_update_validates_path_before_one_explicit_connection_fence(db, monkeypatch):
+    item = make_reading(db)
+    output = make_archive_output(db)
+    db.register_reading_output_ownership(
+        item.id, output.id, expected_revision=item.revision, storage_namespace_id="test-volume"
+    )
+    statements = []
+    connections = []
+    execute = db.backend.execute
+    resolve = db.resolve_output_storage_path
+
+    def trace(query, params=None, *, connection=None, **kwargs):
+        statements.append(query)
+        connections.append(connection)
+        return execute(query, params, connection=connection, **kwargs)
+
+    def resolve_before_lock(path):
+        assert statements == []
+        return resolve(path)
+
+    monkeypatch.setattr(db.backend, "execute", trace)
+    monkeypatch.setattr(db, "resolve_output_storage_path", resolve_before_lock)
+    mutate_output(db, output.id, "rename")
+    assert "UPDATE" in statements[0] and "reading_revision_clock" in statements[0]
+    assert connections[0] is not None
+    assert all(conn is connections[0] for conn in connections)
+
+
 def test_explicit_output_ownership_advances_once_and_survives_schema_reinit(db):
     item = make_reading(db)
     output = make_archive_output(db)

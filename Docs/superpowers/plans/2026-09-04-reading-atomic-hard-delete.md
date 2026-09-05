@@ -44,7 +44,7 @@
 
 ## Stage 1: Persist revisions and fence every Reading mutation
 
-**Status:** In Progress — revision schema/clock, item/tag, note-link and highlight writers implemented; output ownership integration and DTO coverage remains.
+**Status:** In Progress — revision schema/clock, item/tag, note-link, highlight and output database-update writers implemented; artifact lifecycle/purge integration and DTO coverage remain.
 **Goal:** Every returned token describes one coherent aggregate version.
 **Success Criteria:** Migration, no-op, child-write, reuse and snapshot cases pass on both backends.
 **Tests:** New revision module plus existing service/highlight/note-link/import suites.
@@ -230,6 +230,38 @@ Ownership foundation verification (Server virtual environment, 2026-09-04):
 - New tests pass Ruff/Black, touched production ranges pass Black, compilation and
   diff checks pass. Scoped Bandit reports zero findings/errors; the production
   module retains the same nine previously recorded Ruff findings. No full suite.
+
+Output database-update checkpoint (2026-09-04): metadata/chatbook-link, Media-link,
+rename, format and retention writers now share one CollectionsDatabase update
+boundary. The outputs service delegates instead of issuing standalone UPDATE SQL.
+Path validation finishes before the clock lock; output/structural-owner reads,
+updates and parent revision advancement use the same explicit connection. Material
+compound edits advance once, normalized JSON/no-op replays preserve the token, and
+JSON booleans remain distinct from numbers. The Media link can still be cleared.
+Unowned outputs cannot infer Reading ownership from editable metadata. Active
+same-user validation now prevents the old Media-link writer from changing a
+soft-deleted row before raising `output_not_found`.
+
+This checkpoint only fences database metadata, not file operations. File-first
+rename/transcode/deletion, purge routing, shared paths, namespace validation and
+staging/adoption still require the planned durable storage lifecycle. Production
+ownership registration remains unwired; capability stays absent. Existing ADR-003
+applies without a new architectural decision. Stage 1 and TASK-13153 remain In Progress.
+Independent scoped review found no outstanding correctness/security findings; its
+retention-only coverage suggestion is included.
+
+Output update verification (Server virtual environment):
+
+- Initial SQLite red run reproduced missing parent revision/rollback, JSON no-op
+  and deleted-row protection; four unrelated-output assertions were corrected to
+  compare persisted snapshots rather than transient `is_new/content_changed` flags.
+- New output cases: 19 passed on SQLite. Added retention-only persistence/no-op and
+  explicit-connection/clock-order/path-validation tests: 2 passed on SQLite.
+- `TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_reading_revision_mutations.py tldw_Server_API/tests/Services/test_outputs_service.py tldw_Server_API/tests/Collections/test_items_and_outputs_api.py tldw_Server_API/tests/Collections/test_output_artifact_idempotency.py -k 'not postgres' -q --tb=short`: 125 passed, 78 deselected (before the two extra edge cases were added).
+- `TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_reading_revision_mutations.py -k 'output and postgres' -q --tb=short`: 33 passed, 121 deselected, no skips, against the existing real PostgreSQL service. The added `-k '(retention_only or explicit_connection_fence) and postgres'` run passed both cases (156 deselected, no skips).
+- Test Ruff/Black, changed production-range Black, compilation and diff checks
+  pass. Scoped Bandit reports zero findings/errors. The two production files retain
+  their same ten baseline Ruff findings (nine DB, one service import order). No full suite.
 
 - [x] Add a real database fixture using `tmp_path` and the existing `CollectionsDatabase.from_backend` pattern. Use the following record constructor in the new test module:
 

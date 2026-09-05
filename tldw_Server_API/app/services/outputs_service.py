@@ -535,40 +535,14 @@ def update_output_artifact_db(
     new_format: str | None,
     retention_until: str | None,
 ):
-    """Apply partial updates to an output artifact row and return the refreshed row.
-
-    This function encapsulates the SQL UPDATE previously issued from the endpoint.
-    """
-    sets: list[str] = []
-    params: list[object] = []
-    if new_title is not None:
-        sets.append("title = ?")
-        params.append(new_title)
-    if new_path is not None:
-        new_path = cdb.resolve_output_storage_path(new_path)
-        sets.append("storage_path = ?")
-        params.append(new_path)
-    if new_format is not None:
-        sets.append("format = ?")
-        params.append(new_format)
-    if retention_until is not None:
-        sets.append("retention_until = ?")
-        params.append(retention_until)
-    if sets:
-        params.extend([output_id, cdb.user_id])
-        set_clause = ", ".join(sets)
-        update_output_sql_template = "UPDATE outputs SET {set_clause} WHERE id = ? AND user_id = ? AND deleted = 0"
-        q = update_output_sql_template.format_map(locals())  # nosec B608
-        try:
-            cdb.backend.execute(q, tuple(params))
-        except Exception as e:
-            logger.error(f"outputs_service.update: DB update failed: {e}")
-            raise
-    try:
-        return cdb.get_output_artifact(output_id)
-    except Exception as e:
-        logger.error(f"outputs_service.update: failed to fetch updated row: {e}")
-        raise
+    """Delegate partial updates to the database's atomic output mutation boundary."""
+    return cdb.update_output_artifact(
+        output_id,
+        title=new_title,
+        storage_path=new_path,
+        format_=new_format,
+        retention_until=retention_until,
+    )
 
 
 def find_outputs_to_purge(

@@ -5105,11 +5105,7 @@ class CollectionsDatabase:
         return CollectionsDatabase.OutputArtifactRow(**row)
 
     def update_output_media_item_id(self, output_id: int, media_item_id: int | None) -> CollectionsDatabase.OutputArtifactRow:
-        q = "UPDATE outputs SET media_item_id = ? WHERE id = ? AND user_id = ?"
-        res = self.backend.execute(q, (media_item_id, output_id, self.user_id))
-        if res.rowcount <= 0:
-            raise KeyError("output_not_found")
-        return self.get_output_artifact(output_id)
+        return self._update_output_artifact_fields(output_id, {"media_item_id": media_item_id})
 
     def update_output_artifact_metadata(
         self,
@@ -5118,22 +5114,91 @@ class CollectionsDatabase:
         metadata_json: str | None = None,
         chatbook_path: str | None = None,
     ) -> CollectionsDatabase.OutputArtifactRow:
-        fields: list[str] = []
-        params: list[Any] = []
-        if metadata_json is not None:
-            fields.append("metadata_json = ?")
-            params.append(metadata_json)
-        if chatbook_path is not None:
-            fields.append("chatbook_path = ?")
-            params.append(chatbook_path)
-        if not fields:
-            return self.get_output_artifact(output_id)
-        params.extend([output_id, self.user_id])
-        q = f"UPDATE outputs SET {', '.join(fields)} WHERE id = ? AND user_id = ? AND deleted = 0"  # nosec B608
-        res = self.backend.execute(q, tuple(params))
-        if res.rowcount <= 0:
-            raise KeyError("output_not_found")
-        return self.get_output_artifact(output_id)
+        return self._update_output_artifact_fields(
+            output_id,
+            {
+                key: value
+                for key, value in {"metadata_json": metadata_json, "chatbook_path": chatbook_path}.items()
+                if value is not None
+            },
+        )
+
+    def update_output_artifact(
+        self,
+        output_id: int,
+        *,
+        title: str | None = None,
+        storage_path: str | None = None,
+        format_: str | None = None,
+        retention_until: str | None = None,
+    ) -> CollectionsDatabase.OutputArtifactRow:
+        """Update output fields and any structurally owning Reading revision atomically.
+
+        This updates database metadata only. File moves/writes still require the
+        storage lifecycle fence before production archive ownership is enabled.
+        """
+        fields = {"title": title, "storage_path": storage_path, "format": format_, "retention_until": retention_until}
+        return self._update_output_artifact_fields(
+            output_id, {key: value for key, value in fields.items() if value is not None}
+        )
+
+    def _update_output_artifact_fields(
+        self, output_id: int, fields: dict[str, Any]
+    ) -> CollectionsDatabase.OutputArtifactRow:
+        """Fence the active output and its explicit owner on one connection."""
+        allowed = {
+            "title",
+            "storage_path",
+            "format",
+            "retention_until",
+            "metadata_json",
+            "chatbook_path",
+            "media_item_id",
+        }
+        if fields.keys() - allowed:
+            raise ValueError("invalid_output_update_fields")
+        if "storage_path" in fields:
+            # Validation can touch the filesystem; it must precede the DB lock.
+            fields = {**fields, "storage_path": self.resolve_output_storage_path(fields["storage_path"])}
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            current = self.backend.execute(
+                "SELECT title, storage_path, format, retention_until, metadata_json, chatbook_path, media_item_id "
+                "FROM outputs WHERE id = ? AND user_id = ? AND deleted = 0",
+                (output_id, self.user_id),
+                connection=conn,
+            ).first
+            if not current:
+                raise KeyError("output_not_found")
+            changes = {key: value for key, value in fields.items() if value != current[key]}
+            if "metadata_json" in changes:
+                try:
+                    # Canonical serialization keeps JSON booleans distinct from numbers.
+                    if json.dumps(json.loads(changes["metadata_json"]), sort_keys=True) == json.dumps(
+                        json.loads(current["metadata_json"]), sort_keys=True
+                    ):
+                        changes.pop("metadata_json")
+                except (TypeError, ValueError):
+                    pass  # Legacy invalid JSON remains comparable as raw text.
+            if changes:
+                owner = self.backend.execute(
+                    "SELECT item_id FROM reading_output_ownership WHERE output_id = ? AND user_id = ?",
+                    (output_id, self.user_id),
+                    connection=conn,
+                ).first
+                if owner:
+                    self._get_reading_parent(owner["item_id"], conn)
+                setters = ", ".join(f"{key} = ?" for key in changes)
+                result = self.backend.execute(
+                    f"UPDATE outputs SET {setters} WHERE id = ? AND user_id = ? AND deleted = 0",  # nosec B608
+                    (*changes.values(), output_id, self.user_id),
+                    connection=conn,
+                )
+                if result.rowcount != 1:
+                    raise KeyError("output_not_found")
+                if owner:
+                    self._advance_reading_parent(owner["item_id"], conn)
+            return self.get_output_artifact(output_id, connection=conn)
 
     def get_output_artifact(
         self, output_id: int, include_deleted: bool = False, *, connection: Any | None = None
@@ -5452,18 +5517,7 @@ class CollectionsDatabase:
         return self.set_audiobook_output_usage(total_bytes)
 
     def rename_output_artifact(self, output_id: int, new_title: str, new_storage_path: str | None = None) -> CollectionsDatabase.OutputArtifactRow:
-        fields = ["title = ?"]
-        params: list[Any] = [new_title]
-        if new_storage_path is not None:
-            new_storage_path = self.resolve_output_storage_path(new_storage_path)
-            fields.append("storage_path = ?")
-            params.append(new_storage_path)
-        params.extend([output_id, self.user_id])
-        q = f"UPDATE outputs SET {', '.join(fields)} WHERE id = ? AND user_id = ? AND deleted = 0"  # nosec B608
-        res = self.backend.execute(q, tuple(params))
-        if res.rowcount <= 0:
-            raise KeyError("output_not_found")
-        return self.get_output_artifact(output_id)
+        return self.update_output_artifact(output_id, title=new_title, storage_path=new_storage_path)
 
     # ------------------------
     # Audiobook voice profiles
