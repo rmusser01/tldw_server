@@ -26,6 +26,14 @@ const downloadCsv = (data: string, filename: string) => {
   URL.revokeObjectURL(url)
 }
 
+
+// Dollar amounts: whole cents normally; sub-cent LLM costs keep 4 decimals
+// so tiny real spend does not round to an unhelpful $0.00.
+const formatUsd = (value: number): string => {
+  if (!Number.isFinite(value) || value === 0) return "$0.00"
+  return Math.abs(value) < 0.01 ? `$${value.toFixed(4)}` : `$${value.toFixed(2)}`
+}
+
 const UsageAnalyticsPage: React.FC = () => {
   // Admin guard state
   const [adminGuard, setAdminGuard] = useState<"forbidden" | "notFound" | null>(null)
@@ -223,13 +231,13 @@ const UsageAnalyticsPage: React.FC = () => {
     { title: "Provider", dataIndex: "provider", key: "provider" },
     { title: "Model", dataIndex: "model", key: "model" },
     { title: "Tokens", dataIndex: "tokens", key: "tokens", render: (v: number) => v?.toLocaleString() ?? "\u2014" },
-    { title: "Cost", dataIndex: "cost", key: "cost", render: (v: number) => v != null ? `$${v.toFixed(4)}` : "\u2014" }
+    { title: "Cost", dataIndex: "cost", key: "cost", render: (v: number) => v != null ? formatUsd(v) : "\u2014" }
   ]
 
   const topSpenderColumns = [
     { title: "User", dataIndex: "username", key: "username" },
     { title: "Total Tokens", dataIndex: "total_tokens", key: "total_tokens", render: (v: number) => v?.toLocaleString() ?? "\u2014" },
-    { title: "Total Cost", dataIndex: "total_cost", key: "total_cost", render: (v: number) => v != null ? `$${v.toFixed(4)}` : "\u2014" }
+    { title: "Total Cost", dataIndex: "total_cost", key: "total_cost", render: (v: number) => v != null ? formatUsd(v) : "\u2014" }
   ]
 
   const providerColumns = [
@@ -341,9 +349,7 @@ const UsageAnalyticsPage: React.FC = () => {
             />
             <Statistic
               title="Total Cost"
-              prefix="$"
-              value={llmSummary.total_cost ?? llmSummary.totalCost ?? 0}
-              precision={4}
+              value={formatUsd(llmSummary.total_cost ?? llmSummary.totalCost ?? 0)}
               loading={llmSummaryLoading}
             />
           </Space>

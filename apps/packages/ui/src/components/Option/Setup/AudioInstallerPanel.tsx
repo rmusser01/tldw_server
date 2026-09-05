@@ -121,7 +121,9 @@ export const AudioInstallerPanel: React.FC = () => {
           />
         )}
 
-        <Descriptions size="small" column={2}>
+        {/* One column on phones: two squeezed columns wrapped values one
+            character per line at 390px (2026-09 UX audit finding S10). */}
+        <Descriptions size="small" column={{ xs: 1, sm: 2 }}>
           <Descriptions.Item
             label={t("settings:audioInstaller.machineProfile", "Machine profile")}
           >

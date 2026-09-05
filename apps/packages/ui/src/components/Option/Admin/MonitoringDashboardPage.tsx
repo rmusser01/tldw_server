@@ -57,7 +57,7 @@ function formatStatValue(value: unknown): React.ReactNode {
       <dl style={{ margin: 0 }}>
         {entries.map(([k, v]) => (
           <div key={k} style={{ display: "flex", gap: 8, fontSize: 12, lineHeight: 1.6 }}>
-            <dt style={{ color: "#666", minWidth: 100 }}>{k}:</dt>
+            <dt style={{ color: "#666", minWidth: 100 }}>{formatStatKey(k)}:</dt>
             <dd style={{ margin: 0 }}>{formatStatValue(v)}</dd>
           </div>
         ))}
@@ -67,11 +67,36 @@ function formatStatValue(value: unknown): React.ReactNode {
   return String(value)
 }
 
-/** Make a stat key more human-readable */
+const STAT_KEY_ACRONYMS: Record<string, string> = {
+  kb: "KB",
+  mb: "MB",
+  gb: "GB",
+  tb: "TB",
+  cpu: "CPU",
+  gpu: "GPU",
+  mcp: "MCP",
+  acp: "ACP",
+  llm: "LLM",
+  api: "API",
+  id: "ID",
+  url: "URL",
+  pct: "%"
+}
+
+/** Make a stat key human-readable: total_used_mb -> "Total Used MB",
+ * mcp_invocations_today -> "MCP Invocations Today", new_last_30d -> "New (last 30 days)". */
 function formatStatKey(key: string): string {
   return key
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .split("_")
+    .map(
+      (part) =>
+        STAT_KEY_ACRONYMS[part.toLowerCase()] ??
+        part.charAt(0).toUpperCase() + part.slice(1)
+    )
+    .join(" ")
+    .replace(/\bLast 30d\b/i, "(last 30 days)")
+    .replace(/\bLast 7d\b/i, "(last 7 days)")
+    .replace(/\bLast 24h\b/i, "(last 24 hours)")
 }
 
 function formatRuntimeCode(value: string | null | undefined): string {
@@ -161,6 +186,7 @@ const MonitoringDashboardPage: React.FC = () => {
   const [sandboxDiagnostics, setSandboxDiagnostics] = useState<SandboxAdminRuntimeDiagnosticsResponse | null>(null)
   const [sandboxDiagnosticsLoading, setSandboxDiagnosticsLoading] = useState(false)
   const [sandboxDiagnosticsError, setSandboxDiagnosticsError] = useState<SandboxDiagnosticsErrorState | null>(null)
+  const [sandboxDiagnosticsMissing, setSandboxDiagnosticsMissing] = useState(false)
 
   // Alert rules state
   const [alertRules, setAlertRules] = useState<AlertRuleRow[]>([])
@@ -220,10 +246,13 @@ const MonitoringDashboardPage: React.FC = () => {
       const diagnostics = await tldwClient.getSandboxRuntimeDiagnostics()
       setSandboxDiagnostics(diagnostics)
       setSandboxDiagnosticsError(null)
+      setSandboxDiagnosticsMissing(false)
     } catch (err: unknown) {
       const guardState = deriveAdminGuardFromError(err)
       const isForbidden = guardState === "forbidden"
+      const isMissing = guardState === "notFound"
       setSandboxDiagnostics(null)
+      setSandboxDiagnosticsMissing(isMissing)
       setSandboxDiagnosticsError(
         buildCapabilityState({
           featureName: "Sandbox diagnostics",
@@ -233,10 +262,14 @@ const MonitoringDashboardPage: React.FC = () => {
           error: err,
           title: isForbidden
             ? "Sandbox diagnostics access denied"
-            : "Sandbox diagnostics unavailable",
+            : isMissing
+              ? "Sandbox diagnostics not available on this server"
+              : "Sandbox diagnostics unavailable",
           message: isForbidden
             ? "You don't have permission to view sandbox runtime diagnostics."
-            : "Sandbox runtime diagnostics are not available."
+            : isMissing
+              ? "This server does not expose the sandbox runtime diagnostics API. This is expected when the sandbox module is not enabled."
+              : "Sandbox runtime diagnostics are not available."
         })
       )
     } finally {
@@ -655,10 +688,16 @@ const MonitoringDashboardPage: React.FC = () => {
               message={sandboxDiagnosticsError.message}
               diagnostics={sandboxDiagnosticsError.diagnostics}
               role="alert"
-              primaryAction={{
-                label: "Retry diagnostics",
-                onClick: () => void loadSandboxDiagnostics()
-              }}
+              primaryAction={
+                // Retrying a missing endpoint can never succeed — offer the
+                // action only for transient failures (2026-09 audit S9).
+                sandboxDiagnosticsMissing
+                  ? undefined
+                  : {
+                      label: "Retry diagnostics",
+                      onClick: () => void loadSandboxDiagnostics()
+                    }
+              }
             />
           )}
           {sandboxDiagnostics?.summary && (

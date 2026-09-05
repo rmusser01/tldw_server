@@ -216,28 +216,42 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
     }
   })
 
+  // A 4xx (endpoint missing, forbidden) will not change on retry; hammering
+  // an absent workspace API produced 12 404s per page load (audit finding S9).
+  const retryUnlessClientError = (failureCount: number, error: unknown) => {
+    const status = getCapabilityErrorStatus(error)
+    if (typeof status === "number" && status >= 400 && status < 500) {
+      return false
+    }
+    return failureCount < 3
+  }
+
   const slackPolicyQuery = useQuery({
     queryKey: buildIntegrationQueryKey("workspace", activeOrgId, "slack-policy"),
     queryFn: getWorkspaceSlackPolicy,
-    enabled: scope === "workspace"
+    enabled: scope === "workspace",
+    retry: retryUnlessClientError
   })
 
   const discordPolicyQuery = useQuery({
     queryKey: buildIntegrationQueryKey("workspace", activeOrgId, "discord-policy"),
     queryFn: getWorkspaceDiscordPolicy,
-    enabled: scope === "workspace"
+    enabled: scope === "workspace",
+    retry: retryUnlessClientError
   })
 
   const telegramBotQuery = useQuery({
     queryKey: buildIntegrationQueryKey("workspace", activeOrgId, "telegram-bot"),
     queryFn: getWorkspaceTelegramBot,
-    enabled: scope === "workspace"
+    enabled: scope === "workspace",
+    retry: retryUnlessClientError
   })
 
   const telegramActorsQuery = useQuery({
     queryKey: buildIntegrationQueryKey("workspace", activeOrgId, "telegram-linked-actors"),
     queryFn: listWorkspaceTelegramLinkedActors,
-    enabled: scope === "workspace"
+    enabled: scope === "workspace",
+    retry: retryUnlessClientError
   })
 
   const connectionsByProvider = useMemo(() => {
