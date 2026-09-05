@@ -147,6 +147,7 @@ from .notes_task_readiness import (
     redact_notes_task_server_metadata,
 )
 from .personal_context_ongoing_contract import (
+    PersonalContextActivationReceipt,
     PersonalContextAuthorityMetadata,
     PersonalContextExchangeProof,
     PersonalContextRelayContinuation,
@@ -1390,7 +1391,7 @@ class SyncV2Service:
                 or type(getattr(exchange, "ongoing_sync_version", None)) is not int
             ):
                 raise ValueError("Personal Context activation version is invalid")
-            persisted = PersonalContextExchangeProof.model_validate(
+            stored = PersonalContextExchangeProof.model_validate(
                 {
                     "ongoing_sync_version": state.get("ongoing_sync_version"),
                     "activation_epoch": state.get("activation_epoch"),
@@ -1399,21 +1400,38 @@ class SyncV2Service:
             )
             supplied = PersonalContextExchangeProof.model_validate(
                 {
-                    "ongoing_sync_version": getattr(
-                        exchange, "ongoing_sync_version", None
-                    ),
+                    "ongoing_sync_version": getattr(exchange, "ongoing_sync_version", None),
                     "activation_epoch": getattr(exchange, "activation_epoch", None),
                     "continuity_token": getattr(exchange, "continuity_token", None),
                 }
             )
-            proof_matches = hmac.compare_digest(
-                persisted.activation_epoch.encode("ascii"),
-                supplied.activation_epoch.encode("ascii"),
-            ) and hmac.compare_digest(
-                persisted.continuity_token.encode("ascii"),
-                supplied.continuity_token.encode("ascii"),
+            canonical = self._personal_context_service_for_user(user_id)
+            persisted = canonical._repository.validate_activation_exchange(
+                profile_id=state.get("profile_id"),
+                dataset_id=dataset.dataset_id,
+                device_id=device_id,
+                activation_epoch=supplied.activation_epoch,
+                continuity_token=supplied.continuity_token,
             )
-        except (TypeError, UnicodeError, ValueError):
+            proof_matches = (
+                hmac.compare_digest(
+                    persisted.activation_epoch.encode("ascii"),
+                    supplied.activation_epoch.encode("ascii"),
+                )
+                and hmac.compare_digest(
+                    persisted.continuity_token.encode("ascii"),
+                    supplied.continuity_token.encode("ascii"),
+                )
+                and hmac.compare_digest(
+                    stored.activation_epoch.encode("ascii"),
+                    supplied.activation_epoch.encode("ascii"),
+                )
+                and hmac.compare_digest(
+                    stored.continuity_token.encode("ascii"),
+                    supplied.continuity_token.encode("ascii"),
+                )
+            )
+        except (AttributeError, KeyError, RuntimeError, SyncStoreError, TypeError, UnicodeError, ValueError):
             proof_matches = False
         if (
             not isinstance(state, Mapping)
@@ -3652,8 +3670,41 @@ class SyncV2Service:
         required_schema_version: int | None = None,
         required_quotas: Mapping[str, int] | None = None,
         expected_purge_generation: int | None = None,
+        ongoing_sync_version: int | None = None,
     ) -> PersonalContextBootstrap:
-        """Return an authenticated device's canonical first-link snapshot."""
+        """Dispatch first linking or activation under the current rollout gate.
+
+        Args:
+            user_id: Authenticated owner of the profile and registered device.
+            device_id: Device requesting the baseline.
+            required_schema_version: Optional client schema requirement.
+            required_quotas: Optional client quota requirements.
+            expected_purge_generation: Optional generation the client expects.
+            ongoing_sync_version: None or zero for first linking; one for activation.
+
+        Returns:
+            The canonical snapshot and its protected device delivery metadata.
+
+        Raises:
+            SyncStoreError: The requested ongoing version is unavailable or
+                activation cannot establish valid continuity.
+            PersonalContextBootstrapError: Device, schema, quota, generation,
+                custody, or snapshot requirements cannot be satisfied.
+        """
+
+        if ongoing_sync_version not in (None, 0):
+            if (
+                ongoing_sync_version != 1
+                or self.capabilities(user_id=user_id).personal_context.ongoing_sync_version != 1
+            ):
+                raise SyncStoreError("personal_context_ongoing_sync_unavailable")
+            return self.prepare_personal_context_activation(
+                user_id=user_id,
+                device_id=device_id,
+                required_schema_version=required_schema_version,
+                required_quotas=required_quotas,
+                expected_purge_generation=expected_purge_generation,
+            )
 
         return self._profile_manager().bootstrap_personal_context(
             user_id=user_id,
@@ -3663,6 +3714,72 @@ class SyncV2Service:
             required_quotas=required_quotas,
             expected_purge_generation=expected_purge_generation,
         )
+
+    def prepare_personal_context_activation(
+        self,
+        *,
+        user_id: str,
+        device_id: str,
+        required_schema_version: int | None = None,
+        required_quotas: Mapping[str, int] | None = None,
+        expected_purge_generation: int | None = None,
+    ) -> PersonalContextBootstrap:
+        """Install a canonical activation baseline through protected Sync storage."""
+
+        from tldw_Server_API.app.core.exceptions import PersonalContextActivationError
+
+        from .personal_context_activation import prepare_activation
+
+        try:
+            return prepare_activation(
+                self,
+                user_id=user_id,
+                device_id=device_id,
+                required_schema_version=required_schema_version,
+                required_quotas=required_quotas,
+                expected_purge_generation=expected_purge_generation,
+            )
+        except PersonalContextActivationError as exc:
+            raise SyncStoreError("personal_context_activation_required") from exc
+        except (ValueError, RuntimeError) as exc:
+            if isinstance(exc, SyncStoreError):
+                raise
+            raise SyncStoreError("personal_context_activation_required") from exc
+
+    def acknowledge_personal_context_activation(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str,
+        activation_id: str,
+        baseline_digest: str,
+        local_receipt_id: str,
+        exchange: PersonalContextExchangeProof,
+    ) -> tuple[PersonalContextActivationReceipt, PersonalContextExchangeProof]:
+        """Record an exact device acknowledgment across both durable journals."""
+
+        from tldw_Server_API.app.core.exceptions import PersonalContextActivationError
+
+        from .personal_context_activation import acknowledge_activation
+
+        try:
+            return acknowledge_activation(
+                self,
+                user_id=user_id,
+                dataset_id=dataset_id,
+                device_id=device_id,
+                activation_id=activation_id,
+                baseline_digest=baseline_digest,
+                local_receipt_id=local_receipt_id,
+                exchange=exchange,
+            )
+        except PersonalContextActivationError as exc:
+            raise SyncStoreError("personal_context_activation_required") from exc
+        except (ValueError, RuntimeError) as exc:
+            if isinstance(exc, SyncStoreError):
+                raise
+            raise SyncStoreError("personal_context_activation_required") from exc
 
     def complete_personal_context_link(
         self,

@@ -80,6 +80,14 @@ class AuthorityHarness:
             id_factory=next_id,
         )
         self.manifest = self.canonical.create_profile()
+        # These tests intentionally retain unacknowledged source publications.
+        # Isolate activation authorization instead of covering their test subjects;
+        # the activation integration suite verifies real cross-store receipts.
+        monkeypatch.setattr(
+            self.canonical._repository,
+            "validate_activation_exchange",
+            self.validate_activation_exchange,
+        )
         key_id, integrity_key = self.canonical.sync_integrity_key(
             self.manifest.profile_id
         )
@@ -121,6 +129,32 @@ class AuthorityHarness:
             )
         )
         self.publications = PersonalContextPublicationRelayStore(self.personal_db)
+
+    def validate_activation_exchange(
+        self,
+        *,
+        profile_id: str,
+        device_id: str,
+        dataset_id: str,
+        activation_epoch: str,
+        continuity_token: str,
+    ) -> PersonalContextExchangeProof:
+        """Authenticate this fixture's fixed proof independently of Sync metadata."""
+        proof = PersonalContextExchangeProof(
+            ongoing_sync_version=1,
+            activation_epoch=activation_epoch,
+            continuity_token=continuity_token,
+        )
+        if (
+            profile_id != self.manifest.profile_id
+            or device_id != "device-a"
+            or dataset_id != "dataset-a"
+            or proof.activation_epoch != "epoch_0123456789abcdef"
+            or proof.continuity_token != "continuity_0123456789abcdef"
+        ):
+            raise ValueError("personal_context_activation_required")
+        return proof
+
     @contextmanager
     def claimed_row(self) -> Iterator[PublicationSourceRow]:
         with self.publications.profile_lease(self.manifest.profile_id) as lease:

@@ -4,7 +4,9 @@ import base64
 import hashlib
 import hmac
 import json
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -73,6 +75,42 @@ from tldw_Server_API.tests.Personalization.personal_context_test_support import 
 pytestmark = pytest.mark.unit
 
 
+@pytest.mark.parametrize("requested", [None, 0, 1, 2])
+@pytest.mark.parametrize("advertised", [0, 1])
+def test_personal_context_core_dispatch_enforces_rollout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, requested: int | None, advertised: int
+) -> None:
+    service = _build_service(tmp_path)
+    capabilities = service.capabilities(user_id="dispatch-user")
+    capabilities = replace(
+        capabilities,
+        personal_context=replace(capabilities.personal_context, ongoing_sync_version=advertised),
+    )
+    monkeypatch.setattr(service, "capabilities", lambda **_kwargs: capabilities)
+    calls: list[str] = []
+
+    def first_link(**_kwargs: Any) -> None:
+        calls.append("first-link")
+
+    def activation(**_kwargs: Any) -> None:
+        calls.append("activation")
+
+    monkeypatch.setattr(
+        service, "_profile_manager", lambda: SimpleNamespace(bootstrap_personal_context=first_link)
+    )
+    monkeypatch.setattr(service, "prepare_personal_context_activation", activation)
+    arguments = {
+        "user_id": "dispatch-user", "device_id": "dispatch-device", "ongoing_sync_version": requested
+    }
+    if requested == 2 or (requested == 1 and advertised == 0):
+        with pytest.raises(SyncStoreError, match="personal_context_ongoing_sync_unavailable"):
+            service.bootstrap_personal_context(**arguments)
+        assert calls == []
+    else:
+        service.bootstrap_personal_context(**arguments)
+        assert calls == ["activation" if requested == 1 else "first-link"]
+
+
 def _clock() -> str:
     return "2026-05-23T18:12:00+00:00"
 
@@ -97,17 +135,24 @@ def _seed_persisted_personal_context_exchange(
     service: SyncV2Service,
     dataset_id: str,
 ) -> dict[str, object]:
-    """Seed the future activation owner state without exposing an HTTP route."""
+    """Install real canonical receipts before enabling the test-only exchange gate."""
+
+    baseline = service.prepare_personal_context_activation(user_id="101", device_id="pc-device")
+    _receipt, installed_proof = service.acknowledge_personal_context_activation(
+        user_id="101",
+        dataset_id=dataset_id,
+        device_id="pc-device",
+        activation_id=baseline.activation.activation_id,
+        baseline_digest=baseline.activation.baseline_digest,
+        local_receipt_id="endpoint-local-install-0123456789",
+        exchange=baseline.personal_context_exchange,
+    )
 
     dataset = service.store.get_dataset(dataset_id)
     assert dataset is not None
     metadata = dict(dataset.metadata)
     state = dict(metadata["personal_context"])
-    proof: dict[str, object] = {
-        "ongoing_sync_version": 1,
-        "activation_epoch": "epoch_0123456789abcdef",
-        "continuity_token": "continuity_0123456789abcdef",
-    }
+    proof = installed_proof.model_dump(mode="json")
     state.update(proof)
     metadata["personal_context"] = state
     with service.store.db.backend.transaction() as connection:

@@ -200,8 +200,32 @@ class PersonalContextError(RuntimeError):
     """Base error for canonical Personal Context operations."""
 
 
+class PersonalContextActivationError(PersonalContextError, ValueError):
+    """Base activation failure retaining compatibility with ValueError callers."""
+
+
+class PersonalContextActivationInputError(PersonalContextActivationError):
+    """Activation input or installation receipt fields are invalid."""
+
+
+class PersonalContextActivationPendingError(PersonalContextActivationError):
+    """Existing activation or publication work must finish before preparation."""
+
+
+class PersonalContextActivationMissingError(PersonalContextActivationError):
+    """The requested activation or current device acknowledgment is absent."""
+
+
+class PersonalContextActivationStaleError(PersonalContextActivationError):
+    """Activation lease, generation, digest, receipt or continuity is no longer valid."""
+
+
 class PublicationRelayPoisoned(PersonalContextError):
     """Content-free durable attention state for the earliest corrupt batch."""
+
+
+class PublicationActivationPending(PersonalContextError):
+    """A live prepared baseline temporarily fences ordinary publication relay."""
 
 
 class PersonalContextAuthoritySourceError(PersonalContextError):

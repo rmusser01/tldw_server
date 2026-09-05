@@ -35,6 +35,7 @@ from .notes_moodboard_studio_readiness import (
     parse_notes_moodboard_studio_readiness_record,
 )
 from .notes_task_readiness import parse_notes_task_readiness_record
+from .personal_context_ongoing_contract import PersonalContextActivationReceipt, PersonalContextExchangeProof
 from .store import SyncV2Store
 
 SYNC_V2_M1_PROTOCOL_VERSION = "sync-v2-m1"
@@ -87,6 +88,8 @@ class PersonalContextBootstrap:
     sync_transport_cursor: str
     integrity_key: PersonalContextBootstrapIntegrityKey
     link_state: str
+    activation: PersonalContextActivationReceipt | None = None
+    personal_context_exchange: PersonalContextExchangeProof | None = None
 
 
 @dataclass(frozen=True, slots=True)

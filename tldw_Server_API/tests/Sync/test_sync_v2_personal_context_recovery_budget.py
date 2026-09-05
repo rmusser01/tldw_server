@@ -1371,7 +1371,8 @@ class _ManyBatchSource:
         self.expire_after_selection = expire_after_selection
 
     @contextmanager
-    def profile_lease(self, _profile_id: str):
+    def profile_lease(self, _profile_id: str, *, blocking=True):
+        assert blocking is False
         yield SimpleNamespace(owner_token="owner")
 
     def earliest_nonterminal_batch(

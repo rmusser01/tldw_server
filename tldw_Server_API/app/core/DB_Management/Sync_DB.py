@@ -380,6 +380,30 @@ CREATE TABLE IF NOT EXISTS sync_personal_context_link_receipts (
     PRIMARY KEY (user_id, dataset_id, device_id)
 );
 
+CREATE TABLE IF NOT EXISTS sync_personal_context_activations (
+    activation_id TEXT PRIMARY KEY,
+    dataset_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    profile_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    baseline_digest TEXT NOT NULL,
+    purge_generation BIGINT NOT NULL,
+    publication_watermark BIGINT NOT NULL,
+    home_server_cursor BIGINT NOT NULL,
+    receipt_id TEXT NOT NULL,
+    envelopes_json TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sync_personal_context_activation_profile
+    ON sync_personal_context_activations(user_id, profile_id);
+CREATE TABLE IF NOT EXISTS sync_personal_context_activation_acks (
+    activation_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    local_receipt_id TEXT NOT NULL,
+    receipt_id TEXT NOT NULL,
+    PRIMARY KEY (activation_id, device_id)
+);
+
 CREATE TABLE IF NOT EXISTS sync_domain_state (
     dataset_id TEXT NOT NULL,
     domain TEXT NOT NULL,
@@ -989,6 +1013,30 @@ CREATE TABLE IF NOT EXISTS sync_personal_context_link_receipts (
     purge_generation INTEGER NOT NULL,
     bootstrap_cursor TEXT NOT NULL,
     PRIMARY KEY (user_id, dataset_id, device_id)
+);
+
+CREATE TABLE IF NOT EXISTS sync_personal_context_activations (
+    activation_id TEXT PRIMARY KEY,
+    dataset_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    profile_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    baseline_digest TEXT NOT NULL,
+    purge_generation BIGINT NOT NULL,
+    publication_watermark BIGINT NOT NULL,
+    home_server_cursor BIGINT NOT NULL,
+    receipt_id TEXT NOT NULL,
+    envelopes_json TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sync_personal_context_activation_profile
+    ON sync_personal_context_activations(user_id, profile_id);
+CREATE TABLE IF NOT EXISTS sync_personal_context_activation_acks (
+    activation_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    local_receipt_id TEXT NOT NULL,
+    receipt_id TEXT NOT NULL,
+    PRIMARY KEY (activation_id, device_id)
 );
 
 CREATE TABLE IF NOT EXISTS sync_domain_state (
@@ -3955,6 +4003,183 @@ class SyncDatabase:
                 ),
                 connection=connection,
             )
+
+    def mirror_personal_context_activation(
+        self,
+        *,
+        dataset_id: str,
+        user_id: str,
+        profile_id: str,
+        purge_generation: int,
+        activation_epoch: str,
+        continuity_token: str,
+        connection: Any,
+    ) -> None:
+        """Mirror installed canonical continuity without enabling the rollout gate."""
+
+        if connection is None:
+            raise SyncStoreError("personal_context_activation_guard_required")
+        row = self._require_dataset_owner_for_update(dataset_id, user_id, connection=connection)
+        metadata = decode_json(row.get("metadata_json"), default={})
+        state = metadata.get("personal_context")
+        if not isinstance(state, dict) or any(
+            state.get(key) != value
+            for key, value in {
+                "profile_id": profile_id,
+                "purge_generation": purge_generation,
+                "link_state": "complete",
+            }.items()
+        ):
+            raise SyncStoreError("personal_context_activation_required")
+        state.update(activation_epoch=activation_epoch, continuity_token=continuity_token)
+        changed = self.execute(
+            """UPDATE sync_datasets SET metadata_json = ?, updated_at = ?
+               WHERE dataset_id = ? AND owner_user_id = ? AND metadata_json = ?""",
+            (encode_json(metadata, default={}), utcnow_iso(), dataset_id, user_id, row["metadata_json"]),
+            connection=connection,
+        )
+        if changed.rowcount != 1:
+            raise SyncStoreError("personal_context_activation_required")
+
+    def get_personal_context_activation(
+        self,
+        activation_id: str,
+        *,
+        connection: Any | None = None,
+    ) -> dict[str, Any] | None:
+        """Read one immutable encrypted baseline and its installation receipt."""
+
+        return _first(
+            self.execute(
+                "SELECT * FROM sync_personal_context_activations WHERE activation_id = ?",
+                (activation_id,),
+                connection=connection,
+            )
+        )
+
+    def install_personal_context_activation(
+        self,
+        *,
+        activation_id: str,
+        dataset_id: str,
+        user_id: str,
+        profile_id: str,
+        device_id: str,
+        baseline_digest: str,
+        purge_generation: int,
+        publication_watermark: int,
+        home_server_cursor: int,
+        receipt_id: str,
+        envelopes_json: str,
+        expires_at: str,
+        connection: Any,
+    ) -> dict[str, Any]:
+        """Install once under the caller's Sync and canonical source guards.
+
+        The application verifies encrypted envelope identity and canonical custody;
+        this boundary rejects every changed replay instead of replacing ciphertext.
+        """
+
+        if connection is None:
+            raise SyncStoreError("personal_context_activation_guard_required")
+        desired = {
+            "activation_id": activation_id,
+            "dataset_id": dataset_id,
+            "user_id": user_id,
+            "profile_id": profile_id,
+            "device_id": device_id,
+            "baseline_digest": baseline_digest,
+            "purge_generation": purge_generation,
+            "publication_watermark": publication_watermark,
+            "home_server_cursor": home_server_cursor,
+            "receipt_id": receipt_id,
+            "envelopes_json": envelopes_json,
+            "expires_at": expires_at,
+        }
+        self.execute(
+            """INSERT INTO sync_personal_context_activations
+               (activation_id, dataset_id, user_id, profile_id, device_id, baseline_digest,
+                purge_generation, publication_watermark, home_server_cursor, receipt_id,
+                envelopes_json, expires_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(activation_id) DO NOTHING""",
+            tuple(desired.values()),
+            connection=connection,
+        )
+        stored = self.get_personal_context_activation(activation_id, connection=connection)
+        if stored is None or any(stored.get(key) != value for key, value in desired.items()):
+            raise SyncStoreError("personal_context_activation_receipt_mismatch")
+        return stored
+
+    def acknowledge_personal_context_activation(
+        self,
+        *,
+        activation_id: str,
+        dataset_id: str,
+        user_id: str,
+        device_id: str,
+        baseline_digest: str,
+        local_receipt_id: str,
+        connection: Any,
+    ) -> dict[str, Any]:
+        """Persist an exact device install acknowledgment without mutable replay."""
+
+        if connection is None:
+            raise SyncStoreError("personal_context_activation_guard_required")
+        activation = self.get_personal_context_activation(activation_id, connection=connection)
+        if activation is None or any(
+            activation.get(key) != value
+            for key, value in {
+                "dataset_id": dataset_id,
+                "user_id": user_id,
+                "device_id": device_id,
+                "baseline_digest": baseline_digest,
+            }.items()
+        ):
+            raise SyncStoreError("personal_context_activation_receipt_mismatch")
+        receipt_id = hashlib.sha256(
+            encode_json(
+                [activation_id, dataset_id, user_id, device_id, baseline_digest, local_receipt_id],
+                default=[],
+            ).encode()
+        ).hexdigest()
+        self.execute(
+            """INSERT INTO sync_personal_context_activation_acks
+               (activation_id, device_id, local_receipt_id, receipt_id)
+               VALUES (?, ?, ?, ?) ON CONFLICT(activation_id, device_id) DO NOTHING""",
+            (activation_id, device_id, local_receipt_id, receipt_id),
+            connection=connection,
+        )
+        stored = self.get_personal_context_activation_ack(
+            activation_id,
+            device_id,
+            connection=connection,
+        )
+        if (
+            stored is None
+            or stored.get("local_receipt_id") != local_receipt_id
+            or stored.get("receipt_id") != receipt_id
+        ):
+            raise SyncStoreError("personal_context_activation_receipt_mismatch")
+        return stored
+
+    def get_personal_context_activation_ack(
+        self,
+        activation_id: str,
+        device_id: str,
+        *,
+        connection: Any | None = None,
+    ) -> dict[str, Any] | None:
+        """Read the content-free acknowledgment retained for an ordinary device."""
+
+        return _first(
+            self.execute(
+                """SELECT * FROM sync_personal_context_activation_acks
+               WHERE activation_id = ? AND device_id = ?""",
+                (activation_id, device_id),
+                connection=connection,
+            )
+        )
 
     def has_personal_context_link_receipt(
         self,
@@ -8803,6 +9028,24 @@ class SyncDatabase:
             ):
                 raise SyncStoreError("Personal Context cleanup generation is invalid")
 
+            self.execute(
+                """DELETE FROM sync_personal_context_activation_acks
+                   WHERE activation_id IN (
+                     SELECT activation_id FROM sync_personal_context_activations
+                      WHERE dataset_id = ? AND user_id = ? AND profile_id = ?
+                        AND purge_generation <= ?
+                   )""",
+                (dataset_id, user_id, profile_id, old_generation_through),
+                connection=transaction,
+            )
+            self.execute(
+                """DELETE FROM sync_personal_context_activations
+                   WHERE dataset_id = ? AND user_id = ? AND profile_id = ?
+                     AND purge_generation <= ?""",
+                (dataset_id, user_id, profile_id, old_generation_through),
+                connection=transaction,
+            )
+
             candidate_rows = self.execute(
                 f"""
                 SELECT server_sequence, domain, entity_id, client_envelope_id,
@@ -9299,7 +9542,7 @@ class SyncDatabase:
                 UPDATE sync_envelopes
                    SET apply_status = 'applied', apply_error_code = NULL,
                        apply_error_message = NULL, applied_at = ?
-                 WHERE server_sequence = ? AND apply_status IN ('pending', 'applied')
+                 WHERE server_sequence = ? AND apply_status IN ('pending', 'failed', 'applied')
                 """,
                 (utcnow_iso(), server_cursor),
                 connection=conn,

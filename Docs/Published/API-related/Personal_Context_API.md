@@ -130,11 +130,35 @@ The transport can validate and materialize inbound Chatbook-originated
 ongoing client lifecycle. The current products do not provide a dedicated
 Personal Context queue/status or post-link conflict-resolution surface.
 
-REST edits are not published to linked clients. They change the server copy
-without appending a Personal Context Sync entry, so post-link edits can make the
-peers diverge in either direction.
+Eligible REST mutations now append encrypted publication batches in the same
+canonical transaction. A bounded server relay installs those batches in Sync;
+interrupted publication remains retryable. This does not make the currently
+shipped Chatbook drain its ongoing queue.
 
-Server purge does not publish the protocol purge envelope and remains pending because acknowledgement completion is absent.
+Server purge journals its generation barrier, but remains pending because the
+cross-device acknowledgement-completion lifecycle is not yet enabled.
+
+### Ongoing activation (not yet enabled)
+
+The server still advertises `ongoing_sync_version: 0`. Explicit version-one
+bootstrap and activation-acknowledgement requests return HTTP 409 with
+`personal_context_ongoing_sync_unavailable`; existing first linking is unchanged.
+The implementation is preparation for the separate ongoing-sync rollout, not a
+setting clients should bypass.
+
+Once enabled, a previously completed link requests version-one bootstrap through
+`POST /api/v1/sync/personal-context/bootstrap`. Its response pins one exact
+eligible baseline, activation ID/digest, purge generation, publication watermark,
+transport checkpoint, and continuity proof. The device must durably install that
+baseline before sending the exact ID/digest and its local installation receipt to
+`POST /api/v1/sync/personal-context/activation/acknowledge`.
+
+Push, pull, conflict listing, and conflict resolution require both the current
+canonical continuity proof and this device's durable acknowledgement. Copying
+another device's proof or changing Sync metadata cannot activate a device.
+Retries reuse exact receipts. Delivery baselines expire after 30 days; obtain a
+fresh baseline rather than acknowledging an expired one. Capability downgrade
+preserves stored work and acknowledgements while blocking version-one exchanges.
 
 ## Transport deployment boundary
 

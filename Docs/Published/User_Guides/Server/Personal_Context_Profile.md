@@ -99,8 +99,9 @@ reference](../../API-related/Personal_Context_API.md).
 8. Do not rely on the link for later changes. Chatbook creates encrypted local
    outbox entries for later syncable mutations, but the shipped app has no
    ongoing Personal Context sync caller. **Overview → Manual Sync** covers Notes
-   and Chat only. Ordinary server REST edits likewise remain server-local because
-   they are not published into the Personal Context Sync log.
+   and Chat only. The server now journals eligible REST edits and retries their
+   publication, but the client must support the separate ongoing-sync rollout
+   before later changes can converge automatically.
 
 ## What is shared
 
@@ -114,7 +115,7 @@ reference](../../API-related/Personal_Context_API.md).
 | Published during successful reviewed first linking when eligible | Not published by the shipped ongoing application lifecycle |
 | --- | --- |
 | Canonical manifest in the snapshot resulting from the user-approved content-free reconciliation plan | Later syncable Chatbook mutations: encrypted outbox entries are created but no shipped ongoing Personal Context caller sends them |
-| Required global and linked-workspace scopes in that snapshot | Ordinary server REST mutations: the server copy changes but no Personal Context Sync entry publishes them to Chatbook |
+| Required global and linked-workspace scopes in that snapshot | Later server edits: server publication exists, but automatic delivery to the current Chatbook is not enabled |
 | Eligible record heads, tombstones, and proposal review state selected by reconciliation, including approved interview answer content after it becomes a canonical record payload | Device-only or non-syncable records |
 | Exact canonical object identities, versions, and bytes for those eligible objects | Runtime agent authority grants, tool availability, local workspace mappings, and enablement |
 | — | Peer-local at-rest encryption/recovery keys, local undo data, caches, ciphertext, database row identities, conflict-review metadata, acknowledgement tracking, and other operational state |
@@ -122,7 +123,11 @@ reference](../../API-related/Personal_Context_API.md).
 
 The home server wraps its Sync integrity key for authenticated registered Chatbook devices; this is not at-rest key sharing.
 
-Ordinary server REST record/proposal mutations are not currently published to linked Chatbook clients.
+The server still advertises ongoing Personal Context sync version zero. Do not
+change Sync metadata to force activation: each device needs a verified baseline
+and its own durable acknowledgement. This preparation does not add a new user
+action yet. Existing first linking and local editing remain available; keep local
+queued changes until the ongoing client workflow is released.
 
 The versioned [Shared Core
 contract](https://github.com/rmusser01/tldw_server/tree/dev/packages/tldw_profile_core)
@@ -192,7 +197,7 @@ check, so not every rejected request returns `profile_purge_pending`.
 
 The `personal_context.purge` protocol domain exists.
 
-The server purge endpoint does not publish the protocol purge envelope, and acknowledgement completion is not wired.
+The server journals the purge barrier, but cross-device acknowledgement completion is not wired.
 Reconnecting devices does not currently clear `purge_pending`, and the current
 server has no completion path for that state.
 

@@ -9,7 +9,8 @@ import secrets
 import sqlite3
 import time
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, TypeVar
@@ -32,6 +33,12 @@ from tldw_Server_API.app.core.DB_Management.Personal_Context_Key_Store import (
     ServerProfileKeyProvider,
 )
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
+from tldw_Server_API.app.core.exceptions import (
+    PersonalContextActivationInputError,
+    PersonalContextActivationMissingError,
+    PersonalContextActivationPendingError,
+    PersonalContextActivationStaleError,
+)
 from tldw_Server_API.app.core.Personalization.personal_context_crypto import (
     EncryptedEnvelope,
     EnvelopeAuthenticationError,
@@ -43,9 +50,11 @@ from tldw_Server_API.app.core.Personalization.personal_context_publication impor
     PersonalContextPublicationJournal,
     PublicationBatchReceipt,
     PublicationObject,
+    PublicationRelayLease,
 )
 from tldw_Server_API.app.core.Personalization.personal_context_repository_models import (
     ConcurrentProfileUpdateError,
+    PreparedPersonalContextActivation,
     ProfileAlreadyExistsError,
     ProfileIntegrityError,
     ProfileKeyMaterial,
@@ -53,6 +62,9 @@ from tldw_Server_API.app.core.Personalization.personal_context_repository_models
     ProfileSemanticKeyCollisionError,
     ProfileStorageLockedError,
     ProfileUnsupportedSchemaError,
+)
+from tldw_Server_API.app.core.Sync.v2.personal_context_ongoing_contract import (
+    PersonalContextExchangeProof,
 )
 
 _ModelT = TypeVar("_ModelT", bound=BaseModel)
@@ -66,6 +78,7 @@ _SYNC_HISTORY_KEY_LABEL = b"tldw-personal-context-sync-history-v1"
 _DIRECT_CONFIRMED_FULL_PROFILE_PURGE = object()
 _DIRECT_PURGE_CLEANUP_ORIGIN = "direct_confirmed_full_profile_purge"
 _DIRECT_PURGE_CLAIM_SECONDS = 60
+_ACTIVATION_LEASE_SECONDS = 60
 _VERIFIED_DIRECT_PURGE_EXECUTION = object()
 _DIRECT_PURGE_CAPABILITY_SIGNING_KEY = secrets.token_bytes(32)
 
@@ -1359,6 +1372,567 @@ class PersonalContextRepository:
                 journal.transition_row_state(connection, row, row_state="staged")
             return len(superseded)
 
+    @staticmethod
+    def _activation_aad(row: Mapping[str, Any] | sqlite3.Row) -> bytes:
+        """Bind an encrypted baseline to its immutable journal identity."""
+        return canonical_json_bytes(
+            {
+                "purpose": "personal-context-activation-v1",
+                **{
+                    name: row[name]
+                    for name in (
+                        "profile_id",
+                        "device_id",
+                        "activation_id",
+                        "baseline_digest",
+                        "purge_generation",
+                        "publication_watermark",
+                    )
+                },
+            }
+        )
+
+    @staticmethod
+    def _require_activation_lease(
+        connection: sqlite3.Connection,
+        profile_id: str,
+        lease: PublicationRelayLease | None,
+    ) -> None:
+        """Fence activation with the current owner and bound its larger snapshot work."""
+        if (
+            lease is None
+            or lease.profile_id != profile_id
+            or connection.execute(
+                """SELECT 1 FROM personal_context_publication_relay_leases
+               WHERE profile_id = ? AND owner_token = ? AND expires_at_ns > ?""",
+                (profile_id, lease.owner_token, time.time_ns()),
+            ).fetchone()
+            is None
+        ):
+            raise PersonalContextActivationStaleError("personal_context_activation_required")
+        connection.execute(
+            """UPDATE personal_context_publication_relay_leases SET expires_at_ns = ?
+               WHERE profile_id = ? AND owner_token = ?""",
+            (time.time_ns() + _ACTIVATION_LEASE_SECONDS * 1_000_000_000, profile_id, lease.owner_token),
+        )
+
+    def _decode_activation(
+        self,
+        connection: sqlite3.Connection,
+        row: sqlite3.Row,
+    ) -> PreparedPersonalContextActivation:
+        """Authenticate an exact journal snapshot before returning plaintext."""
+        if row["state"] == "expired":
+            raise PersonalContextActivationStaleError("personal_context_activation_required")
+        keys = self._keys.load(str(row["profile_id"]), connection=connection)
+        baseline = EnvelopeCipher(keys.encryption_key, key_version=keys.key_version).decrypt(
+            EncryptedEnvelope(
+                **{
+                    name: row[name]
+                    for name in (
+                        "algorithm",
+                        "key_version",
+                        "nonce",
+                        "wrapped_dek",
+                        "wrapped_dek_nonce",
+                        "ciphertext",
+                    )
+                }
+            ),
+            self._activation_aad(row),
+        )
+        if not hmac.compare_digest(hashlib.sha256(baseline).hexdigest(), row["baseline_digest"]):
+            raise ProfileIntegrityError("Personal Context activation integrity failed")
+        return PreparedPersonalContextActivation(
+            **{
+                name: row[name]
+                for name in (
+                    "profile_id",
+                    "device_id",
+                    "activation_id",
+                    "baseline_digest",
+                    "purge_generation",
+                    "publication_watermark",
+                    "state",
+                    "sync_receipt_id",
+                    "home_server_cursor",
+                    "activation_epoch",
+                    "continuity_token",
+                )
+            },
+            baseline=baseline,
+        )
+
+    def load_activation(self, activation_id: str) -> PreparedPersonalContextActivation:
+        """Read and authenticate a durable baseline after a process restart."""
+        with self._database.transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM personal_context_activations WHERE activation_id = ?",
+                (activation_id,),
+            ).fetchone()
+            if row is None:
+                raise PersonalContextActivationMissingError("personal_context_activation_required")
+            return self._decode_activation(connection, row)
+
+    def prepare_activation(
+        self,
+        profile_id: str,
+        *,
+        device_id: str,
+        lease: PublicationRelayLease | None,
+        fresh: bool = False,
+    ) -> PreparedPersonalContextActivation:
+        """Commit one device's exact eligible heads and whole-batch watermark.
+
+        Args:
+            profile_id: Canonical profile to snapshot.
+            device_id: Nonempty device identifier of at most 128 characters.
+            lease: Current publication lease owned by the caller for this profile.
+            fresh: Replace an active baseline; prepared and installed baselines
+                always replay until their installation or acknowledgment finishes.
+
+        Returns:
+            The authenticated durable preparation, including its exact baseline,
+            digest, purge generation and whole-batch publication watermark.
+
+        Raises:
+            PersonalContextActivationInputError: The device identifier is invalid.
+            PersonalContextActivationStaleError: The caller's lease is not current.
+            PersonalContextActivationPendingError: Another preparation or an
+                incomplete publication batch prevents preparing a fresh baseline.
+            ProfileIntegrityError: The encrypted baseline or watermark is invalid.
+            ProfileStorageLockedError: Canonical profile keys are unavailable.
+        """
+        if not device_id or len(device_id) > 128:
+            raise PersonalContextActivationInputError("personal_context_activation_required")
+        with self._database.transaction(immediate=True) as connection:
+            self._require_activation_lease(connection, profile_id, lease)
+            manifest, scopes, records, proposals, _key_id, _key = self.sync_bootstrap_snapshot(
+                profile_id,
+                connection=connection,
+            )
+            row = connection.execute(
+                """SELECT * FROM personal_context_activations
+                   WHERE profile_id = ? AND device_id = ? AND purge_generation = ?
+                   ORDER BY rowid DESC LIMIT 1""",
+                (profile_id, device_id, manifest.purge_generation),
+            ).fetchone()
+            if row is not None and row["state"] != "expired":
+                previous = self._decode_activation(connection, row)
+                if row["state"] == "prepared":
+                    return previous
+                try:
+                    self._activation_current_pair(connection, row)
+                except PersonalContextActivationStaleError:
+                    pass  # A broken continuity proof requires a new exact-head baseline.
+                else:
+                    if row["state"] == "installed" or not fresh:
+                        return previous
+            if (
+                connection.execute(
+                    """SELECT 1 FROM personal_context_activations
+                   WHERE profile_id = ? AND purge_generation = ? AND state = 'prepared' LIMIT 1""",
+                    (profile_id, manifest.purge_generation),
+                ).fetchone()
+                is not None
+            ):
+                raise PersonalContextActivationPendingError("personal_context_activation_pending")
+            if (
+                connection.execute(
+                    """SELECT 1 FROM personal_context_activations a
+                   WHERE a.profile_id = ? AND a.purge_generation = ? AND a.home_server_cursor IS NOT NULL
+                     AND EXISTS (SELECT 1 FROM personal_context_publication_batches b
+                       WHERE b.profile_id = a.profile_id
+                         AND b.status NOT IN ('complete','covered_by_activation','purge_terminal'))
+                   LIMIT 1""",
+                    (profile_id, manifest.purge_generation),
+                ).fetchone()
+                is not None
+            ):
+                raise PersonalContextActivationPendingError("personal_context_activation_pending")
+            profile = connection.execute(
+                "SELECT * FROM personal_context_publication_profiles WHERE profile_id = ?",
+                (profile_id,),
+            ).fetchone()
+            watermark = 0 if profile is None else int(profile["next_sequence"]) - 1
+            if (
+                watermark
+                and connection.execute(
+                    """SELECT 1 FROM personal_context_publication_batches b
+                   WHERE b.profile_id = ? AND b.profile_publication_sequence = ?
+                     AND b.batch_size = (SELECT COUNT(*) FROM personal_context_publication_rows r
+                       WHERE r.profile_id = b.profile_id
+                         AND r.profile_publication_sequence = b.profile_publication_sequence)""",
+                    (profile_id, watermark),
+                ).fetchone()
+                is None
+            ):
+                raise ProfileIntegrityError("Personal Context activation watermark is invalid")
+            baseline = canonical_json_bytes(
+                {
+                    "manifest": manifest.model_dump(mode="json"),
+                    "scopes": [item.model_dump(mode="json") for item in scopes],
+                    "records": [
+                        item.model_dump(mode="json") for item in records if item.controls.sync_mode is SyncMode.SYNCABLE
+                    ],
+                    "proposals": [
+                        item.model_dump(mode="json")
+                        for item in proposals
+                        if item.proposed_record is None or item.proposed_record.controls.sync_mode is SyncMode.SYNCABLE
+                    ],
+                }
+            )
+            identity = {
+                "profile_id": profile_id,
+                "device_id": device_id,
+                "activation_id": str(uuid.uuid4()),
+                "baseline_digest": hashlib.sha256(baseline).hexdigest(),
+                "purge_generation": manifest.purge_generation,
+                "publication_watermark": watermark,
+            }
+            keys = self._keys.load(profile_id, connection=connection)
+            envelope = EnvelopeCipher(keys.encryption_key, key_version=keys.key_version).encrypt(
+                baseline,
+                self._activation_aad(identity),
+            )
+            now = _now_text()
+            connection.execute(
+                """INSERT INTO personal_context_activations (
+                   profile_id, device_id, activation_id, baseline_digest, purge_generation,
+                   publication_watermark, state, algorithm, key_version, nonce, wrapped_dek,
+                   wrapped_dek_nonce, ciphertext, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, 'prepared', ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    *identity.values(),
+                    envelope.algorithm,
+                    envelope.key_version,
+                    envelope.nonce,
+                    envelope.wrapped_dek,
+                    envelope.wrapped_dek_nonce,
+                    envelope.ciphertext,
+                    now,
+                    now,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM personal_context_activations WHERE activation_id = ?",
+                (identity["activation_id"],),
+            ).fetchone()
+            return self._decode_activation(connection, row)
+
+    @contextmanager
+    def activation_install_guard(
+        self,
+        activation_id: str,
+        baseline_digest: str,
+        *,
+        lease: PublicationRelayLease | None,
+    ) -> Iterator[PreparedPersonalContextActivation]:
+        """Hold canonical generation and lease stable through the independent Sync commit."""
+        with self._database.transaction(immediate=True) as connection:
+            row = connection.execute(
+                "SELECT * FROM personal_context_activations WHERE activation_id = ?",
+                (activation_id,),
+            ).fetchone()
+            if row is None:
+                raise PersonalContextActivationMissingError("personal_context_activation_required")
+            if not hmac.compare_digest(row["baseline_digest"], baseline_digest):
+                raise PersonalContextActivationStaleError("personal_context_activation_required")
+            self._require_activation_lease(connection, row["profile_id"], lease)
+            keys = self._keys.load(row["profile_id"], connection=connection)
+            manifest = self._current_manifest_for_publication(connection, row["profile_id"], keys)
+            if manifest.purge_generation != row["purge_generation"]:
+                raise PersonalContextActivationStaleError("personal_context_activation_required")
+            yield self._decode_activation(connection, row)
+
+    def complete_activation_install(
+        self,
+        activation_id: str,
+        baseline_digest: str,
+        sync_receipt_id: str,
+        *,
+        home_server_cursor: int,
+        lease: PublicationRelayLease | None,
+    ) -> PreparedPersonalContextActivation:
+        """CAS verified Sync installation, source coverage, and continuity in one commit."""
+        if not sync_receipt_id or type(home_server_cursor) is not int or home_server_cursor < 0:
+            raise PersonalContextActivationInputError("personal_context_activation_required")
+        with self._database.transaction(immediate=True) as connection:
+            row = connection.execute(
+                "SELECT * FROM personal_context_activations WHERE activation_id = ?",
+                (activation_id,),
+            ).fetchone()
+            if row is None:
+                raise PersonalContextActivationMissingError("personal_context_activation_required")
+            if not hmac.compare_digest(row["baseline_digest"], baseline_digest):
+                raise PersonalContextActivationStaleError("personal_context_activation_required")
+            activation = self._decode_activation(connection, row)
+            self._require_activation_lease(connection, activation.profile_id, lease)
+            profile = connection.execute(
+                "SELECT * FROM personal_context_publication_profiles WHERE profile_id = ?",
+                (activation.profile_id,),
+            ).fetchone()
+            keys = self._keys.load(activation.profile_id, connection=connection)
+            manifest = self._current_manifest_for_publication(connection, activation.profile_id, keys)
+            if manifest.purge_generation != activation.purge_generation:
+                raise PersonalContextActivationStaleError("personal_context_activation_required")
+            if row["state"] != "prepared":
+                if row["sync_receipt_id"] != sync_receipt_id or row["home_server_cursor"] != home_server_cursor:
+                    raise PersonalContextActivationStaleError("personal_context_activation_required")
+                self._activation_current_pair(connection, row)
+                return self._decode_activation(connection, row)
+            epoch = profile["activation_epoch"] if profile else None
+            token = profile["continuity_token"] if profile else None
+            if not epoch or not token:
+                epoch, token = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
+            now = _now_text()
+            connection.execute(
+                """INSERT INTO personal_context_publication_profiles (
+                   profile_id, next_sequence, activation_covered_through_sequence,
+                   purge_generation, activation_epoch, continuity_token, updated_at)
+                   VALUES (?, 1, ?, ?, ?, ?, ?)
+                   ON CONFLICT(profile_id) DO UPDATE SET
+                   activation_covered_through_sequence = MAX(activation_covered_through_sequence, excluded.activation_covered_through_sequence),
+                   activation_epoch = excluded.activation_epoch, continuity_token = excluded.continuity_token,
+                   updated_at = excluded.updated_at""",
+                (
+                    activation.profile_id,
+                    activation.publication_watermark,
+                    activation.purge_generation,
+                    epoch,
+                    token,
+                    now,
+                ),
+            )
+            connection.execute(
+                """UPDATE personal_context_publication_batches SET status = 'covered_by_activation',
+                   activation_id = ?, baseline_digest = ?, sync_receipt_id = ?, updated_at = ?
+                   WHERE profile_id = ? AND profile_publication_sequence <= ?
+                     AND status NOT IN ('complete','covered_by_activation','purge_terminal')""",
+                (
+                    activation_id,
+                    baseline_digest,
+                    sync_receipt_id,
+                    now,
+                    activation.profile_id,
+                    activation.publication_watermark,
+                ),
+            )
+            connection.execute(
+                """UPDATE personal_context_activations SET state = 'installed', sync_receipt_id = ?,
+                   home_server_cursor = ?, activation_epoch = ?, continuity_token = ?, updated_at = ?
+                   WHERE activation_id = ? AND state = 'prepared' AND baseline_digest = ?""",
+                (sync_receipt_id, home_server_cursor, epoch, token, now, activation_id, baseline_digest),
+            )
+            return self._decode_activation(
+                connection,
+                connection.execute(
+                    "SELECT * FROM personal_context_activations WHERE activation_id = ?",
+                    (activation_id,),
+                ).fetchone(),
+            )
+
+    def expire_activation(
+        self,
+        activation_id: str,
+        baseline_digest: str,
+        *,
+        sync_receipt_id: str,
+        lease: PublicationRelayLease | None,
+    ) -> None:
+        """Retire only one device baseline after the exact Sync installation expires.
+
+        The Sync owner verifies its receipt and expiry before calling. Source
+        coverage and the shared continuity pair survive this per-device change.
+        """
+        if not sync_receipt_id or len(sync_receipt_id) > 128:
+            raise PersonalContextActivationInputError("personal_context_activation_required")
+        with self._database.transaction(immediate=True) as connection:
+            row = connection.execute(
+                "SELECT * FROM personal_context_activations WHERE activation_id = ?",
+                (activation_id,),
+            ).fetchone()
+            if row is None:
+                raise PersonalContextActivationMissingError("personal_context_activation_required")
+            if not hmac.compare_digest(row["baseline_digest"], baseline_digest) or row["sync_receipt_id"] not in (
+                None,
+                sync_receipt_id,
+            ):
+                raise PersonalContextActivationStaleError("personal_context_activation_required")
+            self._require_activation_lease(connection, row["profile_id"], lease)
+            if row["state"] == "expired":
+                return
+            self._decode_activation(connection, row)
+            connection.execute(
+                "DELETE FROM personal_context_activation_devices WHERE activation_id = ? AND device_id = ?",
+                (activation_id, row["device_id"]),
+            )
+            connection.execute(
+                """UPDATE personal_context_activations SET state = 'expired', sync_receipt_id = ?,
+                   activation_epoch = NULL, continuity_token = NULL, ciphertext = ?, wrapped_dek = ?,
+                   wrapped_dek_nonce = ?, nonce = ?, updated_at = ? WHERE activation_id = ?""",
+                (sync_receipt_id, b"", b"", b"", b"", _now_text(), activation_id),
+            )
+
+    def compact_activation(self, activation_id: str) -> int:
+        """Erase covered source ciphertext only after its content-free proof commits."""
+        with self._database.transaction(immediate=True) as connection:
+            activation = connection.execute(
+                "SELECT * FROM personal_context_activations WHERE activation_id = ?",
+                (activation_id,),
+            ).fetchone()
+            if activation is None:
+                raise PersonalContextActivationMissingError("personal_context_activation_required")
+            if activation["state"] == "prepared" or not activation["sync_receipt_id"]:
+                raise PersonalContextActivationStaleError("personal_context_activation_required")
+            return connection.execute(
+                """UPDATE personal_context_publication_rows SET ciphertext = ?, wrapped_dek = ?,
+                   wrapped_dek_nonce = ?, nonce = ?, row_state = 'shredded'
+                   WHERE profile_id = ? AND profile_publication_sequence IN (
+                     SELECT profile_publication_sequence FROM personal_context_publication_batches
+                     WHERE profile_id = ? AND activation_id = ? AND baseline_digest = ?
+                       AND sync_receipt_id = ? AND status = 'covered_by_activation')
+                     AND profile_publication_sequence <= (
+                       SELECT activation_covered_through_sequence FROM personal_context_publication_profiles
+                       WHERE profile_id = ?) AND row_state != 'shredded'""",
+                (
+                    b"",
+                    b"",
+                    b"",
+                    b"",
+                    activation["profile_id"],
+                    activation["profile_id"],
+                    activation_id,
+                    activation["baseline_digest"],
+                    activation["sync_receipt_id"],
+                    activation["profile_id"],
+                ),
+            ).rowcount
+
+    def confirm_activation_device(
+        self,
+        activation_id: str,
+        baseline_digest: str,
+        device_id: str,
+        sync_ack_receipt_id: str,
+        *,
+        local_receipt_id: str,
+        dataset_id: str,
+    ) -> PreparedPersonalContextActivation:
+        """Record the exact verified independent Sync acknowledgment idempotently."""
+        if any(
+            not value or len(value) > 128
+            for value in (
+                sync_ack_receipt_id,
+                local_receipt_id,
+                dataset_id,
+                device_id,
+            )
+        ):
+            raise PersonalContextActivationInputError("personal_context_activation_required")
+        with self._database.transaction(immediate=True) as connection:
+            row = connection.execute(
+                "SELECT * FROM personal_context_activations WHERE activation_id = ?",
+                (activation_id,),
+            ).fetchone()
+            if row is None:
+                raise PersonalContextActivationMissingError("personal_context_activation_required")
+            if (
+                row["device_id"] != device_id
+                or row["state"] == "prepared"
+                or not hmac.compare_digest(row["baseline_digest"], baseline_digest)
+            ):
+                raise PersonalContextActivationStaleError("personal_context_activation_required")
+            self._activation_current_pair(connection, row)
+            expected = (baseline_digest, local_receipt_id, sync_ack_receipt_id, dataset_id)
+            receipt = connection.execute(
+                """SELECT baseline_digest, local_receipt_id, sync_ack_receipt_id, dataset_id
+                   FROM personal_context_activation_devices WHERE activation_id = ? AND device_id = ?""",
+                (activation_id, device_id),
+            ).fetchone()
+            if receipt is not None and tuple(receipt) != expected:
+                raise PersonalContextActivationStaleError("personal_context_activation_required")
+            connection.execute(
+                """INSERT INTO personal_context_activation_devices (
+                   activation_id, device_id, baseline_digest, local_receipt_id,
+                   sync_ack_receipt_id, dataset_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(activation_id, device_id) DO NOTHING""",
+                (activation_id, device_id, *expected, _now_text()),
+            )
+            connection.execute(
+                "UPDATE personal_context_activations SET state = 'active', updated_at = ? WHERE activation_id = ?",
+                (_now_text(), activation_id),
+            )
+            return self._decode_activation(
+                connection,
+                connection.execute(
+                    "SELECT * FROM personal_context_activations WHERE activation_id = ?",
+                    (activation_id,),
+                ).fetchone(),
+            )
+
+    def _activation_current_pair(
+        self,
+        connection: sqlite3.Connection,
+        activation: sqlite3.Row,
+    ) -> None:
+        """Reject a stored baseline after generation or publication continuity changes."""
+        profile = connection.execute(
+            "SELECT * FROM personal_context_publication_profiles WHERE profile_id = ?",
+            (activation["profile_id"],),
+        ).fetchone()
+        keys = self._keys.load(activation["profile_id"], connection=connection)
+        manifest = self._current_manifest_for_publication(connection, activation["profile_id"], keys)
+        if (
+            profile is None
+            or manifest.purge_generation != activation["purge_generation"]
+            or profile["purge_generation"] != activation["purge_generation"]
+            or not activation["activation_epoch"]
+            or not activation["continuity_token"]
+            or not hmac.compare_digest(profile["activation_epoch"] or "", activation["activation_epoch"])
+            or not hmac.compare_digest(profile["continuity_token"] or "", activation["continuity_token"])
+        ):
+            raise PersonalContextActivationStaleError("personal_context_activation_required")
+
+    def validate_activation_exchange(
+        self,
+        *,
+        profile_id: str,
+        device_id: str,
+        dataset_id: str,
+        activation_epoch: str,
+        continuity_token: str,
+    ) -> PersonalContextExchangeProof:
+        """Return the canonical proof only for an acknowledged current device baseline."""
+        try:
+            supplied = PersonalContextExchangeProof(
+                ongoing_sync_version=1,
+                activation_epoch=activation_epoch,
+                continuity_token=continuity_token,
+            )
+        except (TypeError, ValueError):
+            raise PersonalContextActivationInputError("personal_context_activation_required") from None
+        with self._database.transaction() as connection:
+            row = connection.execute(
+                """SELECT a.* FROM personal_context_activations a
+                   JOIN personal_context_activation_devices d ON d.activation_id = a.activation_id
+                     AND d.device_id = a.device_id AND d.baseline_digest = a.baseline_digest
+                   WHERE a.profile_id = ? AND a.device_id = ? AND d.dataset_id = ? AND a.state = 'active'
+                     AND a.rowid = (SELECT MAX(latest.rowid) FROM personal_context_activations latest
+                       WHERE latest.profile_id = a.profile_id AND latest.device_id = a.device_id)
+                   ORDER BY a.rowid DESC LIMIT 1""",
+                (profile_id, device_id, dataset_id),
+            ).fetchone()
+            if row is None:
+                raise PersonalContextActivationMissingError("personal_context_activation_required")
+            self._activation_current_pair(connection, row)
+            if not (
+                hmac.compare_digest(row["activation_epoch"], supplied.activation_epoch)
+                and hmac.compare_digest(row["continuity_token"], supplied.continuity_token)
+            ):
+                raise PersonalContextActivationStaleError("personal_context_activation_required")
+        return supplied
+
     def has_sync_profile_reservation(self) -> bool:
         """Return whether the only durable state is one content-free key reservation."""
 
@@ -1502,7 +2076,7 @@ class PersonalContextRepository:
             raise ProfileIntegrityError("Canonical object validation failed") from None
 
     def sync_bootstrap_snapshot(
-        self, profile_id: str
+        self, profile_id: str, *, connection: sqlite3.Connection | None = None
     ) -> tuple[
         ProfileManifest,
         tuple[ProfileScope, ...],
@@ -1513,7 +2087,7 @@ class PersonalContextRepository:
     ]:
         """Read all bounded canonical Sync heads and key identity in one transaction."""
 
-        with self._database.transaction() as connection:
+        with (self._database.transaction() if connection is None else nullcontext(connection)) as connection:
             keys = self._keys.load(profile_id, connection=connection)
             manifest_row = self._head_row(connection, profile_id, "manifest", profile_id)
             if manifest_row is None:
@@ -2814,6 +3388,16 @@ class PersonalContextRepository:
                 "DELETE FROM personal_context_receipts WHERE profile_id = ?",
                 (manifest.profile_id,),
             )
+            connection.execute(
+                """DELETE FROM personal_context_activation_devices WHERE activation_id IN (
+                   SELECT activation_id FROM personal_context_activations
+                   WHERE profile_id = ? AND purge_generation < ?)""",
+                (manifest.profile_id, manifest.purge_generation),
+            )
+            connection.execute(
+                "DELETE FROM personal_context_activations WHERE profile_id = ? AND purge_generation < ?",
+                (manifest.profile_id, manifest.purge_generation),
+            )
 
     @staticmethod
     def _direct_purge_cleanup_intent(row: sqlite3.Row) -> DirectPurgeCleanupIntent:
@@ -3279,6 +3863,20 @@ class PersonalContextRepository:
                     raise ConcurrentProfileUpdateError(
                         "encrypted publication changed concurrently"
                     )
+            for row in connection.execute(
+                "SELECT * FROM personal_context_activations WHERE profile_id = ? AND state != 'expired'", (profile_id,),
+            ).fetchall():
+                rewrapped = cipher.rewrap(
+                    EncryptedEnvelope(**{name: row[name] for name in (
+                        "algorithm", "key_version", "nonce", "wrapped_dek", "wrapped_dek_nonce", "ciphertext",
+                    )}), self._activation_aad(row), new_encryption_key, new_key_version=new_key_version,
+                )
+                connection.execute(
+                    """UPDATE personal_context_activations
+                       SET wrapped_dek = ?, wrapped_dek_nonce = ?, key_version = ?
+                       WHERE activation_id = ?""",
+                    (rewrapped.wrapped_dek, rewrapped.wrapped_dek_nonce, rewrapped.key_version, row["activation_id"]),
+                )
             return self._keys.replace_encryption_key(
                 profile_id,
                 encryption_key=new_encryption_key,

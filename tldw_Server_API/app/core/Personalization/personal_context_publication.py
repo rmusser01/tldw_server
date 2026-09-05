@@ -25,7 +25,10 @@ from tldw_profile_core import (
 )
 from tldw_profile_core.canonical import canonical_json_bytes
 
-from tldw_Server_API.app.core.exceptions import PublicationRelayPoisoned
+from tldw_Server_API.app.core.exceptions import (
+    PublicationActivationPending,
+    PublicationRelayPoisoned,
+)
 from tldw_Server_API.app.core.Personalization.personal_context_crypto import (
     EncryptedEnvelope,
     EnvelopeAuthenticationError,
@@ -563,13 +566,30 @@ class PersonalContextPublicationRelayStore:
         )
 
     @contextmanager
-    def profile_lease(self, profile_id: str) -> Iterator[PublicationRelayLease | None]:
-        """Acquire a recoverable SQLite lease shared by every process entry point."""
+    def profile_lease(
+        self, profile_id: str, *, blocking: bool = True
+    ) -> Iterator[PublicationRelayLease | None]:
+        """Claim a recoverable lease, optionally skipping a contended process lock.
+
+        Nonblocking relay callers may already hold Sync. They return no lease
+        before any canonical SQL when another thread owns the profile lock.
+        The durable claim still commits before yielding to external Sync work.
+
+        Args:
+            profile_id: Profile whose publication lease is requested.
+            blocking: Whether to wait for the in-process profile lock.
+
+        Yields:
+            The owned durable lease, or None when either lock is unavailable.
+        """
 
         key = (self._database.db_path, profile_id)
         with self._locks_guard:
             lock = self._profile_locks.setdefault(key, threading.RLock())
-        with lock:
+        if not lock.acquire(blocking=blocking):
+            yield None
+            return
+        try:
             owner_token = uuid.uuid4().hex
             now = time.time_ns()
             with self._database.transaction(immediate=True) as connection:
@@ -617,6 +637,8 @@ class PersonalContextPublicationRelayStore:
                         )
                         if released.rowcount != 1:
                             raise RuntimeError("publication relay lease changed")
+        finally:
+            lock.release()
 
     def renew_lease(self, lease: PublicationRelayLease) -> bool:
         """CAS-renew the current owner before an external stage transition."""
@@ -755,6 +777,33 @@ class PersonalContextPublicationRelayStore:
                 ).fetchone()
                 if lease.profile_id != profile_id or owned is None:
                     raise RuntimeError("publication relay lease changed")
+            activation = connection.execute(
+                """SELECT a.activation_id,
+                     a.created_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-60 seconds') AS stale
+                   FROM personal_context_activations a
+                   LEFT JOIN personal_context_publication_profiles p ON p.profile_id = a.profile_id
+                   WHERE a.profile_id = ? AND a.state = 'prepared'
+                     AND (p.profile_id IS NULL OR a.purge_generation = p.purge_generation) LIMIT 1""",
+                (profile_id,),
+            ).fetchone()
+            if activation is not None:
+                if budget is not None and not budget.consume_returned():
+                    raise PublicationActivationPending("Personal Context activation pending")
+                if lease is None or not activation["stale"]:
+                    raise PublicationActivationPending("Personal Context activation pending")
+                # A vanished requester cannot freeze other devices' queued writes.
+                # Retain the terminal ID/digest: an orphan Sync install cannot revive it.
+                connection.execute(
+                    """UPDATE personal_context_activations SET state = 'expired',
+                       ciphertext = ?, wrapped_dek = ?, wrapped_dek_nonce = ?, nonce = ?,
+                       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                       WHERE activation_id = ? AND state = 'prepared'""",
+                    (b"", b"", b"", b"", activation["activation_id"]),
+                )
+                if budget is not None:
+                    if not budget.can_inspect():
+                        return None
+                    row_limit = min(row_limit, budget.remaining_rows)
             batch = connection.execute(
                 """
                 SELECT * FROM personal_context_publication_batches
@@ -1575,10 +1624,13 @@ class PersonalContextPublicationJournal:
         updated = connection.execute(
             """
             UPDATE personal_context_publication_profiles
-            SET next_sequence = ?, purge_generation = ?, updated_at = ?
+            SET next_sequence = ?,
+                activation_epoch = CASE WHEN purge_generation = ? THEN activation_epoch ELSE NULL END,
+                continuity_token = CASE WHEN purge_generation = ? THEN continuity_token ELSE NULL END,
+                purge_generation = ?, updated_at = ?
             WHERE profile_id = ? AND next_sequence = ?
             """,
-            (sequence + 1, purge_generation, now, profile_id, sequence),
+            (sequence + 1, purge_generation, purge_generation, purge_generation, now, profile_id, sequence),
         )
         if updated.rowcount != 1:
             raise RuntimeError("Personal Context publication sequence changed concurrently")
