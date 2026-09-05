@@ -14,7 +14,7 @@
 **Task:** TASK-13153, In Progress. These are checkpoints within that task, not newly allocated Backlog IDs.
 **Approved spec:** `Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md`, user approved after checkpoint `8dc255fcca`.
 **Parent plan:** `Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md`; this plan replaces its generic-file-writer gap, not its remaining Reading DTO/HTTP/reconciliation/release tasks.
-**Status:** Inline execution in progress. Task 1 and Task 2a capacity/accounting verified on SQLite/PostgreSQL. Task 2b shared claims and later tasks remain pending. See checkpoint evidence below.
+**Status:** Inline execution in progress. Task 1, Task 2a and Task 2b database checkpoints verified on SQLite/PostgreSQL. Runtime file protocol and later tasks remain pending. See checkpoint evidence below.
 
 ---
 
@@ -94,6 +94,11 @@ WHERE token = ? AND user_id = ? AND fs_done = 1 AND effects_pending = 0;
 ## Task 2: Enforce shared row/path claims and resource admission
 
 **Files:** Modify `tldw_Server_API/app/core/DB_Management/Collections_DB.py`; extend `tldw_Server_API/tests/Collections/test_output_file_operations_db.py` and `tldw_Server_API/tests/Collections/test_reading_artifact_adoption.py`.
+
+Task 2b keeps its cross-writer matrix in new
+`tldw_Server_API/tests/Collections/test_output_file_claims_db.py` to avoid further
+expanding the journal transition/admission module. Existing adoption/deletion
+modules remain focused regressions, not rewritten fixtures.
 
 Execution split: Task 2a implements and verifies capacity admission plus explicit
 same-transaction audiobook accounting first. Task 2b then covers shared row/path
@@ -358,3 +363,73 @@ Logs: `/private/tmp/task-13153-output-admission-{red,green}.log`,
 Next: Task 2b row/path claims across generic and Reading writers, both-order races,
 recorded-transition exceptions, and ID-reuse protection. Activation stays off;
 the complete Task 2 checklist and full-task acceptance criteria remain unchecked.
+
+### Task 2b: Shared database row/path claims (2026-09-05)
+
+Adds one shared unfinished-operation guard under the existing revision fence.
+Generic creation/retargeting checks all three path claims; metadata/link changes,
+soft/hard deletion and retention check the original row/path. Newly allocated IDs
+are checked before commit for both generic insertion and Reading adoption, so
+SQLite cannot reuse an ID still held by unfinished cleanup. All queries are scoped
+to the user and `fs_done=0`; history-only records impose no row/path claim.
+
+Reading registration, reserve, staging validation/adoption, owned-output disposal,
+and cleanup preparation/retirement honor generic claims. Known ownership/volume
+namespaces remain distinct; unowned generic references stay conservative. Incoming
+legacy absolute paths are compared by conservative basename, and stored output
+references and Reading intents also match escaped absolute suffixes. Exact names
+remain unchanged for future filesystem identity checks.
+
+Generic preparation and precommit validation check both journals and surviving
+outputs. Managed source aliases and occupied destinations reject; shared unowned
+sources remain eligible for a later copy/preserve lifecycle. Only the internal
+validator, after checking user/namespace, phase, lease and the original snapshot,
+excludes its own journal token. No public writer accepts a bypass token. The
+existing trusted caller-owned commit context remains a DB primitive, not an
+implemented filesystem operation or runtime producer integration. Future legacy
+reconciliation must use the guarded registration boundary.
+
+TDD: 14 initial writer/ID cases failed; one foreign-user control passed. Ten more
+admission/Reading cases failed with the shared-unowned control passing. Tests then
+exposed missing cleanup guards (two RED cases). Independent review found stored
+absolute Reading intent aliases; three RED cases covered attachment, prepare and
+revalidation. Two further RED cases corrected over-conservative path checks on
+owned rows whose known volume differs. Both-order threaded races exercise reserve
+against ownership, destination attachment, metadata and deletion. The older stale
+snapshot test now verifies normal writes reject first and uses explicit incompatible
+SQL to retain its stale-commit check. One test fixture was corrected to compare
+persisted Reading state rather than transient upsert `is_new` flags.
+
+The initial PostgreSQL run failed early on untyped optional-null predicates and
+was interrupted, not counted as verification. An isolated read-only probe proved
+SQLSTATE 42P18; explicit text casts fixed the probe and isolated regression.
+This incident is recorded in `backlog/docs/lessons-testing-evidence.md`.
+Independent follow-up review found no remaining serious DB-guard findings.
+
+Verified evidence: 134 non-PostgreSQL combined passes plus one focused history-only
+claim-release test, and 133 required PostgreSQL passes in 332.56 seconds with no
+required-backend skips: 268 distinct targeted passes. New/changed tests pass
+Ruff/Black, modified production ranges pass Black, and the adapter's nine
+preexisting Ruff findings remain unchanged. Compile and diff checks pass; scoped
+Bandit reports no findings or scanner errors. No full-suite, filesystem lifecycle
+or activation claim.
+
+Verification commands (after environment activation):
+
+```bash
+TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_claims_db.py tldw_Server_API/tests/Collections/test_output_file_operations_db.py tldw_Server_API/tests/Collections/test_reading_artifact_adoption.py tldw_Server_API/tests/Collections/test_reading_output_deletion.py -q -k 'not postgres'
+TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_claims_db.py -q -k 'sqlite and file_completion_releases_claims'
+TLDW_TEST_NO_DOCKER=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_claims_db.py tldw_Server_API/tests/Collections/test_output_file_operations_db.py tldw_Server_API/tests/Collections/test_reading_artifact_adoption.py tldw_Server_API/tests/Collections/test_reading_output_deletion.py -q -k 'postgres and not sqlite' -n 2 -x
+```
+
+Logs: `/private/tmp/task-13153-output-claims-writers-{red,green}.log`,
+`/private/tmp/task-13153-output-claims-admission-red.log`,
+`/private/tmp/task-13153-output-claims-races.log`,
+`/private/tmp/task-13153-output-claims-review-red.log`,
+`/private/tmp/task-13153-output-claims-{sqlite-final,release,pg-final}.log`,
+and `/private/tmp/task-13153-output-claims-bandit-final.json`.
+Next: Task 3 bounded file protocol and restart recovery. The exhaustive writer/
+path/order integration matrix and recorded runtime mutation boundary remain
+rollout obligations; this checkpoint does not mark the complete Task 2 checklist
+or full-task acceptance criteria complete. No storage activation or public
+capability is enabled.

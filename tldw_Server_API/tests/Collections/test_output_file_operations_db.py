@@ -380,7 +380,10 @@ def test_expired_operation_cannot_validate_or_commit_but_can_abort(db, monkeypat
 
 def test_original_snapshot_rechecked_before_commit(db):
     output, operation = prepared(db)
-    db.update_output_artifact_metadata(output.id, metadata_json='{"private": "changed"}')
+    with pytest.raises(RuntimeError, match="^output_file_busy$"):
+        db.update_output_artifact_metadata(output.id, metadata_json='{"private": "changed"}')
+    # An incompatible old writer or offline SQL bypass still cannot commit a stale snapshot.
+    db.backend.execute("UPDATE outputs SET metadata_json = ? WHERE id = ?", ('{"private": "changed"}', output.id))
     with pytest.raises(RuntimeError, match="^output_operation_conflict$"):
         with db.commit_output_file_operation(operation["token"], "test-volume"):
             pytest.fail("stale snapshot entered commit")

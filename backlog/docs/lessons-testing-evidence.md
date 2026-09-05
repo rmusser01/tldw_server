@@ -1,5 +1,19 @@
 # Testing Evidence Lessons
 
+## PostgreSQL optional-null predicates need an explicit parameter type
+
+**Incident (TASK-13153, 2026-09-05):** New shared output guards passed 134 SQLite
+tests but failed on PostgreSQL before the first output insert. The predicate
+`? IS NULL OR token <> ?` used separate parameters for the null test and comparison;
+psycopg v3 could not infer the first parameter's type. A read-only `SELECT` probe
+reproduced `IndeterminateDatatype` / SQLSTATE `42P18` without any application tables.
+
+**Evidence and rule:** `CAST(? AS TEXT) IS NULL` made the probe and isolated real
+PostgreSQL guard test pass. Give nullable optional token/namespace parameters a
+type at their null-test occurrence; a later separate placeholder does not supply
+that type. Do not treat sanitized backend errors as evidence of an environment
+failure or rely on SQLite to validate PostgreSQL parameter typing.
+
 ## PostgreSQL placeholder heuristics can mistake LIKE parameters for JSONB operators
 
 **Incident (TASK-13153, 2026-09-05):** A shared-file guard using `LIKE ? ESCAPE '^'`

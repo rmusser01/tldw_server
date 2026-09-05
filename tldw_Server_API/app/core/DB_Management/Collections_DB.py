@@ -2973,6 +2973,16 @@ class CollectionsDatabase:
                 source = self._output_operation_filename(source)
             if destination is not None and source is not None and destination.lower() == source.lower():
                 raise ValueError("output_operation_invalid")
+            self._assert_output_operation_paths(
+                {
+                    "output_id": output_id,
+                    "source_path": source,
+                    "stage_path": stage,
+                    "destination_path": destination,
+                    "storage_namespace_id": storage_namespace_id,
+                },
+                conn,
+            )
             usage = self.backend.execute(
                 "SELECT COUNT(*) AS active, COALESCE(SUM(reserved_bytes), 0) AS reserved "
                 "FROM output_file_operations WHERE user_id = ? AND fs_done = 0",
@@ -3040,7 +3050,35 @@ class CollectionsDatabase:
             )
             if json.dumps(original, sort_keys=True) != row["original_json"]:
                 raise RuntimeError("output_operation_conflict")
+        self._assert_output_operation_paths(row, connection, exclude_token=token)
         return row
+
+    def _assert_output_operation_paths(
+        self, operation: dict[str, Any], connection: Any, *, exclude_token: str | None = None
+    ) -> None:
+        """Preflight recorded claims against both journals and surviving outputs."""
+        namespace = operation["storage_namespace_id"]
+        self._assert_output_file_claims(connection, output_id=operation["output_id"], exclude_token=exclude_token)
+        for column in ("source_path", "stage_path", "destination_path"):
+            path = operation[column]
+            if path is None:
+                continue
+            self._assert_output_path_not_reserved(
+                path, connection, storage_namespace_id=namespace, exclude_token=exclude_token
+            )
+            key = path.lower()
+            suffix = "%/" + key.replace("^", "^^").replace("%", "^%").replace("_", "^_")
+            references = self.backend.execute(
+                "SELECT o.id, r.output_id AS owned_id FROM outputs o "
+                "LEFT JOIN reading_output_ownership r ON r.output_id = o.id AND r.user_id = o.user_id "
+                "WHERE o.user_id = ? AND (r.output_id IS NULL OR r.storage_namespace_id = ?) "
+                "AND (lower(replace(o.storage_path, ?, '/')) = ? "
+                "OR lower(replace(o.storage_path, ?, '/')) LIKE (?) ESCAPE '^')",
+                (self.user_id, namespace, "\\", key, "\\", suffix),
+                connection=connection,
+            ).rows
+            if any(column != "source_path" or row["owned_id"] is not None for row in references):
+                raise RuntimeError("output_path_conflict")
 
     def validate_output_file_operation(
         self, token: str, storage_namespace_id: str, *, connection: Any | None = None
@@ -4950,6 +4988,13 @@ class CollectionsDatabase:
         self, parent: ContentItemRow, outputs: list[dict[str, Any]], connection: Any
     ) -> None:
         """Reserve unshared owned paths before deleting these exact output rows."""
+        for row in outputs:
+            self._assert_output_file_claims(
+                connection,
+                output_id=row["id"],
+                storage_path=row["storage_path"],
+                storage_namespace_id=row["storage_namespace_id"],
+            )
         removed_ids = {row["id"] for row in outputs}
         paths = {(row["storage_namespace_id"], row["storage_path"]) for row in outputs}
         unshared = []
@@ -5703,11 +5748,14 @@ class CollectionsDatabase:
                     params,
                     connection=conn,
                 )
-                return self.get_output_artifact_by_idempotency_key(normalized_idempotency_key, connection=conn)
+                output = self.get_output_artifact_by_idempotency_key(normalized_idempotency_key, connection=conn)
+                self._assert_output_file_claims(conn, output_id=output.id)
+                return output
             res = self._execute_insert(q, params, connection=conn)
             new_id = self._extract_lastrowid(res)
             if not new_id:
                 raise DatabaseError("Failed to create output artifact")
+            self._assert_output_file_claims(conn, output_id=new_id)
             return self.get_output_artifact(new_id, connection=conn)
 
     def get_output_artifact_by_idempotency_key(
@@ -5733,7 +5781,9 @@ class CollectionsDatabase:
             raise KeyError("output_not_found")
         return CollectionsDatabase.OutputArtifactRow(**row)
 
-    def update_output_media_item_id(self, output_id: int, media_item_id: int | None) -> CollectionsDatabase.OutputArtifactRow:
+    def update_output_media_item_id(
+        self, output_id: int, media_item_id: int | None
+    ) -> CollectionsDatabase.OutputArtifactRow:
         return self._update_output_artifact_fields(output_id, {"media_item_id": media_item_id})
 
     def update_output_artifact_metadata(
@@ -5840,10 +5890,16 @@ class CollectionsDatabase:
                     pass  # Legacy invalid JSON remains comparable as raw text.
             if changes:
                 owner = self.backend.execute(
-                    "SELECT item_id FROM reading_output_ownership WHERE output_id = ? AND user_id = ?",
+                    "SELECT item_id, storage_namespace_id FROM reading_output_ownership WHERE output_id = ? AND user_id = ?",
                     (output_id, self.user_id),
                     connection=conn,
                 ).first
+                self._assert_output_file_claims(
+                    conn,
+                    output_id=output_id,
+                    storage_path=current["storage_path"],
+                    storage_namespace_id=owner["storage_namespace_id"] if owner else None,
+                )
                 if owner:
                     if changes.keys() & {"storage_path", "format"}:
                         raise ReadingArchiveFileImmutable("reading_archive_file_immutable")
@@ -5897,6 +5953,9 @@ class CollectionsDatabase:
             self._lock_reading_revision_clock(conn)
             parent = self._get_reading_parent(item_id, conn)
             output = self.get_output_artifact(output_id, connection=conn)
+            self._assert_output_file_claims(
+                conn, output_id=output_id, storage_path=output.storage_path, storage_namespace_id=storage_namespace_id
+            )
             if output.type != "reading_archive":
                 raise ValueError("reading_archive_required")
             existing = self.backend.execute(
@@ -5939,6 +5998,7 @@ class CollectionsDatabase:
             parent = self._get_reading_parent(item_id, conn)
             if parent.revision != expected_revision:
                 raise ReadingRevisionConflict("reading_revision_conflict")
+            self._assert_output_file_claims(conn, storage_path=path, storage_namespace_id=storage_namespace_id)
             if self._reading_artifact_has_output_reference(path, storage_namespace_id, conn):
                 raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
             self.backend.execute(
@@ -5981,6 +6041,9 @@ class CollectionsDatabase:
         parent = self._get_reading_parent(row["item_id"], connection)
         if parent.revision != row["expected_revision"]:
             raise ReadingRevisionConflict("reading_revision_conflict")
+        self._assert_output_file_claims(
+            connection, storage_path=row["storage_path"], storage_namespace_id=storage_namespace_id
+        )
         return row, parent
 
     def adopt_reading_artifact(
@@ -6015,6 +6078,7 @@ class CollectionsDatabase:
             output_id = self._extract_lastrowid(result)
             if not output_id:
                 raise DatabaseError("reading_artifact_adoption_failed")
+            self._assert_output_file_claims(conn, output_id=output_id)
             self.backend.execute(
                 "INSERT INTO reading_output_ownership (user_id, item_id, output_id, storage_namespace_id) VALUES (?, ?, ?, ?)",
                 (self.user_id, parent.id, output_id, storage_namespace_id),
@@ -6077,11 +6141,64 @@ class CollectionsDatabase:
             ).first
         )
 
-    def _assert_output_path_not_reserved(self, storage_path: str, connection: Any) -> None:
-        # Generic outputs have no namespace authority: conservatively fence all namespaces.
+    def _assert_output_file_claims(
+        self,
+        connection: Any,
+        *,
+        output_id: int | None = None,
+        storage_path: str | None = None,
+        storage_namespace_id: str | None = None,
+        exclude_token: str | None = None,
+    ) -> None:
+        """Reject unfinished same-user claims; aliases are not filesystem identity.
+
+        Call only under the revision fence. Only the internal operation validator
+        may exclude its own already-validated token; ordinary writers never do.
+        Known path namespaces remain distinct, but row identity is global per user.
+        """
+        key = storage_path.replace("\\", "/").rsplit("/", 1)[-1].lower() if storage_path is not None else None
         if self.backend.execute(
-            "SELECT 1 FROM reading_artifact_paths WHERE user_id = ? AND lower(storage_path) = lower(?) LIMIT 1",
-            (self.user_id, storage_path),
+            "SELECT 1 FROM output_file_operations WHERE user_id = ? AND fs_done = 0 "
+            "AND (CAST(? AS TEXT) IS NULL OR token <> ?) AND (output_id = ? OR "
+            "((CAST(? AS TEXT) IS NULL OR storage_namespace_id = ?) AND (source_key = ? OR stage_key = ? OR destination_key = ?))) LIMIT 1",
+            (
+                self.user_id,
+                exclude_token,
+                exclude_token,
+                output_id,
+                storage_namespace_id,
+                storage_namespace_id,
+                key,
+                key,
+                key,
+            ),
+            connection=connection,
+        ).first:
+            raise RuntimeError("output_file_busy")
+
+    def _assert_output_path_not_reserved(
+        self,
+        storage_path: str,
+        connection: Any,
+        *,
+        storage_namespace_id: str | None = None,
+        exclude_token: str | None = None,
+    ) -> None:
+        self._assert_output_file_claims(
+            connection,
+            storage_path=storage_path,
+            storage_namespace_id=storage_namespace_id,
+            exclude_token=exclude_token,
+        )
+        # Generic outputs have no namespace authority: conservatively fence all namespaces.
+        key = storage_path.replace("\\", "/").rsplit("/", 1)[-1].lower()
+        suffix = "%/" + key.replace("^", "^^").replace("%", "^%").replace("_", "^_")
+        if self.backend.execute(
+            "SELECT 1 FROM reading_artifact_paths WHERE user_id = ? "
+            "AND (lower(replace(storage_path, ?, '/')) = ? "
+            "OR lower(replace(storage_path, ?, '/')) LIKE (?) ESCAPE '^') "
+            "AND (CAST(? AS TEXT) IS NULL OR storage_namespace_id = ?) LIMIT 1",
+            (self.user_id, "\\", key, "\\", suffix, storage_namespace_id, storage_namespace_id),
             connection=connection,
         ).first:
             raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
@@ -6104,6 +6221,9 @@ class CollectionsDatabase:
             ).rows
             ready = []
             for row in rows:
+                self._assert_output_file_claims(
+                    conn, storage_path=row["storage_path"], storage_namespace_id=storage_namespace_id
+                )
                 self.backend.execute(
                     "UPDATE reading_artifact_paths SET state = 'pending' WHERE token = ? AND user_id = ?",
                     (row["token"], self.user_id),
@@ -6137,6 +6257,15 @@ class CollectionsDatabase:
         """Retire a pending path only after caller's unlink and directory sync succeed."""
         with self.transaction() as conn:
             self._lock_reading_revision_clock(conn)
+            row = self.backend.execute(
+                "SELECT storage_path FROM reading_artifact_paths WHERE token = ? AND user_id = ? AND storage_namespace_id = ?",
+                (token, self.user_id, storage_namespace_id),
+                connection=conn,
+            ).first
+            if row:
+                self._assert_output_file_claims(
+                    conn, storage_path=row["storage_path"], storage_namespace_id=storage_namespace_id
+                )
             result = self.backend.execute(
                 "DELETE FROM reading_artifact_paths WHERE token = ? AND user_id = ? AND storage_namespace_id = ? "
                 "AND state = 'pending' AND NOT EXISTS (SELECT 1 FROM outputs o "
@@ -6216,6 +6345,12 @@ class CollectionsDatabase:
                 (output_id, self.user_id),
                 connection=conn,
             ).first
+            self._assert_output_file_claims(
+                conn,
+                output_id=output_id,
+                storage_path=current["storage_path"],
+                storage_namespace_id=owner["storage_namespace_id"] if owner else None,
+            )
             parent = self._get_reading_parent(owner["item_id"], conn) if owner else None
             # Any surviving reference may acquire Reading ownership after commit.
             # Generic outputs lack namespace authority, so compare conservatively.
