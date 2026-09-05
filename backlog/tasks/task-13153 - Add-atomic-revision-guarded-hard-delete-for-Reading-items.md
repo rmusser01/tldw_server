@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-03 02:27'
-updated_date: '2026-09-05 06:18'
+updated_date: '2026-09-05 16:23'
 labels:
   - collections
   - reading-list
@@ -52,5 +52,5 @@ diagnostic-privacy behavior are covered.
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-ADR required: yes; existing ADR-003 applies; further storage-boundary amendment needs approval. Latest implementation checkpoint 2207a84fc1 keeps managed archive files immutable via DB/HTTP guards; verified 92 SQLite/API + 54 PostgreSQL cases, review clear. Follow-up investigation reproduced three deferred failures with isolated real SQLite and direct endpoint calls: late ownership returns 409 after source moved; shared managed source rename returns 200 and moves archive; managed destination collision returns 200 and overwrites bytes. No production changes this investigation. Evidence and root cause in Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md and /private/tmp/task-13153-file-fence-probes.log. Proposed next design: extend durable path reservations plus storage exclusion/crash recovery to generic file mutations, preserving unmanaged rename/conversion. Await user approval before the broader schema/lifecycle design; do not substitute prechecks or filesystem I/O under DB mutation locks. Remaining production routing/reconciliation/cleanup/readiness/collection-writer/DTO work unchanged. Capability absent; task In Progress.
+ADR required: yes; existing ADR-003 amended. User approved durable reservations after three isolated SQLite file-damage probes. Detailed spec: Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md. Covers bounded generic operation journal, per-user storage binding, cross-writer path/row reservations, copy-before-commit, no-clobber publication, identity-checked crash recovery and fail-closed activation. Explicit safety corrections: occupied destinations reject rather than overwrite; missing source rejects physical changes. First review found ambiguous commit acknowledgement, abort witness ordering and source identity gaps; all addressed, second whole-spec review approved. Source/target/private links retain durable authority, unknown commits preserve files, same-store accounting remains atomic and external replay requires idempotence. No production changes or new runtime test claims. Existing 2207a84fc1 code checkpoint remains at 146 targeted passes. Written-spec user review is next before implementation planning. Capability absent; TASK-13153 In Progress.
 <!-- SECTION:PLAN:END -->

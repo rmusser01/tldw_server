@@ -138,6 +138,24 @@ Docs-info performs no schema changes or filesystem probing; it reads established
 readiness state. Where docs-info lacks user scope, it makes only a conservative
 deployment-wide claim; the endpoint additionally checks the target user's store.
 
+### Generic filesystem boundary amendment (2026-09-05)
+
+The user approved extending durable reservations and existing storage exclusion
+to generic file mutations, preserving unmanaged rename/conversion. The detailed
+contract is in
+`Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md`
+(independent review passed; user written-spec review pending). It introduces a bounded output operation journal,
+not fake Reading parents or a public job system. All conflicting output/ownership
+writers honor its path and row reservations. Copy-before-commit preserves sources;
+no-clobber publication, durable phases and identity-checked recovery preserve
+cleanup authority. The existing OS-lock-before-DB ordering remains mandatory.
+
+The detailed spec explicitly calls out occupied-destination rejection, missing
+source handling and fail-closed activated-store behavior for user review. A
+persisted per-user protocol/volume binding prevents runtime fallback to legacy
+file-first operations; activation is a stopped-writer upgrade. No capability is
+enabled by this amendment. Production code remains unchanged at this design stage.
+
 ## Alternatives and consequences
 
 - Timestamp tokens fail to cover child-only writes and can collide.

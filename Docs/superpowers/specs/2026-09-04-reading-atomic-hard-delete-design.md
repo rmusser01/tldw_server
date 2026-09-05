@@ -126,6 +126,13 @@ checkpoint: late ownership registration during generic file operations and write
 through shared source/target paths must also be fenced before enabling rollout.
 Managed format conversion would require a separate staged replacement lifecycle.
 
+The reservation approach for generic file mutations was approved on 2026-09-05.
+Its detailed storage-boundary amendment is
+`Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md`
+(independent review passed; user written-spec review pending). It supersedes any suggestion above that a DB
+precheck alone suffices for generic filesystem writers. No production rollout or
+capability activation is implied by approval of the approach.
+
 Stop old writers before upgrade. Migrate before advertising the capability. Keep
 the capability absent/false until all transaction and lifecycle tests pass, including
 real PostgreSQL tests (a skipped backend suite is not evidence).

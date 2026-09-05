@@ -451,6 +451,17 @@ or silently disable/change previously approved unmanaged behavior. A narrower
 behavioral restriction would instead require the user's explicit policy change.
 Capability remains absent; TASK-13153 remains In Progress.
 
+Subsequent user decision (2026-09-05): the reservation approach is approved.
+The detailed amendment is now written in
+`Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md`;
+its independent whole-spec re-review passed with no remaining serious issues.
+User review of the written spec is pending. No production code has changed. The
+first bounded review identified uncertain commit acknowledgement, abort witness
+cleanup ordering and missing source-identity evidence. The spec now requires
+durable phase rereads, destination-before-witness abort cleanup and recorded
+source fingerprints checked again before disposal. Implementation planning waits
+for the reviewed written spec's user approval under the brainstorming workflow.
+
 ### Managed archive immutability checkpoint (approved 2026-09-05)
 
 ADR required: yes. ADR path: `backlog/decisions/003-reading-atomic-hard-delete.md`.
