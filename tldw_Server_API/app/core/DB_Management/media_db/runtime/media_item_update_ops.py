@@ -13,15 +13,11 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
     InputError,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.collections import (
-    load_collections_database_cls,
-)
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
 
 _MEDIA_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
-_COLLECTIONS_DB = load_collections_database_cls()
 _OWNED_UPDATE_FIELDS = frozenset({"title", "author", "type", "content"})
 
 
@@ -176,21 +172,6 @@ def apply_media_item_update(
                 updated_media_data,
             )
 
-        try:
-            if (
-                content_actually_changed
-                and _COLLECTIONS_DB is not None
-                and client_id is not None
-            ):
-                _COLLECTIONS_DB.from_backend(
-                    user_id=str(client_id),
-                    backend=self.backend,
-                ).mark_highlights_stale_if_content_changed(
-                    media_id,
-                    resulting_content_hash,
-                )
-        except _MEDIA_NONCRITICAL_EXCEPTIONS as anch_err:
-            logger.debug("Highlight re-anchoring hook (media update) failed: {}", anch_err)
     except (InputError, ConflictError, DatabaseError, TypeError):
         raise
     except sqlite3.Error as exc:

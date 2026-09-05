@@ -17,9 +17,6 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
     InputError,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.collections import (
-    load_collections_database_cls,
-)
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
@@ -28,7 +25,6 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import M
 
 def _load_legacy_media_support():
     return (
-        load_collections_database_cls(),
         MEDIA_NONCRITICAL_EXCEPTIONS,
         media_dedupe_url_candidates,
         normalize_media_dedupe_url,
@@ -74,7 +70,6 @@ class MediaRepository:
         """
         db = self.session
         (
-            collections_db_cls,
             noncritical_exceptions,
             media_dedupe_url_candidates,
             normalize_media_dedupe_url,
@@ -520,16 +515,6 @@ class MediaRepository:
                             analysis_content=analysis_content,
                         )
                         _persist_chunks(conn, media_id)
-                        try:
-                            if collections_db_cls is not None and client_id is not None:
-                                collections_db_cls.from_backend(
-                                    user_id=str(client_id),
-                                    backend=db.backend,
-                                ).mark_highlights_stale_if_content_changed(media_id, content_hash)
-                        except noncritical_exceptions as anchoring_error:
-                            logger.debug(
-                                f"Highlight re-anchoring hook failed (non-fatal): {anchoring_error}"
-                            )
                         try:
                             from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (
                                 invalidate_intra_doc_vectors,

@@ -13,6 +13,7 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.core.DB_Management.media_db.media_database import MediaDatabase
 
 pytestmark = pytest.mark.unit
 pytest_plugins = ["tldw_Server_API.tests._plugins.authnz_full_fixtures"]
@@ -55,6 +56,44 @@ def make_reading(db, *, origin="reading"):
     )
 
 
+@pytest.mark.parametrize("operation", ["edit", "sync", "rollback", "overwrite"])
+def test_external_media_writes_do_not_mutate_colliding_reading_highlights(db, tmp_path, operation):
+    media = MediaDatabase(tmp_path / "media.db", client_id=db.user_id, backend=db.backend)
+    media_id, _, _ = media.add_media_with_keywords(
+        url="https://example.org/external", title="External", media_type="document", content="Old external body"
+    )
+    version = media.create_document_version(media_id=media_id, content="Historical external body")
+    media.create_document_version(media_id=media_id, content="Latest external body")
+    item = make_reading(db)
+    assert media_id == item.id  # Deliberate collision between independent ID domains.
+    highlight = db.create_highlight(item.id, "Body", 0, 4, None, None, content_hash_ref="a")
+    before = db.get_content_item(item.id)
+    if operation == "edit":
+        media.apply_media_item_update(media_id=media_id, fields={"content": "Edited external body"})
+    elif operation == "sync":
+        media.apply_synced_document_content_update(media_id=media_id, content="Synced external body")
+    elif operation == "rollback":
+        result = media.rollback_to_version(media_id, version["version_number"])
+        assert "error" not in result
+    else:
+        media.add_media_with_keywords(
+            url="https://example.org/external",
+            title="External",
+            media_type="document",
+            content="Replaced external body",
+            overwrite=True,
+        )
+    expected = {
+        "edit": "Edited external body",
+        "sync": "Synced external body",
+        "rollback": "Historical external body",
+        "overwrite": "Replaced external body",
+    }
+    assert db.backend.execute("SELECT content FROM Media WHERE id = ?", (media_id,)).scalar == expected[operation]
+    assert db.get_highlight(highlight.id) == highlight
+    assert db.get_content_item(item.id) == before
+
+
 def test_item_edits_advance_once_and_equivalent_values_are_noops(db):
     original = make_reading(db)
     changed = db.update_content_item(
@@ -76,6 +115,105 @@ def test_item_edits_advance_once_and_equivalent_values_are_noops(db):
     assert same.updated_at == changed.updated_at
     assert same.tags == ["new", "news"]
     assert json.loads(same.metadata_json) == {"one": 1, "two": 2}
+
+
+def test_highlight_crud_advances_revision_and_ignores_equivalent_patch(db):
+    item = make_reading(db)
+    highlight = db.create_highlight(item.id, "Body", 0, 4, None, None)
+    assert db.get_content_item(item.id).revision == item.revision + 1
+    changed = db.update_highlight(highlight.id, {"note": "Annotation", "color": "yellow"})
+    before = db.get_content_item(item.id)
+    assert before.revision == item.revision + 2
+    assert db.update_highlight(highlight.id, {"note": "Annotation", "color": "yellow"}) == changed
+    assert db.get_content_item(item.id) == before
+    assert db.delete_highlight(highlight.id)
+    deleted = db.get_content_item(item.id)
+    assert deleted.revision == before.revision + 1
+    assert not db.delete_highlight(highlight.id)
+    assert db.get_content_item(item.id) == deleted
+
+
+@pytest.mark.parametrize("origin", ["missing", "watchlist", "foreign"])
+def test_highlight_create_requires_owned_reading_parent(db, origin):
+    item = make_reading(db, origin="watchlist" if origin == "watchlist" else "reading")
+    if origin == "missing":
+        db.delete_content_item(item.id)
+    writer = CollectionsDatabase.from_backend(user_id="781", backend=db.backend) if origin == "foreign" else db
+    with pytest.raises(KeyError):
+        writer.create_highlight(item.id, "Body", 0, 4, None, None)
+    assert db.backend.execute("SELECT COUNT(*) FROM reading_highlights", ()).scalar == 0
+
+
+@pytest.mark.parametrize("operation", ["create", "update", "delete", "reanchor"])
+def test_highlight_failure_rolls_back_child_and_revision(db, monkeypatch, operation):
+    item = make_reading(db)
+    highlight = db.create_highlight(item.id, "Body", 0, 4, None, None)
+    before = db.get_content_item(item.id)
+    children = db.list_highlights_by_item(item.id)
+    allocate = db._next_reading_revision
+
+    def allocate_then_fail(conn):
+        allocate(conn)
+        raise RuntimeError("abort highlight mutation")
+
+    monkeypatch.setattr(db, "_next_reading_revision", allocate_then_fail)
+    with pytest.raises(RuntimeError, match="abort highlight mutation"):
+        if operation == "create":
+            db.create_highlight(item.id, "Other", 0, 5, None, None)
+        elif operation == "update":
+            db.update_highlight(highlight.id, {"note": "Not saved"})
+        elif operation == "delete":
+            db.delete_highlight(highlight.id)
+        else:
+            db.reanchor_highlights_for_item(item.id, content_text="Body", content_hash="a")
+    assert db.get_content_item(item.id) == before
+    assert db.list_highlights_by_item(item.id) == children
+
+
+def test_reanchor_changes_multiple_highlights_once_and_noops_preserve_revision(db):
+    item = make_reading(db)
+    first = db.create_highlight(item.id, "Body", 0, 4, None, None)
+    second = db.create_highlight(item.id, "Missing", 0, 7, None, None)
+    before = db.get_content_item(item.id)
+    assert db.reanchor_highlights_for_item(item.id, content_text="Body", content_hash="a") == {
+        "updated": 1,
+        "stale": 1,
+        "skipped": 0,
+    }
+    after = db.get_content_item(item.id)
+    assert after.revision == before.revision + 1
+    assert db.get_highlight(first.id).content_hash_ref == "a"
+    assert db.get_highlight(second.id).state == "stale"
+    db.reanchor_highlights_for_item(item.id, content_text="Body", content_hash="a")
+    assert db.get_content_item(item.id) == after
+
+
+def test_late_reanchor_cannot_overwrite_newer_highlight_edit(db, monkeypatch):
+    item = make_reading(db)
+    highlight = db.create_highlight(item.id, "Body", 0, 4, None, None)
+    from tldw_Server_API.app.core.DB_Management import Collections_DB as module
+
+    find_span = module.find_highlight_span
+
+    def edit_during_matching(*args, **kwargs):
+        with ThreadPoolExecutor(max_workers=1) as workers:
+            workers.submit(db.update_highlight, highlight.id, {"quote": "New quote"}).result(timeout=15)
+        return find_span(*args, **kwargs)
+
+    monkeypatch.setattr(module, "find_highlight_span", edit_during_matching)
+    result = db.reanchor_highlights_for_item(item.id, content_text="Body", content_hash="a")
+    assert result == {"updated": 0, "stale": 0, "skipped": 1}
+    assert db.get_highlight(highlight.id).quote == "New quote"
+    assert db.get_highlight(highlight.id).content_hash_ref is None
+
+
+def test_reanchor_rejects_content_hash_from_an_older_capture(db):
+    item = make_reading(db)
+    highlight = db.create_highlight(item.id, "Body", 0, 4, None, None)
+    before = db.get_content_item(item.id)
+    db.reanchor_highlights_for_item(item.id, content_text="Body", content_hash="obsolete")
+    assert db.get_highlight(highlight.id) == highlight
+    assert db.get_content_item(item.id) == before
 
 
 def test_upsert_identical_record_is_noop_and_changes_advance(db):

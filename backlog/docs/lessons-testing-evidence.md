@@ -1,5 +1,19 @@
 # Testing Evidence Lessons
 
+## Matching numeric IDs do not establish cross-domain ownership
+
+**Incident (TASK-13153, 2026-09-04):** Media update hooks passed Media IDs directly
+to Reading highlight SQL keyed by content-item IDs. The old unit tests asserted
+those hook calls and the highlight API test used a nonexistent literal parent.
+Real Media/Collections adapters with colliding IDs reproduced unrelated capture
+highlights becoming stale during Media edits, sync and rollback.
+
+**Evidence and rule:** Removing the cross-domain hooks and validating surviving
+Reading parents made the collision and ownership regressions pass on SQLite and
+PostgreSQL. Exercise separate identity domains with deliberately colliding IDs;
+mock call assertions cannot prove ownership. A rollback test must create an older
+version and verify the rollback succeeded, not treat an error result as preservation.
+
 ## Memoized schema setup does not initialize per-adapter runtime flags
 
 **Incident (TASK-13153, 2026-09-04):** Making Reading item, tag and FTS writes

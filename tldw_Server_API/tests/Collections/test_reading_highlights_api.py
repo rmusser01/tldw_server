@@ -8,12 +8,13 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture()
-def client_with_user(monkeypatch):
+def client_with_user(monkeypatch, tmp_path):
     async def override_user():
         return User(id=321, username="reader", email=None, is_active=True)
 
     # Use full app profile for reading/Collections endpoints
     monkeypatch.setenv("MINIMAL_TEST_APP", "0")
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "users"))
 
     from tldw_Server_API.app.main import app as fastapi_app
 
@@ -26,7 +27,16 @@ def client_with_user(monkeypatch):
 def test_highlights_crud(client_with_user):
 
     client = client_with_user
-    item_id = 99999
+    saved = client.post(
+        "/api/v1/reading/save",
+        json={
+            "url": "https://example.org/highlight",
+            "title": "Highlight parent",
+            "content": "Important sentence",
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    item_id = saved.json()["id"]
 
     # Create
     payload = {
@@ -65,3 +75,11 @@ def test_highlights_crud(client_with_user):
     # Update non-existent -> 404
     r = client.patch(f"/api/v1/reading/highlights/{hid}", json={"note": "oops"})
     assert r.status_code == 404
+
+
+def test_highlight_create_rejects_missing_parent(client_with_user):
+    response = client_with_user.post(
+        "/api/v1/reading/items/99999/highlight",
+        json={"item_id": 99999, "quote": "No surviving capture"},
+    )
+    assert response.status_code == 404

@@ -44,7 +44,7 @@
 
 ## Stage 1: Persist revisions and fence every Reading mutation
 
-**Status:** In Progress — revision schema/clock, item/tag writers and note-link writers implemented; highlights and ownership integration remains.
+**Status:** In Progress — revision schema/clock, item/tag, note-link and highlight writers implemented; output ownership integration and DTO coverage remains.
 **Goal:** Every returned token describes one coherent aggregate version.
 **Success Criteria:** Migration, no-op, child-write, reuse and snapshot cases pass on both backends.
 **Tests:** New revision module plus existing service/highlight/note-link/import suites.
@@ -144,6 +144,49 @@ item IDs. The legacy highlight CRUD test also creates an orphan using a literal
 99999 parent. Neither is proof of a valid Reading parent/ownership contract.
 Highlight writers, reanchor/stale hooks, output ownership/purge and alternate
 delete paths remain unfinished. This checkpoint does not advertise the capability.
+
+Highlight checkpoint (2026-09-04): CRUD now requires an owned, surviving Reading
+parent, locks the revision clock before reading, and commits child changes and
+one parent token/timestamp together. Equivalent patches and missing deletes are
+no-ops. The create endpoint maps invalid parents to 404. Its former literal-parent
+test now creates an actual Reading capture. Reanchor reads parent/highlights in
+one snapshot, computes matching outside the writer lock, rejects an obsolete
+content hash or changed parent revision, then commits all material child patches
+with one revision advance. The save result refreshes its revision/timestamp after
+reanchoring while retaining its original creation/content-change flags.
+
+The preceding ID-domain concern is resolved: four Media write/rollback/overwrite
+hooks and their now-unused bulk stale setter were removed. Media and Reading
+identities are independent, and ADR-003 explicitly excludes external Media edits
+from capture mutation. Real colliding-ID regressions exercise all four Media
+operations on SQLite/PostgreSQL while verifying both the Media content change and
+unchanged capture/highlight data. Both Reading API documents now describe the
+surviving-parent and capture-specific highlight behavior. No new ADR is required;
+this implements the existing ADR-003 ownership boundary.
+
+Independent review found one stale save-result issue; its regression failed before
+the refresh fix. Scoped re-review found it addressed and no other actionable issues.
+Outputs/ownership/purge, alternate item deletion paths, complete DTO snapshots and
+the cleanup/readiness/guarded-delete contract remain unfinished. Capability stays
+absent; this is not Stage 1 or task completion.
+
+Highlight verification (Server virtual environment):
+
+- New SQLite highlight tests first produced 11 expected failures; the invalid-parent
+  endpoint test first returned 500 rather than 404. Real Media collision tests
+  reproduced stale highlights in edit, sync and rollback paths before hook removal.
+- `python -m pytest tldw_Server_API/tests/Collections/test_reading_service.py tldw_Server_API/tests/Collections/test_reading_import_export.py tldw_Server_API/tests/Collections/test_reading_revision_mutations.py -k 'not postgres' -q --tb=short`: 82 passed, 46 deselected.
+- `TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_reading_revision_mutations.py -k '(highlight or reanchor) and postgres and not external_media' -q --tb=short`: 11 passed, 77 deselected; real PostgreSQL, no skips.
+- Same module with `-k 'external_media and postgres'`: 4 passed, 84 deselected; real PostgreSQL, no skips.
+- `python -m pytest tldw_Server_API/tests/Collections/test_reading_highlights_api.py tldw_Server_API/tests/Collections/test_reading_highlights_reanchor.py tldw_Server_API/tests/Collections/test_companion_reading_activity_bridge.py -q --tb=short`: 6 passed.
+- `python -m pytest tldw_Server_API/tests/DB_Management/test_media_db_media_item_update_ops.py tldw_Server_API/tests/DB_Management/test_media_db_synced_document_update_ops.py tldw_Server_API/tests/DB_Management/test_media_db_document_version_rollback_ops.py -q --tb=short`: 20 passed.
+- Scoped Bandit across all seven touched production modules reports zero findings
+  and no analysis errors. Ruff findings in touched files are the same 14 baseline
+  findings, with none in added lines. No full-suite run was performed.
+- The strengthened late-reanchor race uses a second-thread connection during
+  quote matching; final focused reruns pass on both SQLite and PostgreSQL (one
+  case each). Changed-line Black, compilation of all 13 touched Python files,
+  and `git diff --check` pass.
 
 - [x] Add a real database fixture using `tmp_path` and the existing `CollectionsDatabase.from_backend` pattern. Use the following record constructor in the new test module:
 

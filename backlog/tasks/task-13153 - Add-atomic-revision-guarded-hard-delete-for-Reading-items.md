@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-03 02:27'
-updated_date: '2026-09-05 01:44'
+updated_date: '2026-09-05 02:02'
 labels:
   - collections
   - reading-list
@@ -52,5 +52,5 @@ diagnostic-privacy behavior are covered.
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-ADR required: yes. ADR path: backlog/decisions/003-reading-atomic-hard-delete.md. Reason: persisted aggregate revisions, destructive preconditions, ownership and durable cleanup. Design: Docs/superpowers/specs/2026-09-04-reading-atomic-hard-delete-design.md. Plan: Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md. Stage 1 remains in progress: revision schema/clock, item/tag writer integration and note-link writers are implemented. All these writers fence before parent reads and use one explicit transaction connection for owned changes and revision allocation. Reading no-ops preserve revision/timestamp; generic behavior is preserved. Note-link duplicate/removal/rollback/concurrency/owner checks have real SQLite and PostgreSQL coverage; existing note-link endpoints pass. Independent reviews found no outstanding issues in completed slices. Next: resolve legacy Media-ID/content-item-ID mismatch in highlight stale hooks and enforce surviving Reading parents, then output ownership/purge, alternate deletion guards, DTO exposure, cleanup and endpoint. Capability stays absent. Verification commands/results are recorded in the linked plan. PostgreSQL checks use the existing service with TLDW_TEST_NO_DOCKER=1; no container replacement is authorized.
+ADR required: yes. ADR path: backlog/decisions/003-reading-atomic-hard-delete.md. Reason: persisted aggregate revisions, destructive preconditions, ownership and durable cleanup. Design: Docs/superpowers/specs/2026-09-04-reading-atomic-hard-delete-design.md. Plan: Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md. Stage 1 remains in progress: schema/clock, item/tag, note-link and highlight writers are implemented with explicit-connection atomic revision changes and no-op detection. Highlights require an owned surviving Reading parent; reanchor computes outside the lock and rechecks the snapshot revision before applying. Removed four erroneous Media-ID-to-Reading-highlight hooks per ADR-003. Save results refresh revision/timestamp after reanchor while preserving creation flags. Real SQLite/PostgreSQL collision, ownership, rollback and late-reanchor tests and existing API/Media regressions pass; commands and counts are in the plan. Independent review found a stale save result, reproduced and fixed; re-review found no outstanding issues. Next: output ownership/purge integration, alternate deletion guards, complete DTO snapshots, then durable artifact cleanup and guarded-delete readiness. Capability remains absent. Existing PostgreSQL test service only, TLDW_TEST_NO_DOCKER=1; no container replacement authorized.
 <!-- SECTION:PLAN:END -->

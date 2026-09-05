@@ -4714,6 +4714,21 @@ class CollectionsDatabase:
     # ------------------------
     # Highlights API
     # ------------------------
+    def _get_reading_parent(self, item_id: int, connection: Any) -> ContentItemRow:
+        item = self.get_content_item(item_id, connection=connection)
+        if item.origin != "reading":
+            raise KeyError("content_item_not_found")
+        return item
+
+    def _advance_reading_parent(self, item_id: int, connection: Any) -> None:
+        """Advance a verified parent while its caller holds the shared writer fence."""
+        revision = self._next_reading_revision(connection)
+        self.backend.execute(
+            "UPDATE content_items SET revision = ?, updated_at = ? WHERE id = ? AND user_id = ? AND origin = 'reading'",
+            (revision, _utcnow_iso(), item_id, self.user_id),
+            connection=connection,
+        )
+
     def create_highlight(
         self,
         item_id: int,
@@ -4749,35 +4764,47 @@ class CollectionsDatabase:
             context_after,
             state,
         )
-        res = self._execute_insert(q, params)
-        new_id = self._extract_lastrowid(res)
-        if not new_id:
-            raise DatabaseError("Failed to create highlight")
-        return self.get_highlight(new_id)
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            self._get_reading_parent(item_id, conn)
+            res = self._execute_insert(q, params, connection=conn)
+            new_id = self._extract_lastrowid(res)
+            if not new_id:
+                raise DatabaseError("Failed to create highlight")
+            self._advance_reading_parent(item_id, conn)
+            return self.get_highlight(new_id, connection=conn)
 
-    def list_highlights_by_item(self, item_id: int) -> list[HighlightRow]:
+    def list_highlights_by_item(self, item_id: int, *, connection: Any | None = None) -> list[HighlightRow]:
         q = (
             "SELECT id, user_id, item_id, quote, start_offset, end_offset, color, note, created_at, "
             "anchor_strategy, content_hash_ref, context_before, context_after, state "
             "FROM reading_highlights WHERE user_id = ? AND item_id = ? ORDER BY created_at ASC"
         )
-        rows = self.backend.execute(q, (self.user_id, item_id)).rows
+        rows = self.backend.execute(q, (self.user_id, item_id), connection=connection).rows
         return [HighlightRow(**row) for row in rows]
 
-    def get_highlight(self, highlight_id: int) -> HighlightRow:
+    def get_highlight(self, highlight_id: int, *, connection: Any | None = None) -> HighlightRow:
         q = (
             "SELECT id, user_id, item_id, quote, start_offset, end_offset, color, note, created_at, "
             "anchor_strategy, content_hash_ref, context_before, context_after, state "
             "FROM reading_highlights WHERE id = ? AND user_id = ?"
         )
-        row = self.backend.execute(q, (highlight_id, self.user_id)).first
+        row = self.backend.execute(q, (highlight_id, self.user_id), connection=connection).first
         if not row:
             raise KeyError("highlight_not_found")
         return HighlightRow(**row)
 
     def update_highlight(self, highlight_id: int, patch: dict[str, Any]) -> HighlightRow:
-        if not patch:
-            return self.get_highlight(highlight_id)
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            highlight = self.get_highlight(highlight_id, connection=conn)
+            self._get_reading_parent(highlight.item_id, conn)
+            if self._update_highlight_fields(highlight, patch, conn):
+                self._advance_reading_parent(highlight.item_id, conn)
+            return self.get_highlight(highlight_id, connection=conn)
+
+    def _update_highlight_fields(self, highlight: HighlightRow, patch: dict[str, Any], connection: Any) -> bool:
+        """Apply material allowed fields inside a caller-owned aggregate transaction."""
         fields = []
         params: list[Any] = []
         for key in (
@@ -4792,40 +4819,36 @@ class CollectionsDatabase:
             "context_after",
             "state",
         ):
-            if key in patch and patch[key] is not None:
+            if key in patch and patch[key] is not None and patch[key] != getattr(highlight, key):
                 fields.append(f"{key} = ?")
                 params.append(patch[key])
         if not fields:
-            return self.get_highlight(highlight_id)
-        params.extend([highlight_id, self.user_id])
+            return False
+        params.extend([highlight.id, self.user_id])
         q = f"UPDATE reading_highlights SET {', '.join(fields)} WHERE id = ? AND user_id = ?"  # nosec B608
-        res = self.backend.execute(q, tuple(params))
+        res = self.backend.execute(q, tuple(params), connection=connection)
         if res.rowcount <= 0:
             raise KeyError("highlight_not_found")
-        return self.get_highlight(highlight_id)
+        return True
 
     def delete_highlight(self, highlight_id: int) -> bool:
-        q = "DELETE FROM reading_highlights WHERE id = ? AND user_id = ?"
-        res = self.backend.execute(q, (highlight_id, self.user_id))
-        return res.rowcount > 0
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            try:
+                highlight = self.get_highlight(highlight_id, connection=conn)
+                self._get_reading_parent(highlight.item_id, conn)
+            except KeyError:
+                return False
+            q = "DELETE FROM reading_highlights WHERE id = ? AND user_id = ?"
+            res = self.backend.execute(q, (highlight_id, self.user_id), connection=conn)
+            if res.rowcount > 0:
+                self._advance_reading_parent(highlight.item_id, conn)
+                return True
+            return False
 
     # ------------------------
     # Maintenance hooks
     # ------------------------
-    def mark_highlights_stale_if_content_changed(self, item_id: int, new_content_hash: str | None) -> int:
-        """Mark highlights as stale if their stored content_hash_ref doesn't match new hash.
-
-        Returns number of rows updated. Intended to be called by item update pipeline.
-        """
-        if not new_content_hash:
-            return 0
-        q = (
-            "UPDATE reading_highlights SET state = 'stale' WHERE user_id = ? AND item_id = ? "
-            "AND content_hash_ref IS NOT NULL AND content_hash_ref <> ?"
-        )
-        res = self.backend.execute(q, (self.user_id, item_id, new_content_hash))
-        return int(res.rowcount or 0)
-
     def reanchor_highlights_for_item(
         self,
         item_id: int,
@@ -4839,10 +4862,17 @@ class CollectionsDatabase:
         if not resolved_hash:
             return {"updated": 0, "stale": 0, "skipped": 0}
 
+        with self._read_snapshot() as conn:
+            parent = self._get_reading_parent(item_id, conn)
+            highlights = self.list_highlights_by_item(item_id, connection=conn)
+        if parent.content_hash != resolved_hash:
+            return {"updated": 0, "stale": 0, "skipped": len(highlights)}
+
         updated = 0
         stale = 0
         skipped = 0
-        for highlight in self.list_highlights_by_item(item_id=item_id):
+        patches: list[tuple[HighlightRow, dict[str, Any]]] = []
+        for highlight in highlights:
             if not highlight.quote:
                 skipped += 1
                 continue
@@ -4857,25 +4887,37 @@ class CollectionsDatabase:
             )
             if span is None:
                 if highlight.state != "stale":
-                    self.update_highlight(highlight.id, {"state": "stale"})
+                    patches.append((highlight, {"state": "stale"}))
                 stale += 1
                 continue
 
             start_offset, end_offset = span
             context_before, context_after = build_highlight_context(content_text, start_offset, end_offset)
-            self.update_highlight(
-                highlight.id,
-                {
-                    "start_offset": start_offset,
-                    "end_offset": end_offset,
-                    "content_hash_ref": resolved_hash,
-                    "context_before": context_before,
-                    "context_after": context_after,
-                    "state": "active",
-                },
+            patches.append(
+                (
+                    highlight,
+                    {
+                        "start_offset": start_offset,
+                        "end_offset": end_offset,
+                        "content_hash_ref": resolved_hash,
+                        "context_before": context_before,
+                        "context_after": context_after,
+                        "state": "active",
+                    },
+                )
             )
             updated += 1
 
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            current = self._get_reading_parent(item_id, conn)
+            if current.revision != parent.revision:
+                return {"updated": 0, "stale": 0, "skipped": len(highlights)}
+            changed = False
+            for highlight, patch in patches:
+                changed = self._update_highlight_fields(highlight, patch, conn) or changed
+            if changed:
+                self._advance_reading_parent(item_id, conn)
         return {"updated": updated, "stale": stale, "skipped": skipped}
 
     # ------------------------

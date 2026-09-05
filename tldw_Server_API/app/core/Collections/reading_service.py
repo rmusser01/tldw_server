@@ -759,6 +759,10 @@ class ReadingService:
                     content_text=content,
                     content_hash=item_row.content_hash,
                 )
+                refreshed = self.collections.get_content_item(item_row.id)
+                refreshed.is_new = item_row.is_new
+                refreshed.content_changed = item_row.content_changed
+                item_row = refreshed
             except _READING_SERVICE_NONCRITICAL_EXCEPTIONS as exc:
                 logger.debug(f"Highlight re-anchoring failed for item {item_row.id}: {exc}")
 

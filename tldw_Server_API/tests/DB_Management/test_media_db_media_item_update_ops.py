@@ -229,9 +229,7 @@ def test_apply_media_item_update_updates_metadata_logs_sync_and_refreshes_title_
     assert doc_versions == []
 
 
-def test_apply_media_item_update_changes_content_creates_version_logs_sync_and_marks_stale(
-    monkeypatch,
-) -> None:
+def test_apply_media_item_update_changes_content_creates_version_and_logs_sync() -> None:
     media_item_update_ops_module = _load_media_item_update_ops_module()
 
     old_hash = hashlib.sha256(b"existing body").hexdigest()
@@ -252,25 +250,6 @@ def test_apply_media_item_update_changes_content_creates_version_logs_sync_and_m
     doc_versions: list[dict[str, object]] = []
     sync_payloads: list[dict[str, object]] = []
     fts_calls: list[tuple[object, int, str, str, str | None, str | None]] = []
-    collection_calls: list[tuple[int, str]] = []
-
-    class _FakeCollectionsDatabase:
-        @classmethod
-        def from_backend(cls, *, user_id, backend):
-            assert user_id == "api-client"
-
-            class _Instance:
-                def mark_highlights_stale_if_content_changed(self, media_id, content_hash):
-                    collection_calls.append((media_id, content_hash))
-
-            return _Instance()
-
-    monkeypatch.setattr(
-        media_item_update_ops_module,
-        "_COLLECTIONS_DB",
-        _FakeCollectionsDatabase,
-        raising=False,
-    )
 
     def _fetchone(_conn, _query, _params):
         return fetch_rows.pop(0)
@@ -367,7 +346,6 @@ def test_apply_media_item_update_changes_content_creates_version_logs_sync_and_m
     assert fts_calls == [
         ("conn", 9, "Updated Title", "updated body", "Current Title", "existing body")
     ]
-    assert collection_calls == [(9, expected_hash)]
 
 
 def test_apply_media_item_update_versions_identical_content_without_rechunking_or_fts() -> None:

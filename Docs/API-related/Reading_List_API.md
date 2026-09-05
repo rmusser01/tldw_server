@@ -129,6 +129,23 @@ Response:
 { "status": "archived", "item_id": 123, "hard": false }
 ```
 
+## Highlights
+
+Highlights belong to saved Reading captures, not to external Media IDs.
+
+- `POST /api/v1/reading/items/{item_id}/highlight` creates a highlight. The parent
+  must be an existing Reading item owned by the authenticated user; otherwise the
+  response is 404 (`content_item_not_found`).
+- `GET /api/v1/reading/items/{item_id}/highlights` lists the user's highlights.
+- `PATCH /api/v1/reading/highlights/{highlight_id}` edits a highlight, and
+  `DELETE /api/v1/reading/highlights/{highlight_id}` removes it. Missing or
+  inaccessible highlights/parents return 404 on mutation.
+
+Changing highlights updates the owning capture's modification time; an equivalent
+patch does not. Reanchoring follows changes to the saved capture and does not
+apply results computed before a newer capture/highlight edit. Editing linked
+external Media does not reanchor or stale the capture's highlights.
+
 ## Summarize
 
 `POST /api/v1/reading/items/{id}/summarize`

@@ -97,6 +97,25 @@ async def test_reading_save_and_list(reading_env):
     assert any(it.title == "Reading Demo" for it in items)
 
 
+@pytest.mark.asyncio
+async def test_reading_save_returns_revision_after_reanchoring(reading_env):
+    service = ReadingService(TEST_USER_ID)
+    saved = await service.save_url(
+        url="https://example.org/reanchor-result", content_override="Original body", title_override="Capture"
+    )
+    assert saved.created
+    assert saved.item.is_new
+    service.collections.create_highlight(saved.item.id, "body", 9, 13, None, None)
+    changed = await service.save_url(
+        url="https://example.org/reanchor-result", content_override="Updated body", title_override="Capture"
+    )
+    persisted = service.collections.get_content_item(saved.item.id)
+    assert changed.item.revision == persisted.revision
+    assert changed.item.updated_at == persisted.updated_at
+    assert not changed.created
+    assert changed.item.content_changed
+
+
 def test_reading_list_page_uses_one_snapshot_during_concurrent_insert(
     reading_env: Path,
     monkeypatch: pytest.MonkeyPatch,
