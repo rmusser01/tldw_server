@@ -4,9 +4,11 @@ title: Expose synchronous EPUB summarization in Service Prompts
 status: Done
 assignee: []
 created_date: '2026-09-05 14:31'
-updated_date: '2026-09-05 14:43'
+updated_date: '2026-09-05 14:58'
 labels: []
 dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/pull/2882'
 documentation:
   - Docs/Design/ebook-summary-service-prompt.md
 ---
@@ -37,6 +39,8 @@ Add regression tests, extend the existing registry/request adapter/Settings meta
 Baseline: 108 backend tests passed. RED: 10 expected backend failures for missing EPUB catalog/lookup, explicit-empty and canonical provider handling; new shared Settings EPUB test failed before metadata implementation. GREEN: combined backend120 and shared Settings/service/domain196 passed. Ruff lint/format, compilation and Bandit passed (zero findings). Independent read-only review in progress. Official OpenAPI exporter initially needed its ignored output directory created; rerun in progress. Main checkout remains untouched.
 
 Final: 120 focused backend +45 adjacent EPUB/ingestion/safety/chunking/usage tests passed; shared UI196 passed and WebUI-config targeted4 passed. Ruff, compileall and Bandit zero findings. Official OpenAPI export/typegen/check passed; deleting only new EPUB api_provider reproduces exact base fingerprint. Independent review found no actionable issues. Full repo suites, full frontend typecheck and live browser/provider E2E not run. Temporary dependency symlinks removed before commit; generated full schema/types stay ignored.
+
+Published PR #2882 against dev at user request. Implementation commit cbfdd903ec492fd70ba253e555c6f404eebad5c4. Branch and worktree retained for review follow-up.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
