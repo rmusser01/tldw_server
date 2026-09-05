@@ -14,7 +14,7 @@
 **Task:** TASK-13153, In Progress. These are checkpoints within that task, not newly allocated Backlog IDs.
 **Approved spec:** `Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md`, user approved after checkpoint `8dc255fcca`.
 **Parent plan:** `Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md`; this plan replaces its generic-file-writer gap, not its remaining Reading DTO/HTTP/reconciliation/release tasks.
-**Status:** Independently reviewed and ready for inline execution. No implementation or new runtime evidence.
+**Status:** Inline execution in progress. Task 1 schema/identity foundation implemented; transition methods and later tasks remain pending. See checkpoint evidence below.
 
 ---
 
@@ -72,10 +72,10 @@ Do not split the entire large Collections adapter. Keep its transaction-bearing 
 
 **Files:** Modify `tldw_Server_API/app/core/DB_Management/Collections_DB.py`; create `tldw_Server_API/tests/Collections/test_output_file_operations_db.py`.
 
-- [ ] Add failing repeated-bootstrap tests for `output_storage_bindings` and `output_file_operations`, with explicit NOT NULL identities, user scope, no output cascading FK, valid kinds/phases, nonnegative counts/budgets, and `fs_done` only on committed/aborting rows. Schema installation must not create/provision paths or activate a user.
-- [ ] Run `python -m pytest tldw_Server_API/tests/Collections/test_output_file_operations_db.py -q -k sqlite`; confirm new behavior fails.
-- [ ] Extend `_ensure_reading_revision_schema` using its existing transaction/advisory bootstrap lock and explicit connection. Bindings contain user, namespace, protocol version and validated finite policy. Journal stores the spec's fixed source/stage/destination fields and collision keys, snapshot/intended changes, source/stage/publication identity, lease/retry/error, bounded history payload/status, and byte reservation. Use compact bounded JSON only for finite structured fields, never bodies/credentials. Add due-work and active-user lookup indexes; no general lock table.
-- [ ] Add internal immutable `outputs.file_incarnation` (random UUID on insert, retained on rename, never copied on new output/ID reuse). Existing rows receive new tokens in an idempotent stopped-writer backfill; never reset a nonempty token. This is not a public patchable metadata key. `create_output_artifact` remains the only ordinary allocator.
+- [x] Add failing repeated-bootstrap tests for `output_storage_bindings` and `output_file_operations`, with explicit NOT NULL identities, user scope, no output cascading FK, valid kinds/phases, nonnegative counts/budgets, and `fs_done` only on committed/aborting rows. Schema installation must not create/provision paths or activate a user.
+- [x] Run `python -m pytest tldw_Server_API/tests/Collections/test_output_file_operations_db.py -q -k sqlite`; confirm new behavior fails.
+- [x] Extend `_ensure_reading_revision_schema` using its existing transaction/advisory bootstrap lock and explicit connection. Bindings contain user, namespace, protocol version and validated finite policy. Journal stores the spec's fixed source/stage/destination fields and collision keys, snapshot/intended changes, source/stage/publication identity, lease/retry/error, bounded history payload/status, and byte reservation. Use compact bounded JSON only for finite structured fields, never bodies/credentials. Add due-work and active-user lookup indexes; no general lock table.
+- [x] Add internal immutable `outputs.file_incarnation` (random UUID on insert, retained on rename, never copied on new output/ID reuse). Existing rows receive new tokens in an idempotent stopped-writer backfill; never reset a nonempty token. This is not a public patchable metadata key. `create_output_artifact` remains the ordinary allocator; the existing trusted Reading adoption insert also allocates its own fresh token.
 - [ ] Implement transaction-owned methods `prepare_output_file_operation`, `get_output_file_operation`, `validate_output_file_operation`, `commit_output_file_operation`, `abort_output_file_operation`, `finish_output_file_operation`, and `ack_output_file_effect`. Internal optional `connection` propagates the same DB transaction; public HTTP payloads never accept operation tokens. Fresh lease time is read after the fence, not supplied pre-wait.
 - [ ] Test conditional transitions, unknown token, other user, expiry, unchanged source snapshot, and rollback. Core transition predicates are:
 
@@ -194,6 +194,53 @@ Independent plan review found two gaps: disposal of an already-live receiver row
 and output readers outside the Outputs endpoint. Both were corrected with explicit
 monotonic receiver transitions, delayed-insertion tests, Watchlist/internal-reader
 ownership and path-reuse coverage. Whole-plan re-review approved with no remaining
-serious implementation blockers. No boxes above represent completed implementation.
-Current validation is document consistency, existing-path checks and
-`git diff --check`; no production tests were run for this documentation-only plan.
+serious implementation blockers. Checked boxes now reflect the dated execution
+checkpoint below, not the earlier plan-review outcome.
+At plan approval, validation was document consistency, existing-path checks and
+`git diff --check`; no production tests were claimed for the documentation-only plan.
+
+### Task 1a: Inert schema/identity foundation (2026-09-05)
+
+Split Task 1 at its verified schema boundary before implementing transition APIs.
+No transition/claim enforcement, filesystem operation, activation or capability is
+implemented by this checkpoint. Table DDL reuses the existing schema fence and
+never inserts a binding. Legacy output tokens remain NULL through ordinary
+bootstrap; explicit user-scoped offline backfill assigns missing UUIDs in one
+transaction with bounded read batches. Generic creation and trusted Reading
+adoption allocate fresh tokens; existing output DTOs do not expose them.
+
+The initial eight schema/identity tests and separate adoption test failed on the
+missing tables/column before implementation. One first GREEN-run fixture failed
+because it reused an existing unique title; a distinct title corrected that setup,
+without changing production uniqueness behavior. Additional migration/idempotency
+and valid-kind checks complete 12 foundation tests per backend.
+
+Final evidence: 12 SQLite foundation passes; 98 non-PostgreSQL targeted revision,
+adoption and idempotency regression passes; 106 PostgreSQL foundation/regression
+passes with two isolated workers (375.06 seconds). Total: 216 distinct passes.
+The PostgreSQL keyword selection also selected the SQLite parameter of
+`test_postgres_search_path_cannot_reset_public_revision_clock`, which intentionally
+skipped; collection confirmed it is the only SQLite case selected. No required
+PostgreSQL case skipped. Independent read-only review found no actionable
+foundation issues. Python compile checks also pass.
+New test module Ruff/Black and changed production-range Black checks pass; the
+adapter's nine preexisting Ruff findings and whole-file Black debt are unchanged
+against HEAD. Scoped Bandit reports no findings or scanner errors.
+
+Verification commands (after environment activation):
+
+```bash
+TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_operations_db.py -q -k sqlite
+TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_reading_revision_mutations.py tldw_Server_API/tests/Collections/test_reading_artifact_adoption.py tldw_Server_API/tests/Collections/test_output_artifact_idempotency.py -q -k 'not postgres'
+TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_operations_db.py tldw_Server_API/tests/Collections/test_reading_revision_mutations.py tldw_Server_API/tests/Collections/test_reading_artifact_adoption.py tldw_Server_API/tests/Collections/test_output_artifact_idempotency.py -q -k postgres -n 2
+```
+
+Future PostgreSQL selection can use `-k 'postgres and not sqlite'` to exclude that
+inapplicable case explicitly; also set `TLDW_TEST_POSTGRES_REQUIRED=1` to turn
+cluster unavailability into an error rather than a fixture skip.
+
+Logs: `/private/tmp/task-13153-journal-schema-{red,green,pg,regressions}.log`,
+`/private/tmp/task-13153-journal-adoption-red.log`,
+`/private/tmp/task-13153-journal-schema-bandit.json`.
+Next: remaining Task 1 transition methods with fresh failing tests. All full-task
+acceptance criteria remain unchecked and TASK-13153 stays In Progress.

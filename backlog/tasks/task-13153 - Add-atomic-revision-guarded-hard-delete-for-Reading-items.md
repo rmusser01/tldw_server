@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-03 02:27'
-updated_date: '2026-09-05 17:06'
+updated_date: '2026-09-05 17:28'
 labels:
   - collections
   - reading-list
@@ -52,5 +52,5 @@ diagnostic-privacy behavior are covered.
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-ADR required: yes; existing ADR-003 applies. User approved the independently reviewed written spec after 8dc255fcca. Spec: Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md. Implementation plan: Docs/superpowers/plans/2026-09-05-reading-output-file-reservations.md. Independent plan review passed after correcting existing-live history receiver disposal and protected Watchlist/internal reader coverage. Ten inline checkpoints: inert binding/journal and immutable output incarnation; shared row/path/resource claims; bounded file protocol/recovery; descriptor-bound downloads; original-instance idempotent history delivery; PATCH/delete/purge integration; text and Reading producers; audio/subtitle producers; offline activation and independent recovery; integrated verification/docs. Reuses revision fence and POSIX descriptor context, no public jobs API or new dependency. Next is Task 1 schema/journal TDD. Production implementation has not started for this sub-plan; last code checkpoint remains 2207a84fc1 with historical 146 targeted passes. Plan-only checks: existing paths, independent review and git diff --check. Capability remains absent. Parent-plan HTTP/DTO/reconciliation/release work remains required; TASK-13153 In Progress.
+ADR required: yes; ADR-003. Approved spec: Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md. Reviewed implementation plan/evidence: Docs/superpowers/plans/2026-09-05-reading-output-file-reservations.md. Task 1a schema/identity foundation implemented and reviewed: inert constrained binding/journal tables; internal UUID incarnation in generic output creation and trusted Reading adoption; explicit user-scoped transactional offline backfill; no public DTO exposure. Files: Collections_DB.py and new tests/Collections/test_output_file_operations_db.py. TDD RED: eight foundation tests plus separate adoption test failed before implementation. Final verification: 12 SQLite foundation +98 non-PG regressions +106 real PG passes =216 distinct passes. One inapplicable SQLite parameter of a PostgreSQL-only test skipped; no required PG case skipped. Compile, new test Ruff/Black, changed-range Black, diff check and scoped Bandit pass; nine existing adapter Ruff findings and whole-file Black debt unchanged against HEAD. Independent review found no actionable foundation issues. Task 1 is intentionally not complete: transition methods are next, with fresh failing tests. No binding/volume activated, no file mutation or capability enabled. Remaining sub-plan and parent-plan HTTP/DTO/reconciliation/release work pending; TASK-13153 In Progress.
 <!-- SECTION:PLAN:END -->

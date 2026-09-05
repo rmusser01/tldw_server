@@ -2736,6 +2736,119 @@ class CollectionsDatabase:
                 (),
                 connection=conn,
             )
+            self._ensure_output_file_operation_schema(conn)
+
+    def _ensure_output_file_operation_schema(self, connection: Any) -> None:
+        """Install inert generic journal tables inside the existing schema fence.
+
+        No binding is inserted, volume provisioned, or legacy identity inferred.
+        Resource admission and operation transitions are separate rollout steps.
+        """
+        prefix = "public." if self.backend.backend_type == BackendType.POSTGRESQL else ""
+        if prefix:
+            columns = self.backend.get_table_info("outputs", connection=connection)
+        else:
+            columns = self.backend.execute("PRAGMA table_info(outputs)", (), connection=connection).rows
+        if not any(row["name"] == "file_incarnation" for row in columns):
+            self.backend.execute(
+                f"ALTER TABLE {prefix}outputs ADD COLUMN file_incarnation TEXT "  # nosec B608: fixed schema identifier
+                "CHECK (file_incarnation IS NULL OR length(file_incarnation) = 32)",
+                (),
+                connection=connection,
+            )
+        self.backend.execute(
+            f"CREATE UNIQUE INDEX IF NOT EXISTS ux_output_file_incarnation ON {prefix}outputs(user_id, file_incarnation)",  # nosec B608: fixed schema identifier
+            (),
+            connection=connection,
+        )
+        self.backend.execute(
+            f"CREATE TABLE IF NOT EXISTS {prefix}output_storage_bindings ("  # nosec B608: fixed schema identifier
+            "user_id TEXT NOT NULL PRIMARY KEY CHECK (length(trim(user_id)) > 0), "
+            "storage_namespace_id TEXT NOT NULL CHECK (length(trim(storage_namespace_id)) BETWEEN 1 AND 128), "
+            "protocol_version INTEGER NOT NULL CHECK (protocol_version > 0), "
+            "operation_bytes BIGINT NOT NULL CHECK (operation_bytes BETWEEN 1 AND 9223372036854775807), "
+            "user_pending_bytes BIGINT NOT NULL CHECK (user_pending_bytes BETWEEN 1 AND 9223372036854775807), "
+            "active_operations BIGINT NOT NULL CHECK (active_operations BETWEEN 1 AND 9223372036854775807), "
+            "text_input_bytes BIGINT NOT NULL CHECK (text_input_bytes BETWEEN 1 AND 9223372036854775807), "
+            "text_output_bytes BIGINT NOT NULL CHECK (text_output_bytes BETWEEN 1 AND 9223372036854775807), "
+            "free_space_margin_bytes BIGINT NOT NULL CHECK (free_space_margin_bytes BETWEEN 1 AND 9223372036854775807), "
+            "UNIQUE (user_id, storage_namespace_id))",
+            (),
+            connection=connection,
+        )
+        self.backend.execute(
+            f"CREATE TABLE IF NOT EXISTS {prefix}output_file_operations ("  # nosec B608: fixed schema identifiers
+            "token TEXT NOT NULL PRIMARY KEY CHECK (length(trim(token)) BETWEEN 1 AND 128), "
+            "user_id TEXT NOT NULL, storage_namespace_id TEXT NOT NULL, output_id BIGINT, "
+            "kind TEXT NOT NULL CHECK (kind IN ('create', 'replace', 'remove')), "
+            "phase TEXT NOT NULL DEFAULT 'prepared' CHECK (phase IN ('prepared', 'committed', 'aborting')), "
+            "fs_done INTEGER NOT NULL DEFAULT 0 CHECK (fs_done IN (0, 1)), "
+            "source_path TEXT CHECK (length(source_path) BETWEEN 1 AND 255), source_key TEXT, "
+            "stage_path TEXT CHECK (length(stage_path) BETWEEN 1 AND 255), stage_key TEXT, "
+            "destination_path TEXT CHECK (length(destination_path) BETWEEN 1 AND 255), destination_key TEXT, "
+            "original_json TEXT NOT NULL DEFAULT '{}' CHECK (length(original_json) <= 32768), "
+            "intended_json TEXT NOT NULL DEFAULT '{}' CHECK (length(intended_json) <= 32768), "
+            "source_identity_json TEXT CHECK (length(source_identity_json) <= 2048), "
+            "stage_identity_json TEXT CHECK (length(stage_identity_json) <= 2048), "
+            "publication_identity_json TEXT CHECK (length(publication_identity_json) <= 2048), "
+            "written_bytes BIGINT NOT NULL DEFAULT 0 CHECK (written_bytes >= 0), "
+            "reserved_bytes BIGINT NOT NULL DEFAULT 0 CHECK (reserved_bytes >= 0), "
+            "lease_until BIGINT NOT NULL CHECK (lease_until >= 0), "
+            "attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0), "
+            "retry_after BIGINT NOT NULL DEFAULT 0 CHECK (retry_after >= 0), "
+            "last_error TEXT CHECK (length(last_error) <= 64), "
+            "effects_json TEXT NOT NULL DEFAULT '[]' CHECK (length(effects_json) <= 16384), "
+            "effects_pending INTEGER NOT NULL DEFAULT 0 CHECK (effects_pending BETWEEN 0 AND 4), "
+            "CHECK (fs_done = 0 OR (phase IN ('committed', 'aborting') AND reserved_bytes = 0)), "
+            "CHECK ((source_path IS NULL AND source_key IS NULL) OR "
+            "(source_path IS NOT NULL AND source_key IS NOT NULL AND source_key = lower(source_path))), "
+            "CHECK ((stage_path IS NULL AND stage_key IS NULL) OR "
+            "(stage_path IS NOT NULL AND stage_key IS NOT NULL AND stage_key = lower(stage_path))), "
+            "CHECK ((destination_path IS NULL AND destination_key IS NULL) OR "
+            "(destination_path IS NOT NULL AND destination_key IS NOT NULL AND destination_key = lower(destination_path))), "
+            "CHECK ((kind = 'remove' AND source_path IS NOT NULL AND stage_path IS NULL AND destination_path IS NULL) OR "
+            "(kind = 'create' AND source_path IS NULL AND stage_path IS NOT NULL AND destination_path IS NOT NULL) OR "
+            "(kind = 'replace' AND source_path IS NOT NULL AND stage_path IS NOT NULL AND destination_path IS NOT NULL)), "
+            f"FOREIGN KEY (user_id, storage_namespace_id) REFERENCES {prefix}output_storage_bindings(user_id, storage_namespace_id) ON DELETE RESTRICT)",
+            (),
+            connection=connection,
+        )
+        self.backend.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_output_file_operations_due ON {prefix}output_file_operations(user_id, storage_namespace_id, fs_done, retry_after)",  # nosec B608: fixed schema identifier
+            (),
+            connection=connection,
+        )
+        self.backend.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_output_file_operations_active ON {prefix}output_file_operations(user_id, fs_done, output_id)",  # nosec B608: fixed schema identifier
+            (),
+            connection=connection,
+        )
+
+    def backfill_output_file_incarnations(self) -> int:
+        """Assign missing internal identities for this user during offline upgrade.
+
+        The operator must stop old writers first. This does not activate storage
+        or reconcile ownership/history. Existing identities are never reassigned.
+        All batches share one transaction so an interrupted backfill rolls back.
+        """
+        count = 0
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            while True:
+                rows = self.backend.execute(
+                    "SELECT id FROM outputs WHERE user_id = ? AND file_incarnation IS NULL ORDER BY id LIMIT 100",
+                    (self.user_id,),
+                    connection=conn,
+                ).rows
+                if not rows:
+                    return count
+                for row in rows:
+                    result = self.backend.execute(
+                        "UPDATE outputs SET file_incarnation = ? WHERE user_id = ? AND id = ? AND file_incarnation IS NULL",
+                        (uuid4().hex, self.user_id, row["id"]),
+                        connection=conn,
+                    )
+                    count += result.rowcount
 
     def _lock_reading_revision_clock(self, connection: Any) -> None:
         """Serialize aggregate writers before reading their current state."""
@@ -5228,8 +5341,8 @@ class CollectionsDatabase:
         resolved_storage_path = self.resolve_output_storage_path(storage_path)
         normalized_idempotency_key = str(idempotency_key or "").strip() or None
         q = (
-            "INSERT INTO outputs (user_id, job_id, run_id, type, title, format, storage_path, metadata_json, workspace_tag, created_at, media_item_id, chatbook_path, deleted, deleted_at, retention_until, idempotency_key) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)"
+            "INSERT INTO outputs (user_id, job_id, run_id, type, title, format, storage_path, metadata_json, workspace_tag, created_at, media_item_id, chatbook_path, deleted, deleted_at, retention_until, idempotency_key, file_incarnation) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)"
         )
         params = (
             self.user_id,
@@ -5246,6 +5359,7 @@ class CollectionsDatabase:
             chatbook_path,
             retention_until,
             normalized_idempotency_key,
+            uuid4().hex,
         )
         with self.transaction() as conn:
             self._lock_reading_revision_clock(conn)
@@ -5556,8 +5670,8 @@ class CollectionsDatabase:
             if self._reading_artifact_has_output_reference(row["storage_path"], storage_namespace_id, conn):
                 raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
             result = self._execute_insert(
-                "INSERT INTO outputs (user_id, type, title, format, storage_path, metadata_json, created_at, media_item_id, retention_until, deleted) "
-                "VALUES (?, 'reading_archive', ?, 'md', ?, ?, ?, ?, ?, 0)",
+                "INSERT INTO outputs (user_id, type, title, format, storage_path, metadata_json, created_at, media_item_id, retention_until, deleted, file_incarnation) "
+                "VALUES (?, 'reading_archive', ?, 'md', ?, ?, ?, ?, ?, 0, ?)",
                 (
                     self.user_id,
                     title,
@@ -5566,6 +5680,7 @@ class CollectionsDatabase:
                     _utcnow_iso(),
                     parent.media_id,
                     retention_until,
+                    uuid4().hex,
                 ),
                 connection=conn,
             )
