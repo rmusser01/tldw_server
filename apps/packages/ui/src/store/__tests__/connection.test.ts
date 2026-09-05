@@ -353,9 +353,36 @@ describe("connection store stability", () => {
     mockedApiSend.mockResolvedValue({ ok: true, status: 200, data: { status: "alive" } })
     await useConnectionStore.getState().checkOnce()
     expect(useConnectionStore.getState().state.isConnected).toBe(expected)
-    if (expected) expect(mockedApiSend).toHaveBeenCalledWith(expect.objectContaining({ noAuth: false }))
+    if (expected) expect(mockedApiSend).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/users/me", noAuth: false }))
     else expect(useConnectionStore.getState().state.configStep).toBe("auth")
   })
+
+  it.each(["absent", "expired", "revoked"])(
+    "rejects %s cookies even when persisted transport metadata and public liveness are valid",
+    async (reason) => {
+      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+      mockedClient.getConfig.mockResolvedValue({
+        serverUrl: window.location.origin,
+        authMode: "single-user",
+        authSource: "cookie-session"
+      })
+      mockedApiSend.mockImplementation(async ({ path }) =>
+        path === "/api/v1/users/me"
+          ? { ok: false, status: 401, error: `Session ${reason}` }
+          : { ok: true, status: 200, data: { status: "alive" } }
+      )
+
+      await useConnectionStore.getState().checkOnce()
+
+      expect(useConnectionStore.getState().state).toMatchObject({
+        phase: ConnectionPhase.ERROR,
+        isConnected: false,
+        errorKind: "auth",
+        lastStatusCode: 401
+      })
+      expect(mockedClient.ragHealth).not.toHaveBeenCalled()
+    }
+  )
 
   it("treats runtime single-user auth as configured without persisting an api key", async () => {
     mockedClient.getConfig.mockResolvedValue({

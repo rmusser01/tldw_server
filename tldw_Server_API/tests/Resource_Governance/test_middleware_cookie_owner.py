@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.AuthNZ import auth_principal_resolver as resolver
@@ -14,19 +14,23 @@ from tldw_Server_API.app.core.AuthNZ.single_user_session import SingleUserSessio
 from tldw_Server_API.app.core.Resource_Governance.governor import MemoryResourceGovernor
 from tldw_Server_API.app.core.Resource_Governance.middleware_simple import RGSimpleMiddleware
 
+# unit is the primary classification; rate_limit is a registered feature marker.
 pytestmark = [pytest.mark.unit, pytest.mark.rate_limit]
+
+GovernedCookieApp = tuple[FastAPI, list[str | None], MemoryResourceGovernor]
 
 
 @pytest.fixture
-def governed_cookie_app(monkeypatch):
+def governed_cookie_app(monkeypatch: pytest.MonkeyPatch) -> GovernedCookieApp:
+    """Build governed ingress with real quotas and stubbed cookie validation."""
     settings = SimpleNamespace(AUTH_MODE="single_user", SINGLE_USER_SESSION_COOKIE_NAME="custom_session")
     monkeypatch.setattr(resolver, "get_settings", lambda: settings)
     from tldw_Server_API.app.core.AuthNZ import settings as settings_module
 
     monkeypatch.setattr(settings_module, "get_settings", lambda: settings)
-    validations = []
+    validations: list[str | None] = []
 
-    async def validate(request):
+    async def validate(request: Request) -> SingleUserSessionIdentity | None:
         token = request.cookies.get("custom_session")
         validations.append(token)
         if token not in {"session-a", "session-b"}:
@@ -57,7 +61,7 @@ def governed_cookie_app(monkeypatch):
     return app, validations, governor
 
 
-def test_cookie_sessions_share_owner_quota_and_cached_auth(governed_cookie_app):
+async def test_cookie_sessions_share_owner_quota_and_cached_auth(governed_cookie_app: GovernedCookieApp) -> None:
     app, validations, governor = governed_cookie_app
     with TestClient(app) as client:
         for index in range(60):
@@ -68,10 +72,13 @@ def test_cookie_sessions_share_owner_quota_and_cached_auth(governed_cookie_app):
         denied = client.get("/api/v1/persona/profiles", headers={"Cookie": "custom_session=session-b"})
     assert denied.status_code == 429
     assert len(validations) == 61  # Canonical endpoint resolver reused the request cache.
-    assert set(governor._buckets) == {("character_chat.default", "requests", "user", "1")}
+    owner_quota = await governor.peek_with_policy("user:1", ["requests"], "character_chat.default")
+    other_owner_quota = await governor.peek_with_policy("user:2", ["requests"], "character_chat.default")
+    assert owner_quota["requests"]["remaining"] == 0
+    assert other_owner_quota["requests"]["remaining"] == 60
 
 
-def test_invalid_cookie_returns_canonical_auth_failure(governed_cookie_app):
+async def test_invalid_cookie_returns_canonical_auth_failure(governed_cookie_app: GovernedCookieApp) -> None:
     app, validations, governor = governed_cookie_app
     with TestClient(app) as client:
         response = client.get("/api/v1/persona/profiles", headers={"Cookie": "custom_session=invalid"})
@@ -79,7 +86,8 @@ def test_invalid_cookie_returns_canonical_auth_failure(governed_cookie_app):
     assert response.headers["www-authenticate"] == "Bearer"
     assert response.json()["detail"] == "Not authenticated (provide Bearer token or X-API-KEY)"
     assert validations == ["invalid"]
-    assert not governor._buckets
+    owner_quota = await governor.peek_with_policy("user:1", ["requests"], "character_chat.default")
+    assert owner_quota["requests"]["remaining"] == 60
 
 
 @pytest.mark.parametrize(
@@ -116,26 +124,29 @@ def test_cookie_preflight_does_not_apply_in_multi_user_mode(governed_cookie_app)
     assert not validations
 
 
-def test_cookie_preflight_does_not_fail_open_on_resolver_failure(governed_cookie_app, monkeypatch):
+async def test_cookie_preflight_does_not_fail_open_on_resolver_failure(
+    governed_cookie_app: GovernedCookieApp, monkeypatch: pytest.MonkeyPatch
+) -> None:
     app, _, governor = governed_cookie_app
 
-    async def unavailable(request):
+    async def unavailable(request: Request) -> None:
         raise RuntimeError("auth unavailable")
 
     monkeypatch.setattr(resolver, "get_auth_principal", unavailable)
     with TestClient(app) as client, pytest.raises(RuntimeError, match="auth unavailable"):
         client.get("/api/v1/persona/profiles", headers={"Cookie": "custom_session=session-a"})
-    assert not governor._buckets
+    owner_quota = await governor.peek_with_policy("user:1", ["requests"], "character_chat.default")
+    assert owner_quota["requests"]["remaining"] == 60
 
 
 def test_valid_cookie_does_not_bypass_missing_policy(governed_cookie_app):
-    app, validations, governor = governed_cookie_app
+    app, validations, _ = governed_cookie_app
     app.state.rg_policy_loader.get_policy = lambda _: {}
     with TestClient(app) as client:
         response = client.get("/api/v1/persona/profiles", headers={"Cookie": "custom_session=session-a"})
     assert response.status_code == 429
     assert not validations
-    assert not governor._buckets
+    assert response.json()["policy_id"] == "character_chat.default"
 
 
 @pytest.mark.parametrize("scopes", [["global", "ip"], ["user", "api_key", "ip"], ["entity"]])

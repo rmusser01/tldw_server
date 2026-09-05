@@ -568,7 +568,7 @@ const hasSingleUserApiKey = (config: Partial<TldwConfig> | null | undefined): bo
   )
 }
 
-const hasActiveCookieSession = (config: Partial<TldwConfig> | null | undefined): boolean =>
+const hasConfiguredCookieTransport = (config: Partial<TldwConfig> | null | undefined): boolean =>
   !isCookieSessionConfigInvalidated() &&
   isExactOriginCookieSessionConfig(config, getQuickstartWebUiServerUrl())
 
@@ -578,7 +578,7 @@ const hasRequiredAuthForConfig = (config: Partial<TldwConfig> | null | undefined
     return Boolean(String(config?.accessToken || "").trim())
   }
 
-  return hasSingleUserApiKey(config) || hasActiveCookieSession(config)
+  return hasSingleUserApiKey(config) || hasConfiguredCookieTransport(config)
 }
 
 const deriveOnboardingConfigStep = (
@@ -753,7 +753,7 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
         let cfg = await (await getTldwClient()).getConfig()
         // Check the original binding before quickstart normalizes serverUrl.
         // Foreign-origin cookie metadata must never become local authority.
-        const hasCookieSessionAuth = hasActiveCookieSession(cfg)
+        const hasCookieSessionAuth = hasConfiguredCookieTransport(cfg)
         const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
         const recoveryProbeSourceServerUrl = cfg?.serverUrl ?? currentState.serverUrl ?? null
         let serverUrl = quickstartWebUiServerUrl ?? cfg?.serverUrl ?? null
@@ -794,8 +794,8 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
           (cfg?.authMode ?? "single-user") === "single-user" &&
           !hasSingleUserAuthValue
 
-        // Require API-key or active same-origin cookie-session configuration
-        // before using liveness to mark authenticated pages ready.
+        // Require credentials or same-origin cookie transport configuration
+        // before checking whether authenticated pages are ready.
         if (missingSingleUserAuth) {
           set((s) => ({
             state: {
@@ -853,10 +853,17 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
             !cfg.accessToken &&
             cfg.authMode !== "multi-user")
 
+        // Cookie metadata survives HTTP-only cookie expiry/revocation. Probe
+        // the canonical authenticated user endpoint for cookie-only readiness;
+        // public liveness cannot establish that the session is still valid.
+        const connectionProbePath = hasCookieSessionAuth && !hasSingleUserApiKey(cfg)
+          ? "/api/v1/users/me"
+          : HEALTH_LIVENESS_PATH
+
         const healthPromise = (async () => {
           try {
             const resp = await apiSend({
-              path: HEALTH_LIVENESS_PATH,
+              path: connectionProbePath,
               method: 'GET',
               timeoutMs: CONNECTION_TIMEOUT_MS,
               // Allow unauthenticated health checks when no credentials have
@@ -901,11 +908,11 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
             }
             const fallbackHasSingleUserApiKey = hasSingleUserApiKey(cfg)
             const fallbackNoAuth = !cfg ||
-              (!fallbackHasSingleUserApiKey &&
+              (!fallbackHasSingleUserApiKey && !hasCookieSessionAuth &&
                 !cfg.accessToken &&
                 cfg.authMode !== "multi-user")
             const fallbackResp = await apiSend({
-              path: HEALTH_LIVENESS_PATH,
+              path: connectionProbePath,
               method: "GET",
               timeoutMs: CONNECTION_TIMEOUT_MS,
               noAuth: fallbackNoAuth

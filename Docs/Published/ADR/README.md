@@ -74,3 +74,6 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-040](040-synchronized-moodboards-and-studio-authority.md) | Proposed | Synchronize moodboards, explicit placements, and accepted Studio sidecars while retaining existing product authority and derived smart matches. |
 | [ADR-041](041-scheduled-agent-execution-feasibility.md) | Accepted | Keep Scheduled Agent execution fail-closed until exact deployment certification and the separate execution stack are both ready. |
 | [ADR-042](042-browser-transport-admission-and-attestation.md) | Accepted | Admit browser retrieval only through URL-guarded single-user compatibility or a complete governed-transport attestation. |
+
+| [ADR-045](045-persona-live-pending-plan-handoff.md) | Accepted | Project the latest active owned pending Persona plan through authenticated session detail for explicit full Live review. |
+| [ADR-044](044-cookie-session-governance-owner-preflight.md) | Accepted | Resolve canonical cookie-session owners before ingress quotas only when policy scopes cannot admit anonymous requests. |

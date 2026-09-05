@@ -662,6 +662,8 @@ class PersonaSessionSummary(BaseModel):
 
 
 class PersonaPendingPlanStep(BaseModel):
+    """A read-only pending step for owner review, without an approval grant."""
+
     idx: int
     tool: str
     step_type: str

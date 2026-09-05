@@ -13,7 +13,7 @@ modified_files:
 - tldw_Server_API/tests/Resource_Governance/test_middleware_cookie_owner.py
 - Docs/ADR/044-cookie-session-governance-owner-preflight.md
 - Docs/ADR/README.md
-updated_date: 2026-09-05 19:13
+updated_date: 2026-09-05 19:28
 ---
 
 ## Description
@@ -48,8 +48,8 @@ Evidence: initial regression2failed (valid cookie429 and invalidcookie429); anon
 Broader targeted verification finished: 58 passed, including 32 real SQLite single-user-cookie integration cases (mint, logout idempotence, revoked/expired sessions, CSRF, principal adapters). This run started before the final anonymous-policy narrowing; the final narrowed production snapshot then passed the dedicated 15 regressions and 19 existing middleware/entity tests. Added ADR044 to Docs/ADR/README.md. Parent browser UAT remains the final live verification.
 Parent real-browser UAT: after restarting the actual FastAPI application with this middleware, Persona profile reads changed from persistent429 character_chat.default to200. Quickstart reports Connected; protected builder and Buddy images decode96x96; notifications/ingestion/users/me also200. Evidence: Docs/Reviews/assets/migu-buddy-followups-2026-09-05/quickstart-builder.json. No quota disablement, policy expansion, API-key injection or cookie-value logging. Independent frontend review caught missing per-turn stream correlation and stale connect completion guards; those are being repaired under TASK13180.
 Originally allocated TASK-13185 during this work; renumbered to TASK-13192 before rebase because dev independently allocated 13185 to the llama.cpp snapshot plan. Original creation: 2026-09-05 18:30. Scope and verification unchanged.
+PR2902 governance-test review follow-up (3941784787, 3941784791): typed/documented governed_cookie_app and its validation helper; replaced private MemoryResourceGovernor._buckets checks with public peek_with_policy quota snapshots and observable HTTP rejection. Quota assertions prove both sessions consume user:1's 60-request allowance while user:2 retains 60, and authentication failures leave owner quota untouched. 3941784789's marker removal was not applied: rate_limit is explicitly registered in pyproject.toml and remains a secondary feature marker; unit is the sole primary classification. Targeted test file: 15 passed; Ruff check/format and whitespace check pass. Production code unchanged.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->

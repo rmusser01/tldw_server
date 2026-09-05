@@ -207,3 +207,31 @@ became ADR-045. Both existing and new testing lessons were retained. Production
 patches are range-diff equivalent. On this base, **214 frontend tests and 162
 Persona/Governor Python tests passed**. Live receipts above identify the earlier
 base and are not represented as a second live run after rebase.
+
+### PR #2902 review fixes
+
+Qodo identified that persisted cookie metadata could outlive the HTTP-only
+session while public health remained successful. Four failing connection tests
+reproduced it. Cookie-only readiness now probes the authenticated `/users/me`
+endpoint, including transport recovery; absent, expired, and revoked sessions
+produce an authentication error. The connection and persona-store suites pass
+46 tests, with no new lint findings. Existing whole-frontend typechecking still
+reports the same 80 diagnostics in six unchanged files.
+
+Confirmation admission now belongs to `SessionManager`: runtime ownership,
+retention, lifecycle-snapshot checks and plan consumption share one lock. This
+does not make separate persisted lifecycle writes atomic; ADR-045 explicitly
+documents that boundary. Core tests cover concurrent single consumption and
+rejection without consumption. Session-detail tests are split into focused
+fixture-backed cases. The new step schema has a public-contract docstring.
+
+Governor tests now use public quota snapshots instead of private bucket storage,
+and the fixture has typed documented outputs. `rate_limit` remains a registered
+supplemental marker; `unit` is its sole primary classification. All15 pass with
+strict-marker collection. Published ADR mirrors and the OpenAPI fingerprint are
+regenerated for the new API models. Review fixes have targeted automated
+evidence; the recorded real-browser run above predates these refinements.
+
+Final review check: **178 Persona/Governor tests passed**, published-mirror suite
+**33 passed**, and canonical OpenAPI fingerprint verification passed after
+regenerating frontend declarations (2073 paths, 3142 schemas).

@@ -5,7 +5,7 @@ status: Done
 assignee:
 - '@codex'
 created_date: 2026-09-05 15:53
-updated_date: 2026-09-05 18:55
+updated_date: 2026-09-05 19:32
 labels: []
 dependencies: []
 references:
@@ -41,8 +41,8 @@ ADR required: no new ADR.
 ADR path: Docs/ADR/018-resource-governance-endpoint-policy-and-route-map.md; Docs/ADR/019-security-request-edge-middleware.md.
 Reason: bounded adapter repair implementing existing Principal Governance and Docs/superpowers/specs/2026-07-10-single-user-http-only-session-design.md; no new auth policy, identity owner, or middleware boundary.
 Real browser follow-up: connection.tsx also checks only API keys before health probing. Reuse the existing active cookie-session config predicate for auth readiness, preserving invalidation and origin restrictions. Add a connection-store regression before changing readiness; this implements the existing July10 cookie contract, no new ADR.
+Qodo review3941784796: persisted cookie transport metadata alone cannot prove current authentication because health/live is public. First reproduce missing/expired/revoked cookie readiness as auth failures despite healthy public liveness, then use the existing authenticated users/me endpoint as the cookie-only connection probe. Preserve exact-origin metadata checks and explicit API-key precedence. ADR required: no new ADR; existing canonical auth contract and ADR044 apply. Re-run connection/onboarding tests and document this narrower readiness proof.
 <!-- SECTION:PLAN:END -->
-
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
@@ -75,4 +75,5 @@ No new ADR required. Existing Docs/ADR/018-resource-governance-endpoint-policy-a
 
 AC3 remains pending real quickstart Migu/Buddy and browser stream UAT by the parent agent. No full suite, commit, push, PR, or real runtime/browser operation performed by this subtask.
 Real quickstart UAT now passes after both legacy-cookie auth and TASK13185 owner-admission fixes. Existing connection readiness also required an API key despite active cookie metadata; it now uses exact-origin cookie-session configuration plus invalidation state before URL normalization and authenticated health probing. Connection-store red-to-green matrix covers valid, invalidated and foreign-origin cookie metadata;36 store tests plus7 persona-state tests pass. Browser cookie-only users/me, Persona profiles, notifications, ingestion capabilities and docs-info all200; builder and Buddy decode96x96 protected blob images. Real cookie WebSocket receives the synthetic plan using explicitly allowed18385 origin. Evidence: Docs/Reviews/assets/migu-buddy-followups-2026-09-05/quickstart-builder.json and screenshot. TypeScript lint0errors; repository frontend typecheck retains80 unrelated diagnostics across the same6 baseline files. New public auth policy not introduced; ADR018/019 and July10 cookie design remain governing.
+Qodo3941784796 confirmed: public health allowed absent/expired/revoked cookies to look connected. Four red cases reproduced it. Cookie-only readiness now probes canonical authenticated /api/v1/users/me, including recovery retries; transport metadata predicate renamed to avoid implying session validity. Same-origin and explicit API-key precedence retained. Connection+persona store suites46 passed, ESLint0 errors14 existing any warnings; touched-cookie changes introduce none. Prior real browser receipts predate this readiness refinement; they already show authenticated users/me200. No new provider/microphone acceptance.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

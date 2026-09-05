@@ -114,6 +114,14 @@ class Session:
     pending_plans: dict[str, PendingPlan] = field(default_factory=dict)
 
 
+class PlanConfirmationError(ValueError):
+    """A pending plan cannot be admitted for confirmation."""
+
+    def __init__(self, reason_code: str, message: str) -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
+
+
 class SessionManager:
     def __init__(
         self,
@@ -297,6 +305,36 @@ class SessionManager:
             if consume:
                 session.pending_plans.pop(plan_id, None)
                 self._touch_session(session)
+            return pending
+
+    def consume_plan_for_confirmation(
+        self,
+        *,
+        session_id: str,
+        plan_id: str,
+        user_id: str,
+        session_exists: bool,
+        session_terminal: bool,
+    ) -> PendingPlan:
+        """Validate and consume a pending plan under the runtime lock.
+
+        Lifecycle flags must come from the server's owner-filtered persisted
+        lookup. This serializes runtime ownership/retention checks and removal,
+        not database lifecycle writes; the persisted flags are a read snapshot.
+        Rejection leaves an unexpired plan available. Execution must still check
+        current scopes and tool policy after admission.
+        """
+        with self._lock:
+            pending = self.get_plan(session_id=session_id, plan_id=plan_id, user_id=user_id)
+            if pending is None:
+                raise PlanConfirmationError("PLAN_NOT_FOUND", "Invalid plan_id/session_id")
+            if session_terminal:
+                raise PlanConfirmationError("SESSION_TERMINAL", "Persona session is stopped.")
+            if pending.requires_persisted_session and not session_exists:
+                raise PlanConfirmationError("SESSION_NOT_FOUND", "Persona session is unavailable.")
+            session = self._sessions[session_id]
+            session.pending_plans.pop(plan_id)
+            self._touch_session(session)
             return pending
 
     def get_latest_plan_snapshot(

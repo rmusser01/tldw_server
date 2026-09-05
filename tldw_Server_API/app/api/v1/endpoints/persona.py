@@ -251,7 +251,7 @@ from tldw_Server_API.app.core.Persona.runtime_explorer import (
     RuntimeExplorerConfig,
     RuntimeScorer,
 )
-from tldw_Server_API.app.core.Persona.session_manager import get_session_manager
+from tldw_Server_API.app.core.Persona.session_manager import PlanConfirmationError, get_session_manager
 from tldw_Server_API.app.core.Persona.session_materialization import (
     materialize_persona_session,
     scope_snapshot_id_from_snapshot,
@@ -10566,53 +10566,25 @@ async def persona_stream(
                 max_tool_steps = _get_persona_max_tool_steps()
                 approved_step_indices = sorted(set(approved_step_indices))[:max_tool_steps]
 
-                pending_plan = session_manager.get_plan(
-                    session_id=session_id,
-                    plan_id=plan_id,
-                    user_id=connection_user_id,
-                    consume=False,
-                )
-                if pending_plan is None:
-                    await _emit_notice(
-                        session_id=session_id,
-                        level="error",
-                        message="Invalid plan_id/session_id",
-                        reason_code="PLAN_NOT_FOUND",
-                    )
-                    continue
-
                 runtime_context = _load_persona_policy_rules_for_session(
                     persona_scope_db,
                     session_id=session_id,
                     user_id=authenticated_user_id,
                 )
-                if bool(runtime_context.get("session_terminal", False)):
-                    await _emit_notice(
+                try:
+                    pending_plan = session_manager.consume_plan_for_confirmation(
                         session_id=session_id,
-                        level="error",
-                        message="Persona session is stopped.",
-                        reason_code="SESSION_TERMINAL",
+                        plan_id=plan_id,
+                        user_id=connection_user_id,
+                        session_exists=bool(runtime_context.get("session_exists")),
+                        session_terminal=bool(runtime_context.get("session_terminal", False)),
                     )
-                    continue
-                if pending_plan.requires_persisted_session and not bool(runtime_context.get("session_exists")):
+                except PlanConfirmationError as exc:
                     await _emit_notice(
                         session_id=session_id,
                         level="error",
-                        message="Persona session is unavailable.",
-                        reason_code="SESSION_NOT_FOUND",
-                    )
-                    continue
-                if session_manager.get_plan(
-                    session_id=session_id,
-                    plan_id=plan_id,
-                    user_id=connection_user_id,
-                    consume=True,
-                ) is not pending_plan:
-                    await _emit_notice(
-                        session_id=session_id,
-                        level="error",
-                        message="Invalid plan_id/session_id",
-                        reason_code="PLAN_NOT_FOUND",
+                        message=str(exc),
+                        reason_code=exc.reason_code,
                     )
                     continue
 
