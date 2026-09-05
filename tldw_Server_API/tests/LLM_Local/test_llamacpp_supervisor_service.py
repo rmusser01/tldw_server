@@ -245,6 +245,76 @@ async def test_snapshot_failed_start_keeps_child_ownership_until_confirmed_death
         assert not (tmp_path / "llamacpp-snapshots" / "one" / "working" / "failedlaunch").exists()
 
 
+async def test_overlapping_cleanup_preserves_new_live_child_and_owner_on_failed_stop(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_supervisor_service as module
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore, SnapshotStoreError
+
+    dead = SimpleNamespace(returncode=0)
+    live = SimpleNamespace(returncode=None)
+    starting, register = asyncio.Event(), asyncio.Event()
+
+    class NewRunner(StopFailingRunner):
+        async def start(self, model_path, profile):
+            self.snapshot_generation = "newgeneration"
+            self.snapshot_working = self.snapshot_store.launch_directory("new", "newgeneration")
+            self.snapshot_process = live
+            starting.set()
+            await register.wait()
+            return await super().start(model_path, profile)
+
+    config = make_config(tmp_path)
+    model = make_model(config)
+    supervisor = LlamaCppSupervisor(
+        config=config,
+        store=JsonLlamaCppProfileStore(tmp_path / "profiles.json"),
+        runner_factory=lambda c, p: NewRunner(p, {}),
+    )
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="new", name="new", model_path=str(model), snapshots_enabled=True)
+    )
+    start = asyncio.create_task(supervisor.start_profile("new"))
+    await starting.wait()
+    service = supervisor._snapshots
+    supervisor._snapshot_launches.append(("old", "oldgeneration", dead))
+    entered, release = asyncio.Event(), asyncio.Event()
+    calls = 0
+    original_disk_call = module.disk_call
+
+    async def controlled_disk_call(fn, *args, **kwargs):
+        nonlocal calls
+        if fn == service.store.cleanup_launch:
+            calls += 1
+            if calls == 1:
+                entered.set()
+                await release.wait()
+            return None
+        return await original_disk_call(fn, *args, **kwargs)
+
+    monkeypatch.setattr(module, "disk_call", controlled_disk_call)
+    first = asyncio.create_task(supervisor._cleanup_dead_snapshot_launches())
+    await entered.wait()
+    second = asyncio.create_task(supervisor._cleanup_dead_snapshot_launches())
+    # The second pass either completes without I/O suspension (old code), or
+    # suspends on the cleanup lock. Register a different profile at that point.
+    await asyncio.sleep(0)
+    register.set()
+    await start
+    release.set()
+    await asyncio.gather(first, second)
+    try:
+        with pytest.raises(RuntimeError, match="Failed to stop"):
+            await supervisor.shutdown()
+        supervisor.cleanup_sync()
+        with pytest.raises(SnapshotStoreError):
+            SnapshotStore(tmp_path / "llamacpp-snapshots")
+        assert ("new", "newgeneration", live) in supervisor._snapshot_launches
+    finally:
+        live.returncode = 1
+        service.store.close()
+
+
 async def test_default_profile_compatibility_path_cannot_change_reserved_snapshot_profile(tmp_path):
     from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_store import DEFAULT_PROFILE_ID
     from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_operations import SnapshotOperationError

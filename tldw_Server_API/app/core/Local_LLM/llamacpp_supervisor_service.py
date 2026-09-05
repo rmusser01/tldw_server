@@ -110,6 +110,7 @@ class LlamaCppSupervisor:
         self._paused: set[str] = set()
         self._snapshots: SnapshotOperations | None = None
         self._snapshot_init_lock = asyncio.Lock()
+        self._snapshot_cleanup_lock = asyncio.Lock()
         self._snapshot_launches: list[tuple[str, str, Any]] = []
         self._shutting_down = False
 
@@ -434,15 +435,18 @@ class LlamaCppSupervisor:
     async def _cleanup_dead_snapshot_launches(self):
         if self._snapshots is None:
             return
-        remaining = []
-        for profile_id, generation, process in self._snapshot_launches:
-            if process.returncode is None:
-                remaining.append((profile_id, generation, process))
-                continue
-            await disk_call(self._snapshots.store.cleanup_launch, profile_id, generation)
-            if self._snapshots.quarantined.get(profile_id) == generation:
-                self._snapshots.quarantined.pop(profile_id, None)
-        self._snapshot_launches = remaining
+        async with self._snapshot_cleanup_lock:
+            # Registration is synchronous on this event loop. Remove only the
+            # proven-dead entry after cleanup; never replace a ledger to which
+            # another profile may have appended while disk work was awaited.
+            for launch in tuple(self._snapshot_launches):
+                profile_id, generation, process = launch
+                if process.returncode is None:
+                    continue
+                await disk_call(self._snapshots.store.cleanup_launch, profile_id, generation)
+                self._snapshot_launches.remove(launch)
+                if self._snapshots.quarantined.get(profile_id) == generation:
+                    self._snapshots.quarantined.pop(profile_id, None)
 
     async def snapshot_slots(self, profile_id: str) -> dict[str, object]:
         async with self._lock_for(profile_id):

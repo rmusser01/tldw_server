@@ -19,6 +19,20 @@ and unverified options fail closed. Matching filenames or token counts do not
 establish compatibility. There is no force-restore override, import, download or
 arbitrary filesystem-path input in the snapshot UI.
 
+Snapshot-enabled launches require a numeric loopback bind, such as `127.0.0.1`
+or `::1`. Wildcard, LAN/public addresses and DNS names (including `localhost`)
+are rejected; change the profile host to a loopback literal before starting it.
+The child exposes native slot-management routes on that local listener, even
+while the production build allowlist is empty. Local callers can bypass tldw's
+admin checks, compatibility gate and receipts. Use only on a trusted host,
+restrict local access, and never forward or proxy those native routes to users.
+Loopback binding does not isolate untrusted local users or processes.
+
+Snapshot storage currently requires POSIX ownership locking and descriptor-based
+filesystem confinement. Unsupported platforms fail closed when storage is
+initialized. Ordinary snapshot-disabled runtime lifecycle remains supported on
+Windows; this feature does not add Windows snapshot support.
+
 Protocol fixtures are derived from llama.cpp revision
 `4d9176092d00586775af140581bb0b558ddc4389`, not captured from a live executable.
 At this revision [server-common.cpp](https://github.com/ggml-org/llama.cpp/blob/4d9176092d00586775af140581bb0b558ddc4389/tools/server/server-common.cpp#L67)

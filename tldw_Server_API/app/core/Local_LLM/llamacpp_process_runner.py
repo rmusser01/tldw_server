@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ipaddress
 import os
 import platform
 import signal
@@ -202,6 +203,13 @@ class LlamaCppProcessRunner:
         args = _clean_server_args(profile.server_args)
         self._check_denylist(args)
         host = handler_utils.strip_host_brackets(profile.host or self.config.default_host or "127.0.0.1")
+        if profile.snapshots_enabled:
+            try:
+                loopback = ipaddress.ip_address(host).is_loopback
+            except ValueError:
+                loopback = False
+            if not loopback:
+                raise ServerError("Snapshots require a numeric loopback bind; use 127.0.0.1 or ::1.")
         port = self._resolve_port(host, profile)
         command = self._build_command(executable_path, resolved_model_path, host, port, args)
         self.snapshot_generation = uuid4().hex

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import errno
-import fcntl
 import hashlib
 import json
 import os
@@ -11,6 +10,11 @@ import re
 import stat
 import uuid
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -49,6 +53,8 @@ class SnapshotStore:
     """Filesystem store held by one process for its entire lifetime."""
 
     def __init__(self, root: Path):
+        if fcntl is None:
+            raise SnapshotStorageUnavailableError("Snapshot storage requires POSIX ownership locking.")
         self.root = Path(root)
         self._lock_fd: int | None = None
         self._owner_pid = os.getpid()
