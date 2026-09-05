@@ -4,7 +4,7 @@ title: Persist immutable character-conversation behavior snapshots
 status: Done
 assignee: []
 created_date: '2026-08-28 05:06'
-updated_date: '2026-09-05 01:01'
+updated_date: '2026-09-05 02:27'
 labels:
   - character-chat
   - api
@@ -59,6 +59,10 @@ Stage 4 materialized-settings and coherent-fence checkpoint completed. Behavior 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 2026-09-04: With explicit user approval, renumbered this Roleplay snapshot task from its colliding former ID TASK-13134 to TASK-13159; its completion-contract successor is now TASK-13160. Updated the plan, ADR and dependency references. Unrelated task records were preserved. Rebased PR #2833 onto dev, allocated snapshot migration v65 after upstream Notes v64, corrected live PostgreSQL nullable-owner typing, registered CI shards and regenerated OpenAPI. Verification: 52 snapshot migration/store tests passed including four live PostgreSQL upgrade/read cases; 30 upstream v64 tests passed; 33 published-doc tests passed; canonical OpenAPI drift and shard-coverage checks passed; Bandit and focused Ruff passed. Broader Roleplay API regression tests and required GitHub checks remain in progress; the PR is not yet merged.
+
+Final broader regression evidence: all 370 Roleplay snapshot, settings and character-chat tests passed (22 warnings; 4922.99 seconds). Dev then advanced through service-prompt PR #2815; rebased without conflicts onto c5dfe0ff73, and git range-diff confirms all 37 PR patches are unchanged. The canonical OpenAPI fingerprint still matches. Required checks must run again on the newly rebased head before merge.
+
+Post-rebase focused verification: 101 snapshot migration/store and service-prompt tests passed with 2 warnings in 35.67 seconds.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
