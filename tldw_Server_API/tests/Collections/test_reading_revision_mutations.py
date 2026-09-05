@@ -256,6 +256,107 @@ def test_revision_clock_survives_schema_reinitialization(db):
     assert second > first
 
 
+def test_note_links_advance_revision_only_when_membership_changes(db):
+    item = make_reading(db)
+    link = db.link_note_to_content_item(item_id=item.id, note_id="external-note")
+    linked = db.get_content_item(item.id)
+    assert linked.revision == item.revision + 1
+    duplicate = db.link_note_to_content_item(item_id=item.id, note_id="external-note")
+    assert duplicate == link
+    assert db.get_content_item(item.id) == linked
+    assert db.unlink_note_from_content_item(item_id=item.id, note_id="external-note")
+    unlinked = db.get_content_item(item.id)
+    assert unlinked.revision == linked.revision + 1
+    assert not db.unlink_note_from_content_item(item_id=item.id, note_id="external-note")
+    assert db.get_content_item(item.id) == unlinked
+
+
+@pytest.mark.parametrize("unlink", [False, True])
+def test_note_link_failure_rolls_back_membership_and_clock(db, monkeypatch, unlink):
+    item = make_reading(db)
+    if unlink:
+        db.link_note_to_content_item(item_id=item.id, note_id="external-note")
+    before = db.get_content_item(item.id)
+    links = db.list_note_links_for_content_item(item.id)
+    clock = db.backend.execute("SELECT value FROM reading_revision_clock WHERE id = 1", ()).scalar
+    allocate = db._next_reading_revision
+
+    def allocate_then_fail(conn):
+        allocate(conn)
+        raise RuntimeError("abort link mutation")
+
+    monkeypatch.setattr(db, "_next_reading_revision", allocate_then_fail)
+    mutate = db.unlink_note_from_content_item if unlink else db.link_note_to_content_item
+    with pytest.raises(RuntimeError, match="abort link mutation"):
+        mutate(item_id=item.id, note_id="external-note")
+    assert db.list_note_links_for_content_item(item.id) == links
+    assert db.get_content_item(item.id) == before
+    assert db.backend.execute("SELECT value FROM reading_revision_clock WHERE id = 1", ()).scalar == clock
+
+
+def test_concurrent_duplicate_note_links_advance_once(db):
+    item = make_reading(db)
+    ready = Barrier(2)
+
+    def link():
+        ready.wait(timeout=10)
+        return db.link_note_to_content_item(item_id=item.id, note_id="shared-note")
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        first, second = [workers.submit(link) for _ in range(2)]
+        assert first.result(timeout=15) == second.result(timeout=15)
+    assert db.get_content_item(item.id).revision == item.revision + 1
+    assert len(db.list_note_links_for_content_item(item.id)) == 1
+
+
+def test_concurrent_note_link_and_item_edit_keep_both_revisions(db):
+    item = make_reading(db)
+    ready = Barrier(2)
+
+    def link():
+        ready.wait(timeout=10)
+        db.link_note_to_content_item(item_id=item.id, note_id="external-note")
+
+    def edit():
+        ready.wait(timeout=10)
+        db.update_content_item(item.id, title="Changed")
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        first, second = workers.submit(link), workers.submit(edit)
+        first.result(timeout=15)
+        second.result(timeout=15)
+    final = db.get_content_item(item.id)
+    assert final.revision == item.revision + 2
+    assert final.title == "Changed"
+    assert [link.note_id for link in db.list_note_links_for_content_item(item.id)] == ["external-note"]
+
+
+def test_note_links_reject_wrong_owner_and_deleted_parent(db):
+    item = make_reading(db)
+    db.link_note_to_content_item(item_id=item.id, note_id="external-note")
+    before = db.get_content_item(item.id)
+    other = CollectionsDatabase.from_backend(user_id="781", backend=db.backend)
+    with pytest.raises(KeyError):
+        other.link_note_to_content_item(item_id=item.id, note_id="other-note")
+    assert not other.unlink_note_from_content_item(item_id=item.id, note_id="external-note")
+    assert db.get_content_item(item.id) == before
+    assert [link.note_id for link in db.list_note_links_for_content_item(item.id)] == ["external-note"]
+    db.delete_content_item(item.id)
+    with pytest.raises(KeyError):
+        db.link_note_to_content_item(item_id=item.id, note_id="late-note")
+    assert not db.unlink_note_from_content_item(item_id=item.id, note_id="external-note")
+    assert db.backend.execute("SELECT COUNT(*) FROM content_item_note_links", ()).scalar == 0
+
+
+def test_nonreading_note_links_preserve_item_revision_and_timestamp(db):
+    item = make_reading(db, origin="watchlist")
+    before = db.get_content_item(item.id)
+    db.link_note_to_content_item(item_id=item.id, note_id="external-note")
+    assert db.get_content_item(item.id) == before
+    assert db.unlink_note_from_content_item(item_id=item.id, note_id="external-note")
+    assert db.get_content_item(item.id) == before
+
+
 def test_revision_allocation_rolls_back_with_transaction(db):
     with db.transaction() as conn:
         first = db._next_reading_revision(conn)

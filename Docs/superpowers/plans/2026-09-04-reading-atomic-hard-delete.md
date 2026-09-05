@@ -44,7 +44,7 @@
 
 ## Stage 1: Persist revisions and fence every Reading mutation
 
-**Status:** In Progress — revision schema/clock and item/tag writer integration implemented; child writer and ownership integration remains.
+**Status:** In Progress — revision schema/clock, item/tag writers and note-link writers implemented; highlights and ownership integration remains.
 **Goal:** Every returned token describes one coherent aggregate version.
 **Success Criteria:** Migration, no-op, child-write, reuse and snapshot cases pass on both backends.
 **Tests:** New revision module plus existing service/highlight/note-link/import suites.
@@ -116,6 +116,34 @@ Checkpoint verification (Server virtual environment, 2026-09-04):
   compilation and `git diff --check` pass. Production Ruff reports the same
   nine baseline findings as the preceding foundation commit. Scoped Bandit
   reports zero findings and no analysis errors. No full-suite run was performed.
+
+Note-link checkpoint (2026-09-04): both association writers acquire the shared
+clock fence before reading the parent and use one explicit connection for child
+membership and the parent revision/timestamp. Reading membership changes advance
+once; duplicate links and absent unlinks preserve the token and timestamp.
+Non-Reading associations retain their prior item timestamps and revisions. Missing
+or inaccessible parents cannot receive new links; unlink still returns false for
+an absent association. No external Note row is edited or deleted. Independent
+review found no actionable issues in this slice.
+
+Note-link verification (Server virtual environment):
+
+- Red run of the new SQLite note-link cases: five expected failures for missing
+  revision allocation/rollback; two compatibility characterization cases passed.
+- `python -m pytest tldw_Server_API/tests/Collections/test_reading_revision_mutations.py -k 'not postgres' -q --tb=short`: 28 passed, 30 deselected.
+- `TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_reading_revision_mutations.py -k 'note_link and postgres' -q --tb=short`: 7 passed on real PostgreSQL, 51 deselected, no skips.
+- `python -m pytest tldw_Server_API/tests/Collections/test_reading_note_links_db.py tldw_Server_API/tests/Collections/test_reading_api.py -k note_link -q --tb=short`: 6 passed, 14 deselected.
+- Test Ruff/Black, changed production-range Black, compilation and diff checks
+  pass. Scoped Bandit has zero findings/errors. Production Ruff retains its nine
+  previously recorded baseline findings. No full-suite run was performed.
+
+The next highlight slice must address the existing ID-domain mismatch before
+enabling hard deletion: Media repository/runtime hooks pass Media IDs directly to
+`mark_highlights_stale_if_content_changed()`, whose SQL interprets them as content
+item IDs. The legacy highlight CRUD test also creates an orphan using a literal
+99999 parent. Neither is proof of a valid Reading parent/ownership contract.
+Highlight writers, reanchor/stale hooks, output ownership/purge and alternate
+delete paths remain unfinished. This checkpoint does not advertise the capability.
 
 - [x] Add a real database fixture using `tmp_path` and the existing `CollectionsDatabase.from_backend` pattern. Use the following record constructor in the new test module:
 

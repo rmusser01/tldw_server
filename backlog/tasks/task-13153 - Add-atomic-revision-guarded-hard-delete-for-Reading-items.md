@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-03 02:27'
-updated_date: '2026-09-05 01:37'
+updated_date: '2026-09-05 01:44'
 labels:
   - collections
   - reading-list
@@ -52,5 +52,5 @@ diagnostic-privacy behavior are covered.
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-ADR required: yes. ADR path: backlog/decisions/003-reading-atomic-hard-delete.md. Reason: persisted aggregate revisions, destructive preconditions, ownership and durable cleanup. Design: Docs/superpowers/specs/2026-09-04-reading-atomic-hard-delete-design.md. Plan: Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md. Stage 1 remains in progress: revision schema/clock and item/tag writer integration are implemented. Upsert/update fence before reads and use one transaction for fields, tags, FTS and the token; coherent ID/URL/Media-ID/list reads expose persisted revisions internally. Reading no-ops preserve revision/timestamp; generic refresh timestamps are preserved. Repeated-adapter FTS detection fixes a reproduced import regression. Independent review and compatibility re-review found no outstanding issues. Child note-link/highlight writers, output ownership/purge and alternate deletion guards, DTO exposure, cleanup and endpoint remain unimplemented; capability stays absent. Focused verification is recorded in the linked plan. PostgreSQL checks use the existing service with TLDW_TEST_NO_DOCKER=1; no container replacement is authorized.
+ADR required: yes. ADR path: backlog/decisions/003-reading-atomic-hard-delete.md. Reason: persisted aggregate revisions, destructive preconditions, ownership and durable cleanup. Design: Docs/superpowers/specs/2026-09-04-reading-atomic-hard-delete-design.md. Plan: Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md. Stage 1 remains in progress: revision schema/clock, item/tag writer integration and note-link writers are implemented. All these writers fence before parent reads and use one explicit transaction connection for owned changes and revision allocation. Reading no-ops preserve revision/timestamp; generic behavior is preserved. Note-link duplicate/removal/rollback/concurrency/owner checks have real SQLite and PostgreSQL coverage; existing note-link endpoints pass. Independent reviews found no outstanding issues in completed slices. Next: resolve legacy Media-ID/content-item-ID mismatch in highlight stale hooks and enforce surviving Reading parents, then output ownership/purge, alternate deletion guards, DTO exposure, cleanup and endpoint. Capability stays absent. Verification commands/results are recorded in the linked plan. PostgreSQL checks use the existing service with TLDW_TEST_NO_DOCKER=1; no container replacement is authorized.
 <!-- SECTION:PLAN:END -->

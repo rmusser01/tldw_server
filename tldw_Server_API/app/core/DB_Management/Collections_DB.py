@@ -4555,21 +4555,33 @@ class CollectionsDatabase:
         )
 
     def link_note_to_content_item(self, *, item_id: int, note_id: str) -> ContentItemNoteLinkRow:
-        self.get_content_item(item_id)
-        now = _utcnow_iso()
-        self.backend.execute(
-            "INSERT INTO content_item_note_links (user_id, item_id, note_id, created_at) "
-            "VALUES (?, ?, ?, ?) ON CONFLICT(user_id, item_id, note_id) DO NOTHING",
-            (self.user_id, item_id, note_id, now),
-        )
-        row = self.backend.execute(
-            "SELECT user_id, item_id, note_id, created_at FROM content_item_note_links "
-            "WHERE user_id = ? AND item_id = ? AND note_id = ?",
-            (self.user_id, item_id, note_id),
-        ).first
-        if not row:
-            raise DatabaseError("Failed to link note to content item")
-        return self._content_item_note_link_row_from_db(row)
+        """Attach an external note and advance a changed Reading aggregate atomically."""
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            item = self.get_content_item(item_id, connection=conn)
+            now = _utcnow_iso()
+            result = self.backend.execute(
+                "INSERT INTO content_item_note_links (user_id, item_id, note_id, created_at) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(user_id, item_id, note_id) DO NOTHING",
+                (self.user_id, item_id, note_id, now),
+                connection=conn,
+            )
+            if result.rowcount > 0 and item.origin == "reading":
+                revision = self._next_reading_revision(conn)
+                self.backend.execute(
+                    "UPDATE content_items SET revision = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+                    (revision, now, item_id, self.user_id),
+                    connection=conn,
+                )
+            row = self.backend.execute(
+                "SELECT user_id, item_id, note_id, created_at FROM content_item_note_links "
+                "WHERE user_id = ? AND item_id = ? AND note_id = ?",
+                (self.user_id, item_id, note_id),
+                connection=conn,
+            ).first
+            if not row:
+                raise DatabaseError("Failed to link note to content item")
+            return self._content_item_note_link_row_from_db(row)
 
     def list_note_links_for_content_item(self, item_id: int) -> list[ContentItemNoteLinkRow]:
         self.get_content_item(item_id)
@@ -4581,11 +4593,27 @@ class CollectionsDatabase:
         return [self._content_item_note_link_row_from_db(row) for row in rows]
 
     def unlink_note_from_content_item(self, *, item_id: int, note_id: str) -> bool:
-        res = self.backend.execute(
-            "DELETE FROM content_item_note_links WHERE user_id = ? AND item_id = ? AND note_id = ?",
-            (self.user_id, item_id, note_id),
-        )
-        return bool(res.rowcount and res.rowcount > 0)
+        """Remove only the association, preserving the external note itself."""
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            try:
+                item = self.get_content_item(item_id, connection=conn)
+            except KeyError:
+                return False
+            result = self.backend.execute(
+                "DELETE FROM content_item_note_links WHERE user_id = ? AND item_id = ? AND note_id = ?",
+                (self.user_id, item_id, note_id),
+                connection=conn,
+            )
+            changed = bool(result.rowcount and result.rowcount > 0)
+            if changed and item.origin == "reading":
+                revision = self._next_reading_revision(conn)
+                self.backend.execute(
+                    "UPDATE content_items SET revision = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+                    (revision, _utcnow_iso(), item_id, self.user_id),
+                    connection=conn,
+                )
+            return changed
 
     # ------------------------
     # Output Templates API
