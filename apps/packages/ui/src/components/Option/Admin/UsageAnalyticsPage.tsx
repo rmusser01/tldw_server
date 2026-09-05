@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from "react"
+import { useTranslation } from "react-i18next"
 import {
   Card,
   Table,
@@ -35,6 +36,7 @@ const formatUsd = (value: number): string => {
 }
 
 const UsageAnalyticsPage: React.FC = () => {
+  const { t } = useTranslation(["settings", "common"])
   // Admin guard state
   const [adminGuard, setAdminGuard] = useState<"forbidden" | "notFound" | null>(null)
 
@@ -101,9 +103,9 @@ const UsageAnalyticsPage: React.FC = () => {
     try {
       const csv = await tldwClient.exportDailyUsageCsv()
       downloadCsv(csv, "daily_usage.csv")
-      message.success("Daily usage CSV exported")
+      message.success(t("settings:adminUsage.dailyCsvExported", "Daily usage CSV exported"))
     } catch (err: any) {
-      message.error(sanitizeAdminErrorMessage(err, "Failed to export daily usage CSV"))
+      message.error(sanitizeAdminErrorMessage(err, t("settings:adminUsage.dailyCsvExportFailed", "Failed to export daily usage CSV")))
     } finally {
       setDailyExporting(false)
     }
@@ -128,9 +130,9 @@ const UsageAnalyticsPage: React.FC = () => {
     try {
       const csv = await tldwClient.exportTopUsageCsv()
       downloadCsv(csv, "top_usage.csv")
-      message.success("Top usage CSV exported")
+      message.success(t("settings:adminUsage.topCsvExported", "Top usage CSV exported"))
     } catch (err: any) {
-      message.error(sanitizeAdminErrorMessage(err, "Failed to export top usage CSV"))
+      message.error(sanitizeAdminErrorMessage(err, t("settings:adminUsage.topCsvExportFailed", "Failed to export top usage CSV")))
     } finally {
       setTopExporting(false)
     }
@@ -212,54 +214,54 @@ const UsageAnalyticsPage: React.FC = () => {
   // ── Table Columns ──
 
   const dailyColumns = [
-    { title: "Date", dataIndex: "date", key: "date" },
-    { title: "Requests", dataIndex: "requests", key: "requests", render: (v: number) => v?.toLocaleString() ?? "\u2014" },
-    { title: "Bytes In", dataIndex: "bytes_in", key: "bytes_in", render: (v: number) => v != null ? v.toLocaleString() : "\u2014" },
-    { title: "Bytes Out", dataIndex: "bytes_out", key: "bytes_out", render: (v: number) => v != null ? v.toLocaleString() : "\u2014" },
-    { title: "Errors", dataIndex: "errors", key: "errors", render: (v: number) => v?.toLocaleString() ?? "0" },
-    { title: "Unique Users", dataIndex: "unique_users", key: "unique_users", render: (v: number) => v?.toLocaleString() ?? "\u2014" }
+    { title: t("settings:adminUsage.colDate", "Date"), dataIndex: "date", key: "date" },
+    { title: t("settings:adminUsage.colRequests", "Requests"), dataIndex: "requests", key: "requests", render: (v: number) => v?.toLocaleString() ?? "\u2014" },
+    { title: t("settings:adminUsage.colBytesIn", "Bytes In"), dataIndex: "bytes_in", key: "bytes_in", render: (v: number) => v != null ? v.toLocaleString() : "\u2014" },
+    { title: t("settings:adminUsage.colBytesOut", "Bytes Out"), dataIndex: "bytes_out", key: "bytes_out", render: (v: number) => v != null ? v.toLocaleString() : "\u2014" },
+    { title: t("settings:adminUsage.colErrors", "Errors"), dataIndex: "errors", key: "errors", render: (v: number) => v?.toLocaleString() ?? "0" },
+    { title: t("settings:adminUsage.colUniqueUsers", "Unique Users"), dataIndex: "unique_users", key: "unique_users", render: (v: number) => v?.toLocaleString() ?? "\u2014" }
   ]
 
   const topUsageColumns = [
-    { title: "Username", dataIndex: "username", key: "username" },
-    { title: "Requests", dataIndex: "requests", key: "requests", render: (v: number) => v?.toLocaleString() ?? "\u2014" },
-    { title: "Bytes", dataIndex: "bytes", key: "bytes", render: (v: number) => v != null ? v.toLocaleString() : "\u2014" },
-    { title: "Errors", dataIndex: "errors", key: "errors", render: (v: number) => v?.toLocaleString() ?? "0" }
+    { title: t("settings:adminUsage.colUsername", "Username"), dataIndex: "username", key: "username" },
+    { title: t("settings:adminUsage.colRequests", "Requests"), dataIndex: "requests", key: "requests", render: (v: number) => v?.toLocaleString() ?? "\u2014" },
+    { title: t("settings:adminUsage.colBytes", "Bytes"), dataIndex: "bytes", key: "bytes", render: (v: number) => v != null ? v.toLocaleString() : "\u2014" },
+    { title: t("settings:adminUsage.colErrors", "Errors"), dataIndex: "errors", key: "errors", render: (v: number) => v?.toLocaleString() ?? "0" }
   ]
 
   const llmColumns = [
-    { title: "Provider", dataIndex: "provider", key: "provider" },
-    { title: "Model", dataIndex: "model", key: "model" },
-    { title: "Tokens", dataIndex: "tokens", key: "tokens", render: (v: number) => v?.toLocaleString() ?? "\u2014" },
-    { title: "Cost", dataIndex: "cost", key: "cost", render: (v: number) => v != null ? formatUsd(v) : "\u2014" }
+    { title: t("settings:adminUsage.colProvider", "Provider"), dataIndex: "provider", key: "provider" },
+    { title: t("settings:adminUsage.colModel", "Model"), dataIndex: "model", key: "model" },
+    { title: t("settings:adminUsage.colTokens", "Tokens"), dataIndex: "tokens", key: "tokens", render: (v: number) => v?.toLocaleString() ?? "\u2014" },
+    { title: t("settings:adminUsage.colCost", "Cost"), dataIndex: "cost", key: "cost", render: (v: number) => v != null ? formatUsd(v) : "\u2014" }
   ]
 
   const topSpenderColumns = [
-    { title: "User", dataIndex: "username", key: "username" },
-    { title: "Total Tokens", dataIndex: "total_tokens", key: "total_tokens", render: (v: number) => v?.toLocaleString() ?? "\u2014" },
-    { title: "Total Cost", dataIndex: "total_cost", key: "total_cost", render: (v: number) => v != null ? formatUsd(v) : "\u2014" }
+    { title: t("settings:adminUsage.colUser", "User"), dataIndex: "username", key: "username" },
+    { title: t("settings:adminUsage.colTotalTokens", "Total Tokens"), dataIndex: "total_tokens", key: "total_tokens", render: (v: number) => v?.toLocaleString() ?? "\u2014" },
+    { title: t("settings:adminUsage.colTotalCost", "Total Cost"), dataIndex: "total_cost", key: "total_cost", render: (v: number) => v != null ? formatUsd(v) : "\u2014" }
   ]
 
   const providerColumns = [
-    { title: "Provider", dataIndex: "provider", key: "provider" },
-    { title: "Success Rate", dataIndex: "success_rate", key: "success_rate", render: (v: number) => v != null ? `${(v * 100).toFixed(1)}%` : "\u2014" },
-    { title: "Avg Latency (ms)", dataIndex: "avg_latency_ms", key: "avg_latency_ms", render: (v: number) => v != null ? v.toFixed(0) : "\u2014" },
-    { title: "Requests", dataIndex: "total_requests", key: "total_requests", render: (v: number) => v?.toLocaleString() ?? "\u2014" }
+    { title: t("settings:adminUsage.colProvider", "Provider"), dataIndex: "provider", key: "provider" },
+    { title: t("settings:adminUsage.colSuccessRate", "Success Rate"), dataIndex: "success_rate", key: "success_rate", render: (v: number) => v != null ? `${(v * 100).toFixed(1)}%` : "\u2014" },
+    { title: t("settings:adminUsage.colAvgLatency", "Avg Latency (ms)"), dataIndex: "avg_latency_ms", key: "avg_latency_ms", render: (v: number) => v != null ? v.toFixed(0) : "\u2014" },
+    { title: t("settings:adminUsage.colRequests", "Requests"), dataIndex: "total_requests", key: "total_requests", render: (v: number) => v?.toLocaleString() ?? "\u2014" }
   ]
 
   // ── Render ──
 
   if (adminGuard === "forbidden") {
     return (
-      <Alert variant="error" title="Access Denied">
-        You don't have permission to access usage analytics.
+      <Alert variant="error" title={t("settings:adminUsage.forbiddenTitle", "Access Denied")}>
+        {t("settings:adminUsage.forbiddenBody", "You don't have permission to access usage analytics.")}
       </Alert>
     )
   }
   if (adminGuard === "notFound") {
     return (
-      <Alert variant="warning" title="Not Available">
-        Usage analytics is not available on this server.
+      <Alert variant="warning" title={t("settings:adminUsage.notFoundTitle", "Not Available")}>
+        {t("settings:adminUsage.notFoundBody", "Usage analytics is not available on this server.")}
       </Alert>
     )
   }
@@ -267,29 +269,29 @@ const UsageAnalyticsPage: React.FC = () => {
   return (
     <div style={{ padding: "24px", maxWidth: 1200 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <h1 style={{ margin: 0, fontSize: "1.5rem", fontWeight: 600 }}>Usage Analytics</h1>
+        <h1 style={{ margin: 0, fontSize: "1.5rem", fontWeight: 600 }}>{t("settings:adminUsage.title", "Usage Analytics")}</h1>
         <Select
           value={dateRange}
           onChange={(val) => setDateRange(val)}
           style={{ width: 140 }}
           options={[
-            { value: "7d", label: "Last 7 days" },
-            { value: "30d", label: "Last 30 days" }
+            { value: "7d", label: t("settings:adminUsage.last7Days", "Last 7 days") },
+            { value: "30d", label: t("settings:adminUsage.last30Days", "Last 30 days") }
           ]}
         />
       </div>
 
       {/* Daily Usage Card */}
       <Card
-        title="Daily Usage"
+        title={t("settings:adminUsage.dailyCardTitle", "Daily Usage")}
         style={{ marginBottom: 16 }}
         extra={
           <Space>
             <Button size="small" onClick={handleExportDailyCsv} loading={dailyExporting}>
-              Export CSV
+              {t("settings:adminUsage.exportCsv", "Export CSV")}
             </Button>
             <Button size="small" onClick={() => loadDailyUsage()}>
-              Refresh
+              {t("common:refresh", "Refresh")}
             </Button>
           </Space>
         }
@@ -306,15 +308,15 @@ const UsageAnalyticsPage: React.FC = () => {
 
       {/* Top Users Card */}
       <Card
-        title="Top Users"
+        title={t("settings:adminUsage.topUsersCardTitle", "Top Users")}
         style={{ marginBottom: 16 }}
         extra={
           <Space>
             <Button size="small" onClick={handleExportTopCsv} loading={topExporting}>
-              Export CSV
+              {t("settings:adminUsage.exportCsv", "Export CSV")}
             </Button>
             <Button size="small" onClick={() => loadTopUsage()}>
-              Refresh
+              {t("common:refresh", "Refresh")}
             </Button>
           </Space>
         }
@@ -331,11 +333,11 @@ const UsageAnalyticsPage: React.FC = () => {
 
       {/* LLM Usage Card */}
       <Card
-        title="LLM Usage"
+        title={t("settings:adminUsage.llmCardTitle", "LLM Usage")}
         style={{ marginBottom: 16 }}
         extra={
           <Button size="small" onClick={() => { void loadLlmUsage(); void loadLlmSummary(); void loadTopSpenders() }}>
-            Refresh
+            {t("common:refresh", "Refresh")}
           </Button>
         }
       >
@@ -343,12 +345,12 @@ const UsageAnalyticsPage: React.FC = () => {
         {llmSummary && (
           <Space size="large" style={{ marginBottom: 16 }}>
             <Statistic
-              title="Total Tokens"
+              title={t("settings:adminUsage.totalTokens", "Total Tokens")}
               value={llmSummary.total_tokens ?? llmSummary.totalTokens ?? 0}
               loading={llmSummaryLoading}
             />
             <Statistic
-              title="Total Cost"
+              title={t("settings:adminUsage.totalCost", "Total Cost")}
               value={formatUsd(llmSummary.total_cost ?? llmSummary.totalCost ?? 0)}
               loading={llmSummaryLoading}
             />
@@ -368,7 +370,7 @@ const UsageAnalyticsPage: React.FC = () => {
         {/* Top Spenders sub-table */}
         {topSpenders.length > 0 && (
           <>
-            <h4 style={{ marginTop: 8, marginBottom: 8 }}>Top Spenders</h4>
+            <h4 style={{ marginTop: 8, marginBottom: 8 }}>{t("settings:adminUsage.topSpenders", "Top Spenders")}</h4>
             <Table
               dataSource={topSpenders}
               columns={topSpenderColumns}
@@ -386,12 +388,12 @@ const UsageAnalyticsPage: React.FC = () => {
         items={[
           {
             key: "provider-analytics",
-            label: "Provider Analytics",
+            label: t("settings:adminUsage.providerAnalytics", "Provider Analytics"),
             children: (
               <>
                 <Space style={{ marginBottom: 12 }}>
                   <Button size="small" onClick={() => loadProviderAnalytics()}>
-                    Refresh
+                    {t("common:refresh", "Refresh")}
                   </Button>
                 </Space>
                 <Table

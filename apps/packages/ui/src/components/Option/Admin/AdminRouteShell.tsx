@@ -1,4 +1,5 @@
 import React from "react"
+import { Link } from "react-router-dom"
 import {
   ADMIN_MODULES,
   adminModuleForRoute,
@@ -44,8 +45,8 @@ export const AdminRouteShell: React.FC<{
         className="border-b border-border bg-surface px-4 py-2"
       >
         <div className="flex items-center gap-1 overflow-x-auto whitespace-nowrap text-sm">
-          <a
-            href="/admin"
+          <Link
+            to="/admin"
             aria-current={onOverview ? "page" : undefined}
             className={
               onOverview
@@ -54,16 +55,16 @@ export const AdminRouteShell: React.FC<{
             }
           >
             Admin
-          </a>
+          </Link>
           <span aria-hidden="true" className="px-1 text-text-muted">
             /
           </span>
           {ADMIN_MODULES.map((module) => {
             const isCurrent = module.route === current?.route
             return (
-              <a
+              <Link
                 key={module.route}
-                href={module.route}
+                to={module.route}
                 aria-current={isCurrent ? "page" : undefined}
                 title={module.description}
                 className={
@@ -73,7 +74,7 @@ export const AdminRouteShell: React.FC<{
                 }
               >
                 {module.label}
-              </a>
+              </Link>
             )
           })}
         </div>

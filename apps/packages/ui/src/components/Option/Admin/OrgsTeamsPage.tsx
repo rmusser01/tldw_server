@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from "react"
+import { useTranslation } from "react-i18next"
 import {
   Card,
   Table,
@@ -59,6 +60,7 @@ interface TeamMember {
 // ── Org Members Sub-Table ──
 
 const OrgMembersTable: React.FC<{ orgId: number }> = ({ orgId }) => {
+  const { t } = useTranslation(["settings", "common"])
   const [members, setMembers] = useState<OrgMember[]>([])
   const [loading, setLoading] = useState(false)
   const [addModalOpen, setAddModalOpen] = useState(false)
@@ -86,13 +88,13 @@ const OrgMembersTable: React.FC<{ orgId: number }> = ({ orgId }) => {
       const values = await addForm.validateFields()
       setAdding(true)
       await tldwClient.addOrgMember(orgId, { user_id: values.user_id, role: values.role })
-      message.success("Member added")
+      message.success(t("settings:adminOrgs.memberAdded", "Member added"))
       setAddModalOpen(false)
       addForm.resetFields()
       void loadMembers()
     } catch (err: any) {
       if (err?.errorFields) return
-      message.error(sanitizeAdminErrorMessage(err, "Failed to add member"))
+      message.error(sanitizeAdminErrorMessage(err, t("settings:adminOrgs.addMemberFailed", "Failed to add member")))
     } finally {
       setAdding(false)
     }
@@ -101,38 +103,38 @@ const OrgMembersTable: React.FC<{ orgId: number }> = ({ orgId }) => {
   const handleRemove = async (userId: number) => {
     try {
       await tldwClient.removeOrgMember(orgId, userId)
-      message.success("Member removed")
+      message.success(t("settings:adminOrgs.memberRemoved", "Member removed"))
       void loadMembers()
     } catch (err: any) {
-      message.error(sanitizeAdminErrorMessage(err, "Failed to remove member"))
+      message.error(sanitizeAdminErrorMessage(err, t("settings:adminOrgs.removeMemberFailed", "Failed to remove member")))
     }
   }
 
   const handleRoleChange = async (userId: number, role: string) => {
     try {
       await tldwClient.updateOrgMemberRole(orgId, userId, { role })
-      message.success("Role updated")
+      message.success(t("settings:adminOrgs.roleUpdated", "Role updated"))
       void loadMembers()
     } catch (err: any) {
-      message.error(sanitizeAdminErrorMessage(err, "Failed to update role"))
+      message.error(sanitizeAdminErrorMessage(err, t("settings:adminOrgs.updateRoleFailed", "Failed to update role")))
     }
   }
 
   const columns = [
     {
-      title: "User ID",
+      title: t("settings:adminOrgs.colUserId", "User ID"),
       dataIndex: "user_id",
       key: "user_id",
       width: 100
     },
     {
-      title: "Username",
+      title: t("settings:adminOrgs.colUsername", "Username"),
       dataIndex: "username",
       key: "username",
       render: (v: string) => v || "\u2014"
     },
     {
-      title: "Role",
+      title: t("settings:adminOrgs.colRole", "Role"),
       dataIndex: "role",
       key: "role",
       width: 160,
@@ -143,29 +145,29 @@ const OrgMembersTable: React.FC<{ orgId: number }> = ({ orgId }) => {
           style={{ width: 130 }}
           onChange={(val) => handleRoleChange(record.user_id, val)}
           options={[
-            { value: "owner", label: "Owner" },
-            { value: "admin", label: "Admin" },
-            { value: "member", label: "Member" },
-            { value: "viewer", label: "Viewer" }
+            { value: "owner", label: t("settings:adminOrgs.roleOwner", "Owner") },
+            { value: "admin", label: t("settings:adminOrgs.roleAdmin", "Admin") },
+            { value: "member", label: t("settings:adminOrgs.roleMember", "Member") },
+            { value: "viewer", label: t("settings:adminOrgs.roleViewer", "Viewer") }
           ]}
         />
       )
     },
     {
-      title: "Joined",
+      title: t("settings:adminOrgs.colJoined", "Joined"),
       dataIndex: "joined_at",
       key: "joined_at",
       render: (v: string) => (v ? new Date(v).toLocaleDateString() : "\u2014")
     },
     {
-      title: "Actions",
+      title: t("settings:adminOrgs.colActions", "Actions"),
       key: "actions",
       width: 80,
       render: (_: any, record: OrgMember) => (
         <Popconfirm
-          title="Remove this member?"
+          title={t("settings:adminOrgs.removeMemberConfirm", "Remove this member?")}
           onConfirm={() => handleRemove(record.user_id)}
-          okText="Remove"
+          okText={t("settings:adminOrgs.remove", "Remove")}
           okButtonProps={{ danger: true }}
         >
           <Button type="text" size="small" danger icon={<DeleteOutlined />} />
@@ -177,13 +179,13 @@ const OrgMembersTable: React.FC<{ orgId: number }> = ({ orgId }) => {
   return (
     <div style={{ marginBottom: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <strong>Organization Members</strong>
+        <strong>{t("settings:adminOrgs.orgMembers", "Organization Members")}</strong>
         <Space>
           <Button size="small" icon={<ReloadOutlined />} onClick={() => loadMembers()}>
-            Refresh
+            {t("common:refresh", "Refresh")}
           </Button>
           <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => setAddModalOpen(true)}>
-            Add Member
+            {t("settings:adminOrgs.addMember", "Add Member")}
           </Button>
         </Space>
       </div>
@@ -196,23 +198,23 @@ const OrgMembersTable: React.FC<{ orgId: number }> = ({ orgId }) => {
         size="small"
       />
       <Modal
-        title="Add Organization Member"
+        title={t("settings:adminOrgs.addOrgMemberTitle", "Add Organization Member")}
         open={addModalOpen}
         onCancel={() => { setAddModalOpen(false); addForm.resetFields() }}
         onOk={handleAddMember}
         confirmLoading={adding}
       >
         <Form form={addForm} layout="vertical">
-          <Form.Item name="user_id" label="User ID" rules={[{ required: true, message: "User ID is required" }]}>
-            <InputNumber style={{ width: "100%" }} min={1} placeholder="Enter user ID" />
+          <Form.Item name="user_id" label={t("settings:adminOrgs.colUserId", "User ID")} rules={[{ required: true, message: t("settings:adminOrgs.userIdRequired", "User ID is required") }]}>
+            <InputNumber style={{ width: "100%" }} min={1} placeholder={t("settings:adminOrgs.userIdPlaceholder", "Enter user ID")} />
           </Form.Item>
-          <Form.Item name="role" label="Role" initialValue="member">
+          <Form.Item name="role" label={t("settings:adminOrgs.colRole", "Role")} initialValue="member">
             <Select
               options={[
-                { value: "owner", label: "Owner" },
-                { value: "admin", label: "Admin" },
-                { value: "member", label: "Member" },
-                { value: "viewer", label: "Viewer" }
+                { value: "owner", label: t("settings:adminOrgs.roleOwner", "Owner") },
+                { value: "admin", label: t("settings:adminOrgs.roleAdmin", "Admin") },
+                { value: "member", label: t("settings:adminOrgs.roleMember", "Member") },
+                { value: "viewer", label: t("settings:adminOrgs.roleViewer", "Viewer") }
               ]}
             />
           </Form.Item>
@@ -225,6 +227,7 @@ const OrgMembersTable: React.FC<{ orgId: number }> = ({ orgId }) => {
 // ── Team Members Sub-Table ──
 
 const TeamMembersTable: React.FC<{ teamId: number }> = ({ teamId }) => {
+  const { t } = useTranslation(["settings", "common"])
   const [members, setMembers] = useState<TeamMember[]>([])
   const [loading, setLoading] = useState(false)
   const [addModalOpen, setAddModalOpen] = useState(false)
@@ -252,13 +255,13 @@ const TeamMembersTable: React.FC<{ teamId: number }> = ({ teamId }) => {
       const values = await addForm.validateFields()
       setAdding(true)
       await tldwClient.addTeamMember(teamId, { user_id: values.user_id, role: values.role })
-      message.success("Team member added")
+      message.success(t("settings:adminOrgs.teamMemberAdded", "Team member added"))
       setAddModalOpen(false)
       addForm.resetFields()
       void loadMembers()
     } catch (err: any) {
       if (err?.errorFields) return
-      message.error(sanitizeAdminErrorMessage(err, "Failed to add team member"))
+      message.error(sanitizeAdminErrorMessage(err, t("settings:adminOrgs.addTeamMemberFailed", "Failed to add team member")))
     } finally {
       setAdding(false)
     }
@@ -267,38 +270,38 @@ const TeamMembersTable: React.FC<{ teamId: number }> = ({ teamId }) => {
   const handleRemove = async (userId: number) => {
     try {
       await tldwClient.removeTeamMember(teamId, userId)
-      message.success("Team member removed")
+      message.success(t("settings:adminOrgs.teamMemberRemoved", "Team member removed"))
       void loadMembers()
     } catch (err: any) {
-      message.error(sanitizeAdminErrorMessage(err, "Failed to remove team member"))
+      message.error(sanitizeAdminErrorMessage(err, t("settings:adminOrgs.removeTeamMemberFailed", "Failed to remove team member")))
     }
   }
 
   const handleRoleChange = async (userId: number, role: string) => {
     try {
       await tldwClient.updateTeamMemberRole(teamId, userId, { role })
-      message.success("Role updated")
+      message.success(t("settings:adminOrgs.roleUpdated", "Role updated"))
       void loadMembers()
     } catch (err: any) {
-      message.error(sanitizeAdminErrorMessage(err, "Failed to update role"))
+      message.error(sanitizeAdminErrorMessage(err, t("settings:adminOrgs.updateRoleFailed", "Failed to update role")))
     }
   }
 
   const columns = [
     {
-      title: "User ID",
+      title: t("settings:adminOrgs.colUserId", "User ID"),
       dataIndex: "user_id",
       key: "user_id",
       width: 100
     },
     {
-      title: "Username",
+      title: t("settings:adminOrgs.colUsername", "Username"),
       dataIndex: "username",
       key: "username",
       render: (v: string) => v || "\u2014"
     },
     {
-      title: "Role",
+      title: t("settings:adminOrgs.colRole", "Role"),
       dataIndex: "role",
       key: "role",
       width: 160,
@@ -309,22 +312,22 @@ const TeamMembersTable: React.FC<{ teamId: number }> = ({ teamId }) => {
           style={{ width: 130 }}
           onChange={(val) => handleRoleChange(record.user_id, val)}
           options={[
-            { value: "lead", label: "Lead" },
-            { value: "member", label: "Member" },
-            { value: "viewer", label: "Viewer" }
+            { value: "lead", label: t("settings:adminOrgs.roleLead", "Lead") },
+            { value: "member", label: t("settings:adminOrgs.roleMember", "Member") },
+            { value: "viewer", label: t("settings:adminOrgs.roleViewer", "Viewer") }
           ]}
         />
       )
     },
     {
-      title: "Actions",
+      title: t("settings:adminOrgs.colActions", "Actions"),
       key: "actions",
       width: 80,
       render: (_: any, record: TeamMember) => (
         <Popconfirm
-          title="Remove this team member?"
+          title={t("settings:adminOrgs.removeTeamMemberConfirm", "Remove this team member?")}
           onConfirm={() => handleRemove(record.user_id)}
-          okText="Remove"
+          okText={t("settings:adminOrgs.remove", "Remove")}
           okButtonProps={{ danger: true }}
         >
           <Button type="text" size="small" danger icon={<DeleteOutlined />} />
@@ -336,13 +339,13 @@ const TeamMembersTable: React.FC<{ teamId: number }> = ({ teamId }) => {
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <strong>Team Members</strong>
+        <strong>{t("settings:adminOrgs.teamMembers", "Team Members")}</strong>
         <Space>
           <Button size="small" icon={<ReloadOutlined />} onClick={() => loadMembers()}>
-            Refresh
+            {t("common:refresh", "Refresh")}
           </Button>
           <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => setAddModalOpen(true)}>
-            Add Member
+            {t("settings:adminOrgs.addMember", "Add Member")}
           </Button>
         </Space>
       </div>
@@ -355,22 +358,22 @@ const TeamMembersTable: React.FC<{ teamId: number }> = ({ teamId }) => {
         size="small"
       />
       <Modal
-        title="Add Team Member"
+        title={t("settings:adminOrgs.addTeamMemberTitle", "Add Team Member")}
         open={addModalOpen}
         onCancel={() => { setAddModalOpen(false); addForm.resetFields() }}
         onOk={handleAddMember}
         confirmLoading={adding}
       >
         <Form form={addForm} layout="vertical">
-          <Form.Item name="user_id" label="User ID" rules={[{ required: true, message: "User ID is required" }]}>
-            <InputNumber style={{ width: "100%" }} min={1} placeholder="Enter user ID" />
+          <Form.Item name="user_id" label={t("settings:adminOrgs.colUserId", "User ID")} rules={[{ required: true, message: t("settings:adminOrgs.userIdRequired", "User ID is required") }]}>
+            <InputNumber style={{ width: "100%" }} min={1} placeholder={t("settings:adminOrgs.userIdPlaceholder", "Enter user ID")} />
           </Form.Item>
-          <Form.Item name="role" label="Role" initialValue="member">
+          <Form.Item name="role" label={t("settings:adminOrgs.colRole", "Role")} initialValue="member">
             <Select
               options={[
-                { value: "lead", label: "Lead" },
-                { value: "member", label: "Member" },
-                { value: "viewer", label: "Viewer" }
+                { value: "lead", label: t("settings:adminOrgs.roleLead", "Lead") },
+                { value: "member", label: t("settings:adminOrgs.roleMember", "Member") },
+                { value: "viewer", label: t("settings:adminOrgs.roleViewer", "Viewer") }
               ]}
             />
           </Form.Item>
@@ -383,6 +386,7 @@ const TeamMembersTable: React.FC<{ teamId: number }> = ({ teamId }) => {
 // ── Teams Sub-Table (inside org expanded row) ──
 
 const TeamsTable: React.FC<{ orgId: number }> = ({ orgId }) => {
+  const { t } = useTranslation(["settings", "common"])
   const [teams, setTeams] = useState<Team[]>([])
   const [loading, setLoading] = useState(false)
   const [createModalOpen, setCreateModalOpen] = useState(false)
@@ -410,13 +414,13 @@ const TeamsTable: React.FC<{ orgId: number }> = ({ orgId }) => {
       const values = await createForm.validateFields()
       setCreating(true)
       await tldwClient.createTeam(orgId, { name: values.name })
-      message.success("Team created")
+      message.success(t("settings:adminOrgs.teamCreated", "Team created"))
       setCreateModalOpen(false)
       createForm.resetFields()
       void loadTeams()
     } catch (err: any) {
       if (err?.errorFields) return
-      message.error(sanitizeAdminErrorMessage(err, "Failed to create team"))
+      message.error(sanitizeAdminErrorMessage(err, t("settings:adminOrgs.createTeamFailed", "Failed to create team")))
     } finally {
       setCreating(false)
     }
@@ -424,12 +428,12 @@ const TeamsTable: React.FC<{ orgId: number }> = ({ orgId }) => {
 
   const teamColumns = [
     {
-      title: "Team Name",
+      title: t("settings:adminOrgs.colTeamName", "Team Name"),
       dataIndex: "name",
       key: "name"
     },
     {
-      title: "Member Count",
+      title: t("settings:adminOrgs.colMemberCount", "Member Count"),
       dataIndex: "member_count",
       key: "member_count",
       width: 120,
@@ -440,13 +444,13 @@ const TeamsTable: React.FC<{ orgId: number }> = ({ orgId }) => {
   return (
     <div style={{ marginTop: 8 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <strong><TeamOutlined /> Teams</strong>
+        <strong><TeamOutlined /> {t("settings:adminOrgs.teams", "Teams")}</strong>
         <Space>
           <Button size="small" icon={<ReloadOutlined />} onClick={() => loadTeams()}>
-            Refresh
+            {t("common:refresh", "Refresh")}
           </Button>
           <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
-            Create Team
+            {t("settings:adminOrgs.createTeam", "Create Team")}
           </Button>
         </Space>
       </div>
@@ -462,15 +466,15 @@ const TeamsTable: React.FC<{ orgId: number }> = ({ orgId }) => {
         }}
       />
       <Modal
-        title="Create Team"
+        title={t("settings:adminOrgs.createTeamTitle", "Create Team")}
         open={createModalOpen}
         onCancel={() => { setCreateModalOpen(false); createForm.resetFields() }}
         onOk={handleCreateTeam}
         confirmLoading={creating}
       >
         <Form form={createForm} layout="vertical">
-          <Form.Item name="name" label="Team Name" rules={[{ required: true, message: "Team name is required" }]}>
-            <Input placeholder="Enter team name" />
+          <Form.Item name="name" label={t("settings:adminOrgs.teamNameLabel", "Team Name")} rules={[{ required: true, message: t("settings:adminOrgs.teamNameRequired", "Team name is required") }]}>
+            <Input placeholder={t("settings:adminOrgs.teamNamePlaceholder", "Enter team name")} />
           </Form.Item>
         </Form>
       </Modal>
@@ -481,6 +485,7 @@ const TeamsTable: React.FC<{ orgId: number }> = ({ orgId }) => {
 // ── Main Page ──
 
 const OrgsTeamsPage: React.FC = () => {
+  const { t } = useTranslation(["settings", "common"])
   const [adminGuard, setAdminGuard] = useState<"forbidden" | "notFound" | null>(null)
 
   const [orgs, setOrgs] = useState<Org[]>([])
@@ -529,13 +534,13 @@ const OrgsTeamsPage: React.FC = () => {
       const payload: { name: string; slug?: string } = { name: values.name }
       if (values.slug) payload.slug = values.slug
       await tldwClient.createOrg(payload)
-      message.success("Organization created")
+      message.success(t("settings:adminOrgs.orgCreated", "Organization created"))
       setCreateOrgModalOpen(false)
       createOrgForm.resetFields()
       void loadOrgs()
     } catch (err: any) {
       if (err?.errorFields) return
-      message.error(sanitizeAdminErrorMessage(err, "Failed to create organization"))
+      message.error(sanitizeAdminErrorMessage(err, t("settings:adminOrgs.createOrgFailed", "Failed to create organization")))
     } finally {
       setCreatingOrg(false)
     }
@@ -543,26 +548,26 @@ const OrgsTeamsPage: React.FC = () => {
 
   const orgColumns = [
     {
-      title: "Name",
+      title: t("settings:adminOrgs.colName", "Name"),
       dataIndex: "name",
       key: "name",
       render: (name: string) => <strong>{name}</strong>
     },
     {
-      title: "Slug",
+      title: t("settings:adminOrgs.colSlug", "Slug"),
       dataIndex: "slug",
       key: "slug",
       render: (v: string) => v ? <Tag>{v}</Tag> : "\u2014"
     },
     {
-      title: "Members",
+      title: t("settings:adminOrgs.colMembers", "Members"),
       dataIndex: "member_count",
       key: "member_count",
       width: 100,
       render: (v: number) => v ?? "\u2014"
     },
     {
-      title: "Created",
+      title: t("settings:adminOrgs.colCreated", "Created"),
       dataIndex: "created_at",
       key: "created_at",
       width: 140,
@@ -574,15 +579,15 @@ const OrgsTeamsPage: React.FC = () => {
 
   if (adminGuard === "forbidden") {
     return (
-      <Alert variant="error" title="Access Denied">
-        You don't have permission to manage organizations.
+      <Alert variant="error" title={t("settings:adminOrgs.forbiddenTitle", "Access Denied")}>
+        {t("settings:adminOrgs.forbiddenBody", "You don't have permission to manage organizations.")}
       </Alert>
     )
   }
   if (adminGuard === "notFound") {
     return (
-      <Alert variant="warning" title="Not Available">
-        Organization management is not available on this server.
+      <Alert variant="warning" title={t("settings:adminOrgs.notFoundTitle", "Not Available")}>
+        {t("settings:adminOrgs.notFoundBody", "Organization management is not available on this server.")}
       </Alert>
     )
   }
@@ -590,15 +595,15 @@ const OrgsTeamsPage: React.FC = () => {
   return (
     <div style={{ padding: "24px", maxWidth: 1200 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <h1 style={{ margin: 0, fontSize: "1.5rem", fontWeight: 600 }}>Organizations & Teams</h1>
+        <h1 style={{ margin: 0, fontSize: "1.5rem", fontWeight: 600 }}>{t("settings:adminOrgs.title", "Organizations & Teams")}</h1>
       </div>
 
       <Card
-        title="Organizations"
+        title={t("settings:adminOrgs.orgsCardTitle", "Organizations")}
         extra={
           <Space>
             <Input.Search
-              placeholder="Search orgs..."
+              placeholder={t("settings:adminOrgs.searchOrgs", "Search orgs...")}
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
               onSearch={handleSearch}
@@ -607,10 +612,10 @@ const OrgsTeamsPage: React.FC = () => {
               allowClear
             />
             <Button size="small" icon={<ReloadOutlined />} onClick={() => loadOrgs(searchText || undefined)}>
-              Refresh
+              {t("common:refresh", "Refresh")}
             </Button>
             <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => setCreateOrgModalOpen(true)}>
-              Create Org
+              {t("settings:adminOrgs.createOrg", "Create Org")}
             </Button>
           </Space>
         }
@@ -635,18 +640,18 @@ const OrgsTeamsPage: React.FC = () => {
 
       {/* Create Org Modal */}
       <Modal
-        title="Create Organization"
+        title={t("settings:adminOrgs.createOrgTitle", "Create Organization")}
         open={createOrgModalOpen}
         onCancel={() => { setCreateOrgModalOpen(false); createOrgForm.resetFields() }}
         onOk={handleCreateOrg}
         confirmLoading={creatingOrg}
       >
         <Form form={createOrgForm} layout="vertical">
-          <Form.Item name="name" label="Organization Name" rules={[{ required: true, message: "Name is required" }]}>
-            <Input placeholder="Enter organization name" />
+          <Form.Item name="name" label={t("settings:adminOrgs.orgNameLabel", "Organization Name")} rules={[{ required: true, message: t("settings:adminOrgs.orgNameRequired", "Name is required") }]}>
+            <Input placeholder={t("settings:adminOrgs.orgNamePlaceholder", "Enter organization name")} />
           </Form.Item>
-          <Form.Item name="slug" label="Slug (optional)">
-            <Input placeholder="e.g. my-org" />
+          <Form.Item name="slug" label={t("settings:adminOrgs.slugLabel", "Slug (optional)")}>
+            <Input placeholder={t("settings:adminOrgs.slugPlaceholder", "e.g. my-org")} />
           </Form.Item>
         </Form>
       </Modal>

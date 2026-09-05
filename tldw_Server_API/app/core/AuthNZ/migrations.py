@@ -64,6 +64,7 @@ def migration_001_create_users_table(conn: sqlite3.Connection) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            uuid TEXT UNIQUE DEFAULT (lower(hex(randomblob(16)))),
             username TEXT UNIQUE NOT NULL,
             email TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
@@ -6511,7 +6512,45 @@ def get_authnz_migrations() -> list[Migration]:
             "Add admin webhook delivery recovery schema",
             migration_096_add_admin_webhook_delivery_recovery,
         ),
+        Migration(
+            97,
+            "Backfill NULL users.uuid values",
+            migration_097_backfill_user_uuid,
+        ),
     ]
+
+
+def migration_097_backfill_user_uuid(conn: sqlite3.Connection) -> None:
+    """Backfill NULL/blank users.uuid values with generated identifiers.
+
+    The packaged SQLite schema (Databases/SQLite/Schema/sqlite_users.sql)
+    declares users.uuid as NOT NULL with a randomblob-hex default, but the
+    migrations path added the column via ALTER TABLE as nullable with no
+    default — so databases created through migrations could carry NULL uuids
+    (the single-user bootstrap row did until 2026-09). API responses expect a
+    uuid per user, and a NULL row used to 500 the admin users list.
+
+    This migration backfills existing NULL/blank values using the same format
+    as the packaged default. The column is deliberately NOT retro-tightened to
+    NOT NULL: that would require a users-table rebuild, which would drop the
+    profile-version anchor triggers and indexes attached to the table. New
+    rows are covered by the column default (migration 001, packaged schema)
+    and by explicit uuid assignment in the application write paths.
+    """
+    user_columns = {
+        str(row[1]) for row in conn.execute("PRAGMA table_info(users)").fetchall()
+    }
+    if "uuid" not in user_columns:
+        # ALTER TABLE cannot attach the non-constant default; the backfill
+        # below covers existing rows and application writes cover new ones.
+        conn.execute("ALTER TABLE users ADD COLUMN uuid TEXT")
+    conn.execute(
+        """
+        UPDATE users
+        SET uuid = lower(hex(randomblob(16)))
+        WHERE uuid IS NULL OR trim(uuid) = ''
+        """
+    )
 
 
 def apply_authnz_migrations(db_path: Path, target_version: int = None) -> None:

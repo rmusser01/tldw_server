@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from "react"
+import { useTranslation } from "react-i18next"
 import {
   Card,
   Table,
@@ -23,6 +24,7 @@ const pageContainerStyle: React.CSSProperties = {
 }
 
 const WatchlistsPage: React.FC = () => {
+  const { t } = useTranslation(["settings", "common"])
   // Admin guard state
   const [adminGuard, setAdminGuard] = useState<"forbidden" | "notFound" | null>(null)
 
@@ -66,11 +68,11 @@ const WatchlistsPage: React.FC = () => {
         description: values.description?.trim() || undefined
       })
       watchlistForm.resetFields()
-      message.success("Watchlist created")
+      message.success(t("settings:adminWatchlists.created", "Watchlist created"))
       await loadWatchlists()
     } catch (err: any) {
       if (err?.errorFields) return
-      message.error(sanitizeAdminErrorMessage(err, "Failed to create watchlist"))
+      message.error(sanitizeAdminErrorMessage(err, t("settings:adminWatchlists.createFailed", "Failed to create watchlist")))
     } finally {
       setCreatingWatchlist(false)
     }
@@ -79,10 +81,10 @@ const WatchlistsPage: React.FC = () => {
   const handleDeleteWatchlist = async (id: string) => {
     try {
       await tldwClient.deleteWatchlist(id)
-      message.success("Watchlist deleted")
+      message.success(t("settings:adminWatchlists.deleted", "Watchlist deleted"))
       await loadWatchlists()
     } catch (err: any) {
-      message.error(sanitizeAdminErrorMessage(err, "Failed to delete watchlist"))
+      message.error(sanitizeAdminErrorMessage(err, t("settings:adminWatchlists.deleteFailed", "Failed to delete watchlist")))
     }
   }
 
@@ -104,20 +106,20 @@ const WatchlistsPage: React.FC = () => {
   const handleAcknowledgeAlert = async (alertId: number) => {
     try {
       await tldwClient.acknowledgeAlert(alertId)
-      message.success("Alert acknowledged")
+      message.success(t("settings:adminWatchlists.alertAcknowledged", "Alert acknowledged"))
       await loadAlerts()
     } catch (err: any) {
-      message.error(sanitizeAdminErrorMessage(err, "Failed to acknowledge alert"))
+      message.error(sanitizeAdminErrorMessage(err, t("settings:adminWatchlists.acknowledgeFailed", "Failed to acknowledge alert")))
     }
   }
 
   const handleDismissAlert = async (alertId: number) => {
     try {
       await tldwClient.dismissAlert(alertId)
-      message.success("Alert dismissed")
+      message.success(t("settings:adminWatchlists.alertDismissed", "Alert dismissed"))
       await loadAlerts()
     } catch (err: any) {
-      message.error(sanitizeAdminErrorMessage(err, "Failed to dismiss alert"))
+      message.error(sanitizeAdminErrorMessage(err, t("settings:adminWatchlists.dismissFailed", "Failed to dismiss alert")))
     }
   }
 
@@ -134,47 +136,50 @@ const WatchlistsPage: React.FC = () => {
 
   const watchlistColumns = [
     {
-      title: "Name",
+      title: t("settings:adminWatchlists.colName", "Name"),
       dataIndex: "name",
       key: "name"
     },
     {
-      title: "Description",
+      title: t("settings:adminWatchlists.colDescription", "Description"),
       dataIndex: "description",
       key: "description",
       render: (val: string) => val || "\u2014"
     },
     {
-      title: "Scope",
+      title: t("settings:adminWatchlists.colScope", "Scope"),
       dataIndex: "scope_type",
       key: "scope_type",
-      render: (val: string) => <Tag>{val || "user"}</Tag>
+      render: (val: string) => <Tag>{val || t("settings:adminWatchlists.scopeUser", "user")}</Tag>
     },
     {
-      title: "Enabled",
+      title: t("settings:adminWatchlists.colEnabled", "Enabled"),
       dataIndex: "enabled",
       key: "enabled",
       render: (val: boolean) => (
         <Tag color={val !== false ? "green" : "default"}>
-          {val !== false ? "Yes" : "No"}
+          {val !== false ? t("common:yes", "Yes") : t("common:no", "No")}
         </Tag>
       )
     },
     {
-      title: "Rules",
+      title: t("settings:adminWatchlists.colRules", "Rules"),
       dataIndex: "rules",
       key: "rules",
       render: (rules: any[]) => (rules?.length ?? 0)
     },
     {
-      title: "Actions",
+      title: t("settings:adminWatchlists.colActions", "Actions"),
       key: "actions",
       render: (_: any, record: any) => (
         <Popconfirm
-          title={`Delete watchlist "${record.name}"?`}
+          title={t("settings:adminWatchlists.deleteConfirm", {
+            defaultValue: 'Delete watchlist "{{name}}"?',
+            name: record.name
+          })}
           onConfirm={() => handleDeleteWatchlist(record.id)}
         >
-          <Button size="small" danger>Delete</Button>
+          <Button size="small" danger>{t("common:delete", "Delete")}</Button>
         </Popconfirm>
       )
     }
@@ -184,57 +189,57 @@ const WatchlistsPage: React.FC = () => {
 
   const alertColumns = [
     {
-      title: "ID",
+      title: t("settings:adminWatchlists.colId", "ID"),
       dataIndex: "id",
       key: "id",
       width: 60
     },
     {
-      title: "Source",
+      title: t("settings:adminWatchlists.colSource", "Source"),
       dataIndex: "source",
       key: "source"
     },
     {
-      title: "Category",
+      title: t("settings:adminWatchlists.colCategory", "Category"),
       dataIndex: "rule_category",
       key: "rule_category",
       render: (val: string) => val || "\u2014"
     },
     {
-      title: "Severity",
+      title: t("settings:adminWatchlists.colSeverity", "Severity"),
       dataIndex: "rule_severity",
       key: "rule_severity",
       render: (severity: string) => {
         const color = severity === "critical" ? "red" : severity === "warning" ? "orange" : "blue"
-        return <Tag color={color}>{severity || "info"}</Tag>
+        return <Tag color={color}>{severity || t("settings:adminWatchlists.severityInfo", "info")}</Tag>
       }
     },
     {
-      title: "Snippet",
+      title: t("settings:adminWatchlists.colSnippet", "Snippet"),
       dataIndex: "text_snippet",
       key: "text_snippet",
       ellipsis: true,
       render: (val: string) => val || "\u2014"
     },
     {
-      title: "Created",
+      title: t("settings:adminWatchlists.colCreated", "Created"),
       dataIndex: "created_at",
       key: "created_at",
       render: (val: string) => val ? new Date(val).toLocaleString() : "\u2014"
     },
     {
-      title: "Actions",
+      title: t("settings:adminWatchlists.colActions", "Actions"),
       key: "actions",
       render: (_: any, record: any) => (
         <Space size="small">
           <Button size="small" onClick={() => handleAcknowledgeAlert(record.id)}>
-            Acknowledge
+            {t("settings:adminWatchlists.acknowledge", "Acknowledge")}
           </Button>
           <Popconfirm
-            title="Dismiss this alert?"
+            title={t("settings:adminWatchlists.dismissConfirm", "Dismiss this alert?")}
             onConfirm={() => handleDismissAlert(record.id)}
           >
-            <Button size="small" danger>Dismiss</Button>
+            <Button size="small" danger>{t("settings:adminWatchlists.dismiss", "Dismiss")}</Button>
           </Popconfirm>
         </Space>
       )
@@ -246,8 +251,11 @@ const WatchlistsPage: React.FC = () => {
   if (adminGuard === "forbidden") {
     return (
       <div style={pageContainerStyle}>
-        <Alert variant="error" title="Access Denied">
-          You don't have permission to access watchlists administration.
+        <Alert variant="error" title={t("settings:adminWatchlists.forbiddenTitle", "Access Denied")}>
+          {t(
+            "settings:adminWatchlists.forbiddenBody",
+            "You don't have permission to access watchlists administration."
+          )}
         </Alert>
       </div>
     )
@@ -255,8 +263,11 @@ const WatchlistsPage: React.FC = () => {
   if (adminGuard === "notFound") {
     return (
       <div style={pageContainerStyle}>
-        <Alert variant="warning" title="Not Available">
-          Watchlists administration is not available on this server.
+        <Alert variant="warning" title={t("settings:adminWatchlists.notFoundTitle", "Not Available")}>
+          {t(
+            "settings:adminWatchlists.notFoundBody",
+            "Watchlists administration is not available on this server."
+          )}
         </Alert>
       </div>
     )
@@ -264,15 +275,15 @@ const WatchlistsPage: React.FC = () => {
 
   return (
     <div style={pageContainerStyle}>
-      <h1 style={{ marginBottom: 16, fontSize: "1.5rem", fontWeight: 600 }}>Watchlists &amp; Alerts</h1>
+      <h1 style={{ marginBottom: 16, fontSize: "1.5rem", fontWeight: 600 }}>{t("settings:adminWatchlists.title", "Watchlists & Alerts")}</h1>
 
       {/* Watchlists Card */}
       <Card
-        title="Watchlists"
+        title={t("settings:adminWatchlists.watchlistsCardTitle", "Watchlists")}
         style={{ marginBottom: 16 }}
         extra={
           <Button onClick={() => loadWatchlists()} size="small">
-            Refresh
+            {t("common:refresh", "Refresh")}
           </Button>
         }
       >
@@ -280,16 +291,16 @@ const WatchlistsPage: React.FC = () => {
           <Form form={watchlistForm} layout="inline">
             <Form.Item
               name="name"
-              rules={[{ required: true, message: "Name is required" }]}
+              rules={[{ required: true, message: t("settings:adminWatchlists.nameRequired", "Name is required") }]}
             >
-              <Input placeholder="Watchlist name" style={{ width: 200 }} />
+              <Input placeholder={t("settings:adminWatchlists.namePlaceholder", "Watchlist name")} style={{ width: 200 }} />
             </Form.Item>
             <Form.Item name="description">
-              <Input placeholder="Description (optional)" style={{ width: 250 }} />
+              <Input placeholder={t("settings:adminWatchlists.descriptionPlaceholder", "Description (optional)")} style={{ width: 250 }} />
             </Form.Item>
             <Form.Item>
               <Button type="primary" onClick={handleCreateWatchlist} loading={creatingWatchlist}>
-                Create Watchlist
+                {t("settings:adminWatchlists.createWatchlist", "Create Watchlist")}
               </Button>
             </Form.Item>
           </Form>
@@ -306,10 +317,10 @@ const WatchlistsPage: React.FC = () => {
 
       {/* Alerts Card */}
       <Card
-        title="Monitoring Alerts"
+        title={t("settings:adminWatchlists.alertsCardTitle", "Monitoring Alerts")}
         extra={
           <Button onClick={() => loadAlerts()} size="small">
-            Refresh
+            {t("common:refresh", "Refresh")}
           </Button>
         }
       >

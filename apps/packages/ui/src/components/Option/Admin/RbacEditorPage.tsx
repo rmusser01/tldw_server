@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from "react"
+import { useTranslation } from "react-i18next"
 import {
   Card,
   Table,
@@ -61,6 +62,7 @@ interface EffectivePerm {
 // ── Permission Matrix Tab ──
 
 const PermissionMatrixTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }) => {
+  const { t } = useTranslation(["settings", "common"])
   const [matrix, setMatrix] = useState<any>(null)
   const [matrixError, setMatrixError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -77,7 +79,7 @@ const PermissionMatrixTab: React.FC<{ onGuardError: (err: any) => void }> = ({ o
     } catch (err) {
       onGuardError(err)
       setMatrixError(
-        sanitizeAdminErrorMessage(err, "Failed to load the permission matrix.")
+        sanitizeAdminErrorMessage(err, t("settings:adminRbac.matrixLoadFailed", "Failed to load the permission matrix."))
       )
     } finally {
       setLoading(false)
@@ -111,10 +113,10 @@ const PermissionMatrixTab: React.FC<{ onGuardError: (err: any) => void }> = ({ o
         await tldwClient.grantRolePermission(roleId, permissionId)
       }
       await loadMatrix()
-      message.success(currentValue ? "Permission revoked" : "Permission granted")
+      message.success(currentValue ? t("settings:adminRbac.permissionRevoked", "Permission revoked") : t("settings:adminRbac.permissionGranted", "Permission granted"))
     } catch (err: any) {
       message.error(
-        sanitizeAdminErrorMessage(err, "Failed to update permission matrix")
+        sanitizeAdminErrorMessage(err, t("settings:adminRbac.matrixUpdateFailed", "Failed to update permission matrix"))
       )
     } finally {
       setToggling(null)
@@ -124,11 +126,11 @@ const PermissionMatrixTab: React.FC<{ onGuardError: (err: any) => void }> = ({ o
   if (!matrix) {
     if (matrixError && !loading) {
       return (
-        <DesignSystemAlert variant="error" title="Unable to load the permission matrix">
+        <DesignSystemAlert variant="error" title={t("settings:adminRbac.matrixErrorTitle", "Unable to load the permission matrix")}>
           <Space orientation="vertical" size="small">
             <span>{matrixError}</span>
             <Button size="small" onClick={() => void loadMatrix()}>
-              Retry
+              {t("common:retry", "Retry")}
             </Button>
           </Space>
         </DesignSystemAlert>
@@ -148,7 +150,7 @@ const PermissionMatrixTab: React.FC<{ onGuardError: (err: any) => void }> = ({ o
 
   const columns = [
     {
-      title: "Permission",
+      title: t("settings:adminRbac.colPermission", "Permission"),
       dataIndex: "name",
       key: "name",
       fixed: "left" as const,
@@ -181,19 +183,19 @@ const PermissionMatrixTab: React.FC<{ onGuardError: (err: any) => void }> = ({ o
 
   return (
     <Card
-      title="Permission Matrix"
+      title={t("settings:adminRbac.matrixCardTitle", "Permission Matrix")}
       extra={
         <Space>
           <Select
             allowClear
-            placeholder="Filter by category"
+            placeholder={t("settings:adminRbac.filterByCategory", "Filter by category")}
             style={{ width: 200 }}
             value={selectedCategory}
             onChange={v => setSelectedCategory(v ?? null)}
             options={categories.map(c => ({ label: c, value: c }))}
           />
           <Button icon={<ReloadOutlined />} onClick={loadMatrix} loading={loading}>
-            Refresh
+            {t("common:refresh", "Refresh")}
           </Button>
         </Space>
       }
@@ -201,12 +203,12 @@ const PermissionMatrixTab: React.FC<{ onGuardError: (err: any) => void }> = ({ o
       {permissions.length === 0 && !loading ? (
         <DesignSystemAlert
           variant="info"
-          title="No permissions registered yet"
+          title={t("settings:adminRbac.emptyCatalogTitle", "No permissions registered yet")}
         >
-          This server's RBAC catalog is empty, so there is nothing to grant or
-          revoke per role — built-in role behavior still applies. The matrix
-          fills in once permissions are seeded on the server (see the privilege
-          catalog configuration).
+          {t(
+            "settings:adminRbac.emptyCatalogBody",
+            "This server's RBAC catalog is empty, so there is nothing to grant or revoke per role — built-in role behavior still applies. The matrix fills in once permissions are seeded on the server (see the privilege catalog configuration)."
+          )}
         </DesignSystemAlert>
       ) : (
         <Table
@@ -219,8 +221,8 @@ const PermissionMatrixTab: React.FC<{ onGuardError: (err: any) => void }> = ({ o
           size="small"
           locale={{
             emptyText: selectedCategory
-              ? "No permissions in this category."
-              : "No permissions found."
+              ? t("settings:adminRbac.emptyCategory", "No permissions in this category.")
+              : t("settings:adminRbac.emptyPermissions", "No permissions found.")
           }}
         />
       )}
@@ -231,6 +233,7 @@ const PermissionMatrixTab: React.FC<{ onGuardError: (err: any) => void }> = ({ o
 // ── Roles Tab ──
 
 const RolesTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }) => {
+  const { t } = useTranslation(["settings", "common"])
   const [roles, setRoles] = useState<Role[]>([])
   const [loading, setLoading] = useState(false)
   const [createForm] = Form.useForm()
@@ -258,12 +261,12 @@ const RolesTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError
       const values = await createForm.validateFields()
       setCreating(true)
       await tldwClient.createAdminRole(values.name, values.description)
-      message.success("Role created")
+      message.success(t("settings:adminRbac.roleCreated", "Role created"))
       createForm.resetFields()
       await loadRoles()
     } catch (err: any) {
       if (err?.errorFields) return
-      message.error(sanitizeAdminErrorMessage(err, "Failed to create role"))
+      message.error(sanitizeAdminErrorMessage(err, t("settings:adminRbac.roleCreateFailed", "Failed to create role")))
     } finally {
       setCreating(false)
     }
@@ -272,10 +275,10 @@ const RolesTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError
   const handleDelete = useCallback(async (roleId: number) => {
     try {
       await tldwClient.deleteAdminRole(roleId)
-      message.success("Role deleted")
+      message.success(t("settings:adminRbac.roleDeleted", "Role deleted"))
       await loadRoles()
     } catch (err: any) {
-      message.error(sanitizeAdminErrorMessage(err, "Failed to delete role"))
+      message.error(sanitizeAdminErrorMessage(err, t("settings:adminRbac.roleDeleteFailed", "Failed to delete role")))
     }
   }, [loadRoles])
 
@@ -292,32 +295,32 @@ const RolesTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError
   }, [])
 
   const columns = [
-    { title: "Name", dataIndex: "name", key: "name" },
-    { title: "Description", dataIndex: "description", key: "description" },
+    { title: t("settings:adminRbac.colName", "Name"), dataIndex: "name", key: "name" },
+    { title: t("settings:adminRbac.colDescription", "Description"), dataIndex: "description", key: "description" },
     {
-      title: "System",
+      title: t("settings:adminRbac.colSystem", "System"),
       dataIndex: "is_system",
       key: "is_system",
       width: 80,
-      render: (v: boolean) => v ? <Tag color="blue">System</Tag> : null
+      render: (v: boolean) => v ? <Tag color="blue">{t("settings:adminRbac.systemTag", "System")}</Tag> : null
     },
     {
-      title: "Permissions",
+      title: t("settings:adminRbac.colPermissions", "Permissions"),
       dataIndex: "permission_count",
       key: "permission_count",
       width: 110,
       render: (v: number) => v ?? "-"
     },
     {
-      title: "Actions",
+      title: t("settings:adminRbac.colActions", "Actions"),
       key: "actions",
       width: 100,
       render: (_: any, record: Role) =>
         record.is_system ? (
-          <Tag>Protected</Tag>
+          <Tag>{t("settings:adminRbac.protectedTag", "Protected")}</Tag>
         ) : (
           <Popconfirm
-            title="Delete this role?"
+            title={t("settings:adminRbac.deleteRoleConfirm", "Delete this role?")}
             onConfirm={() => handleDelete(record.id)}
           >
             <Button danger size="small" icon={<DeleteOutlined />} />
@@ -328,20 +331,20 @@ const RolesTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError
 
   return (
     <Card
-      title="Roles"
+      title={t("settings:adminRbac.rolesCardTitle", "Roles")}
       extra={
         <Button icon={<ReloadOutlined />} onClick={loadRoles} loading={loading}>
-          Refresh
+          {t("common:refresh", "Refresh")}
         </Button>
       }
     >
-      <Card size="small" style={{ marginBottom: 16 }} title="Create Role">
+      <Card size="small" style={{ marginBottom: 16 }} title={t("settings:adminRbac.createRoleCardTitle", "Create Role")}>
         <Form form={createForm} layout="inline">
-          <Form.Item name="name" rules={[{ required: true, message: "Name required" }]}>
-            <Input placeholder="Role name" />
+          <Form.Item name="name" rules={[{ required: true, message: t("settings:adminRbac.nameRequired", "Name required") }]}>
+            <Input placeholder={t("settings:adminRbac.roleNamePlaceholder", "Role name")} />
           </Form.Item>
           <Form.Item name="description">
-            <Input placeholder="Description (optional)" style={{ width: 250 }} />
+            <Input placeholder={t("settings:adminRbac.descriptionPlaceholder", "Description (optional)")} style={{ width: 250 }} />
           </Form.Item>
           <Form.Item>
             <Button
@@ -350,7 +353,7 @@ const RolesTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError
               onClick={handleCreate}
               loading={creating}
             >
-              Create
+              {t("settings:adminRbac.create", "Create")}
             </Button>
           </Form.Item>
         </Form>
@@ -365,8 +368,8 @@ const RolesTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError
         expandable={{
           expandedRowRender: (record: Role) => {
             const perms = expandedPerms[record.id]
-            if (!perms) return <div style={{ padding: 8, color: "#999" }}>Loading...</div>
-            if (perms.length === 0) return <div style={{ padding: 8, color: "#999" }}>No permissions assigned</div>
+            if (!perms) return <div style={{ padding: 8, color: "#999" }}>{t("settings:adminRbac.loading", "Loading...")}</div>
+            if (perms.length === 0) return <div style={{ padding: 8, color: "#999" }}>{t("settings:adminRbac.noPermissionsAssigned", "No permissions assigned")}</div>
             return (
               <div style={{ padding: 8 }}>
                 {perms.map((p: any) => (
@@ -391,6 +394,7 @@ const RolesTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError
 // ── User Permissions Tab ──
 
 const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }) => {
+  const { t } = useTranslation(["settings", "common"])
   const [users, setUsers] = useState<any[]>([])
   const [usersLoading, setUsersLoading] = useState(false)
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null)
@@ -499,10 +503,10 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
     if (!selectedUserId) return
     try {
       await tldwClient.removeUserRole(selectedUserId, roleId)
-      message.success("Role removed")
+      message.success(t("settings:adminRbac.roleRemoved", "Role removed"))
       await loadUserData(selectedUserId)
     } catch (err: any) {
-      message.error(sanitizeAdminErrorMessage(err, "Failed to remove role"))
+      message.error(sanitizeAdminErrorMessage(err, t("settings:adminRbac.roleRemoveFailed", "Failed to remove role")))
     }
   }, [selectedUserId, loadUserData])
 
@@ -511,12 +515,12 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
     setAddingRole(true)
     try {
       await tldwClient.assignUserRole(selectedUserId, addRoleId)
-      message.success("Role assigned")
+      message.success(t("settings:adminRbac.roleAssigned", "Role assigned"))
       setAddRoleModalOpen(false)
       setAddRoleId(null)
       await loadUserData(selectedUserId)
     } catch (err: any) {
-      message.error(sanitizeAdminErrorMessage(err, "Failed to assign role"))
+      message.error(sanitizeAdminErrorMessage(err, t("settings:adminRbac.roleAssignFailed", "Failed to assign role")))
     } finally {
       setAddingRole(false)
     }
@@ -531,14 +535,14 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
         permission_id: values.permission_id,
         effect: values.effect
       })
-      message.success("Override added")
+      message.success(t("settings:adminRbac.overrideAdded", "Override added"))
       setAddOverrideModalOpen(false)
       overrideForm.resetFields()
       await loadUserData(selectedUserId)
     } catch (err: any) {
       if (err?.errorFields) return
       message.error(
-        sanitizeAdminErrorMessage(err, "Failed to save user permission overrides")
+        sanitizeAdminErrorMessage(err, t("settings:adminRbac.overrideSaveFailed", "Failed to save user permission overrides"))
       )
     } finally {
       setAddingOverride(false)
@@ -549,28 +553,28 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
     if (!selectedUserId) return
     try {
       await tldwClient.deleteUserOverride(selectedUserId, permissionId)
-      message.success("Override removed")
+      message.success(t("settings:adminRbac.overrideRemoved", "Override removed"))
       await loadUserData(selectedUserId)
     } catch (err: any) {
       message.error(
-        sanitizeAdminErrorMessage(err, "Failed to revoke user permission override")
+        sanitizeAdminErrorMessage(err, t("settings:adminRbac.overrideRemoveFailed", "Failed to revoke user permission override"))
       )
     }
   }, [selectedUserId, loadUserData])
 
   const roleColumns = [
     {
-      title: "Role",
+      title: t("settings:adminRbac.colRole", "Role"),
       key: "name",
       render: (_: any, record: any) => record.name ?? record.role_name ?? `Role #${record.id ?? record.role_id}`
     },
     {
-      title: "Actions",
+      title: t("settings:adminRbac.colActions", "Actions"),
       key: "actions",
       width: 100,
       render: (_: any, record: any) => (
         <Popconfirm
-          title="Remove this role?"
+          title={t("settings:adminRbac.removeRoleConfirm", "Remove this role?")}
           onConfirm={() => handleRemoveRole(record.id ?? record.role_id)}
         >
           <Button danger size="small" icon={<DeleteOutlined />} />
@@ -581,13 +585,13 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
 
   const overrideColumns = [
     {
-      title: "Permission",
+      title: t("settings:adminRbac.colPermission", "Permission"),
       key: "permission_name",
       render: (_: any, record: UserOverride) =>
         record.permission_name ?? allPermissions.find(p => p.id === record.permission_id)?.name ?? `#${record.permission_id}`
     },
     {
-      title: "Effect",
+      title: t("settings:adminRbac.colEffect", "Effect"),
       dataIndex: "effect",
       key: "effect",
       width: 100,
@@ -596,12 +600,12 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
       )
     },
     {
-      title: "Actions",
+      title: t("settings:adminRbac.colActions", "Actions"),
       key: "actions",
       width: 100,
       render: (_: any, record: UserOverride) => (
         <Popconfirm
-          title="Remove this override?"
+          title={t("settings:adminRbac.removeOverrideConfirm", "Remove this override?")}
           onConfirm={() => handleRemoveOverride(record.permission_id)}
         >
           <Button danger size="small" icon={<DeleteOutlined />} />
@@ -612,20 +616,20 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
 
   const effectiveColumns = [
     {
-      title: "Permission",
+      title: t("settings:adminRbac.colPermission", "Permission"),
       key: "permission_name",
       render: (_: any, record: EffectivePerm) =>
         record.permission_name ?? `#${record.permission_id}`
     },
     {
-      title: "Source",
+      title: t("settings:adminRbac.colSource", "Source"),
       dataIndex: "source",
       key: "source",
       width: 120,
       render: (v: string) => v ? <Tag>{v}</Tag> : null
     },
     {
-      title: "Effect",
+      title: t("settings:adminRbac.colEffect", "Effect"),
       dataIndex: "effect",
       key: "effect",
       width: 100,
@@ -635,11 +639,11 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
   ]
 
   return (
-    <Card title="User Permissions">
+    <Card title={t("settings:adminRbac.userPermissionsCardTitle", "User Permissions")}>
       <div style={{ marginBottom: 16 }}>
         <Select
           showSearch
-          placeholder="Search for a user..."
+          placeholder={t("settings:adminRbac.searchUserPlaceholder", "Search for a user...")}
           style={{ width: 400 }}
           loading={usersLoading}
           filterOption={false}
@@ -658,7 +662,7 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
           {/* Assigned Roles */}
           <Card
             size="small"
-            title="Assigned Roles"
+            title={t("settings:adminRbac.assignedRolesCardTitle", "Assigned Roles")}
             style={{ marginBottom: 16 }}
             extra={
               <Button
@@ -666,7 +670,7 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
                 icon={<PlusOutlined />}
                 onClick={() => setAddRoleModalOpen(true)}
               >
-                Add Role
+                {t("settings:adminRbac.addRole", "Add Role")}
               </Button>
             }
           >
@@ -683,7 +687,7 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
           {/* Permission Overrides */}
           <Card
             size="small"
-            title="Permission Overrides"
+            title={t("settings:adminRbac.overridesCardTitle", "Permission Overrides")}
             style={{ marginBottom: 16 }}
             extra={
               <Button
@@ -691,7 +695,7 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
                 icon={<PlusOutlined />}
                 onClick={() => setAddOverrideModalOpen(true)}
               >
-                Add Override
+                {t("settings:adminRbac.addOverride", "Add Override")}
               </Button>
             }
           >
@@ -706,7 +710,7 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
           </Card>
 
           {/* Effective Permissions */}
-          <Card size="small" title="Effective Permissions (read-only)">
+          <Card size="small" title={t("settings:adminRbac.effectivePermissionsCardTitle", "Effective Permissions (read-only)")}>
             <Table
               dataSource={effectivePerms}
               columns={effectiveColumns}
@@ -721,7 +725,7 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
 
       {/* Add Role Modal */}
       <Modal
-        title="Assign Role"
+        title={t("settings:adminRbac.assignRoleModalTitle", "Assign Role")}
         open={addRoleModalOpen}
         onOk={handleAddRole}
         onCancel={() => { setAddRoleModalOpen(false); setAddRoleId(null) }}
@@ -729,7 +733,7 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
         okButtonProps={{ disabled: !addRoleId }}
       >
         <Select
-          placeholder="Select a role"
+          placeholder={t("settings:adminRbac.selectRolePlaceholder", "Select a role")}
           style={{ width: "100%" }}
           value={addRoleId}
           onChange={setAddRoleId}
@@ -743,7 +747,7 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
 
       {/* Add Override Modal */}
       <Modal
-        title="Add Permission Override"
+        title={t("settings:adminRbac.addOverrideModalTitle", "Add Permission Override")}
         open={addOverrideModalOpen}
         onOk={handleAddOverride}
         onCancel={() => { setAddOverrideModalOpen(false); overrideForm.resetFields() }}
@@ -752,12 +756,12 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
         <Form form={overrideForm} layout="vertical">
           <Form.Item
             name="permission_id"
-            label="Permission"
-            rules={[{ required: true, message: "Select a permission" }]}
+            label={t("settings:adminRbac.permissionLabel", "Permission")}
+            rules={[{ required: true, message: t("settings:adminRbac.selectPermissionRequired", "Select a permission") }]}
           >
             <Select
               showSearch
-              placeholder="Select permission"
+              placeholder={t("settings:adminRbac.selectPermissionPlaceholder", "Select permission")}
               filterOption={(input, option) =>
                 (option?.label as string)?.toLowerCase().includes(input.toLowerCase()) ?? false
               }
@@ -769,14 +773,14 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
           </Form.Item>
           <Form.Item
             name="effect"
-            label="Effect"
-            rules={[{ required: true, message: "Select an effect" }]}
+            label={t("settings:adminRbac.effectLabel", "Effect")}
+            rules={[{ required: true, message: t("settings:adminRbac.selectEffectRequired", "Select an effect") }]}
           >
             <Select
-              placeholder="Select effect"
+              placeholder={t("settings:adminRbac.selectEffectPlaceholder", "Select effect")}
               options={[
-                { label: "Grant", value: "grant" },
-                { label: "Deny", value: "deny" }
+                { label: t("settings:adminRbac.effectGrant", "Grant"), value: "grant" },
+                { label: t("settings:adminRbac.effectDeny", "Deny"), value: "deny" }
               ]}
             />
           </Form.Item>
@@ -789,6 +793,7 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
 // ── Main Page ──
 
 const RbacEditorPage: React.FC = () => {
+  const { t } = useTranslation(["settings", "common"])
   const [guardError, setGuardError] = useState<string | null>(null)
   const guardRef = useRef(false)
 
@@ -802,7 +807,7 @@ const RbacEditorPage: React.FC = () => {
 
   if (guardError) {
     return (
-      <DesignSystemAlert variant="warning" title="Access Restricted" className="m-6">
+      <DesignSystemAlert variant="warning" title={t("settings:adminRbac.accessRestrictedTitle", "Access Restricted")} className="m-6">
         {guardError}
       </DesignSystemAlert>
     )
@@ -810,9 +815,12 @@ const RbacEditorPage: React.FC = () => {
 
   return (
     <div style={{ padding: 16 }}>
-      <h1 style={{ marginBottom: 4, fontSize: "1.5rem", fontWeight: 600 }}>Roles &amp; Permissions</h1>
+      <h1 style={{ marginBottom: 4, fontSize: "1.5rem", fontWeight: 600 }}>{t("settings:adminRbac.title", "Roles & Permissions")}</h1>
       <p style={{ marginBottom: 16, color: "var(--color-text-secondary, #888)" }}>
-        Review the permission matrix, manage roles, and adjust per-user grants.
+        {t(
+          "settings:adminRbac.description",
+          "Review the permission matrix, manage roles, and adjust per-user grants."
+        )}
       </p>
       <Tabs
         defaultActiveKey="matrix"
@@ -821,7 +829,7 @@ const RbacEditorPage: React.FC = () => {
             key: "matrix",
             label: (
               <span>
-                <SafetyOutlined /> Permission Matrix
+                <SafetyOutlined /> {t("settings:adminRbac.tabMatrix", "Permission Matrix")}
               </span>
             ),
             children: <PermissionMatrixTab onGuardError={handleGuardError} />
@@ -830,7 +838,7 @@ const RbacEditorPage: React.FC = () => {
             key: "roles",
             label: (
               <span>
-                <LockOutlined /> Roles
+                <LockOutlined /> {t("settings:adminRbac.tabRoles", "Roles")}
               </span>
             ),
             children: <RolesTab onGuardError={handleGuardError} />
@@ -839,7 +847,7 @@ const RbacEditorPage: React.FC = () => {
             key: "users",
             label: (
               <span>
-                <LockOutlined /> User Permissions
+                <LockOutlined /> {t("settings:adminRbac.tabUserPermissions", "User Permissions")}
               </span>
             ),
             children: <UserPermissionsTab onGuardError={handleGuardError} />
