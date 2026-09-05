@@ -287,6 +287,12 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
           loading={loading}
           pagination={backups.length > 20 ? { pageSize: 20 } : false}
           size="small"
+          locale={{
+            emptyText: t(
+              "settings:adminDataOps.backupsEmpty",
+              "No backups yet. Pick a dataset above and create the first one."
+            )
+          }}
         />
       </Card>
 
@@ -298,6 +304,43 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
           </Button>
         }
       >
+        {/* Starter chips fill the form, mirroring the Monitoring alert-rule
+            pattern - the cron syntax stops being a prerequisite (#2899 I1). */}
+        <div style={{ marginBottom: 8 }}>
+          <Space size="small" wrap>
+            {[
+              {
+                label: t(
+                  "settings:adminDataOps.schedulePresetNightly",
+                  "Nightly at 02:00, keep 14 days"
+                ),
+                cron: "0 2 * * *",
+                retention: 14
+              },
+              {
+                label: t(
+                  "settings:adminDataOps.schedulePresetWeekly",
+                  "Weekly on Sunday 03:00, keep 8 weeks"
+                ),
+                cron: "0 3 * * 0",
+                retention: 56
+              }
+            ].map((preset) => (
+              <Tag
+                key={preset.cron}
+                style={{ cursor: "pointer" }}
+                onClick={() =>
+                  scheduleForm.setFieldsValue({
+                    cron: preset.cron,
+                    retention_days: preset.retention
+                  })
+                }
+              >
+                {preset.label}
+              </Tag>
+            ))}
+          </Space>
+        </div>
         <div style={{ marginBottom: 16 }}>
           <Form form={scheduleForm} layout="inline">
             <Form.Item
@@ -340,6 +383,12 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
           loading={schedulesLoading}
           pagination={false}
           size="small"
+          locale={{
+            emptyText: t(
+              "settings:adminDataOps.schedulesEmpty",
+              "No schedules yet. Recurring backups run themselves - add one above (for example: nightly at 02:00)."
+            )
+          }}
         />
       </Card>
     </div>

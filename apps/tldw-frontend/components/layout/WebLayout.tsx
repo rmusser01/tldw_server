@@ -467,6 +467,14 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
         )}
         style={chatScreenBackgroundStyle}
       >
+        {/* A bypass link is only useful as the FIRST focusable element -
+            before the sidebar and header it exists to skip (#2889). */}
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded-md focus:bg-surface focus:px-3 focus:py-2 focus:text-sm focus:text-text focus:shadow"
+        >
+          Skip to main content
+        </a>
         {/* Persistent ChatSidebar when feature flag enabled */}
         {shouldRenderChatSidebar && (
           <ChatSidebar
@@ -480,8 +488,10 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
           />
         )}
         <main
+          id="main-content"
+          tabIndex={-1}
           className={classNames(
-            'relative flex-1 min-w-0 flex flex-col',
+            'relative flex-1 min-w-0 flex flex-col outline-none',
             hideHeader ? 'bg-bg ' : ''
           )}
           data-demo-mode={demoEnabled ? 'on' : 'off'}

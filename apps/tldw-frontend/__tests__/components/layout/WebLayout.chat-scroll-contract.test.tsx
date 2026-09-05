@@ -953,3 +953,34 @@ describe('WebLayout /chat scroll contract', () => {
     expect(mediaQueryModule.useMediaQuery).toEqual(expect.any(Function));
   });
 });
+
+describe('WebLayout bypass block (#2889)', () => {
+  beforeEach(() => {
+    delete (globalThis as typeof globalThis & { __tldwOptionShell?: unknown }).__tldwOptionShell;
+    vi.clearAllMocks();
+    routerState.location.pathname = '/admin/server';
+    connectionState.value.phase = 'connected';
+    connectionState.value.isConnected = true;
+  });
+
+  afterEach(() => {
+    cleanup();
+    delete (globalThis as typeof globalThis & { __tldwOptionShell?: unknown }).__tldwOptionShell;
+  });
+
+  it('renders a skip link as the first focusable element, targeting the main region', () => {
+    const view = render(<OptionLayout><div>Content</div></OptionLayout>);
+
+    const firstFocusable = view.container.querySelector(
+      "a[href], button, [tabindex]:not([tabindex='-1'])"
+    ) as HTMLElement;
+    expect(firstFocusable).toBeTruthy();
+    expect(firstFocusable.tagName).toBe('A');
+    expect(firstFocusable).toHaveTextContent('Skip to main content');
+    expect(firstFocusable).toHaveAttribute('href', '#main-content');
+
+    const main = view.container.querySelector('main');
+    expect(main).toHaveAttribute('id', 'main-content');
+    expect(main).toHaveAttribute('tabindex', '-1');
+  });
+});

@@ -523,7 +523,12 @@ const BillingDashboardPage: React.FC = () => {
 
   return (
     <div style={{ padding: 24 }}>
-      <h1 style={{ fontSize: "1.5rem", fontWeight: 600 }}>{t("settings:adminBilling.title", "Billing Dashboard")}</h1>
+      <span style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
+        <h1 style={{ fontSize: "1.5rem", fontWeight: 600 }}>{t("settings:adminBilling.title", "Billing Dashboard")}</h1>
+        <a href="/admin/usage" style={{ fontSize: "0.85rem" }}>
+          {t("settings:adminBilling.usageCrossLink", "Request and token volumes live in Usage Analytics")}
+        </a>
+      </span>
       <Tabs defaultActiveKey="overview" items={tabItems} />
     </div>
   )

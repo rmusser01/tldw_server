@@ -1728,7 +1728,7 @@
     }
   },
   "items": {
-    "description": "Review collected updates, alert matches, and briefing candidates from this Watchlist.",
+    "description": "Review collected updates, alert matches, and briefing candidates across your watchlists.",
     "sourcesError": "Failed to load sources",
     "fetchError": "Failed to load updates",
     "smartFeeds": "Smart Feeds",

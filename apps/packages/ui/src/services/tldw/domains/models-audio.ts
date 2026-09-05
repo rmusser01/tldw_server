@@ -599,7 +599,10 @@ export const modelsAudioMethods = {
   async getLlamacppStatus(): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/llamacpp/status",
-      method: "GET"
+      method: "GET",
+      // 503 means the managed backend is deliberately not configured -
+      // callers surface that state in the UI; no console noise (#2896).
+      expectedStatuses: [503]
     })
   },
 

@@ -661,7 +661,13 @@ const MonitoringDashboardPage: React.FC = () => {
         {t(
           "settings:adminMonitoring.description",
           "Monitor your tldw server's health and set up alerts for important metrics. Create rules below to get notified when something needs attention."
-        )}
+        )}{" "}
+        <a href="/admin/server">
+          {t(
+            "settings:adminMonitoring.serverAdminCrossLink",
+            "Users, storage, and session management live in Server Admin."
+          )}
+        </a>
       </Typography.Paragraph>
 
       {/* System Overview Card */}
@@ -809,7 +815,7 @@ const MonitoringDashboardPage: React.FC = () => {
 
       {/* Alert History Card */}
       <Card title={t("settings:adminMonitoring.alertHistoryTitle", "Alert History")} style={{ marginBottom: 16 }} extra={<Button onClick={() => loadAlertHistory()} size="small">{t("common:refresh", "Refresh")}</Button>}>
-        <Table dataSource={alertHistory} columns={historyColumns} rowKey={(record) => String(record.id ?? record.alert ?? record.triggered_at ?? "unknown")} loading={historyLoading} pagination={{ pageSize: 20 }} size="small" />
+        <Table dataSource={alertHistory} columns={historyColumns} rowKey={(record) => String(record.id ?? record.alert ?? record.triggered_at ?? "unknown")} loading={historyLoading} pagination={{ pageSize: 20 }} size="small" locale={{ emptyText: t("settings:adminMonitoring.alertHistoryEmpty", "No alert activity recorded yet. Actions on alerts (acknowledge, snooze, escalate) appear here.") }} />
       </Card>
 
       {/* Activity (Collapsible) */}

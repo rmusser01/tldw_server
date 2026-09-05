@@ -43,6 +43,9 @@ const ApiKeyManagementPage: React.FC = () => {
 
   // New key display (shown after creation with the raw key value)
   const [newKeyValue, setNewKeyValue] = useState<string | null>(null)
+  // The plaintext key shows once, then masks after copy (or on demand) so it
+  // does not linger on screen for shoulder-surfers (#2898 L3).
+  const [newKeyRevealed, setNewKeyRevealed] = useState(true)
 
   const initialLoadRef = useRef(false)
 
@@ -118,6 +121,7 @@ const ApiKeyManagementPage: React.FC = () => {
       // Show the new key value (only visible once)
       if (result?.key || result?.api_key) {
         setNewKeyValue(result.key || result.api_key)
+        setNewKeyRevealed(true)
       }
       createForm.resetFields()
       setCreateModalOpen(false)
@@ -149,6 +153,7 @@ const ApiKeyManagementPage: React.FC = () => {
       const result = await tldwClient.rotateUserApiKey(selectedUserId, keyId)
       if (result?.key || result?.api_key) {
         setNewKeyValue(result.key || result.api_key)
+        setNewKeyRevealed(true)
       }
       message.success(t("settings:adminApiKeys.rotated", "API key rotated"))
       await loadKeys(selectedUserId)
@@ -201,10 +206,19 @@ const ApiKeyManagementPage: React.FC = () => {
       key: "actions",
       render: (_: any, record: any) => (
         <Space size="small">
-          <Popconfirm title={t("settings:adminApiKeys.rotateConfirm", "Rotate this key?")} onConfirm={() => handleRotateKey(record.id)}>
+          <Popconfirm
+            title={t("settings:adminApiKeys.rotateConfirm", "Rotate this key?")}
+            okText={t("settings:adminApiKeys.rotateOk", "Rotate key")}
+            onConfirm={() => handleRotateKey(record.id)}
+          >
             <Button size="small">{t("settings:adminApiKeys.rotate", "Rotate")}</Button>
           </Popconfirm>
-          <Popconfirm title={t("settings:adminApiKeys.revokeConfirm", "Revoke this key? This cannot be undone.")} onConfirm={() => handleRevokeKey(record.id)}>
+          <Popconfirm
+            title={t("settings:adminApiKeys.revokeConfirm", "Revoke this key? This cannot be undone.")}
+            okText={t("settings:adminApiKeys.revokeOk", "Revoke key")}
+            okButtonProps={{ danger: true }}
+            onConfirm={() => handleRevokeKey(record.id)}
+          >
             <Button size="small" danger>{t("settings:adminApiKeys.revoke", "Revoke")}</Button>
           </Popconfirm>
         </Space>
@@ -261,8 +275,46 @@ const ApiKeyManagementPage: React.FC = () => {
           <div>
             <p>{t("settings:adminApiKeys.newKeyCopyHint", "Copy this key now -- it will not be shown again:")}</p>
             <code className="block break-all rounded border border-border bg-surface2 px-3 py-2 font-mono text-sm text-foreground">
-              {newKeyValue}
+              {newKeyRevealed
+                ? newKeyValue
+                : `${newKeyValue.slice(0, 12)}${"•".repeat(12)}`}
             </code>
+            <Space className="mt-2">
+              <Button
+                size="small"
+                type="primary"
+                onClick={() => {
+                  void (async () => {
+                    try {
+                      if (!navigator.clipboard?.writeText) {
+                        throw new Error("Clipboard unavailable")
+                      }
+                      await navigator.clipboard.writeText(newKeyValue)
+                      message.success(
+                        t("settings:adminApiKeys.newKeyCopied", "Key copied")
+                      )
+                      // Mask only once the copy actually succeeded - a denied
+                      // clipboard must never hide the only visible credential.
+                      setNewKeyRevealed(false)
+                    } catch {
+                      message.error(
+                        t(
+                          "settings:adminApiKeys.newKeyCopyFailed",
+                          "Could not access the clipboard - select and copy the key manually."
+                        )
+                      )
+                    }
+                  })()
+                }}
+              >
+                {t("settings:adminApiKeys.newKeyCopy", "Copy key")}
+              </Button>
+              <Button size="small" onClick={() => setNewKeyRevealed((v) => !v)}>
+                {newKeyRevealed
+                  ? t("settings:adminApiKeys.newKeyHide", "Hide")
+                  : t("settings:adminApiKeys.newKeyReveal", "Reveal")}
+              </Button>
+            </Space>
           </div>
         </Alert>
       )}
@@ -329,6 +381,7 @@ const ApiKeyManagementPage: React.FC = () => {
         title={t("settings:adminApiKeys.createModalTitle", "Create API Key")}
         open={createModalOpen}
         onOk={handleCreateKey}
+        okText={t("settings:adminApiKeys.createModalOk", "Create key")}
         onCancel={() => setCreateModalOpen(false)}
         confirmLoading={creating}
       >
@@ -336,7 +389,18 @@ const ApiKeyManagementPage: React.FC = () => {
           <Form.Item name="name" label={t("settings:adminApiKeys.keyNameLabel", "Key Name (optional)")}>
             <Input placeholder={t("settings:adminApiKeys.keyNamePlaceholder", "e.g. Production Key")} />
           </Form.Item>
-          <Form.Item name="rate_limit" label={t("settings:adminApiKeys.rateLimitLabel", "Rate Limit (requests/minute, optional)")}>
+          <Form.Item
+            name="rate_limit"
+            label={t("settings:adminApiKeys.rateLimitLabel", "Rate Limit (requests/minute, optional)")}
+            extra={
+              <a href="/admin/rate-limiting">
+                {t(
+                  "settings:adminApiKeys.rateLimitCrossLink",
+                  "Baseline limits and endpoint coverage live in Rate Limiting."
+                )}
+              </a>
+            }
+          >
             <Input type="number" placeholder={t("settings:adminApiKeys.rateLimitDefault", "Default")} />
           </Form.Item>
         </Form>

@@ -573,10 +573,31 @@ async def rg_diag_capabilities():
     dependencies=[Depends(RequireRole("admin"))],
     summary="Resource Governor endpoint coverage audit",
 )
-async def rg_coverage_audit():
+async def rg_coverage_audit(
+    limit: int = Query(
+        50,
+        ge=1,
+        le=5000,
+        description=(
+            "Maximum entries returned in each route list. Counts always "
+            "reflect full totals; compare list length against the counts "
+            "(or route_list_limit) to detect truncation."
+        ),
+    ),
+) -> JSONResponse:
     """Report which endpoints are governor-protected and which are excluded.
 
-    Returns coverage percentage and lists of protected/unprotected routes.
+    Args:
+        limit: Maximum number of entries returned in each of the
+            ``protected_routes`` / ``unprotected_routes`` lists (1-5000,
+            default 50). The ``*_count`` fields always reflect full totals,
+            so clients can detect a truncated list by comparing lengths
+            against the counts or the echoed ``route_list_limit`` (#2890).
+
+    Returns:
+        JSONResponse with total/protected/unprotected counts, coverage
+        percentage, excluded prefixes, the applied ``route_list_limit``,
+        and the (possibly limited) route lists.
     """
     try:
         from tldw_Server_API.app.core.Resource_Governance.coverage_audit import (
@@ -584,7 +605,7 @@ async def rg_coverage_audit():
         )
 
         app = _get_app()
-        result = audit_governor_coverage(app)
+        result = audit_governor_coverage(app, route_limit=limit)
         return JSONResponse(result)
     except Exception:  # noqa: BLE001 - generic 500 handler
         logger.exception("rg_coverage_audit failed")

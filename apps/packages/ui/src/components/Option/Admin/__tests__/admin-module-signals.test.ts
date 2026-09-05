@@ -138,6 +138,39 @@ describe("loadAdminModuleSignals", () => {
     warnSpy.mockRestore()
   })
 
+  it("maps not-configured backend errors to a neutral 'off' signal (#2894)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+    apiMock.getLlamacppStatus.mockRejectedValue(
+      new Error(
+        "Managed llama.cpp backend is not configured. Enable [LlamaCpp] enabled=true."
+      )
+    )
+
+    const signals = await loadAdminModuleSignals()
+
+    expect(signals["/admin/llamacpp"]).toEqual({
+      state: "off",
+      detail: "Not configured"
+    })
+    // Deliberate off-states are expected - they must not log at all.
+    expect(warnSpy).not.toHaveBeenCalled()
+    warnSpy.mockRestore()
+  })
+
+  it("logs each unavailable route once per session, not once per load (#2896)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+    apiMock.getGovernorCoverage.mockRejectedValue(new Error("boom"))
+
+    await loadAdminModuleSignals()
+    await loadAdminModuleSignals()
+
+    const governorWarns = warnSpy.mock.calls.filter(([first]) =>
+      String(first).includes("/admin/rate-limiting")
+    )
+    expect(governorWarns).toHaveLength(1)
+    warnSpy.mockRestore()
+  })
+
   it("times out a hung fetcher instead of blocking the overview", async () => {
     vi.useFakeTimers()
     apiMock.getMlxStatus.mockImplementation(() => new Promise(() => {}))

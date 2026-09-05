@@ -44,7 +44,10 @@ export const AdminRouteShell: React.FC<{
         aria-label="Admin modules"
         className="border-b border-border bg-surface px-4 py-2"
       >
-        <div className="flex items-center gap-1 overflow-x-auto whitespace-nowrap text-sm">
+        {/* flex-wrap keeps every module reachable at any viewport width; a
+            nowrap row clipped a third of the modules with no affordance
+            that more existed (#2888). */}
+        <div className="flex flex-wrap items-center gap-1 text-sm">
           <Link
             to="/admin"
             aria-current={onOverview ? "page" : undefined}
@@ -74,6 +77,11 @@ export const AdminRouteShell: React.FC<{
                 }
               >
                 {module.label}
+                {module.comingSoon ? (
+                  <span className="ml-1 rounded-full border border-border px-1.5 py-px align-middle text-[10px] uppercase tracking-wide text-text-muted">
+                    Soon
+                  </span>
+                ) : null}
               </Link>
             )
           })}

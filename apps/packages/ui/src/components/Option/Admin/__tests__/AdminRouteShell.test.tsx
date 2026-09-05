@@ -19,9 +19,31 @@ describe("AdminRouteShell", () => {
 
     const nav = screen.getByRole("navigation", { name: "Admin modules" })
     for (const module of ADMIN_MODULES) {
-      const link = within(nav).getByRole("link", { name: module.label })
+      // Coming-soon modules carry a "Soon" badge inside the link (#2897),
+      // so match on the label prefix rather than the exact accessible name.
+      const link = within(nav).getByRole("link", {
+        name: new RegExp(
+          `^${module.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`
+        )
+      })
       expect(link).toHaveAttribute("href", module.route)
     }
+  })
+
+  it("wraps the module nav instead of clipping modules past the viewport (#2888)", () => {
+    render(
+      <MemoryRouter>
+        <AdminRouteShell path="/admin/server">
+          <div>content</div>
+        </AdminRouteShell>
+      </MemoryRouter>
+    )
+
+    const nav = screen.getByRole("navigation", { name: "Admin modules" })
+    const row = nav.firstElementChild as HTMLElement
+    expect(row.className).toContain("flex-wrap")
+    expect(row.className).not.toContain("whitespace-nowrap")
+    expect(row.className).not.toContain("overflow-x-auto")
   })
 
   it("marks the current module and titles the document after it", () => {
