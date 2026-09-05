@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-03 02:27'
-updated_date: '2026-09-05 05:11'
+updated_date: '2026-09-05 05:36'
 labels:
   - collections
   - reading-list
@@ -52,5 +52,5 @@ diagnostic-privacy behavior are covered.
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-ADR required: yes; existing ADR-003 and approved explicit managed file policy apply. Automatic DB purge checkpoint implemented after 96076bb604: purge_expired_outputs defaults to preserving managed Reading archives; trusted callers must explicitly authorize their durable cleanup. Shared candidate discovery and transactional permission/retention checks cover Watchlist reads/create/download callers and late ownership registration without route-specific prechecks. Unowned expiry, aged soft deletion, actual counts and audiobook quota preserved. Verification: 26 SQLite deletion cases, 8 real PostgreSQL purge/Watchlist cases, 2 existing full-app Watchlist integration cases = 36 distinct targeted passes. Initial integration attempt timed out during app startup at 30s; unchanged cases passed with 90s. No PG skips, Docker provisioning or full sweep. Test lint/format, changed DB formatting, compilation/diff checks pass; scoped Bandit zero; nine baseline DB Ruff findings unchanged. Independent review clear. Both API docs and full plan updated. Remaining: rename/transcode/generated-output file operations, production archive routing, reconciliation, cleanup startup/readiness, aggregate/collection writers and DTOs. Capability absent; task In Progress.
+ADR required: yes; ADR path: backlog/decisions/003-reading-atomic-hard-delete.md, amended for user-approved immutable managed archives. Implemented fenced managed-only output update dispatch before path resolution, metadata-only title/retention updates, atomic rejection of changed managed path/format, unchanged-value no-ops and sanitized update errors. Unowned archive/generic rename and conversion behavior preserved. Initial red reproduced nine policy failures; final verification: 92 SQLite/API plus 54 real PostgreSQL cases = 146 distinct targeted passes, no PG skips, no Docker provisioning, no full sweep. New/revised focused tests pass Ruff/Black; changed legacy/production formatting, compilation and diff checks pass; scoped Bandit zero findings/errors; 14 existing Ruff findings unchanged from HEAD. Independent plan/code review clear. ADR, spec, detailed plan and both API docs updated. Remaining: late ownership and shared-path exclusion for generic file mutations, generated output lifecycle, production archive routing, reconciliation, cleanup startup/readiness, collection writers and DTOs. Capability absent; task In Progress.
 <!-- SECTION:PLAN:END -->

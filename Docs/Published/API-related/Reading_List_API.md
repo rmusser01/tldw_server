@@ -448,6 +448,19 @@ rechecked when deletion commits.
 This managed lifecycle is being rolled out under TASK-13153. It does not by itself
 enable the optimistic Reading-delete capability or reconcile legacy archives.
 
+### Managed archive output updates
+
+`PATCH /api/v1/outputs/{id}` changes a managed archive's title and retention
+metadata without renaming or rewriting its file. A changed format returns 409
+`reading_archive_file_immutable` and rejects the entire request, including any
+title/retention edits. Repeating the existing format is allowed. The database
+also rejects direct managed path changes. Unowned outputs, including legacy
+archives not yet structurally managed, retain their rename/conversion behavior.
+
+This is a partial lifecycle checkpoint, not a readiness claim: generic file
+operations still need fencing against late ownership registration and writes
+through shared managed paths before the optimistic-delete capability can ship.
+
 ### Create an archive
 
 `POST /api/v1/reading/items/{id}/archive`

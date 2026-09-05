@@ -413,12 +413,16 @@ def mutate_output(db, output_id, operation):
         return db.update_output_media_item_id(output_id, 42)
     if operation == "rename":
         return db.rename_output_artifact(output_id, "Renamed", "renamed.md")
+    if operation == "title":
+        return db.rename_output_artifact(output_id, "Renamed")
     from tldw_Server_API.app.services.outputs_service import update_output_artifact_db
 
+    if operation == "metadata_service":
+        return update_output_artifact_db(db, output_id, "Retitled", None, None, "2030-01-01T00:00:00")
     return update_output_artifact_db(db, output_id, "Converted", "converted.html", "html", "2030-01-01T00:00:00")
 
 
-@pytest.mark.parametrize("operation", ["metadata", "media", "rename", "service"])
+@pytest.mark.parametrize("operation", ["metadata", "media", "title", "metadata_service"])
 def test_owned_output_updates_advance_once_and_replays_are_noops(db, operation):
     item = make_reading(db)
     output = make_archive_output(db)
@@ -434,7 +438,7 @@ def test_owned_output_updates_advance_once_and_replays_are_noops(db, operation):
     assert db.get_content_item(item.id) == updated
 
 
-@pytest.mark.parametrize("operation", ["metadata", "media", "rename", "service"])
+@pytest.mark.parametrize("operation", ["metadata", "media", "title", "metadata_service"])
 def test_owned_output_updates_roll_back_with_parent_and_clock(db, monkeypatch, operation):
     item = make_reading(db)
     output = make_archive_output(db)
@@ -552,11 +556,7 @@ def test_owned_output_retention_only_updates_advance_once(db):
 
 
 def test_output_update_validates_path_before_one_explicit_connection_fence(db, monkeypatch):
-    item = make_reading(db)
     output = make_archive_output(db)
-    db.register_reading_output_ownership(
-        item.id, output.id, expected_revision=item.revision, storage_namespace_id="test-volume"
-    )
     statements = []
     connections = []
     execute = db.backend.execute

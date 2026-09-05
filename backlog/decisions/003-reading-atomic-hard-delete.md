@@ -61,6 +61,16 @@ in the upgrade procedure so a 409 has an actionable repair path.
 Shared files remain until their last output reference is removed. Shared tags and
 containing collections survive; only item associations are removed.
 
+Managed archive update policy (user approved 2026-09-05): title and retention
+edits are metadata-only; a managed file's path and format are immutable. Reject
+a compound update requesting a changed path or format with
+`reading_archive_file_immutable` before changing any metadata or file. Repeating
+the existing format/path is a no-op, not a conversion. Unowned outputs retain
+their existing rename/conversion behavior. A staged replacement lifecycle for
+managed conversions is deferred. Ownership dispatch and metadata updates share
+the revision fence; generic filesystem writers still require exclusion against
+late ownership registration and managed source/target aliases before rollout.
+
 Record unlink intents transactionally before removing output rows. A small
 Reading cleanup worker retries them after commit and on restart, independently
 of optional retention purging. Missing files count as success. Unlink failures

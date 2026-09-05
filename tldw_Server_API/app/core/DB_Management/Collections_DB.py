@@ -84,6 +84,10 @@ class ReadingFileDeletionRequired(RuntimeError):
     """Managed output removal requires explicit permission for file cleanup."""
 
 
+class ReadingArchiveFileImmutable(RuntimeError):
+    """Managed archive paths and formats cannot be changed in place."""
+
+
 @dataclass(frozen=True)
 class DeletedOutput:
     """Committed output snapshot; managed paths may only use durable cleanup."""
@@ -5325,8 +5329,37 @@ class CollectionsDatabase:
             output_id, {key: value for key, value in fields.items() if value is not None}
         )
 
+    def update_managed_reading_output(
+        self,
+        output_id: int,
+        *,
+        title: str | None = None,
+        format_: str | None = None,
+        retention_until: str | None = None,
+    ) -> CollectionsDatabase.OutputArtifactRow | None:
+        """Update managed metadata atomically, or return None for an unowned output.
+
+        No filesystem access is needed. None is only a dispatch result, not a
+        lease against later ownership registration during generic file writes.
+        """
+        fields = {"title": title, "format": format_, "retention_until": retention_until}
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            owner = self.backend.execute(
+                "SELECT item_id FROM reading_output_ownership WHERE output_id = ? AND user_id = ?",
+                (output_id, self.user_id),
+                connection=conn,
+            ).first
+            if not owner:
+                return None
+            return self._update_output_artifact_fields(
+                output_id,
+                {key: value for key, value in fields.items() if value is not None},
+                connection=conn,
+            )
+
     def _update_output_artifact_fields(
-        self, output_id: int, fields: dict[str, Any]
+        self, output_id: int, fields: dict[str, Any], *, connection: Any | None = None
     ) -> CollectionsDatabase.OutputArtifactRow:
         """Fence the active output and its explicit owner on one connection."""
         allowed = {
@@ -5343,7 +5376,7 @@ class CollectionsDatabase:
         if "storage_path" in fields:
             # Validation can touch the filesystem; it must precede the DB lock.
             fields = {**fields, "storage_path": self.resolve_output_storage_path(fields["storage_path"])}
-        with self.transaction() as conn:
+        with self.transaction() if connection is None else contextlib.nullcontext(connection) as conn:
             self._lock_reading_revision_clock(conn)
             current = self.backend.execute(
                 "SELECT title, storage_path, format, retention_until, metadata_json, chatbook_path, media_item_id "
@@ -5364,15 +5397,17 @@ class CollectionsDatabase:
                 except (TypeError, ValueError):
                     pass  # Legacy invalid JSON remains comparable as raw text.
             if changes:
-                if "storage_path" in changes:
-                    self._assert_output_path_not_reserved(changes["storage_path"], conn)
                 owner = self.backend.execute(
                     "SELECT item_id FROM reading_output_ownership WHERE output_id = ? AND user_id = ?",
                     (output_id, self.user_id),
                     connection=conn,
                 ).first
                 if owner:
+                    if changes.keys() & {"storage_path", "format"}:
+                        raise ReadingArchiveFileImmutable("reading_archive_file_immutable")
                     self._get_reading_parent(owner["item_id"], conn)
+                if "storage_path" in changes:
+                    self._assert_output_path_not_reserved(changes["storage_path"], conn)
                 setters = ", ".join(f"{key} = ?" for key in changes)
                 result = self.backend.execute(
                     f"UPDATE outputs SET {setters} WHERE id = ? AND user_id = ? AND deleted = 0",  # nosec B608

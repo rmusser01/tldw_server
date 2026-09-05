@@ -27,6 +27,7 @@ from tldw_Server_API.app.api.v1.schemas.outputs_schemas import (
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, resolve_user_id_for_request, User
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
 from tldw_Server_API.app.core.DB_Management.Collections_DB import (
+    ReadingArchiveFileImmutable,
     ReadingArtifactOwnershipConflict,
     ReadingFileDeletionRequired,
 )
@@ -722,9 +723,30 @@ async def update_output(
     cdb = Depends(get_collections_db_for_user),
 ):
     try:
+        managed = cdb.update_managed_reading_output(
+            output_id,
+            title=payload.title,
+            format_=payload.format,
+            retention_until=payload.retention_until,
+        )
+        if managed is not None:
+            return OutputArtifact(
+                id=managed.id,
+                title=managed.title,
+                type=managed.type,
+                format=managed.format,  # type: ignore[arg-type]
+                storage_path=managed.storage_path,
+                media_item_id=managed.media_item_id,
+                created_at=datetime.fromisoformat(managed.created_at),
+            )
         row = cdb.get_output_artifact(output_id)
+    except ReadingArchiveFileImmutable:
+        raise HTTPException(status_code=409, detail="reading_archive_file_immutable") from None
     except KeyError:
         raise HTTPException(status_code=404, detail="output_not_found") from None
+    except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
+        logger.error("outputs update failed")
+        raise HTTPException(status_code=409, detail="conflict_on_update") from None
 
     user_id = resolve_user_id_for_request(
         current_user,
@@ -815,9 +837,11 @@ async def update_output(
             new_format=new_format,
             retention_until=payload.retention_until,
         )
-    except _OUTPUTS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"outputs.update conflict or DB error: {e}")
-        raise HTTPException(status_code=409, detail="conflict_on_update") from e
+    except ReadingArchiveFileImmutable:
+        raise HTTPException(status_code=409, detail="reading_archive_file_immutable") from None
+    except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
+        logger.error("outputs update failed")
+        raise HTTPException(status_code=409, detail="conflict_on_update") from None
 
     return OutputArtifact(
         id=final.id,

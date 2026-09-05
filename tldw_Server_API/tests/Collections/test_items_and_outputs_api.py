@@ -1045,6 +1045,9 @@ async def test_outputs_update_old_file_cleanup_failure_log_is_sanitized(monkeypa
         created_at = "2024-01-01T00:00:00"
 
     class _CollectionsDB:
+        def update_managed_reading_output(self, _output_id: int, **_kwargs: Any):
+            return None
+
         def get_output_artifact(self, _output_id: int):
             return _Row()
 

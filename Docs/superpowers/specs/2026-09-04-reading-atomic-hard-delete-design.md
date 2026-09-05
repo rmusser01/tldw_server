@@ -117,6 +117,15 @@ existing `file_deleted`/`files_deleted` counts describe actual immediate removal
 not queued work. Permission and purge eligibility are enforced under the DB fence.
 This user-approved clarification avoids introducing a retained-file lifecycle.
 
+Managed archive files are immutable (user-approved clarification, 2026-09-05).
+Title/retention edits change metadata only. A changed managed path or format
+rejects the complete request with 409 `reading_archive_file_immutable`; unchanged
+values are no-ops. Unowned output rename/conversion semantics are preserved.
+Ownership dispatch and metadata mutation must be atomic. This guard is only one
+checkpoint: late ownership registration during generic file operations and writes
+through shared source/target paths must also be fenced before enabling rollout.
+Managed format conversion would require a separate staged replacement lifecycle.
+
 Stop old writers before upgrade. Migrate before advertising the capability. Keep
 the capability absent/false until all transaction and lifecycle tests pass, including
 real PostgreSQL tests (a skipped backend suite is not evidence).

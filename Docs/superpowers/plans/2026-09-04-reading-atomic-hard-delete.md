@@ -418,6 +418,69 @@ Run `python -m pytest tldw_Server_API/tests/Collections/test_reading_artifact_re
 
 ## Stage 3: Durable artifact staging, adoption and cleanup
 
+### Managed archive immutability checkpoint (approved 2026-09-05)
+
+ADR required: yes. ADR path: `backlog/decisions/003-reading-atomic-hard-delete.md`.
+Reason: the approved managed-file policy amends the existing ownership lifecycle;
+no new ADR, schema or replacement lifecycle is needed for this checkpoint.
+
+Files: `Collections_DB.py` owns transactional immutable-field enforcement and
+managed metadata dispatch; `endpoints/outputs.py` dispatches before path
+normalization or file access. Extend `test_reading_revision_mutations.py` and add
+`tests/Collections/test_reading_output_updates.py` using real backend/HTTP fixtures.
+Update both Reading API documents and this task's record after verification.
+
+- [x] Add failing DB tests for compound path/format rejection, metadata-only
+  updates, normalized no-ops, rollback and wrong-user/deleted outputs. Retain
+  existing unowned rename/conversion tests; adjust older owned mutation cases
+  to metadata-only operations to reflect the approved policy.
+- [x] Add real-file HTTP tests: managed title + retention update leaves filename
+  and bytes untouched and advances once; changed format + title/retention returns
+  409 without any row/file changes; identical format is allowed; missing and
+  foreign rows return 404. Inject rollback and check sanitized diagnostics.
+  Verify unowned archive and generic rename/conversion still work.
+- [x] Run those tests on SQLite and record the expected failures before coding.
+- [x] Under the revision clock, reject actual owned `storage_path`/`format`
+  changes with `ReadingArchiveFileImmutable`. Add managed-only update dispatch
+  returning None for unowned rows; pass the same explicit connection to the
+  existing update boundary. PATCH calls it before resolving any filesystem path
+  and maps immutable requests to 409 `reading_archive_file_immutable`.
+- [x] Run focused SQLite and real PostgreSQL tests with Docker disabled, plus
+  existing output API regressions. Run scoped lint/format/Bandit, independent
+  review and commit the checkpoint; keep TASK-13153 In Progress.
+
+Scope limit: dispatch returning unowned is not a filesystem lease. A concurrent
+ownership registration after dispatch and generic writes through managed aliases
+remain required follow-up work, as do generated-file persistence/cleanup. Do not
+claim complete managed-file safety or enable `hasReadingOptimisticDeletesV1` from
+this checkpoint. No filesystem I/O may be moved into a DB mutation transaction.
+
+Checkpoint evidence: the initial SQLite red run reproduced nine policy
+failures (and two teardown errors propagating the same intentional file-access
+assertions through TestClient). The first green run passed 52 cases. The expanded
+SQLite/API run passed 92 cases, including the two additional single-connection and
+late DB-ownership regressions. Plan and implementation reviews found no actionable
+issues within this scope. Real PostgreSQL passed all 54 selected cases with no
+skips (509.44s): **146 distinct targeted passes** total. No Docker provisioning or
+full sweep was run. New/revised focused tests pass Ruff/Black; changed production
+and legacy-test ranges pass formatting, compilation and diff checks. Scoped
+Bandit reports zero findings and zero errors. The 14 existing Ruff findings
+(9 DB, 1 endpoint, 4 legacy API test) match HEAD and remain outside this change.
+
+Reproduce using the Server virtual environment and `TLDW_TEST_NO_DOCKER=1`:
+
+```bash
+python -m pytest tldw_Server_API/tests/Collections/test_reading_output_updates.py tldw_Server_API/tests/Collections/test_reading_revision_mutations.py tldw_Server_API/tests/Collections/test_items_and_outputs_api.py -k 'not postgres and (output or ownership)' --timeout=90 -q --tb=short
+python -m pytest tldw_Server_API/tests/Collections/test_reading_output_updates.py tldw_Server_API/tests/Collections/test_reading_revision_mutations.py -k 'postgres and (output or ownership)' --timeout=30 -q --tb=short
+```
+
+Logs: `/private/tmp/task-13153-immutable-{red,green,sqlite-api,pg}.log` and
+`/private/tmp/task-13153-immutable-bandit.json`. Existing ADR-003, the spec and both
+API documentation copies record the approved policy. TASK-13153 remains In Progress;
+the optimistic-delete capability remains absent. Next: fence generic filesystem
+mutations against late ownership and managed source/target aliases; then resume
+the remaining production archive/reconciliation/cleanup/readiness integration.
+
 Automatic-purge follow-up (2026-09-05; existing ADR-003): Watchlist reads and
 generation routes call `purge_expired_outputs()` without file-deletion permission.
 Its default must skip managed Reading outputs under the same ownership fence,
