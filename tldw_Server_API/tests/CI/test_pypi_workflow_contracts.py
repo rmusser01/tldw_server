@@ -1,83 +1,146 @@
+"""Security contracts for reproducible and attested Python package publishing."""
+
+from __future__ import annotations
+
+import re
 from pathlib import Path
 
+import pytest
 import yaml
 
+PUBLISH_WORKFLOW = Path(".github/workflows/publish-pypi.yml")
+PACKAGE_WORKFLOW = Path(".github/workflows/pypi-package.yml")
+MAKEFILE = Path("Makefile")
+PINNED_UV = (
+    "ghcr.io/astral-sh/uv:0.12.7@sha256:"
+    "95f2aa1fe59274951cfe9b0cbc7972e879ff1004bc8945d130a32eb0dbd85945"
+)
 
-def _load(path: str) -> dict:
-    return yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+
+def _load(path: Path) -> dict:
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
 def _workflow_on(workflow: dict) -> dict:
     return workflow[True]
 
 
-def _install_step_run(workflow: dict, job_name: str = "build-and-check") -> str:
-    steps = workflow["jobs"][job_name]["steps"]
-    install_steps = [step for step in steps if step.get("name") == "Install packaging tools"]
-    assert install_steps, "Install packaging tools step missing"
-    return install_steps[0]["run"]
+def _get_step(steps: list[dict], name: str) -> dict:
+    matching = [step for step in steps if step.get("name") == name]
+    assert matching, f"{name} step missing"
+    return matching[0]
 
 
-def _detect_version_step_run(workflow: dict) -> str:
-    steps = workflow["jobs"]["detect-version"]["steps"]
-    detect_steps = [step for step in steps if step.get("id") == "detect"]
-    assert detect_steps, "Detect version step missing"
-    return detect_steps[0]["run"]
+def _run(step: dict) -> str:
+    script = step.get("run")
+    assert isinstance(script, str), step
+    return script
 
 
-def test_pypi_package_workflow_installs_setuptools_backend() -> None:
-    workflow = _load(".github/workflows/pypi-package.yml")
-    run_script = _install_step_run(workflow)
-    assert "setuptools" in run_script
-    assert "wheel" in run_script
+def _assert_changed_actions_are_pinned(path: Path) -> None:
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("uses:") and not stripped.endswith(".yml"):
+            target = stripped.removeprefix("uses:").strip()
+            if target.startswith("./"):
+                continue
+            assert re.fullmatch(r"[^@\s]+@[0-9a-f]{40}", target)
 
 
-def test_publish_pypi_workflow_installs_setuptools_backend() -> None:
-    workflow = _load(".github/workflows/publish-pypi.yml")
-    run_script = _install_step_run(workflow, job_name="build")
-    assert "setuptools" in run_script
-    assert "wheel" in run_script
+def test_publish_workflow_keeps_manual_and_guarded_main_triggers() -> None:
+    workflow = _load(PUBLISH_WORKFLOW)
+    triggers = _workflow_on(workflow)
+
+    assert "workflow_dispatch" in triggers
+    assert triggers["push"]["branches"] == ["main"]
+    assert "pyproject.toml" in triggers["push"]["paths"]
+    assert "tldw_Server_API/**" in triggers["push"]["paths"]
 
 
-def test_publish_pypi_workflow_preserves_manual_dispatch_and_gates_push() -> None:
-    workflow = _load(".github/workflows/publish-pypi.yml")
-    on = _workflow_on(workflow)
-    target = on["workflow_dispatch"]["inputs"]["target"]
-    push = on["push"]
-
-    assert set(on) == {"workflow_dispatch", "push"}
-    assert "release" not in on
-    assert push["branches"] == ["main"]
-    assert push["paths"] == ["pyproject.toml", ".github/workflows/publish-pypi.yml"]
-    assert target["options"] == ["testpypi", "pypi"]
-    assert target["default"] == "testpypi"
-
-    detect_version = workflow["jobs"]["detect-version"]
-    assert detect_version["outputs"]["should_publish"] == "${{ steps.detect.outputs.should_publish }}"
-
-    test_suite = workflow["jobs"]["test-suite"]
-    assert test_suite["if"] == (
-        "${{ github.event_name == 'workflow_dispatch' || needs.detect-version.outputs.should_publish == 'true' }}"
-    )
-
+@pytest.mark.parametrize("path", [PUBLISH_WORKFLOW, PACKAGE_WORKFLOW])
+def test_package_build_uses_pinned_uv_and_locked_release_group(path: Path) -> None:
+    workflow = _load(path)
     build = workflow["jobs"]["build"]
-    assert build["needs"] == ["detect-version", "test-suite"]
 
-    publish_testpypi = workflow["jobs"]["publish-testpypi"]
-    assert publish_testpypi["if"] == (
-        "${{ github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi' }}"
+    assert workflow["env"]["UV_IMAGE"] == PINNED_UV
+    _get_step(build["steps"], "Install pinned uv")
+    sync = _run(_get_step(build["steps"], "Sync locked release tools"))
+    assert "uv sync --locked --no-dev --no-editable --group release" in sync
+    package_step = next(
+        step for step in build["steps"] if step.get("name") in {
+            "Build and validate package",
+            "Build and check package",
+        }
+    )
+    assert "PYPI_BUILD_ARGS=--no-isolation" in _run(package_step)
+    assert "pip install build" not in path.read_text(encoding="utf-8")
+
+
+def test_publish_requires_source_admission_before_build_and_publish() -> None:
+    workflow = _load(PUBLISH_WORKFLOW)
+    jobs = workflow["jobs"]
+
+    assert jobs["source-admission"]["uses"] == "./.github/workflows/sbom.yml"
+    assert "source-admission" in jobs["build"]["needs"]
+    assert "build" in jobs["publish-test"]["needs"]
+    assert "build" in jobs["publish-pypi"]["needs"]
+
+
+@pytest.mark.parametrize("path", [PUBLISH_WORKFLOW, PACKAGE_WORKFLOW])
+def test_package_artifact_includes_distribution_checksums(path: Path) -> None:
+    workflow = _load(path)
+    steps = workflow["jobs"]["build"]["steps"]
+    checksum = _run(_get_step(steps, "Hash checked distributions"))
+    upload = _get_step(steps, "Upload distributions")
+
+    assert "SHA256SUMS" in checksum
+    assert "xargs -0 -r sha256sum" in checksum
+    assert "-name '*.whl'" in checksum
+    assert "-name '*.tar.gz'" in checksum
+    assert upload["with"]["path"] == "dist/"
+    assert upload["with"]["if-no-files-found"] == "error"
+
+
+@pytest.mark.parametrize("job_name", ["publish-test", "publish-pypi"])
+def test_publish_jobs_verify_same_artifact_and_request_attestations(job_name: str) -> None:
+    workflow = _load(PUBLISH_WORKFLOW)
+    steps = workflow["jobs"][job_name]["steps"]
+    names = [step.get("name") for step in steps]
+    download = _get_step(steps, "Download checked distributions")
+    verify = _get_step(steps, "Verify distribution checksums")
+    publish = next(step for step in steps if str(step.get("uses", "")).startswith("pypa/"))
+
+    assert download["with"]["name"] == "python-distributions"
+    assert download["with"]["path"] == "dist"
+    assert "sha256sum -c SHA256SUMS" in _run(verify)
+    assert "rm SHA256SUMS" in _run(verify)
+    assert names.index("Verify distribution checksums") < steps.index(publish)
+    assert publish["with"]["attestations"] is True
+    if job_name == "publish-test":
+        assert publish["with"]["repository-url"] == "https://test.pypi.org/legacy/"
+
+
+def test_version_detection_handles_registry_failures_explicitly() -> None:
+    workflow = _load(PUBLISH_WORKFLOW)
+    script = _run(
+        _get_step(workflow["jobs"]["detect-version"]["steps"], "Detect version state")
     )
 
-    publish_pypi = workflow["jobs"]["publish-pypi"]
-    assert publish_pypi["if"] == (
-        "${{ (github.event_name == 'workflow_dispatch' && inputs.target == 'pypi') || "
-        "(github.event_name == 'push' && needs.detect-version.outputs.should_publish == 'true') }}"
-    )
+    assert "JSONDecodeError" in script
+    assert "TimeoutError" in script
 
 
-def test_publish_pypi_detect_version_handles_decode_and_timeout_failures() -> None:
-    workflow = _load(".github/workflows/publish-pypi.yml")
-    run_script = _detect_version_step_run(workflow)
+def test_pypi_make_targets_do_not_require_pip_in_the_locked_environment() -> None:
+    packaging_targets = MAKEFILE.read_text(encoding="utf-8").split(
+        "# MCP Unified standalone RC", maxsplit=1
+    )[0]
 
-    assert "json.JSONDecodeError" in run_script
-    assert "TimeoutError" in run_script
+    assert "-m pip show" not in packaging_targets
+    assert '-c "import build"' in packaging_targets
+    assert '-c "import twine"' in packaging_targets
+    assert '-c "import loguru"' in packaging_targets
+
+
+@pytest.mark.parametrize("path", [PUBLISH_WORKFLOW, PACKAGE_WORKFLOW])
+def test_changed_pypi_workflow_actions_are_commit_pinned(path: Path) -> None:
+    _assert_changed_actions_are_pinned(path)

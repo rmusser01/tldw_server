@@ -294,9 +294,11 @@ describe('Skills certification profile', () => {
       profile,
     });
 
-    const childEnvironments = Object.values(environments);
+    const childEnvironments = Object.values(environments) as Array<Record<string, string>>;
     expect(new Set(childEnvironments).size).toBe(childEnvironments.length);
-    for (const [name, childEnv] of Object.entries(environments)) {
+    for (const [name, childEnv] of Object.entries(environments) as Array<
+      [string, Record<string, string>]
+    >) {
       expect(childEnv.PATH).toBe('/usr/bin:/bin');
       expect(childEnv.LANG).toBe('en_US.UTF-8');
       expect(childEnv.PLAYWRIGHT_BROWSERS_PATH).toBe('/host/playwright-browsers');
@@ -467,13 +469,13 @@ describe('Skills certification profile', () => {
     expect(
       buildSkillsCertificationCommands({
         ...options,
-        baseEnv: { PATH: '/usr/bin:/bin', VIRTUAL_ENV: activeVenv },
+        baseEnv: { NODE_ENV: 'test', PATH: '/usr/bin:/bin', VIRTUAL_ENV: activeVenv },
       }).backend.command
     ).toBe(activePython);
     expect(
       buildSkillsCertificationCommands({
         ...options,
-        baseEnv: { PATH: '/usr/bin:/bin' },
+        baseEnv: { NODE_ENV: 'test', PATH: '/usr/bin:/bin' },
       }).backend.command
     ).toBe(fixture.localPythonPath);
 
@@ -481,7 +483,7 @@ describe('Skills certification profile', () => {
     const missingPythonProfile = createProfile(missingPythonFixture);
     expect(() =>
       buildSkillsCertificationCommands({
-        baseEnv: { PATH: '/usr/bin:/bin' },
+        baseEnv: { NODE_ENV: 'test', PATH: '/usr/bin:/bin' },
         extensionRoot: missingPythonFixture.extensionRoot,
         frontendRoot: missingPythonFixture.frontendRoot,
         ports: { backend: 18992, web: 18991 },

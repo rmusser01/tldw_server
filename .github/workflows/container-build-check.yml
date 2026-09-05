@@ -17,6 +17,9 @@ concurrency:
   group: container-build-check-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
   cancel-in-progress: true
 
+env:
+  TRIVY_IMAGE: ghcr.io/aquasecurity/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+
 jobs:
   admission:
     if: >-
@@ -32,8 +35,8 @@ jobs:
       pull-requests: read
       statuses: read
 
-  build:
-    name: build (${{ matrix.name }})
+  build-and-scan:
+    name: build-and-scan (${{ matrix.name }})
     needs: admission
     if: >-
       always() && !cancelled() &&
@@ -46,13 +49,21 @@ jobs:
         github.event_name != 'workflow_run'
       )
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 90
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: app
             dockerfile: Dockerfiles/Dockerfile.prod
+            build_args: ""
+          - name: worker
+            dockerfile: Dockerfiles/Dockerfile.worker
+            build_args: ""
+          - name: audio-worker
+            dockerfile: Dockerfiles/Dockerfile.audio_gpu_worker
             build_args: ""
           - name: webui
             dockerfile: Dockerfiles/Dockerfile.webui
@@ -73,7 +84,7 @@ jobs:
               NEXT_PUBLIC_BILLING_ENABLED=false
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
@@ -81,13 +92,182 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
 
-      - name: Build container images
+      - name: Build local OCI candidate
+        id: build
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf
         with:
           context: .
           file: ${{ matrix.dockerfile }}
           build-args: ${{ matrix.build_args }}
+          platforms: linux/amd64
           push: false
+          provenance: mode=max
+          sbom: true
+          outputs: type=oci,dest=${{ runner.temp }}/${{ matrix.name }}.oci.tar
+          cache-from: type=gha,scope=check-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=check-${{ matrix.name }}
+
+      - name: Extract exact OCI candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence scanner "$RUNNER_TEMP/${{ matrix.name }}-layout"
+          tar -xf "$RUNNER_TEMP/${{ matrix.name }}.oci.tar" \
+            -C "$RUNNER_TEMP/${{ matrix.name }}-layout"
+          test -s "$RUNNER_TEMP/${{ matrix.name }}-layout/index.json"
+          SUBJECT_DIGEST="${{ steps.build.outputs.digest }}" \
+            LAYOUT="$RUNNER_TEMP/${{ matrix.name }}-layout" python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["LAYOUT"])
+          subject = os.environ["SUBJECT_DIGEST"]
+          index_raw = (root / "index.json").read_bytes()
+          index_digest = "sha256:" + hashlib.sha256(index_raw).hexdigest()
+          index = json.loads(index_raw)
+          descriptor_digests = {item["digest"] for item in index["manifests"]}
+          assert subject == index_digest or subject in descriptor_digests
+          identity = {
+              "subject_digest": subject,
+              "index_digest": index_digest,
+              "platform": "linux/amd64",
+              "descriptors": index["manifests"],
+          }
+          Path("evidence/oci-subject-${{ matrix.name }}.json").write_text(
+              json.dumps(identity, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Prepare fresh pinned Trivy database
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --platform linux/amd64 \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --read-only \
+            --tmpfs /tmp:rw,nosuid,nodev,size=256m \
+            --volume "$PWD/scanner:/trivy-cache:rw" \
+            "$TRIVY_IMAGE" image --download-db-only --cache-dir /trivy-cache
+          python - <<'PY'
+          import json
+          from datetime import datetime, timedelta, timezone
+          from pathlib import Path
+
+          payload = json.loads(Path("scanner/db/metadata.json").read_text())
+          updated = datetime.fromisoformat(payload["UpdatedAt"].replace("Z", "+00:00"))
+          age = datetime.now(timezone.utc) - updated
+          assert timedelta(minutes=-5) <= age <= timedelta(hours=24), age
+          PY
+
+      - name: Scan local OCI candidate
+        shell: bash
+        env:
+          SUBJECT_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          trivy() {
+            docker run --rm --platform linux/amd64 \
+              --network none \
+              --cap-drop ALL \
+              --security-opt no-new-privileges:true \
+              --read-only \
+              --tmpfs /tmp:rw,nosuid,nodev,size=512m \
+              --volume "$PWD/evidence:/work:rw" \
+              --volume "$PWD/scanner:/trivy-cache:rw" \
+              --volume "$RUNNER_TEMP/${{ matrix.name }}-layout:/input:ro" \
+              --workdir /work \
+              "$TRIVY_IMAGE" "$@"
+          }
+          trivy image --platform linux/amd64 \
+            --cache-dir /trivy-cache --skip-db-update \
+            --scanners vuln --ignore-unfixed=false --format json \
+            --output trivy-image-${{ matrix.name }}.json \
+            --input "/input@$SUBJECT_DIGEST"
+          trivy image --platform linux/amd64 \
+            --cache-dir /trivy-cache --skip-db-update \
+            --scanners vuln --ignore-unfixed=false --format cyclonedx \
+            --output sbom-image-${{ matrix.name }}.cdx.json \
+            --input "/input@$SUBJECT_DIGEST"
+
+      - name: Evaluate candidate vulnerability policy
+        id: policy
+        continue-on-error: true
+        shell: bash
+        env:
+          COMPONENT: image-${{ matrix.name }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from dataclasses import asdict
+          from datetime import date
+          from pathlib import Path
+
+          from Helper_Scripts.Supply_Chain.exception_policy import (
+              evaluate_trivy_report,
+              load_policy,
+          )
+
+          name = "${{ matrix.name }}"
+          root = Path("evidence")
+          report = json.loads((root / f"trivy-image-{name}.json").read_text())
+          policy = load_policy(
+              Path(".github/supply-chain/vulnerability-exceptions.json"),
+              today=date.today(),
+          )
+          decision = evaluate_trivy_report(
+              report,
+              component=os.environ["COMPONENT"],
+              policy=policy,
+              today=date.today(),
+          )
+          payload = {
+              "component": decision.component,
+              "blocking": [asdict(item) for item in decision.blocking],
+              "excepted": [asdict(item) for item in decision.excepted],
+              "unmatched_exception_ids": list(decision.unmatched_exception_ids),
+          }
+          (root / f"scan-decision-image-{name}.json").write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n"
+          )
+          if decision.blocking or decision.unmatched_exception_ids:
+              raise SystemExit("container candidate rejected by vulnerability policy")
+          PY
+
+      - name: Hash container admission evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd evidence
+            sha256sum \
+              oci-subject-${{ matrix.name }}.json \
+              trivy-image-${{ matrix.name }}.json \
+              sbom-image-${{ matrix.name }}.cdx.json \
+              scan-decision-image-${{ matrix.name }}.json \
+              > SHA256SUMS-image-${{ matrix.name }}
+            sha256sum -c SHA256SUMS-image-${{ matrix.name }}
+          )
+
+      - name: Upload container admission evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: container-admission-${{ matrix.name }}
+          path: evidence/
+          if-no-files-found: error
+
+      - name: Require candidate admission
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ steps.policy.outcome }}" = "success"
 
   container-build-check:
     name: container-build-check
@@ -101,12 +281,15 @@ jobs:
         ) ||
         github.event_name != 'workflow_run'
       )
-    needs: [build, admission]
+    needs:
+      - build-and-scan
+      - admission
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Check matrix results
+        shell: bash
         run: |
-          if [ "${{ needs.build.result }}" != "success" ]; then
-            echo "::error::One or more container builds failed"
-            exit 1
-          fi
+          set -euo pipefail
+          test "${{ needs.build-and-scan.result }}" = "success"

@@ -268,6 +268,12 @@ export function createSkillsCertificationProfile({ repoRoot, temporaryBase, remo
 
 /**
  * Build independent allowlisted environments for every certification child.
+ *
+ * @param {{
+ *   profile: Record<string, string>,
+ *   ports: { backend: number, web: number },
+ *   baseEnv?: Record<string, string | undefined>,
+ * }} input
  */
 export function buildSkillsCertificationEnvironments({ profile, ports, baseEnv = process.env }) {
   if (!profile || !ports?.backend || !ports?.web) {
@@ -348,6 +354,15 @@ export function buildSkillsCertificationEnvironments({ profile, ports, baseEnv =
 
 /**
  * Build fixed executable, argv, cwd, and environment records for certification.
+ *
+ * @param {{
+ *   repoRoot: string,
+ *   frontendRoot?: string,
+ *   extensionRoot?: string,
+ *   profile: Record<string, string>,
+ *   ports: { backend: number, web: number },
+ *   baseEnv?: Record<string, string | undefined>,
+ * }} input
  */
 export function buildSkillsCertificationCommands({
   repoRoot,

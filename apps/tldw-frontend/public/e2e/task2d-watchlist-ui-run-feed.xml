@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Task 2D UI Run Now Watchlist feed</title>
+    <link>http://127.0.0.1/</link>
+    <description>Fresh local fixture for the real Watchlist UI Run Now occurrence.</description>
+    <item>
+      <title>Task 2D UI Run Now article</title>
+      <link>https://example.test/task2d/ui-run-now-v1</link>
+      <guid isPermaLink="false">task2d-ui-run-now-v1</guid>
+      <description>The real Watchlist UI Run Now fetched this deterministic RSS article and persisted it for briefing generation.</description>
+      <pubDate>Sun, 30 Aug 2026 17:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

@@ -12,5 +12,15 @@
   },
   "dependencies": {
     "jsdom": "^28.1.0"
+  },
+  "overrides": {
+    "@playwright/test": "1.58.0",
+    "@xmldom/xmldom": "0.8.13",
+    "antd": "6.2.1",
+    "linkify-it": "5.0.2",
+    "playwright": "1.58.0",
+    "tmp": "0.2.7",
+    "vitest": "4.0.18",
+    "wxt": "0.20.27"
   }
 }

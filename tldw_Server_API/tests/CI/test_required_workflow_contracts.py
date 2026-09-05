@@ -383,6 +383,42 @@ def test_frontend_e2e_tiers_install_portaudio_before_backend_dependency_setup() 
         assert install_step["with"]["install-ffmpeg"] == "false"
 
 
+def test_frontend_critical_direct_uvicorn_uses_e2e_isolation_without_test_mode() -> None:
+    """Prevents a direct E2E server from tripping the pytest-only TEST_MODE guard."""
+    workflow = _load(".github/workflows/frontend-e2e-tiers.yml")
+    critical = workflow["jobs"]["critical"]
+    env = critical["env"]
+    mock_provider = _get_step(critical["steps"], "Start deterministic mock OpenAI provider")
+    backend = _get_step(critical["steps"], "Start backend server")
+    critical_run = _get_step(critical["steps"], "Run critical E2E tests")
+    mock_run = " ".join(mock_provider["run"].split()).replace("\\ ", "")
+
+    assert mock_provider["working-directory"] == "apps/tldw-frontend/e2e/onboarding-uat/mock-openai"
+    assert "python -m mock_openai.server --config configs/local-success.json --host 127.0.0.1 --port 5000" in mock_run
+    assert "PYTHONPATH=\"${GITHUB_WORKSPACE}/mock_openai_server${PYTHONPATH:+:${PYTHONPATH}}\"" in mock_run
+    assert "curl -sf http://127.0.0.1:5000/health" in mock_run
+    assert critical["steps"].index(mock_provider) < critical["steps"].index(backend) < critical["steps"].index(critical_run)
+    assert "python -m uvicorn tldw_Server_API.app.main:app" in backend["run"]
+    assert 'curl -sf -H "X-API-KEY: ${SINGLE_USER_API_KEY}"' in backend["run"]
+    assert backend["run"].count(
+        'curl -sf -H "X-API-KEY: ${SINGLE_USER_API_KEY}" '
+        "http://127.0.0.1:8000/api/v1/health"
+    ) == 2
+    assert "TEST_MODE" not in env
+    assert env["AUTH_MODE"] == "single_user"
+    assert env["SINGLE_USER_API_KEY"] == "test-api-key-for-e2e-testing-12345"
+    assert env["DEFAULT_LLM_PROVIDER"] == "openai"
+    assert env["OPENAI_API_KEY"] == "sk-uat-mock-openai"
+    assert env["OPENAI_API_BASE_URL"] == "http://127.0.0.1:5000/v1"
+    assert env["CUSTOM_OPENAI_API_IP"] == env["OPENAI_API_BASE_URL"]
+    assert env["CUSTOM_OPENAI_API_KEY"] == env["OPENAI_API_KEY"]
+    assert env["CUSTOM_OPENAI_API_MODEL"] == "local-uat-chat"
+    assert env["REDIS_URL"] == "redis://127.0.0.1:6379/0"
+    assert env["TLDW_SERVER_URL"] == "http://127.0.0.1:8000"
+    assert env["TLDW_API_KEY"] == env["SINGLE_USER_API_KEY"]
+    assert env["NEXT_PUBLIC_API_URL"] == env["TLDW_SERVER_URL"]
+
+
 def test_frontend_ux_gates_skip_ffmpeg_but_keep_portaudio() -> None:
     for job_name in ("onboarding-gate", "smoke-gate"):
         _assert_setup_skips_ffmpeg_but_keeps_portaudio(

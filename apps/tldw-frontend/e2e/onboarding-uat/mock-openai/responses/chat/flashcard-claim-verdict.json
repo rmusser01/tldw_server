@@ -1,0 +1,20 @@
+{
+  "id": "chatcmpl-critical-flashcard-claim-verdict",
+  "object": "chat.completion",
+  "created": 1770000000,
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\"label\": \"supported\", \"confidence\": 0.99, \"rationale\": \"The claim is stated verbatim in the supplied flashcard source.\"}"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 82,
+    "completion_tokens": 28,
+    "total_tokens": 110
+  }
+}

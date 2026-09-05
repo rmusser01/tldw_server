@@ -1,39 +1,60 @@
-# Dockerfile.worker
-# Docker image for embedding pipeline workers
+# Docker image for embedding pipeline workers.
 
-FROM python:3.11-slim
+FROM python:3.11.16-slim-trixie@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534 AS builder
 
-# Install system dependencies (include audio build deps so PyAudio can compile)
-RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
-    make \
-    curl \
-    git \
-    ffmpeg \
-    portaudio19-dev \
-    python3-dev \
+COPY --from=ghcr.io/astral-sh/uv:0.12.7@sha256:95f2aa1fe59274951cfe9b0cbc7972e879ff1004bc8945d130a32eb0dbd85945 /uv /uvx /bin/
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_PROJECT_ENVIRONMENT=/opt/tldw-venv \
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        git \
+        portaudio19-dev \
+        python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
 WORKDIR /app
 
-# Copy pyproject and minimal files for install
-COPY pyproject.toml /app/pyproject.toml
-COPY README.md /app/README.md
+COPY pyproject.toml uv.lock README.md LICENSE /app/
+COPY LICENSES /app/LICENSES
 COPY tldw_Server_API /app/tldw_Server_API
+COPY apps/mcp-unified/src /app/apps/mcp-unified/src
+COPY packages/tldw_profile_core /app/packages/tldw_profile_core
 
-# Install package with extras (multiplayer for PG support)
-RUN pip install --no-cache-dir -e ".[multiplayer]"
+RUN --mount=type=cache,id=tldw-uv-cache,target=/root/.cache/uv \
+    uv sync --locked --no-dev --no-editable --extra multiplayer
 
-# Copy application code
-COPY Config_Files /app/Config_Files
 
-# Create necessary directories
-RUN mkdir -p /app/Databases /app/Models /app/logs
+FROM python:3.11.16-slim-trixie@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534 AS runtime
 
-# Set Python path
-ENV PYTHONPATH=/app:$PYTHONPATH
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+    && rm -rf \
+        /var/lib/apt/lists/* \
+        /usr/local/bin/pip* \
+        /usr/local/lib/python*/site-packages/_distutils_hack \
+        /usr/local/lib/python*/site-packages/pip \
+        /usr/local/lib/python*/site-packages/pip-*.dist-info \
+        /usr/local/lib/python*/site-packages/pkg_resources \
+        /usr/local/lib/python*/site-packages/setuptools \
+        /usr/local/lib/python*/site-packages/setuptools-*.dist-info
+
+WORKDIR /app
+
+COPY --from=builder /opt/tldw-venv /opt/tldw-venv
+COPY tldw_Server_API/Config_Files /app/Config_Files
+
+RUN mkdir -p /app/Databases/user_databases /app/Models /app/logs
+
+ENV PATH="/opt/tldw-venv/bin:${PATH}" \
+    PYTHONPATH=/app \
+    TLDW_CONFIG_DIR=/app/Config_Files \
+    USER_DB_BASE_DIR=/app/Databases/user_databases \
+    DATABASE_URL=sqlite:////app/Databases/users.db
 
 # Default environment variables
 ENV REDIS_URL=redis://localhost:6379
@@ -45,7 +66,7 @@ ENV LOG_LEVEL=INFO
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import sys; sys.exit(0)" || exit 1
+    CMD python -c "import sys; sys.exit(0)"
 
 # Default command (will be overridden in docker-compose)
 CMD ["python", "-m", "tldw_Server_API.app.core.Embeddings.services.redis_worker", "--stage", "all"]

@@ -738,6 +738,7 @@ version = "0.1.30"
     )
     assert repo_root / "Docs" / "Site" / "RELEASE_NOTES.md" in runner._prepared_paths
     assert repo_root / "Docs" / "Published" in runner._prepared_paths
+    assert repo_root / "uv.lock" in runner._prepared_paths
 
 
 def test_shell_release_runner_refreshes_published_before_staging_and_commit(
@@ -758,7 +759,8 @@ def test_shell_release_runner_refreshes_published_before_staging_and_commit(
         del check, capture_output
         commands.append(list(args))
         environments.append(dict(env) if env is not None else None)
-        return subprocess.CompletedProcess(args, 0, "", "")
+        stdout = "uv 0.12.7" if args == ["uv", "--version"] else ""
+        return subprocess.CompletedProcess(args, 0, stdout, "")
 
     monkeypatch.setattr(ShellReleaseRunner, "_run_command", _fake_run_command)
     runner = ShellReleaseRunner(repo_root=tmp_path, dry_run=False)
@@ -786,6 +788,9 @@ def test_shell_release_runner_refreshes_published_before_staging_and_commit(
             "bash",
             str(tmp_path / "Helper_Scripts" / "refresh_docs_published.sh"),
         ],
+        ["uv", "--version"],
+        ["uv", "lock", "--offline"],
+        ["uv", "lock", "--check", "--offline"],
         [
             "git",
             "add",
@@ -807,7 +812,29 @@ def test_shell_release_runner_refreshes_published_before_staging_and_commit(
             "TLDW_DOCS_TEST_MODE",
         )
     )
-    assert environments[1:] == [None, None]
+    assert environments[1:] == [None] * 5
+
+
+@pytest.mark.parametrize("failure", ["version", "lock", "check"])
+def test_release_lock_failure_blocks_staging_and_commit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: str,
+) -> None:
+    commands: list[list[str]] = []
+
+    def run_command(self: ShellReleaseRunner, args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(args)
+        if args[:2] == ["uv", "lock"]:
+            if ("--check" in args) is (failure == "check"):
+                raise RuntimeError("lock validation failed")
+        version = "uv 0.11.7" if failure == "version" else "uv 0.12.7"
+        return subprocess.CompletedProcess(args, 0, version, "")
+
+    monkeypatch.setattr(ShellReleaseRunner, "_run_command", run_command)
+    runner = ShellReleaseRunner(tmp_path)
+    runner._prepared_paths = [tmp_path / "pyproject.toml", tmp_path / "uv.lock"]
+    with pytest.raises(RuntimeError, match="uv 0.12.7|lock validation failed"):
+        runner.create_release_commit("1.2.3")
+    assert all(command[0] != "git" for command in commands)
 
 
 def test_shell_release_runner_refresh_failure_blocks_staging_and_commit(
@@ -929,6 +956,45 @@ def test_shell_release_runner_create_or_update_tag_uses_annotated_tag(monkeypatc
     runner.create_or_update_tag("1.2.3")
 
     assert recorded_commands == [["git", "tag", "-a", "v1.2.3", "-m", "v1.2.3"]]
+
+
+def test_shell_release_runner_creates_draft_for_verified_publication(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    recorded_commands: list[list[str]] = []
+
+    def _fake_run_command(
+        self: ShellReleaseRunner,
+        args: list[str],
+        *,
+        check: bool = True,
+        capture_output: bool = True,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        del self, check, capture_output, env
+        recorded_commands.append(list(args))
+        return subprocess.CompletedProcess(list(args), 0, "", "")
+
+    monkeypatch.setattr(ShellReleaseRunner, "_run_command", _fake_run_command)
+    runner = ShellReleaseRunner(repo_root=tmp_path, dry_run=False)
+    runner._release_notes_body = "Verified release notes"
+
+    assert runner.create_github_release("1.2.3") is True
+    assert recorded_commands == [
+        [
+            "gh",
+            "release",
+            "create",
+            "v1.2.3",
+            "--verify-tag",
+            "--draft",
+            "--title",
+            "v1.2.3",
+            "--notes",
+            "Verified release notes",
+        ]
+    ]
 
 
 def test_shell_release_runner_required_checks_reads_paginated_check_runs(
