@@ -23,7 +23,7 @@ The previously running frontend at 18383 had a missing dependency and the backen
 | Journey | Result | Evidence |
 |---|---|---|
 | Load real Persona page and create Migu UAT | Pass | New profile e19c631e-e2ac-452d-9935-293af03cee4e created through UI |
-| Complete voice-default setup | Fail | Repeated 409 optimistic-version conflicts; TASK-13174 |
+| Complete voice-default setup | Fail | Repeated 409 optimistic-version conflicts; TASK-13182 |
 | Open Buddy at default desktop position | Fail | Composer/navigation entirely below viewport; TASK-13175 |
 | Drag Buddy and restore position | Pass | Native browser pointer gesture moved shell to (704,17); reload/reselect restored it |
 | Select bundled Migu Marker Basic, copy draft and activate | Pass for backend publication | Active pack 30a938ed-3fbf-4232-a41f-8f6d372f036b; authenticated PNG GET 200, 9617 bytes |
@@ -38,7 +38,7 @@ The previously running frontend at 18383 had a missing dependency and the backen
 ## Original defects and fix order
 
 1. **TASK-13177 — Stream lifecycle after Strict Mode remount.** Start succeeds; Send repeatedly returns “Persona live stream failed to connect” without opening a WebSocket. `usePersonaLiveControl.tsx:183` cleanup sets mountedRef=false, and effect setup never restores it. `ensureStreamSocket` then rejects before socket creation. Next config enables Strict Mode. This is a source-supported mechanism; no production fix was applied during this UAT. Re-run actual browser Send after correction, then validate incoming plans/replies and their visible controls.
-2. **TASK-13174 — Setup version handoff.** Create Migu → Save assistant defaults: database version 2 versus expected 1. Reload/reselect/retry repeats version 4 versus expected 3. Voice saving and setup advancement need to hand off the current version while retaining optimistic conflict protection.
+2. **TASK-13182 — Setup version handoff.** Create Migu → Save assistant defaults: database version 2 versus expected 1. Reload/reselect/retry repeats version 4 versus expected 3. Voice saving and setup advancement need to hand off the current version while retaining optimistic conflict protection.
 3. **TASK-13176 — Visual transport.** Copy Migu Marker Basic as draft → activate → browser requests `/api/v1/persona/.../assets/.../content` on port 18384. Advanced mode has no same-origin API rewrite. The identical authenticated asset endpoint on 9101 returns image/png 200. Failed frames are retried repeatedly while animation runs. Resolve asset transport/auth consistently for both builder and shell, then retest animation and state changes.
 4. **TASK-13175 — Expanded-shell containment.** At 1280×720, initial expanded dock (1104,609,220,687) and popover (1104,818,220,478) exceed the viewport. Normal click on Choose/Change Buddy times out as outside viewport. Dragging upward makes it usable. Host clamping watches position and window resize, but not expanded/content size changes. Retest expansion, errors, loaded visuals and reload without manually rescuing the position.
 
@@ -46,14 +46,14 @@ The previously running frontend at 18383 had a missing dependency and the backen
 
 [Clipped controls](assets/migu-buddy-uat-2026-09-05/popover-clipped.png), [setup conflict](assets/migu-buddy-uat-2026-09-05/setup-conflict.yml), [failed browser send](assets/migu-buddy-uat-2026-09-05/ui-sent.txt), [stopped session](assets/migu-buddy-uat-2026-09-05/ui-stopped.txt), [backend stream frames](assets/migu-buddy-uat-2026-09-05/direct-stream-frames.json), [session capabilities](assets/migu-buddy-uat-2026-09-05/live-session.json).
 
-The initial UAT created TASK-13174–13177 without production changes. Its browser and synthetic sessions were stopped before the repair pass. Chatbook follows existing ADR-074.
+The initial UAT created TASK-13182,13175,13176,13177 without production changes. Its browser and synthetic sessions were stopped before the repair pass. Chatbook follows existing ADR-074.
 
 
 ## Repair follow-up
 
 The isolated `codex/migu-server-buddy-uat` branch repairs six concrete failures:
 
-- **TASK-13174:** pass the saved profile version explicitly to the setup checkpoint; retain genuine optimistic conflicts and ignore stale save completions after persona selection changes.
+- **TASK-13182:** pass the saved profile version explicitly to the setup checkpoint; retain genuine optimistic conflicts and ignore stale save completions after persona selection changes.
 - **TASK-13175:** clamp expanded/content-resized Buddy bounds before paint, constrain dock height, and scroll the compact controls.
 - **TASK-13176:** fetch server-owned visual content through the existing authenticated binary transport, render disposable object URLs, retain failures until sources change, and abort/revoke on cleanup. Both sprite frames and generated candidate thumbnails share this path; external asset URLs do not receive credentials.
 - **TASK-13177:** restore Strict Mode mount readiness and fence stale asynchronous session/stream work.
@@ -96,8 +96,8 @@ After the final stale-response fixes and a clean browser reload, defaults saving
 
 ### Final handoff
 
-TASK-13174,13175,13177,13178,13179 are Done. TASK-13176 remains In Progress because its quickstart acceptance is blocked by TASK-13181. TASK-13180 and13181 are recorded as high-priority follow-ups.
+TASK-13182,13175,13177,13178,13179 are Done. TASK-13176 remains In Progress because its quickstart acceptance is blocked by TASK-13181. TASK-13180 and13181 are recorded as high-priority follow-ups.
 
 Final real pointer drag moved the repaired dock from `(938.55,16)` to `(738.55,56)`; the asynchronous Stop completed and disabled its control. [Drag evidence](assets/migu-buddy-uat-2026-09-05/final-drag.json), [completed stop](assets/migu-buddy-uat-2026-09-05/final-stop.json). The initial immediate post-click stop flag is false because the API was still pending; the separate completion evidence is true.
 
-The isolated UAT processes and browsers are stopped after verification. Synthetic runtime data is retained outside the repository. The repair pass was subsequently published as [server PR #2884](https://github.com/rmusser01/tldw_server/pull/2884) against dev63358431d7. All265 focused frontend and54 backend tests passed again after rebase; repository-wide typechecking still reports80 unrelated diagnostics. The PR is a draft while the collision between the Buddy and older EPUB TASK-13174 awaits the repository-required exception for renumbering Buddy to TASK-13182. No merge is included. [Chatbook PR #2418](https://github.com/rmusser01/tldw_chatbook/pull/2418) publishes the separate native UAT evidence against its dev branch.
+The isolated UAT processes and browsers are stopped after verification. Synthetic runtime data is retained outside the repository. The repair pass was subsequently published as [server PR #2884](https://github.com/rmusser01/tldw_server/pull/2884) against dev63358431d7. All265 focused frontend and54 backend tests passed again after rebase; repository-wide typechecking still reports80 unrelated diagnostics. The setup task is renumbered to TASK-13182 during user-authorized review closeout; the older EPUB task retains TASK-13174. The requester supplied the human-written Change summary before the requested merge. No merge is included. [Chatbook PR #2418](https://github.com/rmusser01/tldw_chatbook/pull/2418) publishes the separate native UAT evidence against its dev branch.
