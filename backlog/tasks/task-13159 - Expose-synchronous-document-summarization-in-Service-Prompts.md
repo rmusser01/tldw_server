@@ -1,10 +1,10 @@
 ---
 id: TASK-13159
 title: Expose synchronous document summarization in Service Prompts
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-05 01:52'
-updated_date: '2026-09-05 02:28'
+updated_date: '2026-09-05 03:10'
 labels: []
 dependencies: []
 references:
@@ -47,12 +47,16 @@ Qodo posted four review findings on the implementation commit: route/core prompt
 Qodo fixes: reproduced three real SQLite lifecycle failures (successful probe, failed probe, initial cached-instance setup retained handles), then closed each temporary connection on its originating worker. Expanded focused backend suite: 138 passed, 9 warnings. Added docstrings and explicit parameter/return annotations to new helpers/tests. Ruff lint passed on changed Python scope; format check passed on endpoint/tests (existing dependency-file formatting left unchanged). Bandit on three touched production files: zero findings/errors, /tmp/bandit_document_summary_review.json. Retaining lazy request-boundary orchestration consistent with existing Notes title resolver and approved explicit/disabled/no-provider bypass behavior; independent review pending. Fresh origin/dev fetch has zero commits missing from branch. Required CI and human Change summary still pending.
 
 Independent review of the Qodo patch found no Critical or Important issues and confirmed retaining the request-boundary orchestration is justified by the existing Notes pattern and bypass requirements. Post-format lifecycle/document regression rerun: 20 passed. Publishing fixes and replying to all four Qodo threads; CI and human Change summary remain merge gates.
+
+Implementation and review are complete. Qodo marked all three fixes resolved and the architecture suggestion dismissed; all four threads are resolved. The user supplied the human-written Change summary and it is in PR #2867. All required checks passed on 0aedb1cd50; the separate macOS research-stream timing failure passed on a single diagnostic rerun without code changes. Dev advanced during CI, so rebased cleanly onto 5cd10750d8; git range-diff confirms all three PR patches are unchanged. Fresh rebased verification: 138 focused backend tests passed (9 warnings), Ruff passed, Bandit three touched production files zero findings/errors (/tmp/bandit_document_summary_rebase.json). This closes the implementation task; PR merge remains pending the refreshed-head checks and is monitored separately.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Added Document summarization to shared Service Prompts Settings and owner-scoped synchronous document analysis. Reused existing prompt storage and processor arguments to avoid a separate configuration system, preserved server defaults and explicit requests, and froze one value per request to prevent mid-analysis saves from changing later chunks. Verified with focused backend/frontend suites, compiler, lint and security checks.
+
+Qodo review also identified temporary worker-local prompt-database handles retained by initialization and health checks. Fixed with real SQLite red/green regressions; documented and typed all new test helpers. Preserved existing lazy endpoint orchestration instead of adding another service layer. User Change summary received; rebased onto latest dev with unchanged patches and repeated focused verification.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
