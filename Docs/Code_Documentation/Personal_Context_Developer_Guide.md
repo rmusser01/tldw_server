@@ -220,6 +220,25 @@ enabled end-to-end device acknowledgement-completion path.
 
 ## Future-client integration boundaries
 
+### User-owned deconfliction
+
+Conflict detection preserves competing candidates for user review; it is not an
+automatic merge or a last-write-wins policy. The ongoing-sync contract maps keep
+shared to `skip`, keep local or reviewed merge to `overwrite`, and explicitly
+distinct keep-both to `duplicate_rename`. Use the existing batched Sync endpoint,
+expected candidate IDs, and exact-command idempotency; no per-conflict transport
+or ordinary `resolve_conflict` push operation is introduced.
+
+For different IDs claiming the same semantic key, keep-local/merge explicitly
+targets the established shared canonical ID and applies the user-selected values.
+Canonical identity is not a preference for the server's value. The incoming
+duplicate must be terminally accounted for so retries cannot recreate it.
+Keep-both is permitted only after the user chooses distinct facts with different
+keys. Do not silently rename facts, infer user consent, or choose values based on
+timestamps or peer identity. Unresolved candidates remain protected while
+unrelated objects continue. Capability remains gated independently of this
+contract; the current client limitations above still apply.
+
 A future client must not infer a complete lifecycle from the presence of Sync
 domains or bootstrap endpoints. Client work owns capability negotiation and
 incompatibility handling, an explicit ongoing Personal Context caller, durable

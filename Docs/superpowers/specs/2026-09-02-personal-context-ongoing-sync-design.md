@@ -775,6 +775,15 @@ The merge editor uses typed fields rather than raw canonical JSON. Restrictive
 values win by default for delete, `user_only`, and other privacy-reducing
 controls; the user must explicitly choose a less restrictive result.
 
+User clarification (2026-09-05): deconfliction is explicitly user-directed;
+neither peer selects a winner automatically. When independently created IDs
+claim the same semantic key, keeping local values or a reviewed merge produces
+one fact under the established shared canonical ID, explicitly targeted by the
+reviewed replacement. The incoming duplicate candidate is terminally accounted
+for by the resolution receipt, not installed as a second active fact. Keeping
+both requires an explicit distinct-fact choice and a noncolliding key. Detecting
+the collision alone never authorizes an overwrite or deletion.
+
 Conflict pages contain at most 20 items. Labels are **Local version** and
 **Shared profile version**, not ambiguous client/server winner language.
 

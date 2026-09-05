@@ -160,6 +160,32 @@ Retries reuse exact receipts. Delivery baselines expire after 30 days; obtain a
 fresh baseline rather than acknowledging an expired one. Capability downgrade
 preserves stored work and acknowledgements while blocking version-one exchanges.
 
+### User-directed conflict decisions (ongoing-sync contract)
+
+The gated ongoing-sync contract uses the existing
+`POST /api/v1/sync/conflicts/resolve` batch endpoint. Neither peer selects a
+winner automatically. Each Personal Context item identifies the reviewed local
+and remote envelopes and has an immutable idempotency key; requests also carry
+the device's activation/continuity proof. A changed candidate requires fresh
+review, not a blind retry with new IDs.
+
+| User choice | Action | Reviewed replacement |
+| --- | --- | --- |
+| Keep shared values | `skip` | None |
+| Keep local values | `overwrite` | Explicit canonical target with selected local values |
+| Merge | `overwrite` | Explicit canonical target with user-reviewed merged values |
+| Keep both as distinct facts | `duplicate_rename` | New record ID and a noncolliding semantic key |
+
+If two independently created record IDs claim the same semantic key, keep-local
+or merge targets the established shared canonical record ID. The selected values
+win because the user chose them, not because they came from a particular peer.
+The losing incoming candidate is accounted for by the resolution receipt rather
+than installed as a duplicate active fact. Clients must construct that explicitly
+reviewed replacement; they must not expect the server to silently rewrite its ID.
+
+Until rollout advertises ongoing-sync version 1, these semantics describe the
+client integration contract, not an enabled end-to-end workflow.
+
 ## Transport deployment boundary
 
 Deploy non-loopback API access behind authenticated HTTPS. This is an operator
