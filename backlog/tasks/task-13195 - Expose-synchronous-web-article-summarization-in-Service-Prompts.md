@@ -4,9 +4,11 @@ title: Expose synchronous web article summarization in Service Prompts
 status: In Progress
 assignee: []
 created_date: '2026-09-05 22:49'
-updated_date: '2026-09-05 23:28'
+updated_date: '2026-09-05 23:29'
 labels: []
 dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/pull/2907'
 ---
 
 ## Description
@@ -45,6 +47,8 @@ Stopped only this task’s broad pytest run after confirming host resource failu
 Correction after full failure-log inspection: the broad run’s non-semaphore failure was NOT the already-fixed forwarding test. It was unchanged test_phase3_preflight_characterization.py::test_analyzer_and_public_entry_point_signatures_match_current_inventory, whose expected PEP 604 union spelling differs from Python 3.11 inspect output using typing.Optional. Canonical article source and inventory test are unchanged; enhanced scrape_article argument/return AST is byte-for-byte equivalent structurally to base. The other 10 failures are SemLock OSError(28). Fresh strict-forwarding test remains green. Work is staged, not committed; awaiting direction on proceeding with these unrelated verification limitations.
 
 User explicitly approved committing and opening a PR with the documented broader-test limitations. Proceeding to publish against dev; no merge requested in this step.
+
+Published implementation commit d328765206 on codex/web-summary-service-prompt. PR #2907 opened against dev: https://github.com/rmusser01/tldw_server/pull/2907. Verification limitations are explicit in the PR body. Task remains In Progress pending PR review and integration.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
