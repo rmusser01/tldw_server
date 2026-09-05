@@ -169,6 +169,11 @@ and remote envelopes and has an immutable idempotency key; requests also carry
 the device's activation/continuity proof. A changed candidate requires fresh
 review, not a blind retry with new IDs.
 
+After linking, a client must not push its locally derived manifest. Such ingress
+is invalid, not a user-choice conflict: the server sequences the shared manifest
+from accepted semantic mutations. Initial-link reconciliation and server-issued
+manifest publications remain separate supported paths.
+
 | User choice | Action | Reviewed replacement |
 | --- | --- | --- |
 | Keep shared values | `skip` | None |

@@ -229,6 +229,12 @@ distinct keep-both to `duplicate_rename`. Use the existing batched Sync endpoint
 expected candidate IDs, and exact-command idempotency; no per-conflict transport
 or ordinary `resolve_conflict` push operation is introduced.
 
+Do not send a linked client's derivative manifest as ongoing ingress. It is a
+local commit barrier, not an independently editable shared object; only the
+server advances the shared manifest after semantic writes. Invalid client
+manifest ingress must be rejected before conflict capture. This does not change
+provisional-manifest reconciliation during first linking or authority publication.
+
 For different IDs claiming the same semantic key, keep-local/merge explicitly
 targets the established shared canonical ID and applies the user-selected values.
 Canonical identity is not a preference for the server's value. The incoming
