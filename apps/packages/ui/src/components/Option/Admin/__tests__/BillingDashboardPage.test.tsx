@@ -67,10 +67,10 @@ describe("BillingDashboardPage", () => {
 
     render(<BillingDashboardPage />)
 
-    const alert = await expectDesignSystemAlertForTitle("Not Available")
-    expect(
-      alert
-    ).toHaveTextContent("Billing endpoints are not available on this server.")
+    const alert = await expectDesignSystemAlertForTitle(
+      "Not available on this server"
+    )
+    expect(alert).toHaveTextContent("Billing endpoints are not enabled here.")
     expect(mocks.getBillingOverview).not.toHaveBeenCalled()
     expect(mocks.listAllSubscriptions).not.toHaveBeenCalled()
     expect(mocks.listBillingEvents).not.toHaveBeenCalled()

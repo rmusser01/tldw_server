@@ -27,6 +27,7 @@ const ApiKeyManagementPage: React.FC = () => {
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null)
   const [users, setUsers] = useState<any[]>([])
   const [usersLoading, setUsersLoading] = useState(false)
+  const [usersError, setUsersError] = useState<string | null>(null)
 
   // API keys state
   const [keys, setKeys] = useState<any[]>([])
@@ -51,11 +52,21 @@ const ApiKeyManagementPage: React.FC = () => {
   // Load users for the selector
   const loadUsers = useCallback(async () => {
     setUsersLoading(true)
+    setUsersError(null)
     try {
       const result = await tldwClient.listAdminUsers({ limit: 100 })
-      setUsers(result.users || [])
+      const loaded = result.users || []
+      setUsers(loaded)
+      // Single-user servers have exactly one account — select it directly
+      // instead of asking the operator to search for themselves.
+      if (loaded.length === 1) {
+        setSelectedUserId((current) => current ?? loaded[0].id)
+      }
     } catch (err) {
       markAdminGuardFromError(err)
+      setUsersError(
+        sanitizeAdminErrorMessage(err, "Failed to load the user list.")
+      )
     } finally {
       setUsersLoading(false)
     }
@@ -217,7 +228,22 @@ const ApiKeyManagementPage: React.FC = () => {
 
   return (
     <div style={{ padding: "24px", maxWidth: 1200 }}>
-      <h2 style={{ marginBottom: 16 }}>API Key Management</h2>
+      <h2 style={{ marginBottom: 4 }}>API Key Management</h2>
+      <p style={{ marginBottom: 16, color: "var(--color-text-secondary, #888)" }}>
+        Create, rotate, and revoke the API keys a user presents to
+        authenticate against this server.
+      </p>
+
+      {usersError && (
+        <Alert variant="error" title="Unable to load users" className="mb-4">
+          <Space orientation="vertical" size="small">
+            <span>{usersError}</span>
+            <Button size="small" onClick={() => void loadUsers()}>
+              Retry
+            </Button>
+          </Space>
+        </Alert>
+      )}
 
       {/* New key alert */}
       {newKeyValue && (
@@ -256,6 +282,17 @@ const ApiKeyManagementPage: React.FC = () => {
           />
         </Space>
       </Card>
+
+      {/* Pre-selection guidance (multi-user servers with several accounts) */}
+      {!selectedUserId && !usersLoading && !usersError && (
+        <Card size="small">
+          <p style={{ margin: 0, color: "var(--color-text-secondary, #888)" }}>
+            {users.length === 0
+              ? "No users were found on this server."
+              : "Select a user above to view and manage their API keys."}
+          </p>
+        </Card>
+      )}
 
       {/* Keys table */}
       {selectedUserId && (

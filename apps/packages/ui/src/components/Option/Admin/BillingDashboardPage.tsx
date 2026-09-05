@@ -457,6 +457,16 @@ const BillingDashboardPage: React.FC = () => {
     }
   }, [connectionConfig?.serverUrl, connectionConfigLoading])
 
+  // Failsafe: the capability probe must never hold the whole page in a
+  // skeleton (e.g. when the connection config never finishes loading or the
+  // openapi fetch hangs). After a short grace period, render and let the
+  // runtime endpoints report their own errors.
+  useEffect(() => {
+    if (capabilityCheckResolved) return
+    const timer = setTimeout(() => setCapabilityCheckResolved(true), 4000)
+    return () => clearTimeout(timer)
+  }, [capabilityCheckResolved])
+
   if (!capabilityCheckResolved) {
     return (
       <div style={{ padding: 24 }}>
@@ -478,8 +488,10 @@ const BillingDashboardPage: React.FC = () => {
   if (adminGuard === "notFound") {
     return (
       <div style={{ padding: 24 }}>
-        <Alert variant="warning" title="Not Available">
-          Billing endpoints are not available on this server.
+        <Alert variant="warning" title="Not available on this server">
+          Billing endpoints are not enabled here. Billing applies to
+          multi-user deployments with subscription management configured;
+          single-user servers do not use it.
         </Alert>
       </div>
     )
