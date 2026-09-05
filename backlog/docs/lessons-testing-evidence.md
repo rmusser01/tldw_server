@@ -1,5 +1,19 @@
 # Testing Evidence Lessons
 
+## Delayed retry reports must not clear an operator-only block
+
+**Incident (TASK-13153, 2026-09-05):** Recovery records its failure after releasing
+filesystem exclusion. Review reproduced a delayed worker's busy-lock result
+overwriting another worker's newly persisted identity block, changing the retry
+time from the operator-only sentinel to sixty seconds later. The subsequent file
+checks remained safe, but automatic processing resumed without operator action.
+
+**Evidence and rule:** Two real-database/file regressions failed when a busy or
+unavailable result arrived after the identity block. A conditional failure UPDATE
+now leaves the entire blocked row unchanged. Test delayed failure reporting as
+well as simultaneous successful transitions; releasing an external lock does not
+order the later database diagnostic writes.
+
 ## A fresh read alone does not settle an uncertain commit
 
 **Incident (TASK-13153, 2026-09-05):** Publication tests covered a commit that

@@ -16,7 +16,7 @@
 opened at `f43549c209` on user request; implementation continues on the same branch).
 **Approved spec:** `Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md`, user approved after checkpoint `8dc255fcca`.
 **Parent plan:** `Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md`; this plan replaces its generic-file-writer gap, not its remaining Reading DTO/HTTP/reconciliation/release tasks.
-**Status:** Inline execution in progress. Task 1, Task 2a, Task 2b, Task 3a staging/write and Task 3b's DB-owned recorded commit plus copy/publication checkpoints verified on SQLite/PostgreSQL. Phase-specific cleanup/recovery and later tasks remain pending. See checkpoint evidence below.
+**Status:** Inline execution in progress. Task 1, Task 2a, Task 2b, Task 3a staging/write and Task 3b's recorded commit, copy/publication and phase-specific recovery checkpoints verified on SQLite/PostgreSQL. Remaining process-crash/concurrency evidence, runtime integration and later tasks remain pending. See checkpoint evidence below.
 
 ---
 
@@ -640,3 +640,79 @@ sources, and release reservations only after durable cleanup. Due-work selection
 bounded retry/blocked reporting, remaining process-crash matrix and all later
 producer/reader/activation tasks remain pending. The complete Task 3 checklist
 and full-task acceptance criteria remain unchecked; PR #2903 remains a draft.
+
+### Task 3b cleanup boundary: Phase-specific recovery (2026-09-05)
+
+Adds internal `recover_due`, bounded to 20 operations by default (validated range
+1–100), with one verified storage interval per operation. Selection excludes live
+prepared leases, future retries, operator-blocked identities and `fs_done` rows.
+After acquiring storage exclusion, the adapter rechecks due state under the
+revision fence and changes only expired prepared work to aborting. Surviving
+source references are checked on that same transaction, including soft-deleted
+rows and case/legacy absolute/Windows aliases, scoped to the user and known
+namespace. Existing reservations prevent new compliant attachments during file
+cleanup outside the transaction.
+
+Aborting cleanup never touches source bytes. A destination requires the recorded
+stage identity and live private witness, with the expected two links and length.
+Destination unlink and directory fsync precede witness unlink; a failed sync
+retains the witness. On restart with destination already absent, directory sync
+still precedes witness removal. Committed cleanup preserves the identity-verified
+destination, removes only its proven private link, and unlinks an unreferenced
+source only after checking the original full fingerprint. A committed destination
+with its witness already removed must have exactly one link. Final directory
+sync precedes `fs_done` and reservation release. No-effects work retires; removal
+history remains independently pending, with no later filesystem access.
+
+Missing/wrong volumes, busy exclusion and I/O failures retain claims with a
+sanitized 60-second retry. Unproved identity/length stays operator-only blocked
+using the existing maximum retry sentinel; automated failure updates cannot
+downgrade that state. Attempts saturate instead of overflowing. Database failures
+return `output_update_unconfirmed`; cleanup never guesses that an unacknowledged
+final DB transition succeeded. Cancellation drains the active cleanup interval
+without conditionally aborting another live producer. No new ADR or schema is
+needed: these are direct implementations of ADR-003 and the existing journal.
+
+TDD: 15 initial cases failed on the missing recovery entry point; two legacy-path
+fixtures instead failed at the modern insertion boundary. After correcting those
+fixtures to model historical persisted paths, all 17 basic cases passed. Expanded
+restart/fault coverage passed 33 cases, including interruption after each unlink
+and before/after final DB completion. Three subsequent RED cases exposed raw DB
+errors at selection, phase recheck and completion; sanitizing them made the
+40-case group pass. Independent review reproduced a delayed busy/unavailable
+failure report clearing an identity block. Both added regressions failed, then
+passed after making automated identity blocking monotonic; follow-up review found
+no remaining checkpoint issue. The incident is recorded in the testing lessons.
+
+Final evidence: 265 SQLite/non-PostgreSQL cases pass in 37.13 seconds; 122 required
+PostgreSQL cases pass in 394.22 seconds after the final review fix. This is 387
+distinct targeted cases, with no required-backend skips. An earlier focused
+PostgreSQL run passed 40 cases before the sticky-block fix; it is superseded by
+the final run, not counted again. Service and new tests pass Ruff/Black, touched
+adapter ranges pass Black, compile/diff checks pass, and scoped Bandit reports
+zero findings and scanner errors. The adapter retains exactly its nine baseline
+Ruff findings, compared by code/message to `8f547266d1`. No full sweep or Docker
+provisioning was performed.
+
+Verification commands after Server virtual-environment activation:
+
+```bash
+TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_recovery.py tldw_Server_API/tests/Collections/test_output_file_operations_storage.py tldw_Server_API/tests/Collections/test_output_file_operations_db.py tldw_Server_API/tests/Collections/test_output_file_claims_db.py tldw_Server_API/tests/Collections/test_reading_artifact_storage.py tldw_Server_API/tests/Collections/test_reading_artifact_cleanup.py -q -k 'not postgres'
+TLDW_TEST_NO_DOCKER=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_recovery.py tldw_Server_API/tests/Collections/test_output_file_operations_storage.py tldw_Server_API/tests/Collections/test_reading_artifact_cleanup.py -q -k 'postgres and not sqlite' -n 2 -x
+```
+
+Logs: `/private/tmp/task-13153-recovery-{red,green,green-verified,faults}.log`,
+`/private/tmp/task-13153-recovery-db-errors-red.log`,
+`/private/tmp/task-13153-recovery-review-{red,green}.log`,
+`/private/tmp/task-13153-recovery-sqlite-final.log`,
+`/private/tmp/task-13153-recovery-pg-{focused,final}.log`,
+`/private/tmp/task-13153-recovery-bandit-final.json`.
+
+The 42 new recovery cases live in
+`tldw_Server_API/tests/Collections/test_output_file_recovery.py`, separate from
+the staging/publication tests. No runtime caller, background-worker scheduling,
+automatic post-publication cleanup integration, or capability activation is added.
+Real process-kill/two-process and remaining end-to-end fault coverage are still
+required before marking the complete Task 3 checklist done. Later descriptor
+readers, history receiver, producer/route adaptation and rollout gates also remain
+pending. The task stays In Progress and PR #2903 stays draft.

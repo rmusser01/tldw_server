@@ -1,7 +1,7 @@
-"""Reserved, bounded output staging and publication; cleanup/runtime wiring pending.
+"""Reserved, bounded output mutations and recovery; runtime wiring pending.
 
 Every file operation uses the verified directory descriptor. Failed or ambiguous
-work retains journal authority; this checkpoint never unlinks files or releases claims.
+work retains journal authority until identity-verified cleanup is durable.
 Async callers wait for each offloaded lock interval to close its writable FD.
 """
 
@@ -18,8 +18,13 @@ from pathlib import Path
 
 import anyio
 
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
-from tldw_Server_API.app.services.reading_artifact_cleanup_service import _validated_storage_directory
+from tldw_Server_API.app.services.reading_artifact_cleanup_service import (
+    ReadingStorageBusy,
+    ReadingStorageUnavailable,
+    _validated_storage_directory,
+)
 
 MAX_CHUNK_BYTES = 1024 * 1024
 
@@ -55,6 +60,22 @@ def _check_space(directory: int, required: int, margin: int) -> None:
     info = os.fstatvfs(directory)
     if required > info.f_bavail * info.f_frsize - margin:
         raise RuntimeError("output_storage_capacity")
+
+
+class _UnprovedOutputIdentity(RuntimeError):
+    """Files must be preserved for explicit operator verification."""
+
+
+def _stat_optional(directory: int, name: str) -> os.stat_result | None:
+    try:
+        return os.stat(name, dir_fd=directory, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+
+
+def _require_identity(info: os.stat_result, identity: dict | None, *, size: int) -> None:
+    if identity is None or _identity(info) != identity or info.st_size != size:
+        raise _UnprovedOutputIdentity("output_identity_unconfirmed")
 
 
 async def _wait_worker(function):
@@ -364,3 +385,98 @@ class OutputFileOperations:
                 except Exception:  # noqa: BLE001 - abort acknowledgement can also be lost
                     raise RuntimeError("output_update_unconfirmed") from None
                 raise RuntimeError("output_operation_conflict") from None
+
+    async def recover_due(self, *, limit: int = 20) -> dict[str, int]:
+        """Recover a bounded batch, yielding storage exclusion between operations.
+
+        Cancellation drains the current interval without aborting unrelated live
+        producers. History-only rows are excluded before any filesystem access.
+        """
+        try:
+            tokens = await asyncio.to_thread(self.db.list_due_output_file_operations, self.namespace, limit=limit)
+        except (DatabaseError, OSError):
+            raise RuntimeError("output_update_unconfirmed") from None
+        counts = {"finished": 0, "blocked": 0, "retry": 0, "skipped": 0}
+        for token in tokens:
+            with anyio.CancelScope(shield=True):
+                status, cancelled = await _wait_worker(partial(self._recover_one, token))
+            if cancelled:
+                raise asyncio.CancelledError
+            await anyio.lowlevel.checkpoint_if_cancelled()
+            counts[status] += 1
+        return counts
+
+    def _recover_one(self, token: str) -> str:
+        try:
+            with _validated_storage_directory(self.output_root, storage_namespace_id=self.namespace) as (_, directory):
+                row = self.db.begin_output_file_recovery(token, self.namespace)
+                if row is None:
+                    return "skipped"
+                if row["phase"] == "aborting":
+                    self._clean_aborted(directory, row)
+                else:
+                    self._clean_committed(directory, row)
+                # Also sync absent paths left by a crash before an earlier fsync.
+                os.fsync(directory)
+                self.db.finish_output_file_operation(token, self.namespace)
+                return "finished"
+        except DatabaseError:
+            raise RuntimeError("output_update_unconfirmed") from None
+        except _UnprovedOutputIdentity:
+            category = "output_identity_unconfirmed"
+        except ReadingStorageBusy:
+            category = "output_storage_busy"
+        except (ReadingStorageUnavailable, OSError):
+            category = "output_storage_unavailable"
+        try:
+            self.db.record_output_file_recovery_failure(token, self.namespace, category)
+        except (DatabaseError, OSError):
+            raise RuntimeError("output_update_unconfirmed") from None
+        return "blocked" if category == "output_identity_unconfirmed" else "retry"
+
+    def _clean_aborted(self, directory: int, row: dict) -> None:
+        if row["stage_path"] is None:  # Removal has no private/public file to undo.
+            return
+        stage = _stat_optional(directory, row["stage_path"])
+        destination = _stat_optional(directory, row["destination_path"])
+        identity = json.loads(row["stage_identity_json"]) if row["stage_identity_json"] else None
+        if destination is not None:
+            if stage is None or identity is None:
+                raise _UnprovedOutputIdentity("output_identity_unconfirmed")
+            linked = {**identity, "nlink": 2}
+            _require_identity(stage, linked, size=row["written_bytes"])
+            _require_identity(destination, linked, size=row["written_bytes"])
+            os.unlink(row["destination_path"], dir_fd=directory)
+            os.fsync(directory)  # Witness must survive any failure of this sync.
+        if stage is not None:
+            _require_identity(
+                os.stat(row["stage_path"], dir_fd=directory, follow_symlinks=False), identity, size=row["written_bytes"]
+            )
+            # A prior attempt may have unlinked destination but failed its sync.
+            if destination is None:
+                os.fsync(directory)
+            os.unlink(row["stage_path"], dir_fd=directory)
+            os.fsync(directory)
+
+    def _clean_committed(self, directory: int, row: dict) -> None:
+        if row["kind"] != "remove":
+            stage = _stat_optional(directory, row["stage_path"])
+            destination = _stat_optional(directory, row["destination_path"])
+            identity = json.loads(row["publication_identity_json"]) if row["publication_identity_json"] else None
+            if destination is None or identity is None:
+                raise _UnprovedOutputIdentity("output_identity_unconfirmed")
+            _require_identity(destination, {**identity, "nlink": 2 if stage else 1}, size=row["written_bytes"])
+            if stage is not None:
+                _require_identity(stage, identity, size=row["written_bytes"])
+                os.unlink(row["stage_path"], dir_fd=directory)
+                os.fsync(directory)
+        if row["source_path"] is not None and not row["source_referenced"]:
+            source = _stat_optional(directory, row["source_path"])
+            identity = json.loads(row["source_identity_json"]) if row["source_identity_json"] else None
+            if identity is None:
+                raise _UnprovedOutputIdentity("output_identity_unconfirmed")
+            if source is not None:
+                if _identity(source, source=True) != identity:
+                    raise _UnprovedOutputIdentity("output_identity_unconfirmed")
+                os.unlink(row["source_path"], dir_fd=directory)
+                os.fsync(directory)

@@ -3415,6 +3415,78 @@ class CollectionsDatabase:
             self._retire_output_file_operation(token, storage_namespace_id, conn)
             return True
 
+    def list_due_output_file_operations(self, storage_namespace_id: str, *, limit: int = 20) -> list[str]:
+        """Select a bounded same-user batch; each token must be rechecked after storage exclusion."""
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("output_operation_invalid")
+        now = int(datetime.now(timezone.utc).timestamp())
+        with self._read_snapshot() as conn:
+            self._output_storage_policy(storage_namespace_id, conn)
+            return [
+                row["token"]
+                for row in self.backend.execute(
+                    "SELECT token FROM output_file_operations WHERE user_id = ? AND storage_namespace_id = ? "
+                    "AND fs_done = 0 AND retry_after <= ? AND (phase <> 'prepared' OR lease_until <= ?) "
+                    "ORDER BY retry_after, token LIMIT ?",
+                    (self.user_id, storage_namespace_id, now, now, limit),
+                    connection=conn,
+                ).rows
+            ]
+
+    def begin_output_file_recovery(self, token: str, storage_namespace_id: str) -> dict[str, Any] | None:
+        """Recheck due authority and surviving source references under the fence.
+
+        Caller holds the verified storage lock through cleanup and completion.
+        No filesystem I/O occurs in this transaction. Claims prevent subsequent
+        compliant source attachments while cleanup takes place outside the DB.
+        """
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            self._output_storage_policy(storage_namespace_id, conn)
+            try:
+                row = self.get_output_file_operation(token, storage_namespace_id, connection=conn)
+            except KeyError:
+                return None
+            now = int(datetime.now(timezone.utc).timestamp())
+            if row["fs_done"] or row["retry_after"] > now or (row["phase"] == "prepared" and row["lease_until"] > now):
+                return None
+            if row["phase"] == "prepared":
+                self.abort_output_file_operation(token, storage_namespace_id, connection=conn)
+                row["phase"] = "aborting"
+            row["source_referenced"] = False
+            if row["phase"] == "committed" and row["source_path"]:
+                key = row["source_path"].lower()
+                suffix = "%/" + key.replace("^", "^^").replace("%", "^%").replace("_", "^_")
+                row["source_referenced"] = bool(
+                    self.backend.execute(
+                        "SELECT 1 FROM outputs o LEFT JOIN reading_output_ownership r "
+                        "ON r.output_id = o.id AND r.user_id = o.user_id "
+                        "WHERE o.user_id = ? AND (r.output_id IS NULL OR r.storage_namespace_id = ?) "
+                        "AND (lower(replace(o.storage_path, ?, '/')) = ? "
+                        "OR lower(replace(o.storage_path, ?, '/')) LIKE (?) ESCAPE '^') LIMIT 1",
+                        (self.user_id, storage_namespace_id, "\\", key, "\\", suffix),
+                        connection=conn,
+                    ).first
+                )
+            return row
+
+    def record_output_file_recovery_failure(self, token: str, storage_namespace_id: str, category: str) -> None:
+        """Retain claims with a finite retry or explicit operator-only identity block."""
+        if category not in {"output_identity_unconfirmed", "output_storage_unavailable", "output_storage_busy"}:
+            raise ValueError("output_operation_invalid")
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            now = int(datetime.now(timezone.utc).timestamp())
+            retry_after = 2**63 - 1 if category == "output_identity_unconfirmed" else now + 60
+            self.backend.execute(
+                "UPDATE output_file_operations SET attempts = CASE WHEN attempts < 2147483647 "
+                "THEN attempts + 1 ELSE attempts END, retry_after = ?, last_error = ? "
+                "WHERE token = ? AND user_id = ? AND storage_namespace_id = ? AND fs_done = 0 "
+                "AND (last_error IS NULL OR last_error <> 'output_identity_unconfirmed')",
+                (retry_after, category, token, self.user_id, storage_namespace_id),
+                connection=conn,
+            )
+
     def _retire_output_file_operation(self, token: str, storage_namespace_id: str, connection: Any) -> None:
         self.backend.execute(
             "DELETE FROM output_file_operations WHERE token = ? AND user_id = ? AND storage_namespace_id = ? "
