@@ -470,7 +470,7 @@ class ConversationResumeStore:
                     """
                     SELECT id FROM conversations
                      WHERE id = ? AND deleted = FALSE
-                       AND (? IS NULL OR client_id = ?)
+                       AND (CAST(? AS TEXT) IS NULL OR client_id = ?)
                      FOR UPDATE
                     """,
                     (conversation_id, normalized_owner, normalized_owner),
@@ -496,7 +496,7 @@ class ConversationResumeStore:
                   FROM conversations c
                   LEFT JOIN conversation_settings cs ON cs.conversation_id = c.id
                  WHERE c.id = ? AND c.deleted = FALSE
-                   AND (? IS NULL OR c.client_id = ?)
+                   AND (CAST(? AS TEXT) IS NULL OR c.client_id = ?)
                 """,
                 (conversation_id, normalized_owner, normalized_owner),
             )

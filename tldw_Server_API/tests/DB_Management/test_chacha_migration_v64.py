@@ -12,6 +12,12 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def _pin_v64_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep v63 reconstruction fixtures free of later migration artifacts."""
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 64)
+
+
 _TABLES = {
     "note_graph_suggestion_runs",
     "note_graph_suggestion_operation_receipts",

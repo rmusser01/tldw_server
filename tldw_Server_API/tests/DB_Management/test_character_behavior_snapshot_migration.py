@@ -19,11 +19,13 @@ from tldw_Server_API.app.core.Character_Chat.character_behavior_snapshot import 
 from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     BackendType,
+    DatabaseConfig,
     QueryResult,
 )
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
+from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import (
     ConversationResumeStore,
 )
@@ -109,14 +111,14 @@ def _snapshot() -> BehaviorSnapshotV1:
     )
 
 
-def _create_v63_legacy_database(
+def _create_v64_legacy_database(
     db_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     *,
     conversation_id: str = "legacy-character-conversation",
 ) -> str:
     with monkeypatch.context() as patch:
-        patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 63)
+        patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 64)
         db = CharactersRAGDB(db_path=str(db_path), client_id="legacy-owner")
         created_id = db.add_conversation(
             {
@@ -137,7 +139,7 @@ def _create_v63_legacy_database(
             "SELECT version FROM db_schema_version WHERE schema_name = ?",
             (CharactersRAGDB._SCHEMA_NAME,),
         ).fetchone()[0]
-        assert version == 63
+        assert version == 64
         assert "history_version" not in {
             row[1] for row in conn.execute("PRAGMA table_info('conversations')")
         }
@@ -158,21 +160,23 @@ def _table_columns(conn: sqlite3.Connection, table_name: str) -> dict[str, sqlit
     }
 
 
-def test_schema_head_allocates_exactly_v64_and_both_ladders_advance_once() -> None:
-    assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == 64
-    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION == 64
+def test_schema_head_allocates_exactly_v65_and_both_ladders_advance_once() -> None:
+    assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == 65
+    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION == 65
 
     db = CharactersRAGDB.__new__(CharactersRAGDB)
-    assert db._sqlite_linear_migration_steps()[63].__name__ == "_migrate_from_v63_to_v64"
+    assert db._sqlite_linear_migration_steps()[63].__name__ == "_migrate_from_v63_to_v64_sqlite"
+    assert db._sqlite_linear_migration_steps()[64].__name__ == "_migrate_from_v64_to_v65"
     assert hasattr(CharactersRAGDB, "_migrate_from_v63_to_v64_postgres")
+    assert hasattr(CharactersRAGDB, "_migrate_from_v64_to_v65_postgres")
 
 
-def test_sqlite_v63_to_v64_migrates_catalog_and_legacy_reads_missing(
+def test_sqlite_v64_to_v65_migrates_catalog_and_legacy_reads_missing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    db_path = tmp_path / "character-behavior-v63.sqlite"
-    conversation_id = _create_v63_legacy_database(db_path, monkeypatch)
+    db_path = tmp_path / "character-behavior-v64.sqlite"
+    conversation_id = _create_v64_legacy_database(db_path, monkeypatch)
 
     migrated = CharactersRAGDB(db_path=str(db_path), client_id="legacy-owner")
 
@@ -198,7 +202,7 @@ def test_sqlite_v63_to_v64_migrates_catalog_and_legacy_reads_missing(
             "SELECT version FROM db_schema_version WHERE schema_name = ?",
             (CharactersRAGDB._SCHEMA_NAME,),
         ).fetchone()["version"]
-        assert version == 64
+        assert version == 65
 
         snapshot_columns = _table_columns(conn, "conversation_behavior_snapshots")
         assert set(snapshot_columns) == {
@@ -263,7 +267,7 @@ def test_sqlite_v63_to_v64_migrates_catalog_and_legacy_reads_missing(
         ).fetchone()["history_version"] == 1
 
 
-def test_sqlite_v64_constraints_enforce_one_to_one_status_body_digest_and_versions(
+def test_sqlite_v65_constraints_enforce_one_to_one_status_body_digest_and_versions(
     tmp_path: Path,
 ) -> None:
     db_path = tmp_path / "character-behavior-constraints.sqlite"
@@ -394,19 +398,19 @@ def test_sqlite_v64_constraints_enforce_one_to_one_status_body_digest_and_versio
                 conversation_offset += 1
 
 
-def test_sqlite_v64_checkpoint_failure_rolls_back_all_schema_changes(
+def test_sqlite_v65_checkpoint_failure_rolls_back_all_schema_changes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path = tmp_path / "character-behavior-rollback.sqlite"
-    _create_v63_legacy_database(db_path, monkeypatch)
+    _create_v64_legacy_database(db_path, monkeypatch)
 
     def _fail_checkpoint(_self: CharactersRAGDB, stage: str) -> None:
         assert stage == "schema-created"
-        raise RuntimeError("injected v64 migration checkpoint failure")
+        raise RuntimeError("injected v65 migration checkpoint failure")
 
-    monkeypatch.setattr(CharactersRAGDB, "_migration_v64_checkpoint", _fail_checkpoint)
-    with pytest.raises(CharactersRAGDBError, match="injected v64 migration checkpoint failure"):
+    monkeypatch.setattr(CharactersRAGDB, "_migration_v65_checkpoint", _fail_checkpoint)
+    with pytest.raises(CharactersRAGDBError, match="injected v65 migration checkpoint failure"):
         CharactersRAGDB(db_path=str(db_path), client_id="rollback-owner")
 
     with sqlite3.connect(db_path) as conn:
@@ -414,7 +418,7 @@ def test_sqlite_v64_checkpoint_failure_rolls_back_all_schema_changes(
             "SELECT version FROM db_schema_version WHERE schema_name = ?",
             (CharactersRAGDB._SCHEMA_NAME,),
         ).fetchone()[0]
-        assert version == 63
+        assert version == 64
         assert conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' "
             "AND name = 'conversation_behavior_snapshots'"
@@ -428,13 +432,13 @@ def test_sqlite_v64_checkpoint_failure_rolls_back_all_schema_changes(
 
 
 @pytest.mark.parametrize("drift_object", ["table", "index", "column"])
-def test_sqlite_v64_rejects_partial_preexisting_schema_and_preserves_v63(
+def test_sqlite_v65_rejects_partial_preexisting_schema_and_preserves_v64(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     drift_object: str,
 ) -> None:
     db_path = tmp_path / f"character-behavior-drift-{drift_object}.sqlite"
-    _create_v63_legacy_database(db_path, monkeypatch)
+    _create_v64_legacy_database(db_path, monkeypatch)
 
     with sqlite3.connect(db_path) as conn:
         if drift_object == "table":
@@ -469,7 +473,7 @@ def test_sqlite_v64_rejects_partial_preexisting_schema_and_preserves_v63(
         assert conn.execute(
             "SELECT version FROM db_schema_version WHERE schema_name = ?",
             (CharactersRAGDB._SCHEMA_NAME,),
-        ).fetchone()[0] == 63
+        ).fetchone()[0] == 64
         if drift_object != "table":
             assert conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' "
@@ -1086,7 +1090,7 @@ class _PostgresRecordingBackend:
         self._pending: list[str] = []
         self.committed_statements: list[str] = []
         self.rolled_back = False
-        self.schema_version = 63
+        self.schema_version = 64
         self.drift_object = drift_object
 
     def transaction(self) -> _PostgresTransaction:
@@ -1108,8 +1112,8 @@ class _PostgresRecordingBackend:
         if drift_fragment and drift_fragment in normalized and "if not exists" not in normalized:
             raise BackendDatabaseError(f"pre-existing PostgreSQL {self.drift_object}")
         if normalized.startswith("update db_schema_version set version = %s"):
-            if params == (64, CharactersRAGDB._SCHEMA_NAME, 63) and self.schema_version == 63:
-                self.schema_version = 64
+            if params == (65, CharactersRAGDB._SCHEMA_NAME, 64) and self.schema_version == 64:
+                self.schema_version = 65
                 return SimpleNamespace(rowcount=1)
             return SimpleNamespace(rowcount=0)
         return SimpleNamespace(rowcount=0)
@@ -1748,10 +1752,10 @@ def test_postgres_backend_wrapper_add_message_normalizes_backend_errors(
     assert backend.history_version == 1
 
 
-def test_postgres_v64_contract_has_matching_constraints_indexes_and_initializer_route(
+def test_postgres_v65_contract_has_matching_constraints_indexes_and_initializer_route(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    ddl = " ".join(CharactersRAGDB._MIGRATION_SQL_V63_TO_V64_POSTGRES.lower().split())
+    ddl = " ".join(CharactersRAGDB._MIGRATION_SQL_V64_TO_V65_POSTGRES.lower().split())
     assert "conversation_id text primary key" in ddl
     assert "references conversations(id) on delete cascade" in ddl
     assert "status in ('valid','missing','invalid')" in ddl
@@ -1774,7 +1778,7 @@ def test_postgres_v64_contract_has_matching_constraints_indexes_and_initializer_
 
     backend = _PostgresRecordingBackend()
     db = _postgres_db(backend)
-    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda conn, **kwargs: 63)
+    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda conn, **kwargs: 64)
     monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda conn: None)
     monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda conn: None)
     monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda conn: None)
@@ -1782,22 +1786,55 @@ def test_postgres_v64_contract_has_matching_constraints_indexes_and_initializer_
     applied: list[str] = []
 
     def _record_migration(conn: object) -> None:
-        applied.append("63-to-64")
+        applied.append("64-to-65")
 
-    monkeypatch.setattr(db, "_migrate_from_v63_to_v64_postgres", _record_migration)
+    monkeypatch.setattr(db, "_migrate_from_v64_to_v65_postgres", _record_migration)
     db._initialize_schema_postgres()
 
-    assert applied == ["63-to-64"]
+    assert applied == ["64-to-65"]
 
 
-def test_postgres_v64_migration_executes_exact_version_advance() -> None:
+@pytest.mark.integration
+@pytest.mark.parametrize("lock_for_update", [False, True])
+@pytest.mark.parametrize("owner_client_id", [None, "legacy-owner"])
+def test_postgres_v64_to_v65_preserves_legacy_conversation_and_notes_schema(
+    pg_database_config: DatabaseConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    lock_for_update: bool,
+    owner_client_id: str | None,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    with monkeypatch.context() as patch:
+        patch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 64)
+        db = CharactersRAGDB(":memory:", client_id="legacy-owner", backend=backend)
+    try:
+        conversation_id = db.add_conversation({"title": "Legacy before resume"})
+        db._initialize_schema_postgres()
+        assert backend.execute(
+            "SELECT version FROM db_schema_version WHERE schema_name = %s",
+            (CharactersRAGDB._SCHEMA_NAME,),
+        ).scalar == 65
+        assert backend.table_exists("note_graph_suggestion_operation_receipts")
+        state = db.get_roleplay_resume_state(
+            conversation_id,
+            lock_for_update=lock_for_update,
+            owner_client_id=owner_client_id,
+        )
+        assert state["behavior_snapshot"]["status"] == "missing"
+        assert state["history_version"] == 1
+        assert state["settings_version"] is None  # No settings row is backfilled.
+    finally:
+        db.close_all_connections()
+
+
+def test_postgres_v65_migration_executes_exact_version_advance() -> None:
     backend = _PostgresRecordingBackend()
     db = _postgres_db(backend)
 
     with backend.transaction() as conn:
-        db._migrate_from_v63_to_v64_postgres(conn)
+        db._migrate_from_v64_to_v65_postgres(conn)
 
-    assert backend.schema_version == 64
+    assert backend.schema_version == 65
     assert any("conversation_behavior_snapshots" in sql for sql in backend.committed_statements)
     assert any(
         "where schema_name = %s and version = %s returning version" in " ".join(sql.lower().split())
@@ -1806,7 +1843,7 @@ def test_postgres_v64_migration_executes_exact_version_advance() -> None:
 
 
 @pytest.mark.parametrize("drift_object", ["table", "index", "column"])
-def test_postgres_v64_rejects_partial_preexisting_schema_and_preserves_v63(
+def test_postgres_v65_rejects_partial_preexisting_schema_and_preserves_v64(
     drift_object: str,
 ) -> None:
     backend = _PostgresRecordingBackend(drift_object=drift_object)
@@ -1814,33 +1851,33 @@ def test_postgres_v64_rejects_partial_preexisting_schema_and_preserves_v63(
 
     with pytest.raises(BackendDatabaseError, match="pre-existing PostgreSQL"):
         with backend.transaction() as conn:
-            db._migrate_from_v63_to_v64_postgres(conn)
+            db._migrate_from_v64_to_v65_postgres(conn)
 
     assert backend.rolled_back is True
-    assert backend.schema_version == 63
+    assert backend.schema_version == 64
     assert backend.committed_statements == []
 
 
-def test_postgres_v64_checkpoint_failure_uses_outer_transaction_rollback(
+def test_postgres_v65_checkpoint_failure_uses_outer_transaction_rollback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     backend = _PostgresRecordingBackend()
     db = _postgres_db(backend)
-    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda conn, **kwargs: 63)
+    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda conn, **kwargs: 64)
     monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda conn: None)
     monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda conn: None)
     monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda conn: None)
 
     def _fail_checkpoint(_self: CharactersRAGDB, stage: str) -> None:
         assert stage == "schema-created"
-        raise RuntimeError("injected postgres v64 checkpoint failure")
+        raise RuntimeError("injected postgres v65 checkpoint failure")
 
-    monkeypatch.setattr(CharactersRAGDB, "_migration_v64_checkpoint", _fail_checkpoint)
-    with pytest.raises(RuntimeError, match="injected postgres v64 checkpoint failure"):
+    monkeypatch.setattr(CharactersRAGDB, "_migration_v65_checkpoint", _fail_checkpoint)
+    with pytest.raises(RuntimeError, match="injected postgres v65 checkpoint failure"):
         db._initialize_schema_postgres()
 
     assert backend.rolled_back is True
-    assert backend.schema_version == 63
+    assert backend.schema_version == 64
     assert backend.committed_statements == []
     assert any("conversation_behavior_snapshots" in sql for sql in backend._pending) is False
 
