@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-03 02:27'
-updated_date: '2026-09-05 02:55'
+updated_date: '2026-09-05 03:15'
 labels:
   - collections
   - reading-list
@@ -52,5 +52,5 @@ diagnostic-privacy behavior are covered.
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-ADR required: yes. ADR path: backlog/decisions/003-reading-atomic-hard-delete.md. Reason: persisted aggregate revisions, destructive preconditions, ownership and durable cleanup. Design: Docs/superpowers/specs/2026-09-04-reading-atomic-hard-delete-design.md. Plan: Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md. Stage 1 remains in progress: schema/clock, item/tag/note-link/highlight and output metadata update writers implemented as partial checkpoints. Structural output ownership remains trusted and unwired. Stage 3 storage prerequisite now provides explicit durable namespace provisioning and persistent fail-closed nonblocking POSIX OS locking; no runtime marker/root/lock recreation. Real subprocess exit/termination tests and fault-injected fsync retry regression pass; scoped review resolved the durability retry gap. 23 focused filesystem tests pass, new files lint/format/compile clean, scoped Bandit zero findings. No new PostgreSQL evidence claimed for this filesystem-only slice. Next: durable staging reservations, adoption and cleanup intents/drain, shared-path and purge routing, reconciliation, DTO snapshots and guarded-delete readiness. Existing file-first production paths remain pending; no production storage caller or capability activation yet. Both test-event teardown and fsync retry lessons recorded. Full evidence and remaining scope are in the plan.
+ADR required: yes. ADR path: backlog/decisions/003-reading-atomic-hard-delete.md. Reason: persisted aggregate revisions, destructive preconditions, ownership and durable cleanup. Design: Docs/superpowers/specs/2026-09-04-reading-atomic-hard-delete-design.md. Plan: Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md. Stage 1 clock/item/tag/link/highlight/output metadata checkpoints remain partial. Stage 3 now includes durable unadopted staging/pending paths, original-revision validation before exclusive write, bounded retry cleanup under verified POSIX storage lock, descriptor-relative I/O and directory-sync-before-retirement. Generic output create/path changes fence reserved paths; references and protected names handle ASCII case aliases. Review reproduced and fixed replacement-volume and alias hazards; re-review clear. Verification: 43 SQLite/storage cases; all 20 real PostgreSQL lifecycle cases covered in 17+5 passes with two overlaps, no skips; 123 existing regression cases. Scoped Bandit zero; new service/tests lint/format clean; DB keeps nine baseline findings. Details and lessons are in plan/docs. Next: guarded adoption, owned-output/hard-delete intent creation, legacy reconciliation, purge routing, DTO snapshots and startup readiness. No production service caller, ownership activation or capability yet. Task remains In Progress.
 <!-- SECTION:PLAN:END -->

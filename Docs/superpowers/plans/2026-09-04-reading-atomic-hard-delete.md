@@ -362,7 +362,7 @@ Run `python -m pytest tldw_Server_API/tests/Collections/test_reading_artifact_re
 
 ## Stage 3: Durable artifact staging, adoption and cleanup
 
-**Status:** In Progress — local POSIX storage namespace/OS exclusion prerequisite implemented; durable intents and production wiring not yet implemented.
+**Status:** In Progress — local POSIX exclusion and unadopted staging/cleanup intents implemented; adoption, owned-output disposal and production wiring remain.
 **Goal:** No lost cleanup after crashes and no unlink of shared/reused paths.
 **Success Criteria:** Retry/restart and writer/cleanup races pass; pending work remains observable.
 **Tests:** New artifact module, existing Reading archive/API tests and output-service regressions.
@@ -410,6 +410,63 @@ This module has no production caller: staging reservations, adoption, unlink int
 bounded retry drain, purge routing and readiness remain to be implemented. The
 storage prerequisite was brought forward because relational deletion must not begin
 file disposal before exclusion and namespace verification are available.
+
+Next slice: persist unadopted staging reservations and pending cleanup in one
+namespace/user/path-keyed table, with unique tokens, captured parent revision,
+lease deadline and bounded retry metadata. Reserve before file creation; recheck
+the token/lease/parent under the clock after taking the storage lock. Cleanup
+transitions expired staging to pending while holding that same storage lock,
+checks output references, unlinks outside DB transactions and retires only after
+directory sync. Generic output insert/path-change writers must reject reserved
+paths under the clock. Keep blocked collisions/invalid paths observable and do
+not guess ownership. Test delayed writers after retirement, restart/retry,
+shared-reference preservation and namespace isolation on both databases. Adoption,
+owned-output/hard-delete intent creation and production routing remain later work.
+
+Unadopted-artifact checkpoint (2026-09-04): `reading_artifact_paths` now persists
+token, user, namespace, path, captured parent/revision, lease and staged/pending
+state, plus sanitized bounded retry metadata. It deliberately survives parent
+deletion and does not advance the capture revision before adoption. Reservation,
+write validation, pending transition and retirement use the existing clock fence.
+Exclusive creation rechecks the original token/revision after taking the storage
+lock; expired/missing reservations cannot open a file. Cleanup holds that lock
+through selection, descriptor-relative unlink, directory fsync and final DB
+retirement, with no filesystem work inside a mutation transaction. Missing files
+complete only on a verified namespace. Shared output references, including soft
+deleted rows, are preserved. Invalid paths and file collisions remain blocked;
+ordinary I/O failures retain a capped backoff and sanitized category.
+
+Generic output insertion now uses one clock-first transaction (including
+idempotency lookup), and insertion/path changes cannot attach to reservations.
+Because generic outputs do not carry namespace authority yet, their path guard
+conservatively covers all namespaces for that user. ASCII filename comparisons
+are case-insensitive even on case-sensitive volumes to protect macOS aliases.
+Existing API/idempotency regression suites passed with this guard.
+
+Review found and reproduced root-replacement and case-alias gaps. File open,
+stat/unlink and directory sync now use the held validated directory descriptor,
+never a reopened root pathname. Protected marker/lock names also reject uppercase
+aliases. Four failing initial review regressions and two protected-file alias
+regressions preceded the fixes. Final scoped re-review found no outstanding issues.
+The plan's illustrative Path.open/Path.unlink operations are therefore implemented
+as descriptor-relative os.open/os.unlink, not literal pathname reopening.
+
+Verification (Server venv; only targeted suites):
+
+- Original missing-lifecycle red run: 8 SQLite failures before implementation.
+- `TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_reading_artifact_cleanup.py tldw_Server_API/tests/Collections/test_reading_artifact_storage.py -k 'not postgres' --timeout=30 -q --tb=short`: 43 passed, 20 deselected.
+- New cleanup module `-k postgres --timeout=30`: 17 passed, 17 deselected; added `-k 'postgres and (blocks_invalid_paths or bounded)'`: 5 passed, 35 deselected. This covers all 20 PostgreSQL lifecycle cases, with two rerun overlaps, no skips and no Docker startup.
+- `TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_reading_revision_mutations.py tldw_Server_API/tests/Collections/test_output_artifact_idempotency.py tldw_Server_API/tests/Collections/test_collections_schema_bootstrap.py tldw_Server_API/tests/Collections/test_items_and_outputs_api.py -k 'not postgres' -q --tb=short`: 123 passed, 80 deselected.
+- New/touched service and tests pass Ruff/Black; changed DB ranges pass Black;
+  compilation and diff checks pass. Scoped Bandit: zero findings/errors. DB Ruff
+  retains its nine baseline findings. No full-suite or deployment-readiness claim.
+
+Production adoption must recheck the token/lease/revision under the storage lock
+and atomically replace staging with structural output ownership; it must not
+bypass the new generic guard casually. This slice does not implement adoption,
+legacy reconciliation, owned-output/hard-delete intent creation, purge routing or
+startup-worker readiness. The service helpers have no production callers and the
+capability remains absent. Existing ADR-003 applies; TASK-13153 remains In Progress.
 
 - [ ] Write a failing unlink-retry test: create a real archive in `tmp_path`, delete its parent, force `Path.unlink` to raise `PermissionError`, and assert the intent persists. Reopen the database and retry with unlink restored; assert file and intent are absent. Also test already-missing files as successful cleanup.
 - [ ] Run `python -m pytest tldw_Server_API/tests/Collections/test_reading_artifact_cleanup.py -q` and verify missing lifecycle behavior.

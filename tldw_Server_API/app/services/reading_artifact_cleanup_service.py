@@ -11,10 +11,15 @@ from __future__ import annotations
 
 import os
 import stat
+import time
 import uuid
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
+
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.core.DB_Management.db_path_utils import normalize_output_storage_filename
+from tldw_Server_API.app.core.exceptions import InvalidStoragePathError
 
 try:
     import fcntl
@@ -130,7 +135,7 @@ def provision_reading_storage_namespace(output_root: Path) -> str:
 
 
 @contextmanager
-def reading_storage_lock(output_root: Path, *, storage_namespace_id: str) -> Iterator[Path]:
+def _validated_storage_directory(output_root: Path, *, storage_namespace_id: str) -> Iterator[tuple[Path, int]]:
     """Hold the persistent per-user lock only on the expected mounted namespace.
 
     Busy is retryable. Missing/invalid/replaced state is unavailable, never proof
@@ -142,4 +147,87 @@ def reading_storage_lock(output_root: Path, *, storage_namespace_id: str) -> Ite
                 raise ReadingStorageUnavailable("reading_storage_unavailable")
         except (OSError, TypeError, ValueError):
             raise ReadingStorageUnavailable("reading_storage_unavailable") from None
+        yield root, directory
+
+
+@contextmanager
+def reading_storage_lock(output_root: Path, *, storage_namespace_id: str) -> Iterator[Path]:
+    """Hold verified storage exclusion; internal file I/O must use the held directory FD."""
+    with _validated_storage_directory(output_root, storage_namespace_id=storage_namespace_id) as (root, _):
         yield root
+
+
+def _artifact_filename(name: str) -> str:
+    filename = normalize_output_storage_filename(
+        name,
+        allow_absolute=False,
+        reject_relative_with_separators=True,
+    )
+    if filename.lower() in {_MARKER_NAME, _LOCK_NAME}:
+        raise InvalidStoragePathError("invalid_path")
+    return filename
+
+
+def _sync_directory(directory: int) -> None:
+    os.fsync(directory)
+
+
+def write_staged_reading_artifact(
+    db: CollectionsDatabase, token: str, *, output_root: Path, storage_namespace_id: str, body: str
+) -> None:
+    """Write a reserved archive; adoption remains a separate revision-guarded step.
+
+    The trusted caller supplies already-bounded rendered content. This helper is
+    not yet wired into production capture paths. Expired/retired tokens abort
+    before opening a file; any partially written file retains its durable intent.
+    """
+    with _validated_storage_directory(output_root, storage_namespace_id=storage_namespace_id) as (_, directory):
+        row = db.validate_reading_artifact_for_write(token, storage_namespace_id, now=int(time.time()))
+        try:
+            filename = _artifact_filename(row["storage_path"])
+            fd = os.open(filename, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write(body)
+                stream.flush()
+                os.fsync(stream.fileno())
+            _sync_directory(directory)
+        except (OSError, InvalidStoragePathError) as exc:
+            category = (
+                "invalid_path"
+                if isinstance(exc, InvalidStoragePathError)
+                else ("path_collision" if isinstance(exc, FileExistsError) else "io")
+            )
+            db.record_reading_artifact_error(token, storage_namespace_id, category=category, now=int(time.time()))
+            raise
+
+
+def drain_reading_artifact_cleanup(
+    db: CollectionsDatabase, *, output_root: Path, storage_namespace_id: str, limit: int = 100
+) -> int:
+    """Drain a bounded unadopted-artifact batch on a verified volume outside DB locks."""
+    completed = 0
+    with _validated_storage_directory(output_root, storage_namespace_id=storage_namespace_id) as (_, directory):
+        rows = db.prepare_reading_artifact_cleanup(storage_namespace_id, now=int(time.time()), limit=limit)
+        for row in rows:
+            try:
+                filename = _artifact_filename(row["storage_path"])
+                try:
+                    info = os.stat(filename, dir_fd=directory, follow_symlinks=False)
+                    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                        raise InvalidStoragePathError("invalid_path")
+                    os.unlink(filename, dir_fd=directory)
+                except FileNotFoundError:
+                    pass
+                _sync_directory(directory)
+            except (OSError, InvalidStoragePathError) as exc:
+                category = (
+                    "invalid_path"
+                    if isinstance(exc, InvalidStoragePathError)
+                    else ("permission" if isinstance(exc, PermissionError) else "io")
+                )
+                db.record_reading_artifact_error(
+                    row["token"], storage_namespace_id, category=category, now=int(time.time())
+                )
+                continue
+            completed += db.finish_reading_artifact_cleanup(row["token"], storage_namespace_id)
+    return completed

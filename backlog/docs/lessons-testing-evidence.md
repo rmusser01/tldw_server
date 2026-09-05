@@ -1,5 +1,29 @@
 # Testing Evidence Lessons
 
+## Namespace validation must stay bound to the directory used for I/O
+
+**Incident (TASK-13153, 2026-09-04):** Initial Reading staging/cleanup verified a
+volume marker and locked its file, but later reopened the output-root pathname.
+Review regressions renamed that root and installed a replacement between DB
+validation and file I/O. Cleanup could delete a same-named replacement-volume file
+while holding the original volume's lock; writing likewise targeted the new root.
+
+**Evidence and rule:** Descriptor-relative open/stat/unlink plus fsync on the held
+directory descriptor made both replacement-root regressions pass on SQLite and
+PostgreSQL. A verified pathname is not durable authority over later path resolution.
+
+## File reservation checks must account for filesystem case aliases
+
+**Incident (TASK-13153, 2026-09-04):** Case-sensitive SQL comparisons allowed an
+uppercase generic output path to bypass a lowercase Reading reservation, and
+cleanup missed uppercase shared references on default macOS storage. Re-review
+found the same issue in protected lock/marker filename exclusions.
+
+**Evidence and rule:** Failing alias regressions led to conservative lowercase
+comparisons for allowed ASCII names in reservations, shared references and
+protected-file exclusions. Keep these comparisons aligned; a database's text
+equality does not necessarily match the output filesystem's filename identity.
+
 ## Do not signal a multiprocessing Event after terminating its waiter
 
 **Incident (TASK-13153, 2026-09-04):** The Reading storage-lock crash test

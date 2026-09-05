@@ -2638,12 +2638,14 @@ class CollectionsDatabase:
             items_table = "content_items"
             outputs_table = "outputs"
             ownership_table = "reading_output_ownership"
+            artifact_table = "reading_artifact_paths"
             if backend.backend_type == BackendType.POSTGRESQL:
                 # Match the backend's public-schema metadata contract, not search_path.
                 clock_table = "public.reading_revision_clock"
                 items_table = "public.content_items"
                 outputs_table = "public.outputs"
                 ownership_table = "public.reading_output_ownership"
+                artifact_table = "public.reading_artifact_paths"
                 # Serialize first-time DDL before a clock row exists to lock.
                 backend.execute("SELECT pg_advisory_xact_lock(13153)", (), connection=conn)
                 columns = backend.get_table_info("content_items", connection=conn)
@@ -2698,6 +2700,22 @@ class CollectionsDatabase:
             )
             backend.execute(
                 f"CREATE INDEX IF NOT EXISTS idx_reading_output_owner ON {ownership_table}(user_id, item_id)",
+                (),
+                connection=conn,
+            )
+            # No parent FK: unfinished files must remain recoverable after deletion.
+            backend.execute(
+                f"CREATE TABLE IF NOT EXISTS {artifact_table} ("
+                "token TEXT NOT NULL PRIMARY KEY, user_id TEXT NOT NULL, storage_namespace_id TEXT NOT NULL, "
+                "storage_path TEXT NOT NULL, item_id BIGINT NOT NULL, expected_revision BIGINT NOT NULL CHECK (expected_revision > 0), "
+                "lease_until BIGINT NOT NULL, state TEXT NOT NULL CHECK (state IN ('staged', 'pending')), "
+                "attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0), retry_after BIGINT NOT NULL DEFAULT 0, "
+                "last_error TEXT, UNIQUE (user_id, storage_namespace_id, storage_path))",
+                (),
+                connection=conn,
+            )
+            backend.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_reading_artifact_cleanup ON {artifact_table}(user_id, storage_namespace_id, state, retry_after)",
                 (),
                 connection=conn,
             )
@@ -5064,30 +5082,33 @@ class CollectionsDatabase:
             retention_until,
             normalized_idempotency_key,
         )
-        if normalized_idempotency_key is not None:
-            active_output_predicate = (
-                "idempotency_key IS NOT NULL AND deleted = FALSE"
-                if self.backend.backend_type == BackendType.POSTGRESQL
-                else "idempotency_key IS NOT NULL AND deleted = 0"
-            )
-            self.backend.execute(
-                q
-                + " ON CONFLICT (user_id, idempotency_key) "
-                + f"WHERE {active_output_predicate} DO NOTHING",
-                params,
-            )
-            return self.get_output_artifact_by_idempotency_key(normalized_idempotency_key)
-        res = self._execute_insert(q, params)
-        new_id = self._extract_lastrowid(res)
-        if not new_id:
-            raise DatabaseError("Failed to create output artifact")
-        return self.get_output_artifact(new_id)
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            self._assert_output_path_not_reserved(resolved_storage_path, conn)
+            if normalized_idempotency_key is not None:
+                active_output_predicate = (
+                    "idempotency_key IS NOT NULL AND deleted = FALSE"
+                    if self.backend.backend_type == BackendType.POSTGRESQL
+                    else "idempotency_key IS NOT NULL AND deleted = 0"
+                )
+                self.backend.execute(
+                    q + " ON CONFLICT (user_id, idempotency_key) " + f"WHERE {active_output_predicate} DO NOTHING",
+                    params,
+                    connection=conn,
+                )
+                return self.get_output_artifact_by_idempotency_key(normalized_idempotency_key, connection=conn)
+            res = self._execute_insert(q, params, connection=conn)
+            new_id = self._extract_lastrowid(res)
+            if not new_id:
+                raise DatabaseError("Failed to create output artifact")
+            return self.get_output_artifact(new_id, connection=conn)
 
     def get_output_artifact_by_idempotency_key(
         self,
         idempotency_key: str,
         *,
         include_deleted: bool = False,
+        connection: Any | None = None,
     ) -> CollectionsDatabase.OutputArtifactRow:
         """Return the output created for a stable logical operation key."""
         key = str(idempotency_key or "").strip()
@@ -5099,6 +5120,7 @@ class CollectionsDatabase:
             "metadata_json, workspace_tag, created_at, media_item_id, chatbook_path, idempotency_key "
             f"FROM outputs WHERE user_id = ? AND idempotency_key = ?{deleted_clause}",  # nosec B608
             (self.user_id, key),
+            connection=connection,
         ).first
         if not row:
             raise KeyError("output_not_found")
@@ -5181,6 +5203,8 @@ class CollectionsDatabase:
                 except (TypeError, ValueError):
                     pass  # Legacy invalid JSON remains comparable as raw text.
             if changes:
+                if "storage_path" in changes:
+                    self._assert_output_path_not_reserved(changes["storage_path"], conn)
                 owner = self.backend.execute(
                     "SELECT item_id FROM reading_output_ownership WHERE output_id = ? AND user_id = ?",
                     (output_id, self.user_id),
@@ -5259,6 +5283,147 @@ class CollectionsDatabase:
             )
             self._advance_reading_parent(item_id, conn)
             return True
+
+    def reserve_reading_artifact(
+        self, item_id: int, *, expected_revision: int, storage_namespace_id: str, lease_until: int
+    ) -> dict[str, Any]:
+        """Persist an unadopted random path before any file creation by a trusted caller."""
+        if type(expected_revision) is not int or expected_revision <= 0:
+            raise ValueError("invalid_expected_revision")
+        if not isinstance(storage_namespace_id, str) or not storage_namespace_id.strip():
+            raise ValueError("invalid_storage_namespace")
+        if type(lease_until) is not int or not 0 < lease_until < 2**63:
+            raise ValueError("invalid_artifact_lease")
+        token = uuid4().hex
+        path = f"reading_archive_{token}.md"
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            parent = self._get_reading_parent(item_id, conn)
+            if parent.revision != expected_revision:
+                raise ReadingRevisionConflict("reading_revision_conflict")
+            if self._reading_artifact_has_output_reference(path, conn):
+                raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
+            self.backend.execute(
+                "INSERT INTO reading_artifact_paths "
+                "(token, user_id, storage_namespace_id, storage_path, item_id, expected_revision, lease_until, state) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 'staged')",
+                (token, self.user_id, storage_namespace_id, path, item_id, expected_revision, lease_until),
+                connection=conn,
+            )
+            return self.get_reading_artifact(token, storage_namespace_id, connection=conn)
+
+    def get_reading_artifact(
+        self, token: str, storage_namespace_id: str, *, connection: Any | None = None
+    ) -> dict[str, Any]:
+        """Read an internal reservation without disclosing another user's state."""
+        row = self.backend.execute(
+            "SELECT * FROM reading_artifact_paths WHERE token = ? AND user_id = ? AND storage_namespace_id = ?",
+            (token, self.user_id, storage_namespace_id),
+            connection=connection,
+        ).first
+        if not row:
+            raise KeyError("reading_artifact_not_found")
+        return dict(row)
+
+    def validate_reading_artifact_for_write(self, token: str, storage_namespace_id: str, *, now: int) -> dict[str, Any]:
+        """Recheck reservation and original parent after the caller acquires storage exclusion."""
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            row = self.get_reading_artifact(token, storage_namespace_id, connection=conn)
+            if row["state"] != "staged" or row["lease_until"] <= now:
+                raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
+            if self._get_reading_parent(row["item_id"], conn).revision != row["expected_revision"]:
+                raise ReadingRevisionConflict("reading_revision_conflict")
+            return row
+
+    def cancel_reading_artifact(self, token: str, storage_namespace_id: str) -> None:
+        """Queue unadopted staging for cleanup; preserve existing failure/backoff state."""
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            self.backend.execute(
+                "UPDATE reading_artifact_paths SET state = 'pending' WHERE token = ? AND user_id = ? "
+                "AND storage_namespace_id = ? AND state = 'staged'",
+                (token, self.user_id, storage_namespace_id),
+                connection=conn,
+            )
+
+    def _reading_artifact_has_output_reference(self, storage_path: str, connection: Any) -> bool:
+        return bool(
+            self.backend.execute(
+                "SELECT 1 FROM outputs WHERE user_id = ? AND lower(storage_path) = lower(?) LIMIT 1",
+                (self.user_id, storage_path),
+                connection=connection,
+            ).first
+        )
+
+    def _assert_output_path_not_reserved(self, storage_path: str, connection: Any) -> None:
+        # Generic outputs have no namespace authority: conservatively fence all namespaces.
+        if self.backend.execute(
+            "SELECT 1 FROM reading_artifact_paths WHERE user_id = ? AND lower(storage_path) = lower(?) LIMIT 1",
+            (self.user_id, storage_path),
+            connection=connection,
+        ).first:
+            raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
+
+    def prepare_reading_artifact_cleanup(
+        self, storage_namespace_id: str, *, now: int, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        """Select a bounded batch while the caller holds the verified storage lock."""
+        if type(limit) is not int or not 1 <= limit <= 1000:
+            raise ValueError("invalid_cleanup_limit")
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            rows = self.backend.execute(
+                "SELECT * FROM reading_artifact_paths WHERE user_id = ? AND storage_namespace_id = ? "
+                "AND ((state = 'staged' AND lease_until <= ?) OR (state = 'pending' AND retry_after <= ?)) "
+                "AND (last_error IS NULL OR last_error NOT IN ('invalid_path', 'path_collision')) "
+                "ORDER BY retry_after, token LIMIT ?",
+                (self.user_id, storage_namespace_id, now, now, limit),
+                connection=conn,
+            ).rows
+            ready = []
+            for row in rows:
+                self.backend.execute(
+                    "UPDATE reading_artifact_paths SET state = 'pending' WHERE token = ? AND user_id = ?",
+                    (row["token"], self.user_id),
+                    connection=conn,
+                )
+                if self._reading_artifact_has_output_reference(row["storage_path"], conn):
+                    self._record_reading_artifact_error(row, "shared_output", now, conn)
+                else:
+                    ready.append(dict(row))
+            return ready
+
+    def _record_reading_artifact_error(self, row: dict[str, Any], category: str, now: int, connection: Any) -> None:
+        attempts = min(row["attempts"] + 1, 2**31 - 1)
+        self.backend.execute(
+            "UPDATE reading_artifact_paths SET state = 'pending', attempts = ?, retry_after = ?, last_error = ? "
+            "WHERE token = ? AND user_id = ?",
+            (attempts, now + min(3600, 2 ** min(attempts, 12)), category, row["token"], self.user_id),
+            connection=connection,
+        )
+
+    def record_reading_artifact_error(self, token: str, storage_namespace_id: str, *, category: str, now: int) -> None:
+        """Retain only sanitized failure categories with bounded retry backoff."""
+        if category not in {"io", "permission", "invalid_path", "path_collision", "shared_output"}:
+            raise ValueError("invalid_artifact_error")
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            row = self.get_reading_artifact(token, storage_namespace_id, connection=conn)
+            self._record_reading_artifact_error(row, category, now, conn)
+
+    def finish_reading_artifact_cleanup(self, token: str, storage_namespace_id: str) -> bool:
+        """Retire a pending path only after caller's unlink and directory sync succeed."""
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            result = self.backend.execute(
+                "DELETE FROM reading_artifact_paths WHERE token = ? AND user_id = ? AND storage_namespace_id = ? "
+                "AND state = 'pending' AND NOT EXISTS (SELECT 1 FROM outputs "
+                "WHERE outputs.user_id = reading_artifact_paths.user_id AND lower(outputs.storage_path) = lower(reading_artifact_paths.storage_path))",
+                (token, self.user_id, storage_namespace_id),
+                connection=conn,
+            )
+            return result.rowcount == 1
 
     def delete_output_artifact(self, output_id: int, *, hard: bool = False) -> bool:
         row = self.backend.execute(
