@@ -1470,9 +1470,11 @@ full-suite matrices; no application code or PDF assertions changed. All 858
 focused tests pass, including pinned Docker SBOM generation/schema validation.
 Actionlint and touched Ruff pass; Bandit reports only the unchanged `--cov`
 test-string false positive. Independent review found no issues and confirmed
-exactly one primary media-shard assignment on each platform. Latest dev moved
-to `2742468a19fd`; integrate it and verify again before publication. Other
-source-SBOM/E2E and vulnerability admission failures still block merge.
+exactly one primary media-shard assignment on each platform. Rebased cleanly
+onto dev `2742468a19fd`, preserving all eight patches. The post-rebase combined
+matrix, including all ten upstream PDF integration tests, passes 868 tests;
+workflow syntax, touched lint, offline lock freshness and diff checks pass.
+Other source-SBOM/E2E and vulnerability admission failures still block merge.
 
 Wait for all required checks and reviewer comments. Resolve every actionable thread with evidence, rerun affected tests, rebase again if `dev` moved, and merge only after:
 
