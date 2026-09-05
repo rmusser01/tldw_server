@@ -4,9 +4,11 @@ title: Expose synchronous video summarization in Service Prompts
 status: In Progress
 assignee: []
 created_date: '2026-09-05 21:35'
-updated_date: '2026-09-05 21:51'
+updated_date: '2026-09-05 21:53'
 labels: []
 dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/pull/2904'
 documentation:
   - Docs/Design/video-summary-service-prompt.md
 ---
@@ -43,6 +45,8 @@ Baseline141 tests passed. RED evidence: new video integration10failed/8passed; v
 Post-normalization contract run reported43passed/8warnings in86.78s; process shutdown still being checked. Main backend run276passed, sharedUI199passed, WebUI2passed. No API fingerprint change required. Implementation ready for local commit and user integration choice; no PR created yet.
 
 Final contract test process exited successfully (exit0), including shutdown. Temporary frontend dependency symlinks removed. All related local verification complete.
+
+Opened PR2904 against dev from codex/video-summary-service-prompt. Implementation commitfb882adccc. Awaiting remote review and CI; worktree retained for follow-up.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
