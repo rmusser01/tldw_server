@@ -180,6 +180,7 @@ async def get_process_documents_form(
 
 
 async def get_process_videos_form(
+    request: Request,
     urls: list[str] | None = Form(None),
     title: str | None = Form(None),
     titles: str | None = Form(None),
@@ -221,7 +222,8 @@ async def get_process_videos_form(
     """
     Dependency that parses multipart/form-data into a ProcessVideosForm.
 
-    Used by /media/process-videos (no DB persistence).
+    Used by /media/process-videos (no DB persistence). Explicit empty prompts
+    remain distinct from omission; the canonical provider wins over its alias.
     """
     transcription_model = _resolve_transcription_model_or_default(
         transcription_model,
@@ -231,6 +233,11 @@ async def get_process_videos_form(
     try:
         urls_norm = _coerce_urls(urls)
         title_val = title or titles
+        raw_form = await request.form()
+        if system_prompt is None and raw_form.get("system_prompt") == "":
+            system_prompt = ""
+        if custom_prompt is None and raw_form.get("custom_prompt") == "":
+            custom_prompt = ""
         return ProcessVideosForm(
             urls=urls_norm,
             title=title_val,
@@ -251,7 +258,7 @@ async def get_process_videos_form(
             end_time=end_time,
             api_provider=api_provider,
             model_name=model_name,
-            api_name=api_name,
+            api_name=api_provider or api_name,
             use_cookies=use_cookies,
             cookies=cookies,
             chunk_method=chunk_method,

@@ -162,6 +162,12 @@ const KNOWN_DEFINITIONS = {
     description:
       "Controls system instructions for synchronous EPUB analysis. Without a saved override, server defaults apply."
   },
+  "media.video.summarization": {
+    key: "mediaVideoSummarization",
+    label: "Video summarization",
+    description:
+      "Controls system instructions and recursive final-summary instructions for synchronous video analysis. Without a saved override, server defaults apply."
+  },
   "media.audio.analysis": {
     key: "mediaAudioAnalysis",
     label: "Audio summarization",
@@ -230,6 +236,10 @@ const KNOWN_WORKFLOWS: Record<string, { key: string; label: string }> = {
     key: "audioAnalysis",
     label: "Synchronous audio analysis"
   },
+  "media.video.summarization": {
+    key: "videoSummarization",
+    label: "Synchronous video analysis"
+  },
   "notes.title.generate": {
     key: "automaticNotesTitles",
     label: "Automatic Notes titles"
@@ -240,6 +250,7 @@ const KNOWN_PARTS: Record<string, { key: string; label: string }> = {
   template: { key: "template", label: "Template" },
   system: { key: "system", label: "System instructions" },
   user: { key: "user", label: "User instructions" },
+  final_summary: { key: "finalSummary", label: "Final-summary instructions" },
   system_semantics: {
     key: "systemSemantics",
     label: "Refinement guidance"

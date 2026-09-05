@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,7 @@ from fastapi import (
     Depends,
     File,
     HTTPException,
+    Request,
     Response,
     UploadFile,
     status,
@@ -29,6 +31,7 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
 )
+from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
 from tldw_Server_API.app.api.v1.API_Deps.validations_deps import file_validator_instance
 from tldw_Server_API.app.api.v1.endpoints import media as media_mod
@@ -53,6 +56,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
     save_uploaded_files,
 )
+from tldw_Server_API.app.core.Prompt_Management.service_prompts import resolve_service_prompt
 
 router = APIRouter()
 
@@ -69,6 +73,7 @@ router = APIRouter()
     ],
 )
 async def process_videos_endpoint(
+    request: Request,
     background_tasks: BackgroundTasks,
     injected_response: Response,
     db: Any = Depends(get_media_db_for_user),
@@ -79,7 +84,7 @@ async def process_videos_endpoint(
     ),
     current_user: User = Depends(get_request_user),
     usage_log: UsageEventLogger = Depends(get_usage_event_logger),
-):
+) -> JSONResponse:
     """
     Process videos without persisting to the Media DB.
 
@@ -127,6 +132,29 @@ async def process_videos_endpoint(
         form_data.urls,
         files,
     )
+
+    final_summary_prompt = form_data.custom_prompt
+    needs_final_summary = form_data.perform_chunking and form_data.summarize_recursively
+    if (
+        form_data.perform_analysis
+        and form_data.api_name
+        and form_data.api_name.lower() != "none"
+        and (form_data.system_prompt is None or (needs_final_summary and final_summary_prompt is None))
+    ):
+        prompts_db = await get_prompts_db_for_user(request, current_user)
+
+        def resolve_video_prompts() -> dict[str, str]:
+            """Capture the owner's pair and close its connection on the lookup worker."""
+            try:
+                return dict(resolve_service_prompt(prompts_db, "media.video.summarization").parts)
+            finally:
+                prompts_db.close_connection()
+
+        parts = await asyncio.to_thread(resolve_video_prompts)
+        if form_data.system_prompt is None:
+            form_data.system_prompt = parts["system"]
+        if needs_final_summary and final_summary_prompt is None:
+            final_summary_prompt = parts["final_summary"]
 
     batch_result: dict[str, Any] = {
         "processed_count": 0,
@@ -224,6 +252,7 @@ async def process_videos_endpoint(
 
         # --- Call process_videos via helper ---
         batch_result = await run_video_batch(
+            final_summary_prompt=final_summary_prompt,
             all_inputs_to_process=all_inputs_to_process,
             form_data=form_data,
             current_user=current_user,
@@ -256,7 +285,7 @@ async def process_videos_endpoint(
     log_level = "INFO" if final_status_code == status.HTTP_200_OK else "WARNING"
     logger.log(
         log_level,
-        "/process-videos request finished with status {}. Results count: {}, " "Errors: {}",
+        "/process-videos request finished with status {}. Results count: {}, Errors: {}",
         final_status_code,
         total_items,
         final_error_count,

@@ -342,6 +342,24 @@ _DEFINITION_SEQUENCE = (
         affected_workflows=(ServicePromptWorkflow(id="media.audio.analysis", label="Synchronous audio analysis"),),
     ),
     ServicePromptDefinition(
+        id="media.video.summarization",
+        label="Video summarization",
+        description="Controls system instructions and recursive final-summary instructions for synchronous video analysis. Without a saved override, server defaults apply.",
+        parts=(
+            ServicePromptPart(key="system", label="System instructions", mode="literal", required_variables=()),
+            ServicePromptPart(
+                key="final_summary", label="Final-summary instructions", mode="literal", required_variables=()
+            ),
+        ),
+        default_parts=MappingProxyType(
+            {
+                "system": _DOCUMENT_SUMMARY_SYSTEM_DEFAULT,
+                "final_summary": "Summarize the key points from the preceding text sections.",
+            }
+        ),
+        affected_workflows=(ServicePromptWorkflow(id="media.video.summarization", label="Synchronous video analysis"),),
+    ),
+    ServicePromptDefinition(
         id="media.text.translation",
         label="Text translation",
         description="Controls the visible instructions used by synchronous text translation.",
@@ -577,6 +595,10 @@ def resolve_service_prompt_default(definition: ServicePromptDefinition) -> Resol
         from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import _resolve_default_system_prompt
 
         parts = MappingProxyType({"system": _resolve_default_system_prompt()})
+    elif definition.id == "media.video.summarization":
+        from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import _resolve_default_system_prompt
+
+        parts = MappingProxyType({**definition.default_parts, "system": _resolve_default_system_prompt()})
     elif definition.id == "media.audio.analysis":
         from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import _resolve_default_system_prompt
         from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt

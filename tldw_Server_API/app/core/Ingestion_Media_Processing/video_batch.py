@@ -27,6 +27,7 @@ async def run_video_batch(
     temp_dir: str,
     temp_path_to_original_name: dict[str, str],
     file_handling_errors_structured: list[dict[str, Any]],
+    final_summary_prompt: str | None = None,
 ) -> dict[str, Any]:
     """
     Execute the video processing library and merge results with file errors.
@@ -64,6 +65,7 @@ async def run_video_batch(
         "perform_analysis": form_data.perform_analysis,
         "custom_prompt": form_data.custom_prompt,
         "system_prompt": form_data.system_prompt,
+        "final_summary_prompt": final_summary_prompt,
         "perform_chunking": form_data.perform_chunking,
         "chunk_method": form_data.chunk_method,
         "max_chunk_size": form_data.chunk_size,
