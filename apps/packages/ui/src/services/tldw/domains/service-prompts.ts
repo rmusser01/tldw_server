@@ -10,6 +10,7 @@ export type KnownServicePromptId =
   | "chat.web_search.answer"
   | "chat.title.generation"
   | "image.prompt.refinement"
+  | "media.document.summarization"
   | "media.text.translation"
   | "notes.title.generate"
 

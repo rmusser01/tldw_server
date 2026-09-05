@@ -144,6 +144,12 @@ const KNOWN_DEFINITIONS = {
     description:
       "Controls the visible instructions used by synchronous text translation."
   },
+  "media.document.summarization": {
+    key: "mediaDocumentSummarization",
+    label: "Document summarization",
+    description:
+      "Controls system instructions for synchronous document analysis. Without a saved override, server defaults apply."
+  },
   "notes.title.generate": {
     key: "notesTitleGenerate",
     label: "Notes title",
@@ -179,6 +185,10 @@ const KNOWN_WORKFLOWS: Record<string, { key: string; label: string }> = {
   "media.text.translation": {
     key: "textTranslation",
     label: "Text translation"
+  },
+  "media.document.summarization": {
+    key: "documentSummarization",
+    label: "Synchronous document analysis"
   },
   "notes.title.generate": {
     key: "automaticNotesTitles",

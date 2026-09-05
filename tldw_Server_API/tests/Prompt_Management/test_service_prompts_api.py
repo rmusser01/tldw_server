@@ -89,10 +89,7 @@ def test_service_prompt_catalog_returns_exact_metadata_without_prompt_bodies(
         {
             "id": "chat.rag.answer",
             "label": "RAG answer",
-            "description": (
-                "Controls how retrieved context and the current question are "
-                "presented to the model."
-            ),
+            "description": ("Controls how retrieved context and the current question are presented to the model."),
             "parts": [
                 {
                     "key": "template",
@@ -111,10 +108,7 @@ def test_service_prompt_catalog_returns_exact_metadata_without_prompt_bodies(
         {
             "id": "chat.rag.question_rewrite",
             "label": "RAG follow-up rewrite",
-            "description": (
-                "Controls how a conversational follow-up is rewritten into a "
-                "standalone retrieval query."
-            ),
+            "description": ("Controls how a conversational follow-up is rewritten into a standalone retrieval query."),
             "parts": [
                 {
                     "key": "template",
@@ -132,10 +126,7 @@ def test_service_prompt_catalog_returns_exact_metadata_without_prompt_bodies(
         {
             "id": "chat.web_search.answer",
             "label": "Web-search answer",
-            "description": (
-                "Controls how normalized web-search results are presented for the "
-                "final answer."
-            ),
+            "description": ("Controls how normalized web-search results are presented for the final answer."),
             "parts": [
                 {
                     "key": "template",
@@ -152,9 +143,7 @@ def test_service_prompt_catalog_returns_exact_metadata_without_prompt_bodies(
         {
             "id": "chat.title.generation",
             "label": "Conversation title",
-            "description": (
-                "Controls the instruction used to generate automatic conversation titles."
-            ),
+            "description": ("Controls the instruction used to generate automatic conversation titles."),
             "parts": [
                 {
                     "key": "user_template",
@@ -163,16 +152,12 @@ def test_service_prompt_catalog_returns_exact_metadata_without_prompt_bodies(
                     "required_variables": ["query"],
                 }
             ],
-            "affected_workflows": [
-                {"id": "chat.title.generation", "label": "Automatic conversation titles"}
-            ],
+            "affected_workflows": [{"id": "chat.title.generation", "label": "Automatic conversation titles"}],
         },
         {
             "id": "image.prompt.refinement",
             "label": "Image prompt refinement",
-            "description": (
-                "Controls the semantic instructions used to refine image-generation prompt drafts."
-            ),
+            "description": ("Controls the semantic instructions used to refine image-generation prompt drafts."),
             "parts": [
                 {
                     "key": "system_semantics",
@@ -187,16 +172,19 @@ def test_service_prompt_catalog_returns_exact_metadata_without_prompt_bodies(
                     "required_variables": [],
                 },
             ],
-            "affected_workflows": [
-                {"id": "image.prompt.refinement", "label": "Image prompt refinement"}
-            ],
+            "affected_workflows": [{"id": "image.prompt.refinement", "label": "Image prompt refinement"}],
+        },
+        {
+            "id": "media.document.summarization",
+            "label": "Document summarization",
+            "description": "Controls system instructions for synchronous document analysis. Without a saved override, server defaults apply.",
+            "parts": [{"key": "system", "label": "System instructions", "mode": "literal", "required_variables": []}],
+            "affected_workflows": [{"id": "media.document.summarization", "label": "Synchronous document analysis"}],
         },
         {
             "id": "media.text.translation",
             "label": "Text translation",
-            "description": (
-                "Controls the visible instructions used by synchronous text translation."
-            ),
+            "description": ("Controls the visible instructions used by synchronous text translation."),
             "parts": [
                 {
                     "key": "system",
@@ -211,9 +199,7 @@ def test_service_prompt_catalog_returns_exact_metadata_without_prompt_bodies(
                     "required_variables": ["target_language", "text"],
                 },
             ],
-            "affected_workflows": [
-                {"id": "media.text.translation", "label": "Text translation"}
-            ],
+            "affected_workflows": [{"id": "media.text.translation", "label": "Text translation"}],
         },
         {
             "id": "notes.title.generate",
@@ -233,9 +219,7 @@ def test_service_prompt_catalog_returns_exact_metadata_without_prompt_bodies(
                     "required_variables": [],
                 },
             ],
-            "affected_workflows": [
-                {"id": "notes.title.generate", "label": "Automatic Notes titles"}
-            ],
+            "affected_workflows": [{"id": "notes.title.generate", "label": "Automatic Notes titles"}],
         },
     ]
     assert "You are a helpful AI assistant" not in response.text
@@ -252,6 +236,18 @@ def test_service_prompt_detail_returns_packaged_state_without_caching(api_contex
     assert body["saved_parts"] is None
     assert body["effective_parts"] == body["default_parts"]
     assert set(body["default_parts"]) == {"system", "user_template"}
+
+
+def test_document_summary_prompt_can_be_saved_and_reset(api_context: SimpleNamespace) -> None:
+    """Exercise document guidance save and reset through the generic API."""
+    path = "/api/v1/service-prompts/media.document.summarization"
+    parts = {"system": "Summarize in French. Preserve literal {braces}."}
+    saved = api_context.client.put(path, json={"parts": parts, "expected_revision": None})
+    assert saved.status_code == 200
+    assert saved.json()["effective_parts"] == parts
+    reset = api_context.client.delete(path, params={"expected_revision": saved.json()["revision"]})
+    assert reset.status_code == 200
+    assert reset.json()["source"] == "packaged"
 
 
 def test_title_prompt_can_be_saved_and_reset_through_generic_api(api_context) -> None:
@@ -528,9 +524,7 @@ def test_service_prompt_semantic_validation_is_safe_and_field_keyed(api_context)
         "detail": {
             "code": "service_prompt_validation_failed",
             "message": "Service Prompt validation failed.",
-            "field_errors": {
-                "user_template": "Template variables must match the registered variables exactly once."
-            },
+            "field_errors": {"user_template": "Template variables must match the registered variables exactly once."},
         }
     }
     assert secret not in response.text
@@ -621,9 +615,12 @@ def test_service_prompt_structural_validation_hides_authored_field_names(
 def test_service_prompt_validation_location_preserves_only_public_segments() -> None:
     sentinel = "STRUCTURAL-LOCATION-MUST-NOT-LEAK"
 
-    assert service_prompts_module._sanitize_validation_location(
-        ("body", "parts", sentinel, 3)
-    ) == ["body", "parts", "field", 3]
+    assert service_prompts_module._sanitize_validation_location(("body", "parts", sentinel, 3)) == [
+        "body",
+        "parts",
+        "field",
+        3,
+    ]
 
 
 def test_service_prompt_store_failure_is_content_free(api_context) -> None:
@@ -688,10 +685,13 @@ def test_service_prompt_api_key_scopes_and_jwt_bypass(api_context) -> None:
         json={"parts": CUSTOM_PARTS, "expected_revision": None},
     )
     assert saved.status_code == 200
-    assert api_context.client.delete(
-        TRANSLATION_PATH,
-        params={"expected_revision": saved.json()["revision"]},
-    ).status_code == 200
+    assert (
+        api_context.client.delete(
+            TRANSLATION_PATH,
+            params={"expected_revision": saved.json()["revision"]},
+        ).status_code
+        == 200
+    )
 
     api_context.app.state.principal = _principal()
     api_context.app.state.api_key_scope = None
