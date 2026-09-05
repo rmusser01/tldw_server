@@ -472,9 +472,21 @@ const BillingDashboardPage: React.FC = () => {
     return () => clearTimeout(timer)
   }, [capabilityCheckResolved])
 
+  // The page heading (and its Usage cross-link) renders in every state -
+  // guard panels included - so the page never loses its h1 (#2898 L2).
+  const pageHeading = (
+    <span style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
+      <h1 style={{ fontSize: "1.5rem", fontWeight: 600 }}>{t("settings:adminBilling.title", "Billing Dashboard")}</h1>
+      <a href="/admin/usage" style={{ fontSize: "0.85rem" }}>
+        {t("settings:adminBilling.usageCrossLink", "Request and token volumes live in Usage Analytics")}
+      </a>
+    </span>
+  )
+
   if (!capabilityCheckResolved) {
     return (
       <div style={{ padding: 24 }}>
+        {pageHeading}
         <Card loading />
       </div>
     )
@@ -483,6 +495,7 @@ const BillingDashboardPage: React.FC = () => {
   if (adminGuard === "forbidden") {
     return (
       <div style={{ padding: 24 }}>
+        {pageHeading}
         <Alert variant="error" title={t("settings:adminBilling.forbiddenTitle", "Access Denied")}>
           {t("settings:adminBilling.forbiddenBody", "You do not have permission to view the billing dashboard.")}
         </Alert>
@@ -493,6 +506,7 @@ const BillingDashboardPage: React.FC = () => {
   if (adminGuard === "notFound") {
     return (
       <div style={{ padding: 24 }}>
+        {pageHeading}
         <Alert variant="warning" title={t("settings:adminBilling.notFoundTitle", "Not available on this server")}>
           {t(
             "settings:adminBilling.notFoundBody",
@@ -523,12 +537,7 @@ const BillingDashboardPage: React.FC = () => {
 
   return (
     <div style={{ padding: 24 }}>
-      <span style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
-        <h1 style={{ fontSize: "1.5rem", fontWeight: 600 }}>{t("settings:adminBilling.title", "Billing Dashboard")}</h1>
-        <a href="/admin/usage" style={{ fontSize: "0.85rem" }}>
-          {t("settings:adminBilling.usageCrossLink", "Request and token volumes live in Usage Analytics")}
-        </a>
-      </span>
+      {pageHeading}
       <Tabs defaultActiveKey="overview" items={tabItems} />
     </div>
   )
