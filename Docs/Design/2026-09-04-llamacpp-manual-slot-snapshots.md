@@ -1,6 +1,6 @@
 # Manual llama.cpp slot snapshots
 
-Status: Proposed, written-spec review pending. No implementation in this change.
+Status: Approved by requester for implementation planning. No implementation in this change.
 Task: TASK-13159. Baseline: origin/dev c5dfe0ff73.
 
 ADR required: yes
