@@ -17,6 +17,7 @@ from functools import partial
 from pathlib import Path
 
 import anyio
+from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
@@ -318,8 +319,9 @@ class OutputFileOperations:
     async def publish_and_commit(self, token: str) -> CollectionsDatabase.OutputArtifactRow | None:
         """Publish without replacement, then atomically apply the recorded mutation.
 
-        Files and reservations deliberately remain for phase-specific recovery;
-        a successful return denotes logical commit, not filesystem completion.
+        Attempt cleanup under the same exclusion after confirming the commit.
+        A successful return denotes logical commit; failed cleanup remains due
+        for recovery and must not turn a committed mutation into a failed one.
         """
         return await self._run_interval(partial(self._publish_and_commit, token), token=token)
 
@@ -365,7 +367,7 @@ class OutputFileOperations:
                 self.db.abort_output_file_operation(token, self.namespace)
                 raise
             try:
-                return self.db.apply_output_file_operation(token, self.namespace, publication_identity=publication)
+                output = self.db.apply_output_file_operation(token, self.namespace, publication_identity=publication)
             except Exception:  # noqa: BLE001 - any commit failure may hide durable success
                 try:
                     outcome, output = self.db.read_output_file_operation_outcome(token, self.namespace)
@@ -373,18 +375,41 @@ class OutputFileOperations:
                     # Never abort or discard evidence when the outcome is unknown.
                     raise RuntimeError("output_update_unconfirmed") from None
                 if outcome["phase"] == "committed":
-                    return output
+                    return self._complete_committed(directory, token, output)
                 try:
                     aborted = self.db.abort_output_file_operation(token, self.namespace)
                     if not aborted:
                         outcome, output = self.db.read_output_file_operation_outcome(token, self.namespace)
                         if outcome["phase"] == "committed":
-                            return output
+                            return self._complete_committed(directory, token, output)
                         if outcome["phase"] != "aborting":
                             raise RuntimeError("output_update_unconfirmed")
                 except Exception:  # noqa: BLE001 - abort acknowledgement can also be lost
                     raise RuntimeError("output_update_unconfirmed") from None
                 raise RuntimeError("output_operation_conflict") from None
+            return self._complete_committed(directory, token, output)
+
+    def _complete_committed(
+        self, directory: int, token: str, output: CollectionsDatabase.OutputArtifactRow | None
+    ) -> CollectionsDatabase.OutputArtifactRow | None:
+        """Best-effort disposal cannot revoke a known logical commit."""
+        try:
+            self._recover_locked(directory, token)
+            return output
+        except _UnprovedOutputIdentity:
+            category = "output_identity_unconfirmed"
+        except (ReadingStorageUnavailable, OSError):
+            category = "output_storage_unavailable"
+        except Exception:  # noqa: BLE001 - preserve confirmed success and durable recovery authority
+            logger.warning("Output post-commit cleanup deferred: output_update_unconfirmed")
+            return output
+        try:
+            self.db.record_output_file_recovery_failure(token, self.namespace, category)
+        except Exception:  # noqa: BLE001 - failure reporting cannot revoke the confirmed commit either
+            logger.warning("Output post-commit cleanup status unconfirmed: {}", category)
+        else:
+            logger.warning("Output post-commit cleanup deferred: {}", category)
+        return output
 
     async def recover_due(self, *, limit: int = 20) -> dict[str, int]:
         """Recover a bounded batch, yielding storage exclusion between operations.
@@ -409,17 +434,7 @@ class OutputFileOperations:
     def _recover_one(self, token: str) -> str:
         try:
             with _validated_storage_directory(self.output_root, storage_namespace_id=self.namespace) as (_, directory):
-                row = self.db.begin_output_file_recovery(token, self.namespace)
-                if row is None:
-                    return "skipped"
-                if row["phase"] == "aborting":
-                    self._clean_aborted(directory, row)
-                else:
-                    self._clean_committed(directory, row)
-                # Also sync absent paths left by a crash before an earlier fsync.
-                os.fsync(directory)
-                self.db.finish_output_file_operation(token, self.namespace)
-                return "finished"
+                return self._recover_locked(directory, token)
         except DatabaseError:
             raise RuntimeError("output_update_unconfirmed") from None
         except _UnprovedOutputIdentity:
@@ -433,6 +448,19 @@ class OutputFileOperations:
         except (DatabaseError, OSError):
             raise RuntimeError("output_update_unconfirmed") from None
         return "blocked" if category == "output_identity_unconfirmed" else "retry"
+
+    def _recover_locked(self, directory: int, token: str) -> str:
+        row = self.db.begin_output_file_recovery(token, self.namespace)
+        if row is None:
+            return "skipped"
+        if row["phase"] == "aborting":
+            self._clean_aborted(directory, row)
+        else:
+            self._clean_committed(directory, row)
+        # Also sync absent paths left by a crash before an earlier fsync.
+        os.fsync(directory)
+        self.db.finish_output_file_operation(token, self.namespace)
+        return "finished"
 
     def _clean_aborted(self, directory: int, row: dict) -> None:
         if row["stage_path"] is None:  # Removal has no private/public file to undo.

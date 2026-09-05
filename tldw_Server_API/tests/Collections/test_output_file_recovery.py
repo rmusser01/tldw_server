@@ -6,6 +6,7 @@ import asyncio
 import errno
 import os
 from threading import Event
+from unittest.mock import patch
 
 import pytest
 
@@ -23,6 +24,24 @@ from tldw_Server_API.tests.Collections.test_output_file_operations_storage impor
 
 pytestmark = [pytest.mark.unit, pytest.mark.skipif(os.name != "posix", reason="POSIX file protocol")]
 pytest_plugins = ["tldw_Server_API.tests._plugins.authnz_full_fixtures"]
+
+
+def publish_before_interruption(writer, token):
+    """Leave a real committed mutation at the pre-cleanup crash boundary."""
+    real_apply = writer.db.apply_output_file_operation
+    outputs = []
+
+    class Interrupted(BaseException):
+        pass
+
+    def commit_then_interrupt(*args, **kwargs):
+        outputs.append(real_apply(*args, **kwargs))
+        raise Interrupted()
+
+    with patch.object(writer.db, "apply_output_file_operation", commit_then_interrupt):
+        with pytest.raises(Interrupted):
+            run(writer.publish_and_commit, token)
+    return outputs[0]
 
 
 def aborted_publication(db, storage):
@@ -66,7 +85,7 @@ def test_recovery_commit_preserves_destination_and_cleans_old_source(db, storage
     writer = service(db, storage)
     row = prepare(writer, original)
     run(writer.write_chunk, row["token"], b"replacement", expected_offset=0)
-    committed = run(writer.publish_and_commit, row["token"])
+    committed = publish_before_interruption(writer, row["token"])
     assert run(writer.recover_due)["finished"] == 1
     assert (root / "destination.md").read_bytes() == b"replacement"
     assert (root / "destination.md").stat().st_nlink == 1
@@ -132,7 +151,7 @@ def test_recovery_committed_source_with_surviving_reference_is_preserved(db, sto
     shared = db.get_output_artifact(shared.id)
     writer = service(db, storage)
     row = prepare(writer, original)
-    run(writer.publish_and_commit, row["token"])
+    publish_before_interruption(writer, row["token"])
     assert run(writer.recover_due)["finished"] == 1
     assert (root / "source.md").read_bytes() == b"original"
     assert db.get_output_artifact(shared.id) == shared
@@ -142,7 +161,7 @@ def test_recovery_remove_releases_filesystem_claim_but_keeps_history_effect(db, 
     root, namespace, original = storage
     writer = service(db, storage)
     row = run(writer.prepare, kind="remove", output_id=original.id, max_output_bytes=0)
-    run(writer.publish_and_commit, row["token"])
+    publish_before_interruption(writer, row["token"])
     assert run(writer.recover_due)["finished"] == 1
     pending = db.get_output_file_operation(row["token"], namespace)
     assert pending["fs_done"] and pending["reserved_bytes"] == 0 and pending["effects_pending"] == 1
@@ -156,7 +175,7 @@ def test_recovery_changed_committed_source_is_never_unlinked(db, storage):
     root, namespace, original = storage
     writer = service(db, storage)
     row = prepare(writer, original)
-    run(writer.publish_and_commit, row["token"])
+    publish_before_interruption(writer, row["token"])
     (root / "source.md").write_bytes(b"different")
     assert run(writer.recover_due)["blocked"] == 1
     assert (root / "source.md").read_bytes() == b"different"
@@ -203,7 +222,7 @@ def test_recovery_restart_after_cleanup_interruptions(db, storage, monkeypatch, 
     else:
         writer = service(db, storage)
         row = prepare(writer, original)
-        run(writer.publish_and_commit, row["token"])
+        publish_before_interruption(writer, row["token"])
     real_unlink, real_finish = os.unlink, db.finish_output_file_operation
     calls = []
 
@@ -247,7 +266,7 @@ def test_recovery_unproved_committed_destination_keeps_witness_and_source(db, st
     root, namespace, original = storage
     writer = service(db, storage)
     row = prepare(writer, original)
-    run(writer.publish_and_commit, row["token"])
+    publish_before_interruption(writer, row["token"])
     dest = root / "destination.md"
     if changed != "hardlink":
         dest.unlink()
@@ -295,7 +314,7 @@ def test_recovery_empty_and_history_only_batches_never_open_volume(db, storage, 
     root, namespace, original = storage
     writer = service(db, storage)
     row = run(writer.prepare, kind="remove", output_id=original.id, max_output_bytes=0)
-    run(writer.publish_and_commit, row["token"])
+    publish_before_interruption(writer, row["token"])
     run(writer.recover_due)
 
     def forbidden(*args, **kwargs):

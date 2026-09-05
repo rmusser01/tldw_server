@@ -331,7 +331,7 @@ def test_large_copy_has_bounded_memory_and_cross_process_reader_progress(db, sto
                 )
                 run(peer.write_chunk, operation["token"], b"peer", expected_offset=0)
                 published = run(peer.publish_and_commit, operation["token"])
-                assert run(peer.recover_due)["finished"] == 1
+                assert run(peer.recover_due)["finished"] == 0  # Publication already cleaned under exclusion.
                 assert db.get_output_artifact(published.id).storage_path == "peer.md"
                 assert (root / "peer.md").read_bytes() == b"peer"
             offsets.append(offset)

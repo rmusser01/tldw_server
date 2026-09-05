@@ -16,7 +16,7 @@
 opened at `f43549c209` on user request; implementation continues on the same branch).
 **Approved spec:** `Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md`, user approved after checkpoint `8dc255fcca`.
 **Parent plan:** `Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md`; this plan replaces its generic-file-writer gap, not its remaining Reading DTO/HTTP/reconciliation/release tasks.
-**Status:** Inline execution in progress. Task 1, Task 2a, Task 2b, Task 3a staging/write and Task 3b's recorded commit, copy/publication, recovery and real-process kill/progress checkpoints verified on SQLite/PostgreSQL. Runtime lifecycle integration and later tasks remain pending. See checkpoint evidence below.
+**Status:** Inline execution in progress. Task 1, Task 2a, Task 2b, Task 3a staging/write and Task 3b's recorded commit, copy/publication, recovery and real-process kill/progress checkpoints verified on SQLite/PostgreSQL. Immediate post-commit cleanup now reuses recovery under publication exclusion; checkpoint verification is recorded below. Protected readers, history/producer integration and Task 9 background lifecycle/activation remain pending.
 
 ---
 
@@ -785,3 +785,56 @@ power loss, verify network-filesystem semantics, or establish runtime activation
 readiness. Immediate post-publication cleanup/background lifecycle integration,
 remaining producer/reader/history contracts and rollout gates are still pending;
 the full Task 3 checklist and TASK-13153 acceptance criteria are not marked done.
+
+### Task 3b completion: Immediate cleanup under publication exclusion (2026-09-05)
+
+`publish_and_commit` now attempts phase-specific cleanup after every confirmed
+commit path, including recovered lost acknowledgements, without releasing the
+verified storage directory lock. It reuses the existing recovery interval rather
+than introducing a second disposal implementation. Successful create/replace
+retires no-history journal rows after file and directory sync; remove releases
+filesystem claims while retaining its independent history effect. Unknown commit
+outcomes still preserve every file and claim.
+
+Post-commit filesystem/identity failures retain retryable or blocked authority,
+respectively. Database failures and failures while recording cleanup status keep
+the known logical result successful and log only fixed diagnostic categories.
+Cancellation drains cleanup before exclusion is released. Recovery tests now
+seed committed-but-unfinished work by interrupting the real DB apply boundary,
+not by disabling cleanup on every service fixture. Actual process-kill tests
+remain intact; unrelated writer progress now verifies immediate completion.
+
+The initial nine focused SQLite cases failed at the missing cleanup boundary,
+then passed with the implementation. Three further cases cover cleanup-status
+write failure, unexpected cleanup errors with sanitized logs and successful
+later recovery, and cancellation during unlink. Independent checkpoint review
+found no actionable correctness/security or test findings. Existing ADR-003
+applies; no new architectural boundary or dependency was introduced.
+
+This is still service-level work. Runtime routes, automatic worker registration,
+descriptor readers, history delivery, remaining producers and activation are not
+enabled. Task 9 owns background lifecycle registration after its prerequisites;
+the next implementation checkpoint is Task 4's protected descriptor readers.
+TASK-13153 remains In Progress, full-task ACs unchecked, and PR #2903 draft.
+
+Final checkpoint verification: 172 SQLite/non-PostgreSQL cases passed in 26.55
+seconds and 129 required PostgreSQL cases passed in 333.70 seconds, for 301
+distinct targeted cases with no required-backend skips. Earlier overlapping
+runs are not counted again. Ruff, Black, compile and diff checks pass for all
+five changed Python files. Bandit reports zero findings and scanner errors on
+the production service without exclusions, and on changed tests with only B101
+(pytest assertions) excluded. The DB adapter is unchanged in this checkpoint.
+No full sweep or Docker provisioning was performed.
+
+Commands after activating the existing Server virtual environment:
+
+```bash
+TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_completion.py tldw_Server_API/tests/Collections/test_output_file_operations_storage.py tldw_Server_API/tests/Collections/test_output_file_recovery.py tldw_Server_API/tests/Collections/test_output_file_process_recovery.py tldw_Server_API/tests/Collections/test_reading_artifact_storage.py tldw_Server_API/tests/Collections/test_reading_artifact_cleanup.py -q -k 'not postgres'
+TLDW_TEST_NO_DOCKER=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_completion.py tldw_Server_API/tests/Collections/test_output_file_operations_storage.py tldw_Server_API/tests/Collections/test_output_file_recovery.py tldw_Server_API/tests/Collections/test_output_file_process_recovery.py -q -k postgres -n 2
+```
+
+Logs: `/private/tmp/task-13153-completion-{red,green,expanded}.log`,
+`/private/tmp/task-13153-completion-sqlite-final.log`,
+`/private/tmp/task-13153-completion-pg.log`,
+`/private/tmp/task-13153-completion-bandit.json`, and
+`/private/tmp/task-13153-completion-tests-bandit.json`.
