@@ -1,5 +1,29 @@
 # Testing Evidence Lessons
 
+## Do not signal a multiprocessing Event after terminating its waiter
+
+**Incident (TASK-13153, 2026-09-04):** The Reading storage-lock crash test
+successfully terminated its child and reacquired the OS file lock, but its own
+`finally: release.set()` hung. A short pytest timeout captured the parent blocked
+in `multiprocessing.Condition.notify()` waiting for the killed waiter to wake.
+
+**Evidence and rule:** Removing event signaling after termination made the same
+real-process test complete. Crash-test teardown must not depend on the terminated
+process's shared synchronization state; join/terminate owned children directly.
+OS lock recovery and test-event recovery are different contracts.
+
+## Retry success must re-establish durability, not just find complete bytes
+
+**Incident (TASK-13153, 2026-09-04):** Reading namespace provisioning wrote a valid
+marker before syncing it. Injected `fsync` failure made the first attempt fail,
+but retry returned the existing marker without syncing, falsely reporting success
+even while the storage fault persisted.
+
+**Evidence and rule:** A real-directory regression reproduced both attempts;
+syncing the existing marker and directory on explicit provisioning retries made
+both fail until sync recovered, then preserved the original namespace. Complete
+readable bytes alone do not prove an interrupted provisioning attempt was durable.
+
 ## SQLite non-INTEGER primary keys need explicit NOT NULL
 
 **Incident (TASK-13153, 2026-09-04):** Review of Reading output ownership found

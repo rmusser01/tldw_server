@@ -362,12 +362,54 @@ Run `python -m pytest tldw_Server_API/tests/Collections/test_reading_artifact_re
 
 ## Stage 3: Durable artifact staging, adoption and cleanup
 
-**Status:** Not Started
+**Status:** In Progress — local POSIX storage namespace/OS exclusion prerequisite implemented; durable intents and production wiring not yet implemented.
 **Goal:** No lost cleanup after crashes and no unlink of shared/reused paths.
 **Success Criteria:** Retry/restart and writer/cleanup races pass; pending work remains observable.
 **Tests:** New artifact module, existing Reading archive/API tests and output-service regressions.
 
 **Interfaces:** Create `drain_reading_artifact_cleanup(db: CollectionsDatabase, *, storage_namespace_id: str, limit: int = 100) -> int` in the cleanup service; returns completed intent count. Reservations have a namespace, unique token, lease deadline and `staged|owned|pending` lifecycle. Adoption requires matching token, unexpired lease, surviving item and original revision. Worker claim and output registration serialize on the database fence. Namespace identity is provisioned and verified against a volume marker, not inferred from the database or hostname.
+
+Storage prerequisite slice: implement explicit, idempotent namespace provisioning
+and a fail-closed, nonblocking POSIX OS-lock context in the cleanup service before
+adding unlink/adoption. Runtime access never creates a missing volume marker or
+lock file; provisioning never rotates an existing identity or replaces a missing
+lock beside an existing marker. Hold an open directory descriptor, reject symlink
+or nonregular marker/lock files, verify the path still names the locked directory
+and inode, and sanitize failures. Unsupported platforms fail closed, not through
+stale-file locking. Test independent processes, busy/release, process-exit recovery,
+missing/mismatched markers, distinct roots and replaced lock files. This does not
+establish readiness for untested shared/network filesystems or enable capability.
+ADR required: existing ADR-003 applies; no new lifecycle decision.
+
+Storage prerequisite checkpoint (2026-09-04): the new cleanup-service module has
+explicit namespace provisioning and runtime `reading_storage_lock()`. Provisioning
+requires an existing output directory, persists a random opaque marker with file
+and directory fsync, preserves identity on repeat and rejects a missing lock beside
+an existing marker. Runtime never creates marker/lock/root state. It verifies
+private regular single-link marker/lock files and directory/lock identity after
+nonblocking POSIX flock acquisition. Missing/mismatched state fails unavailable;
+contention fails busy for a later retry. No stale-lock-file fallback, dependency,
+database I/O or diagnostic payload logging is added.
+
+The real subprocess tests prove local exclusion and lock release after both normal
+exit and explicit child termination while retaining the original lock inode.
+The first crash test hung in its own event signaling after termination; a timed
+stack trace isolated that test teardown defect and it was removed. Independent
+review reproduced a provisioning retry bypassing a prior fsync failure. A failing
+regression preceded the fix; existing-marker provisioning now syncs both marker and
+directory before succeeding. Re-review found no outstanding actionable findings.
+Both incidents are recorded in `backlog/docs/lessons-testing-evidence.md`.
+
+Verification: `python -m pytest tldw_Server_API/tests/Collections/test_reading_artifact_storage.py --timeout=20 -q --tb=short`
+passes 23 cases (no skips) on local macOS/POSIX with the Server virtual environment.
+New files pass Ruff, Black and compilation; `git diff --check` passes. Scoped Bandit
+reports zero findings/errors. No database code changed, so no new PostgreSQL evidence
+is claimed; no full suite ran. Tests do not certify Windows or shared/network-volume
+locking. Unsupported platform locking fails closed and capability remains absent.
+This module has no production caller: staging reservations, adoption, unlink intents,
+bounded retry drain, purge routing and readiness remain to be implemented. The
+storage prerequisite was brought forward because relational deletion must not begin
+file disposal before exclusion and namespace verification are available.
 
 - [ ] Write a failing unlink-retry test: create a real archive in `tmp_path`, delete its parent, force `Path.unlink` to raise `PermissionError`, and assert the intent persists. Reopen the database and retry with unlink restored; assert file and intent are absent. Also test already-missing files as successful cleanup.
 - [ ] Run `python -m pytest tldw_Server_API/tests/Collections/test_reading_artifact_cleanup.py -q` and verify missing lifecycle behavior.

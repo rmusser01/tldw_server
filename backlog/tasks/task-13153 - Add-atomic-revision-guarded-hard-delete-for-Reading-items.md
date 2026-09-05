@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-03 02:27'
-updated_date: '2026-09-05 02:34'
+updated_date: '2026-09-05 02:55'
 labels:
   - collections
   - reading-list
@@ -52,5 +52,5 @@ diagnostic-privacy behavior are covered.
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-ADR required: yes. ADR path: backlog/decisions/003-reading-atomic-hard-delete.md. Reason: persisted aggregate revisions, destructive preconditions, ownership and durable cleanup. Design: Docs/superpowers/specs/2026-09-04-reading-atomic-hard-delete-design.md. Plan: Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md. Stage 1 in progress: schema/clock and item/tag/note-link/highlight writers complete as partial checkpoints. Structural ownership has same-user restrictive FKs, explicit namespace and revision-guarded idempotent registration. Output metadata/chatbook/media-link/rename/format/retention DB writers now share one clock-first transaction and normalized no-op handling; service SQL delegates to this boundary. Review found no outstanding scoped issues; retention-only and explicit-connection checks added. Production archive/adoption/reconciliation registration remains unwired. File-first rename/transcode/deletion and purge still require durable cleanup, shared-path reservations and volume authority before enabling registration. Next: storage staging/adoption and cleanup/purge integration, reconciliation, DTO snapshots and guarded-delete readiness. Capability stays absent. Focused results are recorded in the plan; existing PostgreSQL service only with TLDW_TEST_NO_DOCKER=1.
+ADR required: yes. ADR path: backlog/decisions/003-reading-atomic-hard-delete.md. Reason: persisted aggregate revisions, destructive preconditions, ownership and durable cleanup. Design: Docs/superpowers/specs/2026-09-04-reading-atomic-hard-delete-design.md. Plan: Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md. Stage 1 remains in progress: schema/clock, item/tag/note-link/highlight and output metadata update writers implemented as partial checkpoints. Structural output ownership remains trusted and unwired. Stage 3 storage prerequisite now provides explicit durable namespace provisioning and persistent fail-closed nonblocking POSIX OS locking; no runtime marker/root/lock recreation. Real subprocess exit/termination tests and fault-injected fsync retry regression pass; scoped review resolved the durability retry gap. 23 focused filesystem tests pass, new files lint/format/compile clean, scoped Bandit zero findings. No new PostgreSQL evidence claimed for this filesystem-only slice. Next: durable staging reservations, adoption and cleanup intents/drain, shared-path and purge routing, reconciliation, DTO snapshots and guarded-delete readiness. Existing file-first production paths remain pending; no production storage caller or capability activation yet. Both test-event teardown and fsync retry lessons recorded. Full evidence and remaining scope are in the plan.
 <!-- SECTION:PLAN:END -->
