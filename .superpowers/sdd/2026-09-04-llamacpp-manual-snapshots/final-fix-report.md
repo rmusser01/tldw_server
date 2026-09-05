@@ -1,8 +1,8 @@
 # Final combined snapshot fix report
 
-Status: implemented and targeted verification passed; awaiting controller independent re-review. Review base: `786b46e9ef`. TASK-13162 remains under controller tracking; TASK-13163 live acceptance is still open.
+Status: implemented and targeted verification passed; awaiting controller independent re-review. Review base: `786b46e9ef`. TASK-13187 remains under controller tracking; TASK-13188 live acceptance is still open.
 
-ADR required: yes. ADR path: `Docs/ADR/043-managed-llamacpp-manual-slot-snapshots.md`. Reason: these fixes enforce the existing native-control, ownership and fail-closed storage boundaries; no new ADR or feature redesign was needed. Read TASK-13162, the approved design, ADR-043, repository guidance, prior task reports and the testing-evidence lessons. Used TDD and verification-before-completion skills. No subagents, push or merge.
+ADR required: yes. ADR path: `Docs/ADR/043-managed-llamacpp-manual-slot-snapshots.md`. Reason: these fixes enforce the existing native-control, ownership and fail-closed storage boundaries; no new ADR or feature redesign was needed. Read TASK-13187, the approved design, ADR-043, repository guidance, prior task reports and the testing-evidence lessons. Used TDD and verification-before-completion skills. No subagents, push or merge.
 
 ## Changes
 

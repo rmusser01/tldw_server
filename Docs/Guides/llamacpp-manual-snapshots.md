@@ -172,7 +172,7 @@ cause has been identified. All disposable child processes exited.
 - Result: 1 live failure, 5 metric-validator passes in 180.21 seconds.
 
 The executable hash alone does not describe the corrected dynamic-library
-bundle. No production hash was admitted. TASK-13163 remains open for diagnosis,
+bundle. No production hash was admitted. TASK-13188 remains open for diagnosis,
 successful measured reuse, and real Admin/Chatbook/Pause/Resume verification.
 
 ### Latest ARM64 release retry
@@ -244,7 +244,7 @@ Check memory before enabling it; full cache is not a universal reuse guarantee.
 Reports retain measured warm/cold counters even when reuse assertions fail.
 Evidence applies to the exact model bytes, runtime bundle and effective options,
 not every model in an architecture. No production build was admitted by this
-configuration change. Admin/Chatbook acceptance remains separate; TASK-13163 is open.
+configuration change. Admin/Chatbook acceptance remains separate; TASK-13188 is open.
 
 ### Managed full-cache verification (2026-09-04)
 

@@ -1,5 +1,5 @@
 ---
-id: TASK-13163
+id: TASK-13188
 title: Add manual snapshot Admin workflow and live reuse evidence
 status: In Progress
 assignee:
@@ -8,7 +8,7 @@ created_date: '2026-09-05 02:19'
 updated_date: '2026-09-05 06:38'
 labels: []
 dependencies:
-  - TASK-13162
+  - TASK-13187
 documentation:
   - Docs/Design/2026-09-04-llamacpp-manual-slot-snapshots.md
   - Docs/ADR/043-managed-llamacpp-manual-slot-snapshots.md

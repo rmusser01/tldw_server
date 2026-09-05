@@ -1,6 +1,6 @@
 # Manual llama.cpp snapshot UAT — 2026-09-05
 
-Tracking: TASK-13174. Architecture: [ADR-043](../ADR/043-managed-llamacpp-manual-slot-snapshots.md).
+Tracking: TASK-13189. Architecture: [ADR-043](../ADR/043-managed-llamacpp-manual-slot-snapshots.md).
 
 ## Scope and environment
 
@@ -78,8 +78,9 @@ actual slot routing have not been demonstrated. The original snapshot acceptance
 task remains open and production support remains gated. The PR must not claim
 general model support or conversation resumption from these cache tests.
 
-The rebase also revealed that dev independently reused Backlog IDs 13159–13163.
-The five snapshot task files have not been renumbered: the CLI has no ID-renaming
-operation and explicit approval for direct task-file migration is outstanding.
-TASK-13174 uniquely tracks this verification/PR work. The draft PR also awaits
-the repository-required human-written Change summary before merge.
+The rebase revealed independently reused Backlog IDs. With the requester's
+explicit approval, the six snapshot tasks were renumbered to TASK-13184 through
+TASK-13189; TASK-13189 tracks this verification/PR work. Unrelated dev tasks keep
+their original IDs. TASK-13183 records the migration and review/merge follow-up.
+The requester has supplied the human-written Change summary and authorized merge
+of the gated implementation after review and required checks pass.

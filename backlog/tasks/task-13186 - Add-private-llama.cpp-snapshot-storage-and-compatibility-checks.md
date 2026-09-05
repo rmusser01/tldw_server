@@ -1,5 +1,5 @@
 ---
-id: TASK-13161
+id: TASK-13186
 title: Add private llama.cpp snapshot storage and compatibility checks
 status: Done
 assignee:
@@ -36,7 +36,7 @@ Execute Task 1 of Docs/superpowers/plans/2026-09-04-llamacpp-manual-snapshots.md
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Implemented storage, metadata, compatibility and profile defaults in 88d0de09c6, with review fixes 05c1ef71c7 and f9ba63c5ac. Independent spec/quality review approved after two fix rounds. 50 targeted tests with cached Hypothesis; Ruff, compileall, Bandit and whitespace checks clean. Existing seven bootstrap warnings documented in report. ADR043 accepted from requester design/execution approval. Minor descriptor cleanup noted for integration/final review; runtime guards remain TASK-13162.
+Implemented storage, metadata, compatibility and profile defaults in 88d0de09c6, with review fixes 05c1ef71c7 and f9ba63c5ac. Independent spec/quality review approved after two fix rounds. 50 targeted tests with cached Hypothesis; Ruff, compileall, Bandit and whitespace checks clean. Existing seven bootstrap warnings documented in report. ADR043 accepted from requester design/execution approval. Minor descriptor cleanup noted for integration/final review; runtime guards remain TASK-13187.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

@@ -1,6 +1,6 @@
 # Task 3 implementation report
 
-Status: safe implementation ready for independent review. TASK-13163 remains In Progress. Live acceptance is blocked on operator-supplied llama-server/model assets and real Admin/Chatbook verification; no production build hash was added.
+Status: safe implementation ready for independent review. TASK-13188 remains In Progress. Live acceptance is blocked on operator-supplied llama-server/model assets and real Admin/Chatbook verification; no production build hash was added.
 
 ## Implementation
 
@@ -67,7 +67,7 @@ No llama-server or GGUF paths were supplied; live inference was not run. No exec
 
 The metric fields were verified from public pinned source using approved curl: tools/server/server-common.cpp:67–71 maps `timings.cache_n` to `n_prompt_cached` and `timings.prompt_n` to `n_prompt_processed`. tools/server/server-context.cpp:2118 assigns top-level `tokens_cached` from final slot prompt size. The harness requires direct timings counters and fails closed if absent. Source-derived fixtures are not live build support.
 
-Review attention: the live harness is unexercised with real assets and deliberately characterizes a candidate only; initial production capability stays unsupported. Native `/completion` explicitly routes to slot 0, while normal Chatbook requests may route elsewhere. Keep TASK-13163 open until the measured runtime proof and real client semantics checks are recorded.
+Review attention: the live harness is unexercised with real assets and deliberately characterizes a candidate only; initial production capability stays unsupported. Native `/completion` explicitly routes to slot 0, while normal Chatbook requests may route elsewhere. Keep TASK-13188 open until the measured runtime proof and real client semantics checks are recorded.
 
 ## Round-one independent-review fixes
 
@@ -101,4 +101,4 @@ node apps/tldw-frontend/node_modules/prettier/bin/prettier.cjs --check --no-semi
 git diff --check
 ```
 
-All final static commands exited 0; Prettier reported all matched files use its code style. An initial combined format check incorrectly applied shared-package conventions to the frontend workflow and warned on that file; separate checks using each package's existing conventions pass without changing its style. ESLint retains only the existing root missing-pages configuration notice, not changed-code diagnostics. A first targeted TypeScript check caught an invalid test-only RTL `exact` option; removed it and reran successfully. No Python/security-boundary files changed in this round, so the recorded Ruff/Bandit harness checks were not rerun. No full sweep was run. Live blockers, empty production allowlist and TASK-13163 In Progress status are unchanged.
+All final static commands exited 0; Prettier reported all matched files use its code style. An initial combined format check incorrectly applied shared-package conventions to the frontend workflow and warned on that file; separate checks using each package's existing conventions pass without changing its style. ESLint retains only the existing root missing-pages configuration notice, not changed-code diagnostics. A first targeted TypeScript check caught an invalid test-only RTL `exact` option; removed it and reran successfully. No Python/security-boundary files changed in this round, so the recorded Ruff/Bandit harness checks were not rerun. No full sweep was run. Live blockers, empty production allowlist and TASK-13188 In Progress status are unchanged.

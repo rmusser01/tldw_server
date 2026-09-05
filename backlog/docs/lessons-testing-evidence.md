@@ -113,7 +113,7 @@ During PR #2884 / TASK-13176, VisualPackEditor tests passed64/64 on local Node26
 
 ## Cache size is not proof of cache reuse
 
-**Incident (TASK-13162/TASK-13163, 2026-09-04):** Manual llama.cpp snapshot
+**Incident (TASK-13187/TASK-13188, 2026-09-04):** Manual llama.cpp snapshot
 tests initially modeled a slot token count as `n_past`. Review against pinned
 upstream source found that slot JSON uses `n_prompt_tokens` only after a task;
 fresh idle slots omit it. The live-harness investigation also found that
@@ -131,7 +131,7 @@ file existence, HTTP success, similar output, or final cache size.
 
 ## Snapshot reuse evidence is configuration-specific
 
-**Incident (TASK-13163, 2026-09-04):** The supplied Gemma sliding-window model
+**Incident (TASK-13188, 2026-09-04):** The supplied Gemma sliding-window model
 saved/restored 2770 tokens on llama.cpp b10816 but reused zero after restart.
 Native diagnostics reported missing cache coverage; a one-variable `--swa-full`
 test changed reuse to 2770 tokens with only 10 processed. The managed

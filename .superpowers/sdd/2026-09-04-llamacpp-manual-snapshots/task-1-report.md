@@ -1,6 +1,6 @@
 # Task 1 implementation report
 
-Status: implementation complete; awaiting controller independent review. TASK-13161 remains In Progress.
+Status: implementation complete; awaiting controller independent review. TASK-13186 remains In Progress.
 
 ## Scope delivered
 
@@ -35,7 +35,7 @@ The tests use real temporary files/directories and cover known-hash publication,
 - Launch working-directory quarantine cleanup requires a proven-dead child and belongs to the Stage 2 lifecycle owner; this store only creates integrity-verified restore staging files and never attempts lifecycle cleanup itself.
 - Hypothesis was initially unavailable on the venv's default import path. The controller supplied an existing cached package path, so the round-one fix adds and runs a generated invalid-digest property test without installing or changing dependencies.
 - Profile create/update API propagation and runtime/profile deletion guards remain Stage 2 concerns; this stage supplies the persisted fields and storage primitives only.
-- Existing controller edits to the implementation-plan heading and TASK-13161 tracking file were preserved and are intentionally excluded from this stage's code commit.
+- Existing controller edits to the implementation-plan heading and TASK-13186 tracking file were preserved and are intentionally excluded from this stage's code commit.
 
 ## Round-one independent-review fixes
 

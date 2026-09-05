@@ -3,7 +3,7 @@
 Status: Accepted
 Date: 2026-09-04
 Decision owner: Requester approved written design and subagent-driven implementation.
-Related task: TASK-13159
+Related task: TASK-13184
 Design: [Manual slot snapshots (repository source)](https://github.com/rmusser01/tldw_server/blob/3869302734f194b9389b37543c0e25fd6af7d5fa/Docs/Design/2026-09-04-llamacpp-manual-slot-snapshots.md)
 
 ## Context

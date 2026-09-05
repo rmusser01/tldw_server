@@ -1,5 +1,5 @@
 ---
-id: TASK-13160
+id: TASK-13185
 title: Plan manual llama.cpp snapshots implementation
 status: Done
 assignee:
@@ -39,7 +39,7 @@ Created three dependency-ordered implementation tasks and an execution plan with
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Planning complete; TASK-13161, TASK-13162 and TASK-13163 remain To Do. Execution approach is the next user choice.
+Planning complete; TASK-13186, TASK-13187 and TASK-13188 remain To Do. Execution approach is the next user choice.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
