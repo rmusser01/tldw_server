@@ -6,7 +6,10 @@ import json
 import re
 from pathlib import Path
 
+import pytest
 import yaml
+
+pytestmark = pytest.mark.unit
 
 
 def _load(path: str) -> dict:

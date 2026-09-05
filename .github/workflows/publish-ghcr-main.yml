@@ -20,7 +20,10 @@ jobs:
     name: Admit exact source dependencies
     uses: ./.github/workflows/sbom.yml
     permissions:
+      actions: read
       contents: read
+      pull-requests: read
+      statuses: read
 
   build-scan-promote:
     name: Build, scan, and promote main
@@ -93,6 +96,7 @@ jobs:
         run: |
           set -euo pipefail
           docker run --rm --platform linux/amd64 \
+            --user "$(id -u):$(id -g)" \
             --cap-drop ALL \
             --security-opt no-new-privileges:true \
             --read-only \
@@ -120,6 +124,7 @@ jobs:
           set -euo pipefail
           trivy() {
             docker run --rm --platform linux/amd64 \
+              --user "$(id -u):$(id -g)" \
               --cap-drop ALL \
               --security-opt no-new-privileges:true \
               --read-only \

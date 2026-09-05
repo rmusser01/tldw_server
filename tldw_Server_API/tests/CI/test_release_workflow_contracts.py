@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import subprocess
+import tarfile
 from pathlib import Path
 
 import pytest
 import yaml
+
+pytestmark = pytest.mark.unit
 
 RELEASE_WORKFLOW = Path(".github/workflows/publish-docker.yml")
 MAIN_WORKFLOW = Path(".github/workflows/publish-ghcr-main.yml")
@@ -222,6 +226,28 @@ def test_frontend_candidates_are_local_build_and_scan_only() -> None:
     assert '"provenance_ref": os.environ["PROVENANCE_REF"]' in record
     assert "steps.attest.outputs.bundle-path" in hashes
     assert "provenance-image-${{ matrix.name }}.jsonl" in hashes
+
+
+def test_frontend_evidence_retains_exact_attested_subject_bytes(tmp_path: Path) -> None:
+    """The offline signature verifier needs the OCI bytes, not an identity summary."""
+    layout = tmp_path / "input"
+    layout.mkdir()
+    child = "sha256:" + "b" * 64
+    raw = json.dumps({"schemaVersion": 2, "manifests": [{
+        "digest": child, "platform": {"os": "linux", "architecture": "amd64"},
+    }]}).encode()
+    (layout / "index.json").write_bytes(raw)
+    with tarfile.open(tmp_path / "webui.oci.tar", "w") as archive:
+        archive.add(layout / "index.json", arcname="index.json")
+    job = _load(RELEASE_WORKFLOW)["jobs"]["build-frontend-candidates"]
+    script = _run(_get_step(job["steps"], "Extract exact frontend OCI subject"))
+    script = script.replace("${{ matrix.name }}", "webui")
+    subprocess.run(["bash", "-c", script], cwd=tmp_path, check=True, env={
+        **os.environ, "SUBJECT_DIGEST": "sha256:" + hashlib.sha256(raw).hexdigest(),
+        "RUNNER_TEMP": str(tmp_path), "GITHUB_OUTPUT": str(tmp_path / "outputs"),
+    })
+
+    assert (tmp_path / "evidence/subject-webui.json").read_bytes() == raw
 
 
 def test_release_scanner_database_is_fresh_shared_and_offline() -> None:

@@ -1,6 +1,10 @@
 from pathlib import Path
 import re
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 def test_postgres_users_schema_file_exists_with_core_columns() -> None:
     schema_path = Path("tldw_Server_API/Databases/Postgres/Schema/postgresql_users.sql")

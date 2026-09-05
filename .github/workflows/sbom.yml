@@ -4,6 +4,9 @@ on:
   workflow_call:
   workflow_dispatch:
   pull_request:
+  workflow_run:
+    workflows: [Frontend License Gate Audit]
+    types: [completed]
   push:
     branches:
       - main
@@ -12,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: source-sbom-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref || github.run_id }}
+  group: source-sbom-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
   cancel-in-progress: true
 
 env:
@@ -23,9 +26,6 @@ env:
   EVIDENCE_DIR: artifacts/source-sbom
 
 jobs:
-  # The pull_request path reports to the PR, so it is the one branch protection
-  # sees -- but it used to start every gate immediately, in parallel with the
-  # license audit it is supposed to follow. This makes it wait for the verdict.
   await_license:
     if: github.event_name == 'pull_request'
     uses: ./.github/workflows/license-first-await.yml
@@ -33,16 +33,41 @@ jobs:
       contents: read
       statuses: read
 
+  admission:
+    if: >-
+      vars.LICENSE_FIRST_CI_ENABLED == 'true' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success'
+    uses: ./.github/workflows/license-first-admission.yml
+    with:
+      workflow_file: sbom.yml
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      statuses: read
+
   generate-python:
     name: Generate Python source SBOM
-    needs: await_license
-    if: always() && !cancelled() && (needs.await_license.result == 'skipped' || needs.await_license.outputs.license_passed == 'true')
+    needs: [admission, await_license]
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        (github.event_name != 'workflow_run' &&
+          (needs.await_license.result == 'skipped' || needs.await_license.outputs.license_passed == 'true'))
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Setup Python
@@ -110,15 +135,26 @@ jobs:
           if-no-files-found: error
 
   generate-apps-workspace:
-    needs: await_license
-    if: always() && !cancelled() && (needs.await_license.result == 'skipped' || needs.await_license.outputs.license_passed == 'true')
     name: Generate applications workspace source SBOM
+    needs: [admission, await_license]
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        (github.event_name != 'workflow_run' &&
+          (needs.await_license.result == 'skipped' || needs.await_license.outputs.license_passed == 'true'))
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Generate required-only Bun workspace CycloneDX
@@ -128,6 +164,7 @@ jobs:
           mkdir -p "$EVIDENCE_DIR"
           cdxgen() {
             docker run --rm --platform linux/amd64 \
+              --user "$(id -u):$(id -g)" \
               --network none \
               --cap-drop ALL \
               --security-opt no-new-privileges:true \
@@ -274,15 +311,26 @@ jobs:
           if-no-files-found: error
 
   generate-admin-ui:
-    needs: await_license
-    if: always() && !cancelled() && (needs.await_license.result == 'skipped' || needs.await_license.outputs.license_passed == 'true')
     name: Generate Admin UI source SBOM
+    needs: [admission, await_license]
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        (github.event_name != 'workflow_run' &&
+          (needs.await_license.result == 'skipped' || needs.await_license.outputs.license_passed == 'true'))
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Generate required-only Admin UI CycloneDX
@@ -292,6 +340,7 @@ jobs:
           mkdir -p "$EVIDENCE_DIR"
           cdxgen() {
             docker run --rm --platform linux/amd64 \
+              --user "$(id -u):$(id -g)" \
               --network none \
               --cap-drop ALL \
               --security-opt no-new-privileges:true \
@@ -405,6 +454,7 @@ jobs:
           sha256sum -c sbom-admin-ui.cdx.json.sha256
           cyclonedx() {
             docker run --rm --platform linux/amd64 \
+              --user "$(id -u):$(id -g)" \
               --network none \
               --cap-drop ALL \
               --security-opt no-new-privileges:true \
@@ -497,6 +547,7 @@ jobs:
       - name: Checkout policy evaluator
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Setup Python
@@ -517,6 +568,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/trivy-cache"
           trivy() {
             docker run --rm --platform linux/amd64 \
+              --user "$(id -u):$(id -g)" \
               --cap-drop ALL \
               --security-opt no-new-privileges:true \
               --read-only \
@@ -528,6 +580,7 @@ jobs:
           }
           trivy_scan() {
             docker run --rm --platform linux/amd64 \
+              --user "$(id -u):$(id -g)" \
               --network none \
               --cap-drop ALL \
               --security-opt no-new-privileges:true \
@@ -659,8 +712,20 @@ jobs:
 
   source-gate:
     name: Source SBOM result gate
-    if: ${{ always() }}
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        (github.event_name != 'workflow_run' &&
+          (needs.await_license.result == 'skipped' || needs.await_license.outputs.license_passed == 'true'))
+      )
     needs:
+      - await_license
+      - admission
       - generate-python
       - generate-apps-workspace
       - generate-admin-ui
