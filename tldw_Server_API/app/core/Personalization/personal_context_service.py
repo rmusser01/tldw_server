@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
@@ -37,6 +37,7 @@ from tldw_Server_API.app.core.DB_Management.Personal_Context_Repository import (
     DirectPurgeCleanupIntent,
 )
 from tldw_Server_API.app.core.exceptions import (
+    PersonalContextError,
     ProfileConflictError,
     ProfileKeyCollisionError,
     ProfileNotFoundError,
@@ -73,6 +74,9 @@ from tldw_Server_API.app.core.Personalization.personal_context_runtime_policy im
 _PayloadAdapter = TypeAdapter(ProfilePayload)
 _ControlsAdapter = TypeAdapter(ProfileControls)
 _SemanticKeyAdapter = TypeAdapter(SemanticKey)
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
 
 
 class ProfileOperationalState(StrEnum):
@@ -181,7 +185,7 @@ class PersonalContextService:
         try:
             self._after_commit_purge_cleanup(intent)
             if not self._repository.checkpoint_direct_purge_storage():
-                raise RuntimeError("Personal Context retention checkpoint is incomplete")
+                raise PersonalContextError("Personal Context retention checkpoint is incomplete")
             self._repository.complete_direct_purge_cleanup(intent)
         except Exception:  # noqa: BLE001 - cleanup debt remains durable and retryable.
             try:
@@ -190,6 +194,41 @@ class PersonalContextService:
                 return "failed"
             return "failed"
         return "complete"
+
+    def cleanup_sync_history(
+        self,
+        intent: DirectPurgeCleanupIntent,
+        *,
+        user_id: str,
+        sync: SyncV2Service,
+    ) -> None:
+        """Verify and scrub every active or archived dataset bound to a purged profile.
+
+        Args:
+            intent: Live direct-purge intent claimed from this service's repository.
+            user_id: Authenticated owner whose Sync datasets may be inspected.
+            sync: Injected Sync service providing dataset storage and shredding.
+
+        Raises:
+            PermissionError: If the repository cannot authenticate the live intent.
+            SyncStoreError: If the verified capability cannot authorize Sync cleanup.
+            DatabaseError: If storage cleanup fails; its durable debt stays retryable.
+        """
+
+        for dataset in sync.store.list_datasets_for_user(user_id, include_archived=True):
+            state = dataset.metadata.get("personal_context")
+            if not isinstance(state, dict) or state.get("profile_id") != getattr(
+                intent, "profile_id", None
+            ):
+                continue
+            claim = self._repository.verify_direct_purge_cleanup_claim(
+                intent,
+                user_id=user_id,
+                dataset_id=dataset.dataset_id,
+                store=sync.store,
+                database=sync.store.db,
+            )
+            sync.shred_authorized_personal_context_history(claim)
 
     def _relay_after_commit(self, profile_id: str) -> None:
         """Schedule recovery only after the canonical transaction committed."""

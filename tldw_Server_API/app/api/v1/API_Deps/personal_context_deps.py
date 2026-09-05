@@ -15,6 +15,9 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     get_personalization_db_for_user,
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.DB_Management.Personal_Context_Repository import (
+    DirectPurgeCleanupIntent,
+)
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
 from tldw_Server_API.app.core.Personalization.companion_user_ids import (
     resolve_existing_companion_storage_user_id,
@@ -60,31 +63,17 @@ def personal_context_service_for_user(
         id_factory=id_factory,
     )
 
-    def purge_cleanup_after_commit(intent: object) -> None:
-        """Scrub every active or archived Sync dataset bound to this profile."""
+    def purge_cleanup_after_commit(intent: DirectPurgeCleanupIntent) -> None:
+        """Supply authenticated Sync storage to the core cleanup workflow."""
 
         from tldw_Server_API.app.core.Sync.v2.factory import sync_v2_service_for_user
 
         sync = sync_v2_service_for_user(str(user_id))
-        for dataset in sync.store.list_datasets_for_user(
-            str(user_id),
-            include_archived=True,
-        ):
-            state = dataset.metadata.get("personal_context")
-            if not isinstance(state, dict) or state.get("profile_id") != getattr(
-                intent, "profile_id", None
-            ):
-                continue
-            claim = service._repository.verify_direct_purge_cleanup_claim(
-                intent,
-                user_id=str(user_id),
-                dataset_id=dataset.dataset_id,
-                store=sync.store,
-                database=sync.store.db,
-            )
-            sync.shred_authorized_personal_context_history(claim)
+        service.cleanup_sync_history(intent, user_id=str(user_id), sync=sync)
 
     def relay_after_commit(profile_id: str) -> None:
+        """Invoke the user-bound relay after the canonical transaction commits."""
+
         from tldw_Server_API.app.core.Sync.v2.factory import sync_v2_service_for_user
 
         sync = sync_v2_service_for_user(str(user_id))

@@ -100,15 +100,15 @@ class PersonalContextMaterializer:
             if authority is not None and authority.role == "client_ingress":
                 purge_generation = _purge_generation(dataset)
                 identity = IngressIdentity(
-                        dataset_id=envelope.dataset_id,
-                        device_id=str(envelope.device_id or ""),
-                        client_envelope_id=envelope.client_envelope_id,
-                        canonical_payload_digest=(
-                            "sha256:" + hashlib.sha256(canonical_bytes(value)).hexdigest()
-                        ),
-                        purge_generation=purge_generation,
-                        wire_entity_version=str(envelope.entity_version),
-                    )
+                    dataset_id=envelope.dataset_id,
+                    device_id=str(envelope.device_id or ""),
+                    client_envelope_id=envelope.client_envelope_id,
+                    canonical_payload_digest=(
+                        "sha256:" + hashlib.sha256(canonical_bytes(value)).hexdigest()
+                    ),
+                    purge_generation=purge_generation,
+                    wire_entity_version=str(envelope.entity_version),
+                )
                 receipt = service.apply_sync_ingress(
                     identity=identity,
                     domain=self.domain,

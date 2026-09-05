@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-05 02:25'
-updated_date: '2026-09-05 03:13'
+updated_date: '2026-09-05 03:37'
 labels: []
 dependencies: []
 references:
@@ -26,6 +26,7 @@ Resolve Qodo review findings and CI issues for the rebased Personal Context rela
 - [ ] #4 Relevant regression and PR checks pass, every review finding has a recorded resolution, and the PR is merged after required human summary is present
 - [x] #5 Bootstrap rejects ambiguous unbound Chatbook default datasets before enrollment, key wrapping, or binding, while retaining a sole existing authority
 - [x] #6 Reserved activation and purge routes enforce the existing rate limiter, and exported JSON Schema enforces runtime authority/readiness invariants
+- [x] #7 Unexpected relay failures emit content-free diagnostics without breaking retry, and purge cleanup orchestration lives in the core service with unchanged capability checks
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -48,6 +49,10 @@ Human-authored summary and rationale are now present verbatim; no further user i
 Round 3 verification: all 269 targeted tests passed, 74 warnings in 93.82s, with PostgreSQL required and no skips (six affected test files). Red-green reproduction covered both missing rate-limit dependencies and JSON Schema/runtime acceptance mismatches; exhaustive parity tests cover 243 field combinations. Scoped Ruff, Bandit and git diff checks pass (existing nosec warnings only). Fixed conflict-list return documentation and test typing. Independent review confirms schema policy and route dependencies; its misplaced-docstring finding was corrected before the completed test run. PostgreSQL isolation finding is rebutted: pg_database_config uses function-scoped pg_temp_db, creating a unique UUID database and dropping it in finally; the AuthNZ fixture adds unrelated app/auth setup. Human summary gate is satisfied; current-head remote review/checks and merge remain pending.
 
 Final rebase: dev advanced to 5cd10750d89f9668c1c83db232a8ffb08c08895e. Rebased all65 commits; range-diff confirms64 patch-identical, with only generated OpenAPI fingerprint context changed. Regenerated final fingerprint and frontend types from combined source (2068 paths,3133 schemas), and repinned contract provenance to rebased source1557992d6c9e0199890073a1cd5db667d44ffbd3. Exact artifact/runtime equality, SHA256 integrity, JSON Schema meta-validation and OpenAPI drift check pass. Expanded post-rebase11-file targeted regression gate:479 passed,70 warnings in88.51s, PostgreSQL required, no skips. Scoped Ruff/Bandit pass; independent reviewer confirmed corrected conflict handler docs. No new protocol behavior; ADR-002 remains applicable. Remote current-head checks/review and merge remain pending.
+
+Qodo round 4 plan: verify and fix six new findings. Correct indentation and pull/helper documentation; move existing cross-dataset cleanup loop into PersonalContextService with the existing Sync service injected by API wiring; retain all capability verification and archive inclusion. Reproduce unexpected relay failure logging with protected exception/identifier canaries and sink failure, then add a shared content-free diagnostic at every retryable exception boundary. Reuse central PersonalContextError for retention checkpoint failure rather than inventing a new exception hierarchy; preserve pending cleanup behavior. ADR required: no new ADR, existing ADR-002 service ownership and privacy apply; no new storage, authorization or protocol policy.
+
+Round 4 complete locally: fixed all six new Qodo findings. Moved existing purge cleanup orchestration into core PersonalContextService with authenticated Sync injection and unchanged capability checks; reused central PersonalContextError for checkpoint failure; corrected materializer indentation and pull/helper documentation. Shared content-free relay warning covers all eight unexpected exception paths and isolates sink failures. New regressions reproduced missing diagnostics, missing core operation and generic checkpoint error before fixes; corrected test setup to archived_at and the existing PermissionError for forged claims. Final seven-file affected regression gate: 366 passed, 74 warnings in 258.86s with PostgreSQL required and no skips. Separate contract gate: 12 passed. Scoped Ruff, Bandit, diff check, regenerated API types/fingerprint and drift check pass; independent review found no issues. Qodo summary still repeats the prior schema omission, but the exact cited remote artifact contains all conditionals; evidence posted in its original thread. Existing ADR-002 applies. Current-head remote CI/review and merge remain pending.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

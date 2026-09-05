@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -24,6 +25,7 @@ from tldw_Server_API.app.core.DB_Management.Personalization_DB import (
     PersonalizationDB,
 )
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.exceptions import PersonalContextError
 from tldw_Server_API.app.core.Personalization.personal_context_crypto import (
     EnvelopeAuthenticationError,
 )
@@ -1225,6 +1227,78 @@ def test_restart_recovery_rewrites_main_database_freelist_residue(
         "PRAGMA freelist_count"
     ).fetchone()[0] == 0
     assert not _sqlite_artifacts_contain(sync_path, _FREELIST_CANARY)
+
+
+def test_core_cleanup_scrubs_matching_active_and_archived_datasets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Core orchestration verifies each dataset and includes archived profile history."""
+
+    runtime = AuthorityHarness(tmp_path, monkeypatch)
+    first_cursor, _ingress_cursor, _source = _stage_retention_canaries(runtime)
+    _enroll_matching_dataset(runtime, "dataset-b")
+    second_cursor = _stage_dataset_canary(
+        runtime, dataset_id="dataset-b", client_envelope_id="archived-cleanup",
+        canary=_SECOND_DATASET_CANARY,
+    )
+    with runtime.store.db.backend.transaction() as connection:
+        runtime.store.db.execute(
+            "UPDATE sync_datasets SET archived_at = ? WHERE dataset_id = ?",
+            ("2026-09-05T00:00:00Z", "dataset-b"), connection=connection,
+        )
+    repository, intent, _claim = _issue_cleanup_capability(runtime)
+    cleanup = getattr(runtime.canonical, "cleanup_sync_history", None)
+    assert callable(cleanup), "Core service must own cross-dataset cleanup"
+    cleanup(intent, user_id="user-a", sync=runtime.service)
+    for cursor in (first_cursor, second_cursor):
+        envelope = runtime.store.get_envelope_by_server_cursor(cursor)
+        assert envelope is not None and envelope.payload_ciphertext is None
+    repository.release_direct_purge_cleanup(intent)
+
+
+def test_core_cleanup_rejects_unverified_intent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Moving orchestration into core never bypasses the repository capability check."""
+
+    runtime = AuthorityHarness(tmp_path, monkeypatch)
+    cursor, _ingress_cursor, _source = _stage_retention_canaries(runtime)
+    _repository, intent, _claim = _issue_cleanup_capability(runtime)
+    cleanup = getattr(runtime.canonical, "cleanup_sync_history", None)
+    assert callable(cleanup), "Core service must own cross-dataset cleanup"
+    with pytest.raises(PermissionError, match="claim is not live"):
+        cleanup(replace(intent, owner_token="forged-owner"), user_id="user-a", sync=runtime.service)
+    envelope = runtime.store.get_envelope_by_server_cursor(cursor)
+    assert envelope is not None and envelope.payload_ciphertext is not None
+
+
+def test_checkpoint_failure_uses_domain_error_and_retains_retry_debt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An incomplete canonical checkpoint releases ownership for a later purge retry."""
+
+    runtime = AuthorityHarness(tmp_path, monkeypatch)
+    _install_cleanup_callback(runtime)
+    repository = runtime.canonical._repository
+    original = repository.release_direct_purge_cleanup
+    errors: list[BaseException | None] = []
+
+    def release(intent: DirectPurgeCleanupIntent) -> None:
+        """Observe the failure classification while preserving actual lease release."""
+
+        errors.append(sys.exception())
+        original(intent)
+
+    monkeypatch.setattr(repository, "release_direct_purge_cleanup", release)
+    monkeypatch.setattr(repository, "checkpoint_direct_purge_storage", lambda: False)
+    runtime.canonical.purge_profile(
+        mode="everywhere", confirmation="DELETE EVERYWHERE", expected_purge_generation=0,
+    )
+    assert len(errors) == 1 and isinstance(errors[0], PersonalContextError)
+    assert _intent_rows(runtime.personal_db)[0]["state"] == "pending"
 
 
 def test_partial_multi_dataset_cleanup_is_retry_safe_and_converges(

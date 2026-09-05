@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from loguru import logger
@@ -48,6 +48,53 @@ from tldw_Server_API.tests.Sync.test_sync_v2_personal_context_authority_identity
 )
 
 pytestmark = pytest.mark.unit
+
+if TYPE_CHECKING:
+    from loguru import Message
+
+
+@pytest.mark.parametrize("sink_fails", [False, True])
+@pytest.mark.parametrize("failure_site", ["lease", "stage", "acknowledge", "finalize"])
+def test_unexpected_relay_failure_logs_content_free_retry(
+    authority_harness: AuthorityHarness,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_site: str,
+    sink_fails: bool,
+) -> None:
+    """Operational failures remain retryable without leaking errors through logging."""
+
+    events: list[object] = []
+
+    def capture(message: Message) -> None:
+        """Capture the complete record, including any accidental exception context."""
+
+        events.append(message.record)
+        if sink_fails:
+            raise RuntimeError("PR2868-PROTECTED-SINK")
+
+    def fail(*_args: object, **_kwargs: object) -> None:
+        """Inject an error whose text must never enter diagnostics."""
+
+        raise RuntimeError("PR2868-PROTECTED-RELAY")
+
+    target, name = {
+        "lease": (authority_harness.publications, "profile_lease"),
+        "stage": (authority_harness.service, "stage_personal_context_authority"),
+        "acknowledge": (authority_harness.publications, "acknowledge_row"),
+        "finalize": (authority_harness.service, "finalize_personal_context_authority"),
+    }[failure_site]
+    sink = logger.add(capture, level="WARNING", catch=False)
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(target, name, fail)
+            result = _relay(authority_harness)
+    finally:
+        logger.remove(sink)
+    assert result.continuation == "personal_context_relay_pending"
+    assert any("personal_context_relay_failed" in str(event) for event in events)
+    if "PR2868-PROTECTED" in str(events):
+        pytest.fail("relay diagnostic exposed protected content", pytrace=False)
+    assert _drain(authority_harness).continuation == "complete"
 
 
 @pytest.fixture

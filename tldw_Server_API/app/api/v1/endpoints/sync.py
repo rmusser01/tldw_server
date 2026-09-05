@@ -1696,7 +1696,30 @@ def pull_sync_v2_envelopes(
     personal_context_continuity_token: str | None = Query(None, min_length=16, max_length=256),
     user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
-):
+) -> SyncPullResponse:
+    """Return one authorized envelope page with verified Personal Context progress.
+
+    Args:
+        dataset_id: Dataset owned by the authenticated user.
+        device_id: Registered device receiving the page.
+        cursor: Opaque checkpoint from the previous pull.
+        domains: Optional domain selection.
+        limit: Maximum envelopes requested in this page.
+        include_same_device_echoes: Include envelopes from the requesting device.
+        page_size: Legacy alias used when limit is absent.
+        include_own_changes: Legacy alias for same-device echoes.
+        personal_context_activation_epoch: Activation identity, paired with token.
+        personal_context_continuity_token: Continuity proof, paired with epoch.
+        user: Authenticated request principal.
+        service: User-bound Sync service supplied by dependency injection.
+
+    Returns:
+        Envelopes, next cursor, continuation status, and verified exchange metadata.
+
+    Raises:
+        HTTPException: If proof, access, cursor, or service validation fails.
+    """
+
     personal_context_exchange = _validate_personal_context_query_proof(
         personal_context_activation_epoch,
         personal_context_continuity_token,

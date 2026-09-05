@@ -7,6 +7,8 @@ from dataclasses import dataclass, replace
 from time import monotonic_ns
 from typing import Any, Literal
 
+from loguru import logger
+
 from tldw_Server_API.app.core.exceptions import (
     PersonalContextAuthoritySourceError,
     PublicationRelayPoisoned,
@@ -77,6 +79,17 @@ AuthorityCanceller = Callable[
 ]
 
 
+def _log_relay_failure() -> None:
+    """Emit a fixed retry diagnostic without exception text, identifiers, or locals."""
+
+    try:
+        logger.opt(exception=False).warning(
+            "personal_context_relay_failed: durable recovery pending"
+        )
+    except Exception:  # noqa: BLE001 - sink failures must not change durable retry.
+        return
+
+
 @dataclass(slots=True)
 class PersonalContextRelay:
     """Relay the encrypted canonical journal in durable profile order."""
@@ -127,6 +140,7 @@ class PersonalContextRelay:
         except PublicationRelayPoisoned:
             result = PersonalContextRelayResult(0, False, False, "relay_poisoned")
         except Exception:  # noqa: BLE001 - DB/lease/adapter races remain retryable.
+            _log_relay_failure()
             result = self._pending()
         return replace(
             result,
@@ -142,6 +156,8 @@ class PersonalContextRelay:
         dataset_id: str,
         budget: PersonalContextRecoveryBudget,
     ) -> PersonalContextRelayResult:
+        """Recover and publish ordered rows while the caller owns the profile lease."""
+
         staged = 0
         unfinished_lookup = getattr(self.publications, "unfinished_stage_identities", None)
         if unfinished_lookup is not None and budget.can_inspect():
@@ -165,6 +181,7 @@ class PersonalContextRelay:
                         claimed_identity, lease=lease
                     )
                 except Exception:  # noqa: BLE001 - exact cleanup retries after races.
+                    _log_relay_failure()
                     return self._pending(staged)
             if not budget.can_inspect():
                 return self._pending(staged)
@@ -204,6 +221,7 @@ class PersonalContextRelay:
                                 claimed_row, receipt, dataset_id, user_id
                             )
                         except Exception:  # noqa: BLE001 - exact applied replay retries.
+                            _log_relay_failure()
                             return self._pending(staged)
                     continue
 
@@ -230,6 +248,7 @@ class PersonalContextRelay:
                             staged, False, False, "relay_poisoned"
                         )
                     except Exception:  # noqa: BLE001 - storage/head/adapter failures retry.
+                        _log_relay_failure()
                         return self._pending(staged)
                     if not self._receipt_matches(claimed_row, receipt):
                         return self._pending(staged)
@@ -242,6 +261,7 @@ class PersonalContextRelay:
                             lease=lease,
                         )
                     except Exception:  # noqa: BLE001 - classify uncertain commit state.
+                        _log_relay_failure()
                         if not budget.deadline_open():
                             return self._pending(staged)
                         state = self.publications.stage_receipt_state(
@@ -264,6 +284,7 @@ class PersonalContextRelay:
                         lease=lease,
                     )
                 except Exception:  # noqa: BLE001 - durable staged source retries.
+                    _log_relay_failure()
                     return self._pending(staged)
                 acknowledged_ordinals.add(row.batch_ordinal)
 
@@ -275,6 +296,7 @@ class PersonalContextRelay:
                             claimed_row, receipt, dataset_id, user_id
                         )
                     except Exception:  # noqa: BLE001 - acknowledged source repairs on retry.
+                        _log_relay_failure()
                         return self._pending(staged)
                 staged += 1
 
@@ -289,6 +311,8 @@ class PersonalContextRelay:
         lease: Any,
         budget: PersonalContextRecoveryBudget,
     ) -> bool:
+        """Renew ownership and verify the row remains current within the deadline."""
+
         if not self.publications.renew_lease(lease) or not budget.deadline_open():
             return False
         return bool(
@@ -298,6 +322,8 @@ class PersonalContextRelay:
 
     @staticmethod
     def _receipt_for_row(row: PublicationSourceRow) -> AuthorityStageReceipt | None:
+        """Rebuild a durable stage receipt only when the source has a Sync cursor."""
+
         if row.sync_server_cursor is None:
             return None
         return AuthorityStageReceipt(
@@ -312,6 +338,8 @@ class PersonalContextRelay:
 
     @staticmethod
     def _receipt_matches(row: PublicationSourceRow, receipt: object) -> bool:
+        """Require every immutable publication identity field to match the receipt."""
+
         return bool(
             isinstance(receipt, AuthorityStageReceipt)
             and receipt.server_cursor > 0
@@ -325,6 +353,8 @@ class PersonalContextRelay:
 
     @staticmethod
     def _pending(staged: int = 0, inspected: int = 0) -> PersonalContextRelayResult:
+        """Return bounded progress without treating retry debt as source exhaustion."""
+
         return PersonalContextRelayResult(
             staged, False, False, "personal_context_relay_pending", inspected
         )
@@ -343,6 +373,7 @@ class PersonalContextRelay:
         try:
             outcome = self.cancel_authority(row, receipt, dataset_id, user_id)
         except Exception:  # noqa: BLE001 - cancellation is best-effort retry cleanup.
+            _log_relay_failure()
             return "failed"
         return outcome if outcome in {"removed", "absent", "applied"} else "failed"
 
