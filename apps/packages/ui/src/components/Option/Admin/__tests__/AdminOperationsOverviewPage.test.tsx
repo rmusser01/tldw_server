@@ -156,7 +156,7 @@ describe("AdminOperationsOverviewPage", () => {
   })
 
   it("dismissal hides the checklist and persists per server (#2899 I6)", async () => {
-    const { unmount } = render(<AdminOperationsOverviewPage />)
+    const first = render(<AdminOperationsOverviewPage />)
 
     const card = await screen.findByTestId("admin-first-steps")
     within(card).getByRole("button", { name: "Dismiss" }).click()
@@ -165,17 +165,30 @@ describe("AdminOperationsOverviewPage", () => {
     })
 
     // A fresh mount of the same server keeps it dismissed...
-    unmount()
-    render(<AdminOperationsOverviewPage />)
+    first.unmount()
+    const second = render(<AdminOperationsOverviewPage />)
     expect(await screen.findByText("1 user")).toBeInTheDocument()
     expect(screen.queryByTestId("admin-first-steps")).not.toBeInTheDocument()
 
-    // ...but a different server gets its own checklist.
-    expect(
-      window.localStorage.getItem(
-        "__tldw_admin_first_steps_dismissed::http://127.0.0.1:8000"
-      )
-    ).toBe("1")
+    // ...but connecting to a different server gets its own checklist.
+    second.unmount()
+    connectionMock.serverUrl = "http://other-server.local:8000"
+    render(<AdminOperationsOverviewPage />)
+    expect(await screen.findByTestId("admin-first-steps")).toBeInTheDocument()
+  })
+
+  it("reloads signals and checklist when the connection target changes", async () => {
+    const view = render(<AdminOperationsOverviewPage />)
+    expect(await screen.findByText("1 user")).toBeInTheDocument()
+    expect(apiMock.getSystemStats).toHaveBeenCalledTimes(1)
+
+    // Same mounted overview, new server: stale results must not linger.
+    connectionMock.serverUrl = "http://other-server.local:8000"
+    view.rerender(<AdminOperationsOverviewPage />)
+
+    await waitFor(() => {
+      expect(apiMock.getSystemStats).toHaveBeenCalledTimes(2)
+    })
   })
 
   it("omits the connect banner when a server is configured (#2893)", () => {

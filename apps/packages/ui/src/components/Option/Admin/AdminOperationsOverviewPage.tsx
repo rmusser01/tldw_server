@@ -72,6 +72,9 @@ export const AdminOperationsOverviewPage: React.FC = () => {
     try {
       return window.localStorage.getItem(firstStepsDismissKey) === "1"
     } catch {
+      // Best-effort frontend-only state: blocked storage (private mode,
+      // partitioned iframes) degrades to showing the checklist again, which
+      // is the safe direction for a dismissible hint.
       return false
     }
   }, [firstStepsDismissKey, dismissedKeys])
@@ -86,8 +89,15 @@ export const AdminOperationsOverviewPage: React.FC = () => {
     setDismissedKeys((prev) => new Set(prev).add(firstStepsDismissKey))
   }
 
+  // Reload signals and checklist whenever the connection target changes -
+  // an overview kept mounted across a server switch must not show the old
+  // server's results, and late-arriving responses from the previous server
+  // are dropped via the cancelled guard.
   React.useEffect(() => {
     let cancelled = false
+    setSignals({})
+    setFirstSteps([])
+    if (!serverUrl) return
     void loadAdminModuleSignals().then((loaded) => {
       if (!cancelled) setSignals(loaded)
     })
@@ -97,7 +107,7 @@ export const AdminOperationsOverviewPage: React.FC = () => {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [serverUrl])
 
   // The card earns its place only while something is left to do; a finished
   // (or dismissed, or unconnected) checklist renders nothing.
