@@ -117,6 +117,11 @@ export const AdminOperationsOverviewPage: React.FC = () => {
                     <a className="hover:text-primary" href={module.route}>
                       {module.label}
                     </a>
+                    {module.comingSoon ? (
+                      <span className="ml-2 rounded-full border border-border px-2 py-0.5 align-middle text-[10px] font-medium uppercase tracking-wide text-text-muted">
+                        Coming soon
+                      </span>
+                    ) : null}
                   </h3>
                   <p className="mt-1.5 text-sm text-text-muted">
                     {module.description}

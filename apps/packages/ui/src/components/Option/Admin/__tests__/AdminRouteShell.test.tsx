@@ -19,7 +19,13 @@ describe("AdminRouteShell", () => {
 
     const nav = screen.getByRole("navigation", { name: "Admin modules" })
     for (const module of ADMIN_MODULES) {
-      const link = within(nav).getByRole("link", { name: module.label })
+      // Coming-soon modules carry a "Soon" badge inside the link (#2897),
+      // so match on the label prefix rather than the exact accessible name.
+      const link = within(nav).getByRole("link", {
+        name: new RegExp(
+          `^${module.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`
+        )
+      })
       expect(link).toHaveAttribute("href", module.route)
     }
   })

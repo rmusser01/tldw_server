@@ -77,6 +77,11 @@ export const AdminRouteShell: React.FC<{
                 }
               >
                 {module.label}
+                {module.comingSoon ? (
+                  <span className="ml-1 rounded-full border border-border px-1.5 py-px align-middle text-[10px] uppercase tracking-wide text-text-muted">
+                    Soon
+                  </span>
+                ) : null}
               </Link>
             )
           })}

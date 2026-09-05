@@ -20,6 +20,9 @@ export interface AdminModule {
   label: string
   description: string
   group: AdminModuleGroup
+  /** Route exists but the surface is a placeholder - badge it so operators
+   *  know before clicking (#2897). */
+  comingSoon?: boolean
 }
 
 export const ADMIN_MODULE_GROUPS: AdminModuleGroup[] = [
@@ -139,7 +142,8 @@ export const ADMIN_MODULES: AdminModule[] = [
     route: "/admin/watchlists-runs",
     label: "Watchlist Runs",
     description: "Run history and job inspection for watchlists (coming soon).",
-    group: "Workspace"
+    group: "Workspace",
+    comingSoon: true
   }
 ]
 
