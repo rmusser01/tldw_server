@@ -200,3 +200,10 @@ cookie values or provider credentials.
   false; a connection's voice configuration notice is not audio evidence.
   OpenAI credentials and intentional microphone input remain prerequisites
   for the outstanding live voice UAT.
+
+Rebased follow-up verification: base `53d683f0ed` introduced independent snapshot
+documentation, so the new Governor task became TASK-13192 and the handoff ADR
+became ADR-045. Both existing and new testing lessons were retained. Production
+patches are range-diff equivalent. On this base, **214 frontend tests and 162
+Persona/Governor Python tests passed**. Live receipts above identify the earlier
+base and are not represented as a second live run after rebase.

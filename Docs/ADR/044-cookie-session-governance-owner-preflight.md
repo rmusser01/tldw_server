@@ -1,8 +1,8 @@
 # ADR-044: Cookie-session governance owner preflight
 
-**Status:** Accepted  
-**Date:** 2026-09-05  
-**Task:** TASK-13192  
+**Status:** Accepted
+**Date:** 2026-09-05
+**Task:** TASK-13192
 **Extends:** ADR-018 and ADR-019
 
 ## Decision
