@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from "react"
+import { useTranslation } from "react-i18next"
 import {
   Card,
   Table,
@@ -28,6 +29,7 @@ const BILLING_OVERVIEW_PATH = "/api/v1/admin/billing/overview"
 // ── Overview Tab ──
 
 const OverviewTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }) => {
+  const { t } = useTranslation(["settings", "common"])
   const [overview, setOverview] = useState<any>(null)
   const [storageSummary, setStorageSummary] = useState<any>(null)
   const [loading, setLoading] = useState(false)
@@ -62,27 +64,27 @@ const OverviewTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardEr
     <div>
       <div style={{ marginBottom: 16 }}>
         <Button icon={<ReloadOutlined />} onClick={loadOverview} loading={loading}>
-          Refresh
+          {t("common:refresh", "Refresh")}
         </Button>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 16, marginBottom: 24 }}>
         <Card>
-          <Statistic title="Monthly Recurring Revenue" value={overview?.mrr ?? "N/A"} prefix="$" loading={loading} />
+          <Statistic title={t("settings:adminBilling.mrr", "Monthly Recurring Revenue")} value={overview?.mrr ?? "N/A"} prefix="$" loading={loading} />
         </Card>
         <Card>
-          <Statistic title="Active Subscriptions" value={overview?.active_subscriptions ?? 0} loading={loading} />
+          <Statistic title={t("settings:adminBilling.activeSubscriptions", "Active Subscriptions")} value={overview?.active_subscriptions ?? 0} loading={loading} />
         </Card>
         <Card>
-          <Statistic title="Canceled Subscriptions" value={overview?.canceled_subscriptions ?? 0} loading={loading} />
+          <Statistic title={t("settings:adminBilling.canceledSubscriptions", "Canceled Subscriptions")} value={overview?.canceled_subscriptions ?? 0} loading={loading} />
         </Card>
         <Card>
-          <Statistic title="Past Due" value={overview?.past_due_subscriptions ?? 0} loading={loading} />
+          <Statistic title={t("settings:adminBilling.pastDue", "Past Due")} value={overview?.past_due_subscriptions ?? 0} loading={loading} />
         </Card>
       </div>
 
       {overview?.plan_distribution && (
-        <Card title="Plan Distribution" style={{ marginBottom: 24 }}>
+        <Card title={t("settings:adminBilling.planDistribution", "Plan Distribution")} style={{ marginBottom: 24 }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 16 }}>
             {Object.entries(overview.plan_distribution).map(([plan, count]) => (
               <Statistic key={plan} title={plan} value={count as number} />
@@ -92,21 +94,21 @@ const OverviewTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardEr
       )}
 
       {storageSummary && (
-        <Card title="Storage Summary">
+        <Card title={t("settings:adminBilling.storageSummary", "Storage Summary")}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 16 }}>
-            <Statistic title="Total Users" value={storageSummary.total_users ?? 0} />
+            <Statistic title={t("settings:adminBilling.totalUsers", "Total Users")} value={storageSummary.total_users ?? 0} />
             <Statistic
-              title="Total Used (MB)"
+              title={t("settings:adminBilling.totalUsedMb", "Total Used (MB)")}
               value={storageSummary.total_used_mb ?? 0}
               precision={1}
             />
             <Statistic
-              title="Total Quota (MB)"
+              title={t("settings:adminBilling.totalQuotaMb", "Total Quota (MB)")}
               value={storageSummary.total_quota_mb ?? 0}
               precision={1}
             />
             <Statistic
-              title="Avg Utilization"
+              title={t("settings:adminBilling.avgUtilization", "Avg Utilization")}
               value={storageSummary.avg_utilization_pct ?? 0}
               suffix="%"
               precision={1}
@@ -121,6 +123,7 @@ const OverviewTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardEr
 // ── Subscriptions Tab ──
 
 const SubscriptionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }) => {
+  const { t } = useTranslation(["settings", "common"])
   const [subscriptions, setSubscriptions] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [statusFilter, setStatusFilter] = useState<string>("all")
@@ -162,14 +165,14 @@ const SubscriptionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGu
         plan_id: values.plan_id,
         reason: values.reason || undefined
       })
-      message.success("Plan overridden successfully")
+      message.success(t("settings:adminBilling.planOverridden", "Plan overridden successfully"))
       setOverrideModal({ visible: false, userId: null })
       overrideForm.resetFields()
       loadSubscriptions()
     } catch (err: any) {
       if (err?.errorFields) return
       message.error(
-        sanitizeAdminErrorMessage(err, "Failed to override the user plan")
+        sanitizeAdminErrorMessage(err, t("settings:adminBilling.overrideFailed", "Failed to override the user plan"))
       )
     } finally {
       setOverriding(false)
@@ -185,14 +188,14 @@ const SubscriptionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGu
         amount: values.amount,
         reason: values.reason || undefined
       })
-      message.success("Credits granted successfully")
+      message.success(t("settings:adminBilling.creditsGranted", "Credits granted successfully"))
       setCreditsModal({ visible: false, userId: null })
       creditsForm.resetFields()
       loadSubscriptions()
     } catch (err: any) {
       if (err?.errorFields) return
       message.error(
-        sanitizeAdminErrorMessage(err, "Failed to grant credits")
+        sanitizeAdminErrorMessage(err, t("settings:adminBilling.grantCreditsFailed", "Failed to grant credits"))
       )
     } finally {
       setGranting(false)
@@ -210,35 +213,35 @@ const SubscriptionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGu
 
   const columns = [
     {
-      title: "User ID",
+      title: t("settings:adminBilling.colUserId", "User ID"),
       dataIndex: "user_id",
       key: "user_id",
       width: 100
     },
     {
-      title: "Username",
+      title: t("settings:adminBilling.colUsername", "Username"),
       dataIndex: "username",
       key: "username"
     },
     {
-      title: "Plan",
+      title: t("settings:adminBilling.colPlan", "Plan"),
       dataIndex: "plan_id",
       key: "plan_id"
     },
     {
-      title: "Status",
+      title: t("settings:adminBilling.colStatus", "Status"),
       dataIndex: "status",
       key: "status",
       render: (status: string) => <Tag color={statusColor(status)}>{status}</Tag>
     },
     {
-      title: "Created",
+      title: t("settings:adminBilling.colCreated", "Created"),
       dataIndex: "created_at",
       key: "created_at",
       render: (val: string) => val ? new Date(val).toLocaleDateString() : "N/A"
     },
     {
-      title: "Actions",
+      title: t("settings:adminBilling.colActions", "Actions"),
       key: "actions",
       render: (_: any, record: any) => (
         <Space>
@@ -249,13 +252,13 @@ const SubscriptionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGu
               overrideForm.setFieldsValue({ plan_id: record.plan_id })
             }}
           >
-            Override Plan
+            {t("settings:adminBilling.overridePlan", "Override Plan")}
           </Button>
           <Button
             size="small"
             onClick={() => setCreditsModal({ visible: true, userId: record.user_id })}
           >
-            Grant Credits
+            {t("settings:adminBilling.grantCredits", "Grant Credits")}
           </Button>
         </Space>
       )
@@ -270,14 +273,14 @@ const SubscriptionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGu
           onChange={setStatusFilter}
           style={{ width: 160 }}
           options={[
-            { value: "all", label: "All Statuses" },
-            { value: "active", label: "Active" },
-            { value: "canceled", label: "Canceled" },
-            { value: "past_due", label: "Past Due" }
+            { value: "all", label: t("settings:adminBilling.allStatuses", "All Statuses") },
+            { value: "active", label: t("settings:adminBilling.statusActive", "Active") },
+            { value: "canceled", label: t("settings:adminBilling.statusCanceled", "Canceled") },
+            { value: "past_due", label: t("settings:adminBilling.statusPastDue", "Past Due") }
           ]}
         />
         <Button icon={<ReloadOutlined />} onClick={loadSubscriptions} loading={loading}>
-          Refresh
+          {t("common:refresh", "Refresh")}
         </Button>
       </div>
 
@@ -291,35 +294,35 @@ const SubscriptionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGu
       />
 
       <Modal
-        title={`Override Plan - User ${overrideModal.userId}`}
+        title={t("settings:adminBilling.overrideModalTitle", { defaultValue: "Override Plan - User {{userId}}", userId: overrideModal.userId })}
         open={overrideModal.visible}
         onOk={handleOverride}
         onCancel={() => { setOverrideModal({ visible: false, userId: null }); overrideForm.resetFields() }}
         confirmLoading={overriding}
       >
         <Form form={overrideForm} layout="vertical">
-          <Form.Item name="plan_id" label="Plan ID" rules={[{ required: true, message: "Plan ID is required" }]}>
-            <Input placeholder="e.g. pro, enterprise, free" />
+          <Form.Item name="plan_id" label={t("settings:adminBilling.planIdLabel", "Plan ID")} rules={[{ required: true, message: t("settings:adminBilling.planIdRequired", "Plan ID is required") }]}>
+            <Input placeholder={t("settings:adminBilling.planIdPlaceholder", "e.g. pro, enterprise, free")} />
           </Form.Item>
           <Form.Item name="reason" label="Reason">
-            <Input.TextArea rows={2} placeholder="Optional reason for the override" />
+            <Input.TextArea rows={2} placeholder={t("settings:adminBilling.overrideReasonPlaceholder", "Optional reason for the override")} />
           </Form.Item>
         </Form>
       </Modal>
 
       <Modal
-        title={`Grant Credits - User ${creditsModal.userId}`}
+        title={t("settings:adminBilling.creditsModalTitle", { defaultValue: "Grant Credits - User {{userId}}", userId: creditsModal.userId })}
         open={creditsModal.visible}
         onOk={handleGrantCredits}
         onCancel={() => { setCreditsModal({ visible: false, userId: null }); creditsForm.resetFields() }}
         confirmLoading={granting}
       >
         <Form form={creditsForm} layout="vertical">
-          <Form.Item name="amount" label="Amount" rules={[{ required: true, message: "Amount is required" }]}>
-            <InputNumber min={1} style={{ width: "100%" }} placeholder="Credit amount" />
+          <Form.Item name="amount" label={t("settings:adminBilling.amountLabel", "Amount")} rules={[{ required: true, message: t("settings:adminBilling.amountRequired", "Amount is required") }]}>
+            <InputNumber min={1} style={{ width: "100%" }} placeholder={t("settings:adminBilling.creditAmountPlaceholder", "Credit amount")} />
           </Form.Item>
           <Form.Item name="reason" label="Reason">
-            <Input.TextArea rows={2} placeholder="Optional reason for granting credits" />
+            <Input.TextArea rows={2} placeholder={t("settings:adminBilling.creditsReasonPlaceholder", "Optional reason for granting credits")} />
           </Form.Item>
         </Form>
       </Modal>
@@ -330,6 +333,7 @@ const SubscriptionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGu
 // ── Billing Events Tab ──
 
 const BillingEventsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }) => {
+  const { t } = useTranslation(["settings", "common"])
   const [events, setEvents] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
 
@@ -351,31 +355,31 @@ const BillingEventsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGu
 
   const columns = [
     {
-      title: "Event Type",
+      title: t("settings:adminBilling.colEventType", "Event Type"),
       dataIndex: "event_type",
       key: "event_type",
       render: (val: string) => <Tag>{val}</Tag>
     },
     {
-      title: "User ID",
+      title: t("settings:adminBilling.colUserId", "User ID"),
       dataIndex: "user_id",
       key: "user_id",
       width: 100
     },
     {
-      title: "Amount",
+      title: t("settings:adminBilling.colAmount", "Amount"),
       dataIndex: "amount",
       key: "amount",
       render: (val: number) => val != null ? `$${val.toFixed(2)}` : "N/A"
     },
     {
-      title: "Description",
+      title: t("settings:adminBilling.colDescription", "Description"),
       dataIndex: "description",
       key: "description",
       ellipsis: true
     },
     {
-      title: "Created",
+      title: t("settings:adminBilling.colCreated", "Created"),
       dataIndex: "created_at",
       key: "created_at",
       render: (val: string) => val ? new Date(val).toLocaleString() : "N/A"
@@ -386,7 +390,7 @@ const BillingEventsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGu
     <div>
       <div style={{ marginBottom: 16 }}>
         <Button icon={<ReloadOutlined />} onClick={loadEvents} loading={loading}>
-          Refresh
+          {t("common:refresh", "Refresh")}
         </Button>
       </div>
 
@@ -405,6 +409,7 @@ const BillingEventsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGu
 // ── Main Page ──
 
 const BillingDashboardPage: React.FC = () => {
+  const { t } = useTranslation(["settings", "common"])
   const { config: connectionConfig, loading: connectionConfigLoading } = useCanonicalConnectionConfig()
   const [adminGuard, setAdminGuard] = useState<"forbidden" | "notFound" | null>(null)
   const initialLoadRef = useRef(false)
@@ -478,8 +483,8 @@ const BillingDashboardPage: React.FC = () => {
   if (adminGuard === "forbidden") {
     return (
       <div style={{ padding: 24 }}>
-        <Alert variant="error" title="Access Denied">
-          You do not have permission to view the billing dashboard.
+        <Alert variant="error" title={t("settings:adminBilling.forbiddenTitle", "Access Denied")}>
+          {t("settings:adminBilling.forbiddenBody", "You do not have permission to view the billing dashboard.")}
         </Alert>
       </div>
     )
@@ -488,10 +493,11 @@ const BillingDashboardPage: React.FC = () => {
   if (adminGuard === "notFound") {
     return (
       <div style={{ padding: 24 }}>
-        <Alert variant="warning" title="Not available on this server">
-          Billing endpoints are not enabled here. Billing applies to
-          multi-user deployments with subscription management configured;
-          single-user servers do not use it.
+        <Alert variant="warning" title={t("settings:adminBilling.notFoundTitle", "Not available on this server")}>
+          {t(
+            "settings:adminBilling.notFoundBody",
+            "Billing endpoints are not enabled here. Billing applies to multi-user deployments with subscription management configured; single-user servers do not use it."
+          )}
         </Alert>
       </div>
     )
@@ -500,24 +506,24 @@ const BillingDashboardPage: React.FC = () => {
   const tabItems = [
     {
       key: "overview",
-      label: "Overview",
+      label: t("settings:adminBilling.tabOverview", "Overview"),
       children: <OverviewTab onGuardError={markAdminGuardFromError} />
     },
     {
       key: "subscriptions",
-      label: "Subscriptions",
+      label: t("settings:adminBilling.tabSubscriptions", "Subscriptions"),
       children: <SubscriptionsTab onGuardError={markAdminGuardFromError} />
     },
     {
       key: "events",
-      label: "Billing Events",
+      label: t("settings:adminBilling.tabEvents", "Billing Events"),
       children: <BillingEventsTab onGuardError={markAdminGuardFromError} />
     }
   ]
 
   return (
     <div style={{ padding: 24 }}>
-      <h1 style={{ fontSize: "1.5rem", fontWeight: 600 }}>Billing Dashboard</h1>
+      <h1 style={{ fontSize: "1.5rem", fontWeight: 600 }}>{t("settings:adminBilling.title", "Billing Dashboard")}</h1>
       <Tabs defaultActiveKey="overview" items={tabItems} />
     </div>
   )

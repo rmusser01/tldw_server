@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react"
+import { useTranslation } from "react-i18next"
 import {
   AutoComplete,
   Card,
@@ -172,6 +173,7 @@ const hasAntdValidationError = (
 )
 
 const MonitoringDashboardPage: React.FC = () => {
+  const { t } = useTranslation(["settings", "common"])
   // Admin guard state
   const [adminGuard, setAdminGuard] = useState<"forbidden" | "notFound" | null>(null)
 
@@ -261,20 +263,21 @@ const MonitoringDashboardPage: React.FC = () => {
           method: "GET",
           error: err,
           title: isForbidden
-            ? "Sandbox diagnostics access denied"
+            ? t("settings:adminMonitoring.sandboxForbiddenTitle", "Sandbox diagnostics access denied")
             : isMissing
-              ? "Sandbox diagnostics not available on this server"
-              : "Sandbox diagnostics unavailable",
+              ? t("settings:adminMonitoring.sandboxMissingTitle", "Sandbox diagnostics not available on this server")
+              : t("settings:adminMonitoring.sandboxUnavailableTitle", "Sandbox diagnostics unavailable"),
           message: isForbidden
-            ? "You don't have permission to view sandbox runtime diagnostics."
+            ? t("settings:adminMonitoring.sandboxForbiddenBody", "You don't have permission to view sandbox runtime diagnostics.")
             : isMissing
-              ? "This server does not expose the sandbox runtime diagnostics API. This is expected when the sandbox module is not enabled."
-              : "Sandbox runtime diagnostics are not available."
+              ? t("settings:adminMonitoring.sandboxMissingBody", "This server does not expose the sandbox runtime diagnostics API. This is expected when the sandbox module is not enabled.")
+              : t("settings:adminMonitoring.sandboxUnavailableBody", "Sandbox runtime diagnostics are not available.")
         })
       )
     } finally {
       setSandboxDiagnosticsLoading(false)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `t` is stable for the session
   }, [])
 
   // ── Alert Rules ──
@@ -304,11 +307,11 @@ const MonitoringDashboardPage: React.FC = () => {
         enabled: values.enabled ?? true
       })
       ruleForm.resetFields()
-      message.success("Alert rule created")
+      message.success(t("settings:adminMonitoring.ruleCreated", "Alert rule created"))
       await loadAlertRules()
     } catch (err: unknown) {
       if (hasAntdValidationError(err)) return
-      message.error(sanitizeAdminErrorMessage(err, "Failed to create alert rule"))
+      message.error(sanitizeAdminErrorMessage(err, t("settings:adminMonitoring.ruleCreateFailed", "Failed to create alert rule")))
     } finally {
       setCreatingRule(false)
     }
@@ -317,10 +320,10 @@ const MonitoringDashboardPage: React.FC = () => {
   const handleDeleteRule = async (ruleId: number) => {
     try {
       await tldwClient.deleteAlertRule(ruleId)
-      message.success("Alert rule deleted")
+      message.success(t("settings:adminMonitoring.ruleDeleted", "Alert rule deleted"))
       await loadAlertRules()
     } catch (err: unknown) {
-      message.error(sanitizeAdminErrorMessage(err, "Failed to delete alert rule"))
+      message.error(sanitizeAdminErrorMessage(err, t("settings:adminMonitoring.ruleDeleteFailed", "Failed to delete alert rule")))
     }
   }
 
@@ -341,30 +344,30 @@ const MonitoringDashboardPage: React.FC = () => {
   const handleAssignAlert = async (alertId: string, userId: number | null) => {
     try {
       await tldwClient.assignAlert(alertId, { assigned_to_user_id: userId })
-      message.success("Alert assigned")
+      message.success(t("settings:adminMonitoring.alertAssigned", "Alert assigned"))
       await loadAlertHistory()
     } catch (err: unknown) {
-      message.error(sanitizeAdminErrorMessage(err, "Failed to assign alert"))
+      message.error(sanitizeAdminErrorMessage(err, t("settings:adminMonitoring.alertAssignFailed", "Failed to assign alert")))
     }
   }
 
   const handleSnoozeAlert = async (alertId: string, until: string) => {
     try {
       await tldwClient.snoozeAlert(alertId, { until })
-      message.success("Alert snoozed")
+      message.success(t("settings:adminMonitoring.alertSnoozed", "Alert snoozed"))
       await loadAlertHistory()
     } catch (err: unknown) {
-      message.error(sanitizeAdminErrorMessage(err, "Failed to snooze alert"))
+      message.error(sanitizeAdminErrorMessage(err, t("settings:adminMonitoring.alertSnoozeFailed", "Failed to snooze alert")))
     }
   }
 
   const handleEscalateAlert = async (alertId: string) => {
     try {
       await tldwClient.escalateAlert(alertId)
-      message.success("Alert escalated")
+      message.success(t("settings:adminMonitoring.alertEscalated", "Alert escalated"))
       await loadAlertHistory()
     } catch (err: unknown) {
-      message.error(sanitizeAdminErrorMessage(err, "Failed to escalate alert"))
+      message.error(sanitizeAdminErrorMessage(err, t("settings:adminMonitoring.alertEscalateFailed", "Failed to escalate alert")))
     }
   }
 
@@ -433,14 +436,14 @@ const MonitoringDashboardPage: React.FC = () => {
     const tick = () => {
       if (!lastRefreshedAt) { setTimeSinceRefresh(""); return }
       const secs = Math.floor((Date.now() - lastRefreshedAt.getTime()) / 1000)
-      if (secs < 10) setTimeSinceRefresh("just now")
-      else if (secs < 60) setTimeSinceRefresh(`${secs}s ago`)
-      else setTimeSinceRefresh(`${Math.floor(secs / 60)}m ago`)
+      if (secs < 10) setTimeSinceRefresh(t("settings:adminMonitoring.justNow", "just now"))
+      else if (secs < 60) setTimeSinceRefresh(`${secs}${t("settings:adminMonitoring.secondsAgoSuffix", "s ago")}`)
+      else setTimeSinceRefresh(`${Math.floor(secs / 60)}${t("settings:adminMonitoring.minutesAgoSuffix", "m ago")}`)
     }
     tick()
     const id = setInterval(tick, 10_000)
     return () => clearInterval(id)
-  }, [lastRefreshedAt])
+  }, [lastRefreshedAt, t])
 
   // Derive metric name suggestions from system stats keys
   const metricOptions = useMemo(() => {
@@ -465,10 +468,10 @@ const MonitoringDashboardPage: React.FC = () => {
     try {
       setCreatingRule(true)
       await tldwClient.createAlertRule({ ...rule, enabled: true })
-      message.success(`Starter rule created: ${rule.metric} ${rule.operator} ${rule.threshold}`)
+      message.success(`${t("settings:adminMonitoring.starterRuleCreated", "Starter rule created:")} ${rule.metric} ${rule.operator} ${rule.threshold}`)
       await loadAlertRules()
     } catch (err: unknown) {
-      message.error(sanitizeAdminErrorMessage(err, "Failed to create starter rule"))
+      message.error(sanitizeAdminErrorMessage(err, t("settings:adminMonitoring.starterRuleFailed", "Failed to create starter rule")))
     } finally {
       setCreatingRule(false)
     }
@@ -477,26 +480,26 @@ const MonitoringDashboardPage: React.FC = () => {
   // ── Alert Rules Table Columns ──
 
   const ruleColumns: ColumnsType<AlertRuleRow> = [
-    { title: "Metric", dataIndex: "metric", key: "metric", render: (metric: string) => <code>{metric}</code> },
-    { title: "Operator", dataIndex: "operator", key: "operator" },
-    { title: "Threshold", dataIndex: "threshold", key: "threshold" },
-    { title: "Duration (min)", dataIndex: "duration_minutes", key: "duration_minutes", render: (val: number | null) => val ?? "\u2014" },
+    { title: t("settings:adminMonitoring.colMetric", "Metric"), dataIndex: "metric", key: "metric", render: (metric: string) => <code>{metric}</code> },
+    { title: t("settings:adminMonitoring.colOperator", "Operator"), dataIndex: "operator", key: "operator" },
+    { title: t("settings:adminMonitoring.colThreshold", "Threshold"), dataIndex: "threshold", key: "threshold" },
+    { title: t("settings:adminMonitoring.colDuration", "Duration (min)"), dataIndex: "duration_minutes", key: "duration_minutes", render: (val: number | null) => val ?? "\u2014" },
     {
-      title: "Severity", dataIndex: "severity", key: "severity",
+      title: t("settings:adminMonitoring.colSeverity", "Severity"), dataIndex: "severity", key: "severity",
       render: (severity: string) => {
         const color = severity === "critical" ? "red" : severity === "high" ? "orange" : severity === "medium" ? "gold" : "default"
         return <Tag color={color}>{severity || "low"}</Tag>
       }
     },
     {
-      title: "Enabled", dataIndex: "enabled", key: "enabled",
-      render: (enabled: boolean) => <Tag color={enabled !== false ? "green" : "default"}>{enabled !== false ? "Yes" : "No"}</Tag>
+      title: t("settings:adminMonitoring.colEnabled", "Enabled"), dataIndex: "enabled", key: "enabled",
+      render: (enabled: boolean) => <Tag color={enabled !== false ? "green" : "default"}>{enabled !== false ? t("settings:adminMonitoring.yes", "Yes") : t("settings:adminMonitoring.no", "No")}</Tag>
     },
     {
-      title: "Actions", key: "actions",
+      title: t("settings:adminMonitoring.colActions", "Actions"), key: "actions",
       render: (_value: unknown, record: AlertRuleRow) => (
-        <Popconfirm title="Delete this alert rule?" onConfirm={() => handleDeleteRule(record.id)}>
-          <Button size="small" danger>Delete</Button>
+        <Popconfirm title={t("settings:adminMonitoring.deleteRuleConfirm", "Delete this alert rule?")} onConfirm={() => handleDeleteRule(record.id)}>
+          <Button size="small" danger>{t("settings:adminMonitoring.delete", "Delete")}</Button>
         </Popconfirm>
       )
     }
@@ -505,34 +508,34 @@ const MonitoringDashboardPage: React.FC = () => {
   // ── Alert History Table Columns ──
 
   const historyColumns: ColumnsType<AlertHistoryRow> = [
-    { title: "Alert", dataIndex: "alert", key: "alert", render: (alert: string | undefined, record: AlertHistoryRow) => alert || record.metric || record.id || "\u2014" },
+    { title: t("settings:adminMonitoring.colAlert", "Alert"), dataIndex: "alert", key: "alert", render: (alert: string | undefined, record: AlertHistoryRow) => alert || record.metric || record.id || "\u2014" },
     {
-      title: "Severity", dataIndex: "severity", key: "severity",
+      title: t("settings:adminMonitoring.colSeverity", "Severity"), dataIndex: "severity", key: "severity",
       render: (severity: string) => {
         const color = severity === "critical" ? "red" : severity === "high" ? "orange" : severity === "medium" ? "gold" : "default"
         return <Tag color={color}>{severity || "low"}</Tag>
       }
     },
-    { title: "Time", dataIndex: "triggered_at", key: "triggered_at", render: (val: string) => val ? new Date(val).toLocaleString() : "\u2014" },
+    { title: t("settings:adminMonitoring.colTime", "Time"), dataIndex: "triggered_at", key: "triggered_at", render: (val: string) => val ? new Date(val).toLocaleString() : "\u2014" },
     {
-      title: "Status", dataIndex: "status", key: "status",
+      title: t("settings:adminMonitoring.colStatus", "Status"), dataIndex: "status", key: "status",
       render: (status: string) => {
         const color = status === "resolved" ? "green" : status === "snoozed" ? "blue" : status === "escalated" ? "red" : "orange"
         return <Tag color={color}>{status || "active"}</Tag>
       }
     },
     {
-      title: "Actions", key: "actions",
+      title: t("settings:adminMonitoring.colActions", "Actions"), key: "actions",
       render: (_value: unknown, record: AlertHistoryRow) => {
         const identity = String(record.id ?? record.alert ?? "")
         return (
           <Space size="small">
-            <Popconfirm title="Assign this alert?" description="This will assign the alert to you (or unassign)." onConfirm={() => handleAssignAlert(identity, currentUserId)}>
-              <Button size="small">Assign</Button>
+            <Popconfirm title={t("settings:adminMonitoring.assignConfirm", "Assign this alert?")} description={t("settings:adminMonitoring.assignConfirmBody", "This will assign the alert to you (or unassign).")} onConfirm={() => handleAssignAlert(identity, currentUserId)}>
+              <Button size="small">{t("settings:adminMonitoring.assign", "Assign")}</Button>
             </Popconfirm>
-            <Select size="small" placeholder="Snooze" style={{ width: 100 }} onChange={(minutes: number) => { const until = new Date(Date.now() + minutes * 60 * 1000).toISOString(); handleSnoozeAlert(identity, until) }} options={[{ value: 30, label: "30 min" }, { value: 60, label: "1 hour" }, { value: 240, label: "4 hours" }, { value: 1440, label: "24 hours" }]} />
-            <Popconfirm title="Escalate this alert?" onConfirm={() => handleEscalateAlert(identity)}>
-              <Button size="small" danger>Escalate</Button>
+            <Select size="small" placeholder={t("settings:adminMonitoring.snooze", "Snooze")} style={{ width: 100 }} onChange={(minutes: number) => { const until = new Date(Date.now() + minutes * 60 * 1000).toISOString(); handleSnoozeAlert(identity, until) }} options={[{ value: 30, label: t("settings:adminMonitoring.snooze30m", "30 min") }, { value: 60, label: t("settings:adminMonitoring.snooze1h", "1 hour") }, { value: 240, label: t("settings:adminMonitoring.snooze4h", "4 hours") }, { value: 1440, label: t("settings:adminMonitoring.snooze24h", "24 hours") }]} />
+            <Popconfirm title={t("settings:adminMonitoring.escalateConfirm", "Escalate this alert?")} onConfirm={() => handleEscalateAlert(identity)}>
+              <Button size="small" danger>{t("settings:adminMonitoring.escalate", "Escalate")}</Button>
             </Popconfirm>
           </Space>
         )
@@ -542,13 +545,13 @@ const MonitoringDashboardPage: React.FC = () => {
 
   const sandboxRuntimeColumns: ColumnsType<SandboxAdminRuntimeDiagnosticsItem> = [
     {
-      title: "Runtime",
+      title: t("settings:adminMonitoring.colRuntime", "Runtime"),
       dataIndex: "name",
       key: "name",
       render: (name: string) => <code>{name}</code>
     },
     {
-      title: "Readiness",
+      title: t("settings:adminMonitoring.colReadiness", "Readiness"),
       dataIndex: "readiness",
       key: "readiness",
       render: (readiness: string) => (
@@ -558,34 +561,34 @@ const MonitoringDashboardPage: React.FC = () => {
       )
     },
     {
-      title: "Boundary",
+      title: t("settings:adminMonitoring.colBoundary", "Boundary"),
       dataIndex: "boundary_class",
       key: "boundary_class",
       render: (boundaryClass: string | null | undefined) => formatRuntimeCode(boundaryClass)
     },
     {
-      title: "VM-grade",
+      title: t("settings:adminMonitoring.colVmGrade", "VM-grade"),
       dataIndex: "vm_grade_isolation",
       key: "vm_grade_isolation",
       render: (vmGrade: boolean) => (
-        <Tag color={vmGrade ? "green" : "orange"}>{vmGrade ? "Yes" : "No"}</Tag>
+        <Tag color={vmGrade ? "green" : "orange"}>{vmGrade ? t("settings:adminMonitoring.yes", "Yes") : t("settings:adminMonitoring.no", "No")}</Tag>
       )
     },
     {
-      title: "Untrusted",
+      title: t("settings:adminMonitoring.colUntrusted", "Untrusted"),
       dataIndex: "untrusted_eligible",
       key: "untrusted_eligible",
       render: (eligible: boolean) => (
-        <Tag color={eligible ? "green" : "red"}>{eligible ? "Eligible" : "Not eligible"}</Tag>
+        <Tag color={eligible ? "green" : "red"}>{eligible ? t("settings:adminMonitoring.eligible", "Eligible") : t("settings:adminMonitoring.notEligible", "Not eligible")}</Tag>
       )
     },
     {
-      title: "Warnings",
+      title: t("settings:adminMonitoring.colWarnings", "Warnings"),
       dataIndex: "isolation_warnings",
       key: "isolation_warnings",
       render: (warnings: string[] | undefined) => {
         const values = Array.isArray(warnings) ? warnings : []
-        if (values.length === 0) return <Tag color="green">None</Tag>
+        if (values.length === 0) return <Tag color="green">{t("settings:adminMonitoring.none", "None")}</Tag>
         return (
           <Space size={[4, 4]} wrap>
             {values.map((warning) => (
@@ -598,7 +601,7 @@ const MonitoringDashboardPage: React.FC = () => {
       }
     },
     {
-      title: "Action",
+      title: t("settings:adminMonitoring.colAction", "Action"),
       dataIndex: "recommended_action",
       key: "recommended_action",
       render: (action: string | undefined) => formatRuntimeCode(action || "none")
@@ -609,15 +612,21 @@ const MonitoringDashboardPage: React.FC = () => {
 
   if (adminGuard === "forbidden") {
     return (
-      <Alert variant="error" title="Access Denied">
-        You don't have permission to access the monitoring dashboard.
+      <Alert variant="error" title={t("settings:adminMonitoring.forbiddenTitle", "Access Denied")}>
+        {t(
+          "settings:adminMonitoring.forbiddenBody",
+          "You don't have permission to access the monitoring dashboard."
+        )}
       </Alert>
     )
   }
   if (adminGuard === "notFound") {
     return (
-      <Alert variant="warning" title="Not Available">
-        The monitoring dashboard is not available on this server.
+      <Alert variant="warning" title={t("settings:adminMonitoring.notFoundTitle", "Not Available")}>
+        {t(
+          "settings:adminMonitoring.notFoundBody",
+          "The monitoring dashboard is not available on this server."
+        )}
       </Alert>
     )
   }
@@ -633,10 +642,10 @@ const MonitoringDashboardPage: React.FC = () => {
     _key: idx
   }))
   const activityColumns: ColumnsType<ActivityRow> = [
-    { title: "Time", dataIndex: "timestamp", key: "timestamp", render: (val: string | undefined) => val ? new Date(val).toLocaleString() : "\u2014" },
-    { title: "Action", dataIndex: "action", key: "action" },
-    { title: "User", dataIndex: "user", key: "user", render: (val: string | undefined) => val || "\u2014" },
-    { title: "Details", dataIndex: "details", key: "details", render: (val: unknown) => formatStatValue(val) }
+    { title: t("settings:adminMonitoring.colTime", "Time"), dataIndex: "timestamp", key: "timestamp", render: (val: string | undefined) => val ? new Date(val).toLocaleString() : "\u2014" },
+    { title: t("settings:adminMonitoring.colAction", "Action"), dataIndex: "action", key: "action" },
+    { title: t("settings:adminMonitoring.colUser", "User"), dataIndex: "user", key: "user", render: (val: string | undefined) => val || "\u2014" },
+    { title: t("settings:adminMonitoring.colDetails", "Details"), dataIndex: "details", key: "details", render: (val: unknown) => formatStatValue(val) }
   ]
   const sandboxRuntimeRows: SandboxAdminRuntimeDiagnosticsItem[] = Array.isArray(sandboxDiagnostics?.runtimes)
     ? sandboxDiagnostics.runtimes
@@ -647,39 +656,42 @@ const MonitoringDashboardPage: React.FC = () => {
 
   return (
     <div style={{ padding: "24px", maxWidth: 1200 }}>
-      <h1 style={{ marginBottom: 4, fontSize: "1.5rem", fontWeight: 600 }}>Monitoring &amp; Alerting</h1>
+      <h1 style={{ marginBottom: 4, fontSize: "1.5rem", fontWeight: 600 }}>{t("settings:adminMonitoring.title", "Monitoring & Alerting")}</h1>
       <Typography.Paragraph type="secondary" style={{ marginBottom: 16 }}>
-        Monitor your tldw server&apos;s health and set up alerts for important metrics. Create rules below to get notified when something needs attention.
+        {t(
+          "settings:adminMonitoring.description",
+          "Monitor your tldw server's health and set up alerts for important metrics. Create rules below to get notified when something needs attention."
+        )}
       </Typography.Paragraph>
 
       {/* System Overview Card */}
-      <Card title="System Overview" loading={statsLoading || securityLoading} style={{ marginBottom: 16 }} extra={
+      <Card title={t("settings:adminMonitoring.systemOverviewTitle", "System Overview")} loading={statsLoading || securityLoading} style={{ marginBottom: 16 }} extra={
         <Space size="small" align="center">
-          {timeSinceRefresh && <Typography.Text type="secondary" style={{ fontSize: 12 }}>Updated {timeSinceRefresh}</Typography.Text>}
-          <Select size="small" value={autoRefreshInterval} onChange={setAutoRefreshInterval} style={{ width: 90 }} options={[{ value: 0, label: "Off" }, { value: 30, label: "30s" }, { value: 60, label: "1min" }, { value: 300, label: "5min" }]} />
-          <Button size="small" onClick={refreshAll}>Refresh</Button>
+          {timeSinceRefresh && <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t("settings:adminMonitoring.updated", "Updated")} {timeSinceRefresh}</Typography.Text>}
+          <Select size="small" value={autoRefreshInterval} onChange={setAutoRefreshInterval} style={{ width: 90 }} options={[{ value: 0, label: t("settings:adminMonitoring.refreshOff", "Off") }, { value: 30, label: t("settings:adminMonitoring.refresh30s", "30s") }, { value: 60, label: t("settings:adminMonitoring.refresh1min", "1min") }, { value: 300, label: t("settings:adminMonitoring.refresh5min", "5min") }]} />
+          <Button size="small" onClick={refreshAll}>{t("common:refresh", "Refresh")}</Button>
         </Space>
       }>
         <Space orientation="vertical" style={{ width: "100%" }} size="middle">
           {systemStats && (
             <div>
-              <strong>System Stats:</strong>
-              <Table dataSource={Object.entries(systemStats).map(([key, value]) => ({ key, stat: key, rawValue: value }))} columns={[{ title: "Stat", dataIndex: "stat", key: "stat", render: (s: string) => formatStatKey(s) }, { title: "Value", dataIndex: "rawValue", key: "value", render: (v: unknown) => formatStatValue(v) }]} rowKey="key" pagination={false} size="small" />
+              <strong>{t("settings:adminMonitoring.systemStatsLabel", "System Stats:")}</strong>
+              <Table dataSource={Object.entries(systemStats).map(([key, value]) => ({ key, stat: key, rawValue: value }))} columns={[{ title: t("settings:adminMonitoring.colStat", "Stat"), dataIndex: "stat", key: "stat", render: (s: string) => formatStatKey(s) }, { title: t("settings:adminMonitoring.colValue", "Value"), dataIndex: "rawValue", key: "value", render: (v: unknown) => formatStatValue(v) }]} rowKey="key" pagination={false} size="small" />
             </div>
           )}
           {securityStatus && (
             <div>
-              <strong>Security Alert Status:</strong>
-              <Table dataSource={Object.entries(securityStatus).map(([key, value]) => ({ key, field: key, rawValue: value }))} columns={[{ title: "Field", dataIndex: "field", key: "field", render: (s: string) => formatStatKey(s) }, { title: "Value", dataIndex: "rawValue", key: "value", render: (v: unknown) => formatStatValue(v) }]} rowKey="key" pagination={false} size="small" />
+              <strong>{t("settings:adminMonitoring.securityStatusLabel", "Security Alert Status:")}</strong>
+              <Table dataSource={Object.entries(securityStatus).map(([key, value]) => ({ key, field: key, rawValue: value }))} columns={[{ title: t("settings:adminMonitoring.colField", "Field"), dataIndex: "field", key: "field", render: (s: string) => formatStatKey(s) }, { title: t("settings:adminMonitoring.colValue", "Value"), dataIndex: "rawValue", key: "value", render: (v: unknown) => formatStatValue(v) }]} rowKey="key" pagination={false} size="small" />
             </div>
           )}
           {!systemStats && !securityStatus && !statsLoading && !securityLoading && (
-            <Alert title="No system data available yet." />
+            <Alert title={t("settings:adminMonitoring.systemDataEmpty", "No system data available yet.")} />
           )}
         </Space>
       </Card>
 
-      <Card title="Sandbox Runtime Isolation" loading={sandboxDiagnosticsLoading} style={{ marginBottom: 16 }} extra={<Button onClick={() => loadSandboxDiagnostics()} size="small">Refresh</Button>}>
+      <Card title={t("settings:adminMonitoring.sandboxCardTitle", "Sandbox Runtime Isolation")} loading={sandboxDiagnosticsLoading} style={{ marginBottom: 16 }} extra={<Button onClick={() => loadSandboxDiagnostics()} size="small">{t("common:refresh", "Refresh")}</Button>}>
         <Space orientation="vertical" style={{ width: "100%" }} size="middle">
           {sandboxDiagnosticsError && (
             <RecoveryCallout
@@ -694,7 +706,7 @@ const MonitoringDashboardPage: React.FC = () => {
                 sandboxDiagnosticsMissing
                   ? undefined
                   : {
-                      label: "Retry diagnostics",
+                      label: t("settings:adminMonitoring.retryDiagnostics", "Retry diagnostics"),
                       onClick: () => void loadSandboxDiagnostics()
                     }
               }
@@ -702,7 +714,7 @@ const MonitoringDashboardPage: React.FC = () => {
           )}
           {sandboxDiagnostics?.summary && (
             <Descriptions size="small" column={5}>
-              <Descriptions.Item label="Total">
+              <Descriptions.Item label={t("settings:adminMonitoring.sandboxTotal", "Total")}>
                 {sandboxDiagnostics.summary.total}
               </Descriptions.Item>
               <Descriptions.Item label={READY_STATE_LABEL}>
@@ -711,10 +723,10 @@ const MonitoringDashboardPage: React.FC = () => {
               <Descriptions.Item label={UNAVAILABLE_STATE_LABEL}>
                 {sandboxDiagnostics.summary.unavailable}
               </Descriptions.Item>
-              <Descriptions.Item label="Host-gated">
+              <Descriptions.Item label={t("settings:adminMonitoring.sandboxHostGated", "Host-gated")}>
                 {sandboxDiagnostics.summary.host_gated}
               </Descriptions.Item>
-              <Descriptions.Item label="Scaffold">
+              <Descriptions.Item label={t("settings:adminMonitoring.sandboxScaffold", "Scaffold")}>
                 {sandboxDiagnostics.summary.scaffold}
               </Descriptions.Item>
             </Descriptions>
@@ -722,12 +734,15 @@ const MonitoringDashboardPage: React.FC = () => {
           {hostLocalWarningRuntimes.length > 0 && (
             <Alert
               variant="warning"
-              title="Host-local sandbox runtimes require operator review"
+              title={t("settings:adminMonitoring.hostLocalWarningTitle", "Host-local sandbox runtimes require operator review")}
             >
               {
                 <span>
-                  {hostLocalWarningRuntimes.join(", ")} run on host-local boundaries,
-                  are not VM-grade isolation, and are not eligible for untrusted code.
+                  {hostLocalWarningRuntimes.join(", ")}{" "}
+                  {t(
+                    "settings:adminMonitoring.hostLocalWarningBody",
+                    "run on host-local boundaries, are not VM-grade isolation, and are not eligible for untrusted code."
+                  )}
                 </span>
               }
             </Alert>
@@ -741,42 +756,42 @@ const MonitoringDashboardPage: React.FC = () => {
               size="small"
             />
           ) : !sandboxDiagnosticsLoading && !sandboxDiagnosticsError ? (
-            <Alert title="No sandbox runtime diagnostics available yet." />
+            <Alert title={t("settings:adminMonitoring.sandboxEmpty", "No sandbox runtime diagnostics available yet.")} />
           ) : null}
         </Space>
       </Card>
 
       {/* Alert Rules Card */}
-      <Card title="Alert Rules" style={{ marginBottom: 16 }} extra={<Button onClick={() => loadAlertRules()} size="small">Refresh</Button>}>
+      <Card title={t("settings:adminMonitoring.alertRulesTitle", "Alert Rules")} style={{ marginBottom: 16 }} extra={<Button onClick={() => loadAlertRules()} size="small">{t("common:refresh", "Refresh")}</Button>}>
         <div style={{ marginBottom: 16 }}>
           <Form form={ruleForm} layout="inline" style={{ flexWrap: "wrap", gap: "8px 0" }}>
-            <Form.Item name="metric" rules={[{ required: true, message: "Metric is required" }]}>
-              <AutoComplete placeholder="e.g. cpu_usage" style={{ width: 180 }} options={metricOptions} filterOption={(input, option) => (option?.value as string)?.toLowerCase().includes(input.toLowerCase())} />
+            <Form.Item name="metric" rules={[{ required: true, message: t("settings:adminMonitoring.metricRequired", "Metric is required") }]}>
+              <AutoComplete placeholder={t("settings:adminMonitoring.metricPlaceholder", "e.g. cpu_usage")} style={{ width: 180 }} options={metricOptions} filterOption={(input, option) => (option?.value as string)?.toLowerCase().includes(input.toLowerCase())} />
             </Form.Item>
-            <Form.Item name="operator" rules={[{ required: true, message: "Operator is required" }]}>
-              <Select placeholder="Operator" style={{ width: 100 }} options={[{ value: ">", label: ">" }, { value: ">=", label: ">=" }, { value: "<", label: "<" }, { value: "<=", label: "<=" }, { value: "==", label: "==" }]} />
+            <Form.Item name="operator" rules={[{ required: true, message: t("settings:adminMonitoring.operatorRequired", "Operator is required") }]}>
+              <Select placeholder={t("settings:adminMonitoring.operatorPlaceholder", "Operator")} style={{ width: 100 }} options={[{ value: ">", label: ">" }, { value: ">=", label: ">=" }, { value: "<", label: "<" }, { value: "<=", label: "<=" }, { value: "==", label: "==" }]} />
             </Form.Item>
-            <Form.Item name="threshold" rules={[{ required: true, message: "Threshold is required" }]} tooltip="The value to compare against (e.g. 90 for 90%)">
-              <InputNumber placeholder="Threshold" style={{ width: 120 }} />
+            <Form.Item name="threshold" rules={[{ required: true, message: t("settings:adminMonitoring.thresholdRequired", "Threshold is required") }]} tooltip={t("settings:adminMonitoring.thresholdTooltip", "The value to compare against (e.g. 90 for 90%)")}>
+              <InputNumber placeholder={t("settings:adminMonitoring.thresholdPlaceholder", "Threshold")} style={{ width: 120 }} />
             </Form.Item>
-            <Form.Item name="duration_minutes" rules={[{ required: true, message: "Duration is required" }]} tooltip="How long the threshold must be exceeded before alerting (1-1440 minutes)">
-              <InputNumber placeholder="Duration (min)" style={{ width: 130 }} min={1} max={1440} />
+            <Form.Item name="duration_minutes" rules={[{ required: true, message: t("settings:adminMonitoring.durationRequired", "Duration is required") }]} tooltip={t("settings:adminMonitoring.durationTooltip", "How long the threshold must be exceeded before alerting (1-1440 minutes)")}>
+              <InputNumber placeholder={t("settings:adminMonitoring.durationPlaceholder", "Duration (min)")} style={{ width: 130 }} min={1} max={1440} />
             </Form.Item>
-            <Form.Item name="severity" rules={[{ required: true, message: "Severity is required" }]} tooltip="Critical: immediate attention. High: investigate soon. Medium: monitor closely. Low: informational.">
-              <Select placeholder="Severity" style={{ width: 120 }} options={[{ value: "low", label: "Low" }, { value: "medium", label: "Medium" }, { value: "high", label: "High" }, { value: "critical", label: "Critical" }]} />
+            <Form.Item name="severity" rules={[{ required: true, message: t("settings:adminMonitoring.severityRequired", "Severity is required") }]} tooltip={t("settings:adminMonitoring.severityTooltip", "Critical: immediate attention. High: investigate soon. Medium: monitor closely. Low: informational.")}>
+              <Select placeholder={t("settings:adminMonitoring.severityPlaceholder", "Severity")} style={{ width: 120 }} options={[{ value: "low", label: t("settings:adminMonitoring.severityLow", "Low") }, { value: "medium", label: t("settings:adminMonitoring.severityMedium", "Medium") }, { value: "high", label: t("settings:adminMonitoring.severityHigh", "High") }, { value: "critical", label: t("settings:adminMonitoring.severityCritical", "Critical") }]} />
             </Form.Item>
             <Form.Item name="enabled" valuePropName="checked" initialValue={true}>
-              <Switch checkedChildren="Enabled" unCheckedChildren="Disabled" defaultChecked />
+              <Switch checkedChildren={t("settings:adminMonitoring.enabled", "Enabled")} unCheckedChildren={t("settings:adminMonitoring.disabled", "Disabled")} defaultChecked />
             </Form.Item>
             <Form.Item>
-              <Button type="primary" onClick={handleCreateRule} loading={creatingRule}>Create Rule</Button>
+              <Button type="primary" onClick={handleCreateRule} loading={creatingRule}>{t("settings:adminMonitoring.createRule", "Create Rule")}</Button>
             </Form.Item>
           </Form>
         </div>
         {alertRules.length === 0 && !rulesLoading ? (
-          <Alert title="No alert rules configured" className="mb-4">
+          <Alert title={t("settings:adminMonitoring.noRulesTitle", "No alert rules configured")} className="mb-4">
             <div>
-              <p style={{ marginBottom: 8 }}>Create your first rule using the form above, or try a starter rule:</p>
+              <p style={{ marginBottom: 8 }}>{t("settings:adminMonitoring.noRulesHint", "Create your first rule using the form above, or try a starter rule:")}</p>
               <Space wrap>
                 {starterRules.map((rule) => (
                   <Button key={rule.metric} size="small" onClick={() => handleCreateStarterRule(rule)} loading={creatingRule}>
@@ -784,7 +799,7 @@ const MonitoringDashboardPage: React.FC = () => {
                   </Button>
                 ))}
               </Space>
-              <p style={{ marginTop: 8 }}><Typography.Text type="secondary" style={{ fontSize: 12 }}>These are common rules &mdash; your server may use different metric names.</Typography.Text></p>
+              <p style={{ marginTop: 8 }}><Typography.Text type="secondary" style={{ fontSize: 12 }}>{t("settings:adminMonitoring.starterRulesNote", "These are common rules — your server may use different metric names.")}</Typography.Text></p>
             </div>
           </Alert>
         ) : (
@@ -793,18 +808,18 @@ const MonitoringDashboardPage: React.FC = () => {
       </Card>
 
       {/* Alert History Card */}
-      <Card title="Alert History" style={{ marginBottom: 16 }} extra={<Button onClick={() => loadAlertHistory()} size="small">Refresh</Button>}>
+      <Card title={t("settings:adminMonitoring.alertHistoryTitle", "Alert History")} style={{ marginBottom: 16 }} extra={<Button onClick={() => loadAlertHistory()} size="small">{t("common:refresh", "Refresh")}</Button>}>
         <Table dataSource={alertHistory} columns={historyColumns} rowKey={(record) => String(record.id ?? record.alert ?? record.triggered_at ?? "unknown")} loading={historyLoading} pagination={{ pageSize: 20 }} size="small" />
       </Card>
 
       {/* Activity (Collapsible) */}
-      <CollapsibleSection title="Recent Activity" description="Dashboard activity over the last 7 days" defaultOpen>
+      <CollapsibleSection title={t("settings:adminMonitoring.recentActivityTitle", "Recent Activity")} description={t("settings:adminMonitoring.recentActivityDescription", "Dashboard activity over the last 7 days")} defaultOpen>
         {activityLoading ? (
           <Card loading={true} />
         ) : activityRows.length > 0 ? (
           <Table dataSource={activityRows} columns={activityColumns} rowKey="_key" pagination={false} size="small" />
         ) : (
-          <Alert title="No recent activity data available." />
+          <Alert title={t("settings:adminMonitoring.activityEmpty", "No recent activity data available.")} />
         )}
       </CollapsibleSection>
     </div>
