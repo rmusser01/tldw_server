@@ -4,9 +4,11 @@ title: Expose synchronous document summarization in Service Prompts
 status: Done
 assignee: []
 created_date: '2026-09-05 01:52'
-updated_date: '2026-09-05 02:06'
+updated_date: '2026-09-05 02:09'
 labels: []
 dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/pull/2867'
 documentation:
   - Docs/Design/document-summary-service-prompt.md
 ---
@@ -37,6 +39,8 @@ Implement the user-approved next Service Prompts slice for synchronous /api/v1/m
 Approved in this task conversation. Isolated branch codex/document-summary-service-prompt starts at dev c5dfe0ff73. Backlog MCP search has not returned; using official CLI fallback.
 
 Implemented literal document system guidance using the existing registry, storage, shared Settings and processor arguments. Resolved once before uploads/downloads; explicit request system prompt (including multipart empty string) wins, custom user instructions remain unchanged, and no override snapshots the deployment default. RED: 9 initial backend tests failed; UI localization regression failed; multipart empty-field HTTP regression failed. GREEN final: pytest document summary + registry/API + JSON document + media usage suites: 119 passed (9 existing warnings); Vitest Settings + Service Prompts service/domain suites: 194 passed; extension tsc --noEmit -p tsconfig.compile.json: passed; Ruff check and format check: passed; ESLint touched shared files: exit 0 (Next pages-directory configuration notice only); Bandit two production Python files: zero findings/errors, report /tmp/bandit_document_summary_service_prompt.json. Independent review found multipart normalization issue, fixed test-first and re-reviewed with no further findings. Full repository tests and browser end-to-end tests not run. Queued/persisted ingestion, PDFs and ebooks remain intentionally excluded. Local implementation only; no PR created or merge attempted.
+
+User selected push/create PR. Opened PR #2867 against dev: https://github.com/rmusser01/tldw_server/pull/2867 . The PR records the focused verification and intentionally excluded workflows. Human-written Change summary is pending before merge; no merge or recurring monitoring requested in this step.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
