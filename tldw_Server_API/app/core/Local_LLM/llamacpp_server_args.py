@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-
 CORE_SERVER_ARG_KEYS: set[str] = {
     "threads",
     "t",
@@ -18,6 +17,7 @@ CORE_SERVER_ARG_KEYS: set[str] = {
 }
 
 RESERVED_STRUCTURED_ARG_KEYS: set[str] = {"model", "model_path", "m", "host", "port"}
+SNAPSHOT_OWNED_ARG_KEYS: set[str] = {"slot_save_path", "slots", "no_slots"}
 
 PATH_ARG_KEYS: set[str] = {
     "grammar_file",
@@ -79,9 +79,9 @@ def server_arg_formatters() -> dict[str, Callable[[Any], list[str]]]:
         "n_cpu_moe": lambda v: ["--n-cpu-moe", str(int(v))],
         "rope_scaling_type": lambda v: ["--rope-scaling", str(v)],
         "rope_scaling": lambda v: ["--rope-scaling", str(v)],
-        "tensor_split": lambda v: ["--tensor-split", ",".join(map(str, v))]
-        if isinstance(v, (list, tuple))
-        else ["--tensor-split", str(v)],
+        "tensor_split": lambda v: (
+            ["--tensor-split", ",".join(map(str, v))] if isinstance(v, (list, tuple)) else ["--tensor-split", str(v)]
+        ),
         "rope_freq_base": lambda v: ["--rope-freq-base", str(float(v))],
         "rope_freq_scale": lambda v: ["--rope-freq-scale", str(float(v))],
         "rope_scale": lambda v: ["--rope-freq-scale", str(float(v))],
@@ -91,9 +91,11 @@ def server_arg_formatters() -> dict[str, Callable[[Any], list[str]]]:
         "context_shift": lambda v: ["--context-shift"] if v else ["--no-context-shift"],
         "streaming_llm": lambda v: ["--context-shift"] if v else [],
         "lora": lambda v: flatten_repeatable("--lora", v),
-        "lora_scaled": lambda v: ["--lora-scaled", str(v[0]), str(v[1])]
-        if isinstance(v, (list, tuple)) and len(v) == 2
-        else (["--lora-scaled", str(v)] if v is not None else []),
+        "lora_scaled": lambda v: (
+            ["--lora-scaled", str(v[0]), str(v[1])]
+            if isinstance(v, (list, tuple)) and len(v) == 2
+            else (["--lora-scaled", str(v)] if v is not None else [])
+        ),
         "lora_base": lambda v: ["--lora-base", str(v)],
         "control_vector": lambda v: ["--control-vector", str(v)],
         "cache_type_k": lambda v: ["--cache-type-k", str(v)],

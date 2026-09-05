@@ -61,6 +61,7 @@ class LlamaCppRuntime(BaseModel):
 
     profile_id: str
     state: LlamaCppRuntimeState
+    launch_generation: str | None = None
     pid: int | None = None
     host: str | None = None
     port: int | None = Field(default=None, ge=1, le=65535)

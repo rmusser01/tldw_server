@@ -7,14 +7,14 @@ from typing import Any
 
 import pytest
 
-from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
-from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
 from tldw_Server_API.app.core.Local_LLM.llamacpp_process_runner import LlamaCppProcessRunner
 from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
     LlamaCppPortPolicy,
     LlamaCppProfile,
     LlamaCppRuntimeState,
 )
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
 
 
 class FakeProcess:
@@ -122,6 +122,72 @@ def test_runner_reports_defined_before_first_start(tmp_path: Path):
     assert runtime.warnings == []
 
 
+async def test_snapshot_launch_generations_and_private_working_path(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_process_runner as module
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore
+
+    config = make_config(tmp_path)
+    model = make_model(config)
+    commands = []
+
+    async def spawn(*args, **kwargs):
+        commands.append(list(args))
+        return FakeProcess(5000 + len(commands))
+
+    async def ready(*args, **kwargs):
+        return True
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    monkeypatch.setattr(module, "wait_for_http_ready", ready)
+    runner = LlamaCppProcessRunner(config, "one")
+    monkeypatch.setattr(runner, "_is_port_free", lambda *args: True)
+    with SnapshotStore(tmp_path / "snapshots") as store:
+        runner.snapshot_store = store
+        enabled = profile("one").model_copy(update={"snapshots_enabled": True})
+        first = await runner.start(model, enabled)
+        assert first.launch_generation
+        first_path = runner.snapshot_working
+        assert commands[0][-3:] == ["--slots", "--slot-save-path", str(first_path)]
+        assert str(first_path) not in runner.status().resolved_args
+        await runner.stop()
+        second = await runner.start(model, enabled)
+        assert second.launch_generation != first.launch_generation
+        assert runner.snapshot_working != first_path
+        await runner.stop()
+
+
+async def test_failed_readiness_keeps_owned_child_stoppable(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_process_runner as module
+
+    config = make_config(tmp_path)
+    runner = LlamaCppProcessRunner(config, "one")
+    child = FakeProcess(77777)
+
+    async def spawn(*args, **kwargs):
+        return child
+
+    async def readiness(*args, **kwargs):
+        raise ConnectionError("readiness transport failed")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    monkeypatch.setattr(module, "wait_for_http_ready", readiness)
+    monkeypatch.setattr(runner, "_is_port_free", lambda *args: True)
+    monkeypatch.setattr(runner, "_signal_managed_process_group", lambda *args: child.terminate())
+    with pytest.raises(ServerError):
+        await runner.start(make_model(config), profile("one"))
+    await runner.stop()
+    assert child.returncode is not None
+
+
+@pytest.mark.parametrize("key", ["slot_save_path", "slot-save-path", "--slot-save-path", "slots", "no_slots"])
+def test_snapshot_launch_rejects_user_control_of_owned_flags(tmp_path, key):
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_process_runner import validate_profile_server_args
+
+    config = make_config(tmp_path).model_copy(update={"allow_unvalidated_args": True})
+    with pytest.raises(ServerError):
+        validate_profile_server_args(config, profile("one", server_args={key: "outside"}))
+
+
 @pytest.mark.asyncio
 async def test_runner_starts_two_profiles_on_distinct_ports_without_stopping_each_other(
     monkeypatch: pytest.MonkeyPatch,
@@ -223,7 +289,9 @@ async def test_runner_autoselects_port_when_profile_policy_requests_it(
     runner = LlamaCppProcessRunner(config, profile_id="auto")
     monkeypatch.setattr(runner, "_is_port_free", lambda _host, port: port == 8183)
 
-    runtime = await runner.start(model_path, profile=profile("auto", port=8181, port_policy=LlamaCppPortPolicy.AUTOSELECT))
+    runtime = await runner.start(
+        model_path, profile=profile("auto", port=8181, port_policy=LlamaCppPortPolicy.AUTOSELECT)
+    )
 
     assert runtime.port == 8183
     assert commands[0][commands[0].index("--port") + 1] == "8183"
@@ -395,7 +463,7 @@ async def test_runner_accepts_existing_handler_server_arg_aliases(
         "no_cnv": True,
         "in_prefix_bos": True,
         "r": "User:",
-        "j": "{\"type\":\"object\"}",
+        "j": '{"type":"object"}',
     }
 
     await runner.start(make_model(config), profile=profile("aliases", server_args=existing_aliases))

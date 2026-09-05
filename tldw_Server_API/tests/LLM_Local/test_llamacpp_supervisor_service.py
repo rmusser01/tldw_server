@@ -14,8 +14,6 @@ from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
     LlamaCppProfileCreateRequest,
     LlamaCppProfileUpdateRequest,
 )
-from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ModelNotFoundError, ServerError
-from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
 from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_store import JsonLlamaCppProfileStore
 from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
     LlamaCppPortPolicy,
@@ -26,6 +24,8 @@ from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
     LlamaCppRuntimeState,
 )
 from tldw_Server_API.app.core.Local_LLM.llamacpp_supervisor_service import LlamaCppSupervisor
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ModelNotFoundError, ServerError
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
 
 
 def make_config(tmp_path: Path) -> LlamaCppConfig:
@@ -170,6 +170,97 @@ class FakeRunnerFactory:
         runner = FakeRunner(profile_id, self.calls)
         self.runners[profile_id] = runner
         return runner
+
+
+async def test_snapshot_profile_toggle_propagates_without_restart_and_busy_fences(tmp_path):
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_operations import SnapshotOperationError
+
+    config = make_config(tmp_path)
+    model = make_model(config)
+    factory = FakeRunnerFactory()
+    supervisor = LlamaCppSupervisor(
+        config=config, store=JsonLlamaCppProfileStore(tmp_path / "profiles.json"), runner_factory=factory
+    )
+    created = await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(
+            profile_id="one", name="one", model_path=str(model), snapshots_enabled=True, snapshot_retention=8
+        )
+    )
+    assert created.snapshots_enabled and created.snapshot_retention == 8
+    await supervisor.start_profile("one")
+    await supervisor.update_profile("one", LlamaCppProfileUpdateRequest(snapshots_enabled=False))
+    assert factory.calls == {"one": 1}
+    service = await supervisor._snapshot_service()
+    service.active["one"] = "operation"
+    for action in [
+        supervisor.stop_profile,
+        supervisor.pause_profile,
+        supervisor.resume_profile,
+        supervisor.start_profile,
+        supervisor.delete_profile,
+    ]:
+        with pytest.raises(SnapshotOperationError):
+            await action("one")
+    service.active.clear()
+    await supervisor.shutdown()
+
+
+async def test_snapshot_failed_start_keeps_child_ownership_until_confirmed_death(tmp_path):
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore, SnapshotStoreError
+
+    config = make_config(tmp_path)
+    model = make_model(config)
+    child = SimpleNamespace(returncode=None)
+
+    class BrokenRunner(FakeRunner):
+        async def start(self, model_path, profile):
+            self.snapshot_generation = "failedlaunch"
+            self.snapshot_working = self.snapshot_store.launch_directory("one", "failedlaunch")
+            self.snapshot_process = child
+            raise RuntimeError("readiness failed")
+
+        async def stop(self):
+            raise RuntimeError("cannot confirm exit")
+
+    supervisor = LlamaCppSupervisor(
+        config=config,
+        store=JsonLlamaCppProfileStore(tmp_path / "profiles.json"),
+        runner_factory=lambda c, p: BrokenRunner(p, {}),
+    )
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="one", model_path=str(model), snapshots_enabled=True)
+    )
+    with pytest.raises(RuntimeError):
+        await supervisor.start_profile("one")
+    with pytest.raises(RuntimeError):
+        await supervisor.shutdown()
+    with pytest.raises(SnapshotStoreError):
+        SnapshotStore(tmp_path / "llamacpp-snapshots")
+    child.returncode = 1
+    with pytest.raises(RuntimeError):
+        await supervisor.shutdown()
+    with SnapshotStore(tmp_path / "llamacpp-snapshots"):
+        assert not (tmp_path / "llamacpp-snapshots" / "one" / "working" / "failedlaunch").exists()
+
+
+async def test_default_profile_compatibility_path_cannot_change_reserved_snapshot_profile(tmp_path):
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_store import DEFAULT_PROFILE_ID
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_operations import SnapshotOperationError
+
+    config = make_config(tmp_path)
+    model = make_model(config)
+    supervisor = LlamaCppSupervisor(config=config, store=JsonLlamaCppProfileStore(tmp_path / "profiles.json"))
+    await supervisor.ensure_default_profile_from_path(model, {})
+    service = await supervisor._snapshot_service()
+    service.active[DEFAULT_PROFILE_ID] = "busy"
+    replacement = make_model(config, "replacement.gguf")
+    with pytest.raises(SnapshotOperationError):
+        await supervisor.ensure_default_profile_from_path(replacement, {})
+    assert supervisor.store.get(DEFAULT_PROFILE_ID).model_path == str(model)
+    service.active.clear()
+    await supervisor.shutdown()
 
 
 class StopFailingRunnerFactory(FakeRunnerFactory):
@@ -385,7 +476,7 @@ async def test_supervisor_rejects_path_arg_outside_allowlist_before_persisting(t
     model_path = make_model(config)
     grammar_path = tmp_path / "outside" / "grammar.gbnf"
     grammar_path.parent.mkdir()
-    grammar_path.write_text("root ::= \"ok\"", encoding="utf-8")
+    grammar_path.write_text('root ::= "ok"', encoding="utf-8")
 
     with pytest.raises(ServerError, match="grammar_file"):
         await supervisor.create_profile(
@@ -864,9 +955,7 @@ async def test_supervisor_default_profile_bridge_accepts_model_path(tmp_path: Pa
 
 
 @pytest.mark.asyncio
-async def test_supervisor_serializes_default_start_profile_updates(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+async def test_supervisor_serializes_default_start_profile_updates(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_supervisor_service as supervisor_module
 
     config = make_config(tmp_path)

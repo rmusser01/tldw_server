@@ -81,7 +81,7 @@ class LlamaCppConfigUpdateRequest(BaseModel):
     log_output_file: str | None = None
 
     @model_validator(mode="after")
-    def reject_boolean_null_clears(self) -> "LlamaCppConfigUpdateRequest":
+    def reject_boolean_null_clears(self) -> LlamaCppConfigUpdateRequest:
         boolean_fields = {
             "enabled",
             "allow_unvalidated_args",
@@ -433,3 +433,55 @@ class LlamaCppLifecycleActionResponse(BaseModel):
     state: LlamaCppRuntimeState
     accepted: bool = True
     message: str | None = None
+
+
+class LlamaCppSnapshotSlot(BaseModel):
+    slot_id: int
+    busy: bool
+    token_count: int
+
+
+class LlamaCppSnapshotSlotsResponse(BaseModel):
+    capability: Literal["ready", "stopped", "disabled", "restart_required", "busy", "unsupported", "unavailable"]
+    reason: str | None = None
+    launch_generation: str | None = None
+    request_id: str
+    latest_operation_id: str | None = None
+    slots: list[LlamaCppSnapshotSlot] = Field(default_factory=list)
+
+
+class LlamaCppSnapshotItem(BaseModel):
+    snapshot_id: str
+    source_slot: int
+    created_at: str
+    commit_sequence: int
+    byte_count: int
+    token_count: int
+    compatibility: Literal["compatible", "incompatible", "unknown"]
+    reasons: list[str] = Field(default_factory=list)
+
+
+class LlamaCppSnapshotCatalogResponse(BaseModel):
+    snapshots: list[LlamaCppSnapshotItem]
+    total: int
+    total_bytes: int
+    offset: int
+    limit: int
+    retention: int
+
+
+class LlamaCppSnapshotOperationResponse(BaseModel):
+    profile_id: str
+    operation_id: str
+    launch_generation: str
+    kind: Literal["save", "restore"]
+    state: Literal["validating", "saving", "verifying", "restoring", "complete", "failed", "outcome_unknown"]
+    snapshot_id: str | None = None
+    token_count: int | None = None
+    error_code: str | None = None
+    warning_code: str | None = None
+    recovery_action: Literal["none", "retry_manually", "stop_runtime"] = "none"
+
+
+class LlamaCppSnapshotDeleteResponse(BaseModel):
+    deleted: bool = True

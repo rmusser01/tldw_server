@@ -12,13 +12,17 @@ import stat
 import uuid
 from pathlib import Path
 
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from .llamacpp_snapshot_models import OperationReceipt, SnapshotMetadata
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 _CHUNK_SIZE = 1024 * 1024
 _MAX_MANIFEST_BYTES = 1024 * 1024
+
+
+class _Sequence(BaseModel):
+    value: int = Field(ge=0)
 
 
 class SnapshotStoreError(RuntimeError):
@@ -47,6 +51,7 @@ class SnapshotStore:
     def __init__(self, root: Path):
         self.root = Path(root)
         self._lock_fd: int | None = None
+        self._owner_pid = os.getpid()
         self._ensure_private_dir(self.root)
         self._acquire_owner_lock()
 
@@ -59,7 +64,8 @@ class SnapshotStore:
     def close(self) -> None:
         """Release the process ownership fence."""
         if self._lock_fd is not None:
-            fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
+            if os.getpid() == self._owner_pid:
+                fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
             os.close(self._lock_fd)
             self._lock_fd = None
 
@@ -226,6 +232,61 @@ class SnapshotStore:
         if receipt.profile_id != profile_id or receipt.operation_id != operation_id:
             raise SnapshotNotFoundError("operation receipt not found")
         return receipt
+
+    def list_receipts(self, profile_id: str) -> list[OperationReceipt]:
+        """Read retained receipts; receipt history is never automatically pruned."""
+        self._require_open()
+        paths = self._profile_paths(profile_id)
+        result = []
+        for name in self._list_names(paths["receipts"]):
+            if name.endswith(".json"):
+                result.append(self.read_receipt(profile_id, name[:-5]))
+        return sorted(result, key=lambda item: (item.created_at, item.operation_id))
+
+    def token_key(self) -> bytes:
+        """Load or atomically create a private signing key under the owner fence."""
+        self._require_open()
+        path = self.root / ".request-key.json"
+        if not self._exists(path):
+            self._publish_json(path, {"key": os.urandom(32).hex()})
+
+        class Key(BaseModel):
+            key: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+        return bytes.fromhex(self._read_model(path, Key).key)
+
+    def allocate_sequence(self, profile_id: str) -> int:
+        """Durably allocate an increasing sequence even after all snapshots are deleted."""
+        self._require_open()
+        path = self._profile_paths(profile_id)["profile"] / "sequence.json"
+        try:
+            current = self._read_model(path, _Sequence).value
+        except SnapshotNotFoundError:
+            current = max((item.commit_sequence for item in self.list(profile_id)), default=0)
+        self._publish_json(path, {"value": current + 1}, replace=True)
+        return current + 1
+
+    def launch_directory(self, profile_id: str, generation: str) -> Path:
+        """Create a private generated directory, never exposing the committed catalog."""
+        self._require_open()
+        self._validate_id(generation)
+        base = self._profile_paths(profile_id)["profile"] / "working"
+        self._ensure_private_dir(base)
+        path = base / generation
+        self._ensure_private_dir(path)
+        return path
+
+    def cleanup_launch(self, profile_id: str, generation: str) -> None:
+        """Remove working files only after the caller proves the owned child exited."""
+        path = self.launch_directory(profile_id, generation)
+        for name in self._list_names(path):
+            self._unlink(path / name)
+        parent_fd = self._open_directory_fd(path.parent)
+        try:
+            os.rmdir(path.name, dir_fd=parent_fd)
+            os.fsync(parent_fd)
+        finally:
+            os.close(parent_fd)
 
     def _profile_paths(self, profile_id: str) -> dict[str, Path]:
         self._validate_id(profile_id)
@@ -405,7 +466,7 @@ class SnapshotStore:
             os.close(fd)
 
     def _require_open(self) -> None:
-        if self._lock_fd is None:
+        if self._lock_fd is None or os.getpid() != self._owner_pid:
             raise SnapshotStoreError("snapshot store is closed")
 
     def _checkpoint(self, _boundary: str) -> None:
@@ -454,12 +515,14 @@ class SnapshotStore:
     @staticmethod
     def _replace(source: Path, target: Path) -> None:
         source_fd = SnapshotStore._open_directory_fd(source.parent)
-        target_fd = SnapshotStore._open_directory_fd(target.parent)
         try:
-            os.replace(source.name, target.name, src_dir_fd=source_fd, dst_dir_fd=target_fd)
+            target_fd = SnapshotStore._open_directory_fd(target.parent)
+            try:
+                os.replace(source.name, target.name, src_dir_fd=source_fd, dst_dir_fd=target_fd)
+            finally:
+                os.close(target_fd)
         finally:
             os.close(source_fd)
-            os.close(target_fd)
 
     @staticmethod
     def _unlink(path: Path) -> None:

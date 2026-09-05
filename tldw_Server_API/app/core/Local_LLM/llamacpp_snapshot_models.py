@@ -27,7 +27,7 @@ class Fingerprint(BaseModel):
 class SnapshotRequest(BaseModel):
     """Path-free request shared by snapshot operation boundaries."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     slot_id: int = Field(ge=0)
     expected_launch_generation: str = Field(min_length=1, max_length=128)
@@ -81,6 +81,9 @@ class OperationReceipt(BaseModel):
         "outcome_unknown",
     ]
     dispatched: bool = False
+    actor_id: str = Field(default="unknown", min_length=1, max_length=256)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    warning_code: str | None = None
     snapshot_id: str | None = Field(default=None, pattern=_ID_PATTERN)
     token_count: int | None = Field(default=None, ge=0)
     error_code: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]{0,127}$")
