@@ -25,19 +25,27 @@ def compare_fingerprints(saved: Fingerprint, current: Fingerprint | None) -> lis
 
 def hash_file_stable(path: Path) -> str:
     """Hash a regular file and reject identity changes during the read."""
-    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    no_follow = getattr(os, "O_NOFOLLOW", 0)
+    if not no_follow:
+        raise UnstableFingerprintError("no-follow file identity checks are unsupported")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | no_follow
     fd = os.open(path, flags)
     try:
         before = os.fstat(fd)
+        path_before = os.stat(path, follow_symlinks=False)
         if not _is_regular(before.st_mode):
             raise ValueError("fingerprint source must be a regular file")
         digest = hashlib.sha256()
         while chunk := os.read(fd, _CHUNK_SIZE):
             digest.update(chunk)
         after = os.fstat(fd)
-        identity_before = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
-        identity_after = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
-        if identity_before != identity_after:
+        path_after = os.stat(path, follow_symlinks=False)
+        identity_before = _identity(before)
+        if (
+            identity_before != _identity(path_before)
+            or identity_before != _identity(after)
+            or identity_before != _identity(path_after)
+        ):
             raise UnstableFingerprintError("fingerprint source changed while hashing")
         return digest.hexdigest()
     finally:
@@ -72,3 +80,7 @@ def _is_regular(mode: int) -> bool:
     import stat
 
     return stat.S_ISREG(mode)
+
+
+def _identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)

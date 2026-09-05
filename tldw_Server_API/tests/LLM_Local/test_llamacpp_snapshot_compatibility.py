@@ -1,12 +1,18 @@
 import hashlib
+import os
 from pathlib import Path
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
+from pydantic import ValidationError
 
 from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_compatibility import (
+    UnstableFingerprintError,
     build_fingerprint,
     canonical_sha256,
     compare_fingerprints,
+    hash_file_stable,
 )
 from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_models import Fingerprint
 
@@ -78,4 +84,43 @@ def test_fingerprint_rejects_symlink_sources(tmp_path: Path):
             executable=real,
             effective_options={},
             adapters=[],
+        )
+
+
+def test_fingerprint_rejects_atomic_path_replacement_during_read(tmp_path: Path, monkeypatch):
+    source = tmp_path / "model.gguf"
+    source.write_bytes(b"original")
+    replacement = tmp_path / "replacement.gguf"
+    replacement.write_bytes(b"replaced")
+    original_read = os.read
+    replaced = False
+
+    def replace_after_read(fd: int, size: int) -> bytes:
+        nonlocal replaced
+        chunk = original_read(fd, size)
+        if chunk and not replaced:
+            replacement.replace(source)
+            replaced = True
+        return chunk
+
+    monkeypatch.setattr(os, "read", replace_after_read)
+    with pytest.raises(UnstableFingerprintError):
+        hash_file_stable(source)
+
+
+@given(
+    st.one_of(
+        st.text(alphabet="0123456789abcdef", max_size=63),
+        st.text(alphabet="0123456789abcdef", min_size=65, max_size=80),
+        st.just("A" * 64),
+        st.just("z" * 64),
+    )
+)
+def test_fingerprint_rejects_non_sha256_digest_values(value: str):
+    with pytest.raises(ValidationError):
+        Fingerprint(
+            model_sha256=value,
+            executable_sha256="b" * 64,
+            effective_options_sha256="c" * 64,
+            adapters_sha256="d" * 64,
         )

@@ -33,6 +33,17 @@ The tests use real temporary files/directories and cover known-hash publication,
 
 - Blocking filesystem/hash methods are deliberately synchronous storage primitives; Stage 2 supervisor operations must call them with `asyncio.to_thread` so the event loop is not blocked.
 - Launch working-directory quarantine cleanup requires a proven-dead child and belongs to the Stage 2 lifecycle owner; this store only creates integrity-verified restore staging files and never attempts lifecycle cleanup itself.
-- Hypothesis is declared by the project but unavailable in the mandated existing venv, so the delivered boundary matrix uses parametrized tests rather than Hypothesis-generated cases. No dependency was installed, per instruction.
+- Hypothesis was initially unavailable on the venv's default import path. The controller supplied an existing cached package path, so the round-one fix adds and runs a generated invalid-digest property test without installing or changing dependencies.
 - Profile create/update API propagation and runtime/profile deletion guards remain Stage 2 concerns; this stage supplies the persisted fields and storage primitives only.
 - Existing controller edits to the implementation-plan heading and TASK-13161 tracking file were preserved and are intentionally excluded from this stage's code commit.
+
+## Round-one independent-review fixes
+
+- RED evidence: the focused store/compatibility collection failed because the newly specified `SnapshotStorageUnavailableError` did not exist. The added regressions also named the previously unguarded ancestor-symlink, closed-owner, and pathname-replacement behaviors before production edits.
+- Every existing path component is now checked with `lstat`; any symlink ancestor is rejected. `O_NOFOLLOW` is mandatory rather than silently falling back to zero, and directory fsync opens use both no-follow and `O_DIRECTORY` when supported. Root, staged-file, and restore-working ancestor tests prove an outside marker remains unchanged.
+- Catalog reads now ignore only missing/malformed/incomplete entries. Directory enumeration and metadata `EIO` raise `SnapshotStorageUnavailableError`; receipt `EIO` is no longer translated to not-found.
+- Stable file hashing now compares the open descriptor with the pathname both before and after reading, including device, inode, size, mtime, and ctime. A deterministic atomic pathname-replacement test raises `UnstableFingerprintError`.
+- All public operations reject a closed store, including after another instance acquires the root lock.
+- Malformed/oversized manifest fixtures now have private `0600` permissions, proving parsing/size recovery rather than permission rejection. Fault injection covers copy, file fsync, binary rename, binary-directory fsync, manifest write, manifest fsync, manifest rename, and manifest-directory fsync while preserving the prior committed entry.
+- Final round-one test command used cached Hypothesis 6.138.2 via the supplied `PYTHONPATH`: `49 passed, 7 warnings in 1.54s`. The seven warnings are existing test-bootstrap/dependency warnings: Starlette/httpx deprecation, the documented unknown pytest `plugins` option, two legacy Pydantic class-config warnings, the conftest event-loop deprecation, Python `crypt` deprecation through passlib, and an existing Pydantic field-shadow warning.
+- Round-one static/security evidence: Ruff format check and Ruff check passed for the four amended files; compileall passed for both amended production modules; Bandit 1.9.4 reported no findings; `git diff --check` passed.

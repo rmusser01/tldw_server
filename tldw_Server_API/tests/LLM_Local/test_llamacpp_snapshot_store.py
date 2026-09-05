@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_models import (
 )
 from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import (
     SnapshotCorruptError,
+    SnapshotStorageUnavailableError,
     SnapshotStore,
     SnapshotStoreError,
 )
@@ -97,6 +98,35 @@ def test_symlink_root_and_staged_file_fail_closed(tmp_path: Path):
     assert real.read_bytes() == b"cache"
 
 
+@pytest.mark.parametrize("target", ["root", "staged", "working"])
+def test_symlink_ancestors_fail_closed_without_touching_outside(tmp_path: Path, target: str):
+    outside = tmp_path / "outside"
+    outside.mkdir(mode=0o700)
+    marker = outside / "keep.txt"
+    marker.write_text("unchanged", encoding="utf-8")
+    ancestor = tmp_path / "ancestor"
+    ancestor.symlink_to(outside, target_is_directory=True)
+
+    if target == "root":
+        with pytest.raises(SnapshotStoreError):
+            SnapshotStore(ancestor / "snapshots")
+    else:
+        with SnapshotStore(tmp_path / "private") as store:
+            payload = b"cache"
+            staged = tmp_path / "staged.bin"
+            staged.write_bytes(payload)
+            if target == "staged":
+                (outside / "staged.bin").write_bytes(payload)
+                with pytest.raises(SnapshotStoreError):
+                    store.commit("profile_1", ancestor / "staged.bin", metadata(payload))
+            else:
+                store.commit("profile_1", staged, metadata(payload))
+                with pytest.raises(SnapshotStoreError):
+                    store.stage_restore("profile_1", "snap_1", ancestor / "working")
+
+    assert marker.read_text(encoding="utf-8") == "unchanged"
+
+
 def test_oversized_and_incomplete_manifests_are_not_catalog_entries(tmp_path: Path):
     with SnapshotStore(tmp_path / "private") as store:
         profile = tmp_path / "private/profile_1"
@@ -107,8 +137,39 @@ def test_oversized_and_incomplete_manifests_are_not_catalog_entries(tmp_path: Pa
         (snapshots / "orphan.bin").write_bytes(b"orphan")
         (manifests / "huge.json").write_bytes(b"x" * (1024 * 1024 + 1))
         (manifests / "partial.json").write_text("{", encoding="utf-8")
+        for path in manifests.iterdir():
+            path.chmod(0o600)
 
         assert store.list("profile_1") == []
+
+
+def test_catalog_and_receipt_propagate_operational_read_errors(tmp_path: Path, monkeypatch):
+    payload = b"cache"
+    staged = tmp_path / "staged.bin"
+    staged.write_bytes(payload)
+    receipt = OperationReceipt(
+        profile_id="profile_1",
+        operation_id="operation_1",
+        launch_generation="launch_1",
+        request_digest="e" * 64,
+        kind="save",
+        state="validating",
+    )
+    with SnapshotStore(tmp_path / "private") as store:
+        store.commit("profile_1", staged, metadata(payload))
+        store.write_receipt(receipt)
+        original_read = os.read
+
+        def fail_read(fd: int, size: int) -> bytes:
+            if size <= 1024 * 1024:
+                raise OSError(errno.EIO, "I/O error")
+            return original_read(fd, size)
+
+        monkeypatch.setattr(os, "read", fail_read)
+        with pytest.raises(SnapshotStorageUnavailableError):
+            store.list("profile_1")
+        with pytest.raises(SnapshotStorageUnavailableError):
+            store.read_receipt("profile_1", "operation_1")
 
 
 def test_disk_full_before_publication_preserves_previous_snapshot(tmp_path: Path, monkeypatch):
@@ -149,6 +210,42 @@ def test_interrupted_publication_never_lists_incomplete_snapshot(tmp_path: Path,
             store.commit("profile_1", second, metadata(b"second", "snap_2", 2))
 
         assert [item.snapshot_id for item in store.list("profile_1")] == ["snap_1"]
+        assert (tmp_path / "private/profile_1/snapshots/snap_1.bin").read_bytes() == first
+
+
+@pytest.mark.parametrize(
+    ("failure_boundary", "expected_ids"),
+    [
+        ("copy", ["snap_1"]),
+        ("file_fsync", ["snap_1"]),
+        ("binary_rename", ["snap_1"]),
+        ("directory_fsync", ["snap_1"]),
+        ("manifest_write", ["snap_1"]),
+        ("manifest_fsync", ["snap_1"]),
+        ("manifest_rename", ["snap_1"]),
+        ("manifest_directory_fsync", ["snap_2", "snap_1"]),
+    ],
+)
+def test_every_commit_boundary_preserves_previous_catalog_entry(
+    tmp_path: Path, monkeypatch, failure_boundary: str, expected_ids: list[str]
+):
+    first = b"first"
+    staged = tmp_path / "first.bin"
+    staged.write_bytes(first)
+    with SnapshotStore(tmp_path / "private") as store:
+        store.commit("profile_1", staged, metadata(first, "snap_1", 1))
+        second = tmp_path / "second.bin"
+        second.write_bytes(b"second")
+
+        def interrupt(boundary: str) -> None:
+            if boundary == failure_boundary:
+                raise OSError("interrupted")
+
+        monkeypatch.setattr(store, "_checkpoint", interrupt)
+        with pytest.raises(OSError, match="interrupted"):
+            store.commit("profile_1", second, metadata(b"second", "snap_2", 2))
+
+        assert [item.snapshot_id for item in store.list("profile_1")] == expected_ids
         assert (tmp_path / "private/profile_1/snapshots/snap_1.bin").read_bytes() == first
 
 
@@ -195,3 +292,12 @@ def test_second_process_owner_is_rejected(tmp_path: Path):
             SnapshotStore(tmp_path / "private")
     finally:
         first.close()
+
+
+def test_closed_store_rejects_operations_after_new_owner_acquires_root(tmp_path: Path):
+    first = SnapshotStore(tmp_path / "private")
+    first.close()
+    with SnapshotStore(tmp_path / "private") as replacement:
+        with pytest.raises(SnapshotStoreError, match="closed"):
+            first.list("profile_1")
+        assert replacement.list("profile_1") == []
