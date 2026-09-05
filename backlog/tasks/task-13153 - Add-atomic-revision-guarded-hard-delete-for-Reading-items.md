@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-03 02:27'
-updated_date: '2026-09-05 16:23'
+updated_date: '2026-09-05 16:47'
 labels:
   - collections
   - reading-list
@@ -52,5 +52,5 @@ diagnostic-privacy behavior are covered.
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-ADR required: yes; existing ADR-003 amended. User approved durable reservations after three isolated SQLite file-damage probes. Detailed spec: Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md. Covers bounded generic operation journal, per-user storage binding, cross-writer path/row reservations, copy-before-commit, no-clobber publication, identity-checked crash recovery and fail-closed activation. Explicit safety corrections: occupied destinations reject rather than overwrite; missing source rejects physical changes. First review found ambiguous commit acknowledgement, abort witness ordering and source identity gaps; all addressed, second whole-spec review approved. Source/target/private links retain durable authority, unknown commits preserve files, same-store accounting remains atomic and external replay requires idempotence. No production changes or new runtime test claims. Existing 2207a84fc1 code checkpoint remains at 146 targeted passes. Written-spec user review is next before implementation planning. Capability absent; TASK-13153 In Progress.
+ADR required: yes; existing ADR-003 amended. User approved durable reservations after three isolated SQLite file-damage probes. Detailed spec: Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md. Covers bounded generic operation journal, per-user storage binding, cross-writer path/row reservations, copy-before-commit, no-clobber publication, identity-checked crash recovery and fail-closed activation. Occupied destinations reject rather than overwrite; missing source rejects physical changes. Initial review resolved uncertain commit acknowledgement, abort witness ordering and source identity. Follow-up user-requested amendments add descriptor-bound reading, fs_done-separated idempotent original-target history delivery, finite byte admission and bounded journal-backed streaming without untracked external scratch. Re-review found and resolved ownership/reader-volume namespace mismatch; required evidence includes same-user two-volume same-filename reads. Final independent review approved with no remaining serious spec issues. Documentation-only verification: git diff --check; no production changes or new runtime test claims. 2207a84fc1 remains the last code checkpoint with 146 targeted passes. Written-spec user approval is required before implementation planning. Capability absent; TASK-13153 In Progress.
 <!-- SECTION:PLAN:END -->

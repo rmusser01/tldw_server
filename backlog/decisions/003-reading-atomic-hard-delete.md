@@ -144,7 +144,8 @@ The user approved extending durable reservations and existing storage exclusion
 to generic file mutations, preserving unmanaged rename/conversion. The detailed
 contract is in
 `Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md`
-(independent review passed; user written-spec review pending). It introduces a bounded output operation journal,
+(amended spec independently reviewed; user written-spec approval pending).
+It introduces a bounded output operation journal,
 not fake Reading parents or a public job system. All conflicting output/ownership
 writers honor its path and row reservations. Copy-before-commit preserves sources;
 no-clobber publication, durable phases and identity-checked recovery preserve
@@ -155,6 +156,16 @@ source handling and fail-closed activated-store behavior for user review. A
 persisted per-user protocol/volume binding prevents runtime fallback to legacy
 file-first operations; activation is a stopped-writer upgrade. No capability is
 enabled by this amendment. Production code remains unchanged at this design stage.
+
+The follow-up amendment closes lookup/open races by opening download descriptors
+under storage exclusion and streaming that same descriptor after unlocking.
+Protected lookup rejects structural ownership/reader-volume namespace mismatch.
+Filesystem completion releases row/path claims separately from durable,
+idempotent history delivery to the original target. Finite temporary-byte
+admission and bounded write intervals keep large producers from exhausting
+unbounded staging space or monopolizing exclusion. Producers use the reserved
+private stage, not untracked external scratch. These requirements reuse the
+journal and lock; they do not introduce a reader journal or general outbox service.
 
 ## Alternatives and consequences
 

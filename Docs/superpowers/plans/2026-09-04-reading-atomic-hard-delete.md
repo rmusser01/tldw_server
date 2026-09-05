@@ -462,6 +462,18 @@ durable phase rereads, destination-before-witness abort cleanup and recorded
 source fingerprints checked again before disposal. Implementation planning waits
 for the reviewed written spec's user approval under the brainstorming workflow.
 
+Follow-up user-requested design review identified reader lookup/open reuse races,
+history delivery retaining or losing filesystem authority, and unbounded staging
+resources. The user authorized amending all three. The detailed spec now requires
+descriptor-bound downloads, `fs_done`-separated original-target history delivery,
+and finite byte admission with chunked lock yielding and journal-owned staging.
+This supersedes the earlier external-scratch suggestion for generic producers.
+Re-review identified a related wrong-volume read gap; the spec now rejects
+ownership/reader-volume namespace mismatches before opening and requires a
+same-filename two-volume regression. Final independent review approved with no
+remaining serious spec issues. No implementation slice or runtime evidence is
+added here. The written-spec user-approval gate remains pending.
+
 ### Managed archive immutability checkpoint (approved 2026-09-05)
 
 ADR required: yes. ADR path: `backlog/decisions/003-reading-atomic-hard-delete.md`.
