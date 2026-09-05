@@ -203,10 +203,6 @@ async def process_ebooks_endpoint(
     )
 
     system_prompt = form_data.system_prompt
-    # Optional multipart strings normalize empty fields to None. Preserve an
-    # explicit empty prompt instead of replacing it with saved guidance.
-    if system_prompt is None and (await request.form()).get("system_prompt") == "":
-        system_prompt = ""
     if form_data.perform_analysis and form_data.api_name and system_prompt is None:
         prompts_db = await get_prompts_db_for_user(request, current_user)
 

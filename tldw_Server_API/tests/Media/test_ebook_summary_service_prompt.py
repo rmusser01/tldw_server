@@ -7,10 +7,12 @@ from typing import Any, NoReturn
 
 import pytest
 from ebooklib import epub
-from fastapi import Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import get_process_ebooks_form
 from tldw_Server_API.app.api.v1.endpoints.media import process_ebooks as endpoint
+from tldw_Server_API.app.api.v1.schemas.media_request_models import ProcessEbooksForm
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase, ServicePromptOverrideRow
 from tldw_Server_API.app.core.exceptions import ServicePromptCorruptOverride
@@ -19,6 +21,25 @@ from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as summ
 
 pytestmark = pytest.mark.integration
 PROMPT_ID = "media.ebook.summarization"
+
+
+@pytest.mark.parametrize("system", [None, "", "Explicit {literal} guidance"])
+def test_ebook_form_preserves_prompt_presence_before_processing(system: str | None) -> None:
+    """The validated form must distinguish an omitted prompt from explicit empty text."""
+    app = FastAPI()
+
+    @app.post("/parse")
+    async def parse(form: ProcessEbooksForm = Depends(get_process_ebooks_form)) -> dict[str, str | None]:
+        """Expose the parser's validated value without endpoint-specific repair."""
+        return {"system_prompt": form.system_prompt}
+
+    fields = {"api_name": (None, "openai")}
+    if system is not None:
+        fields["system_prompt"] = (None, system)
+    with TestClient(app) as client:
+        response = client.post("/parse", files=fields)
+    assert response.status_code == 200
+    assert response.json() == {"system_prompt": system}
 
 
 @pytest.fixture
@@ -115,7 +136,6 @@ def test_ebook_prompt_is_owner_scoped_and_independent_of_document_guidance(conte
         "Write EPUB notes in French. Preserve {literal braces}.",
         "Write EPUB notes in Spanish.",
     ]
-    assert context.reads == [1, 2]
 
 
 @pytest.mark.parametrize("legacy_provider", ["", "anthropic"])
@@ -126,7 +146,6 @@ def test_canonical_provider_drives_ebook_analysis(context: SimpleNamespace, lega
     assert len(context.calls) == 1
     assert context.calls[0]["api_name"] == "openai"
     assert context.calls[0]["system_message"] == "Use the saved EPUB instructions."
-    assert context.reads == [1]
 
 
 @pytest.mark.parametrize("system", ["Explicit EPUB guidance", ""])
@@ -139,6 +158,7 @@ def test_explicit_multipart_prompt_bypasses_saved_override(context: SimpleNamesp
     assert context.calls[0]["api_key"] is None
     assert context.calls[0]["system_message"] == system
     assert context.calls[0]["custom_prompt_arg"] == "Focus on experiments."
+    # Explicit prompts must remain usable without accessing owner storage.
     assert context.reads == []
 
 
@@ -150,6 +170,7 @@ def test_disabled_analysis_or_missing_provider_skips_prompt_storage(
     context.databases[1].save_service_prompt_override(PROMPT_ID, {"unknown": "bad"}, None)
     process(context, **options)
     assert context.calls == []
+    # Skipping storage is part of the disabled-analysis contract.
     assert context.reads == []
 
 
@@ -188,6 +209,7 @@ def test_batch_chunks_and_recursive_passes_keep_one_snapshot(
     assert {call["custom_prompt_arg"] for call in recursive} == {
         "Provide a concise overall summary of the following chapter summaries."
     }
+    # The approved batch contract resolves owner storage once per request.
     assert context.reads == [1]
     context.owner = 1
     process(context)

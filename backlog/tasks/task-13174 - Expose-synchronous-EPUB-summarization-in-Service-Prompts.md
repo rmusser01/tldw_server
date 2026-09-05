@@ -1,10 +1,10 @@
 ---
 id: TASK-13174
 title: Expose synchronous EPUB summarization in Service Prompts
-status: Done
+status: In Progress
 assignee: []
 created_date: '2026-09-05 14:31'
-updated_date: '2026-09-05 14:58'
+updated_date: '2026-09-05 15:15'
 labels: []
 dependencies: []
 references:
@@ -41,6 +41,10 @@ Baseline: 108 backend tests passed. RED: 10 expected backend failures for missin
 Final: 120 focused backend +45 adjacent EPUB/ingestion/safety/chunking/usage tests passed; shared UI196 passed and WebUI-config targeted4 passed. Ruff, compileall and Bandit zero findings. Official OpenAPI export/typegen/check passed; deleting only new EPUB api_provider reproduces exact base fingerprint. Independent review found no actionable issues. Full repo suites, full frontend typecheck and live browser/provider E2E not run. Temporary dependency symlinks removed before commit; generated full schema/types stay ignored.
 
 Published PR #2882 against dev at user request. Implementation commit cbfdd903ec492fd70ba253e555c6f404eebad5c4. Branch and worktree retained for review follow-up.
+
+Qodo posted three rule comments. Plan: move explicit-empty multipart preservation into get_process_ebooks_form before model validation, with a RED parser contract regression. Remove redundant exact owner lookup sequences in ownership/provider tests while keeping explicit no-read and single-snapshot contract checks. Evaluate architecture request against existing core resolver and API-owned resource lifetime; avoid introducing core-to-API dependencies.
+
+Qodo remediation verified: explicit-empty restoration moved into validated form parsing (RED empty None vs empty-string assertion; GREEN omitted/empty/literal parser cases). Removed redundant exact lookup sequences but retained approved no-read and once-per-request contracts. Architecture disposition independently reviewed: authenticated Request/User DB acquisition and same-worker cleanup stay in API adapter; prompt override/default policy already resides in core. 123 backend tests, Ruff, compileall, Bandit zero findings and unchanged OpenAPI fingerprint check passed. Review follow-up recorded in design doc. Awaiting fresh remote review/checks and human Change summary before merge.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

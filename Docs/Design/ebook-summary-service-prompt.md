@@ -41,3 +41,19 @@ and shared Settings coverage; run focused regressions, Ruff and Bandit.
 
 Full repository suites, full frontend typechecking and live browser/provider
 end-to-end runs were not performed. Existing runtime/dependency warnings remain.
+
+## PR review follow-up
+
+Qodo's multipart comment is addressed by restoring explicit empty system text
+inside the EPUB form dependency before model validation. A real multipart parser
+regression failed on empty text before this move; omitted, empty and literal
+values now pass. The endpoint consumes only the validated prompt field.
+
+Removed redundant owner lookup sequences from ownership/provider tests. Retained
+no-read and single-lookup checks because those are explicit accepted requirements.
+Authenticated database acquisition and worker-local cleanup remain API adapter
+responsibilities; override validation and deployment defaults remain in the
+existing core resolver. Independent review confirmed these boundaries.
+
+Follow-up validation: 123 backend tests passed; Ruff, compilation and Bandit
+(zero findings) passed. The official OpenAPI fingerprint check remained unchanged.
