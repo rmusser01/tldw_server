@@ -1,10 +1,11 @@
 ---
 id: TASK-13153
 title: Add atomic revision-guarded hard delete for Reading items
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@codex'
 created_date: '2026-09-03 02:27'
-updated_date: '2026-09-03 02:41'
+updated_date: '2026-09-05 01:02'
 labels:
   - collections
   - reading-list
@@ -43,4 +44,13 @@ diagnostic-privacy behavior are covered.
 - [ ] #4 Schema migration, concurrent mutation/delete, wrong-user, missing-item, rollback, and cascade behavior have focused SQLite/PostgreSQL regression coverage.
 - [ ] #5 Docs-info advertises `hasReadingOptimisticDeletesV1=true` only when the complete contract is active, and public API documentation describes the precondition and responses.
 - [ ] #6 A new or applicable Server ADR records the schema, destructive precondition, and ownership decision before implementation begins.
+- [ ] #7 Late or crashed artifact writers cannot create untracked files after cleanup; cleanup verifies the owning storage namespace and filesystem exclusion before treating absence as success.
+- [ ] #8 Legitimate legacy manual and older archives have a documented dry-run-first reconciliation path with unchanged-record checks and no deletion.
+- [ ] #9 Optimistic-delete capability defaults false when readiness is unknown or unavailable, and direct hard-delete requests independently reject unavailable target stores without mutation.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+ADR required: yes. ADR path: backlog/decisions/003-reading-atomic-hard-delete.md. Reason: persisted aggregate revisions, destructive preconditions, ownership and durable cleanup. Design: Docs/superpowers/specs/2026-09-04-reading-atomic-hard-delete-design.md. Plan: Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md. Stage 1 in progress: persisted revision column and transactional clock implemented with focused tests; corrected pre-existing PostgreSQL bootstrap column inspection. Production writer integration, DTO exposure, artifact ownership/cleanup and guarded endpoint remain unimplemented. Capability stays absent. PostgreSQL checks use the existing test service with TLDW_TEST_NO_DOCKER=1; no container replacement is authorized.
+<!-- SECTION:PLAN:END -->

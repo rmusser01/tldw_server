@@ -1,5 +1,19 @@
 # Testing Evidence Lessons
 
+## PostgreSQL bootstrap cannot identify duplicate columns from sanitized errors
+
+**Incident (TASK-13153, 2026-09-04):** The first real PostgreSQL revision test
+failed in the existing Collections bootstrap, before reaching the new revision
+migration. Bootstrap inspected existing columns only on SQLite and unconditionally
+attempted to add `output_templates.metadata_json` on PostgreSQL. The backend's
+sanitized `DatabaseError` no longer carried duplicate-column text, so the legacy
+message-based no-op classifier rethrew it.
+
+**Evidence and rule:** Switching bootstrap to its existing cross-backend
+`_table_columns()` helper let the PostgreSQL schema-reinitialization test pass.
+Inspect schema state before backfills; do not rely on parsing redacted exception
+messages. Exercise a real backend bootstrap, not only mocked SQL execution.
+
 ## Generic dict lint rules do not apply to `sqlite3.Row`
 
 **Incident (TASK-13144, 2026-08-30):** Ruff's `SIM118` suggestion replaced

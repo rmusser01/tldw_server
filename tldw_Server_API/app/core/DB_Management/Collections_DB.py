@@ -1910,19 +1910,11 @@ class CollectionsDatabase:
         except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Collections schema init failed: {e}")
             raise
-        output_template_columns: set[str] = set()
-        output_columns: set[str] = set()
-        digest_columns: set[str] = set()
-        file_artifact_columns: set[str] = set()
-        content_columns: set[str] = set()
-        audiobook_project_columns: set[str] = set()
-        if self.backend.backend_type == BackendType.SQLITE:
-            output_template_columns = self._sqlite_columns("output_templates")
-            output_columns = self._sqlite_columns("outputs")
-            digest_columns = self._sqlite_columns("reading_digest_schedules")
-            file_artifact_columns = self._sqlite_columns("file_artifacts")
-            content_columns = self._sqlite_columns("content_items")
-            audiobook_project_columns = self._sqlite_columns("audiobook_projects")
+        output_template_columns = self._table_columns("output_templates")
+        output_columns = self._table_columns("outputs")
+        digest_columns = self._table_columns("reading_digest_schedules")
+        file_artifact_columns = self._table_columns("file_artifacts")
+        audiobook_project_columns = self._table_columns("audiobook_projects")
         # Backfill columns for existing tables
         if "metadata_json" not in output_template_columns:
             try:
@@ -2531,8 +2523,7 @@ class CollectionsDatabase:
         except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Collections content_items schema init failed: {e}")
             raise
-        if self.backend.backend_type == BackendType.SQLITE:
-            content_columns = self._sqlite_columns("content_items")
+        content_columns = self._table_columns("content_items")
         if fts_available:
             try:
                 self.backend.create_tables(
@@ -2568,6 +2559,7 @@ class CollectionsDatabase:
                     logger.debug("collections backfill: content_items.{} already exists or skipped", column)
                 else:
                     raise
+        self._ensure_reading_revision_schema()
         # Backfill user_notifications columns
         notif_columns: set[str] = set()
         if self.backend.table_exists("user_notifications"):
@@ -2623,6 +2615,78 @@ class CollectionsDatabase:
 
         self._fts_available = fts_available
         self._refresh_fts_capabilities()
+
+    def _ensure_reading_revision_schema(self) -> None:
+        """Install the durable Reading revision clock without resetting tokens."""
+        with self.transaction() as conn:
+            backend = self.backend
+            clock_table = "reading_revision_clock"
+            items_table = "content_items"
+            if backend.backend_type == BackendType.POSTGRESQL:
+                # Match the backend's public-schema metadata contract, not search_path.
+                clock_table = "public.reading_revision_clock"
+                items_table = "public.content_items"
+                # Serialize first-time DDL before a clock row exists to lock.
+                backend.execute("SELECT pg_advisory_xact_lock(13153)", (), connection=conn)
+                columns = backend.get_table_info("content_items", connection=conn)
+            else:
+                columns = backend.execute("PRAGMA table_info(content_items)", (), connection=conn).rows
+            if not any(row["name"] == "revision" for row in columns):
+                backend.execute(
+                    f"ALTER TABLE {items_table} ADD COLUMN revision BIGINT NOT NULL DEFAULT 1 CHECK (revision > 0)",
+                    (),
+                    connection=conn,
+                )
+            backend.execute(
+                f"CREATE TABLE IF NOT EXISTS {clock_table} ("
+                "id INTEGER PRIMARY KEY CHECK (id = 1), "
+                "value BIGINT NOT NULL CHECK (value >= 0))",
+                (),
+                connection=conn,
+            )
+            backend.execute(
+                f"INSERT INTO {clock_table} (id, value) VALUES (1, 0) ON CONFLICT (id) DO NOTHING",  # nosec B608: fixed identifiers
+                (),
+                connection=conn,
+            )
+            # Never lower the clock: deleted items' tokens must remain spent.
+            backend.execute(
+                f"UPDATE {clock_table} SET value = CASE "  # nosec B608: fixed identifiers
+                f"WHEN value < (SELECT COALESCE(MAX(revision), 0) FROM {items_table}) "
+                f"THEN (SELECT COALESCE(MAX(revision), 0) FROM {items_table}) ELSE value END "
+                "WHERE id = 1",
+                (),
+                connection=conn,
+            )
+
+    def _next_reading_revision(self, connection: Any) -> int:
+        """Allocate a positive token inside the caller's mutation transaction."""
+        clock_table = (
+            "public.reading_revision_clock"
+            if self.backend.backend_type == BackendType.POSTGRESQL
+            else "reading_revision_clock"
+        )
+        # ponytail: database-wide clock serializes Reading writes; split only if measured contention warrants it.
+        result = self.backend.execute(
+            f"UPDATE {clock_table} SET value = value + 1 WHERE id = 1 AND value < ?",  # nosec B608: fixed identifiers
+            (2**63 - 1,),
+            connection=connection,
+        )
+        if result.rowcount != 1:
+            row = self.backend.execute(
+                f"SELECT value FROM {clock_table} WHERE id = 1",  # nosec B608: fixed identifiers
+                (),
+                connection=connection,
+            ).first
+            if row is None:
+                raise DatabaseError("Reading revision clock unavailable")
+            raise OverflowError("Reading revision clock exhausted")
+        row = self.backend.execute(
+            f"SELECT value FROM {clock_table} WHERE id = 1",  # nosec B608: fixed identifiers
+            (),
+            connection=connection,
+        ).first
+        return int(row["value"])
 
     def _refresh_fts_capabilities(self) -> None:
         """Refresh FTS behavior flags based on the concrete virtual table definition."""
