@@ -208,13 +208,20 @@ describe("ServerAdminPage design-system states", () => {
     ).toBeInTheDocument()
   })
 
-  it("renders user-load errors through the design-system Alert primitive", async () => {
+  it("renders user-load errors as an error state with retry, without a false empty panel", async () => {
     apiMock.listAdminUsers.mockRejectedValueOnce(new Error("Users exploded"))
 
     render(<ServerAdminPage />)
 
-    const alert = await expectDesignSystemAlertForTitle("Unable to load users")
-    expect(alert).toHaveTextContent("Users exploded")
+    expect(await screen.findByText("Unable to load users")).toBeInTheDocument()
+    expect(screen.getByText("Users exploded")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+    // Regression (2026-09 audit S4): a failed fetch must not additionally
+    // render the filters-blaming empty state.
+    expect(screen.queryByText("No users found")).not.toBeInTheDocument()
+    expect(
+      screen.queryByText("No user diagnostics match the current filters.")
+    ).not.toBeInTheDocument()
   })
 
   it("renders role-load errors through the design-system Alert primitive", async () => {

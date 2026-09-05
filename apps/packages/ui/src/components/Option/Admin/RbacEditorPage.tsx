@@ -62,6 +62,7 @@ interface EffectivePerm {
 
 const PermissionMatrixTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }) => {
   const [matrix, setMatrix] = useState<any>(null)
+  const [matrixError, setMatrixError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [toggling, setToggling] = useState<string | null>(null)
   const [categories, setCategories] = useState<string[]>([])
@@ -69,11 +70,15 @@ const PermissionMatrixTab: React.FC<{ onGuardError: (err: any) => void }> = ({ o
 
   const loadMatrix = useCallback(async () => {
     setLoading(true)
+    setMatrixError(null)
     try {
       const result = await tldwClient.getRolePermissionMatrix()
       setMatrix(result)
     } catch (err) {
       onGuardError(err)
+      setMatrixError(
+        sanitizeAdminErrorMessage(err, "Failed to load the permission matrix.")
+      )
     } finally {
       setLoading(false)
     }
@@ -117,6 +122,18 @@ const PermissionMatrixTab: React.FC<{ onGuardError: (err: any) => void }> = ({ o
   }, [loadMatrix])
 
   if (!matrix) {
+    if (matrixError && !loading) {
+      return (
+        <DesignSystemAlert variant="error" title="Unable to load the permission matrix">
+          <Space orientation="vertical" size="small">
+            <span>{matrixError}</span>
+            <Button size="small" onClick={() => void loadMatrix()}>
+              Retry
+            </Button>
+          </Space>
+        </DesignSystemAlert>
+      )
+    }
     return <Card loading={loading}><div style={{ minHeight: 200 }} /></Card>
   }
 
@@ -181,15 +198,32 @@ const PermissionMatrixTab: React.FC<{ onGuardError: (err: any) => void }> = ({ o
         </Space>
       }
     >
-      <Table
-        dataSource={filteredPermissions}
-        columns={columns}
-        rowKey="id"
-        loading={loading}
-        pagination={false}
-        scroll={{ x: 260 + roles.length * 120 }}
-        size="small"
-      />
+      {permissions.length === 0 && !loading ? (
+        <DesignSystemAlert
+          variant="info"
+          title="No permissions registered yet"
+        >
+          This server's RBAC catalog is empty, so there is nothing to grant or
+          revoke per role — built-in role behavior still applies. The matrix
+          fills in once permissions are seeded on the server (see the privilege
+          catalog configuration).
+        </DesignSystemAlert>
+      ) : (
+        <Table
+          dataSource={filteredPermissions}
+          columns={columns}
+          rowKey="id"
+          loading={loading}
+          pagination={false}
+          scroll={{ x: 260 + roles.length * 120 }}
+          size="small"
+          locale={{
+            emptyText: selectedCategory
+              ? "No permissions in this category."
+              : "No permissions found."
+          }}
+        />
+      )}
     </Card>
   )
 }
@@ -776,6 +810,10 @@ const RbacEditorPage: React.FC = () => {
 
   return (
     <div style={{ padding: 16 }}>
+      <h1 style={{ marginBottom: 4, fontSize: "1.5rem", fontWeight: 600 }}>Roles &amp; Permissions</h1>
+      <p style={{ marginBottom: 16, color: "var(--color-text-secondary, #888)" }}>
+        Review the permission matrix, manage roles, and adjust per-user grants.
+      </p>
       <Tabs
         defaultActiveKey="matrix"
         items={[

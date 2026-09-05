@@ -4,44 +4,35 @@ import { describe, expect, it } from "vitest"
 import { render, screen, within } from "@testing-library/react"
 
 import { AdminOperationsOverviewPage } from "../AdminOperationsOverviewPage"
+import { ADMIN_MODULES } from "../admin-modules"
 
 describe("AdminOperationsOverviewPage", () => {
-  it("renders admin operations as an overview with module drill-down routes", () => {
+  it("links every registered admin module (the overview is the complete map)", () => {
     render(<AdminOperationsOverviewPage />)
 
     expect(
       screen.getByRole("heading", { name: "Admin Operations" })
     ).toBeInTheDocument()
-    expect(screen.queryByTestId("route-redirect-panel")).not.toBeInTheDocument()
 
     const modules = screen.getByTestId("admin-operations-modules")
-
-    for (const [label, href] of [
-      ["Server Admin", "/admin/server"],
-      ["Workspace Integrations", "/admin/integrations"],
-      ["Admin Sources", "/admin/sources"],
-      ["Monitoring", "/admin/monitoring"]
-    ] as const) {
-      const link = within(modules).getByRole("link", { name: label })
-      expect(link).toHaveAttribute("href", href)
+    for (const module of ADMIN_MODULES) {
+      const link = within(modules).getByRole("link", { name: module.label })
+      expect(link).toHaveAttribute("href", module.route)
     }
+    // Guard against regressing to a partial list (2026-09 audit finding S1).
+    expect(ADMIN_MODULES.length).toBeGreaterThanOrEqual(17)
   })
 
-  it("keeps module status visible and diagnostics behind disclosure", () => {
+  it("speaks operator language, not implementation status", () => {
     render(<AdminOperationsOverviewPage />)
 
-    const serverCard = screen.getByTestId("admin-module-/admin/server")
-
-    expect(within(serverCard).getByText("Route ready")).toBeInTheDocument()
+    expect(screen.queryByText("Route ready")).not.toBeInTheDocument()
+    expect(screen.queryByText("Diagnostics")).not.toBeInTheDocument()
     expect(
-      within(serverCard).getByText(
-        "Open the module to load live server health and user data."
-      )
-    ).toBeInTheDocument()
-
-    expect(screen.getAllByText("Diagnostics")).toHaveLength(4)
+      screen.queryByText("frontend_state", { exact: false })
+    ).not.toBeInTheDocument()
     expect(
-      screen.queryByText("implementationOwner", { exact: false })
+      screen.queryByText("Needs module configuration")
     ).not.toBeInTheDocument()
   })
 })

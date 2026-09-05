@@ -472,6 +472,7 @@ export const HEADER_SHORTCUT_IDS = [
   "presentation-studio",
   "acp-playground",
   "workflows",
+  "admin-overview",
   "admin-server",
   "admin-integrations",
   "documentation",

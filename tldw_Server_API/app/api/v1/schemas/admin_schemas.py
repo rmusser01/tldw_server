@@ -165,7 +165,9 @@ class AdminUserCreateRequest(BaseModel):
 class UserSummary(BaseModel):
     """Summary information about a user"""
     id: int
-    uuid: UUID
+    # Optional: legacy SQLite installs bootstrapped the single-user row without a
+    # uuid; one NULL row must not 500 the whole admin users list.
+    uuid: UUID | None = None
     username: str
     email: str
     role: str

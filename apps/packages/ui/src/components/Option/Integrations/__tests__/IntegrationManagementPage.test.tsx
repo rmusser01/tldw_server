@@ -370,8 +370,9 @@ describe("IntegrationManagementPage", () => {
     expect(
       screen.getByText("The connected server does not advertise personal integration management.")
     ).toBeInTheDocument()
+    // Diagnostics deliberately redact endpoint paths for display.
     expect(screen.getByLabelText("Diagnostics")).toHaveTextContent(
-      "/api/v1/integrations/personal"
+      "[server-endpoint]"
     )
     expect(mocks.listPersonalIntegrations).not.toHaveBeenCalled()
   })
@@ -395,10 +396,10 @@ describe("IntegrationManagementPage", () => {
     ).toBeInTheDocument()
 
     const diagnostics = screen.getByLabelText("Diagnostics")
-    expect(within(diagnostics).getByText("/api/v1/integrations/personal")).toBeInTheDocument()
+    expect(within(diagnostics).getByText("[server-endpoint]")).toBeInTheDocument()
     expect(within(diagnostics).getByText("403")).toBeInTheDocument()
     expect(
-      within(diagnostics).getByText("Request failed: 403 (GET /api/v1/integrations/personal)")
+      within(diagnostics).getByText("Request failed: 403 (GET [server-endpoint])")
     ).toBeInTheDocument()
   })
 
@@ -481,7 +482,7 @@ describe("IntegrationManagementPage", () => {
     expect(await screen.findByText("Degraded")).toBeInTheDocument()
     expect(screen.getByText("Workspace integrations are partially available")).toBeInTheDocument()
     expect(screen.getByLabelText("Diagnostics")).toHaveTextContent(
-      "/api/v1/integrations/workspace/telegram/linked-actors"
+      "[server-endpoint]"
     )
     expect(screen.getByLabelText("Diagnostics")).toHaveTextContent("503")
   })
@@ -536,7 +537,7 @@ describe("IntegrationManagementPage", () => {
 
     expect(await screen.findByText("Unable to load Slack policy")).toBeInTheDocument()
     const diagnostics = screen.getByLabelText("Diagnostics")
-    expect(within(diagnostics).getByText("/api/v1/integrations/workspace/slack/policy")).toBeInTheDocument()
+    expect(within(diagnostics).getByText("[server-endpoint]")).toBeInTheDocument()
     expect(within(diagnostics).getByText("404")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Save Slack policy" })).toBeDisabled()
   })

@@ -21,6 +21,7 @@ import { CollapsibleSection } from "./CollapsibleSection"
 import { Alert, Badge } from "@/components/ui/primitives"
 import {
   deriveAdminGuardFromError,
+  isServiceUnavailableError,
   sanitizeAdminErrorMessage
 } from "./admin-error-utils"
 
@@ -149,11 +150,21 @@ export const MlxAdminPage: React.FC = () => {
         setMaxConcurrent(data.max_concurrent)
       }
     } catch (e: any) {
-      setStatusError(sanitizeAdminErrorMessage(e, "Failed to load MLX status."))
+      // A 502/503/504 means the MLX runtime is down on the server — say so
+      // instead of showing a generic failure (2026-09 UX audit finding S3).
+      setStatusError(
+        isServiceUnavailableError(e)
+          ? t(
+              "settings:admin.mlxRuntimeUnavailableBody",
+              "The MLX runtime is not available on this server. MLX requires Apple Silicon; install or start it, then retry."
+            )
+          : sanitizeAdminErrorMessage(e, "Failed to load MLX status.")
+      )
       markAdminGuardFromError(e)
     } finally {
       setStatusLoading(false)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `t` is stable for the session; adding it re-triggers the initial load effect
   }, [])
 
   const loadProviders = React.useCallback(async () => {

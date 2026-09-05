@@ -738,6 +738,7 @@ export const ROUTE_METADATA = [
     group: "settings",
     surface: "admin_operator",
     smoke: "manual",
+    commandPalette: "show",
     requiresBackend: true,
     rationale: "Admin landing route for operator-only workflows."
   }),
@@ -747,6 +748,7 @@ export const ROUTE_METADATA = [
     group: "settings",
     surface: "admin_operator",
     availability: webAndExtension,
+    commandPalette: "show",
     requiresBackend: true,
     rationale: "Operator server status, user, role, and maintenance route."
   }),
@@ -756,8 +758,167 @@ export const ROUTE_METADATA = [
     group: "settings",
     surface: "admin_operator",
     smoke: "manual",
+    commandPalette: "show",
     requiresBackend: true,
     rationale: "Admin route for local MLX model status and operator controls."
+  }),
+  // Every admin module is registered here so the command palette and any
+  // metadata-driven navigation can find the full admin surface — the 2026-09
+  // UX audit (finding S1) flagged that most admin routes were URL-only.
+  defineRoute({
+    path: "/admin/llamacpp",
+    label: "Admin Llama.cpp",
+    group: "settings",
+    surface: "admin_operator",
+    availability: webAndExtension,
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for the managed llama.cpp inference server."
+  }),
+  defineRoute({
+    path: "/admin/runtime-config",
+    label: "Admin Runtime Config",
+    group: "settings",
+    surface: "admin_operator",
+    availability: webAndExtension,
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for runtime configuration inspection."
+  }),
+  defineRoute({
+    path: "/admin/monitoring",
+    label: "Monitoring",
+    group: "settings",
+    surface: "admin_operator",
+    availability: webAndExtension,
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for health metrics, alerts, and telemetry."
+  }),
+  defineRoute({
+    path: "/admin/integrations",
+    label: "Workspace Integrations",
+    group: "settings",
+    surface: "admin_operator",
+    availability: webAndExtension,
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for Slack/Discord/Telegram workspace policy."
+  }),
+  defineRoute({
+    path: "/admin/sources",
+    label: "Admin Sources",
+    group: "settings",
+    surface: "admin_operator",
+    availability: webAndExtension,
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for ingestion source availability and sync state."
+  }),
+  defineRoute({
+    path: "/admin/api-keys",
+    label: "Admin API Keys",
+    group: "settings",
+    surface: "admin_operator",
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for creating, rotating, and revoking user API keys."
+  }),
+  defineRoute({
+    path: "/admin/rbac",
+    label: "Admin Roles & Permissions",
+    group: "settings",
+    surface: "admin_operator",
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for the RBAC permission matrix and role grants."
+  }),
+  defineRoute({
+    path: "/admin/orgs",
+    label: "Admin Organizations",
+    group: "settings",
+    surface: "admin_operator",
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for organizations and teams in multi-user mode."
+  }),
+  defineRoute({
+    path: "/admin/rate-limiting",
+    label: "Admin Rate Limiting",
+    group: "settings",
+    surface: "admin_operator",
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for resource governor policy and rate limits."
+  }),
+  defineRoute({
+    path: "/admin/data-ops",
+    label: "Admin Data Operations",
+    group: "settings",
+    surface: "admin_operator",
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for backups, retention, and data subject requests."
+  }),
+  defineRoute({
+    path: "/admin/usage",
+    label: "Admin Usage Analytics",
+    group: "settings",
+    surface: "admin_operator",
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for request, storage, and LLM usage analytics."
+  }),
+  defineRoute({
+    path: "/admin/billing",
+    label: "Admin Billing",
+    group: "settings",
+    surface: "admin_operator",
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for subscriptions and billing events."
+  }),
+  defineRoute({
+    path: "/admin/maintenance",
+    label: "Admin Maintenance",
+    group: "settings",
+    surface: "admin_operator",
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for maintenance mode, feature flags, and incidents."
+  }),
+  defineRoute({
+    path: "/admin/watchlists-items",
+    label: "Admin Watchlist Items",
+    group: "settings",
+    surface: "admin_operator",
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for reviewing collected watchlist updates."
+  }),
+  defineRoute({
+    path: "/admin/watchlists-runs",
+    label: "Admin Watchlist Runs",
+    group: "settings",
+    surface: "admin_operator",
+    smoke: "manual",
+    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Admin route for watchlist run history (planned surface)."
   }),
   defineRoute({
     path: "/mcp-hub",
@@ -1071,6 +1232,441 @@ export const ROUTE_METADATA = [
     surface: "internal_qa_debug",
     smoke: "exclude",
     rationale: "Web debug route for sidepanel error-boundary rendering."
+  }),
+  // ── Governance backfill (2026-09): every active smoke-inventory and
+  // shared-registry route is registered so metadata-coverage and heading
+  // governance hold. requiresH1 is explicitly false with an exception
+  // reason until each page passes a heading audit.
+  defineRoute({
+    path: "/settings/preferences",
+    label: "Preferences Settings",
+    group: "settings",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Startup and general preference settings route."
+  }),
+  defineRoute({
+    path: "/settings/tldw",
+    label: "TLDW Settings",
+    group: "settings",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "tldw server connection settings route."
+  }),
+  defineRoute({
+    path: "/settings/chat",
+    label: "Chat Settings",
+    group: "settings",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Chat behavior settings route."
+  }),
+  defineRoute({
+    path: "/settings/chat-macros",
+    label: "Chat Macros Settings",
+    group: "settings",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Chat macro management settings route."
+  }),
+  defineRoute({
+    path: "/settings/prompt",
+    label: "Workflow Prompts Settings",
+    group: "settings",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Service and workflow prompt settings route."
+  }),
+  defineRoute({
+    path: "/settings/knowledge",
+    label: "Knowledge Settings",
+    group: "settings",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Knowledge base settings route."
+  }),
+  defineRoute({
+    path: "/settings/rag",
+    label: "RAG Settings",
+    group: "settings",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Retrieval-augmented generation settings route."
+  }),
+  defineRoute({
+    path: "/settings/speech",
+    label: "Speech Settings",
+    group: "settings",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Speech-to-text and text-to-speech settings route."
+  }),
+  defineRoute({
+    path: "/settings/evaluations",
+    label: "Evaluations Settings",
+    group: "settings",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Evaluation configuration settings route."
+  }),
+  defineRoute({
+    path: "/settings/family-guardrails",
+    label: "Family Guardrails Wizard",
+    group: "settings",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Family guardrails setup wizard route."
+  }),
+  defineRoute({
+    path: "/settings/guardian",
+    label: "Guardian Settings",
+    group: "settings",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Guardian oversight settings route."
+  }),
+  defineRoute({
+    path: "/settings/chatbooks",
+    label: "Chatbooks Settings",
+    group: "settings",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Chatbook export/import settings route."
+  }),
+  defineRoute({
+    path: "/settings/characters",
+    label: "Characters Settings",
+    group: "settings",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Character defaults settings route."
+  }),
+  defineRoute({
+    path: "/settings/world-books",
+    label: "World Books Settings",
+    group: "settings",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "World book settings route."
+  }),
+  defineRoute({
+    path: "/settings/chat-dictionaries",
+    label: "Dictionaries Settings",
+    group: "settings",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Chat dictionary settings route."
+  }),
+  defineRoute({
+    path: "/settings/processed",
+    label: "Processed Settings",
+    group: "settings",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Processed content review settings route."
+  }),
+  defineRoute({
+    path: "/settings/data",
+    label: "Data Management Settings",
+    group: "settings",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Data management and cleanup settings route."
+  }),
+  defineRoute({
+    path: "/settings/about",
+    label: "About",
+    group: "settings",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "About and version information route."
+  }),
+  defineRoute({
+    path: "/settings/share",
+    label: "Share Settings",
+    group: "settings",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Content sharing settings route."
+  }),
+  defineRoute({
+    path: "/settings/quick-ingest",
+    label: "Quick Ingest Settings",
+    group: "settings",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Quick ingest defaults settings route."
+  }),
+  defineRoute({
+    path: "/settings/prompt-studio",
+    label: "Prompt Studio Settings",
+    group: "settings",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Prompt studio settings route."
+  }),
+  defineRoute({
+    path: "/settings/mcp-hub",
+    label: "MCP Hub Settings",
+    group: "settings",
+    surface: "advanced_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "MCP hub settings alias inside the settings area."
+  }),
+  defineRoute({
+    path: "/settings/splash",
+    label: "Splash Settings",
+    group: "settings",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Splash screen settings route."
+  }),
+  defineRoute({
+    path: "/settings/ui",
+    label: "UI Settings",
+    group: "settings",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Interface appearance settings route."
+  }),
+  defineRoute({
+    path: "/settings/image-gen",
+    label: "Image Gen Settings",
+    group: "settings",
+    surface: "default_self_hosted",
+    smoke: "manual",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Image generation settings alias; smoke-skipped pending Stage 5 gate."
+  }),
+  defineRoute({
+    path: "/media/123/view",
+    label: "Media View (Redirect)",
+    group: "media_library",
+    surface: "redirect",
+    smoke: "manual",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Sample media detail redirect covered by the media route contract."
+  }),
+  defineRoute({
+    path: "/chat/agent",
+    label: "Agent Chat",
+    group: "chat",
+    surface: "advanced_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Agent-driven chat surface route."
+  }),
+  defineRoute({
+    path: "/moderation",
+    label: "Moderation Review",
+    group: "safety",
+    surface: "advanced_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Moderation review queue route."
+  }),
+  defineRoute({
+    path: "/moderation/rules",
+    label: "Content Rules",
+    group: "safety",
+    surface: "advanced_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Moderation content rules route."
+  }),
+  defineRoute({
+    path: "/connectors/browse",
+    label: "Connector Catalog",
+    group: "operations",
+    surface: "advanced_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Connector browsing route."
+  }),
+  defineRoute({
+    path: "/connectors/jobs",
+    label: "Connector Jobs",
+    group: "operations",
+    surface: "advanced_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Connector job monitoring route."
+  }),
+  defineRoute({
+    path: "/connectors/sources",
+    label: "Connector Sources",
+    group: "operations",
+    surface: "advanced_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Connector source management route."
+  }),
+  defineRoute({
+    path: "/for/journalists",
+    label: "For Journalists",
+    group: "documentation",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Persona landing page for journalists."
+  }),
+  defineRoute({
+    path: "/for/osint",
+    label: "For OSINT",
+    group: "documentation",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Persona landing page for OSINT analysts."
+  }),
+  defineRoute({
+    path: "/for/researchers",
+    label: "For Researchers",
+    group: "documentation",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Persona landing page for researchers."
+  }),
+  defineRoute({
+    path: "/auth/magic-link",
+    label: "Magic Link",
+    group: "account",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Magic-link sign-in landing route."
+  }),
+  defineRoute({
+    path: "/auth/reset-password",
+    label: "Reset Password",
+    group: "account",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Password reset flow route."
+  }),
+  defineRoute({
+    path: "/auth/verify-email",
+    label: "Verify Email",
+    group: "account",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Email verification flow route."
+  }),
+  defineRoute({
+    path: "/billing/success",
+    label: "Billing Success",
+    group: "account",
+    surface: "hosted_only",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Billing checkout success landing route."
+  }),
+  defineRoute({
+    path: "/billing/cancel",
+    label: "Billing Cancel",
+    group: "account",
+    surface: "hosted_only",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Billing checkout cancellation landing route."
+  }),
+  defineRoute({
+    path: "/sources/new",
+    label: "New Source",
+    group: "operations",
+    surface: "default_self_hosted",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Source creation route."
+  }),
+  defineRoute({
+    path: "/sources/:sourceId",
+    label: "Source Detail",
+    group: "operations",
+    surface: "default_self_hosted",
+    smoke: "manual",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Source detail route addressed by source id."
+  }),
+  defineRoute({
+    path: "/share/:token",
+    label: "Shared Content",
+    group: "media_library",
+    surface: "advanced_self_hosted",
+    smoke: "manual",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Public share link viewer route."
+  }),
+  defineRoute({
+    path: "/knowledge/shared/:shareToken",
+    label: "Shared Knowledge",
+    group: "knowledge",
+    surface: "advanced_self_hosted",
+    smoke: "manual",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Shared knowledge viewer route addressed by share token."
+  }),
+  defineRoute({
+    path: "/knowledge/thread/:threadId",
+    label: "Knowledge Thread",
+    group: "knowledge",
+    surface: "advanced_self_hosted",
+    smoke: "manual",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Knowledge thread route addressed by thread id."
+  }),
+  defineRoute({
+    path: "/prototype-workspaces",
+    label: "Prototype Workspaces",
+    group: "workspace",
+    surface: "labs_beta",
+    smoke: "manual",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Prototype workspace experiments route."
+  }),
+  defineRoute({
+    path: "/scheduled-tasks/results",
+    label: "Scheduled Task Results",
+    group: "operations",
+    surface: "advanced_self_hosted",
+    smoke: "manual",
+    requiresH1: false,
+    h1ExceptionReason: "Pre-governance page pending heading audit.",
+    rationale: "Scheduled task result inspection route."
   })
 ] as const satisfies readonly RouteMetadata[]
 

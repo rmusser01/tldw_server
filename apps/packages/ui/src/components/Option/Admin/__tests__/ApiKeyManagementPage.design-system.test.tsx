@@ -189,4 +189,33 @@ describe("ApiKeyManagementPage design-system states", () => {
     expect(alert).toHaveTextContent("Copy this key now -- it will not be shown again:")
     expect(alert).toHaveTextContent("sk-test-secret")
   })
+
+  it("auto-selects the only user so single-user servers skip the picker", async () => {
+    render(<ApiKeyManagementPage />)
+
+    await waitFor(() => {
+      expect(apiMock.listUserApiKeys).toHaveBeenCalledWith(11)
+    })
+    expect(await screen.findByText("API Keys")).toBeTruthy()
+  })
+
+  it("surfaces user-list failures with a retry instead of a silent dead end", async () => {
+    apiMock.listAdminUsers.mockRejectedValueOnce(
+      new Error("Request failed: 500 (GET /api/v1/admin/users)")
+    )
+
+    render(<ApiKeyManagementPage />)
+
+    const alert = await expectDesignSystemAlertForText("Unable to load users")
+    expect(alert).toHaveTextContent("Request failed: 500")
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+
+    await waitFor(() => {
+      expect(apiMock.listAdminUsers).toHaveBeenCalledTimes(2)
+    })
+    await waitFor(() => {
+      expect(apiMock.listUserApiKeys).toHaveBeenCalledWith(11)
+    })
+  })
 })

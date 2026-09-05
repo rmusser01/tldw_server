@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import uuid as uuid_module
 from dataclasses import dataclass
 from typing import Any
 
@@ -407,10 +408,15 @@ class AuthnzUsersRepo:
                         parameters=(int(user_id),),
                     )
                 else:
+                    # SQLite has no column default for users.uuid (unlike Postgres),
+                    # so the bootstrap row must supply one; UserSummary responses
+                    # expect it. Existing rows with NULL uuid are backfilled below.
+                    fallback_uuid = str(uuid_module.uuid4())
                     await gateway.insert_user(
                         conn,
                         values={
                             "id": int(user_id),
+                            "uuid": fallback_uuid,
                             "username": str(username),
                             "email": str(email),
                             "password_hash": str(password_hash),
@@ -423,12 +429,12 @@ class AuthnzUsersRepo:
                     await gateway.execute_update(
                         conn,
                         user_id=int(user_id),
-                        profile_visible_fields=("role", "is_active", "is_verified"),
+                        profile_visible_fields=("role", "is_active", "is_verified", "uuid"),
                         statement=(
                             "UPDATE users SET role = 'admin', is_active = 1, "
-                            "is_verified = 1 WHERE id = ?"
+                            "is_verified = 1, uuid = COALESCE(uuid, ?) WHERE id = ?"
                         ),
-                        parameters=(int(user_id),),
+                        parameters=(fallback_uuid, int(user_id)),
                     )
         except Exception as exc:  # pragma: no cover - surfaced via callers
             logger.error(f"AuthnzUsersRepo.ensure_single_user_admin_user failed: {exc}")

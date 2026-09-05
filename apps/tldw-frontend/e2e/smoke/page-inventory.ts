@@ -80,21 +80,49 @@ const METADATA_CHILD_SMOKE_ROUTE_PATHS = new Set([
   "/admin/server"
 ])
 
-const METADATA_SMOKE_PAGES: PageEntry[] = ROUTE_METADATA.filter(
-  (metadata) =>
-    (isAuditedRootRoute(metadata.path) ||
-      METADATA_CHILD_SMOKE_ROUTE_PATHS.has(metadata.path)) &&
-    metadata.availability.includes("web") &&
-    metadata.smoke !== "exclude"
-).map((metadata) => ({
-  path: metadata.path,
-  name: metadata.label,
-  category: routeGroupToPageCategory(metadata.group),
-  ...(metadata.smoke === "manual"
-    ? { skip: `Manual smoke: ${metadata.rationale}` }
-    : {}),
-  ...METADATA_PAGE_OVERRIDES[metadata.path]
-}))
+// Pages that graduated from EXTRA_PAGES into route metadata stay in the smoke
+// inventory (keyed off the extra-page list below) so registering metadata for
+// a page never silently removes its smoke coverage.
+const GRADUATED_SURFACE_EXCLUSIONS = new Set([
+  "legacy_alias",
+  "redirect",
+  "deprecated"
+])
+
+const buildMetadataSmokePages = (
+  extraPageEntryByPath: Map<string, PageEntry>
+): PageEntry[] =>
+  ROUTE_METADATA.filter(
+    (metadata) =>
+      (isAuditedRootRoute(metadata.path) ||
+        METADATA_CHILD_SMOKE_ROUTE_PATHS.has(metadata.path) ||
+        (extraPageEntryByPath.has(metadata.path) &&
+          !GRADUATED_SURFACE_EXCLUSIONS.has(metadata.surface))) &&
+      metadata.availability.includes("web") &&
+      metadata.smoke !== "exclude"
+  ).map((metadata) => {
+    // Extra-page fields only carry over for graduated pages; audited root
+    // routes keep their original metadata-driven entries untouched.
+    const graduated =
+      !isAuditedRootRoute(metadata.path) &&
+      !METADATA_CHILD_SMOKE_ROUTE_PATHS.has(metadata.path)
+    const extraEntry = graduated
+      ? extraPageEntryByPath.get(metadata.path)
+      : undefined
+    return {
+      path: metadata.path,
+      name: metadata.label,
+      category: routeGroupToPageCategory(metadata.group),
+      ...(extraEntry?.expectedTestId
+        ? { expectedTestId: extraEntry.expectedTestId }
+        : {}),
+      ...(metadata.smoke === "manual"
+        ? { skip: `Manual smoke: ${metadata.rationale}` }
+        : {}),
+      ...(extraEntry?.skip ? { skip: extraEntry.skip } : {}),
+      ...METADATA_PAGE_OVERRIDES[metadata.path]
+    }
+  })
 
 /**
  * Extra pages in the tldw-frontend application that are outside the audited
@@ -373,8 +401,12 @@ const EXTRA_PAGES: PageEntry[] = [
  * Audited root routes are owned by route metadata; child and special-case
  * smoke pages remain explicit here until they get first-class metadata.
  */
+const EXTRA_PAGE_ENTRY_BY_PATH = new Map(
+  EXTRA_PAGES.map((page) => [page.path, page])
+)
+
 export const PAGES: PageEntry[] = [
-  ...METADATA_SMOKE_PAGES,
+  ...buildMetadataSmokePages(EXTRA_PAGE_ENTRY_BY_PATH),
   ...EXTRA_PAGES.filter((page) => !METADATA_ROUTE_PATHS.has(page.path))
 ]
 

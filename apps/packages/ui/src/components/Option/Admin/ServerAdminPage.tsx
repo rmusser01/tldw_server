@@ -515,7 +515,7 @@ export const ServerAdminPage: React.FC = () => {
           </Text>
         )}
         <div>
-          <Title level={2}>{t("option:header.adminServer", "Server Admin")}</Title>
+          <Title level={1} style={{ fontSize: 30 }}>{t("option:header.adminServer", "Server Admin")}</Title>
           <Text type="secondary">
             {t(
               "settings:admin.serverIntro",
@@ -653,11 +653,21 @@ export const ServerAdminPage: React.FC = () => {
               }>
               <Space orientation="vertical" size="middle" className="w-full">
                 {usersError && (
-                  <Alert
-                    variant="error"
-                    title={t("settings:admin.usersError", "Unable to load users")}>
-                    {usersError}
-                  </Alert>
+                  <StatePanel
+                    state="error"
+                    title={t("settings:admin.usersError", "Unable to load users")}
+                    message={usersError}
+                    primaryAction={{
+                      label: t("common:retry", "Retry"),
+                      onClick: () =>
+                        loadUsers(
+                          usersPage,
+                          usersPageSize,
+                          userRoleFilter,
+                          userActiveFilter
+                        )
+                    }}
+                  />
                 )}
                 <Space align="center" wrap>
                   <Text strong>
@@ -710,26 +720,39 @@ export const ServerAdminPage: React.FC = () => {
                   }}
                   onChange={handleUserTableChange}
                 />
-                {!usersLoading && (usersData?.users || []).length === 0 && (
-                  <StatePanel
-                    state="empty"
-                    title={t("settings:admin.users.emptyTitle", "No users found")}
-                    message={t(
-                      "settings:admin.users.empty",
-                      "No user diagnostics match the current filters."
-                    )}
-                    primaryAction={{
-                      label: t("common:refresh", "Refresh"),
-                      onClick: () =>
-                        loadUsers(
-                          usersPage,
-                          usersPageSize,
-                          userRoleFilter,
-                          userActiveFilter
-                        )
-                    }}
-                  />
-                )}
+                {/* Never blame the user's filters for a failed fetch: the
+                    empty panel only renders when the request succeeded, and
+                    only mentions filters when filters are actually set
+                    (2026-09 UX audit finding S4). */}
+                {!usersLoading &&
+                  !usersError &&
+                  (usersData?.users || []).length === 0 && (
+                    <StatePanel
+                      state="empty"
+                      title={t("settings:admin.users.emptyTitle", "No users found")}
+                      message={
+                        userRoleFilter || userActiveFilter
+                          ? t(
+                              "settings:admin.users.emptyFiltered",
+                              "No users match the current filters."
+                            )
+                          : t(
+                              "settings:admin.users.emptyNoFilters",
+                              "This server has no user accounts yet."
+                            )
+                      }
+                      primaryAction={{
+                        label: t("common:refresh", "Refresh"),
+                        onClick: () =>
+                          loadUsers(
+                            usersPage,
+                            usersPageSize,
+                            userRoleFilter,
+                            userActiveFilter
+                          )
+                      }}
+                    />
+                  )}
 
                 <Divider />
 

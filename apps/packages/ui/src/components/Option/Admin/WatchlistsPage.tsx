@@ -264,7 +264,7 @@ const WatchlistsPage: React.FC = () => {
 
   return (
     <div style={pageContainerStyle}>
-      <h2 style={{ marginBottom: 16 }}>Watchlists &amp; Alerts</h2>
+      <h1 style={{ marginBottom: 16, fontSize: "1.5rem", fontWeight: 600 }}>Watchlists &amp; Alerts</h1>
 
       {/* Watchlists Card */}
       <Card

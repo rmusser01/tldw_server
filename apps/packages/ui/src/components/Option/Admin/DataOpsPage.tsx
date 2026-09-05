@@ -928,7 +928,7 @@ const DataOpsPage: React.FC = () => {
 
   return (
     <div style={{ padding: "24px", maxWidth: 1200 }}>
-      <h2 style={{ marginBottom: 16 }}>Data Operations</h2>
+      <h1 style={{ marginBottom: 16, fontSize: "1.5rem", fontWeight: 600 }}>Data Operations</h1>
       <Tabs items={tabItems} defaultActiveKey="backups" />
     </div>
   )

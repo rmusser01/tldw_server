@@ -25,6 +25,7 @@ import { downloadBlob } from "@/utils/download-blob"
 import { StatusBanner } from "./StatusBanner"
 import {
   deriveAdminGuardFromError,
+  isServiceUnavailableError,
   sanitizeAdminErrorMessage,
   type AdminGuardState
 } from "./admin-error-utils"
@@ -177,6 +178,19 @@ export const LlamacppAdminPage: React.FC = () => {
     }
   }, [])
 
+  // A 502/503/504 means the llama.cpp runtime is down — say that, instead of
+  // a generic failure (or, worse, the old "Admin APIs are not available" wall).
+  const describeLoadError = React.useCallback(
+    (error: unknown, fallback: string): string =>
+      isServiceUnavailableError(error)
+        ? t(
+            "settings:admin.llamacppRuntimeUnavailableBody",
+            "The llama.cpp runtime is not available on this server. Install or start llama.cpp, then retry."
+          )
+        : sanitizeAdminErrorMessage(error, fallback),
+    [t]
+  )
+
   const loadConfig = React.useCallback(async () => {
     try {
       setLoadingConfig(true)
@@ -184,7 +198,7 @@ export const LlamacppAdminPage: React.FC = () => {
       setConfig(data)
     } catch (error: unknown) {
       setStatusError(
-        sanitizeAdminErrorMessage(error, "Failed to load Llama.cpp configuration.")
+        describeLoadError(error, "Failed to load Llama.cpp configuration.")
       )
       markAdminGuardFromError(error)
     } finally {
@@ -201,7 +215,7 @@ export const LlamacppAdminPage: React.FC = () => {
     } catch (error: unknown) {
       setStatus(null)
       setStatusError(
-        sanitizeAdminErrorMessage(error, "Failed to load Llama.cpp status.")
+        describeLoadError(error, "Failed to load Llama.cpp status.")
       )
       markAdminGuardFromError(error)
     } finally {
@@ -225,7 +239,7 @@ export const LlamacppAdminPage: React.FC = () => {
       setInventory(null)
       setSelectedModelId(undefined)
       setInventoryError(
-        sanitizeAdminErrorMessage(error, "Failed to load Llama.cpp inventory.")
+        describeLoadError(error, "Failed to load Llama.cpp inventory.")
       )
       markAdminGuardFromError(error)
     } finally {
@@ -243,7 +257,7 @@ export const LlamacppAdminPage: React.FC = () => {
     } catch (error: unknown) {
       setAssets(null)
       setAssetError(
-        sanitizeAdminErrorMessage(error, "Failed to load Llama.cpp assets.")
+        describeLoadError(error, "Failed to load Llama.cpp assets.")
       )
       return false
     } finally {
@@ -328,7 +342,7 @@ export const LlamacppAdminPage: React.FC = () => {
       }
       setRuntimeUnsupported(false)
       setRuntimeError(
-        sanitizeAdminErrorMessage(error, "Failed to load Llama.cpp runtime instances.")
+        describeLoadError(error, "Failed to load Llama.cpp runtime instances.")
       )
     } finally {
       setLoadingRuntimes(false)

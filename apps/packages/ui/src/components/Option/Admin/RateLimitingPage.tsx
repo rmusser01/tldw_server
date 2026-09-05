@@ -137,8 +137,14 @@ const RateLimitingPage: React.FC = () => {
 
   // ── Coverage Table Columns ──
 
-  const protectedRoutes = coverage?.protected ?? []
-  const unprotectedRoutes = coverage?.unprotected ?? []
+  // The diag endpoint returns protected_routes/unprotected_routes (+ counts);
+  // older builds used protected/unprotected. Reading the wrong keys rendered
+  // "78.9% coverage" above "0 routes | 0 routes" (2026-09 audit finding P11).
+  const protectedRoutes = coverage?.protected_routes ?? coverage?.protected ?? []
+  const unprotectedRoutes =
+    coverage?.unprotected_routes ?? coverage?.unprotected ?? []
+  const protectedCount = coverage?.protected_count ?? protectedRoutes.length
+  const unprotectedCount = coverage?.unprotected_count ?? unprotectedRoutes.length
   const coveragePct = coverage?.coverage_pct ?? (
     protectedRoutes.length + unprotectedRoutes.length > 0
       ? Math.round((protectedRoutes.length / (protectedRoutes.length + unprotectedRoutes.length)) * 100)
@@ -150,7 +156,11 @@ const RateLimitingPage: React.FC = () => {
       title: "Route",
       dataIndex: "route",
       key: "route",
-      render: (val: string, record: any) => <code>{val || record}</code>
+      // The diag endpoint emits { method, path } objects; legacy payloads used
+      // plain strings or { route }. Never render a raw object into the cell.
+      render: (val: string, record: any) => (
+        <code>{val || record?.path || String(record?.route ?? "")}</code>
+      )
     },
     {
       title: "Method",
@@ -209,7 +219,7 @@ const RateLimitingPage: React.FC = () => {
 
   return (
     <div style={{ padding: "24px", maxWidth: 1200 }}>
-      <h2 style={{ marginBottom: 16 }}>Rate Limiting &amp; Resource Governor</h2>
+      <h1 style={{ marginBottom: 16, fontSize: "1.5rem", fontWeight: 600 }}>Rate Limiting &amp; Resource Governor</h1>
 
       {/* Governor Policy Card */}
       <Card
@@ -275,8 +285,8 @@ const RateLimitingPage: React.FC = () => {
               />
             </div>
             <div>
-              <strong>Protected:</strong> {protectedRoutes.length} routes |{" "}
-              <strong>Unprotected:</strong> {unprotectedRoutes.length} routes
+              <strong>Protected:</strong> {protectedCount} routes |{" "}
+              <strong>Unprotected:</strong> {unprotectedCount} routes
             </div>
             {unprotectedRoutes.length > 0 && (
               <div>
@@ -286,7 +296,7 @@ const RateLimitingPage: React.FC = () => {
                     typeof r === "string" ? { route: r, key: i } : { ...r, key: i }
                   )}
                   columns={routeColumns}
-                  pagination={false}
+                  pagination={{ pageSize: 25, showSizeChanger: false }}
                   size="small"
                   style={{ marginTop: 8 }}
                 />
@@ -300,7 +310,7 @@ const RateLimitingPage: React.FC = () => {
 
       {/* Rate Limits Card */}
       <Card
-        title="Admin Rate Limits"
+        title="Per-user rate limit overrides"
         style={{ marginBottom: 16 }}
         extra={
           <Button onClick={() => loadRateLimits()} size="small">
@@ -308,6 +318,10 @@ const RateLimitingPage: React.FC = () => {
           </Button>
         }
       >
+        <p style={{ marginTop: 0, color: "var(--color-text-secondary, #888)" }}>
+          Overrides created for specific users or API keys. Baseline limits
+          come from the resource governor policy above.
+        </p>
         {rateLimitsError ? (
           <Alert title={rateLimitsError} />
         ) : (
@@ -318,7 +332,10 @@ const RateLimitingPage: React.FC = () => {
             loading={rateLimitsLoading}
             pagination={false}
             size="small"
-            locale={{ emptyText: "No rate limits configured" }}
+            locale={{
+              emptyText:
+                "No per-user overrides configured. The governor policy's baseline limits still apply."
+            }}
           />
         )}
       </Card>
