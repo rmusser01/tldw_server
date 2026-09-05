@@ -238,9 +238,11 @@ export const ServerAdminPage: React.FC = () => {
       } catch {
         // ignore; health checks will surface errors
       }
-      if (!cancelled) {
-        await loadSystemStats()
-      }
+      // Not gated on `cancelled`: under StrictMode the first mount's cleanup
+      // fires while getConfig is still resolving, and the ref guard blocks the
+      // second mount — gating here meant system stats silently never loaded
+      // (#2870). Like users/roles below, the load must survive the remount.
+      void loadSystemStats()
 
       // Initial users + roles
       void loadUsers(1, usersPageSize, userRoleFilter, userActiveFilter)
@@ -544,8 +546,6 @@ export const ServerAdminPage: React.FC = () => {
             )}
           </Card>
         )}
-
-        <AdminAudioInstallerCard />
 
         {!adminGuard && (
           <>
@@ -1002,6 +1002,10 @@ export const ServerAdminPage: React.FC = () => {
             </Card>
           </>
         )}
+
+        {/* One-time setup task: placed after the recurring operational cards
+            (health, users, budgets) per the 2026-09 UX audit (#2878). */}
+        <AdminAudioInstallerCard />
       </Space>
     </PageShell>
   )
