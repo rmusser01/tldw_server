@@ -2971,6 +2971,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
           - name: chat-character-integration-chat
             paths: >-
@@ -4347,6 +4348,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
           - name: chat-character-integration-chat
             paths: >-
@@ -5646,6 +5648,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
           - name: chat-character-integration-chat
             paths: >-
@@ -6951,6 +6954,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
           - name: chat-character-integration-chat
             paths: >-

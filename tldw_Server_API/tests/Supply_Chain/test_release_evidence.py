@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import subprocess
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -15,6 +17,8 @@ from Helper_Scripts.Supply_Chain.release_evidence import (
     main,
     verify_release_manifest,
 )
+
+pytestmark = pytest.mark.unit
 
 PROJECT_IMAGES = {
     "app": ("Dockerfiles/Dockerfile.prod", "promoted"),
@@ -36,6 +40,36 @@ COMPONENT_NAMES = {
     **{name: f"reference-{name}" for name in REFERENCE_IMAGES},
     "postgres": "reference-postgresql",
 }
+
+
+@pytest.fixture(autouse=True)
+def verified_attestations(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub only the external signature verifier for synthetic image fixtures."""
+    def verify(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert command[:3] == ["gh", "attestation", "verify"]
+        subject_path = Path(command[3])
+        name = subject_path.stem.removeprefix("subject-")
+        assert command[4:21] == [
+            "--bundle", str(subject_path.parent / f"provenance-image-{name}.jsonl"),
+            "--repo", "rmusser01/tldw_server",
+            "--signer-workflow", "rmusser01/tldw_server/.github/workflows/publish-docker.yml",
+            "--source-digest", "a" * 40,
+            "--signer-digest", "a" * 40,
+            "--source-ref", "refs/tags/v0.1.0-rc.1",
+            "--predicate-type", "https://slsa.dev/provenance/v1",
+            "--deny-self-hosted-runners", "--format", "json",
+        ]
+        assert kwargs == {"check": True, "capture_output": True, "text": True, "timeout": 60}
+        record = json.loads((subject_path.parent / f"image-{name}.json").read_text())
+        statement = {"subject": [{
+            "name": record["reference"].split("@", 1)[0].rsplit(":", 1)[0],
+            "digest": {"sha256": record["subject_digest"].removeprefix("sha256:")},
+        }]}
+        return subprocess.CompletedProcess(command, 0, json.dumps([
+            {"verificationResult": {"statement": statement}}
+        ]))
+
+    monkeypatch.setattr(subprocess, "run", verify)
 
 
 def _write_json(path: Path, payload: object) -> None:
@@ -75,8 +109,19 @@ def _write_image_fixture(
     subject_digit = "123456789abcdef"[index]
     child_digit = "123456789abcdef"[index + 1]
     subject = "sha256:" + subject_digit * 64
+    if ownership == "project-built":
+        subject_path = root / f"subject-{name}.json"
+        _write_json(subject_path, {"fixture_subject": name})
+        subject = "sha256:" + hashlib.sha256(subject_path.read_bytes()).hexdigest()
+        _write_json(root / f"provenance-image-{name}.jsonl", {"synthetic": name})
     child = "sha256:" + child_digit * 64
     reference = f"registry.example/tldw/{name}:v0.1.0@{subject}"
+    if ownership == "project-built":
+        repository = (
+            "ghcr.io/rmusser01/tldw_server" + {"app": "", "worker": "-worker", "audio-worker": "-audio-worker"}[name]
+            if publication == "promoted" else f"local.invalid/tldw/{name}"
+        )
+        reference = f"{repository}:v0.1.0@{subject}"
     sbom_file = f"sbom-image-{name}.cdx.json"
     scan_file = f"trivy-image-{name}.json"
     decision_file = f"scan-decision-image-{name}.json"
@@ -133,7 +178,7 @@ def _write_image_fixture(
             "scan_file": scan_file,
             "decision_file": decision_file,
             "provenance_ref": (
-                f"https://github.com/rmusser01/tldw_server/attestations/{name}"
+                f"https://github.com/rmusser01/tldw_server/attestations/{index + 1}"
                 if ownership == "project-built"
                 else None
             ),
@@ -170,6 +215,88 @@ def _edit_json(path: Path, **changes: object) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
     payload.update(changes)
     _write_json(path, payload)
+
+
+def test_release_rejects_missing_provenance_bundle(tmp_path: Path) -> None:
+    _write_complete_fixture(tmp_path)
+    (tmp_path / "provenance-image-app.jsonl").unlink()
+    with pytest.raises(EvidenceError, match="provenance"):
+        build_release_manifest(tmp_path, _metadata())
+
+
+def test_release_rejects_worker_subject_presented_as_app(tmp_path: Path) -> None:
+    """A valid signature for another image role is not evidence for the app."""
+    _write_complete_fixture(tmp_path)
+    record_path = tmp_path / "image-app.json"
+    record = json.loads(record_path.read_text())
+    record["reference"] = f"ghcr.io/rmusser01/tldw_server-worker:v0.1.0@{record['subject_digest']}"
+    _write_json(record_path, record)
+    _edit_json(tmp_path / "trivy-image-app.json", ArtifactName=record["reference"])
+    with pytest.raises(EvidenceError, match="provenance"):
+        build_release_manifest(tmp_path, _metadata())
+
+
+def test_release_commands_forward_independently_trusted_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_complete_fixture(tmp_path)
+    trusted_root = tmp_path / "operator-trusted-root.jsonl"
+    _write_json(trusted_root, {"test_only": "trusted root"})
+    synthetic_verifier = subprocess.run
+
+    def verify(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert command[-2:] == ["--custom-trusted-root", str(trusted_root)]
+        return synthetic_verifier(command, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", verify)
+    manifest = build_release_manifest(tmp_path, _metadata(), trusted_root=trusted_root)
+    verify_release_manifest(manifest, tmp_path, trusted_root=trusted_root)
+
+
+def test_release_rejects_wrong_provenance_subject_bytes(tmp_path: Path) -> None:
+    _write_complete_fixture(tmp_path)
+    _write_json(tmp_path / "subject-app.json", {"unrelated": "image"})
+    with pytest.raises(EvidenceError, match="provenance"):
+        build_release_manifest(tmp_path, _metadata())
+
+
+@pytest.mark.parametrize("reference", [
+    "https://github.com/other/repository/attestations/1",
+    "https://github.com/rmusser01/tldw_server/actions/runs/1",
+    "https://github.com/rmusser01/tldw_server/attestations/fabricated",
+])
+def test_release_rejects_unrelated_provenance_reference(tmp_path: Path, reference: str) -> None:
+    _write_complete_fixture(tmp_path)
+    _edit_json(tmp_path / "image-app.json", provenance_ref=reference)
+    with pytest.raises(EvidenceError, match="provenance"):
+        build_release_manifest(tmp_path, _metadata())
+
+
+def test_release_rejects_failed_signature_verification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_complete_fixture(tmp_path)
+
+    def reject(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.CalledProcessError(1, command)
+
+    monkeypatch.setattr(subprocess, "run", reject)
+    with pytest.raises(EvidenceError, match="provenance"):
+        build_release_manifest(tmp_path, _metadata())
+
+
+@pytest.mark.parametrize("output", ["[]", "{}", "not-json", '[{"verificationResult":{"statement":{"subject":[]}}}]'])
+def test_release_rejects_unbound_verification_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, output: str,
+) -> None:
+    _write_complete_fixture(tmp_path)
+
+    def verify(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(command, 0, output)
+
+    monkeypatch.setattr(subprocess, "run", verify)
+    with pytest.raises(EvidenceError, match="provenance"):
+        build_release_manifest(tmp_path, _metadata())
 
 
 def test_release_manifest_requires_exact_image_sets(tmp_path: Path) -> None:

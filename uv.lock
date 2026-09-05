@@ -3390,8 +3390,8 @@ name = "flash-attn"
 version = "2.8.3.post1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "einops", marker = "(sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32') or (sys_platform == 'darwin' and extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release') or (sys_platform == 'darwin' and extra != 'extra-11-tldw-server-backend-vllm' and extra != 'group-11-tldw-server-release') or (sys_platform == 'emscripten' and extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release') or (sys_platform == 'win32' and extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "torch", marker = "(sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32') or (sys_platform == 'darwin' and extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release') or (sys_platform == 'darwin' and extra != 'extra-11-tldw-server-backend-vllm' and extra != 'group-11-tldw-server-release') or (sys_platform == 'emscripten' and extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release') or (sys_platform == 'win32' and extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "einops", marker = "(sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32') or (sys_platform == 'darwin' and extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release') or (sys_platform == 'emscripten' and extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release') or (sys_platform == 'win32' and extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "torch", marker = "(sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32') or (sys_platform == 'darwin' and extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release') or (sys_platform == 'emscripten' and extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release') or (sys_platform == 'win32' and extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/01/7a/92a46e7cd6bbb4d7b2855a457c3b855df54a97af5656d98fc92e58e61065/flash_attn-2.8.3.post1.tar.gz", hash = "sha256:55d5103ed846da8b56e0797acf4bde07dee4b1c7e8907fcfc6699c203030c348", size = 8451657, upload-time = "2026-06-11T04:35:21.318Z" }
 
@@ -6574,15 +6574,14 @@ name = "mlx-lm"
 version = "0.31.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "jinja2", marker = "sys_platform == 'darwin' or (sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-11-tldw-server-backend-vllm' and extra != 'group-11-tldw-server-release') or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "jinja2", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
     { name = "mlx", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "numpy", marker = "sys_platform == 'darwin' or (sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-11-tldw-server-backend-vllm' and extra != 'group-11-tldw-server-release') or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "numpy", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
     { name = "protobuf", version = "6.33.6", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'darwin' and extra == 'extra-11-tldw-server-backend-vllm') or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "protobuf", version = "7.36.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-11-tldw-server-backend-vllm' and extra != 'group-11-tldw-server-release') or (sys_platform == 'darwin' and extra != 'extra-11-tldw-server-backend-vllm') or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "pyyaml", marker = "sys_platform == 'darwin' or (sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-11-tldw-server-backend-vllm' and extra != 'group-11-tldw-server-release') or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "sentencepiece", marker = "sys_platform == 'darwin' or (sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-11-tldw-server-backend-vllm' and extra != 'group-11-tldw-server-release') or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "protobuf", version = "7.36.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'darwin' and extra != 'extra-11-tldw-server-backend-vllm') or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "pyyaml", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "sentencepiece", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
     { name = "transformers", version = "5.8.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "transformers", version = "5.16.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-11-tldw-server-backend-vllm' and extra != 'group-11-tldw-server-release') or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/84/94/9a38d6b0c6fcca995b9136c94eb7da1e9c5165652edf228b96b29960fa7a/mlx_lm-0.31.3.tar.gz", hash = "sha256:61eb0e3ba09444f77f874aff295401d7ccd20b39495cbbce0c782a15474ce733", size = 304318, upload-time = "2026-04-22T07:37:27.922Z" }
 wheels = [
@@ -10389,7 +10388,7 @@ name = "pynvml"
 version = "13.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-ml-py", marker = "(sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32') or (sys_platform == 'darwin' and extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release') or (sys_platform == 'darwin' and extra != 'extra-11-tldw-server-backend-vllm' and extra != 'group-11-tldw-server-release') or (sys_platform == 'emscripten' and extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release') or (sys_platform == 'win32' and extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "nvidia-ml-py", marker = "(sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32') or (sys_platform == 'darwin' and extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release') or (sys_platform == 'emscripten' and extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release') or (sys_platform == 'win32' and extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/5c/57/da7dc63a79f59e082e26a66ac02d87d69ea316b35b35b7a00d82f3ce3d2f/pynvml-13.0.1.tar.gz", hash = "sha256:1245991d9db786b4d2f277ce66869bd58f38ac654e38c9397d18f243c8f6e48f", size = 35226, upload-time = "2025-09-05T20:33:25.377Z" }
 wheels = [
@@ -13737,6 +13736,7 @@ web-research = [
 [package.dev-dependencies]
 release = [
     { name = "build" },
+    { name = "loguru" },
     { name = "setuptools", version = "84.0.0", source = { registry = "https://pypi.org/simple" } },
     { name = "twine" },
     { name = "wheel" },
@@ -14004,6 +14004,7 @@ provides-extras = ["acp", "codegraph", "multiplayer", "dev", "tooling", "otel", 
 [package.metadata.requires-dev]
 release = [
     { name = "build", specifier = "==1.6.0" },
+    { name = "loguru", specifier = "==0.7.3" },
     { name = "setuptools", specifier = "==84.0.0" },
     { name = "twine", specifier = "==7.0.0" },
     { name = "wheel", specifier = "==0.48.0" },

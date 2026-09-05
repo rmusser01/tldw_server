@@ -171,6 +171,7 @@ jobs:
         run: |
           set -euo pipefail
           docker run --rm --platform linux/amd64 \
+            --user "$(id -u):$(id -g)" \
             --cap-drop ALL \
             --security-opt no-new-privileges:true \
             --read-only \
@@ -196,6 +197,7 @@ jobs:
           set -euo pipefail
           trivy() {
             docker run --rm --platform linux/amd64 \
+              --user "$(id -u):$(id -g)" \
               --network none \
               --cap-drop ALL \
               --security-opt no-new-privileges:true \

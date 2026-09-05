@@ -16,6 +16,10 @@ const writingPlaygroundPagePath = path.resolve(
   testDir,
   '../e2e/utils/page-objects/WritingPlaygroundPage.ts'
 );
+const audioStudioPagePath = path.resolve(
+  testDir,
+  '../e2e/utils/page-objects/AudioStudioPage.ts'
+);
 const audiobookStudioPagePath = path.resolve(
   testDir,
   '../e2e/utils/page-objects/AudiobookStudioPage.ts'
@@ -159,6 +163,14 @@ describe('e2e page object contracts', () => {
     expect(compatibilitySource).toContain('await this.gotoCompatibilityRoute()');
     expect(compatibilitySource).not.toContain('async assertPageReady(');
     expect(compatibilitySource).not.toContain('waitForLoadState("networkidle"');
+  });
+
+  it('keeps the audiobook compatibility wrapper on Audio Studio readiness', () => {
+    const source = readFileSync(audiobookStudioPagePath, 'utf8');
+
+    expect(source).not.toContain('waitForLoadState("networkidle"');
+    expect(source).toContain('extends AudioStudioPage');
+    expect(source).toContain('await this.gotoCompatibilityRoute()');
   });
 
   it('grants clipboard permissions for workflow tests', () => {

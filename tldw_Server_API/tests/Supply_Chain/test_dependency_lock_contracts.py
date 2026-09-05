@@ -18,6 +18,8 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
     import tomli as tomllib
 
+pytestmark = pytest.mark.unit
+
 ROOT = Path(__file__).resolve().parents[3]
 UV_IMAGE = (
     "ghcr.io/astral-sh/uv:0.12.7@"
@@ -243,6 +245,7 @@ def test_python_release_tools_and_build_backend_are_exactly_pinned() -> None:
     ]
     assert pyproject["dependency-groups"]["release"] == [
         "build==1.6.0",
+        "loguru==0.7.3",
         "twine==7.0.0",
         "setuptools==84.0.0",
         "wheel==0.48.0",
@@ -269,8 +272,9 @@ def test_universal_uv_lock_contains_root_and_release_tool_profiles() -> None:
     assert lock["version"] == 1
     packages = {package["name"]: package for package in lock["package"]}
     assert packages["tldw-server"]["source"] == {"editable": "."}
-    assert {name: packages[name]["version"] for name in ("build", "twine", "setuptools", "wheel")} == {
+    assert {name: packages[name]["version"] for name in ("build", "loguru", "twine", "setuptools", "wheel")} == {
         "build": "1.6.0",
+        "loguru": "0.7.3",
         "twine": "7.0.0",
         "setuptools": "84.0.0",
         "wheel": "0.48.0",
