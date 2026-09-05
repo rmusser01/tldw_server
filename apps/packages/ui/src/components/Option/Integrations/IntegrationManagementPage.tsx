@@ -342,6 +342,12 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
       })
     : null
 
+  // One page-level status at a time: when the overview endpoint itself is
+  // unavailable, the per-section callouts and empty provider cards below it
+  // only contradict the banner (2026-09 UX audit finding S3).
+  const overviewUnavailable =
+    overviewQuery.isError && !overviewQuery.data && !personalIntegrationsUnsupported
+
   const handlePersonalAction = async (connection: IntegrationConnection, action: string) => {
     if (scope !== "personal" || !isPersonalProvider(connection.provider)) {
       return
@@ -440,7 +446,7 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
         />
       ) : null}
 
-      {!personalIntegrationsUnsupported ? (
+      {!personalIntegrationsUnsupported && !overviewUnavailable ? (
         <Row gutter={[16, 16]}>
           {connectionsByProvider.map((group) => (
             <Col key={group.provider} xs={24} lg={8}>
@@ -456,7 +462,7 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
         </Row>
       ) : null}
 
-      {isWorkspace ? (
+      {isWorkspace && !overviewUnavailable ? (
         <>
           {telegramActorsState ? (
             <RecoveryCallout
