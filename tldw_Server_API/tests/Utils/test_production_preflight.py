@@ -21,6 +21,8 @@ from Helper_Scripts.Deployment.production_preflight import (
 )
 from loguru import logger
 
+pytestmark = pytest.mark.unit
+
 COMPOSE_PATH = Path("Dockerfiles/docker-compose.production.yml")
 PROXY_PATH = Path("Dockerfiles/Production/Caddyfile")
 _INTERPOLATION = re.compile(r"\$\{([A-Z0-9_]+):\?[^}]+\}")
@@ -1210,6 +1212,17 @@ def test_rendered_compose_fail_closed_edge_shapes(
     issues = validate_rendered_compose(compose, values)
 
     assert expected_code in _codes(issues)
+
+
+def test_core_preflight_does_not_require_monitoring_companion_images(tmp_path: Path) -> None:
+    """A core-only deployment must not depend on optional monitoring inputs."""
+    values = _valid_env(tmp_path)
+    for field in ("PROMETHEUS_IMAGE", "ALERTMANAGER_IMAGE", "GRAFANA_IMAGE"):
+        del values[field]
+    env_file = tmp_path / "production.env"
+    _write_env(env_file, values)
+
+    assert run_preflight(env_file, COMPOSE_PATH, PROXY_PATH).ok
 
 
 def test_run_preflight_accepts_a_complete_offline_fixture(tmp_path: Path) -> None:

@@ -2,7 +2,10 @@
 
 from pathlib import Path
 
+import pytest
 import yaml
+
+pytestmark = pytest.mark.unit
 
 
 _WORKFLOW_PATH = Path(".github/workflows/frontend-e2e-tiers.yml")

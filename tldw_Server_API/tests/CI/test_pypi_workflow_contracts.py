@@ -6,7 +6,10 @@ import re
 from pathlib import Path
 
 import pytest
+import tomllib
 import yaml
+
+pytestmark = pytest.mark.unit
 
 PUBLISH_WORKFLOW = Path(".github/workflows/publish-pypi.yml")
 PACKAGE_WORKFLOW = Path(".github/workflows/pypi-package.yml")
@@ -65,7 +68,7 @@ def test_package_build_uses_pinned_uv_and_locked_release_group(path: Path) -> No
     assert workflow["env"]["UV_IMAGE"] == PINNED_UV
     _get_step(build["steps"], "Install pinned uv")
     sync = _run(_get_step(build["steps"], "Sync locked release tools"))
-    assert "uv sync --locked --no-dev --no-editable --group release" in sync
+    assert "uv sync --locked --only-group release" in sync
     package_step = next(
         step for step in build["steps"] if step.get("name") in {
             "Build and validate package",
@@ -139,6 +142,11 @@ def test_pypi_make_targets_do_not_require_pip_in_the_locked_environment() -> Non
     assert '-c "import build"' in packaging_targets
     assert '-c "import twine"' in packaging_targets
     assert '-c "import loguru"' in packaging_targets
+
+
+def test_release_group_includes_artifact_checker_logging_dependency() -> None:
+    project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    assert "loguru==0.7.3" in project["dependency-groups"]["release"]
 
 
 @pytest.mark.parametrize("path", [PUBLISH_WORKFLOW, PACKAGE_WORKFLOW])

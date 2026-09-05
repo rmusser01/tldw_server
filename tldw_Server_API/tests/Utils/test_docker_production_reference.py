@@ -1,6 +1,9 @@
 from pathlib import Path
 
+import pytest
 import yaml
+
+pytestmark = pytest.mark.unit
 
 COMPOSE = Path("Dockerfiles/docker-compose.production.yml")
 MONITORING_COMPOSE = Path("Dockerfiles/Monitoring/docker-compose.production.yml")

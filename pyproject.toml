@@ -483,6 +483,7 @@ all = [
 [dependency-groups]
 release = [
   "build==1.6.0",
+  "loguru==0.7.3",
   "twine==7.0.0",
   "setuptools==84.0.0",
   "wheel==0.48.0",

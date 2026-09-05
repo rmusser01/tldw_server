@@ -11,6 +11,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT_PATH = REPO_ROOT / "Helper_Scripts/ci/license_first_admission.py"
 ROUTES_PATH = REPO_ROOT / ".github/license-first-paths.json"
@@ -451,6 +453,32 @@ def test_route_manifest_exactly_copies_current_pull_request_filters() -> None:
     assert routes == expected
     assert "mcp-unified-publish.yml" not in routes
     assert "publish-pypi.yml" not in routes
+
+
+def test_pypi_lock_change_is_admitted_for_package_validation() -> None:
+    """A locked dependency change must trigger the actual package check."""
+    inputs = valid_inputs(
+        workflow_file="pypi-package.yml",
+        routes=json.loads(ROUTES_PATH.read_text(encoding="utf-8")),
+        file_pages=[[{"filename": "uv.lock", "status": "modified"}]],
+    )
+    assert admission.admit(**inputs)["should_run"] == "true"
+
+
+@pytest.mark.parametrize("filename", [
+    "apps/extension/tests/e2e/prompt-improvement.spec.ts",
+    "apps/packages/ui/src/store/model.tsx",
+    "apps/packages/ui/src/components/Chat/composer/ChatComposer.tsx",
+    "apps/packages/ui/src/assets/locale/en/chat.json",
+])
+def test_watchlists_extension_routes_shared_journey_changes(filename: str) -> None:
+    """Shared journey changes must reach the audited extension E2E workflow."""
+    inputs = valid_inputs(
+        workflow_file="ui-watchlists-extension-e2e.yml",
+        routes=json.loads(ROUTES_PATH.read_text(encoding="utf-8")),
+        file_pages=[[{"filename": filename, "status": "modified"}]],
+    )
+    assert admission.admit(**inputs)["should_run"] == "true"
 
 
 def write_json(path: Path, value: object) -> None:

@@ -15,6 +15,8 @@ from Helper_Scripts.Supply_Chain.exception_policy import (
     write_trivy_ignore,
 )
 
+pytestmark = pytest.mark.unit
+
 TODAY = date(2026, 8, 30)
 
 

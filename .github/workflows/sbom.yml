@@ -4,6 +4,9 @@ on:
   workflow_call:
   workflow_dispatch:
   pull_request:
+  workflow_run:
+    workflows: [Frontend License Gate Audit]
+    types: [completed]
   push:
     branches:
       - main
@@ -12,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: source-sbom-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref || github.run_id }}
+  group: source-sbom-${{ github.workflow }}-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
   cancel-in-progress: true
 
 env:
@@ -23,14 +26,40 @@ env:
   EVIDENCE_DIR: artifacts/source-sbom
 
 jobs:
+  admission:
+    if: >-
+      vars.LICENSE_FIRST_CI_ENABLED == 'true' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success'
+    uses: ./.github/workflows/license-first-admission.yml
+    with:
+      workflow_file: sbom.yml
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      statuses: read
+
   generate-python:
     name: Generate Python source SBOM
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Setup Python
@@ -99,12 +128,24 @@ jobs:
 
   generate-apps-workspace:
     name: Generate applications workspace source SBOM
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Generate required-only Bun workspace CycloneDX
@@ -114,6 +155,7 @@ jobs:
           mkdir -p "$EVIDENCE_DIR"
           cdxgen() {
             docker run --rm --platform linux/amd64 \
+              --user "$(id -u):$(id -g)" \
               --network none \
               --cap-drop ALL \
               --security-opt no-new-privileges:true \
@@ -261,12 +303,24 @@ jobs:
 
   generate-admin-ui:
     name: Generate Admin UI source SBOM
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Generate required-only Admin UI CycloneDX
@@ -276,6 +330,7 @@ jobs:
           mkdir -p "$EVIDENCE_DIR"
           cdxgen() {
             docker run --rm --platform linux/amd64 \
+              --user "$(id -u):$(id -g)" \
               --network none \
               --cap-drop ALL \
               --security-opt no-new-privileges:true \
@@ -389,6 +444,7 @@ jobs:
           sha256sum -c sbom-admin-ui.cdx.json.sha256
           cyclonedx() {
             docker run --rm --platform linux/amd64 \
+              --user "$(id -u):$(id -g)" \
               --network none \
               --cap-drop ALL \
               --security-opt no-new-privileges:true \
@@ -481,6 +537,7 @@ jobs:
       - name: Checkout policy evaluator
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Setup Python
@@ -501,6 +558,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/trivy-cache"
           trivy() {
             docker run --rm --platform linux/amd64 \
+              --user "$(id -u):$(id -g)" \
               --cap-drop ALL \
               --security-opt no-new-privileges:true \
               --read-only \
@@ -512,6 +570,7 @@ jobs:
           }
           trivy_scan() {
             docker run --rm --platform linux/amd64 \
+              --user "$(id -u):$(id -g)" \
               --network none \
               --cap-drop ALL \
               --security-opt no-new-privileges:true \
@@ -643,8 +702,18 @@ jobs:
 
   source-gate:
     name: Source SBOM result gate
-    if: ${{ always() }}
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
     needs:
+      - admission
       - generate-python
       - generate-apps-workspace
       - generate-admin-ui

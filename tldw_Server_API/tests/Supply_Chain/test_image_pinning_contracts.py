@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 ROOT = Path(__file__).resolve().parents[3]
 PRODUCTION_DOCKERFILES = (
     ROOT / "Dockerfiles/Dockerfile.prod",
@@ -218,8 +220,8 @@ def test_admin_next_build_executes_with_node_after_frozen_bun_install() -> None:
     assert "RUN bun run build" not in dockerfile
 
 
-def test_webui_production_build_caps_next_worker_count() -> None:
-    """The reference WebUI build stays within ordinary container memory limits."""
+def test_webui_production_build_uses_canonical_node_turbopack_pipeline() -> None:
+    """The image uses the same production pipeline and budgets as frontend CI."""
     dockerfile = (ROOT / "Dockerfiles/Dockerfile.webui").read_text(encoding="utf-8")
     builder_line = next(
         line for line in dockerfile.splitlines() if line.startswith("FROM ") and line.endswith(" AS builder")
@@ -229,6 +231,6 @@ def test_webui_production_build_caps_next_worker_count() -> None:
     assert "TLDW_NEXT_BUILD_CPUS=1" in dockerfile
     assert "NODE_OPTIONS=--max-old-space-size=6144" in dockerfile
     assert "RUN bun install --frozen-lockfile --cwd /app/apps" in dockerfile
-    assert "npm run compile:prod" in dockerfile
-    assert "npm run build:prod" not in dockerfile
+    assert "npm run build:prod" in dockerfile
+    assert "npm run compile:prod" not in dockerfile
     assert "bun run build:prod" not in dockerfile

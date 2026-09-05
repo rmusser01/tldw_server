@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
-
+from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 
 pytestmark = pytest.mark.unit
 
@@ -55,7 +55,7 @@ def _create_source(db: WatchlistsDatabase, *, label: str, watchlist_id: int | No
     )
 
 
-def test_updating_source_url_clears_conditional_fetch_state(tmp_path):
+def test_updating_source_url_clears_conditional_fetch_state(tmp_path: Path) -> None:
     db = _make_db(tmp_path)
     source = _create_source(db, label="conditional")
     db.update_source_scrape_meta(

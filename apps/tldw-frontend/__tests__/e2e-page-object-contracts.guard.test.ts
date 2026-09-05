@@ -16,6 +16,10 @@ const writingPlaygroundPagePath = path.resolve(
   testDir,
   '../e2e/utils/page-objects/WritingPlaygroundPage.ts'
 );
+const audioStudioPagePath = path.resolve(
+  testDir,
+  '../e2e/utils/page-objects/AudioStudioPage.ts'
+);
 const audiobookStudioPagePath = path.resolve(
   testDir,
   '../e2e/utils/page-objects/AudiobookStudioPage.ts'
@@ -139,7 +143,7 @@ describe('e2e page object contracts', () => {
   it('keeps key page objects off direct networkidle readiness checks', () => {
     const sources = [
       readFileSync(writingPlaygroundPagePath, 'utf8'),
-      readFileSync(audiobookStudioPagePath, 'utf8'),
+      readFileSync(audioStudioPagePath, 'utf8'),
       readFileSync(knowledgeQaPagePath, 'utf8'),
       readFileSync(worldBooksPagePath, 'utf8'),
       readFileSync(agentRegistryPagePath, 'utf8'),
@@ -150,6 +154,14 @@ describe('e2e page object contracts', () => {
       expect(source).not.toContain('waitForLoadState("networkidle"');
       expect(source).toContain('waitForAppShell');
     }
+  });
+
+  it('keeps the audiobook compatibility wrapper on Audio Studio readiness', () => {
+    const source = readFileSync(audiobookStudioPagePath, 'utf8');
+
+    expect(source).not.toContain('waitForLoadState("networkidle"');
+    expect(source).toContain('extends AudioStudioPage');
+    expect(source).toContain('await this.gotoCompatibilityRoute()');
   });
 
   it('grants clipboard permissions for workflow tests', () => {

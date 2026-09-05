@@ -98,7 +98,7 @@ jobs:
           uv --version | grep -Eq '^uv 0\.12\.7 '
 
       - name: Sync locked release tools
-        run: uv sync --locked --no-dev --no-editable --group release
+        run: uv sync --locked --only-group release
 
       - name: Build and check package
         run: >-
