@@ -14,7 +14,7 @@
 **Task:** TASK-13153, In Progress. These are checkpoints within that task, not newly allocated Backlog IDs.
 **Approved spec:** `Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md`, user approved after checkpoint `8dc255fcca`.
 **Parent plan:** `Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md`; this plan replaces its generic-file-writer gap, not its remaining Reading DTO/HTTP/reconciliation/release tasks.
-**Status:** Inline execution in progress. Task 1, Task 2a and Task 2b database checkpoints verified on SQLite/PostgreSQL. Runtime file protocol and later tasks remain pending. See checkpoint evidence below.
+**Status:** Inline execution in progress. Task 1, Task 2a, Task 2b and Task 3a staging/write checkpoints verified on SQLite/PostgreSQL. Publication/recovery and later tasks remain pending. See checkpoint evidence below.
 
 ---
 
@@ -122,6 +122,16 @@ not change existing standalone calls or claim that legacy producers are migrated
 ## Task 3: Bounded file protocol and restart recovery
 
 **Files:** Create `tldw_Server_API/app/services/output_file_operations.py`, `tldw_Server_API/tests/Collections/test_output_file_operations_storage.py`; modify `tldw_Server_API/app/services/reading_artifact_cleanup_service.py` only to expose/reuse its verified directory descriptor context.
+
+Execution split: Task 3a establishes immutable source/stage evidence and guarded
+write-offset updates in `Collections_DB.py`, plus exclusive staging and bounded
+offloaded writes. Each call uses at most one 1 MiB chunk and closes/syncs before
+unlocking (stricter than the maximum 8 MiB interval). Real-file failures and
+SQLite/PostgreSQL adapter checks precede its separate review/commit. Task 3b then
+adds publication, recorded DB mutation and phase-specific recovery, including
+uncertain commit acknowledgements and the full crash matrix below. No runtime
+caller or activation is enabled by Task 3a; incomplete/ambiguous files retain
+their journal claims, with automatic cleanup still pending Task 3b.
 
 - [ ] Write RED tests against real temporary files for copy-before-commit, occupied destination, absent source, symlink/special/unexplained hardlink, changed source fingerprint, and same DB/different root. Start with service-level replace; no routes yet. Run `python -m pytest tldw_Server_API/tests/Collections/test_output_file_operations_storage.py -q`.
 - [ ] Implement `prepare`, `write_chunk`, `publish_and_commit`, and `recover_due` as a small service using Task 1 methods. Lock order is verified storage context then DB fence. Capture original fingerprint before first read. Reserve before exclusive stage creation; persist stage identity before leaving the first lock interval. No filesystem/network call occurs inside DB mutation transactions. Never reopen the root path after verifying its descriptor.
@@ -433,3 +443,65 @@ path/order integration matrix and recorded runtime mutation boundary remain
 rollout obligations; this checkpoint does not mark the complete Task 2 checklist
 or full-task acceptance criteria complete. No storage activation or public
 capability is enabled.
+
+### Task 3a: Durable evidence and bounded offloaded staging (2026-09-05)
+
+Adds internal `OutputFileOperations.prepare`/`write_chunk`, reusing the existing
+verified directory descriptor without changing Reading storage primitives. No
+runtime callers, publication, unlink or activation. The adapter now exposes its
+validated policy and an immutable source/stage evidence + compare-and-set offset
+transition under the existing revision fence. Source fingerprints include device,
+inode, type, link count, size and modification/change timestamps; stage authority
+uses device/inode/type/link count plus the durable expected length. All source
+bytes and output metadata remain unchanged during this checkpoint.
+
+Preparation checks physical capacity and reserves source-size plus declared
+maximum staging bytes before exclusive private creation. It records source
+evidence before stage creation and syncs the empty stage/directory before recording
+stage evidence. Every write reacquires volume exclusion, checks live phase/lease,
+source/stage identity and exact offset, enforces cumulative bounds, syncs/closes
+the writable descriptor, then records the new offset. One call writes at most
+1 MiB, yielding exclusion more frequently than the plan's 8 MiB maximum. There
+are no producer/network waits or filesystem calls inside DB mutation transactions.
+
+Cancellation drains the offloaded asyncio worker before returning, then attempts
+conditional abort under verified storage exclusion. AnyIO task-group and direct
+asyncio cancellation are both covered. I/O errors are sanitized, including stat/
+free-space preflight calls. Failed writes or lost identity/offset acknowledgements
+retain source bytes and durable claims; they do not truncate/recreate ambiguous
+stages or delete files. Automatic recovery/blocked-category reporting is still
+Task 3b, so this is not yet a usable production file-operation lifecycle.
+
+TDD: 15 initial assertions failed on the missing service/DB transition, then
+passed. Fault tests exposed raw preparation I/O errors and detached direct-asyncio
+cancellation; follow-up cases exposed AnyIO cancellation not scheduling abort.
+Independent review found soft-deleted removal lookup and preflight error privacy.
+Both findings were reproduced and fixed. The removal regression initially used
+unsupported test APIs/fields; after inspecting the adapter it uses real soft
+deletion plus both supported lookup modes. Those fixture failures and the
+interrupted PostgreSQL run are not counted as verification. Follow-up read-only
+review confirmed the fixes with no remaining serious checkpoint findings.
+
+Verified evidence: 173 SQLite/non-PostgreSQL cases pass in 17.60 seconds and
+103 required PostgreSQL cases pass in 266.99 seconds, with no required-backend
+skips: 276 distinct targeted passes. New service/tests pass Ruff and Black;
+modified adapter ranges pass Black. Compile/diff checks pass; scoped Bandit
+reports zero findings and zero scanner errors. Adapter Ruff retains exactly the
+nine baseline findings, verified against `2583f3e443`.
+
+Verification commands, after activating the Server virtual environment:
+
+```bash
+TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_operations_storage.py tldw_Server_API/tests/Collections/test_output_file_operations_db.py tldw_Server_API/tests/Collections/test_output_file_claims_db.py tldw_Server_API/tests/Collections/test_reading_artifact_storage.py tldw_Server_API/tests/Collections/test_reading_artifact_cleanup.py -q -k 'not postgres'
+TLDW_TEST_NO_DOCKER=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_operations_storage.py tldw_Server_API/tests/Collections/test_output_file_operations_db.py tldw_Server_API/tests/Collections/test_reading_artifact_cleanup.py -q -k 'postgres and not sqlite' -n 2 -x
+```
+
+Logs: `/private/tmp/task-13153-staging-{red,green,faults-red,faults-green}.log`,
+`/private/tmp/task-13153-staging-review-red-valid.log`,
+`/private/tmp/task-13153-staging-{sqlite,pg}-verified.log`,
+`/private/tmp/task-13153-staging-bandit.json`.
+
+Next: Task 3b bounded source-copy orchestration, no-clobber publication, recorded
+DB mutation and phase-specific restart recovery with the remaining crash matrix.
+The complete Task 3 checklist/full-task AC remain unchecked. No push, PR, merge,
+full-suite claim or public capability activation.

@@ -1,0 +1,248 @@
+"""Reserved, bounded output staging; publication/recovery and runtime wiring pending.
+
+Every file operation uses the verified directory descriptor. Failed or ambiguous
+work retains journal authority; this checkpoint never publishes or unlinks files.
+Async callers wait for each offloaded lock interval to close its writable FD.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import errno
+import json
+import os
+import stat
+from contextlib import contextmanager
+from functools import partial
+from pathlib import Path
+
+import anyio
+
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.services.reading_artifact_cleanup_service import _validated_storage_directory
+
+MAX_CHUNK_BYTES = 1024 * 1024
+
+
+def _identity(info: os.stat_result, *, source: bool = False) -> dict[str, int]:
+    identity = {"dev": info.st_dev, "ino": info.st_ino, "mode": stat.S_IFMT(info.st_mode), "nlink": info.st_nlink}
+    if source:
+        identity.update(size=info.st_size, mtime_ns=info.st_mtime_ns, ctime_ns=info.st_ctime_ns)
+    return identity
+
+
+@contextmanager
+def _open_regular(directory: int, name: str, flags: int):
+    fd = os.open(name, flags | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=directory)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise RuntimeError("output_source_unavailable")
+        yield fd
+    finally:
+        os.close(fd)
+
+
+def _source_identity(directory: int, name: str) -> dict[str, int]:
+    try:
+        with _open_regular(directory, name, os.O_RDONLY) as fd:
+            return _identity(os.fstat(fd), source=True)
+    except OSError:
+        raise RuntimeError("output_source_unavailable") from None
+
+
+def _check_space(directory: int, required: int, margin: int) -> None:
+    info = os.fstatvfs(directory)
+    if required > info.f_bavail * info.f_frsize - margin:
+        raise RuntimeError("output_storage_capacity")
+
+
+async def _wait_worker(function):
+    """Drain the worker even after repeated direct asyncio cancellation."""
+    task = asyncio.create_task(asyncio.to_thread(function))
+    cancelled = False
+    while True:
+        try:
+            return await asyncio.shield(task), cancelled
+        except asyncio.CancelledError:
+            if task.cancelled():
+                raise
+            cancelled = True
+        except Exception:
+            if cancelled:
+                raise asyncio.CancelledError from None
+            raise
+
+
+class OutputFileOperations:
+    """Internal staging on one explicitly bound volume, never an activation API."""
+
+    def __init__(self, db: CollectionsDatabase, *, output_root: Path, storage_namespace_id: str) -> None:
+        self.db = db
+        self.output_root = output_root
+        self.namespace = storage_namespace_id
+
+    def _abort(self, token: str) -> None:
+        with _validated_storage_directory(self.output_root, storage_namespace_id=self.namespace):
+            self.db.abort_output_file_operation(token, self.namespace)
+
+    async def _run_interval(self, function, *, token: str | None = None):
+        # Shield AnyIO level cancellation too; direct Task.cancel is drained below.
+        result = None
+        try:
+            with anyio.CancelScope(shield=True):
+                result, cancelled = await _wait_worker(function)
+            if cancelled:
+                raise asyncio.CancelledError
+            await anyio.lowlevel.checkpoint_if_cancelled()
+            return result
+        except asyncio.CancelledError:
+            try:
+                if token is not None or result is not None:
+                    with anyio.CancelScope(shield=True):
+                        await _wait_worker(partial(self._abort, token or result["token"]))
+            finally:
+                raise asyncio.CancelledError from None
+        except OSError as exc:
+            code = "output_storage_capacity" if exc.errno == errno.ENOSPC else "output_storage_unavailable"
+            raise RuntimeError(code) from None
+
+    async def prepare(
+        self,
+        *,
+        kind: str,
+        max_output_bytes: int,
+        output_id: int | None = None,
+        destination_path: str | None = None,
+        intended: dict | None = None,
+        lease_seconds: int = 60,
+    ) -> dict:
+        """Reserve budget and identity before exclusive creation of an empty stage."""
+        return await self._run_interval(
+            partial(
+                self._prepare,
+                kind=kind,
+                max_output_bytes=max_output_bytes,
+                output_id=output_id,
+                destination_path=destination_path,
+                intended=intended,
+                lease_seconds=lease_seconds,
+            )
+        )
+
+    def _prepare(self, *, kind, max_output_bytes, output_id, destination_path, intended, lease_seconds):
+        if type(max_output_bytes) is not int or not 0 <= max_output_bytes <= 2**63 - 1:
+            raise ValueError("output_operation_invalid")
+        if kind not in {"create", "replace", "remove"} or (kind == "remove" and max_output_bytes):
+            raise ValueError("output_operation_invalid")
+        with _validated_storage_directory(self.output_root, storage_namespace_id=self.namespace) as (_, directory):
+            policy = self.db.get_output_storage_policy(self.namespace)
+            source, source_name = None, None
+            if kind != "create":
+                output = self.db.get_output_artifact(output_id, include_deleted=kind == "remove")
+                source_name = self.db._output_operation_filename(output.storage_path)
+                source = _source_identity(directory, source_name)
+            if kind != "remove":
+                destination_path = self.db._output_operation_filename(destination_path)
+                try:
+                    os.stat(destination_path, dir_fd=directory, follow_symlinks=False)
+                except FileNotFoundError:
+                    pass
+                else:
+                    raise RuntimeError("output_path_conflict")
+            _check_space(directory, max_output_bytes, policy["free_space_margin_bytes"])
+            row = self.db.prepare_output_file_operation(
+                self.namespace,
+                kind=kind,
+                output_id=output_id,
+                destination_path=destination_path,
+                intended=intended,
+                reserved_bytes=max_output_bytes + (source["size"] if source else 0),
+                lease_seconds=lease_seconds,
+            )
+            token = row["token"]
+            try:
+                if row["source_path"] != source_name:
+                    raise RuntimeError("output_operation_conflict")
+                self.db.record_output_file_progress(
+                    token,
+                    self.namespace,
+                    source_identity=source,
+                    expected_offset=0,
+                    written_bytes=0,
+                    lease_seconds=lease_seconds,
+                )
+                if row["stage_path"] is not None:
+                    with _open_regular(directory, row["stage_path"], os.O_WRONLY | os.O_CREAT | os.O_EXCL) as fd:
+                        stage = _identity(os.fstat(fd))
+                        os.fsync(fd)
+                    os.fsync(directory)
+                    row = self.db.record_output_file_progress(
+                        token,
+                        self.namespace,
+                        stage_identity=stage,
+                        expected_offset=0,
+                        written_bytes=0,
+                        lease_seconds=lease_seconds,
+                    )
+                else:
+                    row = self.db.get_output_file_operation(token, self.namespace)
+                return row
+            except BaseException as exc:
+                # No file-first rollback: even a pre-identity file keeps its claim.
+                self.db.abort_output_file_operation(token, self.namespace)
+                if isinstance(exc, OSError):
+                    code = "output_storage_capacity" if exc.errno == errno.ENOSPC else "output_storage_unavailable"
+                    raise RuntimeError(code) from None
+                raise
+
+    async def write_chunk(self, token: str, data: bytes, *, expected_offset: int) -> int:
+        """Write/sync at most 1 MiB and close before releasing storage exclusion.
+
+        Byte production happens before this call, outside the lock. Cancellation
+        waits for writable descriptors to close, then conditionally aborts. If
+        storage/DB are unavailable, the durable lease remains for recovery.
+        """
+        if type(data) is not bytes or len(data) > MAX_CHUNK_BYTES:
+            raise ValueError("output_size_limit")
+        if type(expected_offset) is not int or expected_offset < 0:
+            raise ValueError("output_operation_invalid")
+        return await self._run_interval(partial(self._write_chunk, token, data, expected_offset), token=token)
+
+    def _write_chunk(self, token: str, data: bytes, expected_offset: int) -> int:
+        with _validated_storage_directory(self.output_root, storage_namespace_id=self.namespace) as (_, directory):
+            row = self.db.validate_output_file_operation(token, self.namespace)
+            if row["written_bytes"] != expected_offset or row["stage_identity_json"] is None:
+                raise RuntimeError("output_operation_conflict")
+            source = json.loads(row["source_identity_json"]) if row["source_identity_json"] else None
+            if expected_offset + len(data) > row["reserved_bytes"] - (source["size"] if source else 0):
+                raise RuntimeError("output_size_limit")
+            policy = self.db.get_output_storage_policy(self.namespace)
+            _check_space(directory, len(data), policy["free_space_margin_bytes"])
+            try:
+                if source is not None and _source_identity(directory, row["source_path"]) != source:
+                    raise RuntimeError("output_source_unavailable")
+                with _open_regular(directory, row["stage_path"], os.O_WRONLY) as fd:
+                    info = os.fstat(fd)
+                    if _identity(info) != json.loads(row["stage_identity_json"]) or info.st_size != expected_offset:
+                        raise RuntimeError("output_operation_conflict")
+                    os.lseek(fd, expected_offset, os.SEEK_SET)
+                    view = memoryview(data)
+                    while view:
+                        written = os.write(fd, view)
+                        if written <= 0:
+                            raise RuntimeError("output_storage_unavailable")
+                        view = view[written:]
+                    os.fsync(fd)
+                if source is not None and _source_identity(directory, row["source_path"]) != source:
+                    raise RuntimeError("output_source_unavailable")
+                self.db.record_output_file_progress(
+                    token, self.namespace, expected_offset=expected_offset, written_bytes=expected_offset + len(data)
+                )
+            except BaseException as exc:
+                self.db.abort_output_file_operation(token, self.namespace)
+                if isinstance(exc, OSError):
+                    code = "output_storage_capacity" if exc.errno == errno.ENOSPC else "output_storage_unavailable"
+                    raise RuntimeError(code) from None
+                raise
+            return expected_offset + len(data)

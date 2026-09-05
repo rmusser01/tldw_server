@@ -3022,6 +3022,89 @@ class CollectionsDatabase:
             )
             return self.get_output_file_operation(token, storage_namespace_id, connection=conn)
 
+    def get_output_storage_policy(self, storage_namespace_id: str) -> dict[str, Any]:
+        """Read the validated policy; this does not verify a volume or activate it."""
+        with self._read_snapshot() as conn:
+            return self._output_storage_policy(storage_namespace_id, conn)
+
+    def record_output_file_progress(
+        self,
+        token: str,
+        storage_namespace_id: str,
+        *,
+        expected_offset: int,
+        written_bytes: int,
+        source_identity: dict[str, int] | None = None,
+        stage_identity: dict[str, int] | None = None,
+        lease_seconds: int = 60,
+    ) -> dict[str, Any]:
+        """Record immutable file evidence and a compare-and-set durable offset.
+
+        The storage caller holds verified exclusion, collects identities outside
+        this transaction, and syncs/closes writes before acknowledging progress.
+        This method grants no authority to infer identities or repair file bytes.
+        """
+        if (
+            type(expected_offset) is not int
+            or type(written_bytes) is not int
+            or not 0 <= expected_offset <= written_bytes <= 2**63 - 1
+            or written_bytes - expected_offset > 1024 * 1024
+            or type(lease_seconds) is not int
+            or not 1 <= lease_seconds <= 2**31 - 1
+        ):
+            raise ValueError("output_operation_invalid")
+        for identity, source in ((source_identity, True), (stage_identity, False)):
+            if identity is None:
+                continue
+            keys = {"dev", "ino", "mode", "nlink"} | ({"size", "mtime_ns", "ctime_ns"} if source else set())
+            if (
+                not isinstance(identity, dict)
+                or identity.keys() != keys
+                or any(type(value) is not int or not 0 <= value <= 2**64 - 1 for value in identity.values())
+                or identity["mode"] != 0o100000
+                or identity["nlink"] != 1
+            ):
+                raise ValueError("output_operation_invalid")
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            row = self._validate_output_file_operation(token, storage_namespace_id, conn)
+            if row["written_bytes"] != expected_offset or row["publication_identity_json"] is not None:
+                raise RuntimeError("output_operation_conflict")
+            identities = []
+            for column, incoming in (
+                ("source_identity_json", source_identity),
+                ("stage_identity_json", stage_identity),
+            ):
+                existing = json.loads(row[column]) if row[column] is not None else None
+                if existing is not None and incoming is not None and existing != incoming:
+                    raise RuntimeError("output_operation_conflict")
+                identities.append(existing if incoming is None else incoming)
+            source, stage = identities
+            if (
+                (row["kind"] == "create" and source is not None)
+                or (row["kind"] == "remove" and (stage is not None or written_bytes))
+                or (row["source_path"] is not None and stage is not None and source is None)
+                or (written_bytes and stage is None)
+            ):
+                raise RuntimeError("output_operation_conflict")
+            if written_bytes > row["reserved_bytes"] - (source["size"] if source else 0):
+                raise RuntimeError("output_size_limit")
+            self.backend.execute(
+                "UPDATE output_file_operations SET source_identity_json = ?, stage_identity_json = ?, "
+                "written_bytes = ?, lease_until = ? WHERE token = ? AND user_id = ? AND storage_namespace_id = ?",
+                (
+                    json.dumps(source, sort_keys=True) if source is not None else None,
+                    json.dumps(stage, sort_keys=True) if stage is not None else None,
+                    written_bytes,
+                    int(datetime.now(timezone.utc).timestamp()) + lease_seconds,
+                    token,
+                    self.user_id,
+                    storage_namespace_id,
+                ),
+                connection=conn,
+            )
+            return self.get_output_file_operation(token, storage_namespace_id, connection=conn)
+
     def get_output_file_operation(
         self, token: str, storage_namespace_id: str, *, connection: Any | None = None
     ) -> dict[str, Any]:

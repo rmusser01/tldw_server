@@ -1,5 +1,19 @@
 # Testing Evidence Lessons
 
+## Worker cancellation must wait for writable file descriptors to close
+
+**Incident (TASK-13153, 2026-09-05):** A real-file test paused an offloaded output
+write and called `asyncio.Task.cancel()`. AnyIO's default non-abandoning worker
+wait protected its own cancellation scopes but direct asyncio cancellation still
+returned before the worker closed the writable descriptor. Inspecting the
+installed backend confirmed the cancelled await did not stop that worker.
+
+**Evidence and rule:** Shielding and draining the worker task before returning
+cancellation, then conditionally aborting under the verified storage lock, passed
+both direct asyncio and AnyIO task-group cancellation regressions. Test both
+cancellation paths when file authority depends on worker lifetime; an async task
+being cancelled is not evidence that its thread has stopped writing.
+
 ## PostgreSQL optional-null predicates need an explicit parameter type
 
 **Incident (TASK-13153, 2026-09-05):** New shared output guards passed 134 SQLite
