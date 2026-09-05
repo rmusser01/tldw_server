@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-05 02:25'
-updated_date: '2026-09-05 03:08'
+updated_date: '2026-09-05 03:13'
 labels: []
 dependencies: []
 references:
@@ -46,6 +46,8 @@ Qodo follow-up reviewer guide 5548813337: duplicate unbound Chatbook defaults re
 Human-authored summary and rationale are now present verbatim; no further user input is required. Qodo round 3 adds throttling, docs/types, PostgreSQL fixture isolation, and generated-schema parity findings. Plan: reproduce missing rate-limit dependencies and schema acceptance mismatches, add minimal shared dependency and model schema constraints, regenerate artifacts and API fingerprint, verify affected tests; inspect shared PostgreSQL fixture lifecycle before changing it. Existing ADR-002 applies: correcting published validation to existing runtime policy, no new protocol behavior.
 
 Round 3 verification: all 269 targeted tests passed, 74 warnings in 93.82s, with PostgreSQL required and no skips (six affected test files). Red-green reproduction covered both missing rate-limit dependencies and JSON Schema/runtime acceptance mismatches; exhaustive parity tests cover 243 field combinations. Scoped Ruff, Bandit and git diff checks pass (existing nosec warnings only). Fixed conflict-list return documentation and test typing. Independent review confirms schema policy and route dependencies; its misplaced-docstring finding was corrected before the completed test run. PostgreSQL isolation finding is rebutted: pg_database_config uses function-scoped pg_temp_db, creating a unique UUID database and dropping it in finally; the AuthNZ fixture adds unrelated app/auth setup. Human summary gate is satisfied; current-head remote review/checks and merge remain pending.
+
+Final rebase: dev advanced to 5cd10750d89f9668c1c83db232a8ffb08c08895e. Rebased all65 commits; range-diff confirms64 patch-identical, with only generated OpenAPI fingerprint context changed. Regenerated final fingerprint and frontend types from combined source (2068 paths,3133 schemas), and repinned contract provenance to rebased source1557992d6c9e0199890073a1cd5db667d44ffbd3. Exact artifact/runtime equality, SHA256 integrity, JSON Schema meta-validation and OpenAPI drift check pass. Expanded post-rebase11-file targeted regression gate:479 passed,70 warnings in88.51s, PostgreSQL required, no skips. Scoped Ruff/Bandit pass; independent reviewer confirmed corrected conflict handler docs. No new protocol behavior; ADR-002 remains applicable. Remote current-head checks/review and merge remain pending.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
