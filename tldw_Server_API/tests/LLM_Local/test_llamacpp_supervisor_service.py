@@ -981,6 +981,95 @@ async def test_supervisor_delete_running_profile_awaits_stop_before_removing(tmp
 
 
 @pytest.mark.asyncio
+async def test_supervisor_deletes_snapshot_disabled_profile_without_fcntl(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_snapshot_store as snapshot_store_module
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore
+
+    supervisor, config, factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+    snapshot_root = tmp_path / "llamacpp-snapshots"
+    with SnapshotStore(snapshot_root) as snapshot_store:
+        assert snapshot_store.list("other-profile") == []
+
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model_path), port=8181)
+    )
+    await supervisor.start_profile("one")
+    monkeypatch.setattr(snapshot_store_module, "fcntl", None)
+
+    deleted = await supervisor.delete_profile("one")
+
+    assert deleted is True
+    assert supervisor.list_profiles() == []
+    assert factory.runners["one"].stop_calls == 1
+    assert not (snapshot_root / "one").exists()
+
+
+@pytest.mark.asyncio
+async def test_supervisor_fails_closed_without_fcntl_when_disabled_profile_has_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import hashlib
+    from datetime import UTC, datetime
+
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_snapshot_store as snapshot_store_module
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_models import Fingerprint, SnapshotMetadata
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import (
+        SnapshotStorageUnavailableError,
+        SnapshotStore,
+    )
+
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(
+            profile_id="one",
+            name="One",
+            model_path=str(model_path),
+            port=8181,
+            snapshots_enabled=True,
+        )
+    )
+    payload = b"retained cache"
+    staged = tmp_path / "snapshot.bin"
+    staged.write_bytes(payload)
+    fingerprint = Fingerprint(
+        model_sha256="a" * 64,
+        executable_sha256="b" * 64,
+        effective_options_sha256="c" * 64,
+        adapters_sha256="d" * 64,
+    )
+    with SnapshotStore(tmp_path / "llamacpp-snapshots") as snapshot_store:
+        snapshot_store.commit(
+            "one",
+            staged,
+            SnapshotMetadata(
+                profile_id="one",
+                snapshot_id="snapshot_1",
+                source_slot=0,
+                created_at=datetime(2026, 9, 5, tzinfo=UTC),
+                commit_sequence=1,
+                byte_count=len(payload),
+                token_count=4,
+                sha256=hashlib.sha256(payload).hexdigest(),
+                fingerprint=fingerprint,
+                actor_id="admin_1",
+            ),
+        )
+    await supervisor.update_profile("one", LlamaCppProfileUpdateRequest(snapshots_enabled=False))
+    monkeypatch.setattr(snapshot_store_module, "fcntl", None)
+
+    with pytest.raises(SnapshotStorageUnavailableError):
+        await supervisor.delete_profile("one")
+
+    assert supervisor.store.get("one") is not None
+
+
+@pytest.mark.asyncio
 async def test_supervisor_releases_deleted_profile_lock(tmp_path: Path):
     supervisor, config, _factory = make_supervisor(tmp_path)
     model_path = make_model(config)

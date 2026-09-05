@@ -187,9 +187,16 @@ class LlamaCppSupervisor:
 
     async def _delete_profile_unlocked(self, profile_id: str) -> bool:
         self._guard_snapshots(profile_id)
-        snapshots = await self._snapshot_service()
-        if await disk_call(snapshots.store.list, profile_id):
-            raise SnapshotOperationError("delete_snapshots_first")
+        snapshot_root = self.store.path.parent.resolve() / "llamacpp-snapshots"
+        storage_absent = self._snapshots is None and await disk_call(
+            SnapshotStore.profile_state_proven_absent,
+            snapshot_root,
+            profile_id,
+        )
+        if not storage_absent:
+            snapshots = await self._snapshot_service()
+            if await disk_call(snapshots.store.list, profile_id):
+                raise SnapshotOperationError("delete_snapshots_first")
         runner = self._runners.get(profile_id)
         if runner is not None:
             await runner.stop()

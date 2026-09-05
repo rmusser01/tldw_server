@@ -98,6 +98,19 @@ def test_symlink_root_and_staged_file_fail_closed(tmp_path: Path):
     assert real.read_bytes() == b"cache"
 
 
+def test_unsupported_platform_absence_probe_rejects_symlink_root(tmp_path: Path, monkeypatch) -> None:
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_snapshot_store as snapshot_store_module
+
+    outside = tmp_path / "outside"
+    outside.mkdir(mode=0o700)
+    linked_root = tmp_path / "linked"
+    linked_root.symlink_to(outside, target_is_directory=True)
+    monkeypatch.setattr(snapshot_store_module, "fcntl", None)
+
+    with pytest.raises(SnapshotStoreError, match="confinement"):
+        SnapshotStore.profile_state_proven_absent(linked_root, "profile_1")
+
+
 @pytest.mark.parametrize("target", ["root", "staged", "working"])
 def test_symlink_ancestors_fail_closed_without_touching_outside(tmp_path: Path, target: str):
     outside = tmp_path / "outside"

@@ -67,6 +67,47 @@ class SnapshotStore:
     def __exit__(self, *_args: object) -> None:
         self.close()
 
+    @classmethod
+    def profile_state_proven_absent(cls, root: Path, profile_id: str) -> bool:
+        """Prove an unsupported platform has no storage for one profile.
+
+        A platform with ownership locking must acquire that lock and inspect the
+        catalog normally.  Without it, only an absent profile directory under an
+        unchanged, confined root is sufficient evidence to skip initialization.
+        """
+        cls._validate_id(profile_id)
+        if fcntl is not None:
+            return False
+        root = Path(root)
+        try:
+            initial = root.lstat()
+        except FileNotFoundError:
+            return True
+        except OSError as exc:
+            raise SnapshotStorageUnavailableError("snapshot root cannot be inspected") from exc
+        if not stat.S_ISDIR(initial.st_mode) or stat.S_ISLNK(initial.st_mode):
+            raise SnapshotStoreError("snapshot root confinement is unsafe")
+        if os.name == "posix" and (initial.st_uid != os.geteuid() or stat.S_IMODE(initial.st_mode) != 0o700):
+            raise SnapshotStoreError("snapshot root confinement is not private")
+        try:
+            (root / profile_id).lstat()
+        except FileNotFoundError:
+            try:
+                final = root.lstat()
+            except OSError as exc:
+                raise SnapshotStorageUnavailableError("snapshot root changed during inspection") from exc
+            if (initial.st_dev, initial.st_ino, initial.st_mode, initial.st_mtime_ns) != (
+                final.st_dev,
+                final.st_ino,
+                final.st_mode,
+                final.st_mtime_ns,
+            ):
+                raise SnapshotStorageUnavailableError("snapshot root changed during inspection") from None
+            return True
+        except OSError as exc:
+            raise SnapshotStorageUnavailableError("snapshot profile state cannot be inspected") from exc
+        return False
+
     def close(self) -> None:
         """Release the process ownership fence."""
         if self._lock_fd is not None:
