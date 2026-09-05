@@ -919,7 +919,8 @@ def test_copy_starter_pack_cleans_up_when_status_update_returns_none(
     assert db_instance.list_persona_visual_packs(persona_id=persona_id, user_id=user_id) == []
 
 
-def test_pixel_migu_is_independent_art_ready_starter(db_instance):
+def test_pixel_migu_is_independent_art_ready_starter(db_instance: CharactersRAGDB) -> None:
+    """The pixel-art starter remains distinct from the existing marker design."""
     service = PersonaVisualStarterCatalogService(db_instance)
     detail = service.get_starter_pack("pixel-migu")
     assert service.get_starter_pack("migu-marker-basic")["id"] == "migu-marker-basic"

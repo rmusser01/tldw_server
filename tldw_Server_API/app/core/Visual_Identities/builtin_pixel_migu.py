@@ -7,6 +7,7 @@ from dataclasses import asdict
 from importlib import resources
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import BackendType, CharactersRAGDB
+from tldw_Server_API.app.core.exceptions import BuiltinCharacterSeedError
 from tldw_Server_API.app.core.Visual_Identities.service import VisualIdentityService
 from tldw_Server_API.app.core.Visual_Identities.storage import validate_and_store_visual_identity_asset
 
@@ -60,7 +61,7 @@ def _install_character(service: VisualIdentityService) -> int:
     card["creator_notes"] = "Bundled pixel-migu with 18 expression slots. Buddy visuals are configured separately."
     character_id = service.db.add_character_card(card)
     if character_id is None:
-        raise RuntimeError("pixel_migu_character_creation_failed")
+        raise BuiltinCharacterSeedError("pixel_migu_character_creation_failed")
     manifest = json.loads(root.joinpath("visual_identity_pack.json").read_text(encoding="utf-8"))
     draft = service.repository.create_draft(
         owner_user_id=service.owner_user_id,
@@ -80,7 +81,7 @@ def _install_character(service: VisualIdentityService) -> int:
                 content_type="image/png",
             )
         if stored.sha256 != asset["sha256"]:
-            raise ValueError("pixel_migu_asset_hash_mismatch")
+            raise BuiltinCharacterSeedError("pixel_migu_asset_hash_mismatch")
         metadata = asdict(stored)
         metadata["storage_relpath"] = metadata.pop("relpath")
         service.repository.create_asset(

@@ -1,3 +1,5 @@
+"""Central application exceptions and safe API error translation."""
+
 from __future__ import annotations
 
 import email.utils
@@ -68,6 +70,10 @@ class SnapshotStorageUnavailableError(SnapshotStoreError):
 
 class TransactionPassthroughError(Exception):
     """Sanitized domain failure that may cross a rolled-back DB transaction."""
+
+
+class BuiltinCharacterSeedError(TransactionPassthroughError):
+    """Raised when a bundled character cannot be installed with verified assets."""
 
 
 class BehaviorSnapshotValidationError(ValueError):
