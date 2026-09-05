@@ -367,6 +367,12 @@ jobs:
       - generate-python
       - generate-apps-workspace
       - generate-admin-ui
+    # Direct PR runs intentionally skip the transitive admission ancestor.
+    if: >-
+      always() && !cancelled() &&
+      needs.generate-python.result == 'success' &&
+      needs.generate-apps-workspace.result == 'success' &&
+      needs.generate-admin-ui.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -490,6 +496,9 @@ jobs:
     name: Scan source SBOMs
     needs:
       - merge-source
+    if: >-
+      always() && !cancelled() &&
+      needs.merge-source.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
