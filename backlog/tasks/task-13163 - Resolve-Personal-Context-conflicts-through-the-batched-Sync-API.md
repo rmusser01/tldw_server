@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-03 13:40'
-updated_date: '2026-09-05 23:51'
+updated_date: '2026-09-06 00:05'
 labels:
   - personal-context
   - sync
@@ -55,12 +55,14 @@ Implemented user-directed Personal Context deconfliction in the existing batched
 Verification: final amended candidate/replay/race/PostgreSQL selection 16 passed and activation 25 passed, both exit 0; preceding classification fix 2 focused plus 35 adapter/materializer passed. Earlier implementation checkpoints: 48 conflict cases, 60 compatibility/activation, 316 targeted regressions and 71 relay/activation passed; these are not claimed as final-source full reruns. Affected Ruff, formatting, Bandit, docs path hygiene and branch diff checks passed. Independent task review and final whole-branch review, including scoped fixes, approved source commit 62e63bf5124628b3e2bb1d7aec745af6f976c3cf. No full suite or live end-to-end rollout certification was run. Known dependency/config warnings remain attributed; the long 48-test interpreter cleanup exited 0 normally.
 
 API/developer guides, published copies, approved spec/detail plan and testing lesson updated. ADR required: no new ADR; backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md governs the existing storage, authority and conflict boundaries. Plan: Docs/superpowers/plans/2026-09-05-personal-context-conflict-resolution-detail.md. Runtime context builder remains an unwired existing scaffold; the unchanged all-domain scan-watermark length limitation remains outside this task and was not independently baseline-reproduced. Ongoing sync stays version 0. Local branch codex/personal-context-conflict-resolution starts at 6363466d07; no push, PR, merge or destructive cleanup performed.
+
+Publication: opened https://github.com/rmusser01/tldw_server/pull/2910 stacked on PostgreSQL prerequisite PR #2909. Fresh candidate/recovery/race selection: 15 passed and one PostgreSQL sandbox skip; the skipped test then passed with PostgreSQL required and database access (1 passed). Both processes exited 0. Diff check passed. No source changes, rebase, merge or rollout. Merge prerequisite into dev first, then retarget/rebase this PR onto dev and verify integration; human Change summary remains a pre-merge requirement.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Completed canonical user-directed conflict resolution with exact encrypted candidates/receipts, guarded retention, restart recovery and transaction-boundary activation checks. Task and final reviews approved all fixes; targeted tests/static/docs checks passed with disclosed baseline warnings. Implementation and documentation are local only; ongoing sync remains gated at version 0.
+Completed canonical user-directed conflict resolution with exact encrypted candidates/receipts, guarded retention, restart recovery and transaction-boundary activation checks. Task and final reviews approved all fixes; targeted verification is recorded with baseline/environment warnings. Published for review in PR #2910, stacked on #2909; not merged, and ongoing sync remains gated at version 0.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
