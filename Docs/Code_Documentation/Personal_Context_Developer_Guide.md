@@ -220,6 +220,49 @@ enabled end-to-end device acknowledgement-completion path.
 
 ## Future-client integration boundaries
 
+### User-owned deconfliction
+
+Conflict detection preserves competing candidates for user review; it is not an
+automatic merge or a last-write-wins policy. The ongoing-sync contract maps keep
+shared to `skip`, keep local or reviewed merge to `overwrite`, and explicitly
+distinct keep-both to `duplicate_rename`. Use the existing batched Sync endpoint,
+expected candidate IDs, and exact-command idempotency; no per-conflict transport
+or ordinary `resolve_conflict` push operation is introduced.
+
+Do not send a linked client's derivative manifest as ongoing ingress. It is a
+local commit barrier, not an independently editable shared object; only the
+server advances the shared manifest after semantic writes. Invalid client
+manifest ingress must be rejected before conflict capture. This does not change
+provisional-manifest reconciliation during first linking or authority publication.
+
+Purge is a destructive control request, not an editable object. A valid
+next-generation purge with stale Sync lineage returns the content-free
+`personal_context_purge_reconfirmation_required` error with `retryable=false`.
+Stop automatic retries of that rejected request, refresh authoritative state,
+and obtain explicit delete-everywhere confirmation again before signing a new
+request. Do not synthesize a manifest candidate, merge the purge, or silently
+replace its base envelope. Exact idempotent retry of an earlier stored request
+still supports recovery; rejection of a new stale request does not cancel it.
+The ongoing canonical ingress mutation path does not yet implement purge;
+preserving retry does not claim completed deletion or enable capability v1.
+
+For different IDs claiming the same semantic key, keep-local/merge explicitly
+targets the established shared canonical ID and applies the user-selected values.
+Canonical identity is not a preference for the server's value. The incoming
+duplicate must be terminally accounted for so retries cannot recreate it.
+Keep-both is permitted only after the user chooses distinct facts with different
+keys. Do not silently rename facts, infer user consent, or choose values based on
+timestamps or peer identity. Unresolved candidates remain protected while
+unrelated objects continue. Capability remains gated independently of this
+contract; the current client limitations above still apply.
+
+Active conflict heads and completed receipt heads share the existing encrypted
+object owner but have separate types. The internal 1,000-active-conflict bound
+does not count completed decisions; ordinary freeze checks do not scan completed
+receipt history. Exact receipts are retained, not expired to reclaim capacity.
+This admission bound is not a new negotiated wire quota. A full active set must
+leave new conflicts retryable and preserve every already pinned candidate.
+
 A future client must not infer a complete lifecycle from the presence of Sync
 domains or bootstrap endpoints. Client work owns capability negotiation and
 incompatibility handling, an explicit ongoing Personal Context caller, durable

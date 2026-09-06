@@ -1678,7 +1678,25 @@ def push_sync_v2_envelopes(
         dataset_id=result.dataset_id,
         accepted=[SyncPushAcceptedEnvelope(**asdict(item)) for item in result.accepted],
         rejected=[SyncPushRejectedEnvelope(**asdict(item)) for item in result.rejected],
-        conflicts=[SyncPushConflictEnvelope(**asdict(item)) for item in result.conflicts],
+        conflicts=[
+            SyncPushConflictEnvelope(
+                **{
+                    **asdict(item),
+                    "authority_candidate": (
+                        SyncV2EnvelopeResponse(
+                            **{
+                                **asdict(item.authority_candidate),
+                                "authority": item.authority_candidate.authority,
+                                "encryption_policy": "server_trusted_v1",
+                            }
+                        )
+                        if item.authority_candidate is not None
+                        else None
+                    ),
+                }
+            )
+            for item in result.conflicts
+        ],
         next_cursor=result.next_cursor,
         personal_context_exchange=result.personal_context_exchange,
     )

@@ -1119,6 +1119,9 @@ class SyncPushConflict:
     entity_id: str
     server_sequence: int | None = None
     message: str | None = None
+    expected_local_envelope_id: str | None = None
+    expected_remote_envelope_id: str | None = None
+    authority_candidate: SyncEnvelope | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -3340,12 +3343,21 @@ class SyncV2Service:
             domain for domain in dataset.domains if domains is None or domain in domains
         ]
         active_devices = self._retention_active_devices(dataset)
-        envelopes = self.store.list_accepted_envelopes_for_replay(
-            dataset_id,
-            since_cursor=0,
-            limit=scan_limit,
+        pinned_envelopes = self.store.list_conflict_pinned_envelopes(dataset_id, limit=scan_limit)
+        remaining_limit = scan_limit - len(pinned_envelopes)
+        envelopes = (
+            self.store.list_accepted_envelopes_for_replay(
+                dataset_id,
+                since_cursor=0,
+                limit=remaining_limit,
+            )
+            if remaining_limit
+            else []
         )
         latest_by_object = self._retention_latest_envelopes_by_object(envelopes)
+        pinned_cursors = {item.server_cursor for item in pinned_envelopes}
+        seen_cursors = {item.server_cursor for item in envelopes}
+        envelopes.extend(item for item in pinned_envelopes if item.server_cursor not in seen_cursors)
         restore_window_blocked = self._retention_restore_window_active(
             active_devices,
             offline_restore_window_seconds,
@@ -3360,9 +3372,14 @@ class SyncV2Service:
                 envelope,
                 latest_by_object=latest_by_object,
             )
+            if envelope.server_cursor in pinned_cursors:
+                # Preserve informational pins without inventing eligible compaction work.
+                candidate_type = candidate_type or "conflict_pin"
             if candidate_type is None:
                 continue
             blockers: list[str] = []
+            if envelope.server_cursor in pinned_cursors:
+                blockers.append("retention_conflict_pinned")
             if audit_mode:
                 blockers.append("retention_audit_mode")
             window_seconds = (
@@ -3409,7 +3426,9 @@ class SyncV2Service:
                     required_device_ids=[device.device_id for device in active_devices],
                     unacknowledged_device_ids=unacknowledged,
                     reason=(
-                        "superseded envelope"
+                        "unresolved conflict envelope"
+                        if candidate_type == "conflict_pin"
+                        else "superseded envelope"
                         if candidate_type == "envelope_compaction"
                         else "tombstone retained for deletion window"
                     ),
@@ -4582,6 +4601,15 @@ class SyncV2Service:
                     )
                 )
                 continue
+            if envelope.domain == "personal_context.manifest":
+                rejected.append(
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="personal_context_manifest_client_forbidden",
+                        message="Linked profile manifests are server-authored",
+                    )
+                )
+                continue
             if has_guard_required_routing_key(envelope.routing_metadata):
                 rejected.append(
                     SyncPushRejected(
@@ -4688,10 +4716,58 @@ class SyncV2Service:
                     continue
             if (
                 existing is not None
+                and existing.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+                and existing.apply_status == "superseded"
+            ):
+                rejected.append(
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="personal_context_conflict_resolved",
+                        message="Personal Context conflict was already resolved",
+                    )
+                )
+                continue
+            if (
+                existing is not None
                 and existing.status == "accepted"
                 and existing.apply_status in {"applied", "superseded"}
             ):
                 accepted.append(self._push_accepted_from_envelope(existing))
+                continue
+            recorded_personal_context_conflict = False
+            if existing is not None and existing.domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+                from tldw_Server_API.app.core.exceptions import ConcurrentProfileUpdateError
+
+                from .personal_context_conflicts import PersonalContextConflictService
+
+                try:
+                    self._personal_context_service_for_user(user_id).get_sync_conflict(
+                        PersonalContextConflictService.conflict_id(dataset_id, device_id, existing.client_envelope_id)
+                    )
+                except ConcurrentProfileUpdateError:
+                    pass
+                else:
+                    # Canonical capture can survive rollback of Sync's conflict status.
+                    # Recovery still rechecks activation inside capture and staging.
+                    recorded_personal_context_conflict = True
+            if (
+                existing is not None
+                and existing.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+                and (existing.apply_status == "conflict" or existing.status == "conflict" or recorded_personal_context_conflict)
+            ):
+                try:
+                    conflicts.append(self._ensure_personal_context_conflict_candidate(dataset, existing, self.store, exchange=verified_exchange))
+                except PersonalContextStorageEncryptionUnavailableError:
+                    rejected.append(
+                        SyncPushRejected(
+                            client_envelope_id=envelope.client_envelope_id,
+                            error_code="personal_context_storage_unavailable",
+                            message="Personal Context conflict recovery is unavailable",
+                            retryable=True,
+                        )
+                    )
+                if stop_on_conflict and conflicts:
+                    stopped_after_conflict = True
                 continue
             try:
                 outcome = self._evaluate_envelope(
@@ -4748,7 +4824,7 @@ class SyncV2Service:
             if isinstance(outcome, AdapterConflict):
                 try:
                     conflicts.append(
-                        self._store_preflight_conflict(dataset, envelope, outcome)
+                        self._store_preflight_conflict(dataset, envelope, outcome, exchange=verified_exchange)
                     )
                 except SyncIdempotencyConflictError:
                     rejected.append(
@@ -4819,6 +4895,16 @@ class SyncV2Service:
                 )
                 continue
             except SyncHeadConflictError:
+                if envelope.domain == "personal_context.purge":
+                    rejected.append(
+                        SyncPushRejected(
+                            client_envelope_id=envelope.client_envelope_id,
+                            error_code="personal_context_purge_reconfirmation_required",
+                            message="Refresh Personal Context and explicitly reconfirm delete-everywhere.",
+                            retryable=False,
+                        )
+                    )
+                    continue
                 outcome = AdapterConflict(
                     client_envelope_id=envelope.client_envelope_id,
                     domain=envelope.domain,
@@ -4828,7 +4914,7 @@ class SyncV2Service:
                 )
                 try:
                     conflicts.append(
-                        self._store_preflight_conflict(dataset, envelope, outcome)
+                        self._store_preflight_conflict(dataset, envelope, outcome, exchange=verified_exchange)
                     )
                 except SyncIdempotencyConflictError:
                     rejected.append(
@@ -4886,7 +4972,7 @@ class SyncV2Service:
                     stopped_after_conflict = True
                 continue
             if inserted.apply_status not in {"applied", "superseded"}:
-                materialization = self._materialize_envelope(inserted)
+                materialization = self._materialize_envelope(inserted, exchange=verified_exchange)
                 inserted = self._envelope_snapshot(inserted)
                 if materialization.status == "conflict":
                     conflicts.append(
@@ -4894,6 +4980,7 @@ class SyncV2Service:
                             dataset,
                             inserted,
                             materialization,
+                            exchange=verified_exchange,
                         )
                     )
                     if stop_on_conflict:
@@ -6661,6 +6748,7 @@ class SyncV2Service:
     ]:
         """Resolve one ordered batch from a single guarded conflict snapshot."""
 
+        relay_profile_id = None
         with self.store.conflict_resolution_guard(dataset_id) as guarded_store:
             dataset = self._require_dataset_access(
                 user_id=user_id,
@@ -6676,8 +6764,7 @@ class SyncV2Service:
                 )
             verified_exchange = None
             if any(
-                conflict is not None
-                and conflict.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+                conflict is not None and conflict.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
                 for conflict in selected.values()
             ):
                 verified_exchange = self.require_active_exchange(
@@ -6707,8 +6794,7 @@ class SyncV2Service:
                         or idempotency_key is None
                         or (
                             resolution_envelope is not None
-                            and resolution_envelope.domain
-                            not in PERSONAL_CONTEXT_SYNC_DOMAINS
+                            and resolution_envelope.domain not in PERSONAL_CONTEXT_SYNC_DOMAINS
                         )
                     )
                 )
@@ -6719,9 +6805,9 @@ class SyncV2Service:
                 conflict_id,
                 action,
                 resolution_envelope,
-                _expected_local_envelope_id,
-                _expected_remote_envelope_id,
-                _idempotency_key,
+                expected_local_envelope_id,
+                expected_remote_envelope_id,
+                idempotency_key,
             ) in enumerate(resolutions):
                 conflict = selected[conflict_id]
                 if conflict is None or index in invalid_personal_context_items:
@@ -6729,25 +6815,55 @@ class SyncV2Service:
                     continue
                 try:
                     with guarded_store.conflict_resolution_savepoint():
-                        outcome = self.resolve_conflict(
-                            user_id=user_id,
-                            dataset_id=dataset_id,
-                            conflict_id=conflict_id,
-                            action=action,
-                            resolution_envelope=resolution_envelope,
-                            resolved_by_device_id=device_id,
-                            notes=None,
-                            personal_context_exchange=personal_context_exchange,
-                            _conflict=conflict,
-                            _store=guarded_store,
-                            _verified_personal_context_exchange=verified_exchange,
-                        )
+                        if conflict.domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+                            from .personal_context_conflicts import PersonalContextConflictService
+
+                            if action in {"overwrite", "duplicate_rename"}:
+                                relay_profile_id = dataset.metadata["personal_context"]["profile_id"]
+                            outcome = PersonalContextConflictService(self, guarded_store).resolve_batch_item(
+                                user_id=user_id,
+                                dataset=dataset,
+                                device_id=device_id,
+                                conflict=conflict,
+                                action=action,
+                                resolution_envelope=resolution_envelope,
+                                expected_local_envelope_id=expected_local_envelope_id,
+                                expected_remote_envelope_id=expected_remote_envelope_id,
+                                idempotency_key=idempotency_key,
+                                exchange=verified_exchange,
+                            )
+                        else:
+                            outcome = self.resolve_conflict(
+                                user_id=user_id,
+                                dataset_id=dataset_id,
+                                conflict_id=conflict_id,
+                                action=action,
+                                resolution_envelope=resolution_envelope,
+                                resolved_by_device_id=device_id,
+                                notes=None,
+                                personal_context_exchange=personal_context_exchange,
+                                _conflict=conflict,
+                                _store=guarded_store,
+                                _verified_personal_context_exchange=verified_exchange,
+                            )
                 except Exception:  # noqa: BLE001 - preserve per-item API outcomes.
                     rejected.append(index)
                     continue
                 selected[conflict_id] = outcome
                 resolved.append((index, outcome))
-            return resolved, rejected, verified_exchange
+        # Canonical receipts may have committed even when Sync finalization failed.
+        # Reentering Sync before this outer fence exits would invalidate its savepoint.
+        if relay_profile_id is not None and self.personal_context_relay is not None:
+            try:
+                self.personal_context_relay.relay_profile(
+                    user_id=user_id,
+                    profile_id=relay_profile_id,
+                    dataset_id=dataset_id,
+                    after_server_cursor=None,
+                )
+            except Exception:  # noqa: BLE001 - committed choices retain durable relay debt.
+                logger.warning("personal_context_conflict_relay_failed: durable recovery pending")
+        return resolved, rejected, verified_exchange
 
     def resolve_conflict(
         self,
@@ -6774,6 +6890,8 @@ class SyncV2Service:
             raise SyncStoreError("Sync conflict was not found or is not accessible")
         if require_personal_context_conflict and not conflict.domain.startswith("personal_context."):
             raise SyncStoreError("Personal Context conflict identity is not valid for this conflict")
+        if conflict.domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+            raise SyncStoreError("Personal Context conflict resolution requires an exact batched review")
         try:
             dataset = self._require_dataset_access(
                 user_id=user_id,
@@ -8398,6 +8516,10 @@ class SyncV2Service:
                         else None
                     )
                     blockers: list[str] = []
+                    if envelope is not None and guarded.envelope_is_conflict_pinned(
+                        dataset.dataset_id, envelope.client_envelope_id
+                    ):
+                        blockers.append("retention_conflict_pinned")
                     if (
                         envelope is None
                         or envelope.dataset_id != dataset.dataset_id
@@ -9532,6 +9654,7 @@ class SyncV2Service:
         outcome: AdapterConflict,
         *,
         store: SyncV2Store | None = None,
+        exchange: PersonalContextExchangeProof | None = None,
     ) -> SyncPushConflict:
         active_store = store or self.store
         storage_envelope = self._protect_personal_context_for_storage(
@@ -9539,6 +9662,8 @@ class SyncV2Service:
             replace(envelope, status="conflict"),
         )
         inserted = active_store.insert_envelope(storage_envelope)
+        if envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+            return self._ensure_personal_context_conflict_candidate(dataset, inserted, active_store, exchange=exchange)
         existing = active_store.get_unresolved_conflict_for_envelope(
             dataset.dataset_id,
             local_envelope_id=envelope.client_envelope_id,
@@ -9579,6 +9704,8 @@ class SyncV2Service:
         dataset: SyncDataset,
         envelope: SyncEnvelopeCreate,
         outcome: AdapterConflict,
+        *,
+        exchange: PersonalContextExchangeProof | None = None,
     ) -> SyncPushConflict:
         """Atomically prefer an accepted projection blocker over preflight history."""
 
@@ -9606,6 +9733,7 @@ class SyncV2Service:
                 envelope,
                 outcome,
                 store=guarded_store,
+                exchange=exchange,
             )
 
     def _materialize_envelope(
@@ -9614,6 +9742,7 @@ class SyncV2Service:
         *,
         store: SyncV2Store | None = None,
         guarded_mutation: GuardedProductMutation | None = None,
+        exchange: PersonalContextExchangeProof | None = None,
     ) -> MaterializationResult:
         materializer = self.materializers.get(envelope.domain)
         if materializer is None:
@@ -9627,6 +9756,7 @@ class SyncV2Service:
                         envelope,
                         store=guarded_store,
                         guarded_mutation=guarded_mutation,
+                        exchange=exchange,
                     )
             except SyncMaterializationBusyError:
                 return MaterializationResult(
@@ -9641,6 +9771,8 @@ class SyncV2Service:
                     message="An earlier projection must finish first",
                 )
             except Exception as exc:  # noqa: BLE001 - commit/lock failures are retryable.
+                if isinstance(exc, SyncStoreError) and str(exc) == "personal_context_activation_required":
+                    raise
                 return MaterializationResult(
                     status="failed",
                     error_code="sync_projection_failed",
@@ -9671,9 +9803,12 @@ class SyncV2Service:
                     self._envelope_snapshot(envelope, store=store),
                     result,
                     store=store,
+                    exchange=exchange,
                 )
             return result
         except Exception as exc:  # noqa: BLE001 - materializer failures are captured as replayable sync state.
+            if isinstance(exc, SyncStoreError) and str(exc) == "personal_context_activation_required":
+                raise
             error_code = "sync_projection_failed"
             error_message = _safe_projection_error_message(exc)
             if envelope.server_cursor is not None:
@@ -9738,9 +9873,13 @@ class SyncV2Service:
         result: MaterializationResult,
         *,
         store: SyncV2Store | None = None,
+        exchange: PersonalContextExchangeProof | None = None,
     ) -> SyncPushConflict:
         sync_store = store or self.store
         dataset_id = dataset.dataset_id if isinstance(dataset, SyncDataset) else dataset
+        if envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+            current_dataset = dataset if isinstance(dataset, SyncDataset) else sync_store.get_dataset(dataset_id)
+            return self._ensure_personal_context_conflict_candidate(current_dataset, envelope, sync_store, exchange=exchange)
         existing = sync_store.get_unresolved_conflict_for_envelope(
             dataset_id,
             local_envelope_id=envelope.client_envelope_id,
@@ -9775,6 +9914,40 @@ class SyncV2Service:
             server_sequence=envelope.server_sequence,
             message=result.message,
         )
+
+    def _ensure_personal_context_conflict_candidate(
+        self,
+        dataset: SyncDataset,
+        source: SyncEnvelope,
+        store: SyncV2Store,
+        *,
+        exchange: PersonalContextExchangeProof | None = None,
+    ) -> SyncPushConflict:
+        from tldw_Server_API.app.core.exceptions import PersonalContextActivationError
+
+        from .personal_context_conflicts import PersonalContextConflictService
+
+        if exchange is None:
+            raise SyncStoreError("personal_context_activation_required")
+        try:
+            if store._connection is None:
+                with store.conflict_resolution_guard(dataset.dataset_id) as guarded:
+                    return self._ensure_personal_context_conflict_candidate(dataset, source, guarded, exchange=exchange)
+            return PersonalContextConflictService(self, store).ensure_authority_candidate(
+                dataset=dataset, source=source, exchange=exchange,
+            )
+        except PersonalContextActivationError as exc:
+            raise SyncStoreError("personal_context_activation_required") from exc
+        except SyncStoreError as exc:
+            if str(exc) == "personal_context_activation_required":
+                raise
+            raise PersonalContextStorageEncryptionUnavailableError(
+                "Personal Context conflict candidate is not durably available"
+            ) from exc
+        except Exception as exc:  # noqa: BLE001 - no terminal conflict without durable candidates.
+            raise PersonalContextStorageEncryptionUnavailableError(
+                "Personal Context conflict candidate is not durably available"
+            ) from exc
 
     def _resolve_cursor(
         self,

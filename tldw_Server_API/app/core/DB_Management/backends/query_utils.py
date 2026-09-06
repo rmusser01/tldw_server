@@ -91,6 +91,12 @@ def convert_sqlite_placeholders_to_postgres(query: str) -> str:
             return True
         prev_token = _prev_token(idx)
         next_token = _next_token(idx)
+        # CASE introduces expressions on the left; END closes one on the right.
+        # Keep `CASE ... END ? 'key'` and `payload ? CASE ... END` as JSONB.
+        if prev_token in {"CASE", "WHEN", "THEN", "ELSE"} or next_token in {
+            "WHEN", "THEN", "ELSE", "END",
+        }:
+            return False
         if prev_token in {
             "LIMIT",
             "OFFSET",

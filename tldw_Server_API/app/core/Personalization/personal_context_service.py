@@ -762,6 +762,29 @@ class PersonalContextService:
         except (ConcurrentProfileUpdateError, ProfileSemanticKeyCollisionError) as exc:
             raise ProfileConflictError("Personal context changed concurrently") from exc
 
+    def capture_sync_conflict(self, **identity: Any) -> dict[str, Any]:
+        """Capture private canonical candidates and freezes for authenticated Sync ingress."""
+        return self._repository.capture_sync_conflict(profile_id=self._profile_id(), **identity)
+
+    def get_sync_conflict(self, conflict_id: str) -> dict[str, Any]:
+        """Load a private conflict journal within this authenticated user's profile."""
+        return self._repository.get_sync_conflict(self._profile_id(), conflict_id)
+
+    def sync_conflict_staging_guard(self, conflict_id: str, **identity: Any) -> Any:
+        """Hold this user's canonical authority through local candidate attachment."""
+        return self._repository.sync_conflict_staging_guard(self._profile_id(), conflict_id, **identity)
+
+    def resolve_sync_conflict(self, *, defer_relay: bool = False, **command: Any) -> dict[str, Any]:
+        """Apply a reviewed exact choice through the canonical mutation authority."""
+        try:
+            profile_id = self._profile_id()
+            receipt = self._repository.resolve_sync_conflict(profile_id=profile_id, **command)
+            if not defer_relay and receipt.get("publication_batch_id") is not None:
+                self._relay_after_commit(profile_id)
+            return receipt
+        except (ConcurrentProfileUpdateError, ProfileSemanticKeyCollisionError) as exc:
+            raise ProfileConflictError("Personal Context conflict review changed") from exc
+
     def get_manifest(self) -> ProfileManifest:
         """Return the authenticated user's manifest."""
 

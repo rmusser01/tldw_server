@@ -11,7 +11,7 @@ import time
 import uuid
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, TypeVar
 
@@ -38,6 +38,7 @@ from tldw_Server_API.app.core.exceptions import (
     PersonalContextActivationMissingError,
     PersonalContextActivationPendingError,
     PersonalContextActivationStaleError,
+    PersonalContextConflictInputError,
 )
 from tldw_Server_API.app.core.Personalization.personal_context_crypto import (
     EncryptedEnvelope,
@@ -74,6 +75,7 @@ _MAX_PROPOSAL_HEADS = 1_000
 _MAX_RECORD_HEADS = 1_000
 _MAX_SCOPE_HEADS = 1_000
 _MAX_LIST_ROWS = 1_000
+_MAX_CONFLICT_HEADS = 1_000
 _SYNC_HISTORY_KEY_LABEL = b"tldw-personal-context-sync-history-v1"
 _DIRECT_CONFIRMED_FULL_PROFILE_PURGE = object()
 _DIRECT_PURGE_CLEANUP_ORIGIN = "direct_confirmed_full_profile_purge"
@@ -416,6 +418,8 @@ class PersonalContextRepository:
         parent_version_id: str | None,
         value: BaseModel | Mapping[str, Any],
     ) -> None:
+        if object_type in {"record", "scope", "proposal"}:
+            self._require_unfrozen_object(connection, keys, object_type, object_id, value)
         plaintext = self._canonical_payload(value)
         aad = self._aad(
             profile_id,
@@ -1001,6 +1005,353 @@ class PersonalContextRepository:
 
         return self._read_model(profile_id, "manifest", profile_id, ProfileManifest)
 
+    def _sync_conflict_rows(self, connection: sqlite3.Connection, profile_id: str) -> list[sqlite3.Row]:
+        rows = connection.execute(
+            """SELECT versions.* FROM personal_context_object_heads AS heads
+               JOIN personal_context_object_versions AS versions
+                 ON versions.profile_id = heads.profile_id AND versions.object_type = heads.object_type
+                AND versions.object_id = heads.object_id AND versions.version_id = heads.current_version_id
+              WHERE heads.profile_id = ? AND heads.object_type = 'sync_conflict' LIMIT ?""",
+            (profile_id, _MAX_CONFLICT_HEADS + 1),
+        ).fetchall()
+        if len(rows) > _MAX_CONFLICT_HEADS:
+            raise ProfileQuotaExceededError("Personal Context conflict capacity exhausted")
+        return rows
+
+    def _require_unfrozen_object(
+        self,
+        connection: sqlite3.Connection,
+        keys: ProfileKeyMaterial,
+        object_type: str,
+        object_id: str,
+        value: BaseModel | Mapping[str, Any],
+    ) -> None:
+        """Check exact object and contested key ownership under the canonical write lock."""
+        payload = value.model_dump(mode="json") if isinstance(value, BaseModel) else dict(value)
+        slot = self._conflict_key_slot(payload) if object_type == "record" else None
+        for row in self._sync_conflict_rows(connection, str(payload["profile_id"])):
+            journal = json.loads(self._decrypt_row(row, keys))
+            if journal["state"] != "unresolved":
+                continue
+            if [object_type, object_id] in [head[:2] for head in journal["heads"]] or (
+                slot is not None and slot == journal["key_slot"]
+            ):
+                raise ConcurrentProfileUpdateError("Personal Context object is frozen for review")
+
+    @staticmethod
+    def _conflict_key_slot(payload: Mapping[str, Any]) -> list[Any] | None:
+        if payload.get("state") != "active" or payload.get("semantic_key") is None:
+            return None
+        return [payload["scope_id"], payload["kind"], payload["semantic_key"]]
+
+    def _write_sync_conflict(
+        self,
+        connection: sqlite3.Connection,
+        keys: ProfileKeyMaterial,
+        journal: Mapping[str, Any],
+        *,
+        previous_version: str | None,
+        object_type: str = "sync_conflict",
+    ) -> None:
+        version = str(uuid.uuid4())
+        self._insert_encrypted(
+            connection,
+            keys,
+            profile_id=journal["profile_id"],
+            object_type=object_type,
+            object_id=journal["conflict_id"],
+            version_id=version,
+            parent_version_id=previous_version,
+            value=journal,
+        )
+        self._set_head(
+            connection,
+            profile_id=journal["profile_id"],
+            object_type=object_type,
+            object_id=journal["conflict_id"],
+            version_id=version,
+            expected_version_id=previous_version,
+        )
+
+    def _sync_conflict_head(
+        self, connection: sqlite3.Connection, profile_id: str, conflict_id: str
+    ) -> sqlite3.Row | None:
+        return self._head_row(connection, profile_id, "sync_conflict", conflict_id) or self._head_row(
+            connection,
+            profile_id,
+            "sync_conflict_receipt",
+            conflict_id,
+        )
+
+    def get_sync_conflict(self, profile_id: str, conflict_id: str) -> dict[str, Any]:
+        """Read the authenticated private conflict journal through canonical custody."""
+        with self._database.transaction() as connection:
+            keys = self._keys.load(profile_id, connection=connection)
+            row = self._sync_conflict_head(connection, profile_id, conflict_id)
+            if row is None:
+                raise ConcurrentProfileUpdateError("Personal Context conflict is unavailable")
+            return json.loads(self._decrypt_row(row, keys))
+
+    @contextmanager
+    def sync_conflict_staging_guard(
+        self,
+        profile_id: str,
+        conflict_id: str,
+        *,
+        dataset_id: str,
+        device_id: str,
+        purge_generation: int,
+        exchange: PersonalContextExchangeProof,
+    ) -> Iterator[dict[str, Any]]:
+        """Keep canonical authority alive through local protected Sync attachment."""
+        with self._database.transaction(immediate=True) as connection:
+            self.validate_activation_exchange(
+                profile_id=profile_id,
+                device_id=device_id,
+                dataset_id=dataset_id,
+                activation_epoch=exchange.activation_epoch,
+                continuity_token=exchange.continuity_token,
+                _connection=connection,
+            )
+            keys = self._keys.load(profile_id, connection=connection)
+            manifest = self._current_manifest_for_publication(connection, profile_id, keys)
+            self._require_current_writable_manifest_state(connection, profile_id, keys)
+            row = self._sync_conflict_head(connection, profile_id, conflict_id)
+            if row is None or manifest.purge_generation != purge_generation:
+                raise ConcurrentProfileUpdateError("Personal Context conflict authority changed")
+            journal = json.loads(self._decrypt_row(row, keys))
+            if journal["dataset_id"] != dataset_id or journal["device_id"] != device_id or journal["purge_generation"] != purge_generation:
+                raise ConcurrentProfileUpdateError("Personal Context conflict authority changed")
+            yield journal
+
+    def capture_sync_conflict(
+        self,
+        *,
+        profile_id: str,
+        conflict_id: str,
+        dataset_id: str,
+        device_id: str,
+        local_envelope_id: str,
+        domain: str,
+        object_id: str,
+        local_payload: Mapping[str, Any],
+        local_envelope_digest: str,
+        purge_generation: int,
+        exchange: PersonalContextExchangeProof,
+    ) -> dict[str, Any]:
+        """Commit immutable heads and private narrow freezes before Sync reports conflict."""
+        with self._database.transaction(immediate=True) as connection:
+            self.validate_activation_exchange(
+                profile_id=profile_id,
+                device_id=device_id,
+                dataset_id=dataset_id,
+                activation_epoch=exchange.activation_epoch,
+                continuity_token=exchange.continuity_token,
+                _connection=connection,
+            )
+            keys = self._keys.load(profile_id, connection=connection)
+            manifest = self._current_manifest_for_publication(connection, profile_id, keys)
+            self._require_current_writable_manifest_state(connection, profile_id, keys)
+            if manifest.purge_generation != purge_generation:
+                raise ConcurrentProfileUpdateError("Personal Context conflict generation changed")
+            identity = {
+                "profile_id": profile_id,
+                "conflict_id": conflict_id,
+                "dataset_id": dataset_id,
+                "device_id": device_id,
+                "local_envelope_id": local_envelope_id,
+                "domain": domain,
+                "object_id": object_id,
+                "purge_generation": purge_generation,
+                "local_digest": self._canonical_digest(local_payload),
+                "local_envelope_digest": local_envelope_digest,
+            }
+            existing = self._sync_conflict_head(connection, profile_id, conflict_id)
+            if existing is not None:
+                journal = json.loads(self._decrypt_row(existing, keys))
+                if any(journal.get(key) != value for key, value in identity.items()):
+                    raise ConcurrentProfileUpdateError("Personal Context conflict identity changed")
+                return journal
+            if len(self._sync_conflict_rows(connection, profile_id)) >= _MAX_CONFLICT_HEADS:
+                raise ProfileQuotaExceededError("Personal Context conflict capacity exhausted")
+            object_type = domain.removeprefix("personal_context.")
+            current = self._head_row(connection, profile_id, object_type, object_id)
+            heads = [[object_type, object_id, None if current is None else str(current["version_id"])]]
+            contested_slot = None
+            if object_type == "record":
+                slot = self._conflict_key_slot(local_payload)
+                if slot is not None:
+                    record_rows = connection.execute(
+                        """SELECT versions.* FROM personal_context_object_heads AS heads
+                           JOIN personal_context_object_versions AS versions
+                             ON versions.profile_id = heads.profile_id AND versions.object_type = heads.object_type
+                            AND versions.object_id = heads.object_id AND versions.version_id = heads.current_version_id
+                          WHERE heads.profile_id = ? AND heads.object_type = 'record' LIMIT ?""",
+                        (profile_id, _MAX_RECORD_HEADS + 1),
+                    ).fetchall()
+                    if len(record_rows) > _MAX_RECORD_HEADS:
+                        raise ProfileQuotaExceededError("record head quota exceeded")
+                    for record_row in record_rows:
+                        record = ProfileRecord.model_validate_json(self._decrypt_row(record_row, keys))
+                        if (
+                            record.record_id != object_id
+                            and self._conflict_key_slot(record.model_dump(mode="json")) == slot
+                            and (record.expires_at is None or record.expires_at > datetime.now(UTC))
+                        ):
+                            current = self._head_row(connection, profile_id, "record", record.record_id)
+                            heads.append(["record", record.record_id, record.version_id])
+                            contested_slot = slot
+                            break
+            if current is None:
+                raise ConcurrentProfileUpdateError("Personal Context authority candidate is unavailable")
+            payload = json.loads(self._decrypt_row(current, keys))
+            source = connection.execute(
+                """SELECT * FROM personal_context_publication_rows
+                    WHERE profile_id = ? AND opaque_object_id = ? AND opaque_version_id = ?
+                    ORDER BY profile_publication_sequence DESC LIMIT 1""",
+                (profile_id, current["object_id"], current["version_id"]),
+            ).fetchone()
+            if source is None:
+                raise ConcurrentProfileUpdateError("Personal Context candidate publication is unavailable")
+            # A dedicated candidate identity never competes with normal publication lineage.
+            candidate_id = str(
+                uuid.uuid5(uuid.NAMESPACE_URL, f"tldw:personal-context:candidate:{conflict_id}:{current['version_id']}")
+            )
+            journal = {
+                **identity,
+                "state": "unresolved",
+                "heads": heads,
+                "key_slot": contested_slot,
+                "remote_envelope_id": candidate_id,
+                "candidate": payload,
+                "candidate_object_id": str(current["object_id"]),
+                "candidate_version_id": str(current["version_id"]),
+                "candidate_created_at": str(current["created_at"]),
+                "integrity_key_id": f"personal-context-integrity-v{keys.integrity_key_version}",
+                "authority": {
+                    "role": "home_authority",
+                    "publication_batch_id": str(source["publication_batch_id"]),
+                    "profile_publication_sequence": int(source["profile_publication_sequence"]),
+                    "batch_ordinal": int(source["batch_ordinal"]),
+                    "batch_size": int(source["batch_size"]),
+                },
+            }
+            self._write_sync_conflict(connection, keys, journal, previous_version=None)
+            return journal
+
+    def resolve_sync_conflict(
+        self,
+        *,
+        profile_id: str,
+        conflict_id: str,
+        dataset_id: str,
+        device_id: str,
+        expected_local_envelope_id: str,
+        expected_remote_envelope_id: str,
+        idempotency_key: str,
+        action: str,
+        command: Mapping[str, Any] | None,
+        purge_generation: int,
+        exchange: PersonalContextExchangeProof,
+    ) -> dict[str, Any]:
+        """Commit a reviewed choice and its exact replay receipt in one transaction."""
+        with self._database.transaction(immediate=True) as connection:
+            self.validate_activation_exchange(
+                profile_id=profile_id,
+                device_id=device_id,
+                dataset_id=dataset_id,
+                activation_epoch=exchange.activation_epoch,
+                continuity_token=exchange.continuity_token,
+                _connection=connection,
+            )
+            keys = self._keys.load(profile_id, connection=connection)
+            row = self._sync_conflict_head(connection, profile_id, conflict_id)
+            if row is None:
+                raise ConcurrentProfileUpdateError("Personal Context conflict is unavailable")
+            journal = json.loads(self._decrypt_row(row, keys))
+            manifest = self._current_manifest_for_publication(connection, profile_id, keys)
+            if (
+                journal["dataset_id"] != dataset_id
+                or journal["device_id"] != device_id
+                or journal["local_envelope_id"] != expected_local_envelope_id
+                or journal["remote_envelope_id"] != expected_remote_envelope_id
+                or journal["purge_generation"] != purge_generation
+                or manifest.purge_generation != purge_generation
+                or action not in {"skip", "overwrite", "duplicate_rename"}
+                or not idempotency_key
+            ):
+                raise ConcurrentProfileUpdateError("Personal Context conflict review is stale")
+            digest = self._canonical_digest({"action": action, "command": command})
+            if journal["state"] == "resolved":
+                if journal["command_digest"] != digest or journal["idempotency_key"] != idempotency_key:
+                    raise ConcurrentProfileUpdateError("Personal Context resolution command changed")
+                return journal["receipt"]
+            for head_type, head_id, version in journal["heads"]:
+                head = self._head_row(connection, profile_id, head_type, head_id)
+                if (None if head is None else str(head["version_id"])) != version:
+                    raise ConcurrentProfileUpdateError("Personal Context conflict head changed")
+            if (action == "skip") != (command is None):
+                raise PersonalContextConflictInputError("Personal Context resolution payload is invalid")
+            if command is not None:
+                target = command["object_id"]
+                if action == "overwrite" and target != journal["candidate_object_id"]:
+                    raise PersonalContextConflictInputError("Reviewed overwrite must name the shared canonical object")
+                if action == "duplicate_rename":
+                    if journal["domain"] != "personal_context.record" or target in {
+                        item[1] for item in journal["heads"]
+                    }:
+                        raise PersonalContextConflictInputError(
+                            "Personal Context duplicate requires a new record identity"
+                        )
+                    if self._head_row(connection, profile_id, "record", target) is not None:
+                        raise ConcurrentProfileUpdateError("Personal Context duplicate identity already exists")
+                    replacement_slot = self._conflict_key_slot(command["payload"])
+                    if replacement_slot is None or replacement_slot == journal["key_slot"]:
+                        raise PersonalContextConflictInputError("Personal Context duplicate requires a free key")
+            # Only this exact journal is released within the same write transaction;
+            # any error rolls this back, and other conflicts remain enforced.
+            deciding = {**journal, "state": "resolving"}
+            self._write_sync_conflict(connection, keys, deciding, previous_version=str(row["version_id"]))
+            receipt: dict[str, Any] = {
+                "action": action,
+                "resulting_object_id": journal["candidate_object_id"],
+                "publication_batch_id": None,
+            }
+            if command is not None:
+                result = self.apply_ingress_and_publish(
+                    identity=IngressIdentity(
+                        dataset_id=dataset_id,
+                        device_id=device_id,
+                        client_envelope_id=command["client_envelope_id"],
+                        canonical_payload_digest=self._canonical_digest(command["payload"]),
+                        purge_generation=purge_generation,
+                        wire_entity_version=str(command["entity_version"]),
+                    ),
+                    domain=journal["domain"],
+                    value=command["payload"],
+                    base_object_hash=command["base_object_hash"],
+                    _resolution_connection=connection,
+                )
+                receipt = {"action": action, **asdict(result)}
+            self._write_sync_conflict(
+                connection,
+                keys,
+                {
+                    **journal,
+                    "state": "resolved",
+                    "idempotency_key": idempotency_key,
+                    "command_digest": digest,
+                    "receipt": receipt,
+                },
+                previous_version=None,
+                object_type="sync_conflict_receipt",
+            )
+            connection.execute(
+                "DELETE FROM personal_context_object_heads WHERE profile_id = ? AND object_type = 'sync_conflict' AND object_id = ?",
+                (profile_id, conflict_id),
+            )
+            return receipt
+
     def apply_ingress_and_publish(
         self,
         *,
@@ -1008,10 +1359,16 @@ class PersonalContextRepository:
         domain: str,
         value: ProfileManifest | ProfileScope | ProfileRecord | ProfileProposal | Mapping[str, Any],
         base_object_hash: str | None,
+        _resolution_connection: sqlite3.Connection | None = None,
     ) -> CanonicalApplyReceipt:
         """Atomically accept one ingress object and its authority publication."""
 
-        with self._database.transaction(immediate=True) as connection:
+        transaction = (
+            self._database.transaction(immediate=True)
+            if _resolution_connection is None
+            else nullcontext(_resolution_connection)
+        )
+        with transaction as connection:
             if domain == "personal_context.record":
                 record = ProfileRecord.model_validate(value)
                 if record.controls.sync_mode is SyncMode.DEVICE_ONLY:
@@ -1069,9 +1426,10 @@ class PersonalContextRepository:
             if identity.wire_entity_version != expected_wire_version:
                 raise ValueError("ingress wire entity version is invalid")
             keys = self._keys.load(profile_id, connection=connection)
-            replay = PersonalContextPublicationJournal(keys).read_ingress_receipt(
-                connection,
-                identity,
+            replay = (
+                PersonalContextPublicationJournal(keys).read_ingress_receipt(connection, identity)
+                if _resolution_connection is None
+                else None
             )
             if replay is not None:
                 return replay
@@ -1092,7 +1450,10 @@ class PersonalContextRepository:
                     connection, keys, manifest, expected_version_id=current.current_version_id
                 )
                 batch = self._append_publication(
-                    connection, keys, manifest=manifest, ingress=identity
+                    connection,
+                    keys,
+                    manifest=manifest,
+                    ingress=identity if _resolution_connection is None else None,
                 )
                 return CanonicalApplyReceipt(
                     resulting_object_id=manifest.profile_id,
@@ -1260,8 +1621,11 @@ class PersonalContextRepository:
                 version_id=version_id, operation=operation,
             )
             batch = self._append_publication(
-                connection, keys, manifest=next_manifest,
-                semantic=(semantic,), ingress=identity,
+                connection,
+                keys,
+                manifest=next_manifest,
+                semantic=(semantic,),
+                ingress=identity if _resolution_connection is None else None,
             )
             return CanonicalApplyReceipt(
                 resulting_object_id=object_id,
@@ -1902,6 +2266,7 @@ class PersonalContextRepository:
         dataset_id: str,
         activation_epoch: str,
         continuity_token: str,
+        _connection: sqlite3.Connection | None = None,
     ) -> PersonalContextExchangeProof:
         """Return the canonical proof only for an acknowledged current device baseline."""
         try:
@@ -1912,7 +2277,8 @@ class PersonalContextRepository:
             )
         except (TypeError, ValueError):
             raise PersonalContextActivationInputError("personal_context_activation_required") from None
-        with self._database.transaction() as connection:
+        transaction = self._database.transaction() if _connection is None else nullcontext(_connection)
+        with transaction as connection:
             row = connection.execute(
                 """SELECT a.* FROM personal_context_activations a
                    JOIN personal_context_activation_devices d ON d.activation_id = a.activation_id

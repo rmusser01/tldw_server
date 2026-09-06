@@ -4,7 +4,7 @@ Status: Accepted
 
 Date: 2026-08-30
 
-Amended: 2026-09-02
+Amended: 2026-09-06
 
 Related Task: [TASK-13144](../tasks/task-13144%20-%20Add-encrypted-server-Personal-Context-repository.md)
 
@@ -82,6 +82,15 @@ advancement. Ordinary conflicts freeze one object; key collisions freeze both
 object IDs and only their contested semantic-key slot. Push conflicts attach a
 deterministic authority candidate before they are reported.
 
+Delete-everywhere is a destructive control request, not a mergeable profile
+object. A valid next-generation purge with stale Sync lineage is rejected with
+the non-retryable `personal_context_purge_reconfirmation_required` code. The
+client must refresh authoritative state and obtain explicit deletion confirmation
+again before constructing a new request; it must not silently rebase or submit
+the request through ordinary conflict resolution. Exact idempotent retries and
+valid purge processing retain their existing recovery behavior. This policy was
+approved for TASK-13163 on 2026-09-06.
+
 ## Context
 
 The existing server Personalization layer stores user response style and
@@ -107,6 +116,10 @@ operator expectations while allowing a fenced migration from legacy tables.
   closed rather than destroy recoverability.
 - Store semantic routing fields in clear columns: rejected because kind,
   visibility, state, and semantic keys disclose sensitive profile facts.
+- Treat stale delete-everywhere requests as ordinary object conflicts: rejected
+  because canonical purge state is a manifest/barrier, not a competing editable
+  object. Inventing a candidate would misrepresent the authority being reviewed;
+  automatically rebasing deletion would reuse consent against changed state.
 
 ## Consequences
 

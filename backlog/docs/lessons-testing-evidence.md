@@ -1,5 +1,47 @@
 # Testing Evidence Lessons
 
+## Canonical after-commit may still be inside a Sync savepoint
+
+**Incident (TASK-13163, PR #2910 review, 2026-09-05):** Adding the usual
+Personal Context service after-commit relay to conflict resolution committed
+the canonical choice, then reentered Sync before the enclosing batch savepoint
+closed. A production-factory regression returned a rejected item; exposing the
+savepoint exit showed a SQLite query execution failure at `RELEASE SAVEPOINT`.
+
+**Evidence and rule:** Defer batched relay until the outer Sync fence exits,
+including when canonical commit succeeded but Sync finalization failed. Direct
+service callers still use their ordinary after-commit hook. Verify both stores'
+transaction boundaries and callback failure behavior, rather than treating a
+canonical commit as evidence that every enclosing transaction has finished.
+
+## A record conflict is not evidence for every Personal Context domain
+
+**Incident (TASK-13163, 2026-09-05):** A 316-test targeted checkpoint passed
+while the new conflict choices exercised records. Review found that linked
+client manifests could enter the same conflict path, although the approved
+contract forbids pushing those derivative checkpoints. An unrelated semantic
+write advanced the server manifest and stranded its immutable conflict review.
+New stale/current client-manifest rejection tests both failed before the fix.
+
+**Evidence and rule:** Check each domain's authority and lifecycle before applying
+a shared conflict handler. Cover both permitted semantic inputs and prohibited
+derived/control inputs; a broad existing regression count does not establish
+that the new behavior is valid for every domain.
+
+## Exercise ordinary ingress after narrow storage repairs
+
+**Incident (TASK-13192, 2026-09-05):** The activation repair fixture seeded
+PostgreSQL envelopes directly because ordinary insertion failed elsewhere.
+Replacing that seed with `SyncV2Store.insert_envelope` reproduced the failure in
+the shared SQL converter: `ELSE ? END` retained a question mark, leaving five
+bind slots for six parameters. SQLite passed the same insertion.
+
+**Evidence and rule:** Directional CASE keyword recognition restored ordinary
+ingress and all receipt-state tests on both backends. Parser regressions also
+retain JSONB operators after `CASE ... END` and before a CASE operand. A narrow
+storage test may isolate a separate defect temporarily, but remove its bypass
+when fixing that defect and prove the public insertion path on each backend.
+
 ## Generic dict lint rules do not apply to `sqlite3.Row`
 
 **Incident (TASK-13144, 2026-08-30):** Ruff's `SIM118` suggestion replaced
