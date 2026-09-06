@@ -29,6 +29,19 @@ export interface CredentialStorage {
 export const MANUAL_SESSION_KEY = "tldwManualSessionApiKey"
 export const REFRESH_ROTATION_KEY = "tldwRefreshRotation"
 
+/**
+ * A possibly-untrusted request-scope target (e.g. parsed from a runtime
+ * message). Fields are `unknown` on purpose: the helpers below only ever
+ * compare them against the stored config via `servicePromptTargetsMatch`
+ * and fail safe on any mismatch, so no field type may be assumed.
+ */
+type ServicePromptTargetLock = Readonly<{
+  serverUrl?: unknown
+  authMode?: unknown
+  authSource?: unknown
+  orgId?: unknown
+}>
+
 type RefreshRotationRecord = Readonly<{
   version: 1
   serverUrl?: string
@@ -147,7 +160,7 @@ export const hasNewerCurrentRefreshRotation = async (
 
 export const hasNewerCurrentAccessToken = async (
   persistent: CredentialStorage,
-  checked: ServicePromptTargetConfig,
+  checked: ServicePromptTargetLock,
   capturedAccessToken: string
 ): Promise<boolean> => {
   const captured = nonEmptySecret(capturedAccessToken)
@@ -189,7 +202,7 @@ export const hasNewerCurrentAccessToken = async (
 
 export const waitForNewerCurrentAccessToken = async (
   persistent: CredentialStorage,
-  checked: ServicePromptTargetConfig,
+  checked: ServicePromptTargetLock,
   capturedAccessToken: string,
   options: Readonly<{
     timeoutMs?: number
@@ -222,7 +235,7 @@ export const waitForNewerCurrentAccessToken = async (
  */
 export const storeRefreshRotationIfCurrent = async (
   persistent: CredentialStorage,
-  checked: ServicePromptTargetConfig & Readonly<{ accessToken?: string }>,
+  checked: ServicePromptTargetLock & Readonly<{ accessToken?: unknown }>,
   expectedRefreshToken: string,
   tokens: Readonly<{ accessToken: string; refreshToken: string }>
 ): Promise<boolean> => {

@@ -234,7 +234,7 @@ describe("JobsTab scope/filter summaries", () => {
       expect(screen.getByText("Tags: tech")).toBeInTheDocument()
       expect(screen.getByText("Exclude author: spam-bot")).toBeInTheDocument()
       expect(screen.getByTestId("job-output-linkage-77")).toHaveTextContent(
-        "Output linkage: Create a report after each scheduled run • Template: briefing_markdown • Deliver by email • Save to Chatbook • Audio briefing requested"
+        "Output linkage: Save a briefing in Reports after each run • Template: briefing_markdown • Reports (required) • Deliver by email • Save to Chatbook • concise briefing audio targeting 8 minutes"
       )
     })
   })

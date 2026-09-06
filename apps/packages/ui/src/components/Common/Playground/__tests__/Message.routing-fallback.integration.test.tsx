@@ -9,7 +9,9 @@ const storageOverrides = vi.hoisted(() => new Map<string, unknown>())
 const detectCharacterMoodMock = vi.hoisted(() =>
   vi.fn(() => ({ label: "neutral", confidence: 0.5, topic: null }))
 )
-const resolveCharacterMoodImageUrlMock = vi.hoisted(() => vi.fn(() => ""))
+const resolveCharacterMoodImageUrlMock = vi.hoisted(() =>
+  vi.fn((_character: unknown, _moodLabel: unknown) => "")
+)
 const initializeMock = vi.hoisted(() => vi.fn(async () => undefined))
 const saveChatKnowledgeMock = vi.hoisted(() => vi.fn(async () => undefined))
 const staticMessageMock = vi.hoisted(() => ({

@@ -1446,7 +1446,9 @@ describe("StandaloneHtmlWorkspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
     await waitFor(() => expect(screen.getByTestId("standalone-html-save-status")).toHaveTextContent("Conflict"))
     fireEvent.click(screen.getByRole("button", { name: "Overwrite server with my draft" }))
-    const confirm = await screen.findByRole("button", { name: "Confirm overwrite" })
+    const confirm = (await screen.findByRole("button", {
+      name: "Confirm overwrite"
+    })) as HTMLButtonElement
 
     const digest = await crypto.subtle.digest(
       "SHA-256",

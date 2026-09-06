@@ -543,7 +543,10 @@ vi.mock("react-router-dom", async () => {
   }
 })
 
-describe("Playground research context integration", () => {
+// Integration tests render the full Playground tree (4k+ lines with many
+// children); individual tests normally take 1-3.5s but can exceed the 5s
+// default timeout under parallel CI load, so give them explicit headroom.
+describe("Playground research context integration", { timeout: 20000 }, () => {
   beforeEach(() => {
     vi.clearAllMocks()
     window.history.replaceState({}, "", "/chat")
@@ -848,6 +851,33 @@ describe("Playground research context integration", () => {
     expect(screen.getByTestId("playground-form")).toHaveAttribute(
       "data-baseline-run-id",
       ""
+    )
+  })
+
+  it("initializes to readiness under StrictMode replay (latch unlatches on teardown)", async () => {
+    chatSettingsState.syncChatSettingsForServerChat.mockResolvedValue({
+      updatedAt: "2026-03-08T20:10:00Z",
+      deepResearchAttachment: buildPersistedAttachment(
+        "run_strict",
+        "StrictMode restored run"
+      ),
+      deepResearchAttachmentHistory: []
+    })
+
+    // StrictMode mounts, tears down, and remounts: the first effect run is
+    // cancelled, so readiness (and everything gated on it, like this
+    // persisted restore) only arrives if the init latch resets on cleanup.
+    render(
+      <React.StrictMode>
+        <Playground />
+      </React.StrictMode>
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("playground-form")).toHaveAttribute(
+        "data-attached-run-id",
+        "run_strict"
+      )
     )
   })
 

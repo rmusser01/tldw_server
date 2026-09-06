@@ -18,6 +18,8 @@ const capabilityMocks = vi.hoisted(() => ({
 }))
 
 const apiMocks = vi.hoisted(() => ({
+  initialize: vi.fn(),
+  listNoteFolders: vi.fn(),
   listWorkspaces: vi.fn()
 }))
 
@@ -31,6 +33,9 @@ vi.mock("@/hooks/useServerCapabilities", () => ({
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
+    initialize: (...args: unknown[]) => apiMocks.initialize(...args),
+    listNoteFolders: (...args: unknown[]) =>
+      apiMocks.listNoteFolders(...args),
     listWorkspaces: (...args: unknown[]) =>
       apiMocks.listWorkspaces(...args)
   }
@@ -107,6 +112,8 @@ describe("sidepanel clipper route", () => {
         hasWebClipper: true
       }
     })
+    apiMocks.initialize.mockResolvedValue(undefined)
+    apiMocks.listNoteFolders.mockResolvedValue({ items: [] })
     apiMocks.listWorkspaces.mockResolvedValue({ items: [], total: 0 })
   })
 
