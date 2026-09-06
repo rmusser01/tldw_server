@@ -76,6 +76,41 @@ describe("BillingDashboardPage", () => {
     expect(mocks.listBillingEvents).not.toHaveBeenCalled()
   })
 
+  it("aggregates the storage summary from the real {total_quotas, items} envelope", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        paths: {
+          "/api/v1/admin/billing/overview": {}
+        }
+      })
+    })
+    mocks.getBillingOverview.mockResolvedValueOnce({
+      mrr: 0,
+      active_subscriptions: 0,
+      canceled_subscriptions: 0,
+      past_due_subscriptions: 0
+    })
+    // Actual StorageQuotaSummaryResponse shape: no flat total_used_mb /
+    // avg_utilization_pct fields exist - the page must aggregate items.
+    mocks.getStorageQuotaSummary.mockResolvedValueOnce({
+      total_quotas: 2,
+      items: [
+        { id: 1, org_id: 1, quota_mb: 1000, used_mb: 250 },
+        { id: 2, org_id: 2, quota_mb: 1000, used_mb: 250 }
+      ]
+    })
+
+    render(<BillingDashboardPage />)
+
+    expect(await screen.findByText("Quota Records")).toBeInTheDocument()
+    expect(screen.getByText("Total Used (MB)")).toBeInTheDocument()
+    // 500 used of 2000 total -> 25.0% (antd splits digits across spans, so
+    // assert on the statistic container's text)
+    const utilizationStat = screen.getByText("Utilization").closest(".ant-statistic")
+    expect(utilizationStat?.textContent).toContain("25.0")
+  })
+
   it("renders forbidden guard feedback through the design-system Alert primitive", async () => {
     fetchMock.mockResolvedValue({
       ok: true,

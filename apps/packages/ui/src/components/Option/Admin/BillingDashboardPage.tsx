@@ -95,25 +95,40 @@ const OverviewTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardEr
 
       {storageSummary && (
         <Card title={t("settings:adminBilling.storageSummary", "Storage Summary")}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 16 }}>
-            <Statistic title={t("settings:adminBilling.totalUsers", "Total Users")} value={storageSummary.total_users ?? 0} />
-            <Statistic
-              title={t("settings:adminBilling.totalUsedMb", "Total Used (MB)")}
-              value={storageSummary.total_used_mb ?? 0}
-              precision={1}
-            />
-            <Statistic
-              title={t("settings:adminBilling.totalQuotaMb", "Total Quota (MB)")}
-              value={storageSummary.total_quota_mb ?? 0}
-              precision={1}
-            />
-            <Statistic
-              title={t("settings:adminBilling.avgUtilization", "Avg Utilization")}
-              value={storageSummary.avg_utilization_pct ?? 0}
-              suffix="%"
-              precision={1}
-            />
-          </div>
+          {(() => {
+            // GET /admin/storage-quotas/summary returns {total_quotas, items:
+            // [{quota_mb, used_mb, ...}]} - aggregate here; the flat
+            // total_used_mb/avg_utilization_pct fields never existed.
+            const quotaItems: Array<{ quota_mb?: number; used_mb?: number }> =
+              storageSummary.items ?? []
+            const totalQuotaMb = quotaItems.reduce((sum, q) => sum + (q.quota_mb ?? 0), 0)
+            const totalUsedMb = quotaItems.reduce((sum, q) => sum + (q.used_mb ?? 0), 0)
+            const utilizationPct = totalQuotaMb > 0 ? (totalUsedMb / totalQuotaMb) * 100 : 0
+            return (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 16 }}>
+                <Statistic
+                  title={t("settings:adminBilling.totalQuotas", "Quota Records")}
+                  value={storageSummary.total_quotas ?? quotaItems.length}
+                />
+                <Statistic
+                  title={t("settings:adminBilling.totalUsedMb", "Total Used (MB)")}
+                  value={totalUsedMb}
+                  precision={1}
+                />
+                <Statistic
+                  title={t("settings:adminBilling.totalQuotaMb", "Total Quota (MB)")}
+                  value={totalQuotaMb}
+                  precision={1}
+                />
+                <Statistic
+                  title={t("settings:adminBilling.avgUtilization", "Utilization")}
+                  value={utilizationPct}
+                  suffix="%"
+                  precision={1}
+                />
+              </div>
+            )
+          })()}
         </Card>
       )}
     </div>
