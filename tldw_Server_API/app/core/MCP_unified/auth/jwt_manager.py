@@ -11,8 +11,8 @@ from typing import Optional
 
 from fastapi import HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
-from jose.exceptions import ExpiredSignatureError
+from tldw_Server_API.app.core.Utils import jwt_compat as jwt
+from tldw_Server_API.app.core.Utils.jwt_compat import JWTError, ExpiredSignatureError
 from loguru import logger
 from passlib.context import CryptContext
 from pydantic import BaseModel, Field

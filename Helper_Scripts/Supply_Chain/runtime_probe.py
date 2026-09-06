@@ -10,8 +10,9 @@ import json
 import re
 import sys
 import tempfile
-import tomllib
 from pathlib import Path
+
+import tomllib
 
 
 def _read_blob(layout: Path, digest: str) -> dict:
@@ -65,7 +66,7 @@ def require_locked_versions(lock: Path) -> dict[str, str]:
     """Require the installed probe dependencies to match the candidate lock."""
     packages = tomllib.loads(lock.read_text(encoding="utf-8"))["package"]
     versions = {}
-    for name in ("chromadb", "python-jose", "cryptography"):
+    for name in ("chromadb", "pyjwt", "cryptography"):
         expected = {item["version"] for item in packages if item["name"] == name}
         actual = importlib.metadata.version(name)
         if expected != {actual}:
@@ -75,14 +76,14 @@ def require_locked_versions(lock: Path) -> dict[str, str]:
 
 
 def probe_crypto() -> str:
-    """Exercise an ephemeral ES256 signature through python-jose's EC backend."""
+    """Exercise an ephemeral ES256 signature through PyJWT and cryptography."""
+    import jwt
     from cryptography.hazmat.primitives.asymmetric import ec
-    from jose import backends, jwt
 
-    backend = backends.ECKey.__module__
-    if backend != "jose.backends.cryptography_backend":
-        raise ValueError("JWT EC signing must use the cryptography backend")
     key = ec.generate_private_key(ec.SECP256R1())
+    backend = type(key).__module__
+    if not backend.startswith("cryptography."):
+        raise ValueError("JWT EC signing must use the cryptography backend")
     claims = {"sub": "runtime-probe", "aud": "runtime-probe"}
     token = jwt.encode(claims, key, algorithm="ES256")
     if jwt.decode(token, key.public_key(), algorithms=["ES256"], audience="runtime-probe") != claims:
