@@ -117,6 +117,30 @@ describe("usePersonaLiveVoiceController", () => {
   const getSentPayloads = (ws: WebSocket & { send: ReturnType<typeof vi.fn> }) =>
     ws.send.mock.calls.map(([payload]) => JSON.parse(String(payload)))
 
+  type VoiceResult = { current: ReturnType<typeof usePersonaLiveVoiceController> }
+  const ownerPayload = (ws: WebSocket) => {
+    const frames = vi.mocked(ws.send).mock.calls.map(([data]) => JSON.parse(String(data)))
+    return frames.findLast(frame => frame.type === "voice_prepare") ||
+      frames.findLast(frame => frame.type === "voice_config") || {}
+  }
+  const acknowledgeReadiness = async (result: VoiceResult, ws: WebSocket) => {
+    const owner = ownerPayload(ws)
+    if (!owner.client_message_id) return
+    result.current.handlePayload({ ...owner, event: "voice_readiness", ready: true })
+    await Promise.resolve()
+    await Promise.resolve()
+  }
+  const startPreparedVoice = async (result: VoiceResult, ws: WebSocket) => {
+    const pending = result.current.startListening()
+    await Promise.resolve()
+    await Promise.resolve()
+    await acknowledgeReadiness(result, ws)
+    await pending
+  }
+  const deliverPayload = (result: VoiceResult, ws: WebSocket, payload: Record<string, unknown>) => {
+    result.current.handlePayload({ ...ownerPayload(ws), ...payload })
+  }
+
   const createWakeDetectorHarness = () => {
     let config: WakeDetectorConfig | null = null
     const detector: WakeDetector = {
@@ -464,7 +488,7 @@ describe("usePersonaLiveVoiceController", () => {
     })
 
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "notice",
         reason_code: "WAKE_ACTIVATION_REJECTED",
         wake_rejection_reason: "not_saved_in_profile",
@@ -510,7 +534,7 @@ describe("usePersonaLiveVoiceController", () => {
     })
 
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "notice",
         reason_code: "WAKE_ACTIVATION_REJECTED",
         wake_rejection_reason: "missing_from_runtime_config",
@@ -837,7 +861,7 @@ describe("usePersonaLiveVoiceController", () => {
     const stopCallsBeforeMic = vi.mocked(wakeHarness.detector.stop).mock.calls.length
 
     await act(async () => {
-      await result.current.startListening()
+      await startPreparedVoice(result, ws)
     })
 
     expect(vi.mocked(wakeHarness.detector.stop).mock.calls.length).toBe(
@@ -847,7 +871,7 @@ describe("usePersonaLiveVoiceController", () => {
     expect(result.current.wakeArmed).toBe(true)
   })
 
-  it("restarts wake listening after manually stopped mic capture while armed", async () => {
+  it("disarms wake listening when live voice is explicitly stopped", async () => {
     const wakeHarness = createWakeDetectorHarness()
     const ws = {
       readyState: WebSocket.OPEN,
@@ -873,7 +897,7 @@ describe("usePersonaLiveVoiceController", () => {
     expect(wakeHarness.detector.start).toHaveBeenCalledTimes(1)
 
     await act(async () => {
-      await result.current.startListening()
+      await startPreparedVoice(result, ws)
     })
     await waitFor(() => {
       expect(result.current.isListening).toBe(true)
@@ -884,9 +908,9 @@ describe("usePersonaLiveVoiceController", () => {
     })
 
     await waitFor(() => {
-      expect(wakeHarness.detector.start).toHaveBeenCalledTimes(2)
+      expect(wakeHarness.detector.start).toHaveBeenCalledTimes(1)
     })
-    expect(result.current.wakeArmed).toBe(true)
+    expect(result.current.wakeArmed).toBe(false)
   })
 
   it("restarts wake listening after push-to-talk wake turn finishes", async () => {
@@ -923,8 +947,10 @@ describe("usePersonaLiveVoiceController", () => {
       wakeHarness.fireWake()
     })
 
+    await act(async () => { await startPreparedVoice(result, ws) })
+
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "notice",
         reason_code: "TTS_UNAVAILABLE_TEXT_ONLY",
         message: "text only"
@@ -1177,7 +1203,7 @@ describe("usePersonaLiveVoiceController", () => {
     )
 
     await act(async () => {
-      await result.current.startListening()
+      await startPreparedVoice(result, ws)
     })
     rerender({
       sessionId: "sess-voice",
@@ -1204,7 +1230,7 @@ describe("usePersonaLiveVoiceController", () => {
     )
 
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "partial_transcript",
         text_delta: "hey helper search my notes"
       })
@@ -1255,7 +1281,7 @@ describe("usePersonaLiveVoiceController", () => {
     )
 
     await act(async () => {
-      await result.current.startListening()
+      await startPreparedVoice(result, ws)
     })
 
     expect(hookMocks.micStart).toHaveBeenCalledWith({ deviceId: "usb-1" })
@@ -1293,7 +1319,7 @@ describe("usePersonaLiveVoiceController", () => {
     )
 
     await act(async () => {
-      await result.current.startListening()
+      await startPreparedVoice(result, ws)
     })
 
     expect(result.current.isListening).toBe(true)
@@ -1310,6 +1336,7 @@ describe("usePersonaLiveVoiceController", () => {
       await Promise.resolve()
     })
 
+    await act(async () => { await acknowledgeReadiness(result, ws) })
     expect(hookMocks.micStart).toHaveBeenCalledWith({ deviceId: "usb-1" })
   })
 
@@ -1345,7 +1372,7 @@ describe("usePersonaLiveVoiceController", () => {
     )
 
     await act(async () => {
-      await result.current.startListening()
+      await startPreparedVoice(result, ws)
     })
 
     expect(result.current.isListening).toBe(true)
@@ -1397,10 +1424,69 @@ describe("usePersonaLiveVoiceController", () => {
     )
 
     await act(async () => {
-      await result.current.startListening()
+      await startPreparedVoice(result, ws)
     })
 
     expect(hookMocks.micStart).toHaveBeenCalledWith({ deviceId: null })
+  })
+
+  it.each(["manual setting", "server manual fallback"])(
+    "keeps %s waiting for Send now without a stuck-listening warning",
+    async (mode) => {
+      vi.useFakeTimers()
+      const ws = { readyState: WebSocket.OPEN, send: vi.fn() } as unknown as WebSocket
+      const { result } = renderHook(() => usePersonaLiveVoiceController({
+        ws, connected: true, sessionId: "sess-voice", personaId: "persona-1",
+        resolvedDefaults: { ...resolvedDefaults, autoCommitEnabled: mode !== "manual setting" },
+        canUseServerStt: true
+      }))
+      await act(async () => { await startPreparedVoice(result, ws) })
+      act(() => {
+        deliverPayload(result, ws, { event: "partial_transcript", transcript: "the notebook is ready" })
+        if (mode === "server manual fallback") {
+          deliverPayload(result, ws, { event: "notice", reason_code: "VOICE_MANUAL_MODE_REQUIRED" })
+        }
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(10000) })
+      expect(result.current.recoveryMode).toBe("none")
+      expect(result.current.canSendNow).toBe(true)
+    }
+  )
+
+  it.each(["stop", "submit", "disconnect"])(
+    "disables Send now after %s despite retained heard text",
+    async (ending) => {
+      const ws = { readyState: WebSocket.OPEN, send: vi.fn() } as unknown as WebSocket
+      const { result, rerender } = renderHook(({ connected }) => usePersonaLiveVoiceController({
+        ws, connected, sessionId: "sess-voice", personaId: "persona-1",
+        resolvedDefaults, canUseServerStt: true
+      }), { initialProps: { connected: true } })
+      await act(async () => { await startPreparedVoice(result, ws) })
+      act(() => { deliverPayload(result, ws, { event: "partial_transcript", transcript: "the notebook is ready" }) })
+      expect(result.current.canSendNow).toBe(true)
+      if (ending === "disconnect") rerender({ connected: false })
+      else act(() => {
+        if (ending === "stop") result.current.stopListening()
+        else result.current.sendCurrentTranscriptNow()
+      })
+      expect(result.current.canSendNow).toBe(false)
+    }
+  )
+
+  it("commits an owned manual turn only once even before React renders", async () => {
+    const ws = { readyState: WebSocket.OPEN, send: vi.fn() } as unknown as WebSocket
+    const { result } = renderHook(() => usePersonaLiveVoiceController({
+      ws, connected: true, sessionId: "sess-voice", personaId: "persona-1",
+      resolvedDefaults, canUseServerStt: true
+    }))
+    await act(async () => { await startPreparedVoice(result, ws) })
+    act(() => { deliverPayload(result, ws, { event: "partial_transcript", transcript: "the notebook is ready" }) })
+    act(() => {
+      result.current.sendCurrentTranscriptNow()
+      result.current.sendCurrentTranscriptNow()
+    })
+    const sent = vi.mocked(ws.send).mock.calls.map(([data]) => JSON.parse(String(data)))
+    expect(sent.filter(frame => frame.type === "voice_commit")).toHaveLength(1)
   })
 
   it("shows listening recovery after 4 seconds with transcript but no commit", async () => {
@@ -1423,7 +1509,7 @@ describe("usePersonaLiveVoiceController", () => {
     )
 
     await act(async () => {
-      await result.current.startListening()
+      await startPreparedVoice(result, ws)
     })
     rerender({
       sessionId: "sess-voice",
@@ -1431,7 +1517,7 @@ describe("usePersonaLiveVoiceController", () => {
     })
 
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "partial_transcript",
         text_delta: "hey helper"
       })
@@ -1464,7 +1550,7 @@ describe("usePersonaLiveVoiceController", () => {
     )
 
     await act(async () => {
-      await result.current.startListening()
+      await startPreparedVoice(result, ws)
     })
     rerender({
       sessionId: "sess-voice",
@@ -1472,7 +1558,7 @@ describe("usePersonaLiveVoiceController", () => {
     })
 
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "partial_transcript",
         text_delta: "hey helper"
       })
@@ -1505,7 +1591,7 @@ describe("usePersonaLiveVoiceController", () => {
     )
 
     await act(async () => {
-      await result.current.startListening()
+      await startPreparedVoice(result, ws)
     })
     rerender({
       sessionId: "sess-voice",
@@ -1513,7 +1599,7 @@ describe("usePersonaLiveVoiceController", () => {
     })
 
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "partial_transcript",
         text_delta: "hey helper"
       })
@@ -1524,7 +1610,7 @@ describe("usePersonaLiveVoiceController", () => {
     })
 
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "partial_transcript",
         text_delta: "search my notes"
       })
@@ -1563,7 +1649,7 @@ describe("usePersonaLiveVoiceController", () => {
     )
 
     await act(async () => {
-      await result.current.startListening()
+      await startPreparedVoice(result, ws)
     })
     rerender({
       sessionId: "sess-voice",
@@ -1571,7 +1657,7 @@ describe("usePersonaLiveVoiceController", () => {
     })
 
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "partial_transcript",
         text_delta: "hey helper search my notes"
       })
@@ -1622,7 +1708,7 @@ describe("usePersonaLiveVoiceController", () => {
     )
 
     await act(async () => {
-      await result.current.startListening()
+      await startPreparedVoice(result, ws)
     })
     rerender({
       sessionId: "sess-voice",
@@ -1630,7 +1716,7 @@ describe("usePersonaLiveVoiceController", () => {
     })
 
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "partial_transcript",
         text_delta: "hey helper search my notes"
       })
@@ -1674,7 +1760,7 @@ describe("usePersonaLiveVoiceController", () => {
     )
 
     await act(async () => {
-      await result.current.startListening()
+      await startPreparedVoice(result, ws)
     })
     rerender({
       sessionId: "sess-voice",
@@ -1682,7 +1768,7 @@ describe("usePersonaLiveVoiceController", () => {
     })
 
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "partial_transcript",
         text_delta: "hey helper search my notes"
       })
@@ -1691,7 +1777,7 @@ describe("usePersonaLiveVoiceController", () => {
     const stopCallsBeforeCommit = hookMocks.micStop.mock.calls.length
 
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "notice",
         reason_code: "VOICE_TURN_COMMITTED",
         transcript: "search my notes",
@@ -1728,8 +1814,10 @@ describe("usePersonaLiveVoiceController", () => {
       })
     )
 
+    await act(async () => { await startPreparedVoice(result, ws) })
+
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "notice",
         reason_code: "VOICE_TURN_COMMITTED",
         transcript: "search my notes",
@@ -1763,8 +1851,10 @@ describe("usePersonaLiveVoiceController", () => {
       })
     )
 
+    await act(async () => { await startPreparedVoice(result, ws) })
+
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "notice",
         reason_code: "VOICE_TURN_COMMITTED",
         transcript: "search my notes",
@@ -1798,8 +1888,10 @@ describe("usePersonaLiveVoiceController", () => {
       })
     )
 
+    await act(async () => { await startPreparedVoice(result, ws) })
+
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "notice",
         reason_code: "VOICE_TURN_COMMITTED",
         transcript: "search my notes",
@@ -1814,7 +1906,7 @@ describe("usePersonaLiveVoiceController", () => {
     expect((result.current as any).recoveryMode).toBe("thinking_stuck")
 
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "assistant_delta",
         text_delta: "Working on it"
       })
@@ -1842,8 +1934,10 @@ describe("usePersonaLiveVoiceController", () => {
       })
     )
 
+    await act(async () => { await startPreparedVoice(result, ws) })
+
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "notice",
         reason_code: "VOICE_TURN_COMMITTED",
         transcript: "search my notes",
@@ -1858,7 +1952,7 @@ describe("usePersonaLiveVoiceController", () => {
     expect((result.current as any).recoveryMode).toBe("none")
 
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "notice",
         reason_code: "VOICE_TURN_PROCESSING",
         message: "Still processing this voice turn."
@@ -1891,8 +1985,10 @@ describe("usePersonaLiveVoiceController", () => {
       })
     )
 
+    await act(async () => { await startPreparedVoice(result, ws) })
+
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "notice",
         reason_code: "VOICE_TURN_COMMITTED",
         transcript: "search my notes",
@@ -1901,7 +1997,7 @@ describe("usePersonaLiveVoiceController", () => {
     })
 
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "notice",
         reason_code: "VOICE_TURN_PROCESSING",
         message: "Still processing this voice turn."
@@ -1934,8 +2030,10 @@ describe("usePersonaLiveVoiceController", () => {
       })
     )
 
+    await act(async () => { await startPreparedVoice(result, ws) })
+
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "notice",
         reason_code: "VOICE_TURN_COMMITTED",
         transcript: "search my notes",
@@ -1950,7 +2048,7 @@ describe("usePersonaLiveVoiceController", () => {
     expect((result.current as any).recoveryMode).toBe("none")
 
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "tool_call",
         tool: "search_notes",
         why: "Looking through your notes"
@@ -1989,7 +2087,7 @@ describe("usePersonaLiveVoiceController", () => {
     )
 
     await act(async () => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "notice",
         reason_code: "VOICE_TURN_COMMITTED",
         transcript: "search my notes",
@@ -1997,8 +2095,10 @@ describe("usePersonaLiveVoiceController", () => {
       })
     })
 
+    await act(async () => { await startPreparedVoice(result, ws) })
+
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "tool_call",
         tool: "search_notes",
         why: "Looking through your notes"
@@ -2012,7 +2112,7 @@ describe("usePersonaLiveVoiceController", () => {
     expect((result.current as any).recoveryMode).toBe("none")
 
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "notice",
         reason_code: "VOICE_TOOL_EXECUTION_PROCESSING",
         tool: "search_notes",
@@ -2047,8 +2147,10 @@ describe("usePersonaLiveVoiceController", () => {
       })
     )
 
+    await act(async () => { await startPreparedVoice(result, ws) })
+
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "notice",
         reason_code: "VOICE_TURN_COMMITTED",
         transcript: "search my notes",
@@ -2057,7 +2159,7 @@ describe("usePersonaLiveVoiceController", () => {
     })
 
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "tool_call",
         tool: "search_notes",
         why: "Looking through your notes"
@@ -2068,7 +2170,7 @@ describe("usePersonaLiveVoiceController", () => {
     expect((result.current as any).activeToolName).toBe("search_notes")
 
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "tool_result",
         ok: true,
         tool: "search_notes",
@@ -2086,7 +2188,7 @@ describe("usePersonaLiveVoiceController", () => {
     expect((result.current as any).recoveryMode).toBe("thinking_stuck")
   })
 
-  it("extracts activeToolName from object-shaped tool payloads", () => {
+  it("extracts activeToolName from object-shaped tool payloads", async () => {
     const ws = {
       readyState: WebSocket.OPEN,
       send: vi.fn()
@@ -2103,8 +2205,10 @@ describe("usePersonaLiveVoiceController", () => {
       })
     )
 
+    await act(async () => { await startPreparedVoice(result, ws) })
+
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "tool_call",
         tool: {
           name: "notes.search",
@@ -2139,8 +2243,10 @@ describe("usePersonaLiveVoiceController", () => {
       })
     )
 
+    await act(async () => { await startPreparedVoice(result, ws) })
+
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "notice",
         reason_code: "VOICE_TURN_COMMITTED",
         transcript: "search my notes",
@@ -2149,7 +2255,7 @@ describe("usePersonaLiveVoiceController", () => {
     })
 
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "tool_call",
         tool: "search_notes",
         why: "Looking through your notes"
@@ -2159,7 +2265,7 @@ describe("usePersonaLiveVoiceController", () => {
     expect((result.current as any).activeToolStatus).toBeTruthy()
 
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "tool_result",
         approval: {
           tool_name: "search_notes",
@@ -2193,7 +2299,7 @@ describe("usePersonaLiveVoiceController", () => {
     )
 
     await act(async () => {
-      await result.current.startListening()
+      await startPreparedVoice(result, ws)
     })
     rerender({
       sessionId: "sess-voice",
@@ -2201,13 +2307,13 @@ describe("usePersonaLiveVoiceController", () => {
     })
 
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "partial_transcript",
         text_delta: "hey helper search my notes"
       })
     })
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "notice",
         reason_code: "VOICE_MANUAL_MODE_REQUIRED",
         message:
@@ -2235,6 +2341,7 @@ describe("usePersonaLiveVoiceController", () => {
       JSON.stringify({
         type: "voice_commit",
         session_id: "sess-voice",
+        client_message_id: ownerPayload(ws).client_message_id,
         transcript: "hey helper search my notes",
         source: "persona_live_voice_manual"
       })
@@ -2259,8 +2366,10 @@ describe("usePersonaLiveVoiceController", () => {
       })
     )
 
+    await act(async () => { await startPreparedVoice(result, ws) })
+
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "notice",
         reason_code: "TTS_UNAVAILABLE_TEXT_ONLY",
         message: "Live TTS unavailable for this session. Continuing in text-only mode."
@@ -2271,12 +2380,14 @@ describe("usePersonaLiveVoiceController", () => {
       personaId: "persona-1"
     })
 
-    await waitFor(() => {
-      expect(hookMocks.micStart).toHaveBeenCalledTimes(1)
-    })
+    expect(hookMocks.micStart).toHaveBeenCalledTimes(1)
     expect(result.current.textOnlyDueToTtsFailure).toBe(true)
     expect(result.current.warning).toContain("Continuing in text-only mode.")
-    expect(result.current.warningReasonCode).toBe("voice_tts_unavailable_text_only")
+    await act(async () => { await acknowledgeReadiness(result, ws) })
+    expect(hookMocks.micStart).toHaveBeenCalledTimes(2)
+    expect(result.current.textOnlyDueToTtsFailure).toBe(false)
+    expect(result.current.warning).toBeNull()
+    expect(result.current.warningReasonCode).toBeNull()
   })
 
   it("cancels a queued auto-resume before hydration finishes", async () => {
@@ -2287,7 +2398,7 @@ describe("usePersonaLiveVoiceController", () => {
       lastKnownLabel: "USB microphone"
     })
 
-    let preferenceLoading = true
+    let preferenceLoading = false
     useStorageMock.mockImplementation((key: string, defaultValue: unknown) => [
       storageValues.has(key) ? storageValues.get(key) : defaultValue,
       vi.fn(),
@@ -2310,8 +2421,12 @@ describe("usePersonaLiveVoiceController", () => {
       })
     )
 
+    await act(async () => { await startPreparedVoice(result, ws) })
+    preferenceLoading = true
+    rerender()
+
     act(() => {
-      result.current.handlePayload({
+      deliverPayload(result, ws, {
         event: "notice",
         reason_code: "TTS_UNAVAILABLE_TEXT_ONLY",
         message: "Live TTS unavailable for this session. Continuing in text-only mode."
@@ -2319,7 +2434,7 @@ describe("usePersonaLiveVoiceController", () => {
     })
 
     expect(result.current.isListening).toBe(true)
-    expect(hookMocks.micStart).not.toHaveBeenCalled()
+    expect(hookMocks.micStart).toHaveBeenCalledTimes(1)
 
     act(() => {
       result.current.toggleListening()
@@ -2337,7 +2452,7 @@ describe("usePersonaLiveVoiceController", () => {
       await Promise.resolve()
     })
 
-    expect(hookMocks.micStart).not.toHaveBeenCalled()
+    expect(hookMocks.micStart).toHaveBeenCalledTimes(1)
     expect(result.current.isListening).toBe(false)
   })
 

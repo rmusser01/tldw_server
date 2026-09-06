@@ -31,7 +31,7 @@ export type UsePersonaIncomingPayloadArgs = {
   clearResolvedApprovalFadeTimer: () => void
   consumeSetupHandoffAction: (action: SetupHandoffConsumedAction) => void
   emitSetupAnalyticsEvent: (event: Record<string, unknown>) => void
-  liveVoiceController: { handlePayload: (payload: Record<string, unknown> | null) => void }
+  liveVoiceController: { handlePayload: (payload: Record<string, unknown> | null) => boolean | void }
   personaId?: string | null
   personaSetupWizardCurrentStep: PersonaSetupStep
   personaSetupWizardIsSetupRequired: boolean
@@ -82,11 +82,12 @@ export const usePersonaIncomingPayload = ({
     (payload: any) => {
       const eventType = String(payload?.event || payload?.type || "").toLowerCase()
       if (!eventType) return
-      liveVoiceController.handlePayload(
+      const voiceAccepted = liveVoiceController.handlePayload(
         payload && typeof payload === "object"
           ? (payload as Record<string, unknown>)
           : null
       )
+      if (voiceAccepted === false) return
 
       if (eventType === "visual_state_override") {
         const state = String(payload?.state || payload?.visual_state || "").trim()
@@ -203,7 +204,7 @@ export const usePersonaIncomingPayload = ({
       }
 
       if (eventType === "partial_transcript") {
-        appendLog("user", String(payload?.text_delta || ""))
+        // Last heard displays revisions; the log records only committed speech.
         return
       }
 
@@ -307,6 +308,9 @@ export const usePersonaIncomingPayload = ({
 
       if (eventType === "notice") {
         const reasonCode = String(payload?.reason_code || "").trim().toUpperCase()
+        if (reasonCode === "VOICE_TURN_COMMITTED" && typeof payload?.transcript === "string") {
+          appendLog("user", payload.transcript)
+        }
         if (
           reasonCode === "VOICE_TURN_PROCESSING" ||
           reasonCode === "VOICE_TOOL_EXECUTION_PROCESSING"

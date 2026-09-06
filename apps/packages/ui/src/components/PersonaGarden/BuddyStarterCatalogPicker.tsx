@@ -21,6 +21,7 @@ export type BuddyStarterCatalogPickerProps = {
   copyingStarterId?: string | null
   loading?: boolean
   error?: string | null
+  onRetry?: () => void
   onCopyStarterPack: (starterPackId: string) => void
 }
 
@@ -110,6 +111,7 @@ export const BuddyStarterCatalogPicker: React.FC<
   copyingStarterId = null,
   loading = false,
   error = null,
+  onRetry,
   onCopyStarterPack
 }) => {
   const { t } = useTranslation(["sidepanel", "common"])
@@ -132,6 +134,15 @@ export const BuddyStarterCatalogPicker: React.FC<
           </Badge>
         ) : null}
       </div>
+      {onRetry ? (
+        <Button size="small" disabled={loading} onClick={onRetry}>
+          {t(error
+            ? "sidepanel:personaGarden.visuals.builder.retryCatalog"
+            : "sidepanel:personaGarden.visuals.builder.refreshCatalog", {
+            defaultValue: error ? "Retry catalog" : "Refresh catalog"
+          })}
+        </Button>
+      ) : null}
       {error ? (
         <div className="rounded border border-state-error/50 bg-state-error/10 p-2 text-xs text-state-error">
           {error}

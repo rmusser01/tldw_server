@@ -3537,6 +3537,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           starterPacks={starterPacks}
           starterCatalogLoading={starterCatalogLoading}
           starterCatalogError={starterCatalogError}
+          onRetryStarterCatalog={() => void loadStarterCatalog()}
           copyingStarterId={copyingStarterId}
           requestedSource={builderSourceRequest?.source ?? null}
           requestedSourceRequestId={builderSourceRequest?.requestId ?? 0}

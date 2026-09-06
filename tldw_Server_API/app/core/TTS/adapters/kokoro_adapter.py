@@ -509,20 +509,23 @@ class KokoroAdapter(TTSAdapter):
 
             # Initialize Kokoro (support constructors that accept either 1 or 2 positional args)
             if voices_json_arg:
-                self.kokoro_instance = Kokoro(
+                self.kokoro_instance = await asyncio.to_thread(
+                    Kokoro,
                     self.model_path,
                     voices_json_arg,
                     espeak_config=espeak_config
                 )
             else:
                 try:
-                    self.kokoro_instance = Kokoro(
+                    self.kokoro_instance = await asyncio.to_thread(
+                        Kokoro,
                         self.model_path,
                         espeak_config=espeak_config
                     )
                 except TypeError:
                     # Fallback: pass empty string for voices path if constructor requires it
-                    self.kokoro_instance = Kokoro(
+                    self.kokoro_instance = await asyncio.to_thread(
+                        Kokoro,
                         self.model_path,
                         "",
                         espeak_config=espeak_config

@@ -39,6 +39,14 @@ _PROMPT_IMPROVEMENT_DISPATCH_MESSAGES = {
 _MAX_PROMPT_IMPROVEMENT_RETRY_AFTER_SECONDS = 86_400
 
 
+class PersonaConversationError(RuntimeError):
+    """Safe Persona Chat admission/completion failure without provider details."""
+
+
+class PersonaVoiceInputLimitError(ValueError):
+    """A spoken turn exceeded its bounded audio buffer before transcription."""
+
+
 class SnapshotOperationError(RuntimeError):
     """Safe machine-readable error at the admin snapshot operation boundary."""
 

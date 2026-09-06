@@ -1,0 +1,66 @@
+[
+  {
+    "event": "notice",
+    "session_id": "551fa893267849729951f2b13ec6ed41",
+    "timestamp_ms": 1788643691385,
+    "event_seq": 0,
+    "level": "info",
+    "message": "persona stream connected (scaffold)",
+    "reason_code": "WS_CONNECTED"
+  },
+  {
+    "event": "tool_plan",
+    "session_id": "5e8bb650-7b15-4f60-b9bd-bae334a6cebf",
+    "timestamp_ms": 1788643691405,
+    "event_seq": 0,
+    "client_message_id": "migu-uat-a806aa2f9d7840c09c42899199a1334f",
+    "plan_id": "d931e3154fca45268375d0ecc2f31328",
+    "steps": [
+      {
+        "idx": 0,
+        "step_type": "rag_query",
+        "tool": "rag_search",
+        "args": {
+          "query": "Hello Migu. Reply with: Migu buddy UAT ready."
+        },
+        "description": "Search your knowledge base",
+        "why": "Input appears to be a knowledge query.",
+        "policy": {
+          "allow": true,
+          "requires_confirmation": false,
+          "required_scope": "read",
+          "reason_code": null,
+          "reason": null,
+          "action": "read",
+          "step_type": "rag_query",
+          "rule_kind": null,
+          "effective_allowed_tools": [
+            "knowledge.search"
+          ]
+        }
+      }
+    ],
+    "memory": {
+      "enabled": true,
+      "requested_enabled": true,
+      "requested_top_k": 3,
+      "applied_count": 0,
+      "runtime_mode": "persistent_scoped",
+      "persona_state_enabled": true,
+      "persona_state_requested_enabled": true,
+      "persona_state_profile_default": true,
+      "persona_state_mode_allowed": true,
+      "persona_state_applied_count": 0,
+      "persona_state_fields": []
+    },
+    "companion": {
+      "enabled": true,
+      "requested_enabled": true,
+      "mode": "recent_fallback",
+      "applied_card_count": 0,
+      "applied_goal_count": 0,
+      "applied_activity_count": 0
+    },
+    "persona_id": "e19c631e-e2ac-452d-9935-293af03cee4e"
+  }
+]

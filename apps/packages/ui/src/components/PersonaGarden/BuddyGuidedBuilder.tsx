@@ -41,6 +41,7 @@ export type BuddyGuidedBuilderProps = {
   importPreview?: PersonaVisualImportPreviewResponse | null
   activationBlockers?: string[]
   savingManifest?: boolean
+  onRetryStarterCatalog?: () => void
   onCopyStarterPack: (starterPackId: string) => void
   onStartBlank?: () => void
   onOpenLibrary?: () => void
@@ -116,6 +117,7 @@ export const BuddyGuidedBuilder: React.FC<BuddyGuidedBuilderProps> = ({
   importPreview = null,
   activationBlockers = [],
   savingManifest = false,
+  onRetryStarterCatalog,
   onCopyStarterPack,
   onStartBlank,
   onOpenLibrary,
@@ -232,6 +234,7 @@ export const BuddyGuidedBuilder: React.FC<BuddyGuidedBuilderProps> = ({
           starterPacks={starterPacks}
           loading={starterCatalogLoading}
           error={starterCatalogError}
+          onRetry={onRetryStarterCatalog}
           copyingStarterId={copyingStarterId}
           onCopyStarterPack={onCopyStarterPack}
         />
