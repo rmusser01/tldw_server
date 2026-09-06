@@ -28,6 +28,22 @@ const BILLING_OVERVIEW_PATH = "/api/v1/admin/billing/overview"
 
 // ── Overview Tab ──
 
+// GET /admin/storage-quotas/summary returns {total_quotas, items:
+// [{quota_mb, used_mb, ...}], pagination} - the flat total_used_mb /
+// avg_utilization_pct fields never existed, so aggregate the page here.
+export const aggregateStorageSummary = (summary: any) => {
+  const quotaItems: Array<{ quota_mb?: number; used_mb?: number }> = summary?.items ?? []
+  const totalQuotaMb = quotaItems.reduce((sum, q) => sum + (q.quota_mb ?? 0), 0)
+  const totalUsedMb = quotaItems.reduce((sum, q) => sum + (q.used_mb ?? 0), 0)
+  return {
+    totalQuotas: summary?.total_quotas ?? quotaItems.length,
+    totalQuotaMb,
+    totalUsedMb,
+    utilizationPct: totalQuotaMb > 0 ? (totalUsedMb / totalQuotaMb) * 100 : 0,
+    hasMore: Boolean(summary?.has_more ?? summary?.pagination?.has_more)
+  }
+}
+
 const OverviewTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }) => {
   const { t } = useTranslation(["settings", "common"])
   const [overview, setOverview] = useState<any>(null)
@@ -39,7 +55,8 @@ const OverviewTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardEr
     try {
       const [billing, storage] = await Promise.allSettled([
         tldwClient.getBillingOverview(),
-        tldwClient.getStorageQuotaSummary()
+        // 200 is the endpoint's max page size; hasMore flags any remainder.
+        tldwClient.getStorageQuotaSummary({ limit: 200 })
       ])
       if (billing.status === "fulfilled") {
         setOverview(billing.value)
@@ -93,29 +110,45 @@ const OverviewTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardEr
         </Card>
       )}
 
-      {storageSummary && (
-        <Card title={t("settings:adminBilling.storageSummary", "Storage Summary")}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 16 }}>
-            <Statistic title={t("settings:adminBilling.totalUsers", "Total Users")} value={storageSummary.total_users ?? 0} />
-            <Statistic
-              title={t("settings:adminBilling.totalUsedMb", "Total Used (MB)")}
-              value={storageSummary.total_used_mb ?? 0}
-              precision={1}
-            />
-            <Statistic
-              title={t("settings:adminBilling.totalQuotaMb", "Total Quota (MB)")}
-              value={storageSummary.total_quota_mb ?? 0}
-              precision={1}
-            />
-            <Statistic
-              title={t("settings:adminBilling.avgUtilization", "Avg Utilization")}
-              value={storageSummary.avg_utilization_pct ?? 0}
-              suffix="%"
-              precision={1}
-            />
-          </div>
-        </Card>
-      )}
+      {storageSummary &&
+        (() => {
+          const storage = aggregateStorageSummary(storageSummary)
+          return (
+            <Card title={t("settings:adminBilling.storageSummary", "Storage Summary")}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 16 }}>
+                <Statistic
+                  title={t("settings:adminBilling.totalQuotas", "Quota Records")}
+                  value={storage.totalQuotas}
+                  suffix={storage.hasMore ? "+" : undefined}
+                />
+                <Statistic
+                  title={t("settings:adminBilling.totalUsedMb", "Total Used (MB)")}
+                  value={storage.totalUsedMb}
+                  precision={1}
+                />
+                <Statistic
+                  title={t("settings:adminBilling.totalQuotaMb", "Total Quota (MB)")}
+                  value={storage.totalQuotaMb}
+                  precision={1}
+                />
+                <Statistic
+                  title={t("settings:adminBilling.avgUtilization", "Utilization")}
+                  value={storage.utilizationPct}
+                  suffix="%"
+                  precision={1}
+                />
+              </div>
+              {storage.hasMore && (
+                <p style={{ marginTop: 12, marginBottom: 0, color: "var(--color-text-secondary, #888)", fontSize: "0.85rem" }}>
+                  {t(
+                    "settings:adminBilling.storageTruncated",
+                    "Totals cover the first 200 quota records; this server has more."
+                  )}
+                </p>
+              )}
+            </Card>
+          )
+        })()}
     </div>
   )
 }
