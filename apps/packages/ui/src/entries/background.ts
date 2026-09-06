@@ -4229,9 +4229,10 @@ export default defineBackground({
               error.status = 400;
               throw error;
             }
-            const cfg = servicePromptConfig
+            const scopedCfg = servicePromptConfig
               ? await resolveCurrentServicePromptConfig(servicePromptConfig)
-              : await getEffectiveConfig();
+              : null;
+            const cfg = scopedCfg ?? (await getEffectiveConfig());
             if (!cfg?.serverUrl) throw new Error("tldw server not configured");
             const baseUrl = String(cfg.serverUrl).replace(/\/$/, "");
             const streamAccess = evaluateAbsoluteUrlAccess(path, cfg);
@@ -4328,7 +4329,10 @@ export default defineBackground({
             ) {
               try {
                 if (servicePromptConfig) {
-                  await refreshScopedAuth(servicePromptConfig, cfg);
+                  await refreshScopedAuth(
+                    servicePromptConfig,
+                    scopedCfg ?? undefined,
+                  );
                 } else {
                   if (!refreshInFlight) {
                     refreshInFlight = (async () => {
