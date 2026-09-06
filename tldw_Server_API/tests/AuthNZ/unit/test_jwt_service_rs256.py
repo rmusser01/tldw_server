@@ -88,6 +88,13 @@ class TestJWTServiceRS256:
         assert payload["username"] == "bob"
         assert payload["type"] == "access"
 
+    def test_rs256_private_key_only_configuration_verifies_tokens(self):
+        private_pem, _ = _gen_rsa_keypair_pem()
+        svc = JWTService(settings=self._rs_settings(private_pem, ""))
+        token = svc.create_access_token(user_id=42, username="alice", role="user")
+
+        assert svc.decode_access_token(token)["sub"] == "42"
+
     def test_rs256_issuer_audience_enforced(self):
 
         priv, pub = _gen_rsa_keypair_pem()

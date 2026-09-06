@@ -103,8 +103,7 @@ dependencies = [
   "keyring>=24.0.0",
   "puremagic>=1.15",
   "pycryptodomex>=3.18.0",
-  "PyJWT>=2.8.0",
-  "python-jose[cryptography]>=3.3.0",
+  "PyJWT[crypto]>=2.13.0",
   "yara-python>=4.3.0",
   "pyotp",
 

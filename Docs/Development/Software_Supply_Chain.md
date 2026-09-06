@@ -158,10 +158,10 @@ the project did not build.
 The PR container check also loads each Python candidate's existing OCI layout
 into Docker's containerd image store and runs it by the scanned subject digest.
 It does not rebuild or substitute a mutable tag. The probe verifies the selected
-`linux/amd64` manifest/config hashes, locked Chroma/python-jose/cryptography
+`linux/amd64` manifest/config hashes, locked Chroma/PyJWT/cryptography
 versions, real application-managed per-user collection/query isolation, absence
 of TCP listeners while the embedded clients are active, and an ES256 round trip
-through python-jose's cryptography backend. It runs without network access or
+through PyJWT's cryptography backend. It runs without network access or
 capabilities, with a read-only root and temporary scratch storage.
 
 `runtime-image-<name>.json` records these results, the lock hash, and the subject
@@ -171,6 +171,14 @@ These narrowly scoped checks are **not** a full application-startup audit or a
 determination that a CVE is inapplicable. They never create exceptions or change
 either vulnerability gate. Third-party server deployments and optional runtime
 paths still need their own applicability review.
+
+JWT consumers use `PyJWT[crypto]`; the locked graph no longer includes
+python-jose or its ecdsa fallback. A shared compatibility boundary preserves
+existing issued tokens and claim/error handling, including numeric issued-at
+validation and rejection of an unverifiable `at_hash`. OIDC still checks the
+configured signing-algorithm allowlist, issuer, audience, and nonce. Deploy the
+new locked environment or rebuilt images; updating an existing environment
+without removing obsolete packages does not remove their vulnerability findings.
 
 ## Vulnerability exceptions
 
