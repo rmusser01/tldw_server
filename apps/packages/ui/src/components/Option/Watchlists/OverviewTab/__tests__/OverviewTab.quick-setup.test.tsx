@@ -126,11 +126,16 @@ const setExistingSourceSelected = async (sourceName: string, selected: boolean) 
   if ((source as HTMLInputElement).checked !== selected) {
     await user.click(source)
   }
-  await waitFor(() => {
-    const currentSource = pipeline().getByLabelText(sourceName)
-    if (selected) expect(currentSource).toBeChecked()
-    else expect(currentSource).not.toBeChecked()
-  })
+  await waitFor(
+    () => {
+      const currentSource = pipeline().getByLabelText(sourceName)
+      if (selected) expect(currentSource).toBeChecked()
+      else expect(currentSource).not.toBeChecked()
+    },
+    // The checkbox state flows through the heavy pipeline-wizard tree;
+    // waitFor's 1s default races it on loaded CI runners (#2911).
+    { timeout: 15_000 }
+  )
 }
 
 const reachTestStep = async () => {
