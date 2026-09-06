@@ -235,6 +235,15 @@ server advances the shared manifest after semantic writes. Invalid client
 manifest ingress must be rejected before conflict capture. This does not change
 provisional-manifest reconciliation during first linking or authority publication.
 
+Purge is a destructive control request, not an editable object. A valid
+next-generation purge with stale Sync lineage returns the content-free
+`personal_context_purge_reconfirmation_required` error with `retryable=false`.
+Stop automatic retries of that rejected request, refresh authoritative state,
+and obtain explicit delete-everywhere confirmation again before signing a new
+request. Do not synthesize a manifest candidate, merge the purge, or silently
+replace its base envelope. Exact idempotent retry of an earlier stored request
+still supports recovery; rejection of a new stale request does not cancel it.
+
 For different IDs claiming the same semantic key, keep-local/merge explicitly
 targets the established shared canonical ID and applies the user-selected values.
 Canonical identity is not a preference for the server's value. The incoming

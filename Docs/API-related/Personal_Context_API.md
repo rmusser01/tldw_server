@@ -174,6 +174,15 @@ is invalid, not a user-choice conflict: the server sequences the shared manifest
 from accepted semantic mutations. Initial-link reconciliation and server-issued
 manifest publications remain separate supported paths.
 
+A valid next-generation `personal_context.purge` request with stale Sync
+lineage is rejected with `personal_context_purge_reconfirmation_required`,
+`retryable=false`, and "Refresh Personal Context and explicitly reconfirm
+delete-everywhere." Refresh authoritative state and ask the user to explicitly
+confirm deletion again before creating a new signed request. Never automatically
+rebase deletion or send it to the ordinary conflict resolver. This rejection
+does not delete data or create a conflict candidate. A previously stored
+request can still complete through recovery; exact retries remain supported.
+
 | User choice | Action | Reviewed replacement |
 | --- | --- | --- |
 | Keep shared values | `skip` | None |

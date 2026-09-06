@@ -725,7 +725,7 @@ encrypted replay receipts remain available. Exhaustion leaves a new push
 retryable and preserves existing candidates; resolving a conflict frees an
 active slot. Existing negotiated envelope and batch limits still apply.
 
-Every Personal Context push conflict must name and deliver the current
+Every Personal Context object push conflict must name and deliver the current
 canonical authority candidate. Before the server reports the conflict, it:
 
 1. Reads the exact canonical head through the Personal Context service.
@@ -741,6 +741,10 @@ the push item as terminally conflicted or retiring its staged retry. A pull-
 time conflict instead pins the incoming home-authority envelope before cursor
 advancement. Thus review never depends on a future pull or on an envelope that
 retention may already have removed.
+
+Delete-everywhere requests are control operations, not mergeable objects. A
+valid next-generation purge with stale Sync lineage is rejected as described
+under Delete everywhere below; it does not enter this candidate-review flow.
 
 User-facing actions map to the server contract as follows:
 
@@ -901,6 +905,18 @@ stored in SyncState before readable profile keys or content are destroyed.
 The editor freezes while deletion is pending. Every Personal Context ingress,
 source-publication row, authority envelope, conflict candidate, and purge
 barrier carries an explicit purge generation.
+
+A valid next-generation purge whose Sync lineage is stale returns
+`personal_context_purge_reconfirmation_required` with `retryable=false` and
+the content-free message "Refresh Personal Context and explicitly reconfirm
+delete-everywhere." The client must refresh authoritative state and obtain a
+fresh explicit deletion confirmation before constructing a new signed request.
+It must not automatically rebase the request, choose a winner, or route deletion
+through ordinary profile conflict review. No purge object candidate is created.
+This rejection does not itself delete canonical data or advance its generation;
+an earlier durably stored request may still complete through its own recovery.
+Exact idempotent retries of that earlier request remain supported, as do normal
+valid purges and the existing invalid-generation rejections.
 
 For purge ordering, "accepted" means that the canonical Personalization
 transaction committed, not merely that an ingress envelope became durable in
