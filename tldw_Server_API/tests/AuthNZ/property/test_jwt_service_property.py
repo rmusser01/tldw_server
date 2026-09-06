@@ -4,7 +4,7 @@ Property-based tests for the JWT service.
 
 from datetime import datetime, timedelta
 
-from jose import jwt
+import jwt
 from hypothesis import given, strategies as st, settings as hypothesis_settings, HealthCheck
 from hypothesis.strategies import text, integers
 
