@@ -4,8 +4,8 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import pytest
-from jose import jwt
-from jose.utils import base64url_encode
+import jwt
+from jwt.utils import base64url_encode
 
 from tldw_Server_API.app.core.AuthNZ.federation import oidc_service as oidc_module
 from tldw_Server_API.app.core.AuthNZ.federation.oidc_service import OIDCFederationService

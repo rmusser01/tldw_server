@@ -5,7 +5,7 @@ Unit tests for JWT service.
 from datetime import timedelta
 
 import pytest
-from jose import jwt
+from tldw_Server_API.app.core.Utils import jwt_compat as jwt
 
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     InvalidTokenError,

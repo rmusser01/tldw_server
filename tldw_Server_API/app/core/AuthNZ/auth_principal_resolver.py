@@ -104,7 +104,7 @@ def _looks_like_jwt(token: Optional[str]) -> bool:
 def _peek_jwt_token_type(token: str) -> Optional[str]:
     """Return the unverified token type claim when available."""
     try:
-        from jose import jwt as _jwt  # local import to avoid top-level dependency
+        from tldw_Server_API.app.core.Utils import jwt_compat as _jwt
 
         claims = _jwt.get_unverified_claims(token)
         if isinstance(claims, dict):
