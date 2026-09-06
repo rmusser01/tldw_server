@@ -4,7 +4,7 @@ title: Make Study Assistant guidance customizable through Service Prompts
 status: In Progress
 assignee: []
 created_date: '2026-09-06 04:31'
-updated_date: '2026-09-06 05:01'
+updated_date: '2026-09-06 05:17'
 labels: []
 dependencies: []
 references:
@@ -47,6 +47,8 @@ Published PR #2923 against dev at requester option 2. Implementation commit 28f0
 PR #2923 Qodo review posted two verified findings: public guidance docstrings lack complete API contracts, and eleven modified endpoint-test doubles need full annotations and docstrings. Addressing these documentation/type-only changes without changing runtime behavior. CI currently pending; branch is behind dev.
 
 Qodo fixes verified: both public guidance APIs now document arguments, return semantics, owner/worker lifecycle and errors; all eleven modified endpoint test callbacks have full parameter/return annotations and docstrings. Fresh affected suite: 52 passed, 454 deselected. AST audit confirms all eleven callback contracts; compilation, runtime Ruff/format and diff checks pass; Bandit on two touched runtime files reports zero findings. Independent follow-up confirmed no behavior changes and caught one exception-documentation detail, now corrected to reflect database cleanup semantics. Current dev has advanced to 33d7f9f1da; no rebase or base merge performed in this review-fix turn.
+
+Tracking-only retirement before updating PR #2923 from dev: newer Persona work independently claimed active TASK-13199. Preserve this complete Study Assistant record in the archive; a replacement active record will link PR #2923 and this history after updating dev. This does not mark implementation merged.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
