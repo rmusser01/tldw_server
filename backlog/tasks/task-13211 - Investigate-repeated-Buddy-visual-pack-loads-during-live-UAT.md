@@ -5,7 +5,7 @@ status: In Progress
 created_date: 2026-09-06 16:57
 references:
 - Docs/Reviews/MIGU_VOICE_FOLLOWUP_2026_09_06.md
-updated_date: 2026-09-06 17:02
+updated_date: 2026-09-06 17:06
 ---
 
 ## Description
@@ -34,6 +34,7 @@ ADR required: no. Reason: investigation and routine lifecycle repair within exis
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-09-06 physical visual check: repeated authenticated pack list/detail and live-session list requests every ~250 ms, ending in HTTP 429 and a visible 'Visual pack did not load — rate_limited' error. Source review could not establish the initiating trigger. Pack effect dependencies are persona identity, target availability and refresh nonce; local sprite frame cycling alone cannot explain the session-list requests. After rebase/HMR reload and reconnect, screenshot sampling and one real text provider reply did not reproduce the request loop. No speculative repair applied. Targeted BuddyShellHost + Persona route suites passed 129 tests. Remaining work: instrument host mount/dependency/event counts during an actual reproduced failure, then add a failing regression and repair. Bandit not applicable: this task changes only investigation documentation.
+Voice follow-up PR created against dev: https://github.com/rmusser01/tldw_server/pull/2927 . This task remains open; PR creation does not qualify the outstanding floating visual acceptance. UAT session disconnected and temporary browser viewport restored.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 

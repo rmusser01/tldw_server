@@ -3,7 +3,7 @@ id: TASK-13202
 title: Qualify an actual voice-capable Persona Buddy session
 status: In Progress
 created_date: 2026-09-06 02:07
-updated_date: 2026-09-06 17:02
+updated_date: 2026-09-06 17:05
 labels:
 - persona
 - buddy
@@ -65,6 +65,7 @@ Physical attempts on f696121698 used normal Parakeet ONNX CPU. First picked up u
 2026-09-06: Requester-controlled Start then Send now committed on 0837a8df23. User said 'Say the blue notebook is ready'; browser heard/sent 'Right. The blue notebook is ready. Ready. Yeah.' and received reply plus 4 TTS chunks, final idle. Transcription acceptance failed; no new audible confirmation or floating-state qualification. TASK-13210 fixes reproduced stale ONNX chunk artifacts with shared owned whole-turn recognition. Real local phrase/silence/repetition probes and targeted tests pass. Need physical retry on new code; microphone remains off until user starts. Earlier Stop-then-Send attempt was cancellation by control semantics, not failed provider submission.
 Physical retry on cdf099fff7e08fde1596ec73b98b2af4cfc8db62, session 13b398f1-febc-4199-8453-5145f6e26211, normal Parakeet ONNX: requester confirmed saying 'Say the blue notebook is ready'. Browser Last heard/Last sent was 'See the blue notebook is ready.' once, assistant replied 'I see the blue notebook is ready.', four TTS chunks arrived, final Live state idle. User confirmed hearing clearly and recording/playback stopping afterward. Repeated fragments did not recur, but exact transcription still fails on Say→See. No raw human recording was retained, so this observation does not establish an acoustic/model versus commit-timing cause for that substitution. Floating intermediate sprite states were not observed. Keep AC3 and physical accuracy qualification open. Receipt: Docs/Reviews/assets/migu-parakeet-turn-2026-09-06/human-retry.json.
 2026-09-06 visual follow-up on backend cdf099fff7: latest user-controlled notebook turn transcribed 'Say the blue notebook is ready.' correctly once, received 'The blue notebook is ready.' plus four TTS chunks, and returned to idle. User reported 'Done; the reply finished'. Floating intermediate states were not captured. Subsequent visual observation found pack-list/detail and session-list requests at ~4/s ending in HTTP 429; Buddy image disappeared with a rate_limited diagnostic. Reconnect after rebase/HMR restored a loaded idle image; screenshot sampling and a real text provider reply did not reproduce it. AC3 remains unchecked. TASK-13211 tracks the unresolved visual request-loop trigger; no lifecycle fix is claimed.
+Voice follow-up PR created against dev: https://github.com/rmusser01/tldw_server/pull/2927 . This task remains open; PR creation does not qualify the outstanding floating visual acceptance. UAT session disconnected and temporary browser viewport restored.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
