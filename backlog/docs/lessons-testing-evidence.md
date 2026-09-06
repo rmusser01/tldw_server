@@ -1,5 +1,19 @@
 # Testing Evidence Lessons
 
+## Background recognition changes the meaning of VAD completion
+
+**Incident (TASK-13208, 2026-09-06):** Moving Persona Whisper inference off the
+socket loop passed responsiveness and cleanup regressions, but independent
+review found that VAD could now commit an old partial before decoding finished.
+The correction freezes the VAD audio boundary, waits for that exact snapshot,
+and replays later audio into the next transcriber turn and detector once.
+
+**Evidence and rule:** The WebSocket regression blocks recognition, triggers
+VAD, sends later speech, then verifies the full first transcript and its original
+correlation ID plus exact carry into the next turn. When moving work into the
+background, test consumers that previously relied on synchronous completion;
+responsive Stop alone does not prove automatic finalization remains correct.
+
 ## Canonical after-commit may still be inside a Sync savepoint
 
 **Incident (TASK-13163, PR #2910 review, 2026-09-05):** Adding the usual

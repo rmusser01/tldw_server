@@ -7990,6 +7990,7 @@ async def persona_stream(
     owned_control_tasks: set[asyncio.Task] = set()
     persona_voice_prepare_tasks: set[asyncio.Task[None]] = set()
     persona_voice_initialization_pending = threading.Event()
+    persona_retired_recognizers: list[Any] = []
     persona_live_wake_state_by_session: dict[str, dict[str, Any]] = {}
     persona_live_summary_sessions_seen: set[str] = set()
     observed_live_control_session_ids: set[str] = set()
@@ -8537,6 +8538,12 @@ async def persona_stream(
             if transcriber is not None:
                 with contextlib.suppress(Exception):
                     transcriber.cleanup()
+                persona_retired_recognizers[:] = [
+                    runtime for runtime in persona_retired_recognizers
+                    if getattr(runtime, "recognition_pending", False) is True
+                ]
+                if getattr(transcriber, "recognition_pending", False) is True:
+                    persona_retired_recognizers.append(transcriber)
             if turn_detector is not None:
                 with contextlib.suppress(Exception):
                     turn_detector.reset()
@@ -8547,10 +8554,15 @@ async def persona_stream(
             state["current_commit_source"] = None
             state["committed_transcript"] = ""
 
-        def _reset_persona_live_active_turn(session_id: str) -> None:
+        def _reset_persona_live_active_turn(session_id: str, *, preserve_after_auto_commit: bool = False) -> None:
             state = persona_live_stt_state_by_session.get(session_id) or {}
             transcriber = state.get("transcriber")
             turn_detector = state.get("turn_detector")
+            carry_audio = getattr(transcriber, "audio_after_auto_commit", None)
+            state["pending_audio"] = (
+                carry_audio() if preserve_after_auto_commit and callable(carry_audio) else b""
+            )
+            state.pop("auto_commit_client_message_id", None)
             if transcriber is not None:
                 with contextlib.suppress(Exception):
                     transcriber.reset()
@@ -8913,7 +8925,7 @@ async def persona_stream(
                     client_message_id=client_message_id,
                     message="No trigger phrase was heard, so the transcript was ignored.",
                 )
-                _reset_persona_live_active_turn(session_id)
+                _reset_persona_live_active_turn(session_id, preserve_after_auto_commit=commit_source == "vad_auto")
                 return False
             if not cleaned_transcript:
                 await _emit_notice(
@@ -8923,7 +8935,7 @@ async def persona_stream(
                     client_message_id=client_message_id,
                     message="The trigger phrase was removed, but no spoken command remained.",
                 )
-                _reset_persona_live_active_turn(session_id)
+                _reset_persona_live_active_turn(session_id, preserve_after_auto_commit=commit_source == "vad_auto")
                 return False
 
             state["current_utterance_committed"] = True
@@ -8953,7 +8965,7 @@ async def persona_stream(
                 "push_to_talk_after_wake",
             }:
                 _clear_persona_live_wake_state(session_id)
-            _reset_persona_live_active_turn(session_id)
+            _reset_persona_live_active_turn(session_id, preserve_after_auto_commit=commit_source == "vad_auto")
             _start_persona_live_turn(
                 msg=_persona_live_voice_commit_message(
                     session_id=session_id,
@@ -10251,12 +10263,20 @@ async def persona_stream(
                 if mtype == "voice_prepare" and (
                     persona_voice_initialization_pending.is_set()
                     or any(not task.done() for task in persona_voice_prepare_tasks)
+                    or any(
+                        getattr(runtime, "recognition_pending", False) is True
+                        for runtime in persona_retired_recognizers
+                    )
+                    or any(
+                        getattr(state.get("transcriber"), "recognition_pending", False) is True
+                        for state in persona_live_stt_state_by_session.values()
+                    )
                 ):
                     await stream.send_json({
                         "event": "voice_readiness", "session_id": session_id,
                         "client_message_id": client_message_id, "ready": False,
                         "reason_code": "VOICE_PREPARATION_BUSY",
-                        "message": "A voice model is still loading or cleaning up on this connection. Wait for it to finish, then retry voice.",
+                        "message": "A voice model is still loading, recognizing speech or cleaning up on this connection. Wait for it to finish, then retry voice.",
                     })
                     continue
                 key = {"user_id": authenticated_user_id, "session_id": session_id, "connection_id": voice_connection_id}
@@ -10621,6 +10641,7 @@ async def persona_stream(
                             audio_bytes,
                             audio_format=audio_format,
                         )
+                        normalized_audio = stt_state.pop("pending_audio", b"") + normalized_audio
                         if turn_detector is None or not bool(getattr(turn_detector, "available", False)):
                             await _ensure_persona_live_manual_mode_notice(session_id, stt_state)
                         previous_snapshot = str(
@@ -10646,13 +10667,20 @@ async def persona_stream(
                             next_snapshot,
                         )
                         if turn_detector is not None and bool(getattr(turn_detector, "available", False)):
-                            auto_commit_triggered = bool(turn_detector.observe(normalized_audio))
+                            if getattr(transcriber, "auto_commit_pending", False) is not True:
+                                auto_commit_triggered = bool(turn_detector.observe(normalized_audio))
                             if not bool(getattr(turn_detector, "available", False)):
                                 stt_state["manual_mode_reason"] = str(
                                     getattr(turn_detector, "unavailable_reason", "") or "vad_unavailable"
                                 )
                                 await _ensure_persona_live_manual_mode_notice(session_id, stt_state)
                                 auto_commit_triggered = False
+                        request_auto_commit = getattr(transcriber, "request_auto_commit", None)
+                        if callable(request_auto_commit):
+                            if auto_commit_triggered:
+                                request_auto_commit()
+                                stt_state.setdefault("auto_commit_client_message_id", client_message_id)
+                            auto_commit_triggered = transcriber.auto_commit_ready(result)
                     except Exception as exc:
                         logger.debug(
                             "persona live STT processing failed for session {}: {}",
@@ -10701,7 +10729,7 @@ async def persona_stream(
                         transcript=_current_persona_live_transcript(session_id),
                         commit_source="vad_auto",
                         source="persona_live_voice_auto",
-                        client_message_id=msg.get("client_message_id"),
+                        client_message_id=stt_state.get("auto_commit_client_message_id") or msg.get("client_message_id"),
                     )
 
             elif mtype == "confirm_plan":

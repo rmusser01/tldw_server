@@ -366,6 +366,197 @@ def test_real_transcript_correlation_and_no_client_requested_fake_tts(prepared_v
     assert event["reason_code"] == "VOICE_STOPPED"
 
 
+def test_voice_retry_waits_for_retired_recognition(prepared_voice: Any) -> None:
+    from tldw_Server_API.tests.Persona.test_persona_ws import _recv_until
+
+    ws, transcriber = prepared_voice
+    transcriber.recognition_pending = True
+    ws.send_json({"type": "voice_stop", "session_id": "voice-owned", "client_message_id": "stop-decode"})
+    _recv_until(ws, lambda value: value.get("reason_code") == "VOICE_STOPPED")
+    ws.send_json({"type": "voice_prepare", "session_id": "voice-owned", "client_message_id": "retry-decode"})
+    event = _recv_until(ws, lambda value: value.get("event") == "voice_readiness")
+    assert event["ready"] is False
+    assert event["reason_code"] == "VOICE_PREPARATION_BUSY"
+    transcriber.recognition_pending = False
+    ws.send_json({"type": "voice_prepare", "session_id": "voice-owned", "client_message_id": "retry-clean"})
+    assert _recv_until(ws, lambda value: value.get("event") == "voice_readiness")["ready"]
+
+
+def test_vad_waits_for_frozen_whisper_turn_and_replays_later_audio(
+    prepared_voice: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import base64
+    import threading
+    import time
+
+    import numpy as np
+
+    from tldw_Server_API.app.core.Persona import live_conversation
+    from tldw_Server_API.tests.Persona.test_persona_ws import _recv_until
+
+    ws, _ = prepared_voice
+    started, release = threading.Event(), threading.Event()
+    decoded, detected = [], []
+    transcriber = live_stt.create_persona_live_stt_transcriber(voice_runtime={"stt_model": "tiny.en"})
+    transcriber.config.partial_interval = 0
+
+    class Detector:
+        available = True
+
+        def observe(self, audio: bytes) -> bool:
+            detected.append(np.frombuffer(audio, dtype=np.float32).copy())
+            return len(detected) == 2
+
+        def reset(self) -> None:
+            pass
+
+    def initialize() -> None:
+        transcriber.model = object()
+        transcriber.min_chunk_duration = 1
+
+    def decode(audio: Any) -> str:
+        decoded.append(audio.copy())
+        started.set()
+        release.wait(3)
+        return "complete first turn" if len(audio) == 32000 else "old partial"
+
+    async def no_provider(**kwargs: Any) -> Any:
+        raise RuntimeError("Provider deliberately disabled in recognition test")
+
+    def wait_until(predicate: Any) -> None:
+        deadline = time.monotonic() + 2
+        while not predicate() and time.monotonic() < deadline:
+            time.sleep(0.005)
+        assert predicate()
+
+    def send_audio(samples: int, value: float, correlation: str) -> None:
+        ws.send_json(
+            {
+                "type": "audio_chunk",
+                "session_id": "voice-owned",
+                "client_message_id": correlation,
+                "audio_format": "pcm16",
+                "bytes_base64": base64.b64encode(np.full(samples, value * 16384, dtype=np.int16).tobytes()).decode(),
+            }
+        )
+
+    monkeypatch.setattr(transcriber, "initialize", initialize)
+    monkeypatch.setattr(transcriber, "_transcribe_audio", decode)
+    monkeypatch.setattr(persona_ep, "_create_persona_live_stt_transcriber", lambda **kwargs: transcriber)
+    monkeypatch.setattr(persona_ep, "_create_persona_live_turn_detector", lambda **kwargs: Detector())
+    monkeypatch.setattr(live_conversation, "complete_persona_turn", no_provider)
+    ws.send_json({"type": "voice_stop", "session_id": "voice-owned"})
+    _recv_until(ws, lambda value: value.get("reason_code") == "VOICE_STOPPED")
+    ws.send_json({"type": "voice_prepare", "session_id": "voice-owned"})
+    assert _recv_until(ws, lambda value: value.get("event") == "voice_readiness")["ready"]
+    try:
+        send_audio(16000, 0, "first")
+        assert started.wait(1)
+        send_audio(16000, 0, "boundary")
+        wait_until(lambda: transcriber.auto_commit_pending)
+        send_audio(4000, 1, "later")
+        wait_until(lambda: transcriber.buffer.get_duration() == 2.25)
+        release.set()
+        wait_until(lambda: not transcriber.recognition_pending)
+        send_audio(4000, 1, "later")
+        # This frame delivers the old partial and starts a final boundary decode.
+        wait_until(lambda: len(decoded) == 2 and not transcriber.recognition_pending)
+        send_audio(4000, 1, "later")
+        event = _recv_until(ws, lambda value: value.get("reason_code") == "VOICE_TURN_COMMITTED")
+        assert event["transcript"] == "complete first turn"
+        assert event["client_message_id"] == "boundary"
+        assert len(decoded[1]) == 32000 and not np.any(decoded[1])
+        send_audio(4000, 1, "next-turn")
+        wait_until(lambda: len(detected) == 3 and len(decoded) == 3 and not transcriber.recognition_pending)
+        assert np.array_equal(detected[-1], np.full(16000, 0.5, dtype=np.float32))
+        assert np.array_equal(decoded[-1], detected[-1])
+    finally:
+        release.set()
+        ws.send_json({"type": "voice_stop", "session_id": "voice-owned"})
+        _recv_until(ws, lambda value: value.get("reason_code") == "VOICE_STOPPED")
+        wait_until(lambda: not transcriber.recognition_pending)
+
+
+@pytest.mark.parametrize("disconnect", [False, True])
+def test_socket_control_does_not_wait_for_whisper_decode(
+    voice_socket: Any, monkeypatch: pytest.MonkeyPatch, disconnect: bool
+) -> None:
+    import base64
+    import threading
+    import time
+
+    from tldw_Server_API.app.core.Persona import live_conversation
+    from tldw_Server_API.tests.Persona.test_persona_ws import _recv_until
+
+    transcriber = live_stt.create_persona_live_stt_transcriber(voice_runtime={"stt_model": "tiny.en"})
+    started, release, retired = threading.Event(), threading.Event(), threading.Event()
+    model = object()
+
+    def initialize() -> None:
+        transcriber.model = model
+        transcriber.min_chunk_duration = 1
+
+    def decode(audio: Any) -> str:
+        started.set()
+        release.wait(3)
+        return "must not publish after Stop"
+
+    original_cleanup = transcriber.cleanup
+
+    def cleanup() -> None:
+        original_cleanup()
+        retired.set()
+
+    async def prepare_tts(runtime: Any) -> None:
+        pass
+
+    monkeypatch.setattr(transcriber, "initialize", initialize)
+    monkeypatch.setattr(transcriber, "_transcribe_audio", decode)
+    monkeypatch.setattr(transcriber, "cleanup", cleanup)
+    monkeypatch.setattr(live_conversation, "require_persona_voice_conversation_credentials", lambda: object())
+    monkeypatch.setattr(persona_ep, "_create_persona_live_stt_transcriber", lambda **kwargs: transcriber)
+    monkeypatch.setattr(persona_ep, "_create_persona_live_turn_detector", lambda **kwargs: None)
+    monkeypatch.setattr(persona_ep, "_prepare_persona_live_tts", prepare_tts)
+    voice_socket.send_json(
+        {"type": "voice_config", "session_id": "voice-owned", "stt": {"model": "tiny.en"}, "tts": {"provider": "tldw"}}
+    )
+    _recv_until(voice_socket, lambda value: value.get("reason_code") == "VOICE_CONFIG_UPDATED")
+    voice_socket.send_json({"type": "voice_prepare", "session_id": "voice-owned", "client_message_id": "prepare"})
+    assert _recv_until(voice_socket, lambda value: value.get("event") == "voice_readiness")["ready"]
+    try:
+        voice_socket.send_json(
+            {
+                "type": "audio_chunk",
+                "session_id": "voice-owned",
+                "client_message_id": "speech",
+                "audio_format": "pcm16",
+                "bytes_base64": base64.b64encode(b"\0\0" * 16000).decode(),
+            }
+        )
+        assert started.wait(1)
+        if disconnect:
+            voice_socket.close()
+        else:
+            voice_socket.send_json({"type": "voice_stop", "session_id": "voice-owned", "client_message_id": "stop"})
+        assert retired.wait(1), "Socket control waited for native recognition"
+        assert transcriber.model is model
+        assert transcriber.recognition_pending
+        if not disconnect:
+            _recv_until(voice_socket, lambda value: value.get("reason_code") == "VOICE_STOPPED")
+            voice_socket.send_json({"type": "voice_prepare", "session_id": "voice-owned", "client_message_id": "retry"})
+            assert (
+                _recv_until(voice_socket, lambda value: value.get("event") == "voice_readiness")["reason_code"]
+                == "VOICE_PREPARATION_BUSY"
+            )
+    finally:
+        release.set()
+        deadline = time.monotonic() + 2
+        while transcriber.recognition_pending and time.monotonic() < deadline:
+            time.sleep(0.005)
+        assert transcriber.model is None
+        assert transcriber.get_full_transcript() == ""
+
+
 @pytest.mark.parametrize("input_limit", [False, True])
 def test_real_transcription_failure_revokes_runtime_without_placeholder(
     prepared_voice: Any, monkeypatch: pytest.MonkeyPatch, input_limit: bool

@@ -64,3 +64,33 @@ Persona enables the existing local Whisper `vad_filter` independently of its tur
 Persona Whisper keeps one bounded turn and revises its full transcript. It does not concatenate five-second finalized text with a decoded overlap. The existing Whisper loader, speech filter and model selection are retained; the generic streaming endpoints and other Persona STT backends are unchanged. Reset/Stop clears the turn. The existing 30-second audio buffer bound becomes an explicit rejection before overflow, rather than silently dropping earlier audio. The browser receives an actionable shorter-turn retry message through the existing owned STT failure path. Full-buffer decoding trades additional work on long turns for coherent revisions within that bound.
 
 Real local-model probes rejected zero overlap: it stopped some duplicated words but corrupted boundary words. Textual suffix/prefix deduplication was rejected because repeated speech is valid. Timestamp-based fragment reconciliation remains an alternative for future long-form streaming, which is outside this bounded Persona conversation path.
+
+### Responsive Whisper ownership (TASK-13208)
+
+Whole-turn Whisper decoding runs outside the socket event loop. Audio ingestion
+returns promptly and coalesces incoming samples in the existing bounded turn
+buffer; each transcriber admits one decode at a time. The partial interval starts
+when inference completes, and unchanged audio is not decoded again. Completed
+snapshots are delivered on subsequent audio frames, retaining the existing manual
+commit contract: Send now commits the transcript currently shown.
+
+Automatic VAD commitment freezes the exact audio boundary and waits for its
+recognition snapshot, including utterances shorter than the partial-update
+minimum. Later audio stays within the same bounded buffer and is replayed once
+to the fresh transcriber turn and detector after automatic commitment. Manual
+commitment, Stop and session changes discard that carry. A VAD event cannot
+commit an older partial or combine speech from a later turn.
+
+Recognition reuses Chat's bounded task and owned-operation helpers, including a
+30-second deadline and reserved cleanup capacity. Reset invalidates publication
+authority without cancelling native inference. Stop/disconnect retire the
+transcriber immediately, but release its model only after its worker exits. A
+timeout or cancelled supervisor retains that ownership through the existing late
+cleanup path. Capacity rejection starts no decoder and reaches the existing STT
+failure response. No additional executor or unbounded per-frame task queue is
+introduced.
+
+Awaiting a thread directly in audio ingestion was rejected: it frees the event
+loop but still holds the socket receive loop, delaying Stop. Cancelling a thread
+future and immediately clearing its model was rejected because native inference
+may still be using it. Other speech backends and model selection are unchanged.

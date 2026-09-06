@@ -1,0 +1,40 @@
+"""Exercise normal Parakeet ONNX selection with local synthetic speech only."""
+import asyncio
+import json
+import subprocess
+import time
+from pathlib import Path
+
+import httpx
+import numpy as np
+from dotenv import dotenv_values
+from tldw_Server_API.app.core.Persona.live_stt import create_persona_live_stt_transcriber, persona_live_transcript_snapshot
+
+async def main():
+    env=dotenv_values('/private/tmp/migu-server-uat/runtime.env')
+    async with httpx.AsyncClient(timeout=60) as client:
+        response=await client.post('http://127.0.0.1:9101/api/v1/audio/speech',headers={'X-API-KEY':env['SINGLE_USER_API_KEY']},
+          json={'model':'kokoro','input':'Reply with the blue notebook is ready.','voice':'af_heart','response_format':'mp3'})
+        response.raise_for_status()
+    pcm=subprocess.run(['ffmpeg','-v','error','-i','pipe:0','-f','f32le','-ar','16000','-ac','1','pipe:1'],input=response.content,capture_output=True,check=True).stdout
+    audio=np.concatenate([np.frombuffer(pcm,dtype=np.float32),np.zeros(16000,dtype=np.float32)])
+    transcriber=create_persona_live_stt_transcriber(voice_runtime={'stt_model':'parakeet-onnx','stt_language':'en'})
+    await asyncio.to_thread(transcriber.initialize)
+    snapshots,latencies=[],[]
+    try:
+        for offset in range(0,len(audio),4096):
+            started=time.monotonic()
+            result=await transcriber.process_audio_chunk(audio[offset:offset+4096].tobytes())
+            latencies.append(round((time.monotonic()-started)*1000,3))
+            if result is not None:
+                snapshots.append(persona_live_transcript_snapshot(transcriber=transcriber,result=result))
+            await asyncio.sleep(0.256)
+        report={'microphone_used':False,'external_provider_used':False,'selection':'parakeet-onnx','device':'cpu',
+                'model':'istupakov/parakeet-tdt-0.6b-v3-onnx','snapshots':snapshots,'callback_duration_ms':latencies}
+        Path('/private/tmp/migu-voice-followup-20260906/parakeet-speech-result.json').write_text(json.dumps(report,indent=2)+'\n')
+        print(json.dumps(report),flush=True)
+        assert any('blue notebook is ready' in text.lower() for text in snapshots)
+    finally:
+        transcriber.cleanup()
+
+asyncio.run(main())
