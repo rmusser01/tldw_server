@@ -169,6 +169,37 @@ journal and lock; they do not introduce a reader journal or general outbox servi
 Implementation checkpoints are in
 `Docs/superpowers/plans/2026-09-05-reading-output-file-reservations.md`.
 
+### DB-backed report evidence amendment (2026-09-05)
+
+The user approved replacing newly generated Watchlists evidence sidecars with
+bounded immutable Collections snapshots, explicitly shared by output variants.
+The direction, lifecycle and compatibility were approved in conversation; the
+written specification awaits final user review before implementation planning:
+`Docs/superpowers/specs/2026-09-05-reading-report-evidence-database-design.md`.
+
+Link evidence through the authenticated user's exact output incarnation, not
+editable metadata filenames, numeric IDs alone, or inferred variant relationships.
+Publish the primary output, snapshot and link atomically using the existing DB
+fence and explicit connection. Later variants attach to the surviving snapshot;
+late completion cannot recreate evidence erased with its final owner.
+
+Soft-deleted outputs retain evidence. Hard deletion removes their links and deletes
+the snapshot only after the final reference disappears, in the same transaction.
+DB-backed evidence reads need no output-file volume and have no purge side effects.
+Persist finite evidence limits separately from file-staging policy, with unique
+retained snapshot bytes admitted under the same fence. No general quota service,
+additional file journal or per-output payload duplication is introduced.
+
+Preserve the evidence response schema; newly generated/migrated metadata no longer
+promises a JSON sidecar path. Legacy reconciliation is explicit, offline and
+dry-run-first, verifies unchanged files/records and same-user mappings, and leaves
+all source files intact. Missing or ambiguous evidence is not silently replaced
+with live data. Schema setup imports no files and activates no storage protocol.
+
+This supersedes the unresolved sidecar ownership choice in output-reservations
+Task 7, not the remaining all-writers/readers rollout requirements. It enables no
+capability and does not satisfy the human-written Change summary merge gate.
+
 ## Alternatives and consequences
 
 - Timestamp tokens fail to cover child-only writes and can collide.

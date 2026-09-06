@@ -211,6 +211,13 @@ verification, review and commit; neither enables rollout.
 
 ## Task 7: Text, briefing and Reading producer integration
 
+Evidence prerequisite: the user selected DB-backed immutable evidence and approved
+its lifecycle/compatibility. The written amendment is
+`Docs/superpowers/specs/2026-09-05-reading-report-evidence-database-design.md`;
+ADR-003 links it. Obtain written-spec approval and a bounded implementation plan
+before producer changes. The preflight inventory below remains the rollout checklist,
+not an assertion that its initial unresolved sidecar choice is still open.
+
 **Files:** Modify `tldw_Server_API/app/api/v1/endpoints/outputs.py`, `tldw_Server_API/app/api/v1/endpoints/watchlists.py`, `tldw_Server_API/app/services/outputs_service.py`, `tldw_Server_API/app/core/Collections/reading_service.py`; create `tldw_Server_API/tests/Collections/test_output_file_producers.py`; extend `tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py` and `tldw_Server_API/tests/Collections/test_reading_service.py`.
 
 - [ ] Trace every create/write/rename/unlink into the authoritative output root from these entry points. Record each caller and chosen shared boundary in the checkpoint. Include failed multi-variant generation and cancellation. Any additional writer found is a blocker until mapped/tested; do not claim the file list exhausts the repository.
@@ -1314,3 +1321,43 @@ Reading producer integration, including evidence-sidecar authority) is next;
 Tasks 8–10 and parent-plan rollout remain. No full sweep, Docker, worker registration,
 activation, capability advertisement or merge. Full TASK-13153 remains In Progress
 with ACs unchecked, draft PR #2903 and the human-written Change summary gate intact.
+
+### Task 7 preflight: producer inventory and unresolved authority (2026-09-05)
+
+Read-only tracing from checkpoint `6b1465607f` confirms that Task 7 needs its
+explicit evidence-sidecar design prerequisite before Watchlists integration.
+No producer code or runtime configuration changed during this preflight.
+
+| Surface | Observed current path | Required boundary / status |
+| --- | --- | --- |
+| Generic output generation | `endpoints/outputs.py:create_output` renders before admission, writes text/TTS files before row creation, and unlinks files during failed multi-variant cleanup | Reserved creation before rendering; existing journal for publication and failed-generation removal; audio adaptation belongs to Task 8 |
+| Watchlists output/briefing generation | `endpoints/watchlists.py:create_output` has its own file-first text/TTS persistence and cleanup | Same generic producer boundary, preserving metadata, retention, variants and Media ingestion |
+| Immutable report evidence | `_write_report_snapshot_for_user` writes JSON without an output/ownership record; `report_snapshot_path` is copied through report metadata, including variants | Storage and ownership choice still unresolved; activated reads intentionally remain 503 |
+| Reading archives | `ReadingArchiveService.create_archive_artifact` directly writes an archive before output insertion; `save_url` attaches parent metadata afterward | Existing item-owned reservation/write/adopt with exact revision, activation prerequisites and cancellation draining; no fake Reading parent |
+| Output content readers | Watchlist output content/download helpers already use protected response descriptors for activated output rows | Preserve these; sidecar reads cannot reuse metadata filenames as identity |
+| Media ingestion | `_ingest_output_to_media_db` consumes provided text, not an output pathname | Preserve cross-domain ownership; no new file reader needed for this helper |
+
+Additional confirmed top-level writers were found beyond Task 7's named files:
+
+- `core/Research_Workspace/output_jobs.py` writes bytes into the outputs root before
+  creating a Collections output; `_unlink_research_workspace_output_path` also
+  removes files directly. These are not covered by migrating the two HTTP producers.
+- `services/presentation_render_jobs_worker.py` supplies the outputs root to its
+  renderer, then creates a `presentation_render` output afterward. Renderer scratch
+  requirements and cancellation must be traced before admitting activated work.
+
+The root-usage scan also found Research artifact stores, generated-file storage,
+TTS jobs, Audio Studio, VN assets, Visual Identities, STT output policy and storage
+cleanup. Some use nested directories or a separate generated-file identity domain;
+root usage alone does not prove collision with flat Collections output paths.
+They still require explicit boundary classification and reader/writer tests before
+the approved all-writers activation contract can be considered complete. This is
+an inventory lead list, not a claim that every listed subsystem needs migration.
+
+Architectural decision pending: either retain evidence JSON files with explicit
+shared artifact/reference ownership and durable cleanup, or store bounded immutable
+evidence in Collections with relational links from output variants. Existing tests
+assert `.json` metadata paths, so a DB-backed choice also needs an explicit legacy
+compatibility/reconciliation policy; it is not a silent implementation detail.
+No choice has been approved or added to ADR-003 yet. Continue with that decision,
+then amend/review the design and implementation stages before producer changes.
