@@ -1398,6 +1398,12 @@ class SyncV2Store:
             server_sequence=server_sequence,
         )
 
+    def list_conflict_pinned_envelopes(self, dataset_id: str, *, limit: int = 1000) -> list[SyncEnvelope]:
+        return self.db.list_conflict_pinned_envelopes(dataset_id, limit=limit, connection=self._connection)
+
+    def envelope_is_conflict_pinned(self, dataset_id: str, envelope_id: str) -> bool:
+        return self.db.envelope_is_conflict_pinned(dataset_id, envelope_id, connection=self._connection)
+
     def get_envelope_by_server_cursor(self, server_cursor: int) -> SyncEnvelope | None:
         return self.db.get_envelope_by_server_cursor(
             server_cursor,

@@ -206,6 +206,10 @@ class PersonalContextError(RuntimeError):
     """Base error for canonical Personal Context operations."""
 
 
+class PersonalContextConflictInputError(PersonalContextError, ValueError):
+    """A reviewed conflict command fails canonical choice validation."""
+
+
 class PersonalContextActivationError(PersonalContextError, ValueError):
     """Base activation failure retaining compatibility with ValueError callers."""
 

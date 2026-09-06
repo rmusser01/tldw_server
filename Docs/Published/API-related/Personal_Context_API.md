@@ -160,6 +160,52 @@ Retries reuse exact receipts. Delivery baselines expire after 30 days; obtain a
 fresh baseline rather than acknowledging an expired one. Capability downgrade
 preserves stored work and acknowledgements while blocking version-one exchanges.
 
+### User-directed conflict decisions (ongoing-sync contract)
+
+The gated ongoing-sync contract uses the existing
+`POST /api/v1/sync/conflicts/resolve` batch endpoint. Neither peer selects a
+winner automatically. Each Personal Context item identifies the reviewed local
+and remote envelopes and has an immutable idempotency key; requests also carry
+the device's activation/continuity proof. A changed candidate requires fresh
+review, not a blind retry with new IDs.
+
+After linking, a client must not push its locally derived manifest. Such ingress
+is invalid, not a user-choice conflict: the server sequences the shared manifest
+from accepted semantic mutations. Initial-link reconciliation and server-issued
+manifest publications remain separate supported paths.
+
+A valid next-generation `personal_context.purge` request with stale Sync
+lineage is rejected with `personal_context_purge_reconfirmation_required`,
+`retryable=false`, and "Refresh Personal Context and explicitly reconfirm
+delete-everywhere." Refresh authoritative state and ask the user to explicitly
+confirm deletion again before creating a new signed request. Never automatically
+rebase deletion or send it to the ordinary conflict resolver. This rejection
+does not delete data or create a conflict candidate. A previously stored
+request remains eligible for recovery; exact retries remain supported. This
+does not complete the currently gated ongoing-ingress purge lifecycle.
+
+| User choice | Action | Reviewed replacement |
+| --- | --- | --- |
+| Keep shared values | `skip` | None |
+| Keep local values | `overwrite` | Explicit canonical target with selected local values |
+| Merge | `overwrite` | Explicit canonical target with user-reviewed merged values |
+| Keep both as distinct facts | `duplicate_rename` | New record ID and a noncolliding semantic key |
+
+If two independently created record IDs claim the same semantic key, keep-local
+or merge targets the established shared canonical record ID. The selected values
+win because the user chose them, not because they came from a particular peer.
+The losing incoming candidate is accounted for by the resolution receipt rather
+than installed as a duplicate active fact. Clients must construct that explicitly
+reviewed replacement; they must not expect the server to silently rewrite its ID.
+
+The server's internal safety bound is 1,000 active conflicts per profile, not
+1,000 lifetime decisions or a negotiated quota. When full, new conflicts remain
+retryable without evicting existing candidates. Resolution frees an active slot
+while preserving the exact decision receipt for retries.
+
+Until rollout advertises ongoing-sync version 1, these semantics describe the
+client integration contract, not an enabled end-to-end workflow.
+
 ## Transport deployment boundary
 
 Deploy non-loopback API access behind authenticated HTTPS. This is an operator

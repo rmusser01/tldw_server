@@ -167,6 +167,52 @@ def test_adapter_accepts_exact_canonical_whole_objects(domain: str) -> None:
     assert isinstance(result, AdapterAccepted)
 
 
+@pytest.mark.parametrize("head_generation", [0, 1])
+def test_stale_purge_lineage_requires_explicit_reconfirmation(head_generation: int) -> None:
+    """A valid next generation with obsolete lineage cannot enter ordinary review."""
+    domain = "personal_context.purge"
+    previous = _envelope(
+        domain, payload={"schema_version": 1, "profile_id": "profile-a", "purge_generation": head_generation}
+    )
+    head = SyncEnvelope(**{**asdict(previous), "server_cursor": 1, "envelope_id": "prior-purge"})
+    outcome = _adapter(domain).evaluate_envelope(
+        _envelope(domain, base_object_hash="hmac-sha256-v1:" + "0" * 64),
+        dataset=_dataset(),
+        context=SyncAdapterContext(prior_envelopes=(head,)),
+    )
+    assert isinstance(outcome, AdapterRejected)
+    assert outcome.error_code == "personal_context_purge_reconfirmation_required"
+    assert outcome.retryable is False
+    assert outcome.message == "Refresh Personal Context and explicitly reconfirm delete-everywhere."
+
+
+def test_purge_accepts_next_generation_with_current_lineage() -> None:
+    """Explicitly confirmed next-generation lineage retains normal adapter acceptance."""
+    domain = "personal_context.purge"
+    previous = _envelope(domain, payload={"schema_version": 1, "profile_id": "profile-a", "purge_generation": 0})
+    head = SyncEnvelope(**{**asdict(previous), "server_cursor": 1, "envelope_id": "prior-purge"})
+    outcome = _adapter(domain).evaluate_envelope(
+        _envelope(domain, base_object_hash=head.payload_hash),
+        dataset=_dataset(),
+        context=SyncAdapterContext(prior_envelopes=(head,)),
+    )
+    assert isinstance(outcome, AdapterAccepted)
+
+
+def test_invalid_purge_generation_precedes_stale_lineage_rejection() -> None:
+    """An invalid generation keeps its existing classification before lineage review."""
+    domain = "personal_context.purge"
+    previous = _envelope(domain)
+    head = SyncEnvelope(**{**asdict(previous), "server_cursor": 1, "envelope_id": "prior-purge"})
+    outcome = _adapter(domain).evaluate_envelope(
+        _envelope(domain, payload={"schema_version": 1, "profile_id": "profile-a", "purge_generation": 2}),
+        dataset=_dataset(),
+        context=SyncAdapterContext(prior_envelopes=(head,)),
+    )
+    assert isinstance(outcome, AdapterRejected)
+    assert outcome.error_code == "personal_context_purge_generation_invalid"
+
+
 @pytest.mark.parametrize("domain", PERSONAL_CONTEXT_SYNC_DOMAINS)
 def test_adapter_rejects_entity_version_outside_canonical_payload(domain: str) -> None:
     result = _adapter(domain).evaluate_envelope(

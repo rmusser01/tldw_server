@@ -55,6 +55,12 @@ class PersonalContextMaterializer:
         del guarded_mutation
         if envelope.domain != self.domain:
             return MaterializationResult(status="skipped")
+        if (
+            self.domain == "personal_context.manifest"
+            and envelope.authority is not None
+            and envelope.authority.role == "client_ingress"
+        ):
+            return self._fail(envelope, store, "personal_context_manifest_client_forbidden")
         if envelope.server_cursor is None:
             return MaterializationResult(
                 status="failed",

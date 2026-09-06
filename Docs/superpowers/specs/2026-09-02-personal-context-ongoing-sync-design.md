@@ -718,7 +718,14 @@ cannot durably pin another candidate, it stops before advancing the cursor and
 reports profile attention; it never drops the oldest unresolved candidate to
 make room silently.
 
-Every Personal Context push conflict must name and deliver the current
+The current server implementation also has an internal admission bound of 1,000
+active conflicts per profile. This is not a negotiated concurrent-conflict quota
+or a lifetime limit: resolved decisions leave the active set while their exact
+encrypted replay receipts remain available. Exhaustion leaves a new push
+retryable and preserves existing candidates; resolving a conflict frees an
+active slot. Existing negotiated envelope and batch limits still apply.
+
+Every Personal Context object push conflict must name and deliver the current
 canonical authority candidate. Before the server reports the conflict, it:
 
 1. Reads the exact canonical head through the Personal Context service.
@@ -734,6 +741,10 @@ the push item as terminally conflicted or retiring its staged retry. A pull-
 time conflict instead pins the incoming home-authority envelope before cursor
 advancement. Thus review never depends on a future pull or on an envelope that
 retention may already have removed.
+
+Delete-everywhere requests are control operations, not mergeable objects. A
+valid next-generation purge with stale Sync lineage is rejected as described
+under Delete everywhere below; it does not enter this candidate-review flow.
 
 User-facing actions map to the server contract as follows:
 
@@ -774,6 +785,15 @@ and noncolliding key.
 The merge editor uses typed fields rather than raw canonical JSON. Restrictive
 values win by default for delete, `user_only`, and other privacy-reducing
 controls; the user must explicitly choose a less restrictive result.
+
+User clarification (2026-09-05): deconfliction is explicitly user-directed;
+neither peer selects a winner automatically. When independently created IDs
+claim the same semantic key, keeping local values or a reviewed merge produces
+one fact under the established shared canonical ID, explicitly targeted by the
+reviewed replacement. The incoming duplicate candidate is terminally accounted
+for by the resolution receipt, not installed as a second active fact. Keeping
+both requires an explicit distinct-fact choice and a noncolliding key. Detecting
+the collision alone never authorizes an overwrite or deletion.
 
 Conflict pages contain at most 20 items. Labels are **Local version** and
 **Shared profile version**, not ambiguous client/server winner language.
@@ -885,6 +905,18 @@ stored in SyncState before readable profile keys or content are destroyed.
 The editor freezes while deletion is pending. Every Personal Context ingress,
 source-publication row, authority envelope, conflict candidate, and purge
 barrier carries an explicit purge generation.
+
+A valid next-generation purge whose Sync lineage is stale returns
+`personal_context_purge_reconfirmation_required` with `retryable=false` and
+the content-free message "Refresh Personal Context and explicitly reconfirm
+delete-everywhere." The client must refresh authoritative state and obtain a
+fresh explicit deletion confirmation before constructing a new signed request.
+It must not automatically rebase the request, choose a winner, or route deletion
+through ordinary profile conflict review. No purge object candidate is created.
+This rejection does not itself delete canonical data or advance its generation;
+an earlier durably stored request remains eligible for its own recovery.
+Exact idempotent retries of that earlier request remain supported, as do normal
+valid purges and the existing invalid-generation rejections.
 
 For purge ordering, "accepted" means that the canonical Personalization
 transaction committed, not merely that an ingress envelope became durable in
