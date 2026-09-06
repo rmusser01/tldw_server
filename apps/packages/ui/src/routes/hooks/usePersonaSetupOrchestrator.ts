@@ -690,12 +690,31 @@ export function usePersonaSetupOrchestrator(
       }
       setSetupWizardSaving(true)
       clearSetupStepError("persona")
-      const nextSetup = buildPersonaSetupInProgress("voice", ["persona"], {
-        runId: createSetupRunId(),
-      })
       try {
+        const profilePath = `/api/v1/persona/profiles/${encodeURIComponent(nextPersonaId)}`
+        const existingResponse = await tldwClient.fetchWithAuth(profilePath as any, { method: "GET" })
+        if (!existingResponse.ok) {
+          throw new Error(existingResponse.error || "Failed to load persona setup")
+        }
+        const existingProfile = (await existingResponse.json()) as PersonaProfileResponse
+        const existingSetup = existingProfile?.setup
+        if (
+          existingSetup?.status === "completed" ||
+          (existingSetup?.status === "in_progress" &&
+            existingSetup.current_step !== "persona" && existingSetup.current_step !== "archetype")
+        ) {
+          setSelectedPersonaId(nextPersonaId)
+          applyPersonaProfileResponse(existingProfile)
+          return
+        }
+        const nextSetup = buildPersonaSetupInProgress("voice", [
+          ...new Set<PersonaSetupStep>([...(existingSetup?.completed_steps || []), "persona"])
+        ], {
+          runId: existingSetup?.status === "in_progress" && existingSetup.run_id
+            ? existingSetup.run_id : createSetupRunId(),
+        })
         const response = await tldwClient.fetchWithAuth(
-          `/api/v1/persona/profiles/${encodeURIComponent(nextPersonaId)}` as any,
+          profilePath as any,
           { method: "PATCH", body: { setup: nextSetup } }
         )
         if (!response.ok) {

@@ -299,7 +299,7 @@ describe("BuddyShellPopover", () => {
     expect(screen.queryByRole("link", { name: "Listen" })).not.toBeInTheDocument()
   })
 
-  it("hides voice controls when the focused session is not voice-capable", () => {
+  it("offers exact-session voice setup when the focused session is not voice-capable", () => {
     renderPopover({
       liveControl: {
         sessions: [buildLiveSession()],
@@ -317,6 +317,9 @@ describe("BuddyShellPopover", () => {
       }
     })
 
+    expect(screen.getByRole("link", { name: "Set up voice" })).toHaveAttribute(
+      "href", "/persona?persona_id=persona-1&tab=live&session_id=live-session-1"
+    )
     expect(screen.queryByRole("link", { name: "Listen" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Stop listening" })).not.toBeInTheDocument()
   })

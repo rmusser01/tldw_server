@@ -1,0 +1,150 @@
+{
+  "synthetic_speech": "Reply with the blue notebook is ready.",
+  "microphone_used": false,
+  "external_provider_used": false,
+  "results": [
+    {
+      "leading_silence": 0,
+      "overlap": 0.5,
+      "final_snapshot": "Reply with the Blue Notebook is ready.",
+      "events": [
+        {
+          "at": 0.768,
+          "kind": "partial",
+          "text": "Reply with the blue...",
+          "snapshot": "Reply with the blue..."
+        },
+        {
+          "at": 1.28,
+          "kind": "partial",
+          "text": "Reply with the blue notebook.",
+          "snapshot": "Reply with the blue notebook."
+        },
+        {
+          "at": 1.792,
+          "kind": "partial",
+          "text": "Reply with the Blue Notebook is ready.",
+          "snapshot": "Reply with the Blue Notebook is ready."
+        }
+      ]
+    },
+    {
+      "leading_silence": 3.8,
+      "overlap": 0.5,
+      "final_snapshot": "Reply with the Blue Notebook is ready.",
+      "events": [
+        {
+          "at": 3.84,
+          "kind": "partial",
+          "text": "Rips.",
+          "snapshot": "Rips."
+        },
+        {
+          "at": 4.352,
+          "kind": "partial",
+          "text": "Reply with...",
+          "snapshot": "Reply with..."
+        },
+        {
+          "at": 4.864,
+          "kind": "partial",
+          "text": "Reply with the blue note.",
+          "snapshot": "Reply with the blue note."
+        },
+        {
+          "at": 5.376,
+          "kind": "partial",
+          "text": "Reply with the blue notebook as red.",
+          "snapshot": "Reply with the blue notebook as red."
+        },
+        {
+          "at": 5.888,
+          "kind": "partial",
+          "text": "Reply with the Blue Notebook is ready.",
+          "snapshot": "Reply with the Blue Notebook is ready."
+        }
+      ]
+    },
+    {
+      "leading_silence": 4.3,
+      "overlap": 0.5,
+      "final_snapshot": "Reply with the Blue Notebook is ready.",
+      "events": [
+        {
+          "at": 4.352,
+          "kind": "partial",
+          "text": "Rips.",
+          "snapshot": "Rips."
+        },
+        {
+          "at": 4.864,
+          "kind": "partial",
+          "text": "Reply with...",
+          "snapshot": "Reply with..."
+        },
+        {
+          "at": 5.376,
+          "kind": "partial",
+          "text": "Reply with the blue note.",
+          "snapshot": "Reply with the blue note."
+        },
+        {
+          "at": 5.888,
+          "kind": "partial",
+          "text": "Reply with the blue notebook as red.",
+          "snapshot": "Reply with the blue notebook as red."
+        },
+        {
+          "at": 6.4,
+          "kind": "partial",
+          "text": "Reply with the Blue Notebook is ready.",
+          "snapshot": "Reply with the Blue Notebook is ready."
+        }
+      ]
+    },
+    {
+      "leading_silence": 4.8,
+      "overlap": 0.5,
+      "final_snapshot": "Reply with the Blue Notebook is ready.",
+      "events": [
+        {
+          "at": 4.864,
+          "kind": "partial",
+          "text": "Rips.",
+          "snapshot": "Rips."
+        },
+        {
+          "at": 5.376,
+          "kind": "partial",
+          "text": "reply with",
+          "snapshot": "reply with"
+        },
+        {
+          "at": 5.888,
+          "kind": "partial",
+          "text": "Reply with the blue note.",
+          "snapshot": "Reply with the blue note."
+        },
+        {
+          "at": 6.4,
+          "kind": "partial",
+          "text": "Reply with the blue notebook as red.",
+          "snapshot": "Reply with the blue notebook as red."
+        },
+        {
+          "at": 6.912,
+          "kind": "partial",
+          "text": "Reply with the Blue Notebook is ready.",
+          "snapshot": "Reply with the Blue Notebook is ready."
+        }
+      ]
+    }
+  ],
+  "clock": "simulated 256 ms audio callback cadence; real local model decoding",
+  "base_revision": "f71d593e6701ef2e4f8fdfec26f2be09b5ca64ef",
+  "source_hashes": {
+    "tldw_Server_API/app/api/v1/endpoints/persona.py": "bd1a82991f78022987d1549579d45d829375ad5de1384d222c9e3947c13812c8",
+    "tldw_Server_API/app/core/Persona/whisper_transcriber.py": "f8df11413f8d18256d7dfde893c3564d493a97b1cf94f2b4d24a12e2a8f0a737",
+    "tldw_Server_API/app/core/Persona/live_voice_runtime.py": "ea25af86b1f9ddaae46e908230b07d70dac13640d8627718baa34757c286aaaa"
+  }
+}

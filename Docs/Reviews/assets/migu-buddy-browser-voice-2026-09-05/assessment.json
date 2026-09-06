@@ -1,0 +1,39 @@
+{
+  "revision": "9ffa9a272eeec8b8ac98917aead33572f1186ee0",
+  "session_id": "68706cce-fd59-4afc-a620-65a0c8d4f248",
+  "persona_id": "e19c631e-e2ac-452d-9935-293af03cee4e",
+  "browser": "Codex in-app browser",
+  "url": "http://127.0.0.1:18384/persona",
+  "frontend_source_hashes": {
+    "apps/packages/ui/src/hooks/usePersonaLiveVoiceController.tsx": "9b9ad91d5b971c82c013d6f1ac98ee8f62d1c74669ca69e02e184a9c7aef80b1",
+    "apps/packages/ui/src/hooks/useMicStream.ts": "c91d2a1d22ae6c25c89a0b816a02d4d0c4a9fb029467217e6e3907942e34b92e",
+    "apps/packages/ui/src/hooks/useStreamingAudioPlayer.tsx": "fe561f8af14be055b20061bb00db7f0d8542d3f2754f54788d779741386de8b2",
+    "apps/packages/ui/src/routes/hooks/usePersonaIncomingPayload.ts": "abc3312ed16d3b51a7a66a9fc4960fd90dcbc76f6bd97703261b2ba4238356f6",
+    "apps/packages/ui/src/components/Common/PersonaBuddy/BuddyShellPopover.tsx": "f81fc9ef5bb96f3cf8a55d282997090e7de73153bc06e45a6a670d55e8245828"
+  },
+  "settings": {
+    "stt_model": "tiny.en",
+    "language": "en",
+    "tts_provider": "tldw",
+    "voice": "af_heart",
+    "auto_resume": false,
+    "auto_commit": false
+  },
+  "microphone_started": true,
+  "observed_states": [
+    "preparing",
+    "listening",
+    "thinking",
+    "speaking",
+    "idle"
+  ],
+  "manual_send_clicked": true,
+  "provider_reply_received": true,
+  "tts_chunk_notices": 16,
+  "disconnected_after_playback": true,
+  "human_playback_confirmation": "Yes, clearly.",
+  "human_repetition_confirmation": "I said it once.",
+  "transcript_repetition_observed": true,
+  "false_manual_mode_warning_observed": true,
+  "acceptance": "partial: real human speech/provider/playback passed; transcript integrity failed"
+}

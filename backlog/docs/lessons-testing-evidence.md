@@ -238,3 +238,15 @@ DB initialization failed on every retry. A real factory regression reproduced
 the conflict; an explicit include-deleted lookup preserved the user's tombstone
 and restored startup. Test both deletion after seeding and deleted user content
 that predates the seed.
+
+
+## Reload and reselect after completing setup
+
+**Incident (TASK13203, 2026-09-05):** Migu browser UAT successfully finished
+setup through a real provider reply, then reloading and selecting the saved
+Persona overwrote completion and sent the user back to Voice defaults.
+
+**Evidence and rule:** Reading existing setup before initializing it preserved
+completion and saved speech defaults in the same reload/reselection flow.
+Include a fresh-page return to a completed profile in setup acceptance; the
+initial success screen cannot prove that subsequent selection preserves it.

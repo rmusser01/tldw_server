@@ -226,6 +226,9 @@ Common client frame types include:
 
 - `user_message`: send a text turn.
 - `voice_config`: update voice runtime settings for a session.
+- `voice_prepare`: initialize the selected speech services before capturing audio.
+- `voice_stop`: release this connection's prepared speech runtime.
+- `cancel`: cancel active and queued turns for the owned session.
 - `wake_activation` and `wake_deactivation`: manage manually armed wake phrase state.
 - `voice_commit`: commit a transcript as a Persona Live turn.
 - `audio_chunk`: send bounded audio chunks for live STT/TTS handling.
@@ -235,6 +238,7 @@ Common client frame types include:
 Common server events include:
 
 - `notice`: status, warning, error, and recovery messages.
+- `voice_readiness`: correlated preparation result; capture may begin only when `ready` is true.
 - `tool_plan`: proposed tool plan requiring client confirmation when needed.
 - `tool_call` and `tool_result`: tool execution lifecycle.
 - `assistant_delta`: assistant text output.
@@ -242,6 +246,38 @@ Common server events include:
 
 The stream enforces feature flags, authentication, policy checks, tool
 confirmation, audio limits, and rate limits.
+
+### Preparing local voice
+
+Open the exact Buddy session in Full Live and choose Start. Preparation checks
+the configured Chat provider and initializes the selected STT and TTS models
+before the browser requests microphone access. The initial qualified speech path
+uses local Whisper and Kokoro. Other selections return setup feedback when they
+cannot be prepared; no substitute transcript or audio is generated.
+
+WebSocket clients send `voice_config`, then `voice_prepare` with a unique
+`client_message_id`. Wait for the matching `voice_readiness` event. Supply a
+supported Whisper model size (for example `tiny.en`) and `tts.provider` set to
+`kokoro` (or its `tldw` alias). The server must have the selected models and a
+usable default Chat provider with server-configured credentials. This preparation
+check does not yet qualify user/team/organization BYOK credentials for voice.
+A failed preparation does not authorize
+capture. The WebUI cancels a preparation that exceeds its 30-second wait and
+offers retry guidance.
+
+Voice readiness belongs to the connection and session. Session summaries report
+`capabilities.voice=true` only while an owned runtime is prepared. Stop, changes
+to voice settings, runtime failures and disconnect invalidate readiness. REST
+session Stop also notifies the connected client so it can release its microphone
+and playback. Pending microphone permission responses cannot restart capture
+after Stop or navigation.
+
+Typed turns on one connection execute in session order. Explicit cancellation
+invalidates both active and queued turns; a later send can start even when a
+provider delays cancellation. Clients match transcript, readiness and TTS events
+to the current session and request, and consume binary audio only after the
+matching `tts_audio` metadata. Full Live stops on playback failure and offers a
+retry rather than silently resuming recording.
 
 ## State, Memory, and Exemplars
 
@@ -411,3 +447,24 @@ explicitly activate a valid pack.
 - `Docs/Code_Documentation/Persona_Visual_Packs.md` - Persona Visual Pack ownership, activation, import/export, and renderer notes.
 - `Docs/User_Guides/WebUI_Extension/Persona_Live_Wake_Phrases.md` - wake phrase behavior in the WebUI/extension surfaces.
 - `Docs/Operations/Persona_Memory_ChaCha_Cutover_Rollback_Runbook_2026_02_22.md` - memory cutover and rollback notes.
+
+
+Persona Live shows provisional recognition under **Last heard**. Recognition may
+revise those words as more speech arrives; the conversation transcript records
+the committed utterance once. With Auto-commit off, use **Send now** when finished.
+Choosing manual control does not indicate a VAD failure or a stalled automatic
+turn. **Send now** is available only while the current voice turn is listening
+and has recognized speech. Sending consumes that turn once; stopping, finishing,
+or disconnecting disables the button even though **Last heard** remains visible.
+
+### Voice recording rate limits
+
+Persona accepts up to 300 audio chunks per rolling minute by default, enough for the browser microphone cadence. Operators can override `PERSONA_AUDIO_CHUNKS_PER_MINUTE` (1–1200); a lower setting can interrupt continuous browser capture. If this limit is reached, the browser stops recording and asks you to wait one minute before retrying **Start listening**. **Send now** commits recognized speech; **Stop voice** cancels the turn.
+
+Persona Whisper uses local speech filtering to reduce words inferred from silence. This remains enabled when Auto-commit is off: the filter decides which audio contains speech, while **Send now** still decides when to submit the turn. Filtering reduces silence hallucinations but does not guarantee perfect recognition.
+
+Persona Whisper revises the complete current spoken turn so words crossing an internal decode boundary are not appended twice. Keep each turn within 30 seconds, including silence. If that buffer fills, voice stops with a shorter-turn retry message. **Send now** submits the turn; a new Start begins with a fresh transcript.
+
+Changing Persona through setup or Live ends the former connection and clears its resume selection, transcript and pending approvals. Use **Connect** to begin a session for the newly selected Persona. Previously saved setup and voice defaults remain available.
+
+Use **Refresh catalog** to reload bundled Buddy choices. If loading fails, **Retry catalog** repeats the read without copying, activating, or replacing the current pack. The button is disabled during the request. Voice preparation currently requires server-configured credentials for the default Chat provider; user/team/organization BYOK-only credentials are not qualified by this voice preflight.
