@@ -147,3 +147,34 @@ unqualified because “Say” was recognized as “See.” No raw human audio wa
 so this receipt alone cannot distinguish an acoustic/model error from submission
 timing. Floating Buddy intermediate states were not observed. TASK-13202 remains
 open. [Source-bound human receipt](assets/migu-parakeet-turn-2026-09-06/human-retry.json).
+
+## Visual follow-up and PR verification
+
+A later user-controlled turn on backend `cdf099fff7` recognized “Say the blue
+notebook is ready.” once, received “The blue notebook is ready.” and four TTS
+chunks, then returned to idle. The requester reported “Done; the reply finished.”
+This successful phrase does not erase the preceding Say/See accuracy failure.
+
+The floating visual check did **not** pass. Between 16:47:07 and 16:47:15 UTC,
+the loaded idle image disappeared with “Visual pack did not load — rate_limited.”
+Backend access metadata shows visual-pack list/detail and live-session list
+requests roughly every 250 ms before HTTP 429. Changing blob URLs alone is not
+evidence of a refetch: normal animation can cycle cached frames. The repeated
+API calls establish a separate load problem, but its initiating trigger remains
+unproven. Source inspection and independent review did not justify a lifecycle
+repair. TASK-13211 records the investigation; TASK-13202 AC3 remains open.
+
+After rebasing onto `dev` at `c5b777e9ba`, HMR reloaded the frontend. Reconnecting
+restored the loaded idle image. Repeated screenshot sampling and one real text
+provider reply did not reproduce the request loop. No new human voice sequence
+was observed during that follow-up, so listening/thinking/speaking/idle transitions
+remain unqualified. The running backend retained its recorded pre-rebase revision;
+rebasing did not alter the voice implementation.
+
+Fresh post-rebase verification passed **189 targeted Python tests** and **129
+frontend tests** (BuddyShellHost and Persona route). Ruff passed the nine scoped
+transcriber/runtime test files; Bandit found zero issues across the six changed
+production Python files. No full test sweep was run. Previously linked sanitized
+JSON receipts are explicitly staged despite the repository-wide JSON ignore rule.
+
+[Sanitized visual observations and request metadata](assets/migu-parakeet-turn-2026-09-06/visual-follow-up.json).
