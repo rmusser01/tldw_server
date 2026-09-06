@@ -2815,6 +2815,29 @@ class CollectionsDatabase:
             (),
             connection=connection,
         )
+        columns = (
+            self.backend.get_table_info("output_file_operations", connection=connection)
+            if prefix
+            else self.backend.execute("PRAGMA table_info(output_file_operations)", (), connection=connection).rows
+        )
+        present = {row["name"] for row in columns}
+        for name, definition in (
+            ("history_attempts", "INTEGER NOT NULL DEFAULT 0 CHECK (history_attempts >= 0)"),
+            ("history_retry_after", "BIGINT NOT NULL DEFAULT 0 CHECK (history_retry_after >= 0)"),
+            ("history_error", "TEXT CHECK (length(history_error) <= 64)"),
+        ):
+            if name not in present:
+                self.backend.execute(
+                    f"ALTER TABLE {prefix}output_file_operations ADD COLUMN {name} {definition}",  # nosec B608: fixed identifiers/definitions
+                    (),
+                    connection=connection,
+                )
+        self.backend.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_output_history_due ON {prefix}output_file_operations"  # nosec B608: fixed schema identifier
+            "(user_id, storage_namespace_id, history_retry_after) WHERE fs_done = 1 AND effects_pending > 0",
+            (),
+            connection=connection,
+        )
         self.backend.execute(
             f"CREATE INDEX IF NOT EXISTS idx_output_file_operations_due ON {prefix}output_file_operations(user_id, storage_namespace_id, fs_done, retry_after)",  # nosec B608: fixed schema identifier
             (),
@@ -3570,6 +3593,67 @@ class CollectionsDatabase:
             (token, self.user_id, storage_namespace_id),
             connection=connection,
         )
+
+    def list_due_output_history_operations(self, storage_namespace_id: str, *, limit: int = 20) -> list[str]:
+        """Select history-only work independently of filesystem retry/health."""
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("output_operation_invalid")
+        now = int(datetime.now(timezone.utc).timestamp())
+        return [
+            row["token"]
+            for row in self.backend.execute(
+                "SELECT token FROM output_file_operations WHERE user_id = ? AND storage_namespace_id = ? "
+                "AND fs_done = 1 AND phase = 'committed' AND effects_pending > 0 AND history_retry_after <= ? "
+                "ORDER BY history_retry_after, token LIMIT ?",
+                (self.user_id, storage_namespace_id, now, limit),
+            ).rows
+        ]
+
+    def get_due_output_history_operation(self, token: str, storage_namespace_id: str) -> dict[str, Any] | None:
+        """Recheck delivery eligibility; never inspect current outputs or paths."""
+        now = int(datetime.now(timezone.utc).timestamp())
+        return self.backend.execute(
+            "SELECT token, effects_json, effects_pending, original_json FROM output_file_operations "
+            "WHERE token = ? AND user_id = ? AND storage_namespace_id = ? AND fs_done = 1 "
+            "AND phase = 'committed' AND effects_pending > 0 AND history_retry_after <= ?",
+            (token, self.user_id, storage_namespace_id, now),
+        ).first
+
+    def record_output_history_failure(self, token: str, storage_namespace_id: str, category: str) -> None:
+        """Back off transient delivery failures without unblocking operator-only work."""
+        if category not in {"output_history_invalid", "output_history_unavailable"}:
+            raise ValueError("output_operation_invalid")
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            row = self.backend.execute(
+                "SELECT history_attempts FROM output_file_operations WHERE token = ? AND user_id = ? "
+                "AND storage_namespace_id = ? AND fs_done = 1 AND phase = 'committed' AND effects_pending > 0 "
+                "AND (history_error IS NULL OR history_error <> 'output_history_invalid')",
+                (token, self.user_id, storage_namespace_id),
+                connection=conn,
+            ).first
+            if row is None:
+                return
+            retry = (
+                2**63 - 1
+                if category == "output_history_invalid"
+                else (
+                    int(datetime.now(timezone.utc).timestamp()) + min(3600, 60 * 2 ** min(row["history_attempts"], 6))
+                )
+            )
+            self.backend.execute(
+                "UPDATE output_file_operations SET history_attempts = ?, history_retry_after = ?, history_error = ? "
+                "WHERE token = ? AND user_id = ? AND storage_namespace_id = ?",
+                (
+                    min(row["history_attempts"] + 1, 2147483647),
+                    retry,
+                    category,
+                    token,
+                    self.user_id,
+                    storage_namespace_id,
+                ),
+                connection=conn,
+            )
 
     def ack_output_file_effect(
         self, token: str, storage_namespace_id: str, effect_kind: str, *, connection: Any | None = None
@@ -6098,6 +6182,7 @@ class CollectionsDatabase:
         chatbook_path: str | None = None,
         retention_until: str | None = None,
         idempotency_key: str | None = None,
+        connection: Any | None = None,
     ) -> CollectionsDatabase.OutputArtifactRow:
         now = _utcnow_iso()
         resolved_storage_path = self.resolve_output_storage_path(storage_path)
@@ -6123,7 +6208,7 @@ class CollectionsDatabase:
             normalized_idempotency_key,
             uuid4().hex,
         )
-        with self.transaction() as conn:
+        with self.transaction() if connection is None else contextlib.nullcontext(connection) as conn:
             self._lock_reading_revision_clock(conn)
             self._assert_output_path_not_reserved(resolved_storage_path, conn)
             if normalized_idempotency_key is not None:
@@ -6146,6 +6231,21 @@ class CollectionsDatabase:
                 raise DatabaseError("Failed to create output artifact")
             self._assert_output_file_claims(conn, output_id=new_id)
             return self.get_output_artifact(new_id, connection=conn)
+
+    def create_output_artifact_with_history_identity(
+        self, **kwargs: Any
+    ) -> tuple[CollectionsDatabase.OutputArtifactRow, str]:
+        """Capture internal history identity in the creation transaction, never by a later ID lookup."""
+        with self.transaction() as conn:
+            output = self.create_output_artifact(connection=conn, **kwargs)
+            identity = self.backend.execute(
+                "SELECT file_incarnation FROM outputs WHERE id = ? AND user_id = ?",
+                (output.id, self.user_id),
+                connection=conn,
+            ).scalar
+            if not isinstance(identity, str) or re.fullmatch(r"[0-9a-f]{32}", identity) is None:
+                raise RuntimeError("output_history_identity_unavailable")
+            return output, identity
 
     def get_output_artifact_by_idempotency_key(
         self,

@@ -431,6 +431,71 @@ class OutputFileOperations:
             counts[status] += 1
         return counts
 
+    async def deliver_history_due(self, media_db, *, limit: int = 20) -> dict[str, int]:
+        """Deliver committed effects without storage exclusion or live-output lookup.
+
+        The receiver must not carry an enclosing transaction: acknowledgement
+        follows its independent commit. Concurrent deliveries are safe replays.
+        Runtime lifecycle/factory wiring remains a separate activation step.
+        """
+        try:
+            tokens = await asyncio.to_thread(self.db.list_due_output_history_operations, self.namespace, limit=limit)
+        except (DatabaseError, OSError):
+            raise RuntimeError("output_history_unavailable") from None
+        counts = {"delivered": 0, "blocked": 0, "retry": 0, "skipped": 0}
+        for token in tokens:
+            with anyio.CancelScope(shield=True):
+                status, cancelled = await _wait_worker(partial(self._deliver_history_one, token, media_db))
+            if cancelled:
+                raise asyncio.CancelledError
+            await anyio.lowlevel.checkpoint_if_cancelled()
+            counts[status] += 1
+        return counts
+
+    def _deliver_history_one(self, token: str, media_db) -> str:
+        try:
+            row = self.db.get_due_output_history_operation(token, self.namespace)
+            if row is None:
+                return "skipped"
+            try:
+                effects = json.loads(row["effects_json"])
+                original = json.loads(row["original_json"])
+                if (
+                    not isinstance(effects, list)
+                    or len(effects) != 1
+                    or row["effects_pending"] != 1
+                    or not isinstance(effects[0], dict)
+                    or not isinstance(original, dict)
+                    or set(effects[0]) != {"kind", "incarnation", "deleted_at", "acknowledged"}
+                    or effects[0]["kind"] != "dispose_history"
+                    or effects[0]["acknowledged"] is not False
+                    or effects[0]["incarnation"] != original.get("incarnation")
+                ):
+                    raise ValueError("output_history_invalid")
+                effect = effects[0]
+            except (TypeError, ValueError):
+                raise ValueError("output_history_invalid") from None
+            if media_db._get_txn_conn() is not None:
+                raise RuntimeError("output_history_unavailable")
+            media_db.dispose_tts_output_instance(
+                user_id=self.db.user_id,
+                output_incarnation=effect["incarnation"],
+                disposal_token=token,
+                deleted_at=effect["deleted_at"],
+            )
+            acknowledged = self.db.ack_output_file_effect(token, self.namespace, "dispose_history")
+            return "delivered" if acknowledged else "skipped"
+        except ValueError:
+            category = "output_history_invalid"
+        except Exception:  # noqa: BLE001 - external receiver/ack failures retain durable delivery
+            category = "output_history_unavailable"
+        try:
+            self.db.record_output_history_failure(token, self.namespace, category)
+        except Exception:  # noqa: BLE001 - never expose receiver/database details
+            raise RuntimeError("output_history_unavailable") from None
+        logger.warning("Output history delivery deferred: {}", category)
+        return "blocked" if category == "output_history_invalid" else "retry"
+
     def _recover_one(self, token: str) -> str:
         try:
             with _validated_storage_directory(self.output_root, storage_namespace_id=self.namespace) as (_, directory):

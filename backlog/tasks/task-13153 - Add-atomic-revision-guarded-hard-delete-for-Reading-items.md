@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-03 02:27'
-updated_date: '2026-09-06 01:22'
+updated_date: '2026-09-06 01:58'
 labels:
   - collections
   - reading-list
@@ -52,11 +52,13 @@ diagnostic-privacy behavior are covered.
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-ADR required: yes; ADR path: backlog/decisions/003-reading-atomic-hard-delete.md. Approved output-file-reservations plan continues inline. Task 5a receiver foundation verified: Media v27 original-instance live/disposed receiver, both migrations, late-insert and reused-ID/user isolation, first disposal evidence, caller transaction ownership including mixed legacy inserts, optional/partial schema recovery and SQLite pooled-handle migration fix. Verification: 34 real SQLite/PostgreSQL receiver cases, 97 existing local schema/history/purge cases, 5 required PostgreSQL schema cases and 62 TTS consumer cases passed (198 distinct); no required backend skips. Scoped static/security checks pass with one unchanged SQLite bootstrap I001 baseline. Independent review transaction finding reproduced RED and fixed; follow-up cleared it. Next Task 5b: RED post-fs_done outage/lost-ack/recycled-ID tests, original-incarnation capture at TTS producer time, bounded durable delivery outside filesystem exclusion, independent backoff and conditional acknowledgement. No runtime activation, full sweep, Docker or merge. Full task In Progress, ACs unchecked, PR 2903 draft; human Change summary gate pending.
+ADR required: yes; existing backlog/decisions/003-reading-atomic-hard-delete.md applies. Task 5a and Task 5b are verified; detailed evidence is in Docs/superpowers/plans/2026-09-05-reading-output-file-reservations.md. Commit and push the Task 5b checkpoint to draft PR #2903, then continue Task 6 inline: RED full-dispatch output PATCH/deletion/retention tests, shared activated file-operation routing with existing auth/metadata semantics, bounded SQLite/PostgreSQL verification and read-only review. Tasks 7-8 producer routing and Task 9 offline reconciliation/background activation remain pending. No full sweep, Docker, activation or merge; task In Progress, full ACs unchecked, human Change summary gate pending.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
 Task 5a checkpoint: implemented and independently reviewed original-instance Media history disposal receiver, schema v27 migrations and transaction ownership fixes. Existing ADR-003 applies; detailed evidence and remaining Task 5b are in Docs/superpowers/plans/2026-09-05-reading-output-file-reservations.md. Targeted evidence: 198 distinct passing cases across receiver, migration, history, TTS worker/endpoint/cleanup and pagination suites; 22 real PostgreSQL cases included, none skipped in their final required-backend runs. Production Bandit zero findings/errors; test Bandit excludes only assertions; changed-range Black/compile/diff checks pass. No new Ruff findings; one unchanged SQLite bootstrap import-order baseline remains. No activation or full-task completion claimed.
+
+Task 5b checkpoint: added bounded, filesystem-independent delivery of original-instance history effects with separate backoff/operator blocks, cancellation draining, replay-safe acknowledgement and retirement. TTS jobs capture incarnation through one creation transaction without public DTO changes; synchronous speech remains storage-file-ID-only. Independent review exposed a PostgreSQL nested-connection gap; real RED rollback/NOWAIT fence regressions now pass with explicit connection reuse. Existing ADR-003 applies; plan and testing lesson updated. Fresh targeted verification: 340 distinct passes (191 SQLite/non-PostgreSQL, 18 PostgreSQL sender, 131 PostgreSQL journal/recovery/receiver), with only complementary backend-specific skips. Changed-scope formatting, compile/diff checks and Bandit pass; no new Ruff findings, baseline 9 adapter + 1 worker-test warnings unchanged. No Docker, full sweep, activation or merge. Next is Task 6 PATCH/deletion/retention integration; full task stays In Progress with ACs unchecked and human Change summary pending.
 <!-- SECTION:NOTES:END -->

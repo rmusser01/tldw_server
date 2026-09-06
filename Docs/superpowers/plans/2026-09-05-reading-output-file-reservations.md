@@ -16,7 +16,7 @@
 opened at `f43549c209` on user request; implementation continues on the same branch).
 **Approved spec:** `Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md`, user approved after checkpoint `8dc255fcca`.
 **Parent plan:** `Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md`; this plan replaces its generic-file-writer gap, not its remaining Reading DTO/HTTP/reconciliation/release tasks.
-**Status:** Inline execution in progress. Task 1, Task 2a, Task 2b, Task 3a staging/write and Task 3b's recorded commit, copy/publication, recovery and real-process kill/progress checkpoints verified on SQLite/PostgreSQL. Immediate post-commit cleanup reuses recovery under publication exclusion. Task 4a descriptor responses, Task 4b protected generic downloads and Task 4c registered Watchlist readers are implemented; checkpoint verification is recorded below. Unregistered evidence sidecars remain blocked for activated reads pending producer/reconciliation provenance. History/producer integration and Task 9 background lifecycle/activation remain pending.
+**Status:** Inline execution in progress. Task 1, Task 2a, Task 2b, Task 3a staging/write and Task 3b's recorded commit, copy/publication, recovery and real-process kill/progress checkpoints verified on SQLite/PostgreSQL. Immediate post-commit cleanup reuses recovery under publication exclusion. Task 4a descriptor responses, Task 4b protected generic downloads and Task 4c registered Watchlist readers are implemented; checkpoint verification is recorded below. Task 5a history receiver and Task 5b sender/creation-time identity are verified. Unregistered evidence sidecars remain blocked for activated reads pending producer/reconciliation provenance. Tasks 6–8 end-to-end mutation/producer integration and Task 9 background lifecycle/activation remain pending.
 
 ---
 
@@ -184,12 +184,16 @@ Additional files: `tldw_Server_API/tests/DB_Management/test_output_history_recei
 - [x] Receiver relation uses explicit `live`/`disposed` state. Disposal transaction inserts a disposed row if absent, or atomically transitions an existing live row to disposed, recording the first disposal token/timestamp; already-disposed replays preserve that evidence. Then clear links only for the same user's matching incarnation. History creation inserts/locks that same keyed receiver row before checking disposal state and holds that lock through its history insert; disposed instances always produce cleared links. Never resurrect disposed. Test history creation → disposal → delayed history insertion, and both concurrent commit orders, including an existing live receiver row.
 - [x] Preserve caller transaction ownership for explicit connections and implicit nested legacy inserts. Review, targeted verification and security evidence are recorded below.
 
-### Task 5b: Sender delivery and producer capture (next)
+### Task 5b: Sender delivery and producer capture (verified checkpoint)
 
-- [ ] Add RED tests for post-fs_done Media outage, acknowledgement lost after successful update, newer file/path/ID reuse, and history insertion arriving after deletion delivery. Run `python -m pytest tldw_Server_API/tests/Collections/test_output_file_history_delivery.py -q`.
-- [ ] TTS callers capture the internal incarnation when the output is produced, not by fetching a potentially recycled ID later. Pass it only internally to history creation. Non-output file-ID history remains unchanged. If an old activated association lacks proven incarnation, leave a sanitized blocked-delivery effect; do not guess. Offline activation reconciles existing known output/history links with writers stopped and leaves ambiguity explicit.
-- [ ] At logical output commit record a bounded `dispose_history` effect with token, incarnation and fixed timestamp. File recovery marks fs_done/releases claims without Media access. Delivery pass processes fs_done effects outside the OS lock; stable receiver identity makes newer output updates safe. Acknowledge conditionally only after receiver commit; retire only after all bounded effects acknowledge. Separate backoff/status from filesystem health. Preserve tombstones while delayed history writers could still reference an old incarnation; no age-only retirement.
-- [ ] Run new delivery tests and `python -m pytest tldw_Server_API/tests/DB_Management/test_media_db_tts_history_ops.py tldw_Server_API/tests/TTS_NEW/integration/test_tts_history_artifact_purge.py -q`. Test migration twice and disposal/late-insert commit orders on real SQLite/PostgreSQL. Review/commit: `fix(outputs): replay history effects for original output instances (TASK-13153)`.
+- [x] Add RED tests for post-fs_done Media outage, acknowledgement lost after successful update, newer file/path/ID reuse, and history insertion arriving after deletion delivery. Run `python -m pytest tldw_Server_API/tests/Collections/test_output_file_history_delivery.py -q`.
+- [x] TTS callers capture the internal incarnation when the output is produced, not by fetching a potentially recycled ID later. Pass it only internally to history creation. Non-output file-ID history remains unchanged. If a delivery association lacks proven incarnation, leave a sanitized blocked-delivery effect; do not guess.
+- [x] At logical output commit record a bounded `dispose_history` effect with token, incarnation and fixed timestamp. File recovery marks fs_done/releases claims without Media access. Delivery pass processes fs_done effects outside the OS lock; stable receiver identity makes newer output updates safe. Acknowledge conditionally only after receiver commit; retire only after all bounded effects acknowledge. Separate backoff/status from filesystem health. Preserve tombstones while delayed history writers could still reference an old incarnation; no age-only retirement.
+- [x] Run new delivery tests and `python -m pytest tldw_Server_API/tests/DB_Management/test_media_db_tts_history_ops.py tldw_Server_API/tests/TTS_NEW/integration/test_tts_history_artifact_purge.py -q`. Test migration twice and disposal/late-insert commit orders on real SQLite/PostgreSQL. Review/commit: `fix(outputs): replay history effects for original output instances (TASK-13153)`.
+
+Offline activation must reconcile existing known output/history links with writers
+stopped and leave ambiguity explicit. That remains a Task 9 prerequisite, not an
+activated migration or capability claimed by this checkpoint.
 
 ## Task 6: PATCH, explicit deletion and retention integration
 
@@ -1122,6 +1126,71 @@ excludes only B101 for pytest assertions. Ruff has no new findings; the untouche
 SQLite bootstrap import-order finding is unchanged from HEAD and is not called
 clean. No dependency or background registration was added. TASK-13153 remains In
 Progress, full-task ACs unchecked, PR #2903 draft and human Change summary pending.
+
+### Task 5b: History sender and creation-time identity (2026-09-05)
+
+The existing operation journal now has separate bounded history attempts,
+retry time and sanitized category fields, installed idempotently under its schema
+fence. Bounded delivery selects and rechecks committed `fs_done` records without
+opening or locking the output volume. It validates the original-instance effect,
+commits the Media receiver, then conditionally acknowledges and retires the journal.
+Outage backoff does not change filesystem health or reclaim old paths; ambiguous
+identity stays operator-blocked. Delayed failures cannot revive a retired journal
+or clear another worker's operator block. Cancellation drains in-flight delivery;
+concurrent delivery and lost acknowledgements safely replay the same tombstone.
+
+TTS jobs now capture the internal incarnation in the output creation transaction
+and pass it to history without extending public DTOs. The real producer regression
+disposes the output and reuses its numeric ID before history insertion: the old
+history arrives cleared and cannot bind to the replacement. Synchronous speech's
+`return_download_link` branch uses `save_and_register_tts_audio` storage-file IDs,
+leaves its local `output_id` as `None`, and creates no Collections output; that
+non-output path intentionally needs no change in `audio/audio_tts.py`.
+
+Independent review found that nesting Collections transactions did not share a
+PostgreSQL connection. Two RED tests reproduced the released revision fence at
+identity capture and an output surviving failed identity validation. Creation now
+accepts the existing explicit-connection pattern; the wrapper passes its owned
+connection. Both regressions pass on real PostgreSQL. The lock test uses a distinct
+connection's `FOR UPDATE NOWAIT` at the exact identity-read boundary, not an event
+that merely signals a competing thread started. Follow-up read-only review found
+no remaining actionable finding. The incident is recorded in testing lessons.
+
+Final SQLite-side regression run: 191 passed in 55.14s. Its only skip is the
+PostgreSQL-specific independent-connection lock test, which passed in the separate
+required-PostgreSQL sender run: 18 passed in 162.42s. The broader PostgreSQL journal,
+recovery and receiver regression run passed 131 cases in 595.03s. Its only skip is
+the SQLite-only recycled-rowid case, which passed in the SQLite run. Total fresh
+checkpoint evidence is 340 distinct passing cases; neither skip represents an
+unavailable required backend. These are targeted suites, not a full sweep, and
+Docker was disabled throughout.
+
+Commands after activating the existing Server virtual environment:
+
+```bash
+TLDW_TEST_NO_DOCKER=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_history_delivery.py -q -k postgres
+TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_history_delivery.py tldw_Server_API/tests/TTS_NEW/unit/test_tts_jobs_worker.py tldw_Server_API/tests/DB_Management/test_media_db_tts_history_ops.py tldw_Server_API/tests/TTS_NEW/integration/test_tts_history_artifact_purge.py tldw_Server_API/tests/Collections/test_output_file_operations_db.py tldw_Server_API/tests/Collections/test_output_file_recovery.py tldw_Server_API/tests/DB_Management/test_output_history_receiver.py -q -k 'not postgres' --tb=short -rs
+TLDW_TEST_NO_DOCKER=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest tldw_Server_API/tests/Collections/test_output_file_operations_db.py tldw_Server_API/tests/Collections/test_output_file_recovery.py tldw_Server_API/tests/DB_Management/test_output_history_receiver.py -q -k postgres -n 2 --tb=short
+```
+
+Changed-range Black, new-test Black, compilation and diff checks pass. Production
+Bandit reports zero findings/errors with no exclusions; test Bandit excludes only
+B101 assertions. Ruff introduces no new findings: nine existing Collections
+adapter findings and one existing worker-test finding are unchanged from HEAD.
+Existing ADR-003 applies. No dependency, background registration, activation or
+capability advertisement was added. Offline reconciliation of old history links
+still requires stopped writers and remains an activation prerequisite in Task 9;
+unknown legacy incarnations are not guessed. Full producer file-protocol routing
+remains Task 8. TASK-13153 remains In Progress with full-task ACs unchecked; PR
+#2903 remains draft and the human Change summary gate remains pending.
+
+Evidence logs: `/private/tmp/task-13153-identity-transaction-red.log`,
+`/private/tmp/task-13153-delivery-producer-red.log`,
+`/private/tmp/task-13153-delivery-pg-transaction-green.log`,
+`/private/tmp/task-13153-delivery-local-verified.log`,
+`/private/tmp/task-13153-delivery-regressions-pg.log`,
+`/private/tmp/task-13153-delivery-bandit.json` and
+`/private/tmp/task-13153-delivery-tests-bandit.json`.
 
 Logs: `/private/tmp/task-13153-receiver-{red,schema-red,upgrade-red,edge-red,review-red,review-green,all-final,legacy-final,legacy-pg-verified,consumers,static-final}.log`;
 security reports: `/private/tmp/task-13153-receiver-bandit-{app,tests}-final.json`.

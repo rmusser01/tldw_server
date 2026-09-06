@@ -1,5 +1,19 @@
 # Testing Evidence Lessons
 
+## Nested Collections transactions do not share a PostgreSQL connection
+
+**Incident (TASK-13153, 2026-09-05):** An output-history identity wrapper opened
+a transaction, then called output creation without passing its connection.
+SQLite tests passed because its pool reused the thread-local handle. PostgreSQL
+creation committed independently, releasing the deletion fence before identity
+capture. A forced invalid identity left the output committed; a second connection
+could acquire the revision-clock lock with `FOR UPDATE NOWAIT` during the gap.
+
+**Evidence and rule:** Both PostgreSQL regressions failed before creation reused
+the wrapper's explicit connection, then passed. Collections pins the backend,
+not a transaction connection. Pass the connection through composed mutations;
+verify rollback and lock ownership on each backend, not only successful results.
+
 ## Closing a borrowed SQLite connection must invalidate its pool entry
 
 **Incident (TASK-13153, 2026-09-05):** The new Media v26-to-v27 migration passed,
