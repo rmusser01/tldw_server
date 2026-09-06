@@ -33,6 +33,26 @@ const extensionRouteRegistryPath = resolve(
 
 const webRouteRegistrySource = readFileSync(webRouteRegistryPath, "utf8")
 const extensionRouteRegistrySource = readFileSync(extensionRouteRegistryPath, "utf8")
+// The web UI keeps nav metadata in the shared settings nav config, while the
+// extension registry still declares nav blocks inline on route definitions.
+const webNavConfigPath = resolve(
+  workspaceRoot,
+  "apps/packages/ui/src/components/Layouts/settings-nav-config.ts"
+)
+const webNavConfigSource = readFileSync(webNavConfigPath, "utf8")
+
+const extractFamilyWizardNavEntry = (source: string): string => {
+  const startIndex = source.indexOf('path: "/settings/family-guardrails"')
+  if (startIndex === -1) {
+    throw new Error("family wizard nav entry not found")
+  }
+  const remainder = source.slice(startIndex + 1)
+  const nextEntryOffset = remainder.search(/path:\s*"/)
+  return source.slice(
+    startIndex,
+    nextEntryOffset === -1 ? undefined : startIndex + 1 + nextEntryOffset
+  )
+}
 const webRouteModulePath = resolve(
   workspaceRoot,
   "apps/packages/ui/src/routes/option-family-guardrails-wizard.tsx"
@@ -65,10 +85,21 @@ describe("family guardrails route parity", () => {
   })
 
   it("keeps family wizard navigation metadata aligned", () => {
-    expect(webRouteRegistrySource).toContain('labelToken: "settings:familyGuardrailsWizardNav"')
-    expect(extensionRouteRegistrySource).toContain('labelToken: "settings:familyGuardrailsWizardNav"')
-    expect(webRouteRegistrySource).toContain("order: 8")
-    expect(extensionRouteRegistrySource).toContain("order: 8")
+    const webNavEntry = extractFamilyWizardNavEntry(webNavConfigSource)
+    const extensionNavEntry = extractFamilyWizardNavEntry(
+      extensionRouteRegistrySource
+    )
+
+    // Both surfaces label the wizard nav entry via the same translation key.
+    expect(webNavEntry).toContain('labelToken: "settings:familyGuardrailsWizardNav"')
+    expect(extensionNavEntry).toContain(
+      'labelToken: "settings:familyGuardrailsWizardNav"'
+    )
+    // Both surfaces pin an explicit nav group and order for the entry.
+    expect(webNavEntry).toMatch(/group:\s*"[a-zA-Z]+"/)
+    expect(extensionNavEntry).toMatch(/group:\s*"[a-zA-Z]+"/)
+    expect(webNavEntry).toMatch(/order:\s*\d/)
+    expect(extensionNavEntry).toMatch(/order:\s*\d/)
   })
 
   it("keeps the dedicated family wizard route modules in sync", () => {
