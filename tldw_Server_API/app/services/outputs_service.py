@@ -26,7 +26,7 @@ from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
-from tldw_Server_API.app.services.output_file_operations import MAX_CHUNK_BYTES, OutputFileOperations
+from tldw_Server_API.app.services.output_file_operations import MAX_CHUNK_BYTES, OutputFileOperations, _wait_worker
 from tldw_Server_API.app.services.reading_artifact_cleanup_service import ReadingStorageBusy
 
 _OUTPUT_TEMPLATE_ENV = SandboxedEnvironment(autoescape=True, enable_async=False)
@@ -675,7 +675,114 @@ def find_outputs_to_purge(
     return cdb.find_outputs_to_purge(now_iso, soft_deleted_grace_days, include_retention)
 
 
-def delete_output_with_file(
+async def delete_output_with_file(
+    cdb,
+    user_id: int,
+    output_id: int,
+    *,
+    hard: bool = False,
+    delete_file: bool = False,
+    purge_before: str | None = None,
+    soft_deleted_grace_days: int = 30,
+    include_retention: bool = True,
+) -> tuple[bool, bool, bool]:
+    """Return record removal, actual unlink, and whether legacy history applies.
+
+    Activated unowned physical removal commits history and quota in its journal.
+    Metadata-only and Reading-owned deletion retain their existing boundaries.
+    """
+    if str(user_id) != str(cdb.user_id):
+        raise ValueError("output_user_mismatch")
+    options = {
+        "hard": hard,
+        "delete_managed_files": delete_file,
+        "purge_before": purge_before,
+        "soft_deleted_grace_days": soft_deleted_grace_days,
+        "include_retention": include_retention,
+    }
+
+    def dispatch():
+        if hard and delete_file:
+            handled, deleted = cdb.delete_managed_output_artifact_record(output_id, **options)
+            if handled:
+                return deleted is not None, False, True
+            try:
+                namespace = cdb.get_output_read_namespace()
+            except (RuntimeError, ValueError, OSError, DatabaseError):
+                raise HTTPException(503, "output_storage_unavailable") from None
+            if namespace is not None:
+                return namespace
+        deleted, unlinked = _delete_legacy_output_with_file(
+            cdb,
+            user_id,
+            output_id,
+            hard=hard,
+            delete_file=delete_file,
+            purge_before=purge_before,
+            soft_deleted_grace_days=soft_deleted_grace_days,
+            include_retention=include_retention,
+        )
+        return deleted, unlinked, True
+
+    try:
+        with anyio.CancelScope(shield=True):
+            result, cancelled = await _wait_worker(dispatch)
+    except RuntimeError as exc:
+        if str(exc) == "output_file_busy":
+            raise HTTPException(409, "output_file_busy") from None
+        raise
+    if cancelled:
+        raise asyncio.CancelledError
+    await anyio.lowlevel.checkpoint_if_cancelled()
+    if isinstance(result, tuple):
+        return result
+    operation = None
+    writer = None
+    try:
+        root = await asyncio.to_thread(_existing_outputs_dir_for_user, user_id)
+        writer = OutputFileOperations(cdb, output_root=root, storage_namespace_id=result)
+        operation = await writer.prepare(
+            kind="remove",
+            output_id=output_id,
+            max_output_bytes=0,
+            purge_before=purge_before,
+            soft_deleted_grace_days=soft_deleted_grace_days,
+            include_retention=include_retention,
+        )
+        unlinked = await writer.publish_removal(operation["token"])
+        return True, unlinked, False
+    except BaseException as exc:
+        if operation is not None and str(exc) != "output_update_unconfirmed":
+            try:
+                with anyio.CancelScope(shield=True):
+                    await writer.abort(operation["token"])
+            except Exception:  # noqa: BLE001 - durable lease preserves recovery authority
+                logger.warning("outputs.delete: abort deferred")
+        if isinstance(exc, KeyError):
+            return False, False, False
+        if isinstance(exc, RuntimeError) and str(exc) == "output_purge_not_eligible":
+            return False, False, False
+        if isinstance(exc, ReadingStorageBusy):
+            raise HTTPException(409, "output_file_busy") from None
+        codes = {
+            "reading_file_deletion_required": 409,
+            "reading_artifact_ownership_conflict": 409,
+            "output_file_busy": 409,
+            "output_path_conflict": 409,
+            "output_source_unavailable": 409,
+            "output_operation_conflict": 409,
+            "output_storage_unavailable": 503,
+            "output_update_unconfirmed": 503,
+            "output_storage_capacity": 507,
+            "output_size_limit": 413,
+        }
+        if isinstance(exc, (RuntimeError, ValueError, OSError, DatabaseError)):
+            code = str(exc) if str(exc) in codes else "output_storage_unavailable"
+            raise HTTPException(codes[code], code) from None
+        raise
+
+
+def _delete_legacy_output_with_file(
     cdb,
     user_id: int,
     output_id: int,

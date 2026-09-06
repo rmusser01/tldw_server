@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+import os
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
@@ -16,7 +20,12 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.services import outputs_purge_scheduler as scheduler
+from tldw_Server_API.app.services import outputs_service
 from tldw_Server_API.app.services import reading_artifact_cleanup_service as cleanup
+from tldw_Server_API.app.services.output_file_operations import OutputFileOperations
+from tldw_Server_API.tests.Collections.test_output_file_history_delivery import get_history, history
+from tldw_Server_API.tests.Collections.test_output_file_history_delivery import media as media
+from tldw_Server_API.tests.Collections.test_output_file_operations_db import insert_binding
 from tldw_Server_API.tests.Collections.test_reading_atomic_delete import snapshot
 from tldw_Server_API.tests.Collections.test_reading_output_deletion import archive
 from tldw_Server_API.tests.Collections.test_reading_revision_mutations import db as db
@@ -40,6 +49,301 @@ def client(db, tmp_path, monkeypatch):
     )
     with TestClient(app) as client:
         yield client
+
+
+def activate(db, root, monkeypatch):
+    namespace = cleanup.provision_reading_storage_namespace(root)
+    insert_binding(
+        db, storage_namespace_id=namespace, operation_bytes=4096, user_pending_bytes=16384, free_space_margin_bytes=1
+    )
+    monkeypatch.setattr(outputs_service, "_existing_outputs_dir_for_user", lambda user: root)
+    return namespace
+
+
+@pytest.mark.parametrize("shared", [False, True])
+def test_activated_delete_commits_quota_and_original_history_without_legacy_effect(
+    db, tmp_path, client, monkeypatch, shared, media
+):
+    namespace = activate(db, tmp_path, monkeypatch)
+    output = db.create_output_artifact(
+        type_="audiobook_mp3", title="Audio", format_="mp3", storage_path="audio.mp3", metadata_json='{"byte_size": 8}'
+    )
+    identity = db.backend.execute("SELECT file_incarnation FROM outputs WHERE id = ?", (output.id,)).scalar
+    (tmp_path / "audio.mp3").write_bytes(b"original")
+    if shared:
+        other = db.create_output_artifact(type_="report", title="Other", format_="mp3", storage_path="audio.mp3")
+    db.set_audiobook_output_usage(8)
+    original_history = history(media, identity, output.id)
+    newer_history = history(media, "e" * 32, output.id)
+    client.app.dependency_overrides[outputs.get_media_db_for_user] = lambda: media
+    response = client.delete(f"/outputs/{output.id}", params={"hard": True, "delete_file": True})
+    assert response.status_code == 200, response.text
+    assert response.json() == {"success": True, "file_deleted": not shared}
+    assert db.get_audiobook_output_usage() == 0
+    assert (tmp_path / "audio.mp3").exists() is shared
+    if shared:
+        assert db.get_output_artifact(other.id) == other
+    rows = db.backend.execute("SELECT * FROM output_file_operations").rows
+    assert len(rows) == 1 and rows[0]["fs_done"] == 1 and rows[0]["effects_pending"] == 1
+    assert json.loads(rows[0]["effects_json"])[0]["incarnation"] == identity
+    assert get_history(media, original_history)["output_id"] == output.id
+    assert get_history(media, newer_history)["output_id"] == output.id
+    assert client.delete(f"/outputs/{output.id}", params={"hard": True, "delete_file": True}).status_code == 404
+    assert db.get_audiobook_output_usage() == 0
+    writer = OutputFileOperations(db, output_root=tmp_path, storage_namespace_id=namespace)
+    assert asyncio.run(writer.deliver_history_due(media))["delivered"] == 1
+    assert get_history(media, original_history)["output_id"] is None
+    assert get_history(media, newer_history)["output_id"] == output.id
+    late = history(media, identity, output.id)
+    assert get_history(media, late)["output_id"] is None
+
+
+def test_activated_delete_defers_failed_unlink_without_losing_claim(db, tmp_path, client, monkeypatch):
+    activate(db, tmp_path, monkeypatch)
+    output = db.create_output_artifact(type_="report", title="Old", format_="md", storage_path="old.md")
+    (tmp_path / "old.md").write_bytes(b"original")
+    unlink = os.unlink
+
+    def fail_original(path, *args, **kwargs):
+        if path == "old.md":
+            raise OSError("private /secret/mount")
+        return unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "unlink", fail_original)
+    response = client.delete(f"/outputs/{output.id}", params={"hard": True, "delete_file": True})
+    assert response.json() == {"success": True, "file_deleted": False}
+    assert (tmp_path / "old.md").read_bytes() == b"original"
+    row = db.backend.execute("SELECT * FROM output_file_operations").first
+    assert row["phase"] == "committed" and row["fs_done"] == 0 and row["reserved_bytes"] == 8
+    assert row["last_error"] == "output_storage_unavailable"
+
+
+def test_activated_delete_offline_volume_preserves_metadata_and_bytes(db, tmp_path, client, monkeypatch):
+    activate(db, tmp_path, monkeypatch)
+    output = db.create_output_artifact(type_="report", title="Old", format_="md", storage_path="old.md")
+    (tmp_path / "old.md").write_bytes(b"original")
+    missing = tmp_path / "offline"
+    monkeypatch.setattr(outputs_service, "_existing_outputs_dir_for_user", lambda user: missing)
+    absent = client.delete("/outputs/999999", params={"hard": True, "delete_file": True})
+    assert absent.status_code == 404
+    response = client.delete(f"/outputs/{output.id}", params={"hard": True, "delete_file": True})
+    assert response.status_code == 503, response.text
+    assert response.json() == {"detail": "output_storage_unavailable"}
+    assert db.get_output_artifact(output.id) == output
+    assert (tmp_path / "old.md").read_bytes() == b"original" and not missing.exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scheduled", [False, True])
+async def test_activated_purge_keeps_unlink_receipt_when_cleanup_ack_fails(
+    db, tmp_path, client, monkeypatch, scheduled
+):
+    activate(db, tmp_path, monkeypatch)
+    db.create_output_artifact(
+        type_="report", title="Old", format_="md", storage_path="old.md", retention_until="2000-01-01T00:00:00+00:00"
+    )
+    (tmp_path / "old.md").write_bytes(b"original")
+
+    def fail_ack(*args, **kwargs):
+        raise RuntimeError("private /secret/database")
+
+    monkeypatch.setattr(db, "finish_output_file_operation", fail_ack)
+    if scheduled:
+        monkeypatch.setattr(CollectionsDatabase, "for_user", lambda *_: db)
+        assert await scheduler._purge_for_user(int(db.user_id), True, 30) == (1, 1)
+    else:
+        response = client.post("/outputs/purge", json={"delete_files": True})
+        assert response.json() == {"removed": 1, "files_deleted": 1}
+    assert not (tmp_path / "old.md").exists()
+    row = db.backend.execute("SELECT * FROM output_file_operations").first
+    assert row["phase"] == "committed" and row["fs_done"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("committed", [False, True])
+async def test_activated_delete_cancellation_drains_commit_and_preserves_outcome(db, tmp_path, monkeypatch, committed):
+    activate(db, tmp_path, monkeypatch)
+    output = db.create_output_artifact(type_="report", title="Old", format_="md", storage_path="old.md")
+    (tmp_path / "old.md").write_bytes(b"original")
+    entered, release = Event(), Event()
+    apply = db.apply_output_file_operation
+
+    def delayed_commit(*args, **kwargs):
+        entered.set()
+        assert release.wait(10)
+        if committed:
+            return apply(*args, **kwargs)
+        raise OSError("private /secret/database")
+
+    monkeypatch.setattr(db, "apply_output_file_operation", delayed_commit)
+    task = asyncio.create_task(
+        outputs_service.delete_output_with_file(
+            db,
+            int(db.user_id),
+            output.id,
+            hard=True,
+            delete_file=True,
+        )
+    )
+    try:
+        assert await asyncio.to_thread(entered.wait, 10)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        release.set()
+        if not task.done():
+            await asyncio.gather(task, return_exceptions=True)
+    row = db.backend.execute("SELECT * FROM output_file_operations").first
+    assert row["phase"] == ("committed" if committed else "aborting")
+    assert row["effects_pending"] == int(committed)
+    assert (tmp_path / "old.md").exists() is not committed
+    assert db.backend.execute("SELECT COUNT(*) FROM outputs WHERE id = ?", (output.id,)).scalar == int(not committed)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scheduled", [False, True])
+@pytest.mark.parametrize("disposal", ["unlink", "shared", "deferred"])
+async def test_activated_purges_count_only_completed_unlinks(db, tmp_path, client, monkeypatch, scheduled, disposal):
+    activate(db, tmp_path, monkeypatch)
+    output = db.create_output_artifact(
+        type_="report", title="Old", format_="md", storage_path="old.md", retention_until="2000-01-01T00:00:00+00:00"
+    )
+    (tmp_path / "old.md").write_bytes(b"original")
+    if disposal == "shared":
+        db.create_output_artifact(type_="report", title="Keep", format_="md", storage_path="old.md")
+    if disposal == "deferred":
+        unlink = os.unlink
+
+        def fail_original(path, *args, **kwargs):
+            if path == "old.md":
+                raise OSError("private /secret/mount")
+            return unlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "unlink", fail_original)
+    if scheduled:
+        monkeypatch.setattr(CollectionsDatabase, "for_user", lambda *_: db)
+        removed, files = await scheduler._purge_for_user(int(db.user_id), True, 30)
+    else:
+        response = client.post("/outputs/purge", json={"delete_files": True})
+        assert response.status_code == 200
+        removed, files = response.json()["removed"], response.json()["files_deleted"]
+    assert (removed, files) == (1, int(disposal == "unlink"))
+    assert (tmp_path / "old.md").exists() is (disposal != "unlink")
+    with pytest.raises(KeyError):
+        db.get_output_artifact(output.id)
+    row = db.backend.execute("SELECT * FROM output_file_operations").first
+    assert row["effects_pending"] == 1
+    assert row["fs_done"] == int(disposal != "deferred")
+
+
+@pytest.mark.parametrize("hard,delete_file", [(False, False), (False, True), (True, False)])
+def test_deletion_of_claimed_output_returns_busy_without_mutation(db, tmp_path, client, monkeypatch, hard, delete_file):
+    namespace = activate(db, tmp_path, monkeypatch)
+    output = db.create_output_artifact(type_="report", title="Claimed", format_="md", storage_path="old.md")
+    (tmp_path / "old.md").write_bytes(b"original")
+    writer = OutputFileOperations(db, output_root=tmp_path, storage_namespace_id=namespace)
+    operation = asyncio.run(writer.prepare(kind="remove", output_id=output.id, max_output_bytes=0))
+    response = client.delete(f"/outputs/{output.id}", params={"hard": hard, "delete_file": delete_file})
+    assert response.status_code == 409
+    assert response.json() == {"detail": "output_file_busy"}
+    assert db.get_output_artifact(output.id) == output
+    assert (tmp_path / "old.md").read_bytes() == b"original"
+    assert db.get_output_file_operation(operation["token"], namespace)["phase"] == "prepared"
+
+
+@pytest.mark.parametrize("hard,delete_file", [(False, False), (False, True), (True, False)])
+def test_activated_metadata_deletion_needs_no_volume_or_unlink_permission(
+    db, tmp_path, client, monkeypatch, hard, delete_file
+):
+    activate(db, tmp_path, monkeypatch)
+    output = db.create_output_artifact(type_="report", title="Keep bytes", format_="md", storage_path="old.md")
+    (tmp_path / "old.md").write_bytes(b"original")
+    monkeypatch.setattr(outputs_service, "_existing_outputs_dir_for_user", lambda user: tmp_path / "offline")
+    response = client.delete(f"/outputs/{output.id}", params={"hard": hard, "delete_file": delete_file})
+    assert response.json() == {"success": True, "file_deleted": False}
+    assert (tmp_path / "old.md").read_bytes() == b"original"
+    assert db.backend.execute("SELECT COUNT(*) FROM output_file_operations").scalar == 0
+
+
+def test_unbound_owned_store_cannot_use_legacy_unowned_physical_deletion(db, tmp_path, client):
+    archive(db, tmp_path)
+    output = db.create_output_artifact(type_="report", title="Keep", format_="md", storage_path="old.md")
+    (tmp_path / "old.md").write_bytes(b"original")
+    response = client.delete(f"/outputs/{output.id}", params={"hard": True, "delete_file": True})
+    assert response.status_code == 503
+    assert db.get_output_artifact(output.id) == output
+    assert (tmp_path / "old.md").read_bytes() == b"original"
+
+
+@pytest.mark.parametrize("soft_first", [False, True])
+def test_activated_audio_deletion_preserves_atomic_quota_on_commit_failure(
+    db, tmp_path, client, monkeypatch, soft_first
+):
+    activate(db, tmp_path, monkeypatch)
+    output = db.create_output_artifact(
+        type_="audiobook_mp3", title="Audio", format_="mp3", storage_path="audio.mp3", metadata_json='{"byte_size": 8}'
+    )
+    (tmp_path / "audio.mp3").write_bytes(b"original")
+    db.set_audiobook_output_usage(8)
+    if soft_first:
+        assert client.delete(f"/outputs/{output.id}").status_code == 200
+        assert db.get_audiobook_output_usage() == 0
+    else:
+        update_usage = db.update_audiobook_output_usage
+
+        def lose_accounting(*args, **kwargs):
+            update_usage(*args, **kwargs)
+            raise RuntimeError("private /secret/accounting")
+
+        monkeypatch.setattr(db, "update_audiobook_output_usage", lose_accounting)
+    response = client.delete(f"/outputs/{output.id}", params={"hard": True, "delete_file": True})
+    if soft_first:
+        assert response.json() == {"success": True, "file_deleted": True}
+        assert db.get_audiobook_output_usage() == 0
+    else:
+        assert response.status_code == 409
+        assert db.get_output_artifact(output.id) == output
+        assert db.get_audiobook_output_usage() == 8
+        assert (tmp_path / "audio.mp3").read_bytes() == b"original"
+        row = db.backend.execute("SELECT * FROM output_file_operations").first
+        assert row["phase"] == "aborting" and row["effects_pending"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scheduled", [False, True])
+async def test_activated_purge_rechecks_renewal_at_preparation_fence(db, tmp_path, client, monkeypatch, scheduled):
+    activate(db, tmp_path, monkeypatch)
+    output = db.create_output_artifact(
+        type_="report", title="Old", format_="md", storage_path="old.md", retention_until="2000-01-01T00:00:00+00:00"
+    )
+    (tmp_path / "old.md").write_bytes(b"original")
+    prepare = db.prepare_output_file_operation
+    renewed = False
+
+    def renew_before_prepare(*args, **kwargs):
+        nonlocal renewed
+        db.update_output_artifact(output.id, retention_until="2999-01-01T00:00:00+00:00")
+        renewed = True
+        return prepare(*args, **kwargs)
+
+    monkeypatch.setattr(db, "prepare_output_file_operation", renew_before_prepare)
+    if scheduled:
+        monkeypatch.setattr(CollectionsDatabase, "for_user", lambda *_: db)
+        assert await scheduler._purge_for_user(int(db.user_id), True, 30) == (0, 0)
+    else:
+        response = client.post("/outputs/purge", json={"delete_files": True})
+        assert response.json() == {"removed": 0, "files_deleted": 0}
+    assert renewed
+    assert (
+        db.backend.execute("SELECT retention_until FROM outputs WHERE id = ?", (output.id,)).scalar
+        == "2999-01-01T00:00:00+00:00"
+    )
+    assert (tmp_path / "old.md").read_bytes() == b"original"
+    assert db.backend.execute("SELECT COUNT(*) FROM output_file_operations").scalar == 0
 
 
 @pytest.mark.parametrize("soft_first", [False, True])
@@ -113,6 +417,7 @@ async def test_purges_obey_managed_file_permission_and_count_only_deletions(
     db, tmp_path, client, monkeypatch, scheduled, delete_files
 ):
     parent, namespace, output = archive(db, tmp_path)
+    assert activate(db, tmp_path, monkeypatch) == namespace
     db.update_output_artifact(output.id, retention_until="2000-01-01T00:00:00+00:00")
     generic = db.create_output_artifact(
         type_="newsletter_markdown", title="Generic", format_="md", storage_path="generic.md"
@@ -132,7 +437,7 @@ async def test_purges_obey_managed_file_permission_and_count_only_deletions(
         monkeypatch.setattr(CollectionsDatabase, "for_user", lambda *_args: db)
         monkeypatch.setattr(scheduler, "managed_media_database", media_context)
         removed, files = await scheduler._purge_for_user(int(db.user_id), delete_files, 30)
-        assert set(history) == ({generic.id, output.id} if delete_files else {generic.id})
+        assert set(history) == ({output.id} if delete_files else {generic.id})
     else:
         response = client.post("/outputs/purge", json={"delete_files": delete_files})
         assert response.status_code == 200
@@ -218,8 +523,9 @@ def test_ownership_registered_after_initial_read_is_checked_under_fence(db, tmp_
 
 
 @pytest.mark.parametrize("legacy_absolute", [False, True])
-def test_unowned_alias_cannot_unlink_a_surviving_managed_archive(db, tmp_path, client, legacy_absolute):
+def test_unowned_alias_cannot_unlink_a_surviving_managed_archive(db, tmp_path, client, monkeypatch, legacy_absolute):
     _, _, owned = archive(db, tmp_path)
+    activate(db, tmp_path, monkeypatch)
     shared = db.create_output_artifact(
         type_="newsletter_markdown", title="Shared", format_="md", storage_path=owned.storage_path
     )
@@ -228,7 +534,8 @@ def test_unowned_alias_cannot_unlink_a_surviving_managed_archive(db, tmp_path, c
             "UPDATE outputs SET storage_path = ? WHERE id = ?", (str(tmp_path / owned.storage_path), shared.id)
         )
     response = client.delete(f"/outputs/{shared.id}", params={"hard": True, "delete_file": True})
-    assert response.json() == {"success": True, "file_deleted": False}
+    assert response.status_code == (503 if legacy_absolute else 409)
+    assert db.get_output_artifact(shared.id).id == shared.id
     assert (tmp_path / owned.storage_path).exists()
     assert db.get_output_artifact(owned.id).id == owned.id
 

@@ -21,6 +21,7 @@ import asyncio
 import os
 import sqlite3
 
+from fastapi import HTTPException
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
@@ -118,10 +119,11 @@ async def _purge_for_user(user_id: int, delete_files: bool, grace_days: int) -> 
         return 0, 0
 
     removed_ids = []
+    legacy_history_ids = []
     files_deleted = 0
     for output_id in paths:
         try:
-            deleted, file_deleted = delete_output_with_file(
+            deleted, file_deleted, legacy_history = await delete_output_with_file(
                 cdb,
                 user_id,
                 output_id,
@@ -132,10 +134,12 @@ async def _purge_for_user(user_id: int, delete_files: bool, grace_days: int) -> 
             )
             if deleted:
                 removed_ids.append(output_id)
+                if legacy_history:
+                    legacy_history_ids.append(output_id)
             files_deleted += int(file_deleted)
         except ReadingFileDeletionRequired:
             continue
-        except _OUTPUTS_PURGE_NONCRITICAL_EXCEPTIONS as e:
+        except (*_OUTPUTS_PURGE_NONCRITICAL_EXCEPTIONS, HTTPException) as e:
             logger.bind(error_type=type(e).__name__).warning("outputs_purge: DB delete failed")
             try:
                 get_metrics_registry().increment(
@@ -144,14 +148,14 @@ async def _purge_for_user(user_id: int, delete_files: bool, grace_days: int) -> 
                 )
             except _OUTPUTS_PURGE_NONCRITICAL_EXCEPTIONS:
                 logger.debug("metrics increment failed for db_delete_failed")
-    if removed_ids:
+    if legacy_history_ids:
         try:
             with managed_media_database(
                 "outputs_purge",
                 db_path=str(DatabasePaths.get_media_db_path(user_id)),
                 initialize=False,
             ) as media_db:
-                for rid in removed_ids:
+                for rid in legacy_history_ids:
                     try:
                         media_db.mark_tts_history_artifacts_deleted_for_output(
                             user_id=str(user_id),

@@ -709,7 +709,9 @@ async def delete_output(
         invalid_detail="invalid user_id",
     )
     try:
-        ok, fs_deleted = delete_output_with_file(cdb, user_id, output_id, hard=hard, delete_file=delete_file)
+        ok, fs_deleted, legacy_history = await delete_output_with_file(
+            cdb, user_id, output_id, hard=hard, delete_file=delete_file
+        )
     except ReadingFileDeletionRequired:
         raise HTTPException(status_code=409, detail="reading_file_deletion_required") from None
     except ReadingArtifactOwnershipConflict:
@@ -717,10 +719,11 @@ async def delete_output(
     if not ok:
         raise HTTPException(status_code=404, detail="output_not_found")
     try:
-        media_db.mark_tts_history_artifacts_deleted_for_output(
-            user_id=str(user_id),
-            output_id=int(output_id),
-        )
+        if legacy_history:
+            media_db.mark_tts_history_artifacts_deleted_for_output(
+                user_id=str(user_id),
+                output_id=int(output_id),
+            )
     except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
         logger.debug("outputs.delete: failed to update tts_history")
     return {"success": True, "file_deleted": fs_deleted}
@@ -918,7 +921,7 @@ async def purge_outputs(
     files_deleted = 0
     for output_id in candidate_paths:
         try:
-            deleted, file_deleted = delete_output_with_file(
+            deleted, file_deleted, _ = await delete_output_with_file(
                 cdb,
                 user_id,
                 output_id,
@@ -932,7 +935,7 @@ async def purge_outputs(
             files_deleted += int(file_deleted)
         except ReadingFileDeletionRequired:
             continue
-        except (*_OUTPUTS_NONCRITICAL_EXCEPTIONS, DatabaseError):
+        except (*_OUTPUTS_NONCRITICAL_EXCEPTIONS, DatabaseError, HTTPException):
             logger.error("outputs.purge: DB delete failed")
 
     return {"removed": removed, "files_deleted": files_deleted}

@@ -138,6 +138,9 @@ class OutputFileOperations:
         destination_path: str | None = None,
         intended: dict | None = None,
         lease_seconds: int = 60,
+        purge_before: str | None = None,
+        soft_deleted_grace_days: int = 30,
+        include_retention: bool = True,
     ) -> dict:
         """Reserve before stage creation; None reserves an exact-size source copy."""
         return await self._run_interval(
@@ -149,10 +152,25 @@ class OutputFileOperations:
                 destination_path=destination_path,
                 intended=intended,
                 lease_seconds=lease_seconds,
+                purge_before=purge_before,
+                soft_deleted_grace_days=soft_deleted_grace_days,
+                include_retention=include_retention,
             )
         )
 
-    def _prepare(self, *, kind, max_output_bytes, output_id, destination_path, intended, lease_seconds):
+    def _prepare(
+        self,
+        *,
+        kind,
+        max_output_bytes,
+        output_id,
+        destination_path,
+        intended,
+        lease_seconds,
+        purge_before,
+        soft_deleted_grace_days,
+        include_retention,
+    ):
         if not (max_output_bytes is None and kind == "replace") and (
             type(max_output_bytes) is not int or not 0 <= max_output_bytes <= 2**63 - 1
         ):
@@ -185,6 +203,9 @@ class OutputFileOperations:
                 intended=intended,
                 reserved_bytes=max_output_bytes + (source["size"] if source else 0),
                 lease_seconds=lease_seconds,
+                purge_before=purge_before,
+                soft_deleted_grace_days=soft_deleted_grace_days,
+                include_retention=include_retention,
             )
             token = row["token"]
             try:
@@ -361,8 +382,22 @@ class OutputFileOperations:
         return await self._run_interval(partial(self._publish_and_commit, token), token=token)
 
     def _publish_and_commit(self, token: str) -> CollectionsDatabase.OutputArtifactRow | None:
+        return self._publish_and_commit_result(token)[0]
+
+    async def publish_removal(self, token: str) -> bool:
+        """Commit removal and report only a completed unlink under exclusion."""
+        result = await self._run_interval(
+            partial(self._publish_and_commit_result, token, removal_only=True), token=token
+        )
+        return result[1]
+
+    def _publish_and_commit_result(
+        self, token: str, *, removal_only: bool = False
+    ) -> tuple[CollectionsDatabase.OutputArtifactRow | None, bool]:
         with _validated_storage_directory(self.output_root, storage_namespace_id=self.namespace) as (_, directory):
             row = self.db.validate_output_file_operation(token, self.namespace)
+            if removal_only and row["kind"] != "remove":
+                raise ValueError("output_operation_invalid")
             publication = None
             try:
                 source = json.loads(row["source_identity_json"]) if row["source_identity_json"] else None
@@ -426,25 +461,29 @@ class OutputFileOperations:
 
     def _complete_committed(
         self, directory: int, token: str, output: CollectionsDatabase.OutputArtifactRow | None
-    ) -> CollectionsDatabase.OutputArtifactRow | None:
+    ) -> tuple[CollectionsDatabase.OutputArtifactRow | None, bool]:
         """Best-effort disposal cannot revoke a known logical commit."""
+        unlinked = False
         try:
-            self._recover_locked(directory, token)
-            return output
+            row, unlinked = self._clean_operation(directory, token)
+            if row is not None:
+                os.fsync(directory)
+                self.db.finish_output_file_operation(token, self.namespace)
+            return output, unlinked
         except _UnprovedOutputIdentity:
             category = "output_identity_unconfirmed"
         except (ReadingStorageUnavailable, OSError):
             category = "output_storage_unavailable"
         except Exception:  # noqa: BLE001 - preserve confirmed success and durable recovery authority
             logger.warning("Output post-commit cleanup deferred: output_update_unconfirmed")
-            return output
+            return output, unlinked
         try:
             self.db.record_output_file_recovery_failure(token, self.namespace, category)
         except Exception:  # noqa: BLE001 - failure reporting cannot revoke the confirmed commit either
             logger.warning("Output post-commit cleanup status unconfirmed: {}", category)
         else:
             logger.warning("Output post-commit cleanup deferred: {}", category)
-        return output
+        return output, unlinked
 
     async def recover_due(self, *, limit: int = 20) -> dict[str, int]:
         """Recover a bounded batch, yielding storage exclusion between operations.
@@ -550,17 +589,24 @@ class OutputFileOperations:
         return "blocked" if category == "output_identity_unconfirmed" else "retry"
 
     def _recover_locked(self, directory: int, token: str) -> str:
-        row = self.db.begin_output_file_recovery(token, self.namespace)
+        row, _ = self._clean_operation(directory, token)
         if row is None:
             return "skipped"
-        if row["phase"] == "aborting":
-            self._clean_aborted(directory, row)
-        else:
-            self._clean_committed(directory, row)
         # Also sync absent paths left by a crash before an earlier fsync.
         os.fsync(directory)
         self.db.finish_output_file_operation(token, self.namespace)
         return "finished"
+
+    def _clean_operation(self, directory: int, token: str) -> tuple[dict | None, bool]:
+        row = self.db.begin_output_file_recovery(token, self.namespace)
+        if row is None:
+            return None, False
+        unlinked = False
+        if row["phase"] == "aborting":
+            self._clean_aborted(directory, row)
+        else:
+            unlinked = self._clean_committed(directory, row)
+        return row, unlinked
 
     def _clean_aborted(self, directory: int, row: dict) -> None:
         if row["stage_path"] is None:  # Removal has no private/public file to undo.
@@ -586,7 +632,7 @@ class OutputFileOperations:
             os.unlink(row["stage_path"], dir_fd=directory)
             os.fsync(directory)
 
-    def _clean_committed(self, directory: int, row: dict) -> None:
+    def _clean_committed(self, directory: int, row: dict) -> bool:
         if row["kind"] != "remove":
             stage = _stat_optional(directory, row["stage_path"])
             destination = _stat_optional(directory, row["destination_path"])
@@ -608,3 +654,5 @@ class OutputFileOperations:
                     raise _UnprovedOutputIdentity("output_identity_unconfirmed")
                 os.unlink(row["source_path"], dir_fd=directory)
                 os.fsync(directory)
+                return True
+        return False

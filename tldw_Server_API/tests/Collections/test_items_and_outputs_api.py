@@ -1001,6 +1001,12 @@ async def test_outputs_purge_file_delete_failure_log_is_sanitized(monkeypatch):
     class _CollectionsDB:
         user_id = 123
 
+        def delete_managed_output_artifact_record(self, *_args, **_kwargs):
+            return False, None
+
+        def get_output_read_namespace(self):
+            return None
+
         def delete_output_artifact_record(self, *_args, **_kwargs):
             return DeletedOutput("output.md", False)
 

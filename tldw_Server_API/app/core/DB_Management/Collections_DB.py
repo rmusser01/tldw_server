@@ -2950,6 +2950,9 @@ class CollectionsDatabase:
         destination_path: str | None = None,
         intended: dict[str, Any] | None = None,
         reserved_bytes: int = 0,
+        purge_before: str | None = None,
+        soft_deleted_grace_days: int = 30,
+        include_retention: bool = True,
         connection: Any | None = None,
     ) -> dict[str, Any]:
         """Persist an internal prepared record, without file or activation authority.
@@ -2968,6 +2971,7 @@ class CollectionsDatabase:
             or (kind == "create" and output_id is not None)
             or (kind != "create" and (type(output_id) is not int or output_id <= 0))
             or (kind == "remove" and destination_path is not None)
+            or (purge_before is not None and kind != "remove")
         ):
             raise ValueError("output_operation_invalid")
         destination = None if kind == "remove" else self._output_operation_filename(destination_path)
@@ -2992,6 +2996,18 @@ class CollectionsDatabase:
                 if kind == "create"
                 else self._output_operation_snapshot(output_id, conn, include_deleted=kind == "remove")
             )
+            if purge_before is not None:
+                predicate, params = self._output_purge_predicate(
+                    purge_before, soft_deleted_grace_days, include_retention
+                )
+                eligible = self.backend.execute(
+                    f"SELECT 1 FROM outputs WHERE id = ? AND user_id = ? AND ({predicate})",  # nosec B608: fixed predicate
+                    (output_id, self.user_id, *params),
+                    connection=conn,
+                ).first
+                if not eligible:
+                    raise RuntimeError("output_purge_not_eligible")
+                # The snapshot digest and claims protect this decision through commit.
             if source is not None:
                 source = self._output_operation_filename(source)
             if destination is not None and source is not None and destination.lower() == source.lower():
@@ -6775,6 +6791,27 @@ class CollectionsDatabase:
             is not None
         )
 
+    def delete_managed_output_artifact_record(self, output_id: int, **kwargs: Any) -> tuple[bool, DeletedOutput | None]:
+        """Handle missing or Reading-owned rows under one ownership fence.
+
+        False means a surviving unowned row still needs its deletion protocol.
+        """
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            owner = self.backend.execute(
+                "SELECT o.type, r.output_id AS managed_id FROM outputs o LEFT JOIN reading_output_ownership r "
+                "ON r.output_id = o.id AND r.user_id = o.user_id WHERE o.id = ? AND o.user_id = ?",
+                (output_id, self.user_id),
+                connection=conn,
+            ).first
+            if not owner:
+                return True, None
+            if owner["managed_id"] is None:
+                return False, None
+            if owner["type"] != "reading_archive":
+                raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
+            return True, self.delete_output_artifact_record(output_id, connection=conn, **kwargs)
+
     def delete_output_artifact_record(
         self,
         output_id: int,
@@ -6784,6 +6821,7 @@ class CollectionsDatabase:
         purge_before: str | None = None,
         soft_deleted_grace_days: int = 30,
         include_retention: bool = True,
+        connection: Any | None = None,
     ) -> DeletedOutput | None:
         """Delete output metadata, fencing any Reading owner and durable disposal.
 
@@ -6795,6 +6833,7 @@ class CollectionsDatabase:
         row = self.backend.execute(
             "SELECT id, type, metadata_json, storage_path, deleted FROM outputs WHERE id = ? AND user_id = ?",
             (output_id, self.user_id),
+            connection=connection,
         ).first
         if not row:
             return None
@@ -6809,7 +6848,7 @@ class CollectionsDatabase:
             if size_bytes is None:
                 size_bytes = _resolve_output_size_bytes(self.user_id, storage_path)
 
-        with self.transaction() as conn:
+        with self.transaction() if connection is None else contextlib.nullcontext(connection) as conn:
             self._lock_reading_revision_clock(conn)
             current = self.backend.execute(
                 "SELECT id, type, storage_path, deleted FROM outputs WHERE id = ? AND user_id = ?",

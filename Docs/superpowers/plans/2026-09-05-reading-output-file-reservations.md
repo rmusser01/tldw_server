@@ -205,9 +205,9 @@ verification, review and commit; neither enables rollout.
 
 - [x] Add RED full-dispatch tests reproducing the three recorded failures: ownership registered after unmanaged dispatch, unowned row aliasing a managed source, and destination collision overwriting managed bytes. Assert both files and all relevant rows unchanged on rejection. Run `python -m pytest tldw_Server_API/tests/Collections/test_reading_output_updates.py -q`.
 - [x] Activated PATCH goes through one prepared replacement with final compound title/format fields; no intermediate rename, hidden normalization write or file-first fallback. Managed title/retention stays DB-only and managed conversion409 stays unchanged. Case-only title may retain spelling; exact no-op allocates no file operation. Shared-unowned copy preserves source while another reference exists.
-- [ ] Route activated unowned delete-with-file through remove intent and atomic quota/history commit. Managed explicit disposal still uses Reading-owned intents. Metadata-only retention/soft-delete semantics remain; no file permission is inferred. Remove old duplicate additive quota/history effects on the activated branch only. Purges recheck eligibility under the same fence and count only actual completed unlinks, not queued work.
-- [ ] Map known failures to spec errors: 409 busy/path conflict/source unavailable, 503 unavailable/unconfirmed, 507 capacity, 413 overrun; retain auth/missing semantics and path-free logs. Valid pure metadata updates do not acquire file locks. Inactive + ownership/reservations is inconsistent and cannot enter legacy path; unknown binding also fails closed.
-- [ ] Run all four listed test modules and `python -m pytest tldw_Server_API/tests/Collections/test_items_and_outputs_api.py tldw_Server_API/tests/Collections/test_reading_output_deletion.py -q`. Review/commit: `fix(outputs): reserve physical updates and deletion end to end (TASK-13153)`.
+- [x] Route activated unowned delete-with-file through remove intent and atomic quota/history commit. Managed explicit disposal still uses Reading-owned intents. Metadata-only retention/soft-delete semantics remain; no file permission is inferred. Remove old duplicate additive quota/history effects on the activated branch only. Purges recheck eligibility under the same fence and count only actual completed unlinks, not queued work.
+- [x] Map known failures to spec errors: 409 busy/path conflict/source unavailable, 503 unavailable/unconfirmed, 507 capacity, 413 overrun; retain auth/missing semantics and path-free logs. Valid pure metadata updates do not acquire file locks. Inactive + ownership/reservations is inconsistent and cannot enter legacy path; unknown binding also fails closed.
+- [x] Run all four listed test modules and `python -m pytest tldw_Server_API/tests/Collections/test_items_and_outputs_api.py tldw_Server_API/tests/Collections/test_reading_output_deletion.py -q`. Review/commit: `fix(outputs): reserve physical updates and deletion end to end (TASK-13153)`.
 
 ## Task 7: Text, briefing and Reading producer integration
 
@@ -1262,3 +1262,55 @@ stays In Progress with ACs unchecked, draft PR #2903 and human summary gate inta
 Evidence: `/private/tmp/task-13153-patch-{red,bounds-red,volume-red,late-owner-mutation-red,local-verified,postgres,postgres-edges,cancellation-copy,race-verified}.log`,
 `/private/tmp/task-13153-patch-bandit.json` and
 `/private/tmp/task-13153-patch-tests-bandit.json`.
+
+### Task 6b: Protected deletion and retention (2026-09-05)
+
+Implemented inline under existing ADR-003; no new schema or activation boundary.
+Explicit unowned physical deletion on activated storage now prepares/removes through
+the existing journal, committing quota and original-incarnation history effects
+with output removal. DELETE, API purge and scheduled purge await the same service;
+only journal-owned effects suppress the legacy numeric-ID history update.
+
+Managed Reading deletion reuses one explicit connection across dispatch and its
+existing owner/revision/disposal mutation. Missing rows return before volume access.
+Metadata-only deletion stays file-lock-free; unknown/inconsistent bindings never
+fall back to legacy physical removal. Managed aliases reject without mutation.
+
+Retention eligibility is rechecked under the preparation fence. The journal's
+existing full-row snapshot digest and claims protect that decision through commit,
+so no new manifest fields are needed. Renewal after candidate selection now skips
+the output in both purge entry points. Cleanup reports descriptor-relative,
+successfully synced unlinks, not shared-file preservation or deferred work.
+
+Independent read-only review found one receipt issue: a later cleanup bookkeeping
+failure discarded an already completed unlink result. Both purge entry points
+reproduced it RED, then passed after retaining the receipt before acknowledgement.
+The journal remains pending for recovery. Bounded rereviews found no further
+actionable issue. Additional RED checks corrected metadata-only busy responses
+and preserved missing-output 404 semantics even on an offline volume.
+
+Fresh targeted evidence (290 distinct passes; incremental reruns overlap):
+
+- 242 SQLite/non-PostgreSQL cases across all six Task 6 consumer modules plus
+  output storage/history suites, 172.10s; the PostgreSQL-only creation-fence case
+  was explicitly excluded, not silently skipped.
+- 42 PostgreSQL deletion/purge cases, 278.78s, required backend, no skips.
+- Six added claimed-output cases across both backends, 57.26s.
+- Final missing/ownership/rollback/claimed-output boundary rerun: 24 passes across
+  both backends, 99.65s (overlaps the counts above).
+- Production Bandit: no findings/errors. Test Bandit excludes only assertions;
+  five pre-existing B108 temporary-path fixtures match HEAD. Ruff matches its
+  16 baseline findings (9 adapter, 1 service, 1 scheduler, 1 endpoint, 4 old tests).
+  Changed-scope Black, compile and diff checks pass.
+
+Logs: `/private/tmp/task-13153-delete-{red,receipt-red,receipt-green,busy-red,busy-green,missing-red,final-sqlite,final-postgres,last-boundaries}.log`,
+`/private/tmp/task-13153-retention-{red,green}.log`, and
+`/private/tmp/task-13153-delete-{bandit-final,bandit-tests,bandit-test-baseline}.json`.
+The early retention-green attempt exposed a test-only DTO-field assertion; its
+corrected persisted-field assertion passed in subsequent consumer/final runs.
+
+Task 6 is complete as an implementation checkpoint. Task 7 (text, briefing and
+Reading producer integration, including evidence-sidecar authority) is next;
+Tasks 8–10 and parent-plan rollout remain. No full sweep, Docker, worker registration,
+activation, capability advertisement or merge. Full TASK-13153 remains In Progress
+with ACs unchecked, draft PR #2903 and the human-written Change summary gate intact.

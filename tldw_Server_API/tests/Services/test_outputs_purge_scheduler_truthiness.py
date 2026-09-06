@@ -237,6 +237,8 @@ def purge_cdb(monkeypatch):
     cdb = SimpleNamespace(
         user_id="7",
         find_outputs_to_purge=lambda *_args: {12: "file.txt"},
+        delete_managed_output_artifact_record=lambda *_args, **_kwargs: (False, None),
+        get_output_read_namespace=lambda: None,
         delete_output_artifact_record=lambda *_args, **_kwargs: DeletedOutput("file.txt", False),
     )
     monkeypatch.setattr(scheduler.CollectionsDatabase, "for_user", lambda _user_id: cdb)
