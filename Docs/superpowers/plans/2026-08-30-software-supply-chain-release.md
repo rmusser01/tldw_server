@@ -1617,12 +1617,22 @@ additions and unchanged exhaustive/disjoint guards. Independent integration
 review is clean. The expanded matrix reports 1,079 passed and 70 warnings,
 including the new summary modules, real Character dispatch and pinned Docker
 SBOM coverage. Final local garbage collection is unusually slow (native
-sampling identifies `gc_collect_main`); interpreter exit remains to be
-confirmed separately from the passing test summary. Rebased browser suites
+sampling identifies `gc_collect_main`); the process subsequently exited zero
+without intervention. Rebased browser suites
 pass five cases with one existing optional failure-model skip. Compilation,
 Ruff, actionlint, pinned offline lock freshness and configured hooks pass.
 The changed workflow contract has only assertions plus its unchanged Bandit
 false positive for the `--cov` option. Fresh exact-head CI remains required.
+
+Publication checkpoint: `f3f0bd7f54` was published with the requester-authored
+Change summary preserved verbatim. Dev advanced during publication to
+`33d7f9f1da` with separate Persona changes; a final rebase preserves all 14
+patches exactly. Targeted verification passes with exit zero: 515
+CI/supply-chain tests, six Character HTTP regressions, and five browser cases
+with one existing optional failure-model skip. Pinned offline lock freshness
+and actionlint pass. Publish using the exact prior-head lease.
+The 1,079-test evidence above remains tied to the `d308a40871` integration;
+do not present it as a fresh full run on the later base.
 
 Wait for all required checks and reviewer comments. Resolve every actionable
 thread with evidence, rerun affected tests, rebase again if `dev` moved, and
