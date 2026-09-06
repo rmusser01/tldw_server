@@ -1,6 +1,6 @@
 # Study Assistant Service Prompts
 
-Approved bounded slice, tracked by TASK-13199.
+Approved bounded slice, tracked by TASK-13208 (formerly TASK-13199).
 
 Expose four literal `guidance` parts through existing Service Prompts:
 `study.assistant.explain`, `study.assistant.mnemonic`,
