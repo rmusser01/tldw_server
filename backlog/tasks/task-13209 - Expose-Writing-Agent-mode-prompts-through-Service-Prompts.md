@@ -4,7 +4,7 @@ title: Expose Writing Agent mode prompts through Service Prompts
 status: In Progress
 assignee: []
 created_date: '2026-09-06 15:38'
-updated_date: '2026-09-06 16:43'
+updated_date: '2026-09-06 18:09'
 labels: []
 dependencies: []
 references:
@@ -53,6 +53,10 @@ Qodo fixes verified: 8 RED failures then 191 shared UI tests GREEN; WebUI 25 pas
 User approved the OpenAPI fingerprint and generated-type refresh. Regenerate with the canonical exporter, verify the schema change is restricted to the three optional expected-user manuscript headers, regenerate TypeScript declarations, and rerun the drift gate before pushing.
 
 Approved contract refresh complete. Canonical exporter succeeded with PYTHONPATH including packages/tldw_profile_core/src. Fingerprint now e72e58af304408bc1b44bb380d7d4b3a34f126fc87b2c0bc01c9611147d597da, matching the CI-computed value. Removed exactly the three optional X-TLDW-Expected-User-ID parameters from the exported schema in a diagnostic copy; canonical hashing reproduced the original 5c815e778af28b517b73f608b3b458f98c9751313590432e625ea81afe91792c hash. This proves no unrelated contract drift. Counts unchanged: 2073 paths, 3142 schemas. openapi-typescript 7.13.0 generated the ignored schema.d.ts successfully. Fresh export_openapi_schema.py --check passes; git diff --check passes. Only the fingerprint and tracking record are committed; no runtime code changed, so no additional Bandit run needed for this artifact-only fix.
+
+User approved rebase and force-with-lease update. Rebased four commits onto origin/dev c5b777e9ba7f2ef755185fdb0d350fa1c0d2ce2e without conflicts. git range-diff reports all four patches unchanged. Current rebased implementation/fixes: 0ff1a07b37, d3e2e31f46, 6396c88d2f, 20ab6669ff. Fresh affected backend/shared UI/WebUI tests, Bandit and OpenAPI drift verification running before publication.
+
+Post-rebase verification complete: 132 backend tests, 443 shared UI tests across 12 files, and 25 WebUI-harness checks passed. Bandit on both touched runtime Python files reports no findings; OpenAPI drift check passes on latest dev; scoped ESLint has no code findings (existing pages-path configuration warning only). Temporary dependency symlinks removed. Remote dev remains c5b777e9ba7f2ef755185fdb0d350fa1c0d2ce2e and remote PR head remains 01036a690ca5b60881c0d8394dda9bcaa9e668db; publishing with an explicit expected-head lease.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
