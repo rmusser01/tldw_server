@@ -181,7 +181,8 @@ delete-everywhere." Refresh authoritative state and ask the user to explicitly
 confirm deletion again before creating a new signed request. Never automatically
 rebase deletion or send it to the ordinary conflict resolver. This rejection
 does not delete data or create a conflict candidate. A previously stored
-request can still complete through recovery; exact retries remain supported.
+request remains eligible for recovery; exact retries remain supported. This
+does not complete the currently gated ongoing-ingress purge lifecycle.
 
 | User choice | Action | Reviewed replacement |
 | --- | --- | --- |

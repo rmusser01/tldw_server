@@ -914,7 +914,7 @@ fresh explicit deletion confirmation before constructing a new signed request.
 It must not automatically rebase the request, choose a winner, or route deletion
 through ordinary profile conflict review. No purge object candidate is created.
 This rejection does not itself delete canonical data or advance its generation;
-an earlier durably stored request may still complete through its own recovery.
+an earlier durably stored request remains eligible for its own recovery.
 Exact idempotent retries of that earlier request remain supported, as do normal
 valid purges and the existing invalid-generation rejections.
 

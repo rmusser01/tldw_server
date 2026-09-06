@@ -243,6 +243,8 @@ and obtain explicit delete-everywhere confirmation again before signing a new
 request. Do not synthesize a manifest candidate, merge the purge, or silently
 replace its base envelope. Exact idempotent retry of an earlier stored request
 still supports recovery; rejection of a new stale request does not cancel it.
+The ongoing canonical ingress mutation path does not yet implement purge;
+preserving retry does not claim completed deletion or enable capability v1.
 
 For different IDs claiming the same semantic key, keep-local/merge explicitly
 targets the established shared canonical ID and applies the user-selected values.
