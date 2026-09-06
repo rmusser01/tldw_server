@@ -582,7 +582,8 @@ def _get_persona_audio_chunk_max_bytes() -> int:
 
 
 def _get_persona_audio_chunks_per_minute() -> int:
-    return _persona_int_setting("PERSONA_AUDIO_CHUNKS_PER_MINUTE", 120, 1, 1200)
+    # Browser capture emits 4096 samples at 16 kHz (~235 chunks/minute).
+    return _persona_int_setting("PERSONA_AUDIO_CHUNKS_PER_MINUTE", 300, 1, 1200)
 
 
 def _get_persona_tts_chunk_size_bytes() -> int:

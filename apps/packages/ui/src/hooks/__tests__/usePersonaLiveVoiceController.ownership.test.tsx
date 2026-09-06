@@ -121,6 +121,26 @@ describe("Persona voice readiness and ownership", () => {
     expect(h.sent().findLast((message) => message.type === "voice_commit")?.transcript).toBe("blue notebook is ready ready")
   })
 
+  it("stops rejected audio capture and requires explicit retry after throttling", async () => {
+    const h = setup()
+    const { pending } = await h.start()
+    await h.ready(pending)
+    const notice = { ...h.prepare(), event: "notice", reason_code: "AUDIO_RATE_LIMITED", message: "Audio chunk rate limit exceeded" }
+    act(() => h.result.current.handlePayload({ ...notice, client_message_id: "stale" }))
+    expect(h.result.current.state).toBe("listening")
+    mocks.micStop.mockClear()
+    act(() => h.result.current.handlePayload(notice))
+    expect(mocks.micStop).toHaveBeenCalledOnce()
+    expect(h.result.current.state).toBe("error")
+    expect(h.result.current.warning).toMatch(/wait.*minute.*start/i)
+    const beforeLateChunk = h.sent().length
+    act(() => mocks.chunk?.(new ArrayBuffer(8192)))
+    expect(h.sent()).toHaveLength(beforeLateChunk)
+    const retry = await h.start()
+    await h.ready(retry.pending)
+    expect(h.result.current.state).toBe("listening")
+  })
+
   it("waits for matching server readiness before requesting microphone capture", async () => {
     const h = setup()
     const { pending } = await h.start()

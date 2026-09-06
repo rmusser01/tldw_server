@@ -4,7 +4,7 @@ title: Preserve revised Persona voice transcripts and intentional manual mode
 status: In Progress
 assignee: []
 created_date: '2026-09-06 00:09'
-updated_date: '2026-09-06 00:17'
+updated_date: '2026-09-06 00:35'
 labels: []
 dependencies: []
 ---
@@ -33,6 +33,8 @@ ADR required: no new ADR; amend existing Docs/ADR/046-persona-live-conversation-
 
 <!-- SECTION:NOTES:BEGIN -->
 Fixed transcript rollback on no-result audio chunks and added authoritative transcript snapshots consumed as replacements in the voice controller. Conversation log now records committed speech once. Explicit auto-commit off no longer emits an unavailable-VAD warning, and status text describes manual Send. Two backend and three frontend regressions failed before repair; final scopes passed 125 Python and 165 frontend tests. Bandit zero findings; Ruff no added findings; ESLint zero errors/12 existing warnings; scoped TypeScript zero owned diagnostics/27 dependency diagnostics. Existing ADR046 amended and user guide updated. Human browser baseline proved audible provider playback but failed transcript integrity; post-fix retest remains pending, so task remains In Progress.
+
+Corrected browser retest on 7184399358 displayed the notebook phrase once and correct manual-mode status, but recognition retained a mistaken prefix/punctuation. Operator exceeded the intended capture window during context recovery, canceled via Stop voice, and disconnected; no provider reply accepted in that run. Rate-limit mismatch separately fixed and tested under TASK-13199. Fresh short human acceptance remains pending.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

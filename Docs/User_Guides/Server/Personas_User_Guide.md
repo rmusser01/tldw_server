@@ -453,3 +453,7 @@ Persona Live shows provisional recognition under **Last heard**. Recognition may
 revise those words as more speech arrives; the conversation transcript records
 the committed utterance once. With Auto-commit off, use **Send now** when finished.
 Choosing manual control does not indicate a VAD failure.
+
+### Voice recording rate limits
+
+Persona accepts up to 300 audio chunks per rolling minute by default, enough for the browser microphone cadence. Operators can override `PERSONA_AUDIO_CHUNKS_PER_MINUTE` (1–1200); a lower setting can interrupt continuous browser capture. If this limit is reached, the browser stops recording and asks you to wait one minute before retrying **Start listening**. **Send now** commits recognized speech; **Stop voice** cancels the turn.

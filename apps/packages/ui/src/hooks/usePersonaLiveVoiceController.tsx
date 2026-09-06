@@ -1591,16 +1591,19 @@ export const usePersonaLiveVoiceController = ({
         if ([
           "VOICE_STT_UNAVAILABLE", "VOICE_TTS_UNAVAILABLE", "VOICE_CONVERSATION_UNAVAILABLE",
           "VOICE_SESSION_UNAVAILABLE", "VOICE_NOT_READY", "VOICE_NOT_PREPARED",
-          "VOICE_CONFIG_REQUIRED", "VOICE_TRANSCRIPTION_FAILED"
+          "VOICE_CONFIG_REQUIRED", "VOICE_TRANSCRIPTION_FAILED", "AUDIO_RATE_LIMITED"
         ].includes(reasonCode)) {
           invalidateVoice()
           setPendingStartRequest(false)
           stopMicStream()
           stopCurrentPlayback()
+          clearListeningRecoveryTimeout()
           clearThinkingRecovery()
           setVoiceWarning(
-            String(payload?.message || "Voice failed. Check Audio settings and retry Start."),
-            "voice_prepare_unavailable"
+            reasonCode === "AUDIO_RATE_LIMITED"
+              ? "Voice recording stopped because the server audio rate limit was reached. Wait one minute, then retry Start listening."
+              : String(payload?.message || "Voice failed. Check Audio settings and retry Start."),
+            reasonCode === "AUDIO_RATE_LIMITED" ? "voice_capture_error" : "voice_prepare_unavailable"
           )
           setState("error")
           return

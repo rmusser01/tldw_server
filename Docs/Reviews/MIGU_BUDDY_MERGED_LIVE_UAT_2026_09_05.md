@@ -147,3 +147,11 @@ Touched Bandit found zero issues, Ruff added no findings, ESLint had zero errors
 and 12 existing warnings, and scoped TypeScript had no owned diagnostics
 (27 dependency diagnostics remain). The first full UI typecheck exceeded Node's
 heap; the scoped check completed. Post-fix human acceptance remains pending.
+
+### Corrected browser retest: transcript observed, recording canceled
+
+On revision `71843993589539f8dcf0bc7e95175c2c5274c1f9` (see source identity receipt for authoritative revision), manual listening showed the corrected manual-mode status without a VAD failure. Last heard contained the notebook phrase once, with a misrecognized prefix and repeated punctuation. This is provisional STT evidence, not exact transcript acceptance. The operator allowed capture to outlast the intended 20-second window during context recovery, then canceled via Stop voice and disconnected. No provider turn or audible reply was qualified by this run.
+
+The UI accumulated audio-rate warnings: browser capture emits 4096 samples at 16 kHz (about 234 chunks per minute), exceeding the old default of 120. TASK-13199 raises the bounded default to 300, preserves explicit lower settings, and stops browser capture with a retry message when throttled. Corrected short-window human acceptance remains pending; do not interpret the operator overrun as an intentional long-recording UAT.
+
+TASK-13199 verification: 126 backend and 72 frontend tests passed; Bandit zero findings; Ruff four unchanged baseline findings; ESLint no rule findings; scoped TypeScript zero owned diagnostics with 27 existing dependency diagnostics.

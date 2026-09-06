@@ -4308,6 +4308,18 @@ def test_persona_audio_chunk_rejects_invalid_base64_payload():
             assert "Invalid base64 payload for audio chunk" in str(notice.get("message"))
 
 
+def test_persona_default_audio_limit_supports_browser_capture_cadence(monkeypatch):
+    from tldw_Server_API.app.core.config import settings
+
+    monkeypatch.delitem(settings, "PERSONA_AUDIO_CHUNKS_PER_MINUTE", raising=False)
+    # Shipped useMicStream emits 4096 mono samples per callback at 16 kHz.
+    # Include the callback straddling the rolling minute boundary.
+    browser_chunks_per_minute = (16000 * 60 + 4095) // 4096
+    assert persona_ep._get_persona_audio_chunks_per_minute() >= browser_chunks_per_minute
+    monkeypatch.setitem(settings, "PERSONA_AUDIO_CHUNKS_PER_MINUTE", 1)
+    assert persona_ep._get_persona_audio_chunks_per_minute() == 1
+
+
 def test_persona_audio_chunk_rate_limited(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
 
