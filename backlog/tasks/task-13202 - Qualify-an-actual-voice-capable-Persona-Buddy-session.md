@@ -3,7 +3,7 @@ id: TASK-13202
 title: Qualify an actual voice-capable Persona Buddy session
 status: In Progress
 created_date: 2026-09-06 02:07
-updated_date: 2026-09-06 15:28
+updated_date: 2026-09-06 15:45
 labels:
 - persona
 - buddy
@@ -61,6 +61,7 @@ Latest human manual voice retest used backend 0f5ac351f213c78ab922c724f4d6b501e8
 Additional final checks passed 38 floating Buddy host tests (including four new idle/listening/thinking/speaking render cases), 22 voice ownership tests, 7 microphone resource tests and 4 streaming playback leak tests. Combined with the prior human explicit Start/Stop/Send/playback/disconnect observations, AC2 and AC4 have targeted cleanup and sanitized live evidence. Raw live MediaStream handles are not claimed as directly inspected. Twenty conversation tests also reconfirm server-credential preflight rejects missing static credentials; BYOK-only voice remains unsupported under ADR046, not an admitted capability. AC3 remains open only for a direct observation of the floating sprite transitions during a human turn.
 User explicitly requested merging PR #2908 and revisiting remaining voice UAT afterward. Leave AC3 and this task open. Latest physical attempts on 866d41ef39 observed loaded floating listening and error sprites, but no submitted turn or new playback: background-speech attempt disconnected, another reached the 30-second limit before submission, and a quiet retry recognized no speech before the limit. Capture was stopped, Live disconnected and the temporary viewport reset. Read-only investigation found synchronous whole-turn Whisper decoding and a pre-decode cadence timestamp; investigate event-loop responsiveness and cleanup ownership separately before another human recording. A causal link to the disconnect is not established. Existing successful human manual voice receipts remain valid for their recorded revisions.
 2026-09-06 follow-up: user selected normal server STT (Parakeet ONNX CPU, istupakov/parakeet-tdt-0.6b-v3-onnx). Synthetic Migu UAT profile now saves parakeet-onnx and browser Live confirms it. Preparation-only and actual synthetic Parakeet recognition passed; preparation is lazy, cold first decode callback ~1832 ms. TASK-13208 completes deferred Whisper responsiveness/ownership repair and VAD finalization correction (165 focused tests, independent review, Bandit zero). Evidence: Docs/Reviews/MIGU_VOICE_FOLLOWUP_2026_09_06.md. No new human microphone run yet; floating Buddy listening/thinking/speaking/idle and audible reply remain required.
+Physical attempts on f696121698 used normal Parakeet ONNX CPU. First picked up unrelated narration; stopped without provider submission. Second was silence; user confirmed they missed the recording window. Floating96px image was loaded and followed listening→idle after Stop. Forty ONNX '[No speech detected]' markers were exposed as words, corrected in TASK-13209 with 57 focused tests plus real local silence/speech probe. No intentional speech/provider/TTS acceptance claimed. Next retry should use user-controlled Start listening timing.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 

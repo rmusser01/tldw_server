@@ -75,7 +75,10 @@ def _variant_decode_fn(model: str, variant: str) -> DecodeFn | None:
                 Returns:
                     str: Transcribed text.
                 """
-                return _tx_onnx(audio_np, sample_rate=sr)
+                text = _tx_onnx(audio_np, sample_rate=sr)
+                # The file-oriented backend uses this status for empty recognition.
+                # It must not become spoken words in streaming frames or history.
+                return "" if text == "[No speech detected]" else text
 
             return _fn
         except _PARAKEET_TRANSCRIBER_NONCRITICAL_EXCEPTIONS as e:
@@ -286,6 +289,7 @@ class ParakeetCoreTranscriber:
                         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Custom_Vocabulary import (
                             postprocess_text_if_enabled as _cv_post,
                         )
+
                         text = _cv_post(text) or text
                     except _PARAKEET_TRANSCRIBER_NONCRITICAL_EXCEPTIONS as e:
                         logger.debug("Custom vocabulary post-processing failed: {}", e)
@@ -312,6 +316,7 @@ class ParakeetCoreTranscriber:
                         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Custom_Vocabulary import (
                             postprocess_text_if_enabled as _cv_post,
                         )
+
                         text = _cv_post(text) or text
                     except _PARAKEET_TRANSCRIBER_NONCRITICAL_EXCEPTIONS as e:
                         logger.debug("Custom vocabulary post-processing failed: {}", e)
@@ -356,6 +361,7 @@ class ParakeetCoreTranscriber:
                 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Custom_Vocabulary import (
                     postprocess_text_if_enabled as _cv_post,
                 )
+
                 text = _cv_post(text) or text
             except _PARAKEET_TRANSCRIBER_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug("Custom vocabulary post-processing failed: {}", e)

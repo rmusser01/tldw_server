@@ -62,3 +62,31 @@ on their recorded source versions.
 
 Architecture: [ADR046](../ADR/046-persona-live-conversation-and-voice-runtime.md).
 Plan: [TASK-13208 plan](../superpowers/plans/2026-09-06-persona-whisper-responsiveness.md).
+
+## Physical attempt and silence repair — TASK-13209
+
+On `f696121698`, the first Parakeet recording captured unrelated narration and
+was stopped without a provider submission. The next recording contained silence;
+the requester confirmed they missed the recording window. The floating 96-pixel
+asset was loaded and visibly followed listening → idle after Stop in both
+attempts. Thinking, speaking and audible reply were not tested.
+
+The second attempt rendered forty `[No speech detected]` markers as recognized
+words. The ONNX file backend uses that exact status for empty recognition; its
+streaming adapter now converts the status to an empty result before partial,
+final or flush history handling. Ordinary spoken words such as “no speech
+detected” are preserved. No phrase deduplication or general text blacklist was
+added, and the file API remains unchanged.
+
+Three new sentinel regressions failed before the repair. All 57 focused
+Parakeet/core-streaming/Persona voice tests passed afterward; Ruff and Black pass
+on the changed files, Bandit found no production-scope issues, and independent
+review reported no actionable findings. The real local Parakeet ONNX probe
+emitted no transcript frames or history for digital silence, then recognized the
+complete synthetic notebook phrase. No microphone was used in that repair probe.
+
+Sanitized [human-attempt receipt](assets/migu-parakeet-silence-2026-09-06/human-attempts.json),
+[local-model result](assets/migu-parakeet-silence-2026-09-06/result.json), and
+[probe harness](assets/migu-parakeet-silence-2026-09-06/probe.txt).
+The next physical attempt will let the requester start recording directly to
+avoid another missed timed window. TASK-13202 remains open.
