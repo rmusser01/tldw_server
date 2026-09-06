@@ -12,7 +12,9 @@ import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.api.v1.endpoints.media import ingest_web_content as ingest_endpoint
 from tldw_Server_API.app.api.v1.endpoints.media import process_web_scraping as endpoint
+from tldw_Server_API.app.api.v1.schemas.media_request_models import IngestWebContentRequest
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
 from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as summary
@@ -27,6 +29,7 @@ from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
 pytestmark = pytest.mark.integration
 PROMPT_ID = "media.web.summarization"
 METHODS = ["Individual URLs", "Sitemap", "URL Level", "Recursive Scraping"]
+INGEST_METHODS = ["individual", "sitemap", "url_level", "recursive_scraping"]
 
 
 def article(url: str = "https://example.com/a") -> dict[str, Any]:
@@ -93,6 +96,7 @@ def context(
 
     monkeypatch.setitem(client.app.dependency_overrides, get_request_user, user)
     monkeypatch.setattr(endpoint, "get_prompts_db_for_user", database, raising=False)
+    monkeypatch.setattr(ingest_endpoint, "get_prompts_db_for_user", database, raising=False)
     monkeypatch.setattr(scraper_mod, "get_database_dir", lambda: str(tmp_path))
     state.scraper = scraper_mod.EnhancedWebScraper({})
     monkeypatch.setattr(state.scraper.job_queue, "add_job", queue)
@@ -104,6 +108,7 @@ def context(
     state.service._initialized = True
     monkeypatch.setattr(service, "get_web_scraping_service", lambda: state.service)
     monkeypatch.setattr(legacy, "scrape_article", page)
+    monkeypatch.setattr(service, "scrape_article", page)
     monkeypatch.setattr(
         service, "scrape_from_sitemap", lambda *args, **kwargs: [article(), article("https://example.com/b")]
     )
@@ -152,6 +157,129 @@ def process(context: SimpleNamespace, method: str = "Individual URLs", **options
     if "ephemeral_id" in result:
         return ephemeral_storage.get_data(result["ephemeral_id"])["result"]
     return {"articles": result["results"]}
+
+
+def ingest(context: SimpleNamespace, method: str = "individual", **options: Any) -> dict[str, Any]:
+    """Exercise ingestion without replacing its prompt, crawl or result orchestration."""
+    response = context.client.post(
+        "/api/v1/media/ingest-web-content",
+        headers={"token": "test-token"},
+        json={
+            "urls": ["https://example.com/a", "https://example.com/b"],
+            "scrape_method": method,
+            "max_pages": 2,
+            "perform_analysis": True,
+            "api_name": "openai",
+            "perform_chunking": False,
+            **options,
+        },
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+@pytest.mark.parametrize("method", INGEST_METHODS)
+@pytest.mark.parametrize("fallback", [False, True])
+def test_ingest_saved_pair_and_real_crawl_results(
+    context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, method: str, fallback: bool
+) -> None:
+    """Saved owner instructions must reach every article, including stored crawl results."""
+    save(context, 1)
+    save(context, 2)
+    context.owner = 2
+    if fallback:
+
+        def unavailable() -> None:
+            """Select the compatibility engine without mocking its result envelope."""
+            raise RuntimeError("enhanced unavailable")
+
+        monkeypatch.setattr(service, "get_web_scraping_service", unavailable)
+        monkeypatch.setenv("TLDW_ENABLE_LEGACY_WEB_SCRAPING_FALLBACK", "1")
+    result = ingest(context, method)
+    assert [item["analysis"] for item in result["results"]] == ["Summary result."] * 2
+    assert all(item.get("ingested_at") for item in result["results"])
+    assert context.reads == [2]
+    assert len(context.calls) == 2
+    assert {call["system_message"] for call in context.calls} == {"Owner 2 system {literal}"}
+    assert {call["messages"][0]["content"] for call in context.calls} == {
+        "Article facts.\n\n\n\nOwner 2 summary {literal}"
+    }
+
+
+@pytest.mark.parametrize("method", INGEST_METHODS)
+@pytest.mark.parametrize("part", ["system_prompt", "custom_prompt"])
+@pytest.mark.parametrize("value", ["Explicit {literal}", ""])
+def test_ingest_explicit_parts_win_independently(context: SimpleNamespace, method: str, part: str, value: str) -> None:
+    """Empty strings are explicit overrides, not requests to restore saved defaults."""
+    save(context)
+    result = ingest(context, method, **{part: value})
+    assert len(result["results"]) == 2
+    assert {call["system_message"] for call in context.calls} == {
+        value if part == "system_prompt" else "Owner 1 system {literal}"
+    }
+    suffix = value if part == "custom_prompt" else "Owner 1 summary {literal}"
+    assert {call["messages"][0]["content"] for call in context.calls} == {
+        "Article facts." + ("\n\n\n\n" + suffix if suffix else "")
+    }
+
+
+@pytest.mark.parametrize("method", INGEST_METHODS)
+@pytest.mark.parametrize("disabled", [False, True])
+def test_ingest_irrelevant_storage_is_not_read(context: SimpleNamespace, method: str, disabled: bool) -> None:
+    """Disabled or fully explicit ingestion must work even with corrupt saved prompts."""
+    context.databases[1].save_service_prompt_override(PROMPT_ID, {"bad": "corrupt"}, None)
+    options = {"perform_analysis": False} if disabled else {"system_prompt": "", "custom_prompt": ""}
+    result = ingest(context, method, **options)
+    assert len(result["results"]) == 2
+    assert context.reads == []
+    if disabled:
+        assert context.calls == []
+    else:
+        assert {call["system_message"] for call in context.calls} == {""}
+        assert {call["messages"][0]["content"] for call in context.calls} == {"Article facts."}
+
+
+@pytest.mark.parametrize("method", INGEST_METHODS)
+def test_ingest_snapshot_survives_mid_request_edit(
+    context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, method: str
+) -> None:
+    """A settings/account change after the first model call must not affect later pages."""
+    row = save(context)
+    original = OpenAIAdapter.chat
+
+    def edit(self: OpenAIAdapter, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+        """Change real storage and current identity while the request is running."""
+        if not context.calls:
+            db = context.databases[1]
+            try:
+                db.save_service_prompt_override(PROMPT_ID, {"system": "Future", "user": "Future"}, row.revision)
+            finally:
+                db.close_connection()
+            context.owner = 2
+        return original(self, request, timeout=timeout)
+
+    monkeypatch.setattr(OpenAIAdapter, "chat", edit)
+    result = ingest(context, method)
+    assert len(result["results"]) == 2
+    assert context.reads == [1]
+    assert {call["system_message"] for call in context.calls} == {"Owner 1 system {literal}"}
+
+
+@pytest.mark.parametrize("method", INGEST_METHODS)
+def test_ingest_reset_restores_engine_defaults(context: SimpleNamespace, method: str) -> None:
+    """Reset keeps friendly-ingest defaults distinct from enhanced crawl defaults."""
+    row = save(context)
+    context.databases[1].reset_service_prompt_override(PROMPT_ID, row.revision)
+    result = ingest(context, method)
+    assert len(result["results"]) == 2
+    if method in ("individual", "sitemap"):
+        system = "Act as a professional summarizer."
+        user = "Summarize this article."
+    else:
+        system = "You are a professional summarizer who produces accurate, concise summaries of web content."
+        user = "Summarize this article concisely. Focus on the main points, facts, and any actionable insights."
+    assert {call["system_message"] for call in context.calls} == {system}
+    assert {call["messages"][0]["content"] for call in context.calls} == {"Article facts.\n\n\n\n" + user}
 
 
 @pytest.mark.parametrize("method", METHODS)
@@ -237,8 +365,9 @@ def test_snapshot_survives_mid_request_edit(context: SimpleNamespace, monkeypatc
 
 
 @pytest.mark.parametrize("corrupt", [False, True])
+@pytest.mark.parametrize("ingestion", [False, True])
 def test_lookup_connection_closes_on_worker(
-    context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, corrupt: bool
+    context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, corrupt: bool, ingestion: bool
 ) -> None:
     """Prompt storage cleanup runs on its read thread even when validation fails."""
     database = context.databases[1]
@@ -263,8 +392,11 @@ def test_lookup_connection_closes_on_worker(
     monkeypatch.setattr(database, "close_connection", track_close)
     if corrupt:
         response = context.client.post(
-            "/api/v1/media/process-web-scraping",
-            json={
+            "/api/v1/media/ingest-web-content" if ingestion else "/api/v1/media/process-web-scraping",
+            headers={"token": "test-token"},
+            json={"urls": ["https://example.com"], "api_name": "openai"}
+            if ingestion
+            else {
                 "scrape_method": "Individual URLs",
                 "url_input": "https://example.com",
                 "summarize_checkbox": True,
@@ -274,7 +406,7 @@ def test_lookup_connection_closes_on_worker(
         assert response.status_code >= 400
         assert context.fetches == []
     else:
-        process(context)
+        ingest(context) if ingestion else process(context)
     assert len(reads) == 1
     assert closes == reads
 
@@ -352,6 +484,23 @@ def test_explicit_system_reaches_individual_scraper_without_saved_override(
     """The HTTP system_prompt name reaches the individual scraper's model call."""
     process(context, system_prompt="Explicit system")
     assert {call["system_message"] for call in context.calls} == {"Explicit system"}
+
+
+@pytest.mark.asyncio
+async def test_direct_ingestion_does_not_acquire_owner_prompts(context: SimpleNamespace) -> None:
+    """Direct ingestion retains historical defaults even when the HTTP owner has saved prompts."""
+    save(context)
+    result = await service.ingest_web_content_orchestrate(
+        IngestWebContentRequest(urls=["https://example.com/a"], api_name="openai", perform_chunking=False),
+        db=SimpleNamespace(client_id="unscoped"),
+        usage_log=SimpleNamespace(),
+    )
+    assert [item["analysis"] for item in result] == ["Summary result."]
+    assert context.reads == []
+    assert {call["system_message"] for call in context.calls} == {"Act as a professional summarizer."}
+    assert {call["messages"][0]["content"] for call in context.calls} == {
+        "Article facts.\n\n\n\nSummarize this article."
+    }
 
 
 @pytest.mark.asyncio

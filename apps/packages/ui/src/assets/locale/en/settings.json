@@ -69,7 +69,7 @@
       },
       "mediaWebSummarization": {
         "label": "Web article summarization",
-        "description": "Controls summary instructions for synchronous web scraping. Reset restores each scraping engine's existing defaults; the displayed defaults are the deployed web-article prompts."
+        "description": "Controls summary instructions for synchronous web scraping and web-content ingestion. Reset restores each scraping engine's existing defaults; the displayed defaults are the deployed web-article prompts."
       },
       "mediaEmailSummarization": {
         "label": "Email summarization",
@@ -96,7 +96,7 @@
       "emailSummarization": "Synchronous email analysis",
       "audioAnalysis": "Synchronous audio analysis",
       "videoSummarization": "Synchronous video analysis",
-      "webSummarization": "Synchronous web scraping",
+      "webSummarization": "Synchronous web scraping and ingestion",
       "automaticNotesTitles": "Automatic Notes titles"
     },
     "titleGeneration": {

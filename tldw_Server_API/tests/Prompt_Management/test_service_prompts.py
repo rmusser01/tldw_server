@@ -115,9 +115,9 @@ EXPECTED_REGISTRY = {
     },
     "media.web.summarization": {
         "label": "Web article summarization",
-        "description": "Controls summary instructions for synchronous web scraping. Reset restores each scraping engine's existing defaults; the displayed defaults are the deployed web-article prompts.",
+        "description": "Controls summary instructions for synchronous web scraping and web-content ingestion. Reset restores each scraping engine's existing defaults; the displayed defaults are the deployed web-article prompts.",
         "parts": (("system", "System instructions", "literal", ()), ("user", "User instructions", "literal", ())),
-        "workflows": (("media.web.summarization", "Synchronous web scraping"),),
+        "workflows": (("media.web.summarization", "Synchronous web scraping and ingestion"),),
     },
     "media.text.translation": {
         "label": "Text translation",

@@ -178,7 +178,7 @@ const KNOWN_DEFINITIONS = {
     key: "mediaWebSummarization",
     label: "Web article summarization",
     description:
-      "Controls summary instructions for synchronous web scraping. Reset restores each scraping engine's existing defaults; the displayed defaults are the deployed web-article prompts."
+      "Controls summary instructions for synchronous web scraping and web-content ingestion. Reset restores each scraping engine's existing defaults; the displayed defaults are the deployed web-article prompts."
   },
   "media.email.summarization": {
     key: "mediaEmailSummarization",
@@ -248,7 +248,7 @@ const KNOWN_WORKFLOWS: Record<string, { key: string; label: string }> = {
   },
   "media.web.summarization": {
     key: "webSummarization",
-    label: "Synchronous web scraping"
+    label: "Synchronous web scraping and ingestion"
   },
   "notes.title.generate": {
     key: "automaticNotesTitles",

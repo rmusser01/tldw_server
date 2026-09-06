@@ -648,7 +648,7 @@ describe("ServicePromptsSettings", () => {
     await openPrompt("Web article summarization")
     expect(screen.getByLabelText("System instructions")).toHaveValue("Web system guidance.")
     expect(screen.getByLabelText("User instructions")).toHaveValue("Web summary guidance.")
-    expect(screen.getByText("Synchronous web scraping")).toBeVisible()
+    expect(screen.getByText("Synchronous web scraping and ingestion")).toBeVisible()
     expect(screen.getByText(/Reset restores each scraping engine/, { selector: "p" })).toBeVisible()
     fireEvent.change(screen.getByLabelText("System instructions"), { target: { value: "Web {system}" } })
     fireEvent.change(screen.getByLabelText("User instructions"), { target: { value: "Web {summary}" } })
