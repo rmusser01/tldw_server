@@ -150,6 +150,26 @@ const KNOWN_DEFINITIONS = {
     description:
       "Controls system instructions for synchronous document analysis. Without a saved override, server defaults apply."
   },
+  "study.assistant.explain": {
+    key: "studyAssistantExplain",
+    label: "Study explanation",
+    description: "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed."
+  },
+  "study.assistant.mnemonic": {
+    key: "studyAssistantMnemonic",
+    label: "Study mnemonic",
+    description: "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed."
+  },
+  "study.assistant.followup": {
+    key: "studyAssistantFollowup",
+    label: "Study follow-up",
+    description: "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed."
+  },
+  "study.assistant.freeform": {
+    key: "studyAssistantFreeform",
+    label: "Study freeform response",
+    description: "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed."
+  },
   "media.document.insights": {
     key: "mediaDocumentInsights",
     label: "Document Insights",
@@ -201,6 +221,8 @@ const KNOWN_DEFINITIONS = {
 } as const
 
 const KNOWN_WORKFLOWS: Record<string, { key: string; label: string }> = {
+  "study.assistant.flashcard": { key: "studyAssistantFlashcard", label: "Flashcard Study Assistant" },
+  "study.assistant.quiz": { key: "studyAssistantQuiz", label: "Quiz Study Assistant" },
   "chat.main.rag": { key: "mainChatRag", label: "Main chat RAG" },
   "chat.tab.rag": { key: "tabChatRag", label: "Tab chat RAG" },
   "chat.document.rag": {
@@ -267,6 +289,7 @@ const KNOWN_WORKFLOWS: Record<string, { key: string; label: string }> = {
 }
 
 const KNOWN_PARTS: Record<string, { key: string; label: string }> = {
+  guidance: { key: "guidance", label: "Guidance" },
   analysis_guidance: { key: "analysisGuidance", label: "Analysis guidance" },
   presentation_guidance: { key: "presentationGuidance", label: "Presentation guidance" },
   template: { key: "template", label: "Template" },

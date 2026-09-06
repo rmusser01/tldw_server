@@ -88,6 +88,46 @@ def test_service_prompt_catalog_returns_exact_metadata_without_prompt_bodies(
     assert response.headers["cache-control"] == "no-store"
     assert response.json() == [
         {
+            "id": "study.assistant.explain",
+            "label": "Study explanation",
+            "description": "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed.",
+            "parts": [{"key": "guidance", "label": "Guidance", "mode": "literal", "required_variables": []}],
+            "affected_workflows": [
+                {"id": "study.assistant.flashcard", "label": "Flashcard Study Assistant"},
+                {"id": "study.assistant.quiz", "label": "Quiz Study Assistant"},
+            ],
+        },
+        {
+            "id": "study.assistant.mnemonic",
+            "label": "Study mnemonic",
+            "description": "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed.",
+            "parts": [{"key": "guidance", "label": "Guidance", "mode": "literal", "required_variables": []}],
+            "affected_workflows": [
+                {"id": "study.assistant.flashcard", "label": "Flashcard Study Assistant"},
+                {"id": "study.assistant.quiz", "label": "Quiz Study Assistant"},
+            ],
+        },
+        {
+            "id": "study.assistant.followup",
+            "label": "Study follow-up",
+            "description": "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed.",
+            "parts": [{"key": "guidance", "label": "Guidance", "mode": "literal", "required_variables": []}],
+            "affected_workflows": [
+                {"id": "study.assistant.flashcard", "label": "Flashcard Study Assistant"},
+                {"id": "study.assistant.quiz", "label": "Quiz Study Assistant"},
+            ],
+        },
+        {
+            "id": "study.assistant.freeform",
+            "label": "Study freeform response",
+            "description": "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed.",
+            "parts": [{"key": "guidance", "label": "Guidance", "mode": "literal", "required_variables": []}],
+            "affected_workflows": [
+                {"id": "study.assistant.flashcard", "label": "Flashcard Study Assistant"},
+                {"id": "study.assistant.quiz", "label": "Quiz Study Assistant"},
+            ],
+        },
+        {
             "id": "chat.rag.answer",
             "label": "RAG answer",
             "description": ("Controls how retrieved context and the current question are presented to the model."),

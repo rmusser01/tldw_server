@@ -29,6 +29,42 @@ FIXTURE_PATH = (
 FIXTURE = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
 
 EXPECTED_REGISTRY = {
+    "study.assistant.explain": {
+        "label": "Study explanation",
+        "description": "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed.",
+        "parts": (("guidance", "Guidance", "literal", ()),),
+        "workflows": (
+            ("study.assistant.flashcard", "Flashcard Study Assistant"),
+            ("study.assistant.quiz", "Quiz Study Assistant"),
+        ),
+    },
+    "study.assistant.mnemonic": {
+        "label": "Study mnemonic",
+        "description": "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed.",
+        "parts": (("guidance", "Guidance", "literal", ()),),
+        "workflows": (
+            ("study.assistant.flashcard", "Flashcard Study Assistant"),
+            ("study.assistant.quiz", "Quiz Study Assistant"),
+        ),
+    },
+    "study.assistant.followup": {
+        "label": "Study follow-up",
+        "description": "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed.",
+        "parts": (("guidance", "Guidance", "literal", ()),),
+        "workflows": (
+            ("study.assistant.flashcard", "Flashcard Study Assistant"),
+            ("study.assistant.quiz", "Quiz Study Assistant"),
+        ),
+    },
+    "study.assistant.freeform": {
+        "label": "Study freeform response",
+        "description": "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed.",
+        "parts": (("guidance", "Guidance", "literal", ()),),
+        "workflows": (
+            ("study.assistant.flashcard", "Flashcard Study Assistant"),
+            ("study.assistant.quiz", "Quiz Study Assistant"),
+        ),
+    },
     "chat.rag.answer": {
         "label": "RAG answer",
         "description": "Controls how retrieved context and the current question are presented to the model.",

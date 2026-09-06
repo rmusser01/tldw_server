@@ -23,6 +23,22 @@
     "title": "Workflow prompts",
     "description": "Review and customize the instructions used by supported content workflows.",
     "definitions": {
+      "studyAssistantExplain": {
+        "label": "Study explanation",
+        "description": "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed."
+      },
+      "studyAssistantMnemonic": {
+        "label": "Study mnemonic",
+        "description": "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed."
+      },
+      "studyAssistantFollowup": {
+        "label": "Study follow-up",
+        "description": "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed."
+      },
+      "studyAssistantFreeform": {
+        "label": "Study freeform response",
+        "description": "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed."
+      },
       "chatRagAnswer": {
         "label": "RAG answer",
         "description": "Controls how retrieved context and the current question are presented to the model."
@@ -85,6 +101,8 @@
       }
     },
     "workflows": {
+      "studyAssistantFlashcard": "Flashcard Study Assistant",
+      "studyAssistantQuiz": "Quiz Study Assistant",
       "mainChatRag": "Main chat RAG",
       "tabChatRag": "Tab chat RAG",
       "documentChatRag": "Document chat RAG",
@@ -109,6 +127,7 @@
       "openChatSettings": "Open Chat settings"
     },
     "parts": {
+      "guidance": "Guidance",
       "template": "Template",
       "system": "System instructions",
       "user": "User instructions",
