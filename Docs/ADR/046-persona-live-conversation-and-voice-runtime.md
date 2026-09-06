@@ -54,3 +54,7 @@ so actual repeated speech remains valid.
 ### Browser capture rate (TASK-13199)
 
 The default audio admission limit is 300 chunks per rolling minute, covering the shipped 4096-sample / 16 kHz browser capture cadence (about 235 callbacks including a boundary callback) with scheduling headroom. Explicit operator limits and existing chunk-size bounds remain enforced. On an owned rate-limit response the browser stops capture and playback, clears voice authority, and requires an explicit retry after the window expires. Batching was rejected for this repair because it adds transcription latency and residual-buffer lifecycle complexity.
+
+### Whisper speech filtering (TASK-13200)
+
+Persona enables the existing local Whisper `vad_filter` independently of its turn detector. Manual commitment disables automatic turn finalization, not recognition filtering. Silence must be filtered at the audio boundary; no phrase blacklist or textual deduplication is introduced. Local silence generated hallucinated text with filtering off, while the existing filter suppressed it and preserved the known speech sample.

@@ -3390,6 +3390,8 @@ def _build_persona_live_stt_config(voice_runtime: dict[str, Any] | None) -> Any:
     config.language = language.replace("_", "-").split("-", 1)[0].lower() or None
     config.sample_rate = 16000
     config.enable_vad = False
+    # Speech filtering is independent of Persona's manual/automatic commitment.
+    config.vad_filter = model_name == "whisper"
     config.enable_partial = True
     config.partial_interval = 0.35
     config.min_partial_duration = 0.3

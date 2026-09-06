@@ -155,3 +155,11 @@ On revision `71843993589539f8dcf0bc7e95175c2c5274c1f9` (see source identity rece
 The UI accumulated audio-rate warnings: browser capture emits 4096 samples at 16 kHz (about 234 chunks per minute), exceeding the old default of 120. TASK-13199 raises the bounded default to 300, preserves explicit lower settings, and stops browser capture with a retry message when throttled. Corrected short-window human acceptance remains pending; do not interpret the operator overrun as an intentional long-recording UAT.
 
 TASK-13199 verification: 126 backend and 72 frontend tests passed; Bandit zero findings; Ruff four unchanged baseline findings; ESLint no rule findings; scoped TypeScript zero owned diagnostics with 27 existing dependency diagnostics.
+
+### Audible reply confirmed; unspoken prefix isolated (TASK-13200)
+
+On c60f59a95e, the browser submitted the notebook test phrase once and received the expected DeepSeek reply plus four Kokoro audio chunks. The user confirmed audible playback and denied speaking the preexisting gratitude prefix. The microphone was already active when the operator inspected this turn, so this run does not qualify explicit-start ownership. After Send now the UI moved through thinking to idle; the short speaking interval was not sampled. The operator disconnected after playback.
+
+A local real-model comparison reproduced hallucinated text from five seconds of digital silence with Whisper filtering off. The existing faster-whisper audio filter suppressed the silence result and preserved synthetic Kokoro speech. Persona now enables that filter for Whisper independently of automatic turn commitment; there is no phrase blacklist. A production-config probe confirmed empty silence output and correct speech with the filter enabled. These synthetic probes use no microphone or external provider; fresh human transcript acceptance remains pending. See the focused JSON receipts in the browser-voice assets directory.
+
+TASK-13200 validation: 129 focused Persona/Whisper tests passed; Bandit zero findings; Ruff no new findings (one unchanged endpoint SIM114). The two new regressions first failed with filtering disabled.

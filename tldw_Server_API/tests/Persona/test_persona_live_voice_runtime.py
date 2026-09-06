@@ -23,6 +23,36 @@ def test_locale_normalized_for_real_whisper():
     assert config.language == "en"
 
 
+@pytest.mark.parametrize("auto_commit", [False, True])
+def test_persona_whisper_filters_audio_independently_of_turn_commit(monkeypatch, auto_commit):
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Streaming_Unified as streaming
+
+    calls = []
+
+    class Model:
+        def transcribe(self, audio, **kwargs):
+            calls.append(kwargs)
+            # Valid speech must not be removed by a phrase blacklist.
+            return [SimpleNamespace(text="Thank you.")], SimpleNamespace()
+
+    monkeypatch.setattr(streaming, "get_whisper_model", lambda *args: Model(), raising=False)
+    transcriber = persona_ep._create_persona_live_stt_transcriber(
+        voice_runtime={"stt_model": "tiny.en", "stt_language": "en", "enable_vad": auto_commit},
+    )
+    transcriber.initialize()
+    try:
+        assert transcriber.transcriber._transcribe_audio(np.zeros(16000, dtype=np.float32)) == "Thank you."
+        assert calls[0]["vad_filter"] is True
+        # Finalization remains owned by Persona's separate turn detector.
+        assert transcriber.config.enable_vad is False
+    finally:
+        transcriber.cleanup()
+
+
 def test_readiness_cannot_survive_stop_or_move_between_connections():
     from tldw_Server_API.app.core.Persona.live_voice_runtime import PersonaLiveVoiceRegistry
 
