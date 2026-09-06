@@ -1461,6 +1461,7 @@ jobs:
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_provider_payload.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
           - name: chat-character-integration-context
             paths: >-
@@ -2962,6 +2963,7 @@ jobs:
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_provider_payload.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
           - name: chat-character-integration-context
             paths: >-
@@ -4334,6 +4336,7 @@ jobs:
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_provider_payload.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
           - name: chat-character-integration-context
             paths: >-
@@ -5629,6 +5632,7 @@ jobs:
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_provider_payload.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
           - name: chat-character-integration-context
             paths: >-
@@ -6930,6 +6934,7 @@ jobs:
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_provider_payload.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
           - name: chat-character-integration-context
             paths: >-

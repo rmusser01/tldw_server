@@ -1553,7 +1553,66 @@ false positive on `--cov` at line 193; no new security finding. The next fetched
 dev `dc0b7455f2` changes only unrelated design notes and its task record; include
 it unchanged, verify patch preservation, and publish with an exact remote lease.
 
-Wait for all required checks and reviewer comments. Resolve every actionable thread with evidence, rerun affected tests, rebase again if `dev` moved, and merge only after:
+2026-09-06 requester-approved remaining-blocker repair — Locally verified;
+latest-dev integration and exact-head CI pending:
+
+1. Classify exact-head source/image evidence and refresh upstream patch status.
+   Source has seven blockers; both frontend images have 56 package/CVE findings
+   without fixed versions. Backend scans fail before reporting, while copying a
+   CUDA library into their 512 MiB temporary filesystem.
+2. Repair scanner scratch storage in all four image-scan paths with isolated
+   job-local disk storage; preserve scan inputs, scanner coverage and security
+   controls. Prove RED/GREEN and a larger-than-512-MiB scratch operation.
+3. Test a targeted patched Transformers resolution across every platform branch.
+   Current published mlx-lm wheel metadata allows transformers>=5.0.0; validate
+   actual resolver constraints before carrying forward the earlier cap claim.
+   Do not add exceptions for ChromaDB, NLTK, ecdsa or OS packages.
+4. Resume Character complete-v2 payload and mobile setup diagnosis under child
+   TASK-13013.7.2, starting at the failed boundary rather than repeating working
+   provider probes. Add minimal regression-led fixes, independently review,
+   verify and publish. Report any residual requiring a separate explicit choice.
+
+Success requires exact-head evidence, not merely a green aggregate status. The
+earlier Admin Webhooks repair is confirmed in live CI (26 JWT tests pass), but
+broad inherited Admin unit failures are still visible in its permissive step.
+
+Dependency checkpoint: the targeted pinned-uv resolution removed the vulnerable
+Darwin Transformers 5.8.1 branch. All platforms now resolve 5.16.1; the direct
+floor is 5.10.0. The actual old upper bound came from Darwin Docling metadata,
+not MLX. Required Docling core 2.95.0 and IBM models 4.0.2 variants are retained
+alongside the unchanged other-platform variants; tokenizers resolves 0.23.1.
+No other package versions changed. Regression RED became GREEN (16 tests),
+pinned offline lock freshness and CycloneDX schema validation pass. A fresh
+pinned Trivy scan removes the Transformers finding but retains six source
+findings (two Critical, four High): ChromaDB, NLTK and ecdsa. No exception or
+dependency removal was introduced. Bandit reports only test assertions, with
+no parsing errors or non-assertion findings in the changed dependency test.
+
+Scanner checkpoint: all four image helpers use per-invocation disk-backed
+scratch with cleanup; eight RED cases became GREEN within 31 passing workflow
+tests. The real pinned container reproduced the old 512 MiB failure and wrote
+513 MiB successfully through each repaired helper. Full exact-image scans
+remain required in CI; this local check does not establish vulnerability
+admission. Independent review reports no actionable findings in scanner,
+dependency or Character patches. The combined matrix passes 907 tests with
+26 warnings, including the pinned Docker SBOM integration. The new Character
+module initially failed shard inventory; assigning it to the existing chat
+integration shard on all five platforms restores all 55 workflow contracts.
+No inventory assertion was weakened.
+
+Character checkpoint: TASK-13013.7.2 preserves saved generation defaults and
+request precedence, but omits the neutral repetition penalty only when the
+selected provider does not support it. Six real-HTTP-to-adapter regressions
+pass after four expected RED failures; 11 existing generation tests pass.
+Phase 6 navigation focuses the actual composer to reveal its mobile toolbar,
+without changing viewport or diagnostic assertions. The two browser suites
+pass five cases with one existing optional failure-model skip. Scoped Bandit
+has no production findings; existing endpoint lint findings are unchanged.
+The shared environment and other sessions remain untouched.
+
+Wait for all required checks and reviewer comments. Resolve every actionable
+thread with evidence, rerun affected tests, rebase again if `dev` moved, and
+merge only after:
 
 - all required checks pass;
 - every review thread is resolved;

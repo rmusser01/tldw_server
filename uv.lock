@@ -854,8 +854,7 @@ dependencies = [
     { name = "requests" },
     { name = "torch" },
     { name = "tqdm" },
-    { name = "transformers", version = "5.8.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "transformers", version = "5.16.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "transformers" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1c/93/2c97a85cbb66a8a256a13176e11c9c4508074e2341299fe75ee955c81eff/bert_score-0.3.13.tar.gz", hash = "sha256:8ffe5838eac8cdd988b8b1a896af7f49071188c8c011a1ed160d71a9899a2ba4", size = 48621, upload-time = "2023-02-20T21:07:29.477Z" }
 wheels = [
@@ -1554,8 +1553,7 @@ dependencies = [
     { name = "pyyaml" },
     { name = "rich" },
     { name = "tenacity" },
-    { name = "tokenizers", version = "0.22.2", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "tokenizers", version = "0.23.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "tokenizers" },
     { name = "tqdm" },
     { name = "typer" },
     { name = "typing-extensions" },
@@ -1638,8 +1636,7 @@ dependencies = [
     { name = "loguru" },
     { name = "pydantic" },
     { name = "torch" },
-    { name = "transformers", version = "5.8.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'darwin' and extra == 'extra-11-tldw-server-backend-vllm') or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "transformers", version = "5.16.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'darwin' and extra == 'extra-11-tldw-server-backend-vllm') or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "transformers" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/2c/9e/d7f18bd9a0354088abc11a0c1f2c7698f7c49e5a709faedf6a46e388f693/compressed_tensors-0.17.0.tar.gz", hash = "sha256:15c20d06bdbcf35b51fc99fd125e7b9be1e1855567c33b7a46dfac26ad6fb126", size = 257091, upload-time = "2026-06-03T16:49:17.208Z" }
 wheels = [
@@ -2620,8 +2617,7 @@ version = "1.0.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "onnxruntime" },
-    { name = "tokenizers", version = "0.22.2", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "tokenizers", version = "0.23.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "tokenizers" },
     { name = "torch" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/19/3c/a2028821394e2cb4f3c2ebe8099d4a6ef0674aa647c72fad9c6621ef4e83/dicta_onnx-1.0.2.tar.gz", hash = "sha256:8fc79a1b1fd316b8f782cc4ca9b72b0973b25581913e3f9cc74ee65ede9473f2", size = 30763, upload-time = "2025-04-16T12:20:37.276Z" }
@@ -2734,20 +2730,37 @@ wheels = [
 name = "docling-core"
 version = "2.93.0"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.14.*' and sys_platform == 'win32'",
+    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
+    "python_full_version == '3.14.*' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32'",
+    "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
+    "python_full_version == '3.13.*' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32'",
+    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
+    "python_full_version == '3.12.*' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version < '3.12' and sys_platform == 'win32'",
+    "python_full_version < '3.12' and sys_platform == 'emscripten'",
+    "python_full_version < '3.12' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+]
 dependencies = [
-    { name = "defusedxml" },
-    { name = "doclang" },
-    { name = "jsonref" },
-    { name = "jsonschema" },
-    { name = "latex2mathml" },
-    { name = "pandas" },
-    { name = "pillow" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "pyyaml" },
-    { name = "tabulate" },
-    { name = "typer" },
-    { name = "typing-extensions" },
+    { name = "defusedxml", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "doclang", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "jsonref", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "jsonschema", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "latex2mathml", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "pandas", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "pillow", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "pydantic", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "pydantic-settings", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "pyyaml", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "tabulate", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "typer", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "typing-extensions", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/10/33/e30a27d8da4ce3414cce522ec31fcbc842430141b60424c1ea99c903d3e2/docling_core-2.93.0.tar.gz", hash = "sha256:0bdf6f42b0c83ca4dcd3916e6d1fbcfdc87168d93f192e00a1d2b0c55d5357d4", size = 363160, upload-time = "2026-09-01T10:47:45.115Z" }
 wheels = [
@@ -2756,29 +2769,86 @@ wheels = [
 
 [package.optional-dependencies]
 chunking = [
-    { name = "semchunk" },
-    { name = "transformers", version = "5.8.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "transformers", version = "5.16.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "tree-sitter" },
-    { name = "tree-sitter-c" },
-    { name = "tree-sitter-javascript" },
-    { name = "tree-sitter-python" },
-    { name = "tree-sitter-typescript" },
+    { name = "semchunk", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "transformers", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "tree-sitter", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "tree-sitter-c", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "tree-sitter-javascript", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "tree-sitter-python", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "tree-sitter-typescript", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+]
+
+[[package]]
+name = "docling-core"
+version = "2.95.0"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.15' and sys_platform == 'darwin'",
+    "python_full_version == '3.14.*' and sys_platform == 'darwin'",
+    "python_full_version == '3.13.*' and sys_platform == 'darwin'",
+    "python_full_version == '3.12.*' and sys_platform == 'darwin'",
+    "python_full_version < '3.12' and sys_platform == 'darwin'",
+]
+dependencies = [
+    { name = "defusedxml", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "doclang", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "jsonref", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "jsonschema", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "latex2mathml", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "pandas", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "pillow", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "pydantic", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "pydantic-settings", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "pyyaml", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "tabulate", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "typer", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "typing-extensions", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2d/b5/217831e148140fa70326742e9f820813592e3c932bda1f55ac2c76d3958c/docling_core-2.95.0.tar.gz", hash = "sha256:dd79a3db6d08a6d5f674fa66987aaf5c0f2705233cb329c2f19cd9472518796d", size = 371729, upload-time = "2026-09-04T15:17:44.315Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/09/72/9c62033a528be2ae276001faa3cfd01593a710d020b81eeb53d0b689d176/docling_core-2.95.0-py3-none-any.whl", hash = "sha256:bdaace4c575512f3dba36c2978fc3bf67f7fbedc2e8b3c3660b03bdab044fde8", size = 300013, upload-time = "2026-09-04T15:17:42.682Z" },
+]
+
+[package.optional-dependencies]
+chunking = [
+    { name = "semchunk", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "transformers", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "tree-sitter", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "tree-sitter-c", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "tree-sitter-javascript", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "tree-sitter-python", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "tree-sitter-typescript", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
 ]
 
 [[package]]
 name = "docling-ibm-models"
 version = "4.0.1"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.14.*' and sys_platform == 'win32'",
+    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
+    "python_full_version == '3.14.*' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32'",
+    "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
+    "python_full_version == '3.13.*' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32'",
+    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
+    "python_full_version == '3.12.*' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version < '3.12' and sys_platform == 'win32'",
+    "python_full_version < '3.12' and sys_platform == 'emscripten'",
+    "python_full_version < '3.12' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+]
 dependencies = [
-    { name = "huggingface-hub" },
-    { name = "numpy" },
-    { name = "pillow" },
-    { name = "safetensors", extra = ["torch"] },
-    { name = "torch" },
-    { name = "torchvision" },
-    { name = "transformers", version = "5.8.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "transformers", version = "5.16.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "huggingface-hub", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "numpy", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "pillow", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "safetensors", extra = ["torch"], marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "torch", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "torchvision", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "transformers", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/8e/ef/4eefa24b0ab174cd2cf8ab3d2fab8c67e99be49cc147e35090b735395ae1/docling_ibm_models-4.0.1.tar.gz", hash = "sha256:47d490d0e45a56c48a4064970339547ba9d759129353a209879d81977c6fb80a", size = 77758, upload-time = "2026-09-01T08:20:17.43Z" }
 wheels = [
@@ -2786,11 +2856,37 @@ wheels = [
 ]
 
 [[package]]
+name = "docling-ibm-models"
+version = "4.0.2"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.15' and sys_platform == 'darwin'",
+    "python_full_version == '3.14.*' and sys_platform == 'darwin'",
+    "python_full_version == '3.13.*' and sys_platform == 'darwin'",
+    "python_full_version == '3.12.*' and sys_platform == 'darwin'",
+    "python_full_version < '3.12' and sys_platform == 'darwin'",
+]
+dependencies = [
+    { name = "huggingface-hub", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "numpy", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "pillow", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "safetensors", extra = ["torch"], marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "torch", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "torchvision", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "transformers", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8e/e1/ae8c897ccf2f7137ae4ea07af2631b816b38b7382a792095077dc20907ab/docling_ibm_models-4.0.2.tar.gz", hash = "sha256:cfc2e265d9ee5dc7bc4fe001916851adedba1d8020584d170b35da2d79321f8d", size = 77561, upload-time = "2026-09-03T11:25:24.157Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/95/d1/acb1fff3b414f80d25ec4c83fc61fc0e668ab40a83689b28b7806772f8f7/docling_ibm_models-4.0.2-py3-none-any.whl", hash = "sha256:821d343a5d90cc8613029013b7634a18cb600f58c563c6c9ea029974aed80b10", size = 69400, upload-time = "2026-09-03T11:25:22.962Z" },
+]
+
+[[package]]
 name = "docling-parse"
 version = "7.16.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "docling-core" },
+    { name = "docling-core", version = "2.93.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "docling-core", version = "2.95.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
     { name = "pillow" },
     { name = "pydantic" },
     { name = "pywin32", marker = "sys_platform == 'win32' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
@@ -2825,7 +2921,8 @@ version = "2.124.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "certifi" },
-    { name = "docling-core" },
+    { name = "docling-core", version = "2.93.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "docling-core", version = "2.95.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
     { name = "filetype" },
     { name = "pluggy" },
     { name = "pydantic" },
@@ -2843,8 +2940,10 @@ standard = [
     { name = "accelerate" },
     { name = "beautifulsoup4" },
     { name = "defusedxml" },
-    { name = "docling-core", extra = ["chunking"] },
-    { name = "docling-ibm-models" },
+    { name = "docling-core", version = "2.93.0", source = { registry = "https://pypi.org/simple" }, extra = ["chunking"], marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "docling-core", version = "2.95.0", source = { registry = "https://pypi.org/simple" }, extra = ["chunking"], marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "docling-ibm-models", version = "4.0.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "docling-ibm-models", version = "4.0.2", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
     { name = "docling-parse" },
     { name = "httpx" },
     { name = "huggingface-hub" },
@@ -3309,8 +3408,7 @@ dependencies = [
     { name = "ctranslate2" },
     { name = "huggingface-hub" },
     { name = "onnxruntime" },
-    { name = "tokenizers", version = "0.22.2", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "tokenizers", version = "0.23.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "tokenizers" },
     { name = "tqdm" },
 ]
 wheels = [
@@ -3430,8 +3528,7 @@ dependencies = [
     { name = "numpy" },
     { name = "onnxruntime" },
     { name = "requests" },
-    { name = "tokenizers", version = "0.22.2", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "tokenizers", version = "0.23.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "tokenizers" },
     { name = "tqdm" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/55/1f/176cb4a857a70c3538f637e19389ab6aed21548a1ba1d1424fccc8bba108/FlashRank-0.2.10.tar.gz", hash = "sha256:f8f82a25c32fdfc668a09dc4089421d6aab8e7f71308424b541f40bb3f01d9db", size = 18905, upload-time = "2025-01-06T13:33:01.657Z" }
@@ -5239,8 +5336,7 @@ dependencies = [
     { name = "misaki", extra = ["en"] },
     { name = "numpy" },
     { name = "torch" },
-    { name = "transformers", version = "5.8.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "transformers", version = "5.16.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "transformers" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/e8/48/88b8cdf28b068d070195c2817175549dee48e7682e3ab8994bee5f69217e/kokoro-0.9.4.tar.gz", hash = "sha256:fbf633262797f8cf46fdac3315cf9cade67dc8b762c0feccf334892772fb9ac4", size = 26215928, upload-time = "2025-04-05T22:01:35.294Z" }
 wheels = [
@@ -6581,7 +6677,7 @@ dependencies = [
     { name = "protobuf", version = "7.36.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'darwin' and extra != 'extra-11-tldw-server-backend-vllm') or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
     { name = "pyyaml", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
     { name = "sentencepiece", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "transformers", version = "5.8.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "transformers", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/84/94/9a38d6b0c6fcca995b9136c94eb7da1e9c5165652edf228b96b29960fa7a/mlx_lm-0.31.3.tar.gz", hash = "sha256:61eb0e3ba09444f77f874aff295401d7ccd20b39495cbbce0c782a15474ce733", size = 304318, upload-time = "2026-04-22T07:37:27.922Z" }
 wheels = [
@@ -7361,8 +7457,7 @@ asr = [
     { name = "sox" },
     { name = "texterrors" },
     { name = "torchmetrics" },
-    { name = "transformers", version = "5.8.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "transformers", version = "5.16.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "transformers" },
     { name = "wandb" },
     { name = "webdataset" },
 ]
@@ -7387,8 +7482,7 @@ dependencies = [
     { name = "torchao" },
     { name = "torchaudio" },
     { name = "torchtune" },
-    { name = "transformers", version = "5.8.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "transformers", version = "5.16.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "transformers" },
     { name = "vector-quantize-pytorch" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/8d/42/50ce58b959a59e08e91d773efd29342b2ee50d199208c8871769b11ac51e/neucodec-0.0.6.tar.gz", hash = "sha256:9a19f107bf224a1c858967ccaace38fe1efbc328ca78c8f792b8dfca9cd993e6", size = 23546, upload-time = "2026-06-22T10:30:26.816Z" }
@@ -8636,8 +8730,7 @@ dependencies = [
     { name = "numpy" },
     { name = "packaging" },
     { name = "torch" },
-    { name = "transformers", version = "5.8.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "transformers", version = "5.16.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "transformers" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/d9/76/e4ac0c4b398ed3fe2d41e0058002d276896b9a15a54be16889d8e0d3ee92/optimum-2.3.0.tar.gz", hash = "sha256:aa96ad535a5cec68d12c6372574125452284632fe13699633a61e8bbfb09c4df", size = 124929, upload-time = "2026-08-04T15:35:18.895Z" }
 wheels = [
@@ -12259,12 +12352,10 @@ dependencies = [
     { name = "scikit-learn" },
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
     { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "tokenizers", version = "0.22.2", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "tokenizers", version = "0.23.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "tokenizers" },
     { name = "torch" },
     { name = "tqdm" },
-    { name = "transformers", version = "5.8.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "transformers", version = "5.16.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "transformers" },
     { name = "typing-extensions" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/d9/ef/87681678d0aa91a1e77f0ffdd2e5d900aaf358aac644dd14bead8d95ec4c/sentence_transformers-6.0.1.tar.gz", hash = "sha256:1c3b8d9403f87ad0c879638554f36cc85744f38a6a70d150fd7e964ca0e9935b", size = 575395, upload-time = "2026-08-31T07:50:43.518Z" }
@@ -13433,8 +13524,7 @@ dependencies = [
     { name = "torch" },
     { name = "tqdm" },
     { name = "trafilatura" },
-    { name = "transformers", version = "5.8.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "transformers", version = "5.16.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "transformers" },
     { name = "typer" },
     { name = "tzlocal" },
     { name = "urllib3" },
@@ -13502,8 +13592,7 @@ all = [
     { name = "torch" },
     { name = "torchaudio" },
     { name = "trafilatura" },
-    { name = "transformers", version = "5.8.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "transformers", version = "5.16.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "transformers" },
     { name = "webrtcvad" },
     { name = "websockets" },
 ]
@@ -13670,8 +13759,7 @@ tts-higgs = [
     { name = "accelerate" },
     { name = "torch" },
     { name = "torchaudio" },
-    { name = "transformers", version = "5.8.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "transformers", version = "5.16.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "transformers" },
 ]
 tts-kitten-tts = [
     { name = "espeakng-loader" },
@@ -13701,8 +13789,7 @@ tts-neutts = [
     { name = "phonemizer" },
     { name = "resemble-perth" },
     { name = "torch" },
-    { name = "transformers", version = "5.8.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "transformers", version = "5.16.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "transformers" },
 ]
 tts-pocket-tts = [
     { name = "huggingface-hub" },
@@ -13723,8 +13810,7 @@ tts-vibevoice = [
     { name = "sageattention", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine != 'x86_64' and extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release') or (sys_platform != 'linux' and extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
     { name = "torch" },
     { name = "torchaudio" },
-    { name = "transformers", version = "5.8.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "transformers", version = "5.16.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "transformers" },
 ]
 web-research = [
     { name = "arxiv" },
@@ -13973,10 +14059,10 @@ requires-dist = [
     { name = "tqdm", specifier = ">=4.65.0" },
     { name = "trafilatura", specifier = ">=1.6.0" },
     { name = "trafilatura", marker = "extra == 'web-research'", specifier = ">=1.6.0" },
-    { name = "transformers", specifier = ">=5.5.3" },
-    { name = "transformers", marker = "extra == 'tts-higgs'", specifier = ">=5.5.3" },
-    { name = "transformers", marker = "extra == 'tts-neutts'", specifier = ">=5.5.3" },
-    { name = "transformers", marker = "extra == 'tts-vibevoice'", specifier = ">=5.5.3" },
+    { name = "transformers", specifier = ">=5.10.0" },
+    { name = "transformers", marker = "extra == 'tts-higgs'", specifier = ">=5.10.0" },
+    { name = "transformers", marker = "extra == 'tts-neutts'", specifier = ">=5.10.0" },
+    { name = "transformers", marker = "extra == 'tts-vibevoice'", specifier = ">=5.10.0" },
     { name = "tree-sitter", marker = "extra == 'codegraph'", specifier = ">=0.25,<0.26" },
     { name = "tree-sitter-c", marker = "extra == 'codegraph'", specifier = ">=0.24,<0.25" },
     { name = "tree-sitter-c-sharp", marker = "extra == 'codegraph'", specifier = ">=0.23,<0.24" },
@@ -14012,60 +14098,10 @@ release = [
 
 [[package]]
 name = "tokenizers"
-version = "0.22.2"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.15' and sys_platform == 'darwin'",
-    "python_full_version == '3.14.*' and sys_platform == 'darwin'",
-    "python_full_version == '3.13.*' and sys_platform == 'darwin'",
-    "python_full_version == '3.12.*' and sys_platform == 'darwin'",
-    "python_full_version < '3.12' and sys_platform == 'darwin'",
-]
-dependencies = [
-    { name = "huggingface-hub", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/73/6f/f80cfef4a312e1fb34baf7d85c72d4411afde10978d4657f8cdd811d3ccc/tokenizers-0.22.2.tar.gz", hash = "sha256:473b83b915e547aa366d1eee11806deaf419e17be16310ac0a14077f1e28f917", size = 372115, upload-time = "2026-01-05T10:45:15.988Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/92/97/5dbfabf04c7e348e655e907ed27913e03db0923abb5dfdd120d7b25630e1/tokenizers-0.22.2-cp39-abi3-macosx_10_12_x86_64.whl", hash = "sha256:544dd704ae7238755d790de45ba8da072e9af3eea688f698b137915ae959281c", size = 3100275, upload-time = "2026-01-05T10:41:02.158Z" },
-    { url = "https://files.pythonhosted.org/packages/2e/47/174dca0502ef88b28f1c9e06b73ce33500eedfac7a7692108aec220464e7/tokenizers-0.22.2-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:1e418a55456beedca4621dbab65a318981467a2b188e982a23e117f115ce5001", size = 2981472, upload-time = "2026-01-05T10:41:00.276Z" },
-    { url = "https://files.pythonhosted.org/packages/d6/84/7990e799f1309a8b87af6b948f31edaa12a3ed22d11b352eaf4f4b2e5753/tokenizers-0.22.2-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:2249487018adec45d6e3554c71d46eb39fa8ea67156c640f7513eb26f318cec7", size = 3290736, upload-time = "2026-01-05T10:40:32.165Z" },
-    { url = "https://files.pythonhosted.org/packages/78/59/09d0d9ba94dcd5f4f1368d4858d24546b4bdc0231c2354aa31d6199f0399/tokenizers-0.22.2-cp39-abi3-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:25b85325d0815e86e0bac263506dd114578953b7b53d7de09a6485e4a160a7dd", size = 3168835, upload-time = "2026-01-05T10:40:38.847Z" },
-    { url = "https://files.pythonhosted.org/packages/47/50/b3ebb4243e7160bda8d34b731e54dd8ab8b133e50775872e7a434e524c28/tokenizers-0.22.2-cp39-abi3-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:bfb88f22a209ff7b40a576d5324bf8286b519d7358663db21d6246fb17eea2d5", size = 3521673, upload-time = "2026-01-05T10:40:56.614Z" },
-    { url = "https://files.pythonhosted.org/packages/e0/fa/89f4cb9e08df770b57adb96f8cbb7e22695a4cb6c2bd5f0c4f0ebcf33b66/tokenizers-0.22.2-cp39-abi3-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:1c774b1276f71e1ef716e5486f21e76333464f47bece56bbd554485982a9e03e", size = 3724818, upload-time = "2026-01-05T10:40:44.507Z" },
-    { url = "https://files.pythonhosted.org/packages/64/04/ca2363f0bfbe3b3d36e95bf67e56a4c88c8e3362b658e616d1ac185d47f2/tokenizers-0.22.2-cp39-abi3-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:df6c4265b289083bf710dff49bc51ef252f9d5be33a45ee2bed151114a56207b", size = 3379195, upload-time = "2026-01-05T10:40:51.139Z" },
-    { url = "https://files.pythonhosted.org/packages/2e/76/932be4b50ef6ccedf9d3c6639b056a967a86258c6d9200643f01269211ca/tokenizers-0.22.2-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:369cc9fc8cc10cb24143873a0d95438bb8ee257bb80c71989e3ee290e8d72c67", size = 3274982, upload-time = "2026-01-05T10:40:58.331Z" },
-    { url = "https://files.pythonhosted.org/packages/1d/28/5f9f5a4cc211b69e89420980e483831bcc29dade307955cc9dc858a40f01/tokenizers-0.22.2-cp39-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:29c30b83d8dcd061078b05ae0cb94d3c710555fbb44861139f9f83dcca3dc3e4", size = 9478245, upload-time = "2026-01-05T10:41:04.053Z" },
-    { url = "https://files.pythonhosted.org/packages/6c/fb/66e2da4704d6aadebf8cb39f1d6d1957df667ab24cff2326b77cda0dcb85/tokenizers-0.22.2-cp39-abi3-musllinux_1_2_armv7l.whl", hash = "sha256:37ae80a28c1d3265bb1f22464c856bd23c02a05bb211e56d0c5301a435be6c1a", size = 9560069, upload-time = "2026-01-05T10:45:10.673Z" },
-    { url = "https://files.pythonhosted.org/packages/16/04/fed398b05caa87ce9b1a1bb5166645e38196081b225059a6edaff6440fac/tokenizers-0.22.2-cp39-abi3-musllinux_1_2_i686.whl", hash = "sha256:791135ee325f2336f498590eb2f11dc5c295232f288e75c99a36c5dbce63088a", size = 9899263, upload-time = "2026-01-05T10:45:12.559Z" },
-    { url = "https://files.pythonhosted.org/packages/05/a1/d62dfe7376beaaf1394917e0f8e93ee5f67fea8fcf4107501db35996586b/tokenizers-0.22.2-cp39-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:38337540fbbddff8e999d59970f3c6f35a82de10053206a7562f1ea02d046fa5", size = 10033429, upload-time = "2026-01-05T10:45:14.333Z" },
-    { url = "https://files.pythonhosted.org/packages/fd/18/a545c4ea42af3df6effd7d13d250ba77a0a86fb20393143bbb9a92e434d4/tokenizers-0.22.2-cp39-abi3-win32.whl", hash = "sha256:a6bf3f88c554a2b653af81f3204491c818ae2ac6fbc09e76ef4773351292bc92", size = 2502363, upload-time = "2026-01-05T10:45:20.593Z" },
-    { url = "https://files.pythonhosted.org/packages/65/71/0670843133a43d43070abeb1949abfdef12a86d490bea9cd9e18e37c5ff7/tokenizers-0.22.2-cp39-abi3-win_amd64.whl", hash = "sha256:c9ea31edff2968b44a88f97d784c2f16dc0729b8b143ed004699ebca91f05c48", size = 2747786, upload-time = "2026-01-05T10:45:18.411Z" },
-    { url = "https://files.pythonhosted.org/packages/72/f4/0de46cfa12cdcbcd464cc59fde36912af405696f687e53a091fb432f694c/tokenizers-0.22.2-cp39-abi3-win_arm64.whl", hash = "sha256:9ce725d22864a1e965217204946f830c37876eee3b2ba6fc6255e8e903d5fcbc", size = 2612133, upload-time = "2026-01-05T10:45:17.232Z" },
-]
-
-[[package]]
-name = "tokenizers"
 version = "0.23.1"
 source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.15' and sys_platform == 'win32'",
-    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.15' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.14.*' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version == '3.13.*' and sys_platform == 'win32'",
-    "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.13.*' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version == '3.12.*' and sys_platform == 'win32'",
-    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.12.*' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version < '3.12' and sys_platform == 'win32'",
-    "python_full_version < '3.12' and sys_platform == 'emscripten'",
-    "python_full_version < '3.12' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-]
 dependencies = [
-    { name = "huggingface-hub", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "huggingface-hub" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c1/60/21f715d9faba5f5407ff759472ade058ec4a507ad62bcea47cb847239a73/tokenizers-0.23.1.tar.gz", hash = "sha256:1feeeadf865a7915adc25445dea30e9933e593c31bb96c277cee36de227c8bfa", size = 365748, upload-time = "2026-04-27T14:43:25.606Z" }
 wheels = [
@@ -14418,8 +14454,7 @@ dependencies = [
     { name = "safetensors" },
     { name = "sentencepiece" },
     { name = "tiktoken" },
-    { name = "tokenizers", version = "0.22.2", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "tokenizers", version = "0.23.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "tokenizers" },
     { name = "torchdata" },
     { name = "tqdm" },
 ]
@@ -14508,62 +14543,18 @@ wheels = [
 
 [[package]]
 name = "transformers"
-version = "5.8.1"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.15' and sys_platform == 'darwin'",
-    "python_full_version == '3.14.*' and sys_platform == 'darwin'",
-    "python_full_version == '3.13.*' and sys_platform == 'darwin'",
-    "python_full_version == '3.12.*' and sys_platform == 'darwin'",
-    "python_full_version < '3.12' and sys_platform == 'darwin'",
-]
-dependencies = [
-    { name = "huggingface-hub", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "numpy", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "packaging", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "pyyaml", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "regex", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "safetensors", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "tokenizers", version = "0.22.2", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "tqdm", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "typer", marker = "sys_platform == 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/e7/e6/4134ea2fbea322cddc7ffc94a0d8ee47fe32ce8e876b320cd37d88edfc4d/transformers-5.8.1.tar.gz", hash = "sha256:4dd5b6de4105725104d84fd6abd74b305f4debfc251b38c648ee5dd087cf543b", size = 8532019, upload-time = "2026-05-13T03:21:57.234Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/fc/b1/8be7e7ef0b5200491312201918b6125ef9c9df9dd0f0240ccef9ac824e6b/transformers-5.8.1-py3-none-any.whl", hash = "sha256:5340fb95962162cdfdae5cc91d7f8fedd92ed75216c1154c5e1f590fcf56dd0e", size = 10632882, upload-time = "2026-05-13T03:21:52.876Z" },
-]
-
-[[package]]
-name = "transformers"
 version = "5.16.1"
 source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.15' and sys_platform == 'win32'",
-    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.15' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.14.*' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version == '3.13.*' and sys_platform == 'win32'",
-    "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.13.*' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version == '3.12.*' and sys_platform == 'win32'",
-    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.12.*' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version < '3.12' and sys_platform == 'win32'",
-    "python_full_version < '3.12' and sys_platform == 'emscripten'",
-    "python_full_version < '3.12' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-]
 dependencies = [
-    { name = "huggingface-hub", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "numpy", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "packaging", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "pyyaml", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "regex", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "safetensors", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "tokenizers", version = "0.23.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "tqdm", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "typer", marker = "sys_platform != 'darwin' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "huggingface-hub" },
+    { name = "numpy" },
+    { name = "packaging" },
+    { name = "pyyaml" },
+    { name = "regex" },
+    { name = "safetensors" },
+    { name = "tokenizers" },
+    { name = "tqdm" },
+    { name = "typer" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ad/2e/ba418680ab901dae269360bb8642485eae04f1af91ee2ebb8bd6f3607305/transformers-5.16.1.tar.gz", hash = "sha256:17b0eac726ddc55e84ac58946063e0c6d37fd000c456b581f050ea0f4e822869", size = 9650542, upload-time = "2026-08-26T14:48:58.789Z" }
 wheels = [
@@ -15022,16 +15013,14 @@ dependencies = [
     { name = "starlette" },
     { name = "tiktoken" },
     { name = "tilelang" },
-    { name = "tokenizers", version = "0.22.2", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'darwin' and extra == 'extra-11-tldw-server-backend-vllm') or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "tokenizers", version = "0.23.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'darwin' and extra == 'extra-11-tldw-server-backend-vllm') or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "tokenizers" },
     { name = "tokenspeed-mla", marker = "sys_platform == 'linux'" },
     { name = "torch" },
     { name = "torchaudio" },
     { name = "torchcodec" },
     { name = "torchvision" },
     { name = "tqdm" },
-    { name = "transformers", version = "5.8.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'darwin' and extra == 'extra-11-tldw-server-backend-vllm') or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "transformers", version = "5.16.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'darwin' and extra == 'extra-11-tldw-server-backend-vllm') or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "transformers" },
     { name = "typing-extensions" },
     { name = "watchfiles" },
     { name = "xgrammar", marker = "platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'ppc64le' or platform_machine == 's390x' or platform_machine == 'x86_64'" },
@@ -15487,8 +15476,7 @@ dependencies = [
     { name = "numpy" },
     { name = "pydantic" },
     { name = "torch" },
-    { name = "transformers", version = "5.8.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'darwin' and extra == 'extra-11-tldw-server-backend-vllm') or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
-    { name = "transformers", version = "5.16.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'darwin' and extra == 'extra-11-tldw-server-backend-vllm') or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')" },
+    { name = "transformers" },
     { name = "triton", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "typing-extensions" },
 ]

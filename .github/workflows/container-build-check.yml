@@ -170,20 +170,22 @@ jobs:
           SUBJECT_DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           set -euo pipefail
-          trivy() {
+          trivy() (
+            scratch_dir="$(mktemp -d "$RUNNER_TEMP/trivy.XXXXXX")"
+            trap 'rm -rf -- "$scratch_dir"' EXIT
             docker run --rm --platform linux/amd64 \
               --user "$(id -u):$(id -g)" \
               --network none \
               --cap-drop ALL \
               --security-opt no-new-privileges:true \
               --read-only \
-              --tmpfs /tmp:rw,nosuid,nodev,size=512m \
+              --volume "$scratch_dir:/tmp:rw" \
               --volume "$PWD/evidence:/work:rw" \
               --volume "$PWD/scanner:/trivy-cache:rw" \
               --volume "$RUNNER_TEMP/${{ matrix.name }}-layout:/input:ro" \
               --workdir /work \
               "$TRIVY_IMAGE" "$@"
-          }
+          )
           trivy image --platform linux/amd64 \
             --cache-dir /trivy-cache --skip-db-update \
             --scanners vuln --ignore-unfixed=false --format json \

@@ -146,7 +146,7 @@ dependencies = [
   "openai>=1.0.0",
   "optimum>=1.13.0",
   "torch>=2.11.0",
-  "transformers>=5.5.3",
+  "transformers>=5.10.0",
   "sentence-transformers>=5.4.0",
 
   # Research/Web
@@ -393,7 +393,7 @@ TTS_sovits = [
 TTS_higgs = [
   "torch>=2.11.0",
   "torchaudio>=2.11.0",
-  "transformers>=5.5.3",
+  "transformers>=5.10.0",
   "accelerate>=0.20.0",
   # Note: higgs-audio must be installed from source:
   # git clone https://github.com/boson-ai/higgs-audio.git && cd higgs-audio && pip install -e .
@@ -402,7 +402,7 @@ TTS_higgs = [
 TTS_vibevoice = [
   "torch>=2.11.0",
   "torchaudio>=2.11.0",
-  "transformers>=5.5.3",
+  "transformers>=5.10.0",
   "accelerate>=0.20.0",
   "flash-attn>=2.5.8; platform_system == \"Linux\" and platform_machine == \"x86_64\"",
   "sageattention>=1.0.0; platform_system == \"Linux\" and platform_machine == \"x86_64\"",
@@ -432,7 +432,7 @@ TTS_chatterbox_lang = [
 TTS_neutts = [
   "librosa>=0.10.0",
   "phonemizer>=3.2.1",
-  "transformers>=5.5.3",
+  "transformers>=5.10.0",
   "torch>=2.11.0",
   "neucodec>=0.0.4",
   "resemble-perth>=1.0.0",
