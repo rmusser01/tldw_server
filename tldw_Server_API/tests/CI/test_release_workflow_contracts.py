@@ -294,6 +294,97 @@ def test_release_scanner_database_is_fresh_shared_and_offline() -> None:
     assert "--network none" not in reference_scan
 
 
+@pytest.mark.parametrize(
+    ("path", "job_name", "step_name", "offline"),
+    [
+        (CONTAINER_WORKFLOW, "build-and-scan", "Scan local OCI candidate", True),
+        (RELEASE_WORKFLOW, "build-backend-candidates", "Scan exact backend subject", False),
+        (RELEASE_WORKFLOW, "build-frontend-candidates", "Scan exact frontend archive", True),
+        (RELEASE_WORKFLOW, "scan-reference-images", "Scan exact reference subject", False),
+    ],
+)
+@pytest.mark.parametrize("scanner_status", [0, 42])
+def test_image_scans_use_private_disk_scratch_and_preserve_guards(
+    tmp_path: Path, path: Path, job_name: str, step_name: str,
+    offline: bool, scanner_status: int,
+) -> None:
+    """Execute each scan path; catch capped scratch, reuse, leaks, or lost guards."""
+    workflow = _load(path)
+    script = _run(_get_step(workflow["jobs"][job_name]["steps"], step_name))
+    script = script.replace("${{ matrix.name }}", "app")
+    runner_temp = tmp_path / "runner temp"
+    runner_temp.mkdir()
+    digest = "sha256:" + "a" * 64
+    reference = "ghcr.io/example/app@" + digest
+    # Replace only Docker: observe the real helper's arguments and live scratch.
+    docker = r'''
+docker() {
+  python - "$@" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+args = sys.argv[1:]
+scratch = [args[i + 1].removesuffix(":/tmp:rw")
+           for i, arg in enumerate(args[:-1])
+           if arg == "--volume" and args[i + 1].endswith(":/tmp:rw")]
+mode = None
+if scratch:
+    directory = Path(scratch[0])
+    mode = directory.stat().st_mode & 0o777
+    (directory / "scanner-output").write_text("temporary scanner data")
+with Path("docker-calls.jsonl").open("a") as output:
+    print(json.dumps({"args": args, "scratch": scratch, "mode": mode}), file=output)
+sys.exit(int(os.environ["SCANNER_STATUS"]))
+PY
+}
+'''
+    result = subprocess.run(
+        ["bash", "-c", docker + script],  # nosec B603,B607
+        cwd=tmp_path, capture_output=True, text=True,
+        env={**os.environ, "RUNNER_TEMP": str(runner_temp),
+             "TRIVY_IMAGE": workflow["env"]["TRIVY_IMAGE"], "SUBJECT_DIGEST": digest,
+             "CANDIDATE_REF": reference, "REFERENCE": reference,
+             "SCANNER_STATUS": str(scanner_status)},
+        shell=False,  # nosec B603
+        check=False,
+    )
+    assert result.returncode == scanner_status, result.stdout + result.stderr
+    calls = [json.loads(line) for line in (tmp_path / "docker-calls.jsonl").read_text().splitlines()]
+    assert len(calls) == (2 if scanner_status == 0 else 1)
+    scratch_paths = []
+    for call, scan_format in zip(calls, ("json", "cyclonedx")):
+        assert len(call["scratch"]) == 1, "image scan needs disk-backed /tmp"
+        scratch = Path(call["scratch"][0])
+        scratch_paths.append(scratch)
+        assert scratch.parent == runner_temp
+        assert call["mode"] == 0o700
+        assert not scratch.exists(), "scratch must be removed on success and failure"
+        args = call["args"]
+        assert args[:4] == ["run", "--rm", "--platform", "linux/amd64"]
+        assert args[args.index("--user") + 1] == f"{os.getuid()}:{os.getgid()}"
+        assert args[args.index("--cap-drop") + 1] == "ALL"
+        assert args[args.index("--security-opt") + 1] == "no-new-privileges:true"
+        assert "--read-only" in args
+        assert "--tmpfs" not in args
+        assert ("--network" in args) is offline
+        if offline:
+            assert args[args.index("--network") + 1] == "none"
+            assert f"{runner_temp}/app-layout:/input:ro" in args
+            assert args[args.index("--input") + 1] == "/input@" + digest
+        else:
+            assert args[-1] == reference
+        scanner_args = args[args.index(PINNED_TRIVY) + 1:]
+        assert scanner_args[:3] == ["image", "--platform", "linux/amd64"]
+        assert "--skip-db-update" in scanner_args
+        assert "--ignore-unfixed=false" in scanner_args
+        assert scanner_args[scanner_args.index("--scanners") + 1] == "vuln"
+        assert scanner_args[scanner_args.index("--format") + 1] == scan_format
+        assert not any(arg.startswith(("--skip-files", "--skip-dirs")) for arg in scanner_args)
+    assert len(set(scratch_paths)) == len(calls), "each scanner invocation needs private scratch"
+
+
 def test_release_component_evidence_is_checksummed_before_upload() -> None:
     workflow = _load(RELEASE_WORKFLOW)
     jobs = workflow["jobs"]
