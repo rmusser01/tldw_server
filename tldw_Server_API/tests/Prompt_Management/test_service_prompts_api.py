@@ -88,6 +88,27 @@ def test_service_prompt_catalog_returns_exact_metadata_without_prompt_bodies(
     assert response.headers["cache-control"] == "no-store"
     assert response.json() == [
         {
+            "id": "writing.agent.quick",
+            "label": "Writing Agent: Quick",
+            "description": "Controls writing assistance instructions. Manuscript context and provider settings remain fixed.",
+            "parts": [{"key": "system", "label": "System instructions", "mode": "literal", "required_variables": []}],
+            "affected_workflows": [{"id": "writing.agent", "label": "Writing Playground AI Agent"}],
+        },
+        {
+            "id": "writing.agent.planning",
+            "label": "Writing Agent: Planning",
+            "description": "Controls writing assistance instructions. Manuscript context and provider settings remain fixed.",
+            "parts": [{"key": "system", "label": "System instructions", "mode": "literal", "required_variables": []}],
+            "affected_workflows": [{"id": "writing.agent", "label": "Writing Playground AI Agent"}],
+        },
+        {
+            "id": "writing.agent.brainstorm",
+            "label": "Writing Agent: Brainstorm",
+            "description": "Controls writing assistance instructions. Manuscript context and provider settings remain fixed.",
+            "parts": [{"key": "system", "label": "System instructions", "mode": "literal", "required_variables": []}],
+            "affected_workflows": [{"id": "writing.agent", "label": "Writing Playground AI Agent"}],
+        },
+        {
             "id": "study.assistant.explain",
             "label": "Study explanation",
             "description": "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed.",
@@ -480,6 +501,24 @@ def test_summary_settings_uses_deployment_default_for_detail_and_reset(
     assert reset.status_code == 200
     assert reset.json()["effective_parts"] == {"system": "Deployment summary guidance."}
     assert reset.json()["saved_parts"] is None
+
+
+@pytest.mark.parametrize("mode", ["quick", "planning", "brainstorm"])
+def test_writing_agent_prompt_save_reset_and_mode_isolation(api_context: SimpleNamespace, mode: str) -> None:
+    """A writing-mode override stays literal and does not affect another mode."""
+    path = f"/api/v1/service-prompts/writing.agent.{mode}"
+    defaults = api_context.client.get(path).json()["default_parts"]
+    other_mode = "planning" if mode == "quick" else "quick"
+    other_path = f"/api/v1/service-prompts/writing.agent.{other_mode}"
+    other_defaults = api_context.client.get(other_path).json()["effective_parts"]
+    custom = {"system": "Advise in French {literally}."}
+    saved = api_context.client.put(path, json={"parts": custom, "expected_revision": None})
+    assert saved.status_code == 200
+    assert api_context.client.get(path).json()["effective_parts"] == custom
+    assert api_context.client.get(other_path).json()["effective_parts"] == other_defaults
+    reset = api_context.client.delete(path, params={"expected_revision": saved.json()["revision"]})
+    assert reset.status_code == 200
+    assert reset.json()["effective_parts"] == defaults
 
 
 def test_title_prompt_can_be_saved_and_reset_through_generic_api(api_context) -> None:

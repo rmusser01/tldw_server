@@ -99,7 +99,10 @@ const definition = (
   affected_workflows: []
 })
 
-const definitions: Record<KnownServicePromptId, ServicePromptCatalogItem> = {
+const definitions: Partial<Record<KnownServicePromptId, ServicePromptCatalogItem>> = {
+  "writing.agent.quick": definition("writing.agent.quick", [{ key: "system", label: "System instructions", mode: "literal", required_variables: [] }]),
+  "writing.agent.planning": definition("writing.agent.planning", [{ key: "system", label: "System instructions", mode: "literal", required_variables: [] }]),
+  "writing.agent.brainstorm": definition("writing.agent.brainstorm", [{ key: "system", label: "System instructions", mode: "literal", required_variables: [] }]),
   "chat.rag.answer": definition("chat.rag.answer", [
     {
       key: "template",
@@ -177,6 +180,9 @@ const definitions: Record<KnownServicePromptId, ServicePromptCatalogItem> = {
 describe("Service Prompt validation and rendering", () => {
   it("keeps old-server defaults byte-equivalent to the shared fixture", () => {
     expect(LEGACY_SERVICE_PROMPT_DEFAULTS).toEqual({
+      "writing.agent.quick": fixture.defaults["writing.agent.quick"],
+      "writing.agent.planning": fixture.defaults["writing.agent.planning"],
+      "writing.agent.brainstorm": fixture.defaults["writing.agent.brainstorm"],
       "chat.rag.answer": fixture.defaults["chat.rag.answer"],
       "chat.rag.question_rewrite": fixture.defaults["chat.rag.question_rewrite"],
       "chat.web_search.answer": fixture.defaults["chat.web_search.answer"],
@@ -379,6 +385,24 @@ const renderDefinitionFor = (id: KnownServicePromptId) => ({
 })
 
 describe("Service Prompt migration and runtime snapshots", () => {
+  it.each(["quick", "planning", "brainstorm"] as const)("loads %s writing instructions with compatible defaults and no silent error fallback", async (mode) => {
+    const id = `writing.agent.${mode}` as const
+    for (const fallback of ["catalog-404", "omitted", "detail-404", "saved"]) {
+      mocks.listServicePrompts.mockResolvedValue(fallback === "omitted" ? [] : catalog)
+      if (fallback === "catalog-404") mocks.listServicePrompts.mockRejectedValueOnce(new ServicePromptApiError("Not found", { status: 404 }))
+      mocks.getServicePrompt.mockResolvedValue(detailFor(id, { effective_parts: { system: "Custom {literal}" }, source: "user" }))
+      if (fallback === "detail-404") mocks.getServicePrompt.mockRejectedValueOnce(new ServicePromptApiError("Not found", { status: 404 }))
+      const snapshot = await loadServicePromptSnapshot([id])
+      expect(snapshot.definitions[id]?.parts).toEqual(fallback === "saved" ? { system: "Custom {literal}" } : fixture.defaults[id])
+      snapshot.release()
+    }
+    for (const status of [401, 403, 409, 422, 500]) {
+      const error = new ServicePromptApiError("Failed", { status })
+      mocks.getServicePrompt.mockRejectedValueOnce(error)
+      await expect(loadServicePromptSnapshot([id])).rejects.toBe(error)
+    }
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.localGet.mockResolvedValue(undefined)

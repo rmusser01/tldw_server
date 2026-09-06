@@ -12,6 +12,29 @@ import {
 } from "@/services/chat-surface-scope"
 
 describe("Service Prompt scope policy", () => {
+  it.each([
+    "/api/v1/writing/manuscripts/scenes/scene-a",
+    "/api/v1/writing/manuscripts/projects/project-a/characters?role=protagonist",
+    "/api/v1/writing/manuscripts/projects/project-a/world-info?kind=location",
+  ])("allows only GET for the bounded context read %s", (path) => {
+    expect(isServicePromptRequestPath(path, "GET")).toBe(true)
+    for (const method of ["POST", "PATCH", "DELETE", "PUT"]) {
+      expect(isServicePromptRequestPath(path, method)).toBe(false)
+    }
+  })
+
+  it.each([
+    "/api/v1/writing/manuscripts/projects/project-a",
+    "/api/v1/writing/manuscripts/scenes/scene-a/annotations",
+    "/api/v1/writing/manuscripts/projects/project-a/characters/relationships",
+    "/api/v1/writing/manuscripts/projects/%2e%2e/characters",
+    "/api/v1/writing/manuscripts/scenes/a%2fb",
+    "/api/v1/writing/manuscripts/scenes/a%5cb",
+    "/api/v1/writing/manuscripts/scenes/",
+  ])("does not widen scoped access to %s", (path) => {
+    expect(isServicePromptRequestPath(path, "GET")).toBe(false)
+  })
+
   it("compares only the frozen target keys", () => {
     const current = {
       serverUrl: "https://api.example.test",

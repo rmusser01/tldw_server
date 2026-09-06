@@ -1,6 +1,12 @@
 import { bgRequest } from "@/services/background-proxy"
 import { buildQuery, createResourceClient } from "@/services/resource-client"
 import type { AllowedPath } from "@/services/tldw/openapi-guard"
+import { requestScopeFields, type ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
+
+type ManuscriptReadOptions = {
+  signal?: AbortSignal
+  requestScope?: ServicePromptRequestScope
+}
 
 export type ManuscriptProjectResponse = {
   id: string
@@ -1114,10 +1120,12 @@ export async function createManuscriptScene(
   })
 }
 
-export async function getManuscriptScene(sceneId: string): Promise<ManuscriptSceneResponse> {
+export async function getManuscriptScene(sceneId: string, options?: ManuscriptReadOptions): Promise<ManuscriptSceneResponse> {
   return await bgRequest<ManuscriptSceneResponse>({
     path: `/api/v1/writing/manuscripts/scenes/${encodeURIComponent(sceneId)}` as AllowedPath,
     method: "GET",
+    abortSignal: options?.signal,
+    ...requestScopeFields(options?.requestScope),
   })
 }
 
@@ -1142,6 +1150,7 @@ export async function updateManuscriptScene(
 export async function listManuscriptCharacters(
   projectId: string,
   params?: { role?: string; cast_group?: string },
+  options?: ManuscriptReadOptions,
 ): Promise<ManuscriptCharacterListResponse> {
   const query = new URLSearchParams()
   if (params?.role) query.set("role", params.role)
@@ -1151,6 +1160,8 @@ export async function listManuscriptCharacters(
   return await bgRequest<ManuscriptCharacterListResponse>({
     path: path as AllowedPath,
     method: "GET",
+    abortSignal: options?.signal,
+    ...requestScopeFields(options?.requestScope),
   })
 }
 
@@ -1202,6 +1213,7 @@ export async function createManuscriptRelationship(
 export async function listManuscriptWorldInfo(
   projectId: string,
   params?: { kind?: string },
+  options?: ManuscriptReadOptions,
 ): Promise<ManuscriptWorldInfoListResponse> {
   const query = new URLSearchParams()
   if (params?.kind) query.set("kind", params.kind)
@@ -1210,6 +1222,8 @@ export async function listManuscriptWorldInfo(
   return await bgRequest<ManuscriptWorldInfoListResponse>({
     path: path as AllowedPath,
     method: "GET",
+    abortSignal: options?.signal,
+    ...requestScopeFields(options?.requestScope),
   })
 }
 

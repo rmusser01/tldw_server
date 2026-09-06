@@ -29,6 +29,24 @@ FIXTURE_PATH = (
 FIXTURE = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
 
 EXPECTED_REGISTRY = {
+    "writing.agent.quick": {
+        "label": "Writing Agent: Quick",
+        "description": "Controls writing assistance instructions. Manuscript context and provider settings remain fixed.",
+        "parts": (("system", "System instructions", "literal", ()),),
+        "workflows": (("writing.agent", "Writing Playground AI Agent"),),
+    },
+    "writing.agent.planning": {
+        "label": "Writing Agent: Planning",
+        "description": "Controls writing assistance instructions. Manuscript context and provider settings remain fixed.",
+        "parts": (("system", "System instructions", "literal", ()),),
+        "workflows": (("writing.agent", "Writing Playground AI Agent"),),
+    },
+    "writing.agent.brainstorm": {
+        "label": "Writing Agent: Brainstorm",
+        "description": "Controls writing assistance instructions. Manuscript context and provider settings remain fixed.",
+        "parts": (("system", "System instructions", "literal", ()),),
+        "workflows": (("writing.agent", "Writing Playground AI Agent"),),
+    },
     "study.assistant.explain": {
         "label": "Study explanation",
         "description": "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed.",

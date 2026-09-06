@@ -150,6 +150,21 @@ const KNOWN_DEFINITIONS = {
     description:
       "Controls system instructions for synchronous document analysis. Without a saved override, server defaults apply."
   },
+  "writing.agent.quick": {
+    key: "writingAgentQuick",
+    label: "Writing Agent: Quick",
+    description: "Controls writing assistance instructions. Manuscript context and provider settings remain fixed."
+  },
+  "writing.agent.planning": {
+    key: "writingAgentPlanning",
+    label: "Writing Agent: Planning",
+    description: "Controls writing assistance instructions. Manuscript context and provider settings remain fixed."
+  },
+  "writing.agent.brainstorm": {
+    key: "writingAgentBrainstorm",
+    label: "Writing Agent: Brainstorm",
+    description: "Controls writing assistance instructions. Manuscript context and provider settings remain fixed."
+  },
   "study.assistant.explain": {
     key: "studyAssistantExplain",
     label: "Study explanation",
@@ -222,6 +237,7 @@ const KNOWN_DEFINITIONS = {
 
 const KNOWN_WORKFLOWS: Record<string, { key: string; label: string }> = {
   "study.assistant.flashcard": { key: "studyAssistantFlashcard", label: "Flashcard Study Assistant" },
+  "writing.agent": { key: "writingAgent", label: "Writing Playground AI Agent" },
   "study.assistant.quiz": { key: "studyAssistantQuiz", label: "Quiz Study Assistant" },
   "chat.main.rag": { key: "mainChatRag", label: "Main chat RAG" },
   "chat.tab.rag": { key: "tabChatRag", label: "Tab chat RAG" },
