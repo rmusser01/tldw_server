@@ -12,7 +12,8 @@ import {
   Divider,
   Input,
   Popconfirm,
-  Form
+  Form,
+  message
 } from "antd"
 import { useTranslation } from "react-i18next"
 import {
@@ -321,6 +322,30 @@ export const ServerAdminPage: React.FC = () => {
     }
   }
 
+  const handleResetUserPassword = async (user: AdminUserSummary) => {
+    try {
+      setUpdatingUserId(user.id)
+      const result = await tldwClient.resetAdminUserPassword(user.id)
+      message.success(
+        result?.message ||
+          t(
+            "settings:admin.users.resetPasswordDone",
+            "Password reset - {{username}} must set a new password on next login.",
+            { username: user.username }
+          )
+      )
+    } catch (e) {
+      message.error(
+        sanitizeAdminErrorMessage(
+          e,
+          t("settings:admin.users.resetPasswordFailed", "Failed to reset the password")
+        )
+      )
+    } finally {
+      setUpdatingUserId(null)
+    }
+  }
+
   const handleChangeUserRole = async (user: AdminUserSummary, role: string) => {
     try {
       setUpdatingUserId(user.id)
@@ -437,6 +462,25 @@ export const ServerAdminPage: React.FC = () => {
           {formatMegabytesForAdmin(record.storage_used_mb)} /{" "}
           {formatMegabytesForAdmin(record.storage_quota_mb)}
         </span>
+      )
+    },
+    {
+      title: t("settings:admin.users.actions", "Actions"),
+      key: "actions",
+      render: (_: any, record: AdminUserSummary) => (
+        <Popconfirm
+          title={t(
+            "settings:admin.users.resetPasswordConfirm",
+            "Reset {{username}}'s password? They must set a new one on next login.",
+            { username: record.username }
+          )}
+          okText={t("settings:admin.users.resetPasswordOk", "Reset password")}
+          onConfirm={() => handleResetUserPassword(record)}
+        >
+          <Button size="small" loading={updatingUserId === record.id}>
+            {t("settings:admin.users.resetPassword", "Reset password")}
+          </Button>
+        </Popconfirm>
       )
     }
   ]

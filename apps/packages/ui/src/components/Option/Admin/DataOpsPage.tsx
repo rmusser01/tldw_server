@@ -33,6 +33,27 @@ import { tldwClient } from "@/services/tldw/TldwApiClient"
 
 // ── Backups Tab ──
 
+// Mirrors the backend's _BACKUP_DATASETS allowlist (#2917): the UI used to
+// offer "chachanotes"/"users", which the API rejects, and missed three valid
+// datasets entirely. All datasets except authnz are per-user and require a
+// target user id.
+const PER_USER_BACKUP_DATASETS = new Set([
+  "media",
+  "chacha",
+  "prompts",
+  "evaluations",
+  "audit"
+])
+
+const useBackupDatasetOptions = (t: (k: string, d: string) => string) => [
+  { value: "media", label: t("settings:adminDataOps.datasetMedia", "Media") },
+  { value: "chacha", label: t("settings:adminDataOps.datasetChaCha", "Chats & Notes") },
+  { value: "prompts", label: t("settings:adminDataOps.datasetPrompts", "Prompts") },
+  { value: "evaluations", label: t("settings:adminDataOps.datasetEvaluations", "Evaluations") },
+  { value: "audit", label: t("settings:adminDataOps.datasetAudit", "Audit log") },
+  { value: "authnz", label: t("settings:adminDataOps.datasetAuthnz", "Users & auth (server-wide)") }
+]
+
 const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }) => {
   const { t } = useTranslation(["settings", "common"])
   const [backups, setBackups] = useState<any[]>([])
@@ -40,12 +61,15 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
   const [createForm] = Form.useForm()
   const [creating, setCreating] = useState(false)
   const [restoring, setRestoring] = useState<string | null>(null)
+  const datasetOptions = useBackupDatasetOptions(t)
+  const selectedBackupDataset = Form.useWatch("dataset", createForm)
 
   // Schedules
   const [schedules, setSchedules] = useState<any[]>([])
   const [schedulesLoading, setSchedulesLoading] = useState(false)
   const [scheduleForm] = Form.useForm()
   const [creatingSchedule, setCreatingSchedule] = useState(false)
+  const selectedScheduleDataset = Form.useWatch("dataset", scheduleForm)
 
   const loadBackups = useCallback(async () => {
     setLoading(true)
@@ -114,8 +138,10 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
       setCreatingSchedule(true)
       await tldwClient.createBackupSchedule({
         dataset: values.dataset,
-        cron: values.cron || undefined,
-        retention_days: values.retention_days || undefined
+        target_user_id: values.target_user_id || undefined,
+        frequency: values.frequency,
+        time_of_day: values.time_of_day,
+        retention_count: values.retention_count
       })
       message.success(t("settings:adminDataOps.scheduleCreated", "Backup schedule created"))
       scheduleForm.resetFields()
@@ -208,16 +234,19 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
       render: (v: string) => <Tag>{v}</Tag>
     },
     {
-      title: t("settings:adminDataOps.colCron", "Cron"),
-      dataIndex: "cron",
-      key: "cron",
-      render: (v: string) => <code>{v || "\u2014"}</code>
+      title: t("settings:adminDataOps.colSchedule", "Schedule"),
+      key: "schedule",
+      render: (_: unknown, r: any) => (
+        <code>
+          {r.frequency || "\u2014"} @ {r.time_of_day || "\u2014"}
+        </code>
+      )
     },
     {
-      title: t("settings:adminDataOps.colRetentionDays", "Retention (days)"),
-      dataIndex: "retention_days",
-      key: "retention_days",
-      width: 130,
+      title: t("settings:adminDataOps.colRetentionCount", "Keep"),
+      dataIndex: "retention_count",
+      key: "retention_count",
+      width: 90,
       render: (v: number) => v ?? "\u2014"
     },
     {
@@ -256,17 +285,31 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
             >
               <Select
                 placeholder={t("settings:adminDataOps.datasetPlaceholder", "Dataset")}
-                style={{ width: 180 }}
-                options={[
-                  { value: "media", label: t("settings:adminDataOps.datasetMedia", "Media") },
-                  { value: "chachanotes", label: t("settings:adminDataOps.datasetChaChaNotes", "ChaChaNotes") },
-                  { value: "users", label: t("settings:adminDataOps.datasetUsers", "Users") },
-                  { value: "evaluations", label: t("settings:adminDataOps.datasetEvaluations", "Evaluations") }
-                ]}
+                style={{ width: 200 }}
+                options={datasetOptions}
               />
             </Form.Item>
-            <Form.Item name="user_id">
-              <InputNumber placeholder={t("settings:adminDataOps.userIdPlaceholder", "User ID (optional)")} min={1} style={{ width: 160 }} />
+            <Form.Item
+              name="user_id"
+              rules={[
+                {
+                  required: PER_USER_BACKUP_DATASETS.has(selectedBackupDataset),
+                  message: t(
+                    "settings:adminDataOps.userIdRequired",
+                    "This dataset is per-user - pick the user to back up"
+                  )
+                }
+              ]}
+            >
+              <InputNumber
+                placeholder={
+                  PER_USER_BACKUP_DATASETS.has(selectedBackupDataset)
+                    ? t("settings:adminDataOps.userIdPlaceholderRequired", "User ID (required)")
+                    : t("settings:adminDataOps.userIdPlaceholder", "User ID")
+                }
+                min={1}
+                style={{ width: 160 }}
+              />
             </Form.Item>
             <Form.Item>
               <Button
@@ -305,34 +348,40 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
         }
       >
         {/* Starter chips fill the form, mirroring the Monitoring alert-rule
-            pattern - the cron syntax stops being a prerequisite (#2899 I1). */}
+            pattern (#2899 I1) - now speaking the API's actual schedule
+            contract (frequency/time/keep-count, #2917). */}
         <div style={{ marginBottom: 8 }}>
           <Space size="small" wrap>
             {[
               {
+                key: "nightly",
                 label: t(
                   "settings:adminDataOps.schedulePresetNightly",
-                  "Nightly at 02:00, keep 14 days"
+                  "Nightly at 02:00, keep 14"
                 ),
-                cron: "0 2 * * *",
-                retention: 14
+                frequency: "daily",
+                time_of_day: "02:00",
+                retention_count: 14
               },
               {
+                key: "weekly",
                 label: t(
                   "settings:adminDataOps.schedulePresetWeekly",
-                  "Weekly on Sunday 03:00, keep 8 weeks"
+                  "Weekly at 03:00, keep 8"
                 ),
-                cron: "0 3 * * 0",
-                retention: 56
+                frequency: "weekly",
+                time_of_day: "03:00",
+                retention_count: 8
               }
             ].map((preset) => (
               <Tag
-                key={preset.cron}
+                key={preset.key}
                 style={{ cursor: "pointer" }}
                 onClick={() =>
                   scheduleForm.setFieldsValue({
-                    cron: preset.cron,
-                    retention_days: preset.retention
+                    frequency: preset.frequency,
+                    time_of_day: preset.time_of_day,
+                    retention_count: preset.retention_count
                   })
                 }
               >
@@ -349,20 +398,68 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
             >
               <Select
                 placeholder={t("settings:adminDataOps.datasetPlaceholder", "Dataset")}
-                style={{ width: 160 }}
+                style={{ width: 200 }}
+                options={datasetOptions}
+              />
+            </Form.Item>
+            <Form.Item
+              name="target_user_id"
+              rules={[
+                {
+                  required: PER_USER_BACKUP_DATASETS.has(selectedScheduleDataset),
+                  message: t(
+                    "settings:adminDataOps.userIdRequired",
+                    "This dataset is per-user - pick the user to back up"
+                  )
+                }
+              ]}
+            >
+              <InputNumber
+                placeholder={
+                  PER_USER_BACKUP_DATASETS.has(selectedScheduleDataset)
+                    ? t("settings:adminDataOps.userIdPlaceholderRequired", "User ID (required)")
+                    : t("settings:adminDataOps.userIdPlaceholder", "User ID")
+                }
+                min={1}
+                style={{ width: 150 }}
+              />
+            </Form.Item>
+            <Form.Item
+              name="frequency"
+              rules={[{ required: true, message: t("settings:adminDataOps.frequencyRequired", "Frequency is required") }]}
+            >
+              <Select
+                placeholder={t("settings:adminDataOps.frequencyPlaceholder", "Frequency")}
+                style={{ width: 130 }}
                 options={[
-                  { value: "media", label: t("settings:adminDataOps.datasetMedia", "Media") },
-                  { value: "chachanotes", label: t("settings:adminDataOps.datasetChaChaNotes", "ChaChaNotes") },
-                  { value: "users", label: t("settings:adminDataOps.datasetUsers", "Users") },
-                  { value: "evaluations", label: t("settings:adminDataOps.datasetEvaluations", "Evaluations") }
+                  { value: "daily", label: t("settings:adminDataOps.frequencyDaily", "Daily") },
+                  { value: "weekly", label: t("settings:adminDataOps.frequencyWeekly", "Weekly") },
+                  { value: "monthly", label: t("settings:adminDataOps.frequencyMonthly", "Monthly") }
                 ]}
               />
             </Form.Item>
-            <Form.Item name="cron">
-              <Input placeholder={t("settings:adminDataOps.cronPlaceholder", "Cron (e.g. 0 2 * * *)")} style={{ width: 180 }} />
+            <Form.Item
+              name="time_of_day"
+              rules={[
+                { required: true, message: t("settings:adminDataOps.timeRequired", "Time is required") },
+                {
+                  pattern: /^\d{2}:\d{2}$/,
+                  message: t("settings:adminDataOps.timeFormat", "Use 24h HH:MM, e.g. 02:00")
+                }
+              ]}
+            >
+              <Input placeholder={t("settings:adminDataOps.timePlaceholder", "Time (HH:MM)")} style={{ width: 130 }} />
             </Form.Item>
-            <Form.Item name="retention_days">
-              <InputNumber placeholder={t("settings:adminDataOps.retentionDaysPlaceholder", "Retention days")} min={1} style={{ width: 140 }} />
+            <Form.Item
+              name="retention_count"
+              rules={[{ required: true, message: t("settings:adminDataOps.retentionRequired", "Retention is required") }]}
+            >
+              <InputNumber
+                placeholder={t("settings:adminDataOps.retentionCountPlaceholder", "Backups to keep")}
+                min={1}
+                max={1000}
+                style={{ width: 150 }}
+              />
             </Form.Item>
             <Form.Item>
               <Button
