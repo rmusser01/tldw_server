@@ -142,7 +142,13 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
-describe("sidepanel flashcards route", () => {
+// This suite renders a full antd tree (Modal, Form, Select, autoSize
+// TextAreas) under jsdom, where every userEvent interaction costs multiple
+// hundred milliseconds of act() flushing and the cost compounds over the run.
+// The multi-interaction tests legitimately need more than the 5s default, so
+// give the whole suite generous headroom, matching other antd-heavy suites
+// (e.g. RecipesTab.launch, Dictionaries Manager).
+describe("sidepanel flashcards route", { timeout: 60_000 }, () => {
   let currentTemplates: TemplateFixture[]
   let currentReviewCard: ReviewCardFixture | null
   let reviewQueryError: boolean

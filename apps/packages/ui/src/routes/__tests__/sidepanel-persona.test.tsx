@@ -198,6 +198,12 @@ vi.mock("antd", async () => {
 
 import SidepanelPersona from "../sidepanel-persona"
 
+// This suite renders the full 2.5k-line SidepanelPersona route with several
+// large lazily imported panels (VisualPackEditor and friends). Individual
+// tests legitimately take 3-8s of wall time under vitest, so the default 5s
+// test timeout makes the suite flake under load. Assertions are unchanged.
+vi.setConfig({ testTimeout: 30_000 })
+
 const BuddyShellContextProbe = () => {
   const context = useBuddyShellRenderContext()
 
@@ -1541,7 +1547,15 @@ describe("SidepanelPersona", () => {
     await waitFor(() => {
       expect(screen.queryByTestId("assistant-setup-overlay")).not.toBeInTheDocument()
     })
-    expect(await screen.findByTestId("persona-visual-pack-editor")).toBeInTheDocument()
+    // The visual pack editor is a large React.lazy chunk; give its first
+    // dynamic import more headroom than the 1s default wait.
+    expect(
+      await screen.findByTestId(
+        "persona-visual-pack-editor",
+        undefined,
+        { timeout: 15_000 }
+      )
+    ).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "Visuals" })).toBeInTheDocument()
     expect(screen.queryByRole("tab", { name: "Profiles" })).not.toBeInTheDocument()
     expect(screen.queryByRole("tab", { name: "Commands" })).not.toBeInTheDocument()
