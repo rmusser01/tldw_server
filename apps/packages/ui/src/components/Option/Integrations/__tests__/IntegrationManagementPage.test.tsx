@@ -192,6 +192,19 @@ const mockWorkspaceQueries = (overrides?: {
   })
 }
 
+// Locates the Slack policy card so role queries can be scoped with within().
+// Document-wide *ByRole scans compute accessible names across the full antd
+// tree and take seconds in jsdom; scoping keeps the same role+name assertions
+// while querying a ~50 node subtree.
+const findSlackPolicyCard = async (): Promise<HTMLElement> => {
+  const title = await screen.findByText("Slack policy")
+  const card = title.closest(".ant-card")
+  if (!(card instanceof HTMLElement)) {
+    throw new Error("Slack policy card not found")
+  }
+  return card
+}
+
 describe("IntegrationManagementPage", () => {
   beforeEach(() => {
     for (const mock of Object.values(mocks)) {
@@ -300,7 +313,7 @@ describe("IntegrationManagementPage", () => {
     expect(openSpy).toHaveBeenCalledWith("https://slack.example.test/oauth", "_blank", "noopener,noreferrer")
 
     openSpy.mockRestore()
-  })
+  }, 20000)
 
   it("updates and removes a personal integration from the management drawer", async () => {
     const user = userEvent.setup()
@@ -350,7 +363,7 @@ describe("IntegrationManagementPage", () => {
     await waitFor(() => {
       expect(mocks.deletePersonalIntegration).toHaveBeenCalledWith("slack", "personal:slack")
     })
-  })
+  }, 20000)
 
   it("shows an unsupported-state message when personal integrations are unavailable on the server", async () => {
     fetchMock.mockResolvedValue({
@@ -506,7 +519,10 @@ describe("IntegrationManagementPage", () => {
 
     renderWithQueryClient(<IntegrationManagementPage scope="workspace" />)
 
-    await user.click(await screen.findByRole("button", { name: "Save Slack policy" }))
+    const slackCard = await findSlackPolicyCard()
+    await user.click(
+      await within(slackCard).findByRole("button", { name: "Save Slack policy" })
+    )
 
     await waitFor(() => {
       expect(mocks.updateWorkspaceSlackPolicy).toHaveBeenCalledWith({
@@ -522,7 +538,7 @@ describe("IntegrationManagementPage", () => {
         status_scope: "workspace_and_user"
       })
     })
-  })
+  }, 20000)
 
   it("surfaces Slack policy load failures with diagnostics and blocks saving defaults", async () => {
     mockWorkspaceQueries()
@@ -535,25 +551,38 @@ describe("IntegrationManagementPage", () => {
 
     renderWithQueryClient(<IntegrationManagementPage scope="workspace" />)
 
-    expect(await screen.findByText("Unable to load Slack policy")).toBeInTheDocument()
-    const diagnostics = screen.getByLabelText("Diagnostics")
+    const slackCard = await findSlackPolicyCard()
+    expect(
+      await within(slackCard).findByText("Unable to load Slack policy")
+    ).toBeInTheDocument()
+    const diagnostics = within(slackCard).getByLabelText("Diagnostics")
     expect(within(diagnostics).getByText("[server-endpoint]")).toBeInTheDocument()
     expect(within(diagnostics).getByText("404")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Save Slack policy" })).toBeDisabled()
-  })
+    expect(
+      within(slackCard).getByRole("button", { name: "Save Slack policy" })
+    ).toBeDisabled()
+  }, 20000)
 
   it("rejects zero-value Slack quotas instead of sending a no-op payload", async () => {
     mockWorkspaceQueries()
 
     renderWithQueryClient(<IntegrationManagementPage scope="workspace" />)
 
-    const quotaInput = await screen.findByRole("spinbutton", { name: "Workspace quota / min" })
+    // Scope role queries to the Slack policy card: whole-document role+name
+    // scans over the antd tree take seconds and made this test time out
+    // under parallel load.
+    const slackCard = await findSlackPolicyCard()
+    const quotaInput = await within(slackCard).findByRole("spinbutton", {
+      name: "Workspace quota / min"
+    })
     fireEvent.change(quotaInput, { target: { value: "0" } })
     fireEvent.blur(quotaInput)
-    await userEvent.setup().click(screen.getByRole("button", { name: "Save Slack policy" }))
+    await userEvent
+      .setup()
+      .click(within(slackCard).getByRole("button", { name: "Save Slack policy" }))
 
     await waitFor(() => {
       expect(mocks.updateWorkspaceSlackPolicy).not.toHaveBeenCalled()
     })
-  })
+  }, 20000)
 })

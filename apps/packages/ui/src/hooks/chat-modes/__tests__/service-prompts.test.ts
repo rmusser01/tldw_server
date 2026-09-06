@@ -190,6 +190,7 @@ const snapshot = (
   requestScope,
   capability: "supported",
   scopeSignal,
+  scopeInvalidatedSignal: new AbortController().signal,
   release: vi.fn(),
   definitions: {
     ...(ids.includes("chat.rag.answer")

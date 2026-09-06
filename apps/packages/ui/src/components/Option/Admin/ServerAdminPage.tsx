@@ -12,7 +12,9 @@ import {
   Divider,
   Input,
   Popconfirm,
-  Form
+  Form,
+  Modal,
+  message
 } from "antd"
 import { useTranslation } from "react-i18next"
 import {
@@ -115,6 +117,10 @@ export const ServerAdminPage: React.FC = () => {
   const [usersPage, setUsersPage] = React.useState(1)
   const [usersPageSize, setUsersPageSize] = React.useState(20)
   const [updatingUserId, setUpdatingUserId] = React.useState<number | null>(null)
+  const [resetPasswordResult, setResetPasswordResult] = React.useState<{
+    username: string
+    temporaryPassword: string
+  } | null>(null)
   const [creatingRole, setCreatingRole] = React.useState(false)
   const [deletingRoleId, setDeletingRoleId] = React.useState<number | null>(null)
   const [roleForm] = Form.useForm()
@@ -321,6 +327,43 @@ export const ServerAdminPage: React.FC = () => {
     }
   }
 
+  // The reset endpoint requires the admin to supply the temporary password
+  // and an audit reason; generate a strong one and reveal it exactly once so
+  // the admin can hand it to the user.
+  const generateTemporaryPassword = (): string => {
+    const bytes = new Uint8Array(12)
+    crypto.getRandomValues(bytes)
+    const encoded = Array.from(bytes, (b) =>
+      "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789".charAt(b % 57)
+    ).join("")
+    return `T!${encoded}`
+  }
+
+  const handleResetUserPassword = async (user: AdminUserSummary) => {
+    const temporaryPassword = generateTemporaryPassword()
+    try {
+      setUpdatingUserId(user.id)
+      await tldwClient.resetAdminUserPassword(user.id, {
+        temporary_password: temporaryPassword,
+        reason: "Admin-initiated password reset from Server Admin",
+        force_password_change: true
+      })
+      setResetPasswordResult({
+        username: user.username,
+        temporaryPassword
+      })
+    } catch (e) {
+      message.error(
+        sanitizeAdminErrorMessage(
+          e,
+          t("settings:admin.users.resetPasswordFailed", "Failed to reset the password")
+        )
+      )
+    } finally {
+      setUpdatingUserId(null)
+    }
+  }
+
   const handleChangeUserRole = async (user: AdminUserSummary, role: string) => {
     try {
       setUpdatingUserId(user.id)
@@ -437,6 +480,25 @@ export const ServerAdminPage: React.FC = () => {
           {formatMegabytesForAdmin(record.storage_used_mb)} /{" "}
           {formatMegabytesForAdmin(record.storage_quota_mb)}
         </span>
+      )
+    },
+    {
+      title: t("settings:admin.users.actions", "Actions"),
+      key: "actions",
+      render: (_: any, record: AdminUserSummary) => (
+        <Popconfirm
+          title={t(
+            "settings:admin.users.resetPasswordConfirm",
+            "Reset {{username}}'s password? They must set a new one on next login.",
+            { username: record.username }
+          )}
+          okText={t("settings:admin.users.resetPasswordOk", "Reset password")}
+          onConfirm={() => handleResetUserPassword(record)}
+        >
+          <Button size="small" loading={updatingUserId === record.id}>
+            {t("settings:admin.users.resetPassword", "Reset password")}
+          </Button>
+        </Popconfirm>
       )
     }
   ]
@@ -1007,6 +1069,46 @@ export const ServerAdminPage: React.FC = () => {
             (health, users, budgets) per the 2026-09 UX audit (#2878). */}
         <AdminAudioInstallerCard />
       </Space>
+
+      <Modal
+        title={t("settings:admin.users.resetPasswordDoneTitle", "Temporary password created")}
+        open={Boolean(resetPasswordResult)}
+        onCancel={() => setResetPasswordResult(null)}
+        onOk={() => setResetPasswordResult(null)}
+        okText={t("common:done", "Done")}
+        cancelButtonProps={{ style: { display: "none" } }}
+      >
+        {resetPasswordResult ? (
+          <div data-testid="admin-reset-password-result">
+            <p>
+              {t(
+                "settings:admin.users.resetPasswordDoneBody",
+                "Share this temporary password with {{username}} - it will not be shown again. They must set a new password on next login.",
+                { username: resetPasswordResult.username }
+              )}
+            </p>
+            <code className="block break-all rounded border border-border bg-surface2 px-3 py-2 font-mono text-sm">
+              {resetPasswordResult.temporaryPassword}
+            </code>
+            <Button
+              size="small"
+              type="primary"
+              className="mt-2"
+              onClick={() => {
+                void navigator.clipboard
+                  ?.writeText(resetPasswordResult.temporaryPassword)
+                  .then(() =>
+                    message.success(
+                      t("settings:admin.users.resetPasswordCopied", "Copied")
+                    )
+                  )
+              }}
+            >
+              {t("settings:admin.users.resetPasswordCopy", "Copy password")}
+            </Button>
+          </div>
+        ) : null}
+      </Modal>
     </PageShell>
   )
 }

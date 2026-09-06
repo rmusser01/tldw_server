@@ -1007,7 +1007,7 @@ export const ROUTE_METADATA = [
   }),
   defineRoute({
     path: "/stt",
-    label: "STT",
+    label: "Speech to Text",
     group: "audio",
     surface: "default_self_hosted",
     availability: webAndExtension,
@@ -1016,7 +1016,7 @@ export const ROUTE_METADATA = [
   }),
   defineRoute({
     path: "/tts",
-    label: "TTS",
+    label: "Text to Speech",
     group: "audio",
     surface: "default_self_hosted",
     availability: webAndExtension,
@@ -1066,12 +1066,17 @@ export const ROUTE_METADATA = [
   }),
   defineRoute({
     path: "/moderation-playground",
+    canonicalPath: "/moderation/rules",
+    redirectsTo: "/moderation/rules",
     label: "Moderation Playground",
     group: "safety",
-    surface: "advanced_self_hosted",
+    surface: "redirect",
     availability: webAndExtension,
+    smoke: "exclude",
+    commandPalette: "alias_only",
     requiresBackend: true,
-    rationale: "Moderation and safety testing route."
+    rationale:
+      "Legacy alias that redirects to the canonical moderation rules workflow."
   }),
   defineRoute({
     path: "/content-review",
@@ -1084,12 +1089,15 @@ export const ROUTE_METADATA = [
   }),
   defineRoute({
     path: "/claims-review",
+    canonicalPath: "/content-review",
+    redirectsTo: "/content-review",
     label: "Claims Review",
     group: "safety",
-    surface: "advanced_self_hosted",
-    smoke: "manual",
+    surface: "redirect",
+    smoke: "exclude",
+    commandPalette: "alias_only",
     requiresBackend: true,
-    rationale: "Claims review and verification route."
+    rationale: "Legacy alias that redirects to the content review queue."
   }),
   defineRoute({
     path: "/data-tables",

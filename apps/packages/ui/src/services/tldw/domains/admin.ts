@@ -35,6 +35,29 @@ export const adminMethods = {
     })
   },
 
+  async resetAdminUserPassword(
+    userId: number,
+    payload: {
+      temporary_password: string
+      reason: string
+      force_password_change?: boolean
+    }
+  ): Promise<{ user_id: number; force_password_change: boolean; message: string }> {
+    return await bgRequest<{
+      user_id: number
+      force_password_change: boolean
+      message: string
+    }>({
+      path: `/api/v1/admin/users/${userId}/reset-password`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {
+        force_password_change: true,
+        ...payload
+      }
+    })
+  },
+
   async listAdminRoles(): Promise<AdminRole[]> {
     return await bgRequest<AdminRole[]>({
       path: "/api/v1/admin/roles",
@@ -422,7 +445,14 @@ export const adminMethods = {
     return await bgRequest<any>({ path: "/api/v1/admin/backup-schedules", method: "GET" })
   },
 
-  async createBackupSchedule(payload: { dataset: string; cron?: string; retention_days?: number }): Promise<any> {
+  async createBackupSchedule(payload: {
+    dataset: string
+    target_user_id?: number
+    frequency: "daily" | "weekly" | "monthly"
+    time_of_day: string
+    timezone?: string
+    retention_count: number
+  }): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/admin/backup-schedules",
       method: "POST",

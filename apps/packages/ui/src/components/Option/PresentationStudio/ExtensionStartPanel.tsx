@@ -103,7 +103,8 @@ type SafePresentationMetadata = {
 
 type MetadataView =
   | { projectId: string; status: "loading" }
-  | { projectId: string; status: "load_error" | "invalid" }
+  | { projectId: string; status: "load_error" }
+  | { projectId: string; status: "invalid" }
   | { projectId: string; status: "ready"; record: SafePresentationMetadata }
 
 type TrustedReadyMetadata = {
@@ -288,8 +289,10 @@ const projectSourceFreeWebUiConfig = (
   const config: SourceFreeWebUiConfig = {}
   for (const key of ["serverUrl", "webUiUrl", "webuiUrl"] as const) {
     const candidate = value[key]
-    if (typeof candidate === "string" || candidate === null) {
+    if (typeof candidate === "string") {
       config[key] = candidate
+    } else if (candidate === null) {
+      config[key] = null
     }
   }
   return Object.values(config).some(isConfiguredHttpUrl) ? config : null

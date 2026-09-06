@@ -36,6 +36,10 @@ const sourcePaths = {
   playgroundUserMessage: path.resolve(
     testDir,
     "../../components/Common/Playground/PlaygroundUserMessage.tsx"
+  ),
+  chatOpacityCssVars: path.resolve(
+    testDir,
+    "../../services/settings/chat-opacity-css-vars.ts"
   )
 } as const
 type SourceKey = keyof typeof sourcePaths
@@ -125,12 +129,28 @@ describe("chat background image translucency", () => {
     expect(sidepanelSource).toContain("--chat-character-image-opacity")
     expect(extensionSidepanelSource).toContain("--chat-character-image-opacity")
 
-    expect(messageSource).toContain("--chat-message-opacity")
-    expect(messageSource).toContain("--chat-character-image-opacity")
+    // Message components consume the adjustable CSS vars through the shared
+    // chat-opacity-css-vars constants so the var names stay defined in one place.
+    const chatOpacityCssVarsSource = sources.chatOpacityCssVars
+    expect(chatOpacityCssVarsSource).toMatch(
+      /CHAT_MESSAGE_OPACITY_ALPHA =\s*"var\(--chat-message-opacity/
+    )
+    expect(chatOpacityCssVarsSource).toMatch(
+      /CHAT_CHARACTER_IMAGE_OPACITY_ALPHA =\s*"var\(--chat-character-image-opacity/
+    )
+
+    expect(messageSource).toContain("CHAT_MESSAGE_OPACITY_ALPHA")
+    expect(messageSource).toContain("CHAT_CHARACTER_IMAGE_OPACITY_ALPHA")
+    expect(messageSource).toContain(
+      '} from "@/services/settings/chat-opacity-css-vars"'
+    )
     expect(messageSource).toContain("--color-surface2")
     expect(messageSource).not.toContain("--color-surface-2")
     expect(messageSource).not.toContain("CHAT_MESSAGE_OPACITY_SETTING")
-    expect(playgroundUserMessageSource).toContain("--chat-message-opacity")
+    expect(playgroundUserMessageSource).toContain("CHAT_MESSAGE_OPACITY_ALPHA")
+    expect(playgroundUserMessageSource).toContain(
+      'from "@/services/settings/chat-opacity-css-vars"'
+    )
     expect(playgroundUserMessageSource).toContain("--color-surface2")
     expect(playgroundUserMessageSource).not.toContain("--color-surface-2")
     expect(playgroundUserMessageSource).not.toContain(

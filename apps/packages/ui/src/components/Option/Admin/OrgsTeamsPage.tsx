@@ -71,7 +71,7 @@ const OrgMembersTable: React.FC<{ orgId: number }> = ({ orgId }) => {
     setLoading(true)
     try {
       const result = await tldwClient.listOrgMembers(orgId)
-      setMembers(Array.isArray(result) ? result : result?.data ?? result?.members ?? [])
+      setMembers(Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.members ?? [])
     } catch {
       // silently handled by parent guard
     } finally {
@@ -238,7 +238,7 @@ const TeamMembersTable: React.FC<{ teamId: number }> = ({ teamId }) => {
     setLoading(true)
     try {
       const result = await tldwClient.listTeamMembers(teamId)
-      setMembers(Array.isArray(result) ? result : result?.data ?? result?.members ?? [])
+      setMembers(Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.members ?? [])
     } catch {
       // silently handled
     } finally {
@@ -397,7 +397,7 @@ const TeamsTable: React.FC<{ orgId: number }> = ({ orgId }) => {
     setLoading(true)
     try {
       const result = await tldwClient.listTeams(orgId)
-      setTeams(Array.isArray(result) ? result : result?.data ?? result?.teams ?? [])
+      setTeams(Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.teams ?? [])
     } catch {
       // silently handled
     } finally {
@@ -509,7 +509,7 @@ const OrgsTeamsPage: React.FC = () => {
       const params: { search?: string; limit?: number; offset?: number } = { limit: 100 }
       if (search) params.search = search
       const result = await tldwClient.listOrgs(params)
-      setOrgs(Array.isArray(result) ? result : result?.data ?? result?.organizations ?? [])
+      setOrgs(Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.organizations ?? [])
     } catch (err) {
       markAdminGuardFromError(err)
     } finally {
