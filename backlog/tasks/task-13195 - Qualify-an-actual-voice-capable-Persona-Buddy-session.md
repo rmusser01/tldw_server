@@ -4,7 +4,7 @@ title: Qualify an actual voice-capable Persona Buddy session
 status: In Progress
 assignee: []
 created_date: '2026-09-05 21:29'
-updated_date: '2026-09-06 01:12'
+updated_date: '2026-09-06 01:37'
 labels:
   - persona
   - buddy
@@ -56,6 +56,8 @@ Final rebased implementation 2270153980 passed 204 targeted Python and 198 front
 Human browser UAT at c60f59a95e produced the expected DeepSeek reply and four Kokoro audio chunk notices; user confirmed hearing the reply. User also confirmed not saying the Thank you prefix, so exact transcript accuracy failed. The mic was already active at inspection, and speaking state was not sampled before playback finished; explicit-start/no-residual full lifecycle acceptance remains open. Source-bound local receipt: /private/tmp/migu-server-rate-retest-zd65lg4t/latest-browser-assessment.json. Non-speech filtering is investigated separately; do not mark full usability complete.
 
 At f71d593e67 human UAT observed idle before explicit Start, preparation, listening, Send-now thinking and return to idle, followed by disconnect. User heard playback and said Reply with once, but transcript duplicated/corrupted the prefix. TASK-13201 repairs the reproduced overlapping-fragment failure with bounded whole-turn Whisper snapshots; fresh human transcript acceptance remains pending.
+
+Manual human microphone → Whisper → DeepSeek → Kokoro path passed on 31046b8937: user clicked Send now, correct nonduplicated notebook transcript was committed once, provider reply matched, and user confirmed clear playback. Source-bound receipt is Docs/Reviews/assets/migu-buddy-browser-voice-2026-09-05/whole-turn-human-acceptance.json. Observed idle/preparing/listening/thinking/idle and disconnect; the short speaking badge was not sampled and raw MediaStream track state was not inspected. Keep broader lifecycle/state acceptance open rather than claiming those observations.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
