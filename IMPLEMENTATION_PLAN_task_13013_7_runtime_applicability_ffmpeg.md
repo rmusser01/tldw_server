@@ -209,3 +209,13 @@ Requester explicitly approved this qualification on 2026-09-06. This supersedes 
 - [ ] Check dependency/co-install coherence and exported symbols/SONAMEs against the baseline; independently review the qualification evidence, record remaining privilege-boundary/scanner limitations, and report candidate readiness separately from adoption.
 
 The implementer owns only a newly allocated temporary qualification directory and its SDD report; it must not alter the FFmpeg recipe, production image selection, repo tests, Backlog, Git state or other sessions. Controller owns tracked plan/task records, FFmpeg execution, and independent review. Qualification scripts and build recipes are retained as experimental evidence, not promoted into production tooling by this task.
+
+### Util-linux qualification blocker — 2026-09-06
+
+The exact Debian source inputs were checked against the signed snapshot index/hash chain. The complete upstream two-file patch applies without fuzz; an intentionally modified patch fails the hash check. Direct uploader and upstream commit signatures are not claimed as locally verified. These source checks do not establish binary qualification.
+
+The first non-root Debian build stopped at its fatal test gate: **3 of 337 test scripts failed** (`lsfd/mkfds-directory`, `lsfd/mkfds-multiplexing`, and `lsfd/mkfds-symlink`). Full output is retained in `/private/tmp/task-13013-7-util-linux-qualification.AjAiEA/logs-attempt1/binary-package-build-and-tests.log` (SHA-256 `f1f133c81ef7c878296d0e838d09f9e44ea94fc93e16c819ec8f94edf793f78a`). The helper/test sources are unchanged by the libmount security patch, but a successful baseline reproduction has not established causality.
+
+The local amd64 container runs on an aarch64 Docker Desktop host with Apple/Rosetta-style translation evidence. Upstream provides `QEMU_USER=1` skips, but actual QEMU-user execution was not established. A diagnostic retry using that flag was stopped and is not accepted as qualification evidence. No test failure was waived, no additional container privileges were granted, and no production image changed.
+
+Only local Docker contexts are configured. An unchanged-suite run on native Linux amd64 is the next required validation step, followed by coherent binary package installation and exported-symbol/SONAME comparison. Binary package qualification, independent completed-task review, scanner recognition, and production adoption remain pending. Stage 4 is not complete.
