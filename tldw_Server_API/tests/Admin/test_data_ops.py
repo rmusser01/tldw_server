@@ -299,3 +299,50 @@ async def test_admin_data_ops_per_user_backup_success(tmp_path):
         assert payload["pagination"]["offset"] == 0
         listed = payload["items"]
         assert any(item["id"] == backup_id for item in listed)
+
+
+@pytest.mark.asyncio
+async def test_admin_unfiltered_backup_list_includes_per_user_backups(tmp_path):
+    """Unfiltered admin listing must include user_<id>/ backups (#2921)."""
+    _setup_env(tmp_path)
+
+    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+
+    await reset_db_pool()
+    reset_settings()
+    await reset_session_manager()
+
+    user_id = DatabasePaths.get_single_user_id()
+    media_db_path = DatabasePaths.get_media_db_path(user_id)
+    media_db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    import sqlite3
+
+    with sqlite3.connect(media_db_path) as conn:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS test_table (id INTEGER PRIMARY KEY, name TEXT)"
+        )
+        conn.commit()
+
+    headers = {"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]}
+
+    with TestClient(app, headers=headers) as client:
+        create_resp = client.post(
+            "/api/v1/admin/backups",
+            json={"dataset": "media", "user_id": user_id, "backup_type": "full"},
+        )
+        assert create_resp.status_code == 200, create_resp.text
+        backup_id = create_resp.json()["item"]["id"]
+
+        # No dataset/user filters at all: the per-user backup must appear.
+        list_resp = client.get("/api/v1/admin/backups")
+        assert list_resp.status_code == 200, list_resp.text
+        listed = list_resp.json()["items"]
+        assert any(item["id"] == backup_id for item in listed), (
+            "per-user backup missing from unfiltered admin listing"
+        )
+        matching = next(item for item in listed if item["id"] == backup_id)
+        assert matching["user_id"] == user_id

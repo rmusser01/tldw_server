@@ -679,6 +679,36 @@ async def ensure_authnz_schema_ready_once() -> None:
             raise RuntimeError(
                 "SQLite in-memory AuthNZ database target cannot be validated by path"
             )
+
+        # Seed baseline RBAC roles/permissions for SQLite in every auth mode.
+        # Postgres bootstrap and the single-user backstop already run this
+        # idempotent seed; SQLite multi-user previously fell through the gap,
+        # leaving the permission catalog empty and the RBAC admin page
+        # unusable on a fresh install (#2920).
+        try:
+            from tldw_Server_API.app.core.AuthNZ.rbac_seed import (
+                ensure_baseline_rbac_seed,
+            )
+
+            async with pool.transaction() as conn:
+                await ensure_baseline_rbac_seed(
+                    conn,
+                    include_mcp_permissions=True,
+                    is_postgres=False,
+                )
+                with contextlib.suppress(_AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS):
+                    await conn.commit()  # type: ignore[attr-defined]
+        except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS as seed_err:
+            logger.warning(
+                "AuthNZ Startup: baseline RBAC seed failed (continuing): {}",
+                seed_err,
+            )
+            # Do not latch the ensured key on a failed seed: the schema
+            # ensure above is idempotent, and skipping here lets the next
+            # call retry the seed instead of leaving the catalog empty for
+            # the process lifetime.
+            return
+
         _SCHEMA_ENSURED_KEYS.add(key)
 
 
