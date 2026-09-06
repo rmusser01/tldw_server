@@ -32,6 +32,9 @@ const check = (name, ok, detail) => {
 }
 
 await page.goto(WEB + "/admin/watchlists-items", { waitUntil: "domcontentloaded" })
+// networkidle regularly times out on this SPA (long-lived connections keep the
+// network busy); the timeout is a best-effort settle, not a pass/fail signal -
+// the explicit checks below are what decide the probe's outcome.
 try { await page.waitForLoadState("networkidle", { timeout: 12000 }) } catch {}
 await page.waitForTimeout(2500)
 await page.screenshot({ path: `${OUT}/1-initial.png` })

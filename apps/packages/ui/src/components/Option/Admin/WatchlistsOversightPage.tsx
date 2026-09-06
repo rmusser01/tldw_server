@@ -51,39 +51,51 @@ const WatchlistsOversightPage: React.FC = () => {
   const [sources, setSources] = useState<WatchlistSource[]>([])
   const [items, setItems] = useState<ScrapedItem[]>([])
   const [runs, setRuns] = useState<WatchlistRun[]>([])
+  const [sourceTotal, setSourceTotal] = useState<number | null>(null)
+  const [runTotal, setRunTotal] = useState<number | null>(null)
   const [counts, setCounts] = useState<ScrapedItemSmartCounts | null>(null)
 
   const initialLoadRef = useRef(false)
+  // Guards against out-of-order responses: only the latest load may commit
+  // state, so fast user switching can't show a previous user's data.
+  const loadSeqRef = useRef(0)
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const markAdminGuardFromError = useCallback((err: unknown) => {
     const guardState = deriveAdminGuardFromError(err)
     if (guardState) setAdminGuard(guardState)
   }, [])
 
-  const loadUsers = useCallback(async () => {
-    setUsersLoading(true)
-    setUsersError(null)
-    try {
-      const result = await tldwClient.listAdminUsers({ limit: 100 })
-      const loaded = result.users || []
-      setUsers(loaded)
-      // Single-user servers have exactly one account - select it directly
-      // instead of asking the operator to search for themselves.
-      if (loaded.length === 1) {
-        setSelectedUserId((current) => current ?? loaded[0].id)
-      }
-    } catch (err) {
-      markAdminGuardFromError(err)
-      setUsersError(
-        sanitizeAdminErrorMessage(
-          err,
-          t("settings:adminWatchlistsOversight.usersLoadFailed", "Failed to load the user list.")
+  const loadUsers = useCallback(
+    async (search?: string) => {
+      setUsersLoading(true)
+      setUsersError(null)
+      try {
+        const result = await tldwClient.listAdminUsers({
+          limit: 100,
+          ...(search ? { search } : {})
+        })
+        const loaded = result.users || []
+        setUsers(loaded)
+        // Single-user servers have exactly one account - select it directly
+        // instead of asking the operator to search for themselves.
+        if (!search && loaded.length === 1) {
+          setSelectedUserId((current) => current ?? loaded[0].id)
+        }
+      } catch (err) {
+        markAdminGuardFromError(err)
+        setUsersError(
+          sanitizeAdminErrorMessage(
+            err,
+            t("settings:adminWatchlistsOversight.usersLoadFailed", "Failed to load the user list.")
+          )
         )
-      )
-    } finally {
-      setUsersLoading(false)
-    }
-  }, [markAdminGuardFromError, t])
+      } finally {
+        setUsersLoading(false)
+      }
+    },
+    [markAdminGuardFromError, t]
+  )
 
   useEffect(() => {
     if (initialLoadRef.current) return
@@ -91,8 +103,27 @@ const WatchlistsOversightPage: React.FC = () => {
     void loadUsers()
   }, [loadUsers])
 
+  // Remote search so accounts beyond the first page stay reachable on large
+  // servers; the Select filters nothing locally (filterOption={false}).
+  const handleUserSearch = useCallback(
+    (term: string) => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+      searchTimerRef.current = setTimeout(() => {
+        void loadUsers(term.trim() || undefined)
+      }, 300)
+    },
+    [loadUsers]
+  )
+
+  useEffect(() => {
+    return () => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+    }
+  }, [])
+
   const loadUserData = useCallback(
     async (userId: number) => {
+      const seq = ++loadSeqRef.current
       setLoading(true)
       setLoadError(null)
       setPrivacy(null)
@@ -104,12 +135,16 @@ const WatchlistsOversightPage: React.FC = () => {
           fetchWatchlistRuns({ ...scope, size: 25 }),
           fetchScrapedItemSmartCounts(scope)
         ])
+        if (seq !== loadSeqRef.current) return
         setSources(sourcesResp?.items ?? [])
         setItems(itemsResp?.items ?? [])
         setRuns(runsResp?.items ?? [])
+        setSourceTotal(sourcesResp?.total ?? null)
+        setRunTotal(runsResp?.total ?? null)
         setCounts(countsResp ?? null)
         setPrivacy("allowed")
       } catch (err) {
+        if (seq !== loadSeqRef.current) return
         // Sharing can be disabled per deployment; render that as a designed
         // state, not an error wall.
         if (/watchlists_private_only_mode|watchlists_admin_same_org_required/.test(extractDetail(err))) {
@@ -127,7 +162,7 @@ const WatchlistsOversightPage: React.FC = () => {
           )
         }
       } finally {
-        setLoading(false)
+        if (seq === loadSeqRef.current) setLoading(false)
       }
     },
     [markAdminGuardFromError, t]
@@ -137,9 +172,12 @@ const WatchlistsOversightPage: React.FC = () => {
     if (selectedUserId) {
       void loadUserData(selectedUserId)
     } else {
+      loadSeqRef.current += 1
       setSources([])
       setItems([])
       setRuns([])
+      setSourceTotal(null)
+      setRunTotal(null)
       setCounts(null)
       setPrivacy(null)
     }
@@ -165,6 +203,18 @@ const WatchlistsOversightPage: React.FC = () => {
       </Alert>
     )
   }
+
+  // Oversight fetches bounded snapshots (100 feeds / 50 items / 25 runs);
+  // when the server holds more, say so instead of implying completeness.
+  const showingOf = (shown: number, total: number | null) =>
+    total != null && total > shown ? (
+      <span style={{ color: "var(--color-text-secondary, #888)", fontSize: "0.85rem" }}>
+        {t("settings:adminWatchlistsOversight.showingOf", "Showing {{shown}} of {{total}}", {
+          shown,
+          total
+        })}
+      </span>
+    ) : null
 
   const sourceColumns = [
     {
@@ -293,7 +343,8 @@ const WatchlistsOversightPage: React.FC = () => {
             loading={usersLoading}
             value={selectedUserId}
             onChange={(val) => setSelectedUserId(val)}
-            optionFilterProp="label"
+            onSearch={handleUserSearch}
+            filterOption={false}
             options={users.map((u: any) => ({
               value: u.id,
               label: `${u.username} (${u.email || t("settings:adminWatchlistsOversight.noEmail", "no email")})`
@@ -345,7 +396,7 @@ const WatchlistsOversightPage: React.FC = () => {
             <Space size="large" wrap>
               <Statistic
                 title={t("settings:adminWatchlistsOversight.statFeeds", "Feeds")}
-                value={sources.length}
+                value={sourceTotal ?? sources.length}
               />
               <Statistic
                 title={t("settings:adminWatchlistsOversight.statItems", "Collected items")}
@@ -356,14 +407,15 @@ const WatchlistsOversightPage: React.FC = () => {
                 value={counts?.unread ?? 0}
               />
               <Statistic
-                title={t("settings:adminWatchlistsOversight.statRuns", "Recent runs")}
-                value={runs.length}
+                title={t("settings:adminWatchlistsOversight.statRuns", "Runs")}
+                value={runTotal ?? runs.length}
               />
             </Space>
           </Card>
 
           <Card
             title={t("settings:adminWatchlistsOversight.feedsCardTitle", "Feeds")}
+            extra={showingOf(sources.length, sourceTotal)}
             size="small"
             style={{ marginBottom: 16 }}
           >
@@ -385,6 +437,7 @@ const WatchlistsOversightPage: React.FC = () => {
 
           <Card
             title={t("settings:adminWatchlistsOversight.itemsCardTitle", "Latest collected items")}
+            extra={showingOf(items.length, counts?.all ?? null)}
             size="small"
             style={{ marginBottom: 16 }}
           >
@@ -406,6 +459,7 @@ const WatchlistsOversightPage: React.FC = () => {
 
           <Card
             title={t("settings:adminWatchlistsOversight.runsCardTitle", "Recent runs")}
+            extra={showingOf(runs.length, runTotal)}
             size="small"
           >
             <Table

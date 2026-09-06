@@ -667,8 +667,12 @@ export const adminMethods = {
     })
   },
 
-  async getStorageQuotaSummary(): Promise<any> {
-    return await bgRequest<any>({ path: "/api/v1/admin/storage-quotas/summary", method: "GET" })
+  async getStorageQuotaSummary(params?: { limit?: number; offset?: number }): Promise<any> {
+    const query = buildQuery(params as Record<string, any>)
+    return await bgRequest<any>({
+      path: `/api/v1/admin/storage-quotas/summary${query}`,
+      method: "GET"
+    })
   },
 }
 

@@ -28,7 +28,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
-import BillingDashboardPage from "../BillingDashboardPage"
+import BillingDashboardPage, { aggregateStorageSummary } from "../BillingDashboardPage"
 
 const fetchMock = vi.fn()
 vi.stubGlobal("fetch", fetchMock)
@@ -109,6 +109,20 @@ describe("BillingDashboardPage", () => {
     // assert on the statistic container's text)
     const utilizationStat = screen.getByText("Utilization").closest(".ant-statistic")
     expect(utilizationStat?.textContent).toContain("25.0")
+  })
+
+  it("flags truncated storage summaries so paginated servers aren't understated silently", () => {
+    const truncated = aggregateStorageSummary({
+      total_quotas: 200,
+      items: [{ quota_mb: 100, used_mb: 50 }],
+      pagination: { has_more: true }
+    })
+    expect(truncated.hasMore).toBe(true)
+    expect(truncated.utilizationPct).toBe(50)
+
+    const complete = aggregateStorageSummary({ total_quotas: 1, items: [], has_more: false })
+    expect(complete.hasMore).toBe(false)
+    expect(complete.utilizationPct).toBe(0)
   })
 
   it("renders forbidden guard feedback through the design-system Alert primitive", async () => {

@@ -189,6 +189,60 @@ describe("WatchlistsOversightPage (#2922)", () => {
     expect(watchlistsMock.fetchScrapedItems).not.toHaveBeenCalled()
   })
 
+  it("discards stale responses when the operator switches users quickly", async () => {
+    let resolveSlowSources: (value: unknown) => void = () => {}
+    const slowSources = new Promise((resolve) => {
+      resolveSlowSources = resolve
+    })
+    // First selection (alice) hangs; second (audit-admin) resolves instantly.
+    watchlistsMock.fetchWatchlistSources
+      .mockImplementationOnce(() => slowSources)
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: 21,
+            name: "Admin Own Feed",
+            url: "https://example.com/admin.xml",
+            source_type: "rss",
+            active: true,
+            tags: [],
+            created_at: "2026-09-06T00:00:00Z",
+            last_scraped_at: null
+          }
+        ],
+        total: 1
+      })
+
+    render(<WatchlistsOversightPage />)
+    const select = await screen.findByLabelText("Select User")
+    fireEvent.change(select, { target: { value: "2" } })
+    fireEvent.change(select, { target: { value: "1" } })
+
+    expect(await screen.findByText("Admin Own Feed")).toBeInTheDocument()
+
+    // Alice's late response must not overwrite audit-admin's data.
+    resolveSlowSources({
+      items: [
+        {
+          id: 11,
+          name: "Battery Tech News",
+          url: "https://example.com/feed.xml",
+          source_type: "rss",
+          active: true,
+          tags: [],
+          created_at: "2026-09-06T00:00:00Z",
+          last_scraped_at: null
+        }
+      ],
+      total: 1
+    })
+    // Give the stale promise chain time to (incorrectly) commit before
+    // asserting it did not.
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    expect(screen.queryByText("Battery Tech News")).not.toBeInTheDocument()
+    expect(screen.getByText("Admin Own Feed")).toBeInTheDocument()
+  })
+
   it("renders private-only sharing mode as a designed state, not an error", async () => {
     watchlistsMock.fetchWatchlistSources.mockRejectedValue(
       new Error("403 watchlists_private_only_mode")
