@@ -4,7 +4,7 @@ title: Expose Writing Agent mode prompts through Service Prompts
 status: In Progress
 assignee: []
 created_date: '2026-09-06 15:38'
-updated_date: '2026-09-06 16:19'
+updated_date: '2026-09-06 16:43'
 labels: []
 dependencies: []
 references:
@@ -49,6 +49,10 @@ Published PR #2926 against dev from codex/writing-agent-service-prompts. Impleme
 Qodo review on implementation head reported three actionable items: contextual missing-prompt errors, grouped authentication imports, and bare-array manuscript character/world-info responses being treated as empty. Verified server list response models and all three client consumers expect wrappers; plan minimal normalization in the two shared helpers with real-payload regression coverage, plus error context and import cleanup. Backend-required failed OpenAPI fingerprint drift after optional header dependencies; requested approval for contract artifact refresh separately.
 
 Qodo fixes verified: 8 RED failures then 191 shared UI tests GREEN; WebUI 25 passed; nine optional expected-user endpoint regressions passed. Bandit zero findings and py_compile pass. Scoped ESLint from repo root with WebUI config has no code findings (only known pages-directory config warning). Independent read-only fix review approved. Shared list helpers normalize arrays once while preserving existing wrappers and totals; tests feed bare arrays through real helpers into Agent context. Missing prompt errors identify each mode ID; auth imports grouped. OpenAPI regeneration still awaits approval; diagnostic export currently needs repository-local tldw_profile_core on PYTHONPATH.
+
+User approved the OpenAPI fingerprint and generated-type refresh. Regenerate with the canonical exporter, verify the schema change is restricted to the three optional expected-user manuscript headers, regenerate TypeScript declarations, and rerun the drift gate before pushing.
+
+Approved contract refresh complete. Canonical exporter succeeded with PYTHONPATH including packages/tldw_profile_core/src. Fingerprint now e72e58af304408bc1b44bb380d7d4b3a34f126fc87b2c0bc01c9611147d597da, matching the CI-computed value. Removed exactly the three optional X-TLDW-Expected-User-ID parameters from the exported schema in a diagnostic copy; canonical hashing reproduced the original 5c815e778af28b517b73f608b3b458f98c9751313590432e625ea81afe91792c hash. This proves no unrelated contract drift. Counts unchanged: 2073 paths, 3142 schemas. openapi-typescript 7.13.0 generated the ignored schema.d.ts successfully. Fresh export_openapi_schema.py --check passes; git diff --check passes. Only the fingerprint and tracking record are committed; no runtime code changed, so no additional Bandit run needed for this artifact-only fix.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
