@@ -133,13 +133,13 @@ class OutputFileOperations:
         self,
         *,
         kind: str,
-        max_output_bytes: int,
+        max_output_bytes: int | None,
         output_id: int | None = None,
         destination_path: str | None = None,
         intended: dict | None = None,
         lease_seconds: int = 60,
     ) -> dict:
-        """Reserve budget and identity before exclusive creation of an empty stage."""
+        """Reserve before stage creation; None reserves an exact-size source copy."""
         return await self._run_interval(
             partial(
                 self._prepare,
@@ -153,7 +153,9 @@ class OutputFileOperations:
         )
 
     def _prepare(self, *, kind, max_output_bytes, output_id, destination_path, intended, lease_seconds):
-        if type(max_output_bytes) is not int or not 0 <= max_output_bytes <= 2**63 - 1:
+        if not (max_output_bytes is None and kind == "replace") and (
+            type(max_output_bytes) is not int or not 0 <= max_output_bytes <= 2**63 - 1
+        ):
             raise ValueError("output_operation_invalid")
         if kind not in {"create", "replace", "remove"} or (kind == "remove" and max_output_bytes):
             raise ValueError("output_operation_invalid")
@@ -164,6 +166,8 @@ class OutputFileOperations:
                 output = self.db.get_output_artifact(output_id, include_deleted=kind == "remove")
                 source_name = self.db._output_operation_filename(output.storage_path)
                 source = _source_identity(directory, source_name)
+            if max_output_bytes is None:
+                max_output_bytes = source["size"]
             if kind != "remove":
                 destination_path = self.db._output_operation_filename(destination_path)
                 try:
@@ -285,20 +289,51 @@ class OutputFileOperations:
                 return offset
             offset = await self.write_chunk(token, data, expected_offset=offset)
 
-    def _read_source_chunk(self, token: str, offset: int) -> bytes:
+    async def read_source_text(self, token: str) -> str:
+        """Read a conversion's bounded input in revalidated, closed-FD intervals."""
+        content = bytearray()
+        while True:
+            data = await self._run_interval(
+                partial(self._read_source_chunk, token, len(content), copying=False),
+                token=token,
+            )
+            if not data:
+                try:
+                    return content.decode("utf-8")
+                except UnicodeDecodeError:
+                    raise RuntimeError("output_source_unavailable") from None
+            content.extend(data)
+
+    async def abort(self, token: str) -> None:
+        """Release producer authority conditionally; recovery owns physical cleanup."""
+        await self._run_interval(partial(self._abort, token), token=token)
+
+    def _read_source_chunk(self, token: str, offset: int, *, copying: bool = True) -> bytes:
         with _validated_storage_directory(self.output_root, storage_namespace_id=self.namespace) as (_, directory):
             row = self.db.validate_output_file_operation(token, self.namespace)
-            if row["kind"] != "replace" or row["written_bytes"] != offset or not row["source_identity_json"]:
+            if (
+                row["kind"] != "replace"
+                or (copying and row["written_bytes"] != offset)
+                or not row["source_identity_json"]
+            ):
                 raise RuntimeError("output_operation_conflict")
             source = json.loads(row["source_identity_json"])
-            if source["size"] > row["reserved_bytes"] - source["size"]:
+            limit = (
+                row["reserved_bytes"] - source["size"]
+                if copying
+                else self.db.get_output_storage_policy(self.namespace)["text_input_bytes"]
+            )
+            if source["size"] > limit:
                 raise RuntimeError("output_size_limit")
             try:
                 if not row["stage_identity_json"]:
                     raise RuntimeError("output_operation_conflict")
                 with _open_regular(directory, row["stage_path"], os.O_RDONLY) as fd:
                     info = os.fstat(fd)
-                    if _identity(info) != json.loads(row["stage_identity_json"]) or info.st_size != offset:
+                    if (
+                        _identity(info) != json.loads(row["stage_identity_json"])
+                        or info.st_size != row["written_bytes"]
+                    ):
                         raise RuntimeError("output_operation_conflict")
                 with _open_regular(directory, row["source_path"], os.O_RDONLY) as fd:
                     if _identity(os.fstat(fd), source=True) != source or offset > source["size"]:

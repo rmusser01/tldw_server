@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path as PathlibPath
 from typing import Any
 
+import anyio
 from fastapi import HTTPException
 from jinja2 import TemplateError
 from jinja2.sandbox import SandboxedEnvironment
@@ -23,6 +24,10 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
 from tldw_Server_API.app.core.exceptions import InvalidStoragePathError
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.services.output_file_operations import MAX_CHUNK_BYTES, OutputFileOperations
+from tldw_Server_API.app.services.reading_artifact_cleanup_service import ReadingStorageBusy
 
 _OUTPUT_TEMPLATE_ENV = SandboxedEnvironment(autoescape=True, enable_async=False)
 _OUTPUT_TEMPLATE_ENV.filters["markdown_link"] = lambda text, url: f"[{text}]({url})" if url else text
@@ -201,6 +206,11 @@ def normalize_output_storage_path(user_id: int, storage_path: str) -> str:
 
 def _outputs_dir_for_user(user_id: int) -> PathlibPath:
     return DatabasePaths.get_user_outputs_dir(user_id)
+
+
+def _existing_outputs_dir_for_user(user_id: int) -> PathlibPath:
+    """Resolve an activated volume without recreating a missing mount/directory."""
+    return DatabasePaths.resolve_user_base_directory(user_id) / DatabasePaths.OUTPUTS_SUBDIR
 
 
 def _resolve_output_path_for_user(user_id: int, path_value: str | PathlibPath) -> PathlibPath:
@@ -525,6 +535,116 @@ async def _ingest_output_to_media_db(
         logger.error(f"output media ingest failed for {output_id}: {msg}")
         raise HTTPException(status_code=500, detail="media_ingest_failed")
     return int(media_id)
+
+
+async def update_protected_output(
+    cdb: CollectionsDatabase,
+    user_id: int,
+    row: CollectionsDatabase.OutputArtifactRow,
+    *,
+    title: str | None = None,
+    format_: str | None = None,
+    retention_until: str | None = None,
+) -> CollectionsDatabase.OutputArtifactRow | None:
+    """Apply a compound activated PATCH; None permits genuinely inactive legacy dispatch."""
+    if str(user_id) != str(cdb.user_id):
+        raise HTTPException(404, "output_not_found")
+    writer, operation = None, None
+    try:
+        source = PathlibPath(row.storage_path)
+        convert = format_ is not None and format_ != row.format
+        rename = bool(title) and title != row.title
+        filename = row.storage_path
+        if rename or convert:
+            suffix = "." + format_ if convert else source.suffix
+            timestamp = re.search(r"_(\d{8}_\d{6})$", source.stem)
+            stem = _sanitize_title_for_filename(title or row.title)
+            filename = f"{stem}_{timestamp.group(1)}{suffix}" if timestamp else f"{stem}{suffix}"
+        # Retention, exact no-ops and case-only names need no file authority.
+        if not convert and filename.lower() == row.storage_path.lower():
+            return await asyncio.to_thread(
+                cdb.update_output_artifact, row.id, title=title, retention_until=retention_until
+            )
+        namespace = await asyncio.to_thread(cdb.get_output_read_namespace)
+        if namespace is None:
+            return None
+        if convert and (row.format not in {"md", "html"} or format_ not in {"md", "html"}):
+            raise HTTPException(422, "unsupported_format_change")
+        policy = await asyncio.to_thread(cdb.get_output_storage_policy, namespace)
+        root = await asyncio.to_thread(_existing_outputs_dir_for_user, user_id)
+        writer = OutputFileOperations(cdb, output_root=root, storage_namespace_id=namespace)
+        intended = {
+            key: value
+            for key, value in {
+                "title": title,
+                "format": format_,
+                "retention_until": retention_until,
+            }.items()
+            if value is not None
+        }
+        operation = await writer.prepare(
+            kind="replace",
+            output_id=row.id,
+            destination_path=filename,
+            intended=intended,
+            max_output_bytes=policy["text_output_bytes"] if convert else None,
+        )
+        # Do not apply a destination derived from metadata changed before prepare.
+        if await asyncio.to_thread(cdb.get_output_artifact, row.id) != row:
+            raise RuntimeError("output_operation_conflict")
+        if convert:
+            text = await writer.read_source_text(operation["token"])
+            content = await asyncio.to_thread(_convert_protected_output_text, text, row.format)
+            if len(content) > policy["text_output_bytes"]:
+                raise RuntimeError("output_size_limit")
+            offset = 0
+            for start in range(0, len(content), MAX_CHUNK_BYTES):
+                offset = await writer.write_chunk(
+                    operation["token"], content[start : start + MAX_CHUNK_BYTES], expected_offset=offset
+                )
+        else:
+            await writer.copy_source(operation["token"])
+        return await writer.publish_and_commit(operation["token"])
+    except BaseException as exc:
+        if operation is not None and str(exc) != "output_update_unconfirmed":
+            try:
+                with anyio.CancelScope(shield=True):
+                    await writer.abort(operation["token"])
+            except Exception:  # noqa: BLE001 - a durable lease remains if abort is unavailable
+                logger.warning("outputs.patch: abort deferred")
+        if isinstance(exc, HTTPException):
+            raise
+        if isinstance(exc, KeyError):
+            raise HTTPException(404, "output_not_found") from None
+        if isinstance(exc, ReadingStorageBusy):
+            raise HTTPException(409, "output_file_busy") from None
+        codes = {
+            "output_file_busy": 409,
+            "output_path_conflict": 409,
+            "output_source_unavailable": 409,
+            "output_operation_conflict": 409,
+            "output_storage_unavailable": 503,
+            "output_update_unconfirmed": 503,
+            "output_storage_capacity": 507,
+            "output_size_limit": 413,
+        }
+        if isinstance(exc, (RuntimeError, ValueError, OSError, DatabaseError)):
+            code = str(exc) if str(exc) in codes else "output_storage_unavailable"
+            raise HTTPException(codes[code], code) from None
+        raise
+
+
+def _convert_protected_output_text(text: str, source_format: str) -> bytes:
+    """Convert only admitted bounded text, outside storage exclusion."""
+    if source_format == "html":
+        return re.sub(r"<[^>]+>", "", text).encode("utf-8")
+    try:
+        import markdown
+    except ImportError:
+        converted = f"<html><body>\n{text.replace('<', '&lt;')}\n</body></html>"
+    else:
+        converted = markdown.markdown(text)
+    return converted.encode("utf-8")
 
 
 def update_output_artifact_db(

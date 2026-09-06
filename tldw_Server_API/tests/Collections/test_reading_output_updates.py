@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 
 import pytest
 
 from tldw_Server_API.app.api.v1.endpoints import outputs
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.services import outputs_service
+from tldw_Server_API.app.services.reading_artifact_cleanup_service import provision_reading_storage_namespace
+from tldw_Server_API.tests.Collections.test_output_file_operations_db import insert_binding
 from tldw_Server_API.tests.Collections.test_reading_atomic_delete import snapshot
 from tldw_Server_API.tests.Collections.test_reading_output_deletion import archive
 from tldw_Server_API.tests.Collections.test_reading_output_disposal_routes import client as client
@@ -20,6 +25,264 @@ from tldw_Server_API.tests.Collections.test_reading_revision_mutations import (
 
 pytestmark = pytest.mark.unit
 pytest_plugins = ["tldw_Server_API.tests._plugins.authnz_full_fixtures"]
+
+
+@pytest.fixture(autouse=True)
+def existing_output_root(tmp_path, monkeypatch):
+    monkeypatch.setattr(outputs_service, "_existing_outputs_dir_for_user", lambda user: tmp_path, raising=False)
+
+
+def activate(db, root):
+    namespace = provision_reading_storage_namespace(root)
+    insert_binding(
+        db,
+        storage_namespace_id=namespace,
+        operation_bytes=4096,
+        user_pending_bytes=16384,
+        text_input_bytes=512,
+        text_output_bytes=1024,
+        free_space_margin_bytes=1,
+    )
+    return namespace
+
+
+@pytest.mark.parametrize("problem", ["late_owner", "source_alias", "destination"])
+def test_activated_http_patch_rejects_managed_file_races_without_changing_bytes(
+    db, tmp_path, client, monkeypatch, problem
+):
+    output = db.create_output_artifact(
+        type_="reading_archive" if problem == "late_owner" else "report",
+        title="Old",
+        format_="md",
+        storage_path="old.md",
+    )
+    (tmp_path / "old.md").write_text("original", encoding="utf-8")
+    namespace = activate(db, tmp_path)
+    payload = {"title": "New"}
+    baseline = []
+    if problem == "late_owner":
+        parent = make_reading(db)
+        dispatch = db.update_managed_reading_output
+
+        def register_after_dispatch(*args, **kwargs):
+            result = dispatch(*args, **kwargs)
+            db.register_reading_output_ownership(
+                parent.id, output.id, expected_revision=parent.revision, storage_namespace_id=namespace
+            )
+            baseline.append(snapshot(db))
+            return result
+
+        monkeypatch.setattr(db, "update_managed_reading_output", register_after_dispatch)
+    else:
+        _, _, owned = archive(db, tmp_path)
+        if problem == "source_alias":
+            # Pre-existing legacy alias: normal writers already reject new aliases.
+            db.backend.execute("UPDATE outputs SET storage_path = ? WHERE id = ?", (owned.storage_path, output.id))
+        else:
+            payload["title"] = (tmp_path / owned.storage_path).stem
+        baseline.append(snapshot(db))
+    files = {p.name: p.read_bytes() for p in tmp_path.iterdir() if p.is_file()}
+    before = db.get_output_artifact(output.id)
+    response = client.patch(f"/outputs/{output.id}", json=payload)
+    assert response.status_code == 409, response.text
+    assert db.get_output_artifact(output.id) == before
+    assert snapshot(db) == baseline[0]
+    assert {p.name: p.read_bytes() for p in tmp_path.iterdir() if p.is_file()} == files
+
+
+@pytest.mark.parametrize("convert", [False, True])
+def test_activated_http_patch_commits_one_compound_replacement(db, tmp_path, client, monkeypatch, convert):
+    activate(db, tmp_path)
+    output = db.create_output_artifact(type_="report", title="Old", format_="md", storage_path="old.md")
+    (tmp_path / "old.md").write_text("# Body", encoding="utf-8")
+    payload = {"title": "New", "retention_until": "2030-01-01T00:00:00"}
+    if convert:
+        payload["format"] = "html"
+    committed = []
+    apply_operation = db.apply_output_file_operation
+
+    def capture_commit(token, namespace, **kwargs):
+        result = apply_operation(token, namespace, **kwargs)
+        committed.append(db.get_output_file_operation(token, namespace))
+        return result
+
+    monkeypatch.setattr(db, "apply_output_file_operation", capture_commit)
+    response = client.patch(f"/outputs/{output.id}", json=payload)
+    assert response.status_code == 200, response.text
+    changed = db.get_output_artifact(output.id)
+    assert changed.title == "New" and changed.format == ("html" if convert else "md")
+    assert "Body" in (tmp_path / changed.storage_path).read_text(encoding="utf-8")
+    assert not (tmp_path / "old.md").exists()
+    assert len(committed) == 1 and committed[0]["phase"] == "committed"
+    assert committed[0]["effects_pending"] == 0
+    assert db.backend.execute("SELECT COUNT(*) FROM output_file_operations").scalar == 0
+    assert (
+        db.backend.execute("SELECT retention_until FROM outputs WHERE id = ?", (output.id,)).scalar
+        == payload["retention_until"]
+    )
+
+
+def test_activated_rename_reserves_actual_copy_bytes(db, tmp_path, client):
+    activate(db, tmp_path)
+    db.backend.execute("UPDATE output_storage_bindings SET user_pending_bytes = 32")
+    output = db.create_output_artifact(type_="report", title="Old", format_="md", storage_path="old.md")
+    (tmp_path / "old.md").write_bytes(b"seven!!")
+    response = client.patch(f"/outputs/{output.id}", json={"title": "New"})
+    assert response.status_code == 200, response.text
+    assert (tmp_path / "New.md").read_bytes() == b"seven!!"
+
+
+@pytest.mark.parametrize("limit", ["input", "output"])
+def test_activated_conversion_limit_preserves_original_and_aborts_stage(db, tmp_path, client, limit):
+    activate(db, tmp_path)
+    query = (
+        "UPDATE output_storage_bindings SET text_input_bytes = 2"
+        if limit == "input"
+        else "UPDATE output_storage_bindings SET text_output_bytes = 2"
+    )
+    db.backend.execute(query)
+    output = db.create_output_artifact(type_="report", title="Old", format_="md", storage_path="old.md")
+    (tmp_path / "old.md").write_bytes(b"# Body")
+    response = client.patch(f"/outputs/{output.id}", json={"title": "New", "format": "html"})
+    assert response.status_code == 413, response.text
+    assert response.json() == {"detail": "output_size_limit"}
+    assert db.get_output_artifact(output.id) == output
+    assert (tmp_path / "old.md").read_bytes() == b"# Body" and not (tmp_path / "New.html").exists()
+    assert db.backend.execute("SELECT phase FROM output_file_operations").scalar == "aborting"
+
+
+@pytest.mark.parametrize("payload", [{}, {"format": "md"}, {"title": "OLD"}, {"retention_until": "2030-01-01"}])
+def test_activated_metadata_patch_needs_no_volume(db, tmp_path, client, monkeypatch, payload):
+    activate(db, tmp_path)
+    output = db.create_output_artifact(type_="report", title="Old", format_="md", storage_path="old.md")
+
+    def unavailable(*args, **kwargs):
+        pytest.fail("Metadata PATCH must not acquire a volume or file")
+
+    from tldw_Server_API.app.services import outputs_service
+
+    monkeypatch.setattr(outputs_service, "_outputs_dir_for_user", unavailable)
+    response = client.patch(f"/outputs/{output.id}", json=payload)
+    assert response.status_code == 200, response.text
+    assert db.get_output_artifact(output.id).storage_path == "old.md"
+    assert db.backend.execute("SELECT COUNT(*) FROM output_file_operations").scalar == 0
+
+
+def test_activated_patch_preserves_shared_unowned_source(db, tmp_path, client):
+    activate(db, tmp_path)
+    output = db.create_output_artifact(type_="report", title="Old", format_="md", storage_path="old.md")
+    other = db.create_output_artifact(type_="report", title="Other", format_="md", storage_path="old.md")
+    (tmp_path / "old.md").write_bytes(b"shared")
+    response = client.patch(f"/outputs/{output.id}", json={"title": "New"})
+    assert response.status_code == 200, response.text
+    assert db.get_output_artifact(other.id) == other
+    assert (tmp_path / "old.md").read_bytes() == (tmp_path / "New.md").read_bytes() == b"shared"
+
+
+def test_activated_patch_never_provisions_a_missing_volume(db, tmp_path, client, monkeypatch):
+    activate(db, tmp_path)
+    output = db.create_output_artifact(type_="report", title="Old", format_="md", storage_path="old.md")
+    (tmp_path / "old.md").write_bytes(b"original")
+    missing = tmp_path / "offline"
+    monkeypatch.setattr(outputs_service, "_existing_outputs_dir_for_user", lambda user: missing)
+    response = client.patch(f"/outputs/{output.id}", json={"title": "New"})
+    assert response.status_code == 503, response.text
+    assert db.get_output_artifact(output.id) == output
+    assert (tmp_path / "old.md").read_bytes() == b"original"
+    assert not missing.exists()
+
+
+def test_activated_conversion_reads_and_writes_multiple_bounded_chunks(db, tmp_path, client):
+    activate(db, tmp_path)
+    db.backend.execute(
+        "UPDATE output_storage_bindings SET operation_bytes = 8388608, user_pending_bytes = 16777216, "
+        "text_input_bytes = 2097152, text_output_bytes = 2097152"
+    )
+    output = db.create_output_artifact(type_="report", title="Old", format_="html", storage_path="old.html")
+    body = "x" * (1024 * 1024 + 23)
+    (tmp_path / "old.html").write_text("<p>" + body + "</p>", encoding="utf-8")
+    response = client.patch(f"/outputs/{output.id}", json={"title": "New", "format": "md"})
+    assert response.status_code == 200, response.text
+    assert (tmp_path / "New.md").read_text(encoding="utf-8") == body
+    assert not (tmp_path / "old.html").exists()
+
+
+def test_activated_patch_commit_failure_preserves_original_and_sanitizes_error(db, tmp_path, client, monkeypatch):
+    activate(db, tmp_path)
+    output = db.create_output_artifact(type_="report", title="Old", format_="md", storage_path="old.md")
+    (tmp_path / "old.md").write_bytes(b"original")
+
+    def unavailable(*args, **kwargs):
+        raise RuntimeError("private body at /secret/location")
+
+    monkeypatch.setattr(db, "apply_output_file_operation", unavailable)
+    response = client.patch(f"/outputs/{output.id}", json={"title": "New", "format": "html"})
+    assert response.status_code == 409, response.text
+    assert response.json() == {"detail": "output_operation_conflict"}
+    assert db.get_output_artifact(output.id) == output
+    assert (tmp_path / "old.md").read_bytes() == b"original"
+    assert db.backend.execute("SELECT phase FROM output_file_operations").scalar == "aborting"
+
+
+@pytest.mark.parametrize("problem", ["unsupported", "unknown", "ownership_without_binding"])
+def test_inconsistent_storage_never_falls_back_to_legacy_patch(db, tmp_path, client, monkeypatch, problem):
+    if problem == "ownership_without_binding":
+        archive(db, tmp_path)
+    else:
+        activate(db, tmp_path)
+    output = db.create_output_artifact(type_="report", title="Old", format_="md", storage_path="old.md")
+    (tmp_path / "old.md").write_bytes(b"original")
+    if problem == "unsupported":
+        db.backend.execute("UPDATE output_storage_bindings SET protocol_version = 999")
+    elif problem == "unknown":
+
+        def unavailable():
+            raise RuntimeError("private storage error")
+
+        monkeypatch.setattr(db, "get_output_read_namespace", unavailable)
+    response = client.patch(f"/outputs/{output.id}", json={"title": "New"})
+    assert response.status_code == 503, response.text
+    assert response.json() == {"detail": "output_storage_unavailable"}
+    assert db.get_output_artifact(output.id) == output
+    assert (tmp_path / "old.md").read_bytes() == b"original"
+
+
+async def test_cancelled_conversion_cannot_publish_after_renderer_returns(db, tmp_path, monkeypatch):
+    activate(db, tmp_path)
+    output = db.create_output_artifact(type_="report", title="Old", format_="md", storage_path="old.md")
+    (tmp_path / "old.md").write_bytes(b"original")
+    started, release, finished = Event(), Event(), Event()
+
+    def render(*args):
+        started.set()
+        try:
+            assert release.wait(10)
+            return b"converted"
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(outputs_service, "_convert_protected_output_text", render)
+    task = asyncio.create_task(
+        outputs_service.update_protected_output(
+            db,
+            int(db.user_id),
+            output,
+            title="New",
+            format_="html",
+        )
+    )
+    try:
+        assert await asyncio.to_thread(started.wait, 10)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        release.set()
+        assert await asyncio.to_thread(finished.wait, 10)
+    assert db.get_output_artifact(output.id) == output
+    assert (tmp_path / "old.md").read_bytes() == b"original"
+    assert not (tmp_path / "New.html").exists()
+    assert db.backend.execute("SELECT phase FROM output_file_operations").scalar == "aborting"
 
 
 @pytest.mark.parametrize("operation", ["rename", "service", "path", "format"])

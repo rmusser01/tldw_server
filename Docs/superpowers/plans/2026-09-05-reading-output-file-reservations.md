@@ -197,10 +197,14 @@ activated migration or capability claimed by this checkpoint.
 
 ## Task 6: PATCH, explicit deletion and retention integration
 
+Execution split: Task 6a covers protected PATCH; Task 6b covers explicit deletion,
+retention purge and their history/quota effects. Each receives its own targeted
+verification, review and commit; neither enables rollout.
+
 **Files:** Modify `tldw_Server_API/app/api/v1/endpoints/outputs.py`, `tldw_Server_API/app/services/outputs_service.py`, `tldw_Server_API/app/services/outputs_purge_scheduler.py`; extend `tldw_Server_API/tests/Collections/test_reading_output_updates.py`, `tldw_Server_API/tests/Collections/test_reading_output_disposal_routes.py`, `tldw_Server_API/tests/Services/test_outputs_service.py`, `tldw_Server_API/tests/Services/test_outputs_purge_scheduler_truthiness.py`.
 
-- [ ] Add RED full-dispatch tests reproducing the three recorded failures: ownership registered after unmanaged dispatch, unowned row aliasing a managed source, and destination collision overwriting managed bytes. Assert both files and all relevant rows unchanged on rejection. Run `python -m pytest tldw_Server_API/tests/Collections/test_reading_output_updates.py -q`.
-- [ ] Activated PATCH goes through one prepared replacement with final compound title/format fields; no intermediate rename, hidden normalization write or file-first fallback. Managed title/retention stays DB-only and managed conversion409 stays unchanged. Case-only title may retain spelling; exact no-op allocates no file operation. Shared-unowned copy preserves source while another reference exists.
+- [x] Add RED full-dispatch tests reproducing the three recorded failures: ownership registered after unmanaged dispatch, unowned row aliasing a managed source, and destination collision overwriting managed bytes. Assert both files and all relevant rows unchanged on rejection. Run `python -m pytest tldw_Server_API/tests/Collections/test_reading_output_updates.py -q`.
+- [x] Activated PATCH goes through one prepared replacement with final compound title/format fields; no intermediate rename, hidden normalization write or file-first fallback. Managed title/retention stays DB-only and managed conversion409 stays unchanged. Case-only title may retain spelling; exact no-op allocates no file operation. Shared-unowned copy preserves source while another reference exists.
 - [ ] Route activated unowned delete-with-file through remove intent and atomic quota/history commit. Managed explicit disposal still uses Reading-owned intents. Metadata-only retention/soft-delete semantics remain; no file permission is inferred. Remove old duplicate additive quota/history effects on the activated branch only. Purges recheck eligibility under the same fence and count only actual completed unlinks, not queued work.
 - [ ] Map known failures to spec errors: 409 busy/path conflict/source unavailable, 503 unavailable/unconfirmed, 507 capacity, 413 overrun; retain auth/missing semantics and path-free logs. Valid pure metadata updates do not acquire file locks. Inactive + ownership/reservations is inconsistent and cannot enter legacy path; unknown binding also fails closed.
 - [ ] Run all four listed test modules and `python -m pytest tldw_Server_API/tests/Collections/test_items_and_outputs_api.py tldw_Server_API/tests/Collections/test_reading_output_deletion.py -q`. Review/commit: `fix(outputs): reserve physical updates and deletion end to end (TASK-13153)`.
@@ -1194,3 +1198,67 @@ Evidence logs: `/private/tmp/task-13153-identity-transaction-red.log`,
 
 Logs: `/private/tmp/task-13153-receiver-{red,schema-red,upgrade-red,edge-red,review-red,review-green,all-final,legacy-final,legacy-pg-verified,consumers,static-final}.log`;
 security reports: `/private/tmp/task-13153-receiver-bandit-{app,tests}-final.json`.
+
+### Task 6a: Protected compound PATCH (2026-09-05)
+
+The activated HTTP PATCH branch now records one final title/format/retention
+replacement and uses existing reserve, bounded copy/write, no-clobber publish,
+atomic commit and recovery methods. It never renames the original first, applies
+an intermediate normalization update, or falls back after an activated-store
+failure. A post-admission metadata check rejects destinations derived from a
+changed row. Managed metadata and conversion policy remain unchanged; retention,
+exact no-ops and case-only filename changes need no volume access. Genuinely
+inactive legacy physical updates remain available under the stopped-writer
+activation contract. Unknown/inconsistent bindings reject physical updates.
+
+Pure copies reserve their verified source size for the new copy, plus the
+original's cleanup accounting, rather than an arbitrary fraction of the configured
+maximum. Non-streaming text conversion uses explicit policy input/output limits:
+read at most 1 MiB per revalidated interval, render off-thread without storage
+exclusion, then write bounded chunks. No temporary pathname or dependency is
+added. Cancellation conditionally aborts producer authority; a delayed renderer
+cannot later publish. Root resolution is non-creating so a missing volume fails
+closed. Replacement keeps its output incarnation and needs no history disposal;
+its journal retires after filesystem completion. Task 6b will wire removal effects.
+
+Initial RED tests reproduced managed-source alias and destination overwrites.
+Strengthening full database snapshots exposed a late-owner test fixture error:
+registration rejected its non-archive row before the race. After correcting the
+type, bypassing protected dispatch in-memory reproduced the original file rename
+despite the final database rejection. No production code was changed for that
+mutation check. The real protected dispatch is tested against the corrected
+fixture on both databases. A success test was also corrected to inspect the real
+committed replacement before cleanup, rather than incorrectly require a retained
+deletion-history effect. One existing legacy logging double gained its real user
+identity and explicitly inactive binding; production checks were not weakened.
+
+Targeted evidence: 142 SQLite/non-PostgreSQL consumer cases passed in 120.38s;
+33 PostgreSQL HTTP cases passed in 196.51s; five additional PostgreSQL edge cases
+passed in 45.91s; seven conversion-cancellation and affected copy/cancellation
+cases passed in 56.78s. The last run includes conversion cancellation on both
+backends and five additional PostgreSQL storage cases. These are 187 distinct
+passing cases, with no backend skips. The corrected six-case race rerun passed
+on both databases in 31.42s and is not added again to the count. No full sweep or Docker.
+
+Commands after activating the existing Server environment:
+
+```bash
+TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Collections/test_reading_output_updates.py tldw_Server_API/tests/Collections/test_output_file_operations_storage.py tldw_Server_API/tests/Services/test_outputs_service.py tldw_Server_API/tests/Collections/test_items_and_outputs_api.py -q -k 'not postgres' --tb=short
+TLDW_TEST_NO_DOCKER=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest tldw_Server_API/tests/Collections/test_reading_output_updates.py -q -k postgres -n 2 --tb=short -rs
+TLDW_TEST_NO_DOCKER=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest tldw_Server_API/tests/Collections/test_reading_output_updates.py -q -k 'postgres and (multiple_bounded or commit_failure or inconsistent_storage)' -n 2 --tb=short -rs
+TLDW_TEST_NO_DOCKER=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest tldw_Server_API/tests/Collections/test_reading_output_updates.py tldw_Server_API/tests/Collections/test_output_file_operations_storage.py -q -k 'cancelled_conversion or (postgres and (source_copy or cancel_waits or anyio_cancellation))' -n 2 --tb=short -rs
+TLDW_TEST_NO_DOCKER=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest tldw_Server_API/tests/Collections/test_reading_output_updates.py -q -k managed_file_races -n 2 --tb=short -rs
+```
+
+Independent read-only review found no actionable checkpoint issues. Changed-range
+Black, test-file Black, compilation and diff checks pass. Production Bandit has
+zero findings/errors with no exclusions; test Bandit excludes only B101. Ruff
+introduces no findings: unchanged baseline is one each in the endpoint/service
+and four in the existing items/outputs consumer tests. Existing ADR-003 applies.
+No new architectural decision, activation, worker registration or capability
+advertisement is included. Task 6b and Tasks 7–9 remain pending; full TASK-13153
+stays In Progress with ACs unchecked, draft PR #2903 and human summary gate intact.
+
+Evidence: `/private/tmp/task-13153-patch-{red,bounds-red,volume-red,late-owner-mutation-red,local-verified,postgres,postgres-edges,cancellation-copy,race-verified}.log`,
+`/private/tmp/task-13153-patch-bandit.json` and
+`/private/tmp/task-13153-patch-tests-bandit.json`.

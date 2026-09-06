@@ -46,6 +46,7 @@ from tldw_Server_API.app.services.outputs_service import (
     normalize_output_storage_path,
     render_output_template,
     update_output_artifact_db,
+    update_protected_output,
 )
 from tldw_Server_API.app.services.output_file_response import protected_output_response
 
@@ -764,6 +765,24 @@ async def update_output(
         error_status=500,
         invalid_detail="invalid user_id",
     )
+    protected = await update_protected_output(
+        cdb,
+        user_id,
+        row,
+        title=payload.title,
+        format_=payload.format,
+        retention_until=payload.retention_until,
+    )
+    if protected is not None:
+        return OutputArtifact(
+            id=protected.id,
+            title=protected.title,
+            type=protected.type,
+            format=protected.format,
+            storage_path=protected.storage_path,
+            media_item_id=protected.media_item_id,
+            created_at=datetime.fromisoformat(protected.created_at),
+        )
     storage_name = _normalize_output_storage_path_for_user(
         cdb=cdb,
         user_id=user_id,
