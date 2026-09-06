@@ -198,7 +198,12 @@ describe("extractPipelineErrorMessage", () => {
   })
 })
 
-describe("OverviewTab canonical setup", () => {
+// Suite-scoped timeout: these tests drive the full PipelineWizard antd
+// tree through many userEvent interactions under jsdom; individual tests
+// legitimately take 20-30s (no timers or hangs involved - see the
+// per-suite precedent in sidepanel-flashcards.test.tsx). describe options
+// keep the raised timeout from leaking into other files.
+describe("OverviewTab canonical setup", { timeout: 60_000 }, () => {
   it("keeps setup scoped to a selected Watchlist", async () => {
     mocks.selectedWatchlistId = null
     render(<OverviewTab />)
@@ -301,7 +306,7 @@ describe("OverviewTab canonical setup", () => {
     fireEvent.click(await readyPipelineAction("Activate schedule"))
     await waitFor(() => expect(mocks.updateJob).toHaveBeenCalledWith(303, { active: true }))
     expect(mocks.createJob).toHaveBeenCalledTimes(1)
-  }, 20_000)
+  })
 
   it("applies a safe test contract and restores full delivery on activation", async () => {
     render(<OverviewTab />)
@@ -340,7 +345,7 @@ describe("OverviewTab canonical setup", () => {
         })
       })
     ))
-  }, 20_000)
+  })
 
   it("updates the inactive job with the current existing source selection", async () => {
     render(<OverviewTab />)
@@ -364,7 +369,7 @@ describe("OverviewTab canonical setup", () => {
       expect.objectContaining({ scope: { sources: [12] }, active: false })
     ))
     expect(mocks.createJob).toHaveBeenCalledTimes(1)
-  }, 20_000)
+  })
 
   it("updates a persisted new source when its draft identity changes", async () => {
     mocks.fetchOverview.mockResolvedValue(overview(0, 0))
@@ -400,7 +405,7 @@ describe("OverviewTab canonical setup", () => {
       expect.objectContaining({ scope: { sources: [501] }, active: false })
     )
     expect(mocks.createJob).toHaveBeenCalledTimes(1)
-  }, 20_000)
+  })
 
   it("never updates a pre-existing source when switching from existing to new", async () => {
     render(<OverviewTab />)
@@ -425,7 +430,7 @@ describe("OverviewTab canonical setup", () => {
       303,
       expect.objectContaining({ scope: { sources: [501] }, active: false })
     )
-  }, 20_000)
+  })
 
   it("rebinds a wizard-created source job to the current existing selection", async () => {
     mocks.fetchOverview.mockResolvedValue(overview(0, 0))
@@ -456,5 +461,5 @@ describe("OverviewTab canonical setup", () => {
       expect.objectContaining({ scope: { sources: [12] }, active: false })
     ))
     expect(mocks.updateSource).not.toHaveBeenCalled()
-  }, 20_000)
+  })
 })
