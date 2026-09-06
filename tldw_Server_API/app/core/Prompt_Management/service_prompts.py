@@ -156,6 +156,41 @@ Based on the content between backticks create comprehensive bulleted notes.
 - Do not reference these instructions in your response."""
 
 _DEFINITION_SEQUENCE = (
+    *(
+        ServicePromptDefinition(
+            id=f"study.assistant.{action}",
+            label=label,
+            description="Controls study response guidance. Grounding instructions, study context and provider settings remain fixed.",
+            parts=(ServicePromptPart(key="guidance", label="Guidance", mode="literal", required_variables=()),),
+            default_parts=MappingProxyType({"guidance": guidance}),
+            affected_workflows=(
+                ServicePromptWorkflow(id="study.assistant.flashcard", label="Flashcard Study Assistant"),
+                ServicePromptWorkflow(id="study.assistant.quiz", label="Quiz Study Assistant"),
+            ),
+        )
+        for action, label, guidance in (
+            (
+                "explain",
+                "Study explanation",
+                "Explain the material clearly and stay anchored to the provided study context only.",
+            ),
+            (
+                "mnemonic",
+                "Study mnemonic",
+                "Offer one memorable mnemonic tied directly to the provided study context only.",
+            ),
+            (
+                "followup",
+                "Study follow-up",
+                "Answer the follow-up question using only the provided study context and thread history.",
+            ),
+            (
+                "freeform",
+                "Study freeform response",
+                "Answer the learner message using only the provided study context and keep the response concise.",
+            ),
+        )
+    ),
     ServicePromptDefinition(
         id="chat.rag.answer",
         label="RAG answer",

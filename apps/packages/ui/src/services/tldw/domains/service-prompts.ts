@@ -5,6 +5,10 @@ import type {
 } from "@/services/tldw/TldwApiClient"
 
 export type KnownServicePromptId =
+  | "study.assistant.explain"
+  | "study.assistant.mnemonic"
+  | "study.assistant.followup"
+  | "study.assistant.freeform"
   | "chat.rag.answer"
   | "chat.rag.question_rewrite"
   | "chat.web_search.answer"

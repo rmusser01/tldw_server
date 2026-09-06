@@ -4,22 +4,45 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError, InputError
+from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
+from tldw_Server_API.app.core.Prompt_Management.service_prompts import (
+    get_service_prompt_definition,
+    resolve_service_prompt,
+)
 from tldw_Server_API.app.core.StudyPacks.provenance import FlashcardProvenanceStore
 
 try:
     from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
 except ImportError:  # pragma: no cover - fallback for limited test imports
+
     async def perform_chat_api_call_async(*args: Any, **kwargs: Any) -> dict[str, Any]:
         raise ImportError("chat_service_unavailable")
+
 
 from tldw_Server_API.app.core.Workflows.adapters._common import extract_openai_content
 
 STUDY_ASSISTANT_ACTIONS = ("explain", "mnemonic", "follow_up", "fact_check", "freeform")
 DEFAULT_MAX_HISTORY_MESSAGES = 8
 DEFAULT_MAX_FIELD_CHARS = 1200
+STUDY_ASSISTANT_PROMPT_IDS = {
+    "explain": "study.assistant.explain",
+    "mnemonic": "study.assistant.mnemonic",
+    "follow_up": "study.assistant.followup",
+    "freeform": "study.assistant.freeform",
+}
+
+
+def resolve_study_assistant_guidance(database: PromptsDatabase, action: str) -> str:
+    """Resolve one action's immutable guidance and close storage on the same worker."""
+    try:
+        prompt_id = STUDY_ASSISTANT_PROMPT_IDS[normalize_study_assistant_action(action)]
+        return resolve_service_prompt(database, prompt_id).parts["guidance"]
+    finally:
+        database.close_connection()
 
 
 def normalize_study_assistant_action(action: str) -> str:
@@ -61,8 +84,10 @@ def _normalize_string_list(value: Any) -> list[str]:
     return [str(value)]
 
 
-def _normalize_history(messages: list[dict[str, Any]], *, max_history_messages: int, max_field_chars: int) -> list[dict[str, Any]]:
-    recent = messages[-max(0, int(max_history_messages)):] if max_history_messages >= 0 else list(messages)
+def _normalize_history(
+    messages: list[dict[str, Any]], *, max_history_messages: int, max_field_chars: int
+) -> list[dict[str, Any]]:
+    recent = messages[-max(0, int(max_history_messages)) :] if max_history_messages >= 0 else list(messages)
     normalized: list[dict[str, Any]] = []
     for item in recent:
         normalized.append(
@@ -311,6 +336,7 @@ def build_study_assistant_prompt_package(
     action: str,
     context: Mapping[str, Any],
     user_message: str | None = None,
+    guidance: str | None = None,
 ) -> dict[str, str]:
     """Build a narrow action-specific prompt package for downstream LLM calls."""
     normalized_action = normalize_study_assistant_action(action)
@@ -322,13 +348,16 @@ def build_study_assistant_prompt_package(
         target = context.get("flashcard") or {}
         anchor_text = target.get("front") or ""
 
-    action_instruction = {
-        "explain": "Explain the material clearly and stay anchored to the provided study context only.",
-        "mnemonic": "Offer one memorable mnemonic tied directly to the provided study context only.",
-        "follow_up": "Answer the follow-up question using only the provided study context and thread history.",
-        "fact_check": "Fact-check the learner explanation against the provided study context and return structured corrections.",
-        "freeform": "Answer the learner message using only the provided study context and keep the response concise.",
-    }[normalized_action]
+    if normalized_action == "fact_check":
+        action_instruction = (
+            "Fact-check the learner explanation against the provided study context and return structured corrections."
+        )
+    else:
+        action_instruction = (
+            guidance
+            if guidance is not None
+            else get_service_prompt_definition(STUDY_ASSISTANT_PROMPT_IDS[normalized_action]).default_parts["guidance"]
+        )
 
     return {
         "action": normalized_action,
@@ -386,12 +415,14 @@ async def generate_study_assistant_reply(
     message: str | None = None,
     provider: str | None = None,
     model: str | None = None,
+    guidance: str | None = None,
 ) -> dict[str, Any]:
     """Generate an assistant reply for the provided card/question context."""
     prompt_package = build_study_assistant_prompt_package(
         action=action,
         context=context,
         user_message=message,
+        guidance=guidance,
     )
     normalized_action = str(prompt_package["action"])
     system_prompt = prompt_package["system_prompt"]

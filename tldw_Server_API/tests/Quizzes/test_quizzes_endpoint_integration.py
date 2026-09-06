@@ -1677,7 +1677,7 @@ def test_quiz_attempt_question_assistant_respond_persists_user_and_assistant_mes
     attempt_id, question_ids = _create_attempt_with_missed_questions(quizzes_db)
     question_id = question_ids[0]
 
-    async def fake_generate_reply(*, action, context, message=None, provider=None, model=None):
+    async def fake_generate_reply(*, action, context, message=None, provider=None, model=None, guidance: str | None = None):
         assert action == "explain"
         assert context["attempt"]["id"] == attempt_id
         assert context["question"]["id"] == question_id
@@ -1733,7 +1733,7 @@ def test_quiz_attempt_question_assistant_respond_returns_409_for_stale_thread_ve
 
     call_count = 0
 
-    async def fake_generate_reply(*, action, context, message=None, provider=None, model=None):
+    async def fake_generate_reply(*, action, context, message=None, provider=None, model=None, guidance: str | None = None):
         nonlocal call_count
         call_count += 1
         return {
@@ -1767,7 +1767,7 @@ def test_quiz_attempt_question_assistant_respond_returns_409_for_db_conflict(
     attempt_id, question_ids = _create_attempt_with_missed_questions(quizzes_db)
     question_id = question_ids[0]
 
-    async def fake_generate_reply(*, action, context, message=None, provider=None, model=None):
+    async def fake_generate_reply(*, action, context, message=None, provider=None, model=None, guidance: str | None = None):
         _ = (action, context, message, provider, model)
         return {
             "assistant_text": "The glomerulus is where blood filtration begins.",
@@ -1810,7 +1810,7 @@ def test_quiz_attempt_question_assistant_respond_returns_400_for_input_error(
     attempt_id, question_ids = _create_attempt_with_missed_questions(quizzes_db)
     question_id = question_ids[0]
 
-    async def raise_input_error(*, action, context, message=None, provider=None, model=None):
+    async def raise_input_error(*, action, context, message=None, provider=None, model=None, guidance: str | None = None):
         _ = (action, context, message, provider, model)
         raise InputError("invalid study assistant action")
 
@@ -1837,7 +1837,7 @@ def test_quiz_attempt_question_assistant_respond_returns_500_for_db_error(
     attempt_id, question_ids = _create_attempt_with_missed_questions(quizzes_db)
     question_id = question_ids[0]
 
-    async def raise_db_error(*, action, context, message=None, provider=None, model=None):
+    async def raise_db_error(*, action, context, message=None, provider=None, model=None, guidance: str | None = None):
         _ = (action, context, message, provider, model)
         raise CharactersRAGDBError("study assistant reply backend unavailable")
 

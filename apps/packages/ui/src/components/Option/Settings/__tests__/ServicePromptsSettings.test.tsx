@@ -309,7 +309,17 @@ const catalog: ServicePromptCatalogItem[] = [
       { key: "presentation_guidance", label: "Presentation guidance", mode: "literal", required_variables: [] }
     ],
     affected_workflows: [{ id: "media.document.insights", label: "Server insights workflow" }]
-  }
+  },
+  ...["explain", "mnemonic", "followup", "freeform"].map((action) => ({
+    id: `study.assistant.${action}`,
+    label: `Server ${action} prompt`,
+    description: "Server study description",
+    parts: [{ key: "guidance", label: "Server guidance", mode: "literal" as const, required_variables: [] }],
+    affected_workflows: [
+      { id: "study.assistant.flashcard", label: "Server flashcard workflow" },
+      { id: "study.assistant.quiz", label: "Server quiz workflow" }
+    ]
+  }))
 ]
 
 const detailFor = (
@@ -320,7 +330,9 @@ const detailFor = (
     parts?: Record<string, string>
   } = {}
 ): ServicePromptDetail => {
-  const defaults = definition.id === "media.document.insights"
+  const defaults = definition.id.startsWith("study.assistant.")
+    ? { guidance: "Help the learner." }
+    : definition.id === "media.document.insights"
     ? { analysis_guidance: "Extract research insights.", presentation_guidance: "Use concise titles." }
     : definition.id === "media.web.summarization"
     ? { system: "Web system guidance.", user: "Web summary guidance." }
@@ -593,7 +605,7 @@ describe("ServicePromptsSettings", () => {
     renderSettings()
 
     expect(await screen.findAllByTestId("service-prompt-list-item"))
-      .toHaveLength(15)
+      .toHaveLength(19)
     expect(await screen.findByRole("heading", { name: "Text translation" }))
       .toBeInTheDocument()
     expect(screen.getByText("Server default")).toBeInTheDocument()
@@ -653,6 +665,26 @@ describe("ServicePromptsSettings", () => {
     expect(screen.getByText("Synchronous PDF analysis")).toBeVisible()
     expect(screen.getAllByText(/Without a saved override, server defaults apply/)[0]).toBeVisible()
     expect(screen.queryByText("Server PDF prompt")).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ["explain", "Study explanation"],
+    ["mnemonic", "Study mnemonic"],
+    ["followup", "Study follow-up"],
+    ["freeform", "Study freeform response"]
+  ])("edits %s guidance for both study surfaces", async (action, label) => {
+    renderSettings()
+    await openPrompt(label)
+    expect(screen.getByLabelText("Guidance")).toHaveValue("Help the learner.")
+    expect(screen.getByText("Flashcard Study Assistant")).toBeVisible()
+    expect(screen.getByText("Quiz Study Assistant")).toBeVisible()
+    fireEvent.change(screen.getByLabelText("Guidance"), { target: { value: "Teach in French {literally}." } })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledWith(
+      `study.assistant.${action}`,
+      { parts: { guidance: "Teach in French {literally}." }, expected_revision: null },
+      { signal: expect.any(AbortSignal), requestScope: scopeOne }
+    ))
   })
 
   it("edits document insights guidance without exposing its JSON contract", async () => {
