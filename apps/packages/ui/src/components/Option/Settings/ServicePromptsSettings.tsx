@@ -174,6 +174,12 @@ const KNOWN_DEFINITIONS = {
     description:
       "Controls system and user instructions for synchronous audio analysis. Without a saved override, server defaults apply."
   },
+  "media.web.summarization": {
+    key: "mediaWebSummarization",
+    label: "Web article summarization",
+    description:
+      "Controls summary instructions for synchronous web scraping. Reset restores each scraping engine's existing defaults; the displayed defaults are the deployed web-article prompts."
+  },
   "media.email.summarization": {
     key: "mediaEmailSummarization",
     label: "Email summarization",
@@ -239,6 +245,10 @@ const KNOWN_WORKFLOWS: Record<string, { key: string; label: string }> = {
   "media.video.summarization": {
     key: "videoSummarization",
     label: "Synchronous video analysis"
+  },
+  "media.web.summarization": {
+    key: "webSummarization",
+    label: "Synchronous web scraping"
   },
   "notes.title.generate": {
     key: "automaticNotesTitles",

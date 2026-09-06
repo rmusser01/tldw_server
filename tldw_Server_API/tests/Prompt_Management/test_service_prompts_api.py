@@ -229,6 +229,16 @@ def test_service_prompt_catalog_returns_exact_metadata_without_prompt_bodies(
             "affected_workflows": [{"id": "media.video.summarization", "label": "Synchronous video analysis"}],
         },
         {
+            "id": "media.web.summarization",
+            "label": "Web article summarization",
+            "description": "Controls summary instructions for synchronous web scraping. Reset restores each scraping engine's existing defaults; the displayed defaults are the deployed web-article prompts.",
+            "parts": [
+                {"key": "system", "label": "System instructions", "mode": "literal", "required_variables": []},
+                {"key": "user", "label": "User instructions", "mode": "literal", "required_variables": []},
+            ],
+            "affected_workflows": [{"id": "media.web.summarization", "label": "Synchronous web scraping"}],
+        },
+        {
             "id": "media.text.translation",
             "label": "Text translation",
             "description": ("Controls the visible instructions used by synchronous text translation."),
@@ -283,6 +293,32 @@ def test_service_prompt_detail_returns_packaged_state_without_caching(api_contex
     assert body["saved_parts"] is None
     assert body["effective_parts"] == body["default_parts"]
     assert set(body["default_parts"]) == {"system", "user_template"}
+
+
+def test_web_settings_save_pair_atomically_and_reset_deployment_defaults(
+    api_context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Web instructions share atomic updates and expose the deployed article defaults."""
+    from tldw_Server_API.app.core.Utils import prompt_loader
+
+    (tmp_path / "webscraping.prompts.yaml").write_text(
+        "article_summary_system: Deployment system\narticle_summary_user: Deployment summary\n"
+    )
+    monkeypatch.setattr(prompt_loader, "_prompts_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(prompt_loader, "get_global_context_integrity_resolver", lambda: None)
+    path = "/api/v1/service-prompts/media.web.summarization"
+    defaults = {"system": "Deployment system", "user": "Deployment summary"}
+    assert api_context.client.get(path).json()["effective_parts"] == defaults
+    parts = {"system": "System {literal}", "user": "Summary {literal}"}
+    saved = api_context.client.put(path, json={"parts": parts, "expected_revision": None})
+    assert saved.status_code == 200
+    revision = saved.json()["revision"]
+    partial = api_context.client.put(path, json={"parts": {"user": "Incomplete"}, "expected_revision": revision})
+    assert partial.status_code == 422
+    assert api_context.client.get(path).json()["effective_parts"] == parts
+    reset = api_context.client.delete(path, params={"expected_revision": revision})
+    assert reset.status_code == 200
+    assert reset.json()["effective_parts"] == defaults
 
 
 def test_video_settings_save_pair_atomically_and_reset_defaults(

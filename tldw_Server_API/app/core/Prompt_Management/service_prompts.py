@@ -360,6 +360,20 @@ _DEFINITION_SEQUENCE = (
         affected_workflows=(ServicePromptWorkflow(id="media.video.summarization", label="Synchronous video analysis"),),
     ),
     ServicePromptDefinition(
+        id="media.web.summarization",
+        label="Web article summarization",
+        description="Controls summary instructions for synchronous web scraping. Reset restores each scraping engine's existing defaults; the displayed defaults are the deployed web-article prompts.",
+        parts=(
+            ServicePromptPart(key="system", label="System instructions", mode="literal", required_variables=()),
+            ServicePromptPart(key="user", label="User instructions", mode="literal", required_variables=()),
+        ),
+        default_parts=MappingProxyType({
+            "system": "You are a professional summarizer who produces accurate, concise summaries of web content.",
+            "user": "Summarize this article concisely. Focus on the main points, facts, and any actionable insights.",
+        }),
+        affected_workflows=(ServicePromptWorkflow(id="media.web.summarization", label="Synchronous web scraping"),),
+    ),
+    ServicePromptDefinition(
         id="media.text.translation",
         label="Text translation",
         description="Controls the visible instructions used by synchronous text translation.",
@@ -599,6 +613,13 @@ def resolve_service_prompt_default(definition: ServicePromptDefinition) -> Resol
         from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import _resolve_default_system_prompt
 
         parts = MappingProxyType({**definition.default_parts, "system": _resolve_default_system_prompt()})
+    elif definition.id == "media.web.summarization":
+        from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
+
+        parts = MappingProxyType({
+            "system": load_prompt("webscraping", "article_summary_system") or "You are a professional summarizer.",
+            "user": load_prompt("webscraping", "article_summary_user") or "Summarize this article concisely.",
+        })
     elif definition.id == "media.audio.analysis":
         from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import _resolve_default_system_prompt
         from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt

@@ -22,6 +22,7 @@ import json
 import os
 import random
 import tempfile
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from datetime import datetime
@@ -360,6 +361,7 @@ async def scrape_and_summarize_multiple(
     custom_cookies: Optional[list[dict[str, Any]]] = None,
     temperature: float = 0.7,
     allow_llm_extraction: bool = True,
+    summary_prompt_overrides: Optional[Mapping[str, str]] = None,
 ) -> list[dict[str, Any]]:
     urls_list = [url.strip() for url in urls.split('\n') if url.strip()]
     custom_titles = custom_article_titles.split('\n') if custom_article_titles else []
@@ -405,6 +407,9 @@ async def scrape_and_summarize_multiple(
                                                "Act as a professional summarizer and summarize this article."
                         article_custom_prompt = custom_prompt_arg or \
                                                 "Act as a professional summarizer and summarize this article."
+                        if summary_prompt_overrides is not None:
+                            system_message_final = summary_prompt_overrides.get("system", system_message_final)
+                            article_custom_prompt = summary_prompt_overrides.get("user", article_custom_prompt)
 
                         # Summarize the content using the summarize function
                         summary = analyze(
