@@ -17,6 +17,9 @@ request schema. Update the existing Settings description; add no setting ID.
 For crawl modes, retrieve articles from the existing ephemeral result envelope
 before mapping summaries to ingestion analysis fields. Retain support for inline
 article/result lists used by compatibility callers. No new storage mechanism.
+Release consumed temporary entries because ingestion does not return their IDs,
+including on malformed-envelope failures. Missing entries use the existing
+domain resource-not-found exception with the safe result ID for diagnostics.
 
 Tests exercise HTTP, real owner prompt databases, real orchestration and ephemeral
 storage, and model-facing messages; substitute only external extraction/model

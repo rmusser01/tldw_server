@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
     managed_media_database,
 )
 from tldw_Server_API.app.core.deprecations import log_runtime_deprecation
+from tldw_Server_API.app.core.exceptions import ResourceNotFoundError
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     async_resolve_chunking_options_and_plan,
     attach_chunking_plan_to_result,
@@ -696,12 +697,27 @@ async def process_web_scraping_task(
 
 
 def _ingest_crawl_articles(service_result: Any) -> list[dict[str, Any]]:
-    """Recover crawl articles from the enhanced envelope or legacy inline result."""
+    """Recover articles and release temporary payloads not exposed by ingestion.
+
+    Missing enhanced payloads raise ResourceNotFoundError with their result ID.
+    Malformed stored envelopes still release their storage before propagating.
+    """
     if isinstance(service_result, dict) and service_result.get("ephemeral_id"):
-        stored = ephemeral_storage.get_data(service_result["ephemeral_id"])
-        if stored is None:
-            raise RuntimeError("Web crawl results expired before ingestion")
-        service_result = stored["result"]
+        result_id = service_result["ephemeral_id"]
+        try:
+            stored = ephemeral_storage.get_data(result_id)
+            if stored is None:
+                raise ResourceNotFoundError("Web crawl results", result_id, "expired before ingestion")
+            service_result = stored["result"]
+        finally:
+            ephemeral_storage.remove_data(result_id)
+    elif (
+        isinstance(service_result, dict)
+        and service_result.get("status") == "ephemeral-ok"
+        and service_result.get("media_id")
+    ):
+        # Legacy crawls also store a copy, but already return the articles inline.
+        ephemeral_storage.remove_data(service_result["media_id"])
     if isinstance(service_result, dict):
         service_result = service_result.get("articles") or service_result.get("results") or []
     articles = service_result if isinstance(service_result, list) else []

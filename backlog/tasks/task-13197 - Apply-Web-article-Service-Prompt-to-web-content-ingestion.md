@@ -4,7 +4,7 @@ title: Apply Web article Service Prompt to web-content ingestion
 status: In Progress
 assignee: []
 created_date: '2026-09-06 01:34'
-updated_date: '2026-09-06 01:56'
+updated_date: '2026-09-06 02:05'
 labels: []
 dependencies: []
 references:
@@ -44,6 +44,10 @@ Independent reviewer found no blocking correctness/security/compatibility/over-e
 Final verification: 87 feature/owner/cleanup/crawl/strict-contract tests passed; 136 registry/API/ingestion compatibility tests passed (223 focused backend total). Shared Settings 76 passed and WebUI Settings 76 passed (152 UI total). Both full feature runs eventually reported success; interpreter/session cleanup was slow, and a stack sample located finalization outside application request handling. No broad full-repository suite was run. All new lint issues fixed; one unchanged pre-existing B004 remains in the touched older endpoint. Bandit: zero findings. OpenAPI fingerprint unchanged. Independent review complete; direct-ingestion regression added. All four implementation stages complete; temporary plan removed per repository convention. Ready for integration choice; no PR created yet.
 
 Published PR #2913 against dev at requester option 2. Implementation commit 75329803a1; existing verification applies unchanged. Worktree preserved for review follow-up. No merge or recurring monitor initiated.
+
+Rebased cleanly onto dev 7fe169e8c5; range-diff confirms both original commits unchanged. Qodo posted three actionable findings: domain exception with safe result ID, public-ingestion boundary tests rather than a private-helper import, and cleanup of consumed ephemeral crawl payloads. Addressing test-first before publishing the rebased head.
+
+All three Qodo findings addressed: reuse centralized ResourceNotFoundError with the safe result ID; exercise public ingestion orchestration rather than private helper; release enhanced and legacy temporary crawl entries, including malformed-envelope failure. RED: 10 failed and 6 passed before fixes. GREEN: 16 boundary cases passed. Rebased full focused backend suite: 234 passed; final boundary rerun: 16 passed. Ruff/compilation/diff checks passed and Bandit across five runtime files has zero findings. Independent follow-up review found no actionable issues. Publishing rebased fixes with an exact-head force-with-lease, then waiting for current-head Qodo and required CI. Human-summary waiver question for this PR is pending.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
