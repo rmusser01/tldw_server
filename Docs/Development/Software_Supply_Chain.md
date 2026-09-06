@@ -160,9 +160,11 @@ into Docker's containerd image store and runs it by the scanned subject digest.
 It does not rebuild or substitute a mutable tag. The probe verifies the selected
 `linux/amd64` manifest/config hashes, locked Chroma/PyJWT/cryptography
 versions, real application-managed per-user collection/query isolation, absence
-of TCP listeners while the embedded clients are active, and an ES256 round trip
-through PyJWT's cryptography backend. It runs without network access or
-capabilities, with a read-only root and temporary scratch storage.
+of TCP listeners while the embedded clients are active, bidirectional rejection
+of foreign collection UUID reads and writes with original IDs and documents
+preserved, and an ES256 round trip through PyJWT's cryptography backend. It runs
+without network access or capabilities, with a read-only root and temporary
+scratch storage.
 
 `runtime-image-<name>.json` records these results, the lock hash, and the subject
 and config digests; it is included in the evidence checksum manifest. Probe
@@ -171,6 +173,13 @@ These narrowly scoped checks are **not** a full application-startup audit or a
 determination that a CVE is inapplicable. They never create exceptions or change
 either vulnerability gate. Third-party server deployments and optional runtime
 paths still need their own applicability review.
+
+The runtime JSON also records exact-image observations for Perl integer/pointer
+sizes and the presence of the two standard `systemd-homed` executable paths.
+An absent executable is recorded as absent; a failed or malformed observation
+rejects the probe. Host-side tests validate the collector but are not exact-image
+evidence, and these facts do not establish broader module/function reachability
+or make Perl, systemd, or frontend findings inapplicable.
 
 JWT consumers use `PyJWT[crypto]`; the locked graph no longer includes
 python-jose or its ecdsa fallback. A shared compatibility boundary preserves
