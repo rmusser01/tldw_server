@@ -452,7 +452,10 @@ explicitly activate a valid pack.
 Persona Live shows provisional recognition under **Last heard**. Recognition may
 revise those words as more speech arrives; the conversation transcript records
 the committed utterance once. With Auto-commit off, use **Send now** when finished.
-Choosing manual control does not indicate a VAD failure.
+Choosing manual control does not indicate a VAD failure or a stalled automatic
+turn. **Send now** is available only while the current voice turn is listening
+and has recognized speech. Sending consumes that turn once; stopping, finishing,
+or disconnecting disables the button even though **Last heard** remains visible.
 
 ### Voice recording rate limits
 

@@ -3,16 +3,16 @@ id: TASK-13197
 title: Provide conversational responses through the Persona Buddy live session
 status: Done
 assignee: []
-created_date: '2026-09-05 21:29'
-updated_date: '2026-09-05 23:30'
+created_date: 2026-09-05 21:29
+updated_date: 2026-09-06 02:10
 labels:
-  - persona
-  - buddy
-  - uat
+- persona
+- buddy
+- uat
 dependencies: []
 references:
-  - Docs/Reviews/MIGU_BUDDY_MERGED_LIVE_UAT_2026_09_05.md
-  - TASK-13180
+- Docs/Reviews/MIGU_BUDDY_MERGED_LIVE_UAT_2026_09_05.md
+- TASK-13180
 priority: high
 ---
 
@@ -44,10 +44,9 @@ Reason: Authenticated chat reuse and cancellable live turn ownership cross trans
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
-Ordinary persisted Persona Live turns now return provider-backed replies through the complete authenticated Chat HTTP boundary, with bounded enabled Persona context and session history. Only the selected credential family and original proxy provenance are forwarded. Explicit tool intent retains Live plan review; slash commands and empty sends cannot reach Chat command preprocessing. Active and queued turns remain FIFO until explicit Stop retires ownership; late replies cannot publish and retry remains available. ADR046 records the contract. Rebased implementation 2270153980 on dev f6d6a673b6 passed 204 targeted Python and 198 frontend tests, OpenAPI fingerprint, zero touched Bandit findings, and Ruff for new Python helpers/tests. Real DeepSeek UAT returned the expected answer in 0.77 seconds, canceled without late output, recovered in the same session, prepared Whisper/Kokoro and emitted 25388 speech bytes for a synthetic transcript. Explicit search retained an unapproved rag_search plan; REST Stop returned 200. Sanitized evidence identifies the source. Human voice acceptance remains TASK13195. Renumbered from TASK13194 after rebase because dev independently allocated that ID to video Service Prompts.
-<!-- SECTION:NOTES:END -->
-
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Ordinary persisted Persona Live turns now return provider-backed replies through the complete authenticated Chat HTTP boundary, with bounded enabled Persona context and session history. Only the selected credential family and original proxy provenance are forwarded. Explicit tool intent retains Live plan review; slash commands and empty sends cannot reach Chat command preprocessing. Active and queued turns remain FIFO until explicit Stop retires ownership; late replies cannot publish and retry remains available. ADR046 records the contract. Rebased implementation 2270153980 on dev f6d6a673b6 passed 204 targeted Python and 198 frontend tests, OpenAPI fingerprint, zero touched Bandit findings, and Ruff for new Python helpers/tests. Real DeepSeek UAT returned the expected answer in 0.77 seconds, canceled without late output, recovered in the same session, prepared Whisper/Kokoro and emitted 25388 speech bytes for a synthetic transcript. Explicit search retained an unapproved rag_search plan; REST Stop returned 200. Sanitized evidence identifies the source. Human voice acceptance remains TASK13202. Renumbered from TASK13194 after rebase because dev independently allocated that ID to video Service Prompts.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->

@@ -1430,6 +1430,65 @@ describe("usePersonaLiveVoiceController", () => {
     expect(hookMocks.micStart).toHaveBeenCalledWith({ deviceId: null })
   })
 
+  it.each(["manual setting", "server manual fallback"])(
+    "keeps %s waiting for Send now without a stuck-listening warning",
+    async (mode) => {
+      vi.useFakeTimers()
+      const ws = { readyState: WebSocket.OPEN, send: vi.fn() } as unknown as WebSocket
+      const { result } = renderHook(() => usePersonaLiveVoiceController({
+        ws, connected: true, sessionId: "sess-voice", personaId: "persona-1",
+        resolvedDefaults: { ...resolvedDefaults, autoCommitEnabled: mode !== "manual setting" },
+        canUseServerStt: true
+      }))
+      await act(async () => { await startPreparedVoice(result, ws) })
+      act(() => {
+        deliverPayload(result, ws, { event: "partial_transcript", transcript: "the notebook is ready" })
+        if (mode === "server manual fallback") {
+          deliverPayload(result, ws, { event: "notice", reason_code: "VOICE_MANUAL_MODE_REQUIRED" })
+        }
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(10000) })
+      expect(result.current.recoveryMode).toBe("none")
+      expect(result.current.canSendNow).toBe(true)
+    }
+  )
+
+  it.each(["stop", "submit", "disconnect"])(
+    "disables Send now after %s despite retained heard text",
+    async (ending) => {
+      const ws = { readyState: WebSocket.OPEN, send: vi.fn() } as unknown as WebSocket
+      const { result, rerender } = renderHook(({ connected }) => usePersonaLiveVoiceController({
+        ws, connected, sessionId: "sess-voice", personaId: "persona-1",
+        resolvedDefaults, canUseServerStt: true
+      }), { initialProps: { connected: true } })
+      await act(async () => { await startPreparedVoice(result, ws) })
+      act(() => { deliverPayload(result, ws, { event: "partial_transcript", transcript: "the notebook is ready" }) })
+      expect(result.current.canSendNow).toBe(true)
+      if (ending === "disconnect") rerender({ connected: false })
+      else act(() => {
+        if (ending === "stop") result.current.stopListening()
+        else result.current.sendCurrentTranscriptNow()
+      })
+      expect(result.current.canSendNow).toBe(false)
+    }
+  )
+
+  it("commits an owned manual turn only once even before React renders", async () => {
+    const ws = { readyState: WebSocket.OPEN, send: vi.fn() } as unknown as WebSocket
+    const { result } = renderHook(() => usePersonaLiveVoiceController({
+      ws, connected: true, sessionId: "sess-voice", personaId: "persona-1",
+      resolvedDefaults, canUseServerStt: true
+    }))
+    await act(async () => { await startPreparedVoice(result, ws) })
+    act(() => { deliverPayload(result, ws, { event: "partial_transcript", transcript: "the notebook is ready" }) })
+    act(() => {
+      result.current.sendCurrentTranscriptNow()
+      result.current.sendCurrentTranscriptNow()
+    })
+    const sent = vi.mocked(ws.send).mock.calls.map(([data]) => JSON.parse(String(data)))
+    expect(sent.filter(frame => frame.type === "voice_commit")).toHaveLength(1)
+  })
+
   it("shows listening recovery after 4 seconds with transcript but no commit", async () => {
     vi.useFakeTimers()
 

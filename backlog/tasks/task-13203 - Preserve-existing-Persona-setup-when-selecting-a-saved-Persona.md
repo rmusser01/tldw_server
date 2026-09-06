@@ -1,12 +1,9 @@
 ---
-id: TASK-13196
+id: TASK-13203
 title: Preserve existing Persona setup when selecting a saved Persona
 status: Done
-assignee: []
-created_date: '2026-09-05 23:15'
-updated_date: '2026-09-05 23:27'
-labels: []
-dependencies: []
+created_date: 2026-09-06 02:07
+updated_date: 2026-09-06 02:07
 ---
 
 ## Description
@@ -35,17 +32,17 @@ Reason: Routine selection/persistence bug fix preserving the existing setup mode
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Saved-Persona selection now reads the target before applying setup. Completed and later in-progress setup resume unchanged; failed reads cause no write or selection switch. Initial Persona/archetype choice advances to Voice while preserving existing run identity and completed steps. Real browser reload/reselection preserved completed setup and en/tiny.en, tldw/af_heart, manual commit and auto-resume off. Post-rebase route/voice regression scope: 198 passed. ESLint: zero errors, existing warnings only; scoped TypeScript: zero owned diagnostics, 27 dependency diagnostics remain. Bandit not applicable to this TypeScript-only task. Evidence and incident lesson updated; ADR not required for this persistence bug fix.
-<!-- SECTION:NOTES:END -->
+
+Renumbered from TASK-13196 after latest dev allocated that ID to an unrelated task; existing evidence is preserved.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Completed saved-Persona setup survives reload and reselection. Regression and real browser checks passed; unrelated voice acceptance remains under TASK13195.
+Completed saved-Persona setup survives reload and reselection. Regression and real browser checks passed; unrelated voice acceptance remains under TASK13202.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
-
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

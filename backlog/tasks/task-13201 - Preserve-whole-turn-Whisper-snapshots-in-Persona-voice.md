@@ -3,8 +3,8 @@ id: TASK-13201
 title: Preserve whole-turn Whisper snapshots in Persona voice
 status: Done
 assignee: []
-created_date: '2026-09-06 01:06'
-updated_date: '2026-09-06 01:12'
+created_date: 2026-09-06 01:06
+updated_date: 2026-09-06 02:11
 labels: []
 dependencies: []
 ---
@@ -30,10 +30,9 @@ ADR required: amend existing Docs/ADR/046-persona-live-conversation-and-voice-ru
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
-Added PersonaWhisperTranscriber using the existing Whisper loader and speech filter with one bounded whole-turn snapshot. It revises empty results, preserves intentional repeats, and rejects more than 30 seconds before AudioBuffer can trim earlier speech. Existing owned STT failure handling shows a safe shorter-turn retry message. Factory changes apply only to Persona Whisper. Three new regressions failed before repair; final Persona/Whisper scope passed 134 tests, including bounded failure correlation and cleanup. Four real local-model boundary cases now retain the complete phrase; zero-overlap baseline still corrupted words. Bandit zero findings; Ruff one unchanged endpoint SIM114; Black checks for both new files pass. ADR046 and user guide/mirrors updated. Source-hashed synthetic receipts and human baseline recorded in Docs/Reviews/assets/migu-buddy-browser-voice-2026-09-05. Fresh human acceptance remains under TASK-13195/13198.
-<!-- SECTION:NOTES:END -->
-
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Added PersonaWhisperTranscriber using the existing Whisper loader and speech filter with one bounded whole-turn snapshot. It revises empty results, preserves intentional repeats, and rejects more than 30 seconds before AudioBuffer can trim earlier speech. Existing owned STT failure handling shows a safe shorter-turn retry message. Factory changes apply only to Persona Whisper. Three new regressions failed before repair; final Persona/Whisper scope passed 134 tests, including bounded failure correlation and cleanup. Four real local-model boundary cases now retain the complete phrase; zero-overlap baseline still corrupted words. Bandit zero findings; Ruff one unchanged endpoint SIM114; Black checks for both new files pass. ADR046 and user guide/mirrors updated. Source-hashed synthetic receipts and human baseline recorded in Docs/Reviews/assets/migu-buddy-browser-voice-2026-09-05. Fresh human acceptance remains under TASK-13202/13198.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

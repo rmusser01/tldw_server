@@ -3,8 +3,8 @@ id: TASK-13200
 title: Filter non-speech audio in Persona Whisper recognition
 status: Done
 assignee: []
-created_date: '2026-09-06 00:45'
-updated_date: '2026-09-06 00:49'
+created_date: 2026-09-06 00:45
+updated_date: 2026-09-06 02:11
 labels: []
 dependencies: []
 ---
@@ -30,10 +30,9 @@ ADR required: no new ADR; clarify existing Docs/ADR/046-persona-live-conversatio
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
-Enabled the existing local faster-whisper speech filter for Persona Whisper independently of manual/automatic turn commitment. No text blacklist or provider change. Two parameterized adapter regressions failed on vad_filter=False, then the 129-test Persona/Whisper scope passed. Real tiny.en comparison: five seconds of silence produced You with filtering off and empty output with it on; known local Kokoro speech remained correct. Production Persona config with the real model confirmed empty silence and correct speech, including leading silence. Bandit zero findings; Ruff one unchanged endpoint SIM114 baseline finding, no new findings. ADR046, user guide and published mirrors updated. Human playback passed on the previous source, while human transcript accuracy remains pending a new microphone run under TASK-13195. Sanitized receipts are in Docs/Reviews/assets/migu-buddy-browser-voice-2026-09-05.
-<!-- SECTION:NOTES:END -->
-
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Enabled the existing local faster-whisper speech filter for Persona Whisper independently of manual/automatic turn commitment. No text blacklist or provider change. Two parameterized adapter regressions failed on vad_filter=False, then the 129-test Persona/Whisper scope passed. Real tiny.en comparison: five seconds of silence produced You with filtering off and empty output with it on; known local Kokoro speech remained correct. Production Persona config with the real model confirmed empty silence and correct speech, including leading silence. Bandit zero findings; Ruff one unchanged endpoint SIM114 baseline finding, no new findings. ADR046, user guide and published mirrors updated. Human playback passed on the previous source, while human transcript accuracy remains pending a new microphone run under TASK-13202. Sanitized receipts are in Docs/Reviews/assets/migu-buddy-browser-voice-2026-09-05.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

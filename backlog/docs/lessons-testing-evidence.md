@@ -242,7 +242,7 @@ that predates the seed.
 
 ## Reload and reselect after completing setup
 
-**Incident (TASK13196, 2026-09-05):** Migu browser UAT successfully finished
+**Incident (TASK13203, 2026-09-05):** Migu browser UAT successfully finished
 setup through a real provider reply, then reloading and selecting the saved
 Persona overwrote completion and sent the user back to Voice defaults.
 

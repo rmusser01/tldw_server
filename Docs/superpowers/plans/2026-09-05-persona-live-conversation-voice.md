@@ -1,6 +1,6 @@
 # Persona Live conversation and voice implementation
 
-Tasks: TASK-13197 and TASK-13195.
+Tasks: TASK-13197 and TASK-13202.
 
 ADR required: yes
 ADR path: Docs/ADR/046-persona-live-conversation-and-voice-runtime.md

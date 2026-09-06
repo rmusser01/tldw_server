@@ -1133,13 +1133,23 @@ export const usePersonaLiveVoiceController = ({
     stopMicStream
   ])
 
+  const canSendNow = Boolean(
+    connected && ws?.readyState === WebSocket.OPEN && state === "listening" &&
+    voiceEnabledRef.current && voiceOwnerRef.current?.sessionId === sessionId &&
+    captureOwnerRef.current && captureOwnerRef.current === voiceOwnerRef.current &&
+    String(heardText || heardTranscriptRef.current || "").trim()
+  )
+
   const sendCurrentTranscriptNow = React.useCallback(() => {
+    // Consume the capture synchronously: another click can precede React's render.
+    if (!canSendNow || !captureOwnerRef.current ||
+        captureOwnerRef.current !== voiceOwnerRef.current) return
     captureOwnerRef.current = null
     if (micActive) {
       stopMicStream()
     }
     sendVoiceCommit(heardTranscriptRef.current, "persona_live_voice_manual")
-  }, [micActive, sendVoiceCommit, stopMicStream])
+  }, [canSendNow, micActive, sendVoiceCommit, stopMicStream])
 
   const toggleListening = React.useCallback(() => {
     if (voiceEnabledRef.current || micActive || pendingStartRequest) {
@@ -1317,7 +1327,8 @@ export const usePersonaLiveVoiceController = ({
 
   React.useEffect(() => {
     const normalizedHeardText = String(heardText || "").trim()
-    if (state !== "listening" || !normalizedHeardText) {
+    if (state !== "listening" || !normalizedHeardText ||
+        !autoCommitEnabled || manualModeRequired) {
       clearListeningRecoveryTimeout()
       setRecoveryMode((current) => (current === "listening_stuck" ? "none" : current))
       return
@@ -1332,7 +1343,8 @@ export const usePersonaLiveVoiceController = ({
     return () => {
       clearListeningRecoveryTimeout()
     }
-  }, [clearListeningRecoveryTimeout, heardText, listeningRecoveryRestartKey, state])
+  }, [autoCommitEnabled, clearListeningRecoveryTimeout, heardText,
+      listeningRecoveryRestartKey, manualModeRequired, state])
 
   React.useEffect(() => {
     if (state !== "thinking") {
@@ -1797,7 +1809,7 @@ export const usePersonaLiveVoiceController = ({
     sessionWakeBehavior,
     wakeTriggerPhrases,
     manualModeRequired,
-    canSendNow: Boolean(String(heardText || heardTranscriptRef.current || "").trim()),
+    canSendNow,
     speechAvailable: canUseServerStt,
     voiceReady,
     isPreparing: pendingStartRequest && !voiceReady,

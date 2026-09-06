@@ -18,7 +18,7 @@ The probe's first summary read a `type` field and top-level capabilities; inspec
 
 TASK13197 tracks conversational responses through the Buddy live session. The current `_handle_persona_live_turn` always proposes a plan; ordinary text falls through to a RAG search. A provider credential alone cannot make that path return the requested conversation. Its provider/Persona Chat integration needs an explicit design and real response/Stop/recovery acceptance.
 
-TASK13195 tracks an actual voice-capable Buddy session. `core/Persona/live_control.py` deliberately advertises voicefalse. TASK12419's frontend gate correctly respects that capability; changing the flag would not establish microphone/STT/provider/TTS readiness. Full Persona Live and separate audio endpoints are distinct surfaces and were not certified by this Buddy probe.
+TASK13202 tracks an actual voice-capable Buddy session. `core/Persona/live_control.py` deliberately advertises voicefalse. TASK12419's frontend gate correctly respects that capability; changing the flag would not establish microphone/STT/provider/TTS readiness. Full Persona Live and separate audio endpoints are distinct surfaces and were not certified by this Buddy probe.
 
 No production code changed. The findings are recorded as To Do tasks rather than reopening the successfully verified cookie/feedback repairs. Existing architecture must be reviewed and any required ADR written before implementing new provider/runtime boundaries. JSON, source hashes, process identity and whitespace checks validate this evidence; Bandit is not applicable to documentation-only changes.
 
@@ -92,7 +92,7 @@ state and playback acceptance remain open.
 ## Saved setup regression and browser verification
 
 The first reload/reselection overwrote completed Migu setup and forced the Voice
-stage again. TASK13196 fixes the selection handler to read and preserve saved
+stage again. TASK13203 fixes the selection handler to read and preserve saved
 progress, including failing without writes when the profile cannot be read.
 After the fix, a real DeepSeek reply “Migu setup preserved.” completed setup.
 Reloading `/persona` and choosing Migu UAT opened the normal Live Session workspace
@@ -176,4 +176,12 @@ TASK-13201 validation: 134 focused tests passed; Bandit zero findings; Ruff one 
 
 The user spoke the notebook phrase once and clicked **Send now**. The browser submitted `Reply with, the blue notebook is ready.` once; DeepSeek replied `the blue notebook is ready`, four Kokoro audio chunk notices appeared, and the user confirmed clear playback. There were no added or duplicated words. The operator observed idle before explicit Start, preparing, listening, thinking and return to idle, then disconnected. This qualifies the supported manual microphone → local Whisper → configured DeepSeek → audible local Kokoro path on the tested source.
 
-The short speaking badge interval was not captured by DOM sampling and MediaStream track state was not directly inspected, so broader lifecycle/state acceptance remains separately open under TASK-13195. Earlier buffer-limit failure was caused by operator coordination exceeding 30 seconds of real capture; human Send avoided that timing problem. OpenAI realtime microphone/playback, BYOK-only server voice and the previously recorded optional visual-fetch failure remain outside this passing path. Source-bound receipt: `assets/migu-buddy-browser-voice-2026-09-05/whole-turn-human-acceptance.json`. No production code changed after the 134-test passing scope; this update records acceptance only.
+The short speaking badge interval was not captured by DOM sampling and MediaStream track state was not directly inspected, so broader lifecycle/state acceptance remains separately open under TASK-13202. Earlier buffer-limit failure was caused by operator coordination exceeding 30 seconds of real capture; human Send avoided that timing problem. OpenAI realtime microphone/playback, BYOK-only server voice and the previously recorded optional visual-fetch failure remain outside this passing path. Source-bound receipt: `assets/migu-buddy-browser-voice-2026-09-05/whole-turn-human-acceptance.json`. No production code changed after the 134-test passing scope for that human acceptance update.
+
+## Manual control follow-up and latest-dev rebase (TASK-13204)
+
+Rebased onto dev `a7ca654202`. The two task-ID collisions introduced by concurrent dev work were resolved through new Backlog records: voice qualification is TASK-13202 (formerly 13195), and preserved setup is TASK-13203 (formerly 13196). Existing acceptance evidence is retained.
+
+Six new failing controller regressions reproduced false stuck-listening recovery in deliberate/manual-fallback mode, stale Send-now availability after Stop/submit/disconnect, and two commits before React rendered the disabled button. Recovery now requires effective automatic commitment; manual submission requires current connected listening ownership and consumes that capture synchronously. The existing transcript display remains available after a completed turn.
+
+Final targeted verification: 214 Python Persona tests passed with four existing warnings; 90 frontend controller, ownership, microphone, playback and voice-card tests passed. Scoped TypeScript checking of the changed production controller and its imports passed. ESLint found zero production findings and the same 55 preexisting test warnings before/after; the shared-package invocation also retains the existing Next pages-directory configuration notice. Bandit on the six PR production Python files found zero issues. This does not claim a full frontend typecheck or a new physical microphone acceptance run. The broader live-state, BYOK and optional visual-fetch qualifications remain open under TASK-13202.

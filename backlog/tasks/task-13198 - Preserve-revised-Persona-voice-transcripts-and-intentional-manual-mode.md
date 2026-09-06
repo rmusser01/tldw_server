@@ -3,8 +3,8 @@ id: TASK-13198
 title: Preserve revised Persona voice transcripts and intentional manual mode
 status: Done
 assignee: []
-created_date: '2026-09-06 00:09'
-updated_date: '2026-09-06 01:37'
+created_date: 2026-09-06 00:09
+updated_date: 2026-09-06 02:10
 labels: []
 dependencies: []
 ---
@@ -31,10 +31,9 @@ ADR required: no new ADR; amend existing Docs/ADR/046-persona-live-conversation-
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
-Preserved authoritative transcript snapshots on no-result audio chunks, replaced browser provisional revisions including empty corrections, and logged each committed utterance once. Intentional manual mode remains usable without false VAD failure. Initial red/green scope: 125 backend and 165 frontend tests; subsequent recognition fixes under TASK13199/13200/13201 passed the final 134-test Persona/Whisper scope. Bandit zero findings and no added Ruff/ESLint/owned TypeScript findings; existing baseline diagnostics documented. ADR046 and guide updated. Human manual UAT on 31046b8937 now submitted the notebook phrase once, produced the expected DeepSeek reply, and the user confirmed clear Kokoro playback with no added or duplicated words. Receipt: Docs/Reviews/assets/migu-buddy-browser-voice-2026-09-05/whole-turn-human-acceptance.json. Broader direct capture-state/Buddy-state and alternative-provider qualification remain under TASK13195.
-<!-- SECTION:NOTES:END -->
-
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Preserved authoritative transcript snapshots on no-result audio chunks, replaced browser provisional revisions including empty corrections, and logged each committed utterance once. Intentional manual mode remains usable without false VAD failure. Initial red/green scope: 125 backend and 165 frontend tests; subsequent recognition fixes under TASK13199/13200/13201 passed the final 134-test Persona/Whisper scope. Bandit zero findings and no added Ruff/ESLint/owned TypeScript findings; existing baseline diagnostics documented. ADR046 and guide updated. Human manual UAT on 31046b8937 now submitted the notebook phrase once, produced the expected DeepSeek reply, and the user confirmed clear Kokoro playback with no added or duplicated words. Receipt: Docs/Reviews/assets/migu-buddy-browser-voice-2026-09-05/whole-turn-human-acceptance.json. Broader direct capture-state/Buddy-state and alternative-provider qualification remain under TASK13202.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

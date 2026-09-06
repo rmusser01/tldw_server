@@ -1,20 +1,18 @@
 ---
-id: TASK-13195
+id: TASK-13202
 title: Qualify an actual voice-capable Persona Buddy session
 status: In Progress
-assignee: []
-created_date: '2026-09-05 21:29'
-updated_date: '2026-09-06 01:37'
+created_date: 2026-09-06 02:07
+updated_date: 2026-09-06 02:07
 labels:
-  - persona
-  - buddy
-  - voice
-  - uat
-dependencies: []
-references:
-  - Docs/Reviews/MIGU_BUDDY_MERGED_LIVE_UAT_2026_09_05.md
-  - TASK-12419
+- persona
+- buddy
+- voice
+- uat
 priority: high
+references:
+- Docs/Reviews/MIGU_BUDDY_MERGED_LIVE_UAT_2026_09_05.md
+- TASK-12419
 ---
 
 ## Description
@@ -45,11 +43,10 @@ Reason: Voice readiness and microphone/playback lifecycle form a frontend/backen
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Real isolated backend probe (2026-09-05): Whisper tiny.en and local Kokoro initialized successfully in 7.69s. A second prepared session showed capabilities.voice false→true; REST Stop returned 200, sent SESSION_TERMINAL for the exact connected session, and changed voice capability back to false. No microphone was opened and no conversational provider request was sent. Initial unready result was traced to scratch config default_api=openai taking precedence over DEFAULT_LLM_PROVIDER; corrected only the isolated config. Receipts are in /private/tmp/migu-server-voice-runset. Authentication token-shadowing found during review is being corrected before final-source UAT. Human voice and integrated conversational provider acceptance remain open.
 Review fixes now preserve the original WebSocket credential during preparation, make direct voice_stop cancel active/queued owned turns, and bound preparation to one active initialization per connection. Pending-token checks fence expensive STT/TTS/VAD stages. STT initialization reuses Chat.streaming_utils.await_bounded_owned_operation with a 30-second deadline and reserved process-wide work/cleanup capacity. Cancellation or timeout transfers exact transcriber cleanup ownership; socket teardown does not wait for the thread, and the connection remains busy until detached cleanup finishes. Four new socket regressions failed before and passed after; voice plus existing bounded-owner scope: 36 passed, 13 deselected. ADR046 and plan describe the ownership decision. Frontend recovery/playback/cancellation/wake correlation regressions: 71 passed, ESLint zero errors, zero owned TypeScript diagnostics (74 existing dependency diagnostics). Real final-source human voice acceptance remains pending.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
 
 Final rebased implementation 2270153980 passed 204 targeted Python and 198 frontend tests, including preparation-before-capture, stale event/session ownership and playback recovery. Real final-source preparation loaded Whisper tiny.en and Kokoro; a supplied synthetic voice_commit transcript produced a DeepSeek reply and 25388 audio bytes. No microphone opened and no playback occurred in that probe. The fresh harness initially omitted the separate TTS config, correctly yielding VOICE_TTS_UNAVAILABLE; restoring the established complete isolated config made preparation pass. Human speech, visible Buddy state and audible output acceptance remain open; this task remains In Progress and the PR remains draft.
 
@@ -58,15 +55,13 @@ Human browser UAT at c60f59a95e produced the expected DeepSeek reply and four Ko
 At f71d593e67 human UAT observed idle before explicit Start, preparation, listening, Send-now thinking and return to idle, followed by disconnect. User heard playback and said Reply with once, but transcript duplicated/corrupted the prefix. TASK-13201 repairs the reproduced overlapping-fragment failure with bounded whole-turn Whisper snapshots; fresh human transcript acceptance remains pending.
 
 Manual human microphone → Whisper → DeepSeek → Kokoro path passed on 31046b8937: user clicked Send now, correct nonduplicated notebook transcript was committed once, provider reply matched, and user confirmed clear playback. Source-bound receipt is Docs/Reviews/assets/migu-buddy-browser-voice-2026-09-05/whole-turn-human-acceptance.json. Observed idle/preparing/listening/thinking/idle and disconnect; the short speaking badge was not sampled and raw MediaStream track state was not inspected. Keep broader lifecycle/state acceptance open rather than claiming those observations.
-<!-- SECTION:NOTES:END -->
+
+Renumbered from TASK-13195 after latest dev allocated that ID to an unrelated task; existing evidence is preserved.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 
