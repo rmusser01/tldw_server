@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 import yaml
+from packaging.version import Version
 
 try:
     import tomllib
@@ -279,6 +280,18 @@ def test_universal_uv_lock_contains_root_and_release_tool_profiles() -> None:
         "setuptools": "84.0.0",
         "wheel": "0.48.0",
     }
+
+
+def test_all_platform_transformers_resolutions_exclude_cve_2026_9856() -> None:
+    """Reject vulnerable branches even when Linux resolves a patched release."""
+    lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
+    versions = [
+        Version(package["version"])
+        for package in lock["package"]
+        if package["name"] == "transformers"
+    ]
+    assert versions, "the source inventory must retain the required dependency"
+    assert all(version >= Version("5.10.0") for version in versions), versions
 
 
 @pytest.mark.parametrize(

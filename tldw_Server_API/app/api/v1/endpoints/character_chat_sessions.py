@@ -172,6 +172,7 @@ from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
     sanitize_sender_name,
 )
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
+from tldw_Server_API.app.core.LLM_Calls.capability_registry import get_allowed_fields
 
 # Chat helpers and utilities
 # For chat completions
@@ -6363,6 +6364,14 @@ async def character_chat_completion(
                         "model": model,
                     },
                 )
+
+        # Behavior snapshots include the neutral default even for providers that
+        # do not accept this extension. Preserve meaningful penalties for validation.
+        if (
+            resolved_repetition_penalty == 1.0
+            and "repetition_penalty" not in get_allowed_fields(provider)
+        ):
+            resolved_repetition_penalty = None
 
         # If we will persist, ensure message cap won't be exceeded.
         # Otherwise enforce a soft cap for non-persisted completions.
