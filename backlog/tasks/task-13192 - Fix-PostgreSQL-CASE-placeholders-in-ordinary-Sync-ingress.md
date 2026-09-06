@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-05 19:50'
-updated_date: '2026-09-05 19:58'
+updated_date: '2026-09-06 00:04'
 labels: []
 dependencies: []
 ---
@@ -33,6 +33,8 @@ ADR required: no. ADR path: backlog/decisions/002-personal-context-profile-autho
 
 <!-- SECTION:NOTES:BEGIN -->
 Corrected directional CASE placeholder recognition in the shared backend converter; preserved JSONB operators before CASE and after END. Ordinary SyncV2Store insertion now seeds receipt repair coverage, with real PostgreSQL/SQLite successive insertion, replay and nondecreasing domain-watermark assertions. Plan: Docs/superpowers/plans/2026-09-05-postgres-case-ingress.md. ADR check: no new decision; existing ADR-002 governs unchanged Personal Context authority. RED: 11 parser failures and real PostgreSQL ordinary insertion failure, SQLite passed. Final focused verification: 109 passed (placeholder helpers, backend utilities, dual-backend ingress repair, bootstrap), TLDW_TEST_POSTGRES_REQUIRED=1. Ruff touched files and test formatting passed; production Bandit no findings; diff check passed. Independent plan and correctness review approved (reviewer additionally ran 18 parser tests). Broader selected store run: 94 passed, one pre-existing fake-backend receipt test failed with personal_context_link_binding_stale; reproduced after loading unchanged HEAD converter in memory, and neither that test nor Sync_DB changed. No full sweep, capability enablement, PR or merge. Added incident-based testing lesson. Backlog MCP search hung; CLI fallback used.
+
+Publication: opened https://github.com/rmusser01/tldw_server/pull/2909 against dev from reviewed source 6363466d07. Fresh pre-publication placeholder check: 18 passed, exit 0, existing warnings; diff check passed. Dependent conflict PR: https://github.com/rmusser01/tldw_server/pull/2910. No rebase or merge; current dev integration and human Change summary remain pre-merge steps.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
