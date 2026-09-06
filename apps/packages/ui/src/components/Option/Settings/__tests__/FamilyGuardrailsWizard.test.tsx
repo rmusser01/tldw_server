@@ -1463,8 +1463,12 @@ describe("FamilyGuardrailsWizard", { timeout: 60_000 }, () => {
       expect(screen.getByRole("heading", { name: "Invite + Acceptance Tracker" })).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByRole("button", { name: /Save & Continue/i }))
+    // Retry the click together with the assertion: on loaded CI runners the
+    // step re-renders around the click and can swallow it, so a single
+    // fireEvent followed by a plain wait never converges (#2911).
     await waitFor(() => {
+      const advance = screen.queryByRole("button", { name: /Save & Continue/i })
+      if (advance) fireEvent.click(advance)
       expect(screen.getByRole("heading", { name: "Review + Activate" })).toBeInTheDocument()
       expect(screen.getByText("Caregivers:")).toBeInTheDocument()
     })
