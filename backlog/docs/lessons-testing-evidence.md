@@ -264,3 +264,16 @@ Persona overwrote completion and sent the user back to Voice defaults.
 completion and saved speech defaults in the same reload/reselection flow.
 Include a fresh-page return to a completed profile in setup acceptance; the
 initial success screen cannot prove that subsequent selection preserves it.
+
+## Speech probes must match callback cadence
+
+**Incident (TASK-13210, 2026-09-06):** An ONNX probe that slept a full capture
+interval after each awaited decode produced only partials and missed stale chunk
+history. Accounting for decode elapsed time reproduced an early mistaken final
+retained next to a corrected whole phrase; physical UAT also sent repeated words
+that the requester had not said.
+
+**Evidence and rule:** Match the real capture cadence and include leading/trailing
+silence and chunk boundaries. Assert the final complete transcript, not whether
+any partial contains the expected substring. Preserve intermediate hypotheses in
+sanitized evidence so a corrected final does not hide earlier errors.

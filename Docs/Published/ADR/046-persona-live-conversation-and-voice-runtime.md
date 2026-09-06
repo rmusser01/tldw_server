@@ -94,3 +94,22 @@ Awaiting a thread directly in audio ingestion was rejected: it frees the event
 loop but still holds the socket receive loop, delaying Stop. Cancelling a thread
 future and immediately clearing its model was rejected because native inference
 may still be using it. Other speech backends and model selection are unchanged.
+
+### Whole-turn Parakeet ONNX snapshots (TASK-13210)
+
+Physical UAT sent stale recognized fragments that the requester had not spoken.
+A paced local ONNX probe reproduced a mistaken early final retained alongside a
+later corrected decode. Persona now applies its existing bounded whole-turn
+contract to explicit `parakeet-onnx` selection, reusing the owned scheduler
+extracted from the Whisper adapter. Whisper retains its existing loader and
+recognition options; ONNX retains its existing decoder, CPU model cache and
+custom vocabulary processing. Generic streaming routes and other STT selections
+are unchanged. ONNX model loading remains lazy, so preparation is not proof of
+actual inference availability.
+
+One complete transcript replaces the previous revision, including an empty
+correction. There is no word blacklist or repetition removal. The 30-second
+bound, retained worker cleanup, responsive ingestion, and frozen VAD boundary
+apply to both adapters. Manual Send now still submits the currently displayed
+revision. Full-turn decoding prevents stale chunk concatenation but cannot
+promise accurate intermediate hypotheses or perfect recognition of human audio.

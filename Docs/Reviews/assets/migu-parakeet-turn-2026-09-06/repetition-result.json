@@ -1,0 +1,120 @@
+{
+  "microphone_used": false,
+  "external_provider_used": false,
+  "selection": "parakeet-onnx",
+  "device": "cpu",
+  "model": "istupakov/parakeet-tdt-0.6b-v3-onnx",
+  "snapshots": [
+    {
+      "type": "partial",
+      "text": "",
+      "history": "",
+      "snapshot": ""
+    },
+    {
+      "type": "partial",
+      "text": "",
+      "history": "",
+      "snapshot": ""
+    },
+    {
+      "type": "partial",
+      "text": "",
+      "history": "",
+      "snapshot": ""
+    },
+    {
+      "type": "partial",
+      "text": "",
+      "history": "",
+      "snapshot": ""
+    },
+    {
+      "type": "partial",
+      "text": "",
+      "history": "",
+      "snapshot": ""
+    },
+    {
+      "type": "partial",
+      "text": "Say it.",
+      "history": "Say it.",
+      "snapshot": "Say it."
+    },
+    {
+      "type": "partial",
+      "text": "Say ready ready.",
+      "history": "Say ready ready.",
+      "snapshot": "Say ready ready."
+    },
+    {
+      "type": "partial",
+      "text": "Say ready ready.",
+      "history": "Say ready ready.",
+      "snapshot": "Say ready ready."
+    },
+    {
+      "type": "partial",
+      "text": "Say ready, ready.",
+      "history": "Say ready, ready.",
+      "snapshot": "Say ready, ready."
+    },
+    {
+      "type": "partial",
+      "text": "Say ready, ready.",
+      "history": "Say ready, ready.",
+      "snapshot": "Say ready, ready."
+    },
+    {
+      "type": "partial",
+      "text": "Say ready, ready.",
+      "history": "Say ready, ready.",
+      "snapshot": "Say ready, ready."
+    },
+    {
+      "type": "partial",
+      "text": "Say ready, ready.",
+      "history": "Say ready, ready.",
+      "snapshot": "Say ready, ready."
+    }
+  ],
+  "callback_duration_ms": [
+    0.03,
+    0.035,
+    0.046,
+    0.079,
+    0.03,
+    0.11,
+    0.021,
+    0.05,
+    0.019,
+    0.127,
+    0.034,
+    0.089,
+    0.021,
+    0.087,
+    0.018,
+    0.102,
+    0.018,
+    0.043,
+    0.11,
+    0.02,
+    0.043,
+    0.127,
+    0.022,
+    0.019,
+    0.12,
+    0.031,
+    0.026,
+    0.066,
+    0.029,
+    0.02
+  ],
+  "silence_frame_count": 0,
+  "silence_history": "",
+  "source_sha256": {
+    "tldw_Server_API/app/core/Persona/turn_transcriber.py": "4a5e95fb199166617ff6b95be4b5d5f6b1099d952b66cd5d4dc447b1526ee5d3",
+    "tldw_Server_API/app/core/Persona/parakeet_transcriber.py": "c1fe60b844a623cae3ef07a92bc6262d2e20cc61037017efcb15a8c976fe10bb",
+    "tldw_Server_API/app/core/Persona/live_stt.py": "a113fadcb10237675691bea9c132f984ed0a1af3dcef4a050ddc1c9934fbba11"
+  }
+}

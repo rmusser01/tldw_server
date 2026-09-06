@@ -56,7 +56,7 @@ approximately 57–169 ms. This does not qualify Parakeet Stop responsiveness un
 slow native inference. These Parakeet probes preceded the final Whisper VAD
 correction and exercised unchanged Parakeet code.
 
-No human microphone was opened in this follow-up. Final physical acceptance is
+No human microphone was opened during the TASK-13208 synthetic qualification; later physical attempts are recorded below. Final physical acceptance is
 pending; earlier Whisper/Kokoro human confirmations remain historical evidence
 on their recorded source versions.
 
@@ -90,3 +90,45 @@ Sanitized [human-attempt receipt](assets/migu-parakeet-silence-2026-09-06/human-
 [probe harness](assets/migu-parakeet-silence-2026-09-06/probe.txt).
 The next physical attempt will let the requester start recording directly to
 avoid another missed timed window. TASK-13202 remains open.
+
+## Parakeet chunk artifact repair — TASK-13210
+
+On `0837a8df23`, the requester reported saying “Say the blue notebook is ready”
+once. The browser's Last heard and Last sent both contained “Right. The blue
+notebook is ready. Ready. Yeah.” The same live session recorded a committed user
+turn, an assistant reply, and four TTS chunks before returning to idle. This
+establishes submission and generated reply, not transcription accuracy or a new
+human confirmation of audible playback. Earlier cancelled attempts were explained
+by clicking Stop voice before Send now; Stop cancels rather than submitting.
+
+A local paced ONNX probe reproduced the underlying assembly failure: an early
+final “Reps.” remained in history even after a later decode recognized the whole
+phrase correctly. The production-factory regression failed with “Right. Say the
+blue notebook is ready.” instead of the corrected whole phrase. The repair shares
+Persona's existing bounded whole-turn scheduler with an ONNX backend adapter.
+Late revisions replace earlier text; legitimate repetition and empty corrections
+remain intact. Provider/authentication settings are unchanged.
+
+The final focused checks passed 72 voice tests, covering both model adapters and
+real TestClient sockets for Stop/disconnect and exact VAD finalization. The prior
+regression run passed 168 tests, including 128 other Persona/WebSocket/Parakeet
+cases; its overlapping 40 voice tests were rerun with three additional ONNX cases.
+Ruff/Black passed seven changed Python files and Bandit found zero production
+issues. Independent review found no actionable regression.
+
+The real ONNX test used local Kokoro speech, 3 seconds of leading silence,
+3 seconds of trailing silence, and browser-paced 4096-sample callbacks at 16 kHz.
+It ended with exactly the words “Say the Blue Notebook is ready.” The maximum
+observed ingestion call took 0.076 ms. Digital silence generated no words. A
+second sample preserved the deliberate words “Say ready ready,” allowing normal
+punctuation. These probes used no microphone or external chat provider.
+
+Intermediate ONNX hypotheses still included wrong words before later revisions
+corrected them. This fix removes stale chunk accumulation; it does not certify
+perfect speech recognition. Physical acceptance, including floating Buddy states
+and audible completion, remains open under TASK-13202.
+
+Evidence: [local phrase result](assets/migu-parakeet-turn-2026-09-06/phrase-result.json),
+[repetition result](assets/migu-parakeet-turn-2026-09-06/repetition-result.json),
+[phrase harness](assets/migu-parakeet-turn-2026-09-06/phrase-probe.txt), and
+[human receipt](assets/migu-parakeet-turn-2026-09-06/human-attempt.json).

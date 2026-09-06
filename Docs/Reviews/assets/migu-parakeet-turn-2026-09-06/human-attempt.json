@@ -1,0 +1,12 @@
+{
+  "revision": "0837a8df23",
+  "session_id": "17448043-c1dc-471f-84a4-bcd565fa74e6",
+  "stt": "parakeet-onnx",
+  "expected_user_report": "Say the blue notebook is ready",
+  "observed_heard_and_sent": "Right. The blue notebook is ready. Ready. Yeah.",
+  "observed_reply": "Great. The blue notebook is ready.",
+  "tts_chunks": 4,
+  "final_ui_state": "idle",
+  "human_audible_confirmation": false,
+  "transcription_acceptance": false
+}

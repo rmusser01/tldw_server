@@ -382,8 +382,9 @@ def test_voice_retry_waits_for_retired_recognition(prepared_voice: Any) -> None:
     assert _recv_until(ws, lambda value: value.get("event") == "voice_readiness")["ready"]
 
 
-def test_vad_waits_for_frozen_whisper_turn_and_replays_later_audio(
-    prepared_voice: Any, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("stt_model", ["tiny.en", "parakeet-onnx"])
+def test_vad_waits_for_frozen_turn_and_replays_later_audio(
+    prepared_voice: Any, monkeypatch: pytest.MonkeyPatch, stt_model: str
 ) -> None:
     import base64
     import threading
@@ -397,7 +398,7 @@ def test_vad_waits_for_frozen_whisper_turn_and_replays_later_audio(
     ws, _ = prepared_voice
     started, release = threading.Event(), threading.Event()
     decoded, detected = [], []
-    transcriber = live_stt.create_persona_live_stt_transcriber(voice_runtime={"stt_model": "tiny.en"})
+    transcriber = live_stt.create_persona_live_stt_transcriber(voice_runtime={"stt_model": stt_model})
     transcriber.config.partial_interval = 0
 
     class Detector:
@@ -478,8 +479,9 @@ def test_vad_waits_for_frozen_whisper_turn_and_replays_later_audio(
 
 
 @pytest.mark.parametrize("disconnect", [False, True])
-def test_socket_control_does_not_wait_for_whisper_decode(
-    voice_socket: Any, monkeypatch: pytest.MonkeyPatch, disconnect: bool
+@pytest.mark.parametrize("stt_model", ["tiny.en", "parakeet-onnx"])
+def test_socket_control_does_not_wait_for_decode(
+    voice_socket: Any, monkeypatch: pytest.MonkeyPatch, disconnect: bool, stt_model: str
 ) -> None:
     import base64
     import threading
@@ -488,7 +490,7 @@ def test_socket_control_does_not_wait_for_whisper_decode(
     from tldw_Server_API.app.core.Persona import live_conversation
     from tldw_Server_API.tests.Persona.test_persona_ws import _recv_until
 
-    transcriber = live_stt.create_persona_live_stt_transcriber(voice_runtime={"stt_model": "tiny.en"})
+    transcriber = live_stt.create_persona_live_stt_transcriber(voice_runtime={"stt_model": stt_model})
     started, release, retired = threading.Event(), threading.Event(), threading.Event()
     model = object()
 

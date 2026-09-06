@@ -9,13 +9,13 @@ import numpy as np
 import pytest
 
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Streaming_Unified as streaming
-from tldw_Server_API.app.core.Persona import live_stt, whisper_transcriber
+from tldw_Server_API.app.core.Persona import live_stt, turn_transcriber
 
 pytestmark = pytest.mark.unit
 
 
-@pytest.fixture
-def recognition(monkeypatch: pytest.MonkeyPatch) -> Any:
+@pytest.fixture(params=["tiny.en", "parakeet-onnx"])
+def recognition(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> Any:
     now = [1000.0]
     calls = []
     phrase = ["Reply with the blue notebook is ready."]
@@ -26,11 +26,18 @@ def recognition(monkeypatch: pytest.MonkeyPatch) -> Any:
             text = phrase[0] if len(audio) >= 96000 else "Reply with"
             return [SimpleNamespace(text=text)], SimpleNamespace()
 
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Transcription_Parakeet_ONNX as onnx
+
+    def decode_onnx(audio: Any, **kwargs: Any) -> str:
+        calls.append(audio.copy())
+        return phrase[0] if len(audio) >= 96000 else "Reply with"
+
+    monkeypatch.setattr(onnx, "transcribe_with_parakeet_onnx", decode_onnx)
     monkeypatch.setattr(streaming, "get_whisper_model", lambda *args: Model(), raising=False)
     monkeypatch.setattr(streaming.time, "time", lambda: now[0])
-    monkeypatch.setattr(whisper_transcriber, "monotonic", lambda: now[0])
+    monkeypatch.setattr(turn_transcriber, "monotonic", lambda: now[0])
     transcriber = live_stt.create_persona_live_stt_transcriber(
-        voice_runtime={"stt_model": "tiny.en", "enable_vad": False},
+        voice_runtime={"stt_model": request.param, "enable_vad": False},
     )
     transcriber.initialize()
     yield transcriber, now, calls, phrase
@@ -80,7 +87,7 @@ async def test_auto_commit_decodes_exact_boundary_and_retains_later_audio(
 
 
 @pytest.mark.asyncio
-async def test_whisper_revises_whole_turn_across_five_second_boundary(recognition: Any) -> None:
+async def test_recognition_revises_whole_turn_across_five_second_boundary(recognition: Any) -> None:
     transcriber, now, calls, phrase = recognition
     await transcriber.process_audio_chunk(np.zeros(80000, dtype=np.float32).tobytes())
     await collect(transcriber)
@@ -94,7 +101,7 @@ async def test_whisper_revises_whole_turn_across_five_second_boundary(recognitio
 
 
 @pytest.mark.asyncio
-async def test_whisper_preserves_repetition_and_empty_corrections(recognition: Any) -> None:
+async def test_recognition_preserves_repetition_and_empty_corrections(recognition: Any) -> None:
     transcriber, now, _, phrase = recognition
     phrase[0] = "ready ready"
     await transcriber.process_audio_chunk(np.zeros(96000, dtype=np.float32).tobytes())
@@ -109,7 +116,7 @@ async def test_whisper_preserves_repetition_and_empty_corrections(recognition: A
 
 
 @pytest.mark.asyncio
-async def test_whisper_rejects_buffer_overflow_without_discarding_earlier_audio(recognition: Any) -> None:
+async def test_recognition_rejects_buffer_overflow_without_discarding_earlier_audio(recognition: Any) -> None:
     transcriber, _, calls, _ = recognition
     await transcriber.process_audio_chunk(np.zeros(16000 * 30, dtype=np.float32).tobytes())
     await collect(transcriber)
@@ -120,7 +127,7 @@ async def test_whisper_rejects_buffer_overflow_without_discarding_earlier_audio(
 
 
 @pytest.mark.asyncio
-async def test_whisper_reset_starts_fresh_audio_and_transcript(recognition: Any) -> None:
+async def test_recognition_reset_starts_fresh_audio_and_transcript(recognition: Any) -> None:
     transcriber, now, calls, _ = recognition
     await transcriber.process_audio_chunk(np.zeros(96000, dtype=np.float32).tobytes())
     await collect(transcriber)

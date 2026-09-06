@@ -3,7 +3,7 @@ id: TASK-13202
 title: Qualify an actual voice-capable Persona Buddy session
 status: In Progress
 created_date: 2026-09-06 02:07
-updated_date: 2026-09-06 15:45
+updated_date: 2026-09-06 16:16
 labels:
 - persona
 - buddy
@@ -62,6 +62,7 @@ Additional final checks passed 38 floating Buddy host tests (including four new 
 User explicitly requested merging PR #2908 and revisiting remaining voice UAT afterward. Leave AC3 and this task open. Latest physical attempts on 866d41ef39 observed loaded floating listening and error sprites, but no submitted turn or new playback: background-speech attempt disconnected, another reached the 30-second limit before submission, and a quiet retry recognized no speech before the limit. Capture was stopped, Live disconnected and the temporary viewport reset. Read-only investigation found synchronous whole-turn Whisper decoding and a pre-decode cadence timestamp; investigate event-loop responsiveness and cleanup ownership separately before another human recording. A causal link to the disconnect is not established. Existing successful human manual voice receipts remain valid for their recorded revisions.
 2026-09-06 follow-up: user selected normal server STT (Parakeet ONNX CPU, istupakov/parakeet-tdt-0.6b-v3-onnx). Synthetic Migu UAT profile now saves parakeet-onnx and browser Live confirms it. Preparation-only and actual synthetic Parakeet recognition passed; preparation is lazy, cold first decode callback ~1832 ms. TASK-13208 completes deferred Whisper responsiveness/ownership repair and VAD finalization correction (165 focused tests, independent review, Bandit zero). Evidence: Docs/Reviews/MIGU_VOICE_FOLLOWUP_2026_09_06.md. No new human microphone run yet; floating Buddy listening/thinking/speaking/idle and audible reply remain required.
 Physical attempts on f696121698 used normal Parakeet ONNX CPU. First picked up unrelated narration; stopped without provider submission. Second was silence; user confirmed they missed the recording window. Floating96px image was loaded and followed listening→idle after Stop. Forty ONNX '[No speech detected]' markers were exposed as words, corrected in TASK-13209 with 57 focused tests plus real local silence/speech probe. No intentional speech/provider/TTS acceptance claimed. Next retry should use user-controlled Start listening timing.
+2026-09-06: Requester-controlled Start then Send now committed on 0837a8df23. User said 'Say the blue notebook is ready'; browser heard/sent 'Right. The blue notebook is ready. Ready. Yeah.' and received reply plus 4 TTS chunks, final idle. Transcription acceptance failed; no new audible confirmation or floating-state qualification. TASK-13210 fixes reproduced stale ONNX chunk artifacts with shared owned whole-turn recognition. Real local phrase/silence/repetition probes and targeted tests pass. Need physical retry on new code; microphone remains off until user starts. Earlier Stop-then-Send attempt was cancellation by control semantics, not failed provider submission.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 

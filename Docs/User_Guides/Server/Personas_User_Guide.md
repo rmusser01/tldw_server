@@ -463,9 +463,9 @@ Persona accepts up to 300 audio chunks per rolling minute by default, enough for
 
 Persona Whisper uses local speech filtering to reduce words inferred from silence. This remains enabled when Auto-commit is off: the filter decides which audio contains speech, while **Send now** still decides when to submit the turn. Filtering reduces silence hallucinations but does not guarantee perfect recognition.
 
-Persona Whisper revises the complete current spoken turn so words crossing an internal decode boundary are not appended twice. Keep each turn within 30 seconds, including silence. If that buffer fills, voice stops with a shorter-turn retry message. **Send now** submits the turn; a new Start begins with a fresh transcript.
+Persona Whisper and Parakeet ONNX revise the complete current spoken turn so words crossing an internal decode boundary are not appended twice. Keep each turn within 30 seconds, including silence. If that buffer fills, voice stops with a shorter-turn retry message. **Send now** submits the turn; a new Start begins with a fresh transcript.
 
-Whisper recognition runs in the background so incoming audio and Stop stay
+Whisper and Parakeet ONNX recognition run in the background so incoming audio and Stop stay
 responsive. **Send now** commits the transcript currently shown; automatic turn
 detection waits for recognition through the detected speech boundary. If a
 stopped decoder is still finishing, starting voice again shows a busy message
