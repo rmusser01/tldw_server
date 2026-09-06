@@ -49,6 +49,8 @@ async function openRolePlaySetup(page: Page): Promise<void> {
     if (!(await moreOptions.first().isVisible().catch(() => false))) {
       await page.getByRole("button", { name: "Enter focus chat" }).click()
     }
+    // The mobile toolbar collapses while focus is outside the composer.
+    await page.getByPlaceholder(/type a message/i).first().focus()
     await moreOptions.first().click()
     await page
       .getByRole("button", { name: "Role-play setup", exact: true })
