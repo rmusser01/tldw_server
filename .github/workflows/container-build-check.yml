@@ -57,12 +57,15 @@ jobs:
       matrix:
         include:
           - name: app
+            python_runtime: true
             dockerfile: Dockerfiles/Dockerfile.prod
             build_args: ""
           - name: worker
+            python_runtime: true
             dockerfile: Dockerfiles/Dockerfile.worker
             build_args: ""
           - name: audio-worker
+            python_runtime: true
             dockerfile: Dockerfiles/Dockerfile.audio_gpu_worker
             build_args: ""
           - name: webui
@@ -88,6 +91,13 @@ jobs:
         with:
           ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+
+      - name: Enable native OCI image loading
+        if: ${{ matrix.python_runtime == true }}
+        uses: docker/setup-docker-action@e43656e248c0bd0647d3f5c195d116aacf6fcaf4
+        with:
+          daemon-config: |
+            {"features": {"containerd-snapshotter": true}}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
@@ -139,6 +149,58 @@ jobs:
               json.dumps(identity, indent=2, sort_keys=True) + "\n",
               encoding="utf-8",
           )
+          PY
+
+      - name: Remove exported candidate archive
+        if: ${{ always() && steps.build.outcome == 'success' }}
+        shell: bash
+        run: rm -f -- "$RUNNER_TEMP/${{ matrix.name }}.oci.tar"
+
+      - name: Verify embedded Python runtime
+        id: runtime
+        if: ${{ matrix.python_runtime == true }}
+        continue-on-error: true
+        timeout-minutes: 10
+        shell: bash
+        env:
+          SUBJECT_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          CONFIG_DIGEST="$(python Helper_Scripts/Supply_Chain/runtime_probe.py config \
+            --layout "$RUNNER_TEMP/${{ matrix.name }}-layout" --subject "$SUBJECT_DIGEST")"
+          export CONFIG_DIGEST
+          tar -C "$RUNNER_TEMP/${{ matrix.name }}-layout" -cf - . | docker load
+          trap 'docker image rm "$SUBJECT_DIGEST" > /dev/null' EXIT
+          docker image inspect "$SUBJECT_DIGEST" > "$RUNNER_TEMP/runtime-image-inspect.json"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          image = json.loads((Path(os.environ["RUNNER_TEMP"]) / "runtime-image-inspect.json").read_text())[0]
+          if image["Id"] != os.environ["SUBJECT_DIGEST"] or (image["Os"], image["Architecture"]) != ("linux", "amd64"):
+              raise SystemExit("loaded OCI image identity/platform mismatch")
+          PY
+          docker run --rm --pull never --platform linux/amd64 \
+            --user "$(id -u):$(id -g)" \
+            --network none --cap-drop ALL --security-opt no-new-privileges:true \
+            --read-only --tmpfs /tmp:rw,nosuid,nodev,size=512m \
+            --workdir /tmp --env PYTHONDONTWRITEBYTECODE=1 \
+            --env USER_DB_BASE_DIR=/tmp/user_databases \
+            --env DATABASE_URL=sqlite:////tmp/users.db --env HF_HOME=/tmp/huggingface \
+            --volume "$PWD/Helper_Scripts/Supply_Chain/runtime_probe.py:/probe/runtime_probe.py:ro" \
+            --volume "$PWD/uv.lock:/probe/uv.lock:ro" \
+            --entrypoint python "$SUBJECT_DIGEST" \
+            /probe/runtime_probe.py probe --lock /probe/uv.lock \
+            > "$RUNNER_TEMP/runtime-probe.json"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          result = json.loads((Path(os.environ["RUNNER_TEMP"]) / "runtime-probe.json").read_text())
+          result.update({"subject_digest": os.environ["SUBJECT_DIGEST"], "config_digest": os.environ["CONFIG_DIGEST"]})
+          Path("evidence/runtime-image-${{ matrix.name }}.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
           PY
 
       - name: Prepare fresh pinned Trivy database
@@ -255,6 +317,9 @@ jobs:
               sbom-image-${{ matrix.name }}.cdx.json \
               scan-decision-image-${{ matrix.name }}.json \
               > SHA256SUMS-image-${{ matrix.name }}
+            if test "${{ matrix.python_runtime }}" = "true"; then
+              sha256sum runtime-image-${{ matrix.name }}.json >> SHA256SUMS-image-${{ matrix.name }}
+            fi
             sha256sum -c SHA256SUMS-image-${{ matrix.name }}
           )
 
@@ -272,6 +337,9 @@ jobs:
         run: |
           set -euo pipefail
           test "${{ steps.policy.outcome }}" = "success"
+          if test "${{ matrix.python_runtime }}" = "true"; then
+            test "${{ steps.runtime.outcome }}" = "success"
+          fi
 
   container-build-check:
     name: container-build-check
