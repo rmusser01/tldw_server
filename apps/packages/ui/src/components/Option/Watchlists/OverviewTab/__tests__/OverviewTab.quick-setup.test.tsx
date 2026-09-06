@@ -121,19 +121,19 @@ const openPipelineWithSources = async (triggerName = "Test now") => {
 }
 
 const setExistingSourceSelected = async (sourceName: string, selected: boolean) => {
-  const user = userEvent.setup()
-  const source = pipeline().getByLabelText(sourceName)
-  if ((source as HTMLInputElement).checked !== selected) {
-    await user.click(source)
-  }
+  // Click-and-verify inside one waitFor: loaded CI runners can swallow a
+  // single click during re-render, so waiting alone never converges. The
+  // click is state-guarded, so retries are idempotent (#2911).
   await waitFor(
     () => {
+      const source = pipeline().getByLabelText(sourceName)
+      if ((source as HTMLInputElement).checked !== selected) {
+        fireEvent.click(source)
+      }
       const currentSource = pipeline().getByLabelText(sourceName)
       if (selected) expect(currentSource).toBeChecked()
       else expect(currentSource).not.toBeChecked()
     },
-    // The checkbox state flows through the heavy pipeline-wizard tree;
-    // waitFor's 1s default races it on loaded CI runners (#2911).
     { timeout: 15_000 }
   )
 }
