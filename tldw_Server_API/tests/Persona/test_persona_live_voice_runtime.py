@@ -45,7 +45,7 @@ def test_persona_whisper_filters_audio_independently_of_turn_commit(monkeypatch,
     )
     transcriber.initialize()
     try:
-        assert transcriber.transcriber._transcribe_audio(np.zeros(16000, dtype=np.float32)) == "Thank you."
+        assert transcriber._transcribe_audio(np.zeros(16000, dtype=np.float32)) == "Thank you."
         assert calls[0]["vad_filter"] is True
         # Finalization remains owned by Persona's separate turn detector.
         assert transcriber.config.enable_vad is False
@@ -352,7 +352,8 @@ def test_real_transcript_correlation_and_no_client_requested_fake_tts(prepared_v
     assert event["reason_code"] == "VOICE_STOPPED"
 
 
-def test_real_transcription_failure_revokes_runtime_without_placeholder(prepared_voice):
+@pytest.mark.parametrize("input_limit", [False, True])
+def test_real_transcription_failure_revokes_runtime_without_placeholder(prepared_voice, monkeypatch, input_limit):
     import base64
 
     from tldw_Server_API.app.core.Persona.live_voice_runtime import persona_live_voice_registry
@@ -360,6 +361,13 @@ def test_real_transcription_failure_revokes_runtime_without_placeholder(prepared
 
     ws, transcriber = prepared_voice
     transcriber.fail = True
+    if input_limit:
+        from tldw_Server_API.app.core.Persona.live_voice_runtime import PersonaVoiceInputLimitError
+
+        async def exceed_buffer(audio):
+            raise PersonaVoiceInputLimitError("Keep spoken turns within 30 seconds and start voice again.")
+
+        monkeypatch.setattr(transcriber, "process_audio_chunk", exceed_buffer)
     ws.send_json(
         {
             "type": "audio_chunk",
@@ -373,6 +381,8 @@ def test_real_transcription_failure_revokes_runtime_without_placeholder(prepared
     assert event["reason_code"] == "VOICE_STT_UNAVAILABLE"
     assert event["client_message_id"] == "capture-error"
     assert "private" not in str(event)
+    if input_limit:
+        assert "30 seconds" in event["message"]
     assert not persona_live_voice_registry.is_ready(user_id="1", session_id="voice-owned")
 
 

@@ -58,3 +58,9 @@ The default audio admission limit is 300 chunks per rolling minute, covering the
 ### Whisper speech filtering (TASK-13200)
 
 Persona enables the existing local Whisper `vad_filter` independently of its turn detector. Manual commitment disables automatic turn finalization, not recognition filtering. Silence must be filtered at the audio boundary; no phrase blacklist or textual deduplication is introduced. Local silence generated hallucinated text with filtering off, while the existing filter suppressed it and preserved the known speech sample.
+
+### Whole-turn Whisper snapshots (TASK-13201)
+
+Persona Whisper keeps one bounded turn and revises its full transcript. It does not concatenate five-second finalized text with a decoded overlap. The existing Whisper loader, speech filter and model selection are retained; the generic streaming endpoints and other Persona STT backends are unchanged. Reset/Stop clears the turn. The existing 30-second audio buffer bound becomes an explicit rejection before overflow, rather than silently dropping earlier audio. The browser receives an actionable shorter-turn retry message through the existing owned STT failure path. Full-buffer decoding trades additional work on long turns for coherent revisions within that bound.
+
+Real local-model probes rejected zero overlap: it stopped some duplicated words but corrupted boundary words. Textual suffix/prefix deduplication was rejected because repeated speech is valid. Timestamp-based fragment reconciliation remains an alternative for future long-form streaming, which is outside this bounded Persona conversation path.

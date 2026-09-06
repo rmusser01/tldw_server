@@ -217,7 +217,10 @@ from tldw_Server_API.app.core.Persona.live_control import (
     persona_live_stream_registry,
     stop_live_session,
 )
-from tldw_Server_API.app.core.Persona.live_voice_runtime import persona_live_voice_registry
+from tldw_Server_API.app.core.Persona.live_voice_runtime import (
+    PersonaVoiceInputLimitError,
+    persona_live_voice_registry,
+)
 from tldw_Server_API.app.core.Persona.memory_integration import (
     persist_persona_turn,
     persist_tool_outcome,
@@ -3404,6 +3407,10 @@ def _create_persona_live_stt_transcriber(*, voice_runtime: dict[str, Any] | None
     )
 
     config = _build_persona_live_stt_config(voice_runtime)
+    if config.model == "whisper":
+        from tldw_Server_API.app.core.Persona.whisper_transcriber import PersonaWhisperTranscriber
+
+        return PersonaWhisperTranscriber(config)
     return UnifiedStreamingTranscriber(config)
 
 
@@ -10746,7 +10753,8 @@ async def persona_stream(
                         await _emit_notice(
                             session_id=session_id, client_message_id=client_message_id,
                             level="error", reason_code="VOICE_STT_UNAVAILABLE",
-                            message="Speech transcription failed. Check the selected speech model and start voice again.",
+                            message=(str(exc) if isinstance(exc, PersonaVoiceInputLimitError) else
+                                     "Speech transcription failed. Check the selected speech model and start voice again."),
                         )
                         continue
                 if transcript_snapshot_changed:

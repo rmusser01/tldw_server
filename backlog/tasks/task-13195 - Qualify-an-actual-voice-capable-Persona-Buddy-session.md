@@ -4,7 +4,7 @@ title: Qualify an actual voice-capable Persona Buddy session
 status: In Progress
 assignee: []
 created_date: '2026-09-05 21:29'
-updated_date: '2026-09-06 00:45'
+updated_date: '2026-09-06 01:12'
 labels:
   - persona
   - buddy
@@ -54,6 +54,8 @@ Review fixes now preserve the original WebSocket credential during preparation, 
 Final rebased implementation 2270153980 passed 204 targeted Python and 198 frontend tests, including preparation-before-capture, stale event/session ownership and playback recovery. Real final-source preparation loaded Whisper tiny.en and Kokoro; a supplied synthetic voice_commit transcript produced a DeepSeek reply and 25388 audio bytes. No microphone opened and no playback occurred in that probe. The fresh harness initially omitted the separate TTS config, correctly yielding VOICE_TTS_UNAVAILABLE; restoring the established complete isolated config made preparation pass. Human speech, visible Buddy state and audible output acceptance remain open; this task remains In Progress and the PR remains draft.
 
 Human browser UAT at c60f59a95e produced the expected DeepSeek reply and four Kokoro audio chunk notices; user confirmed hearing the reply. User also confirmed not saying the Thank you prefix, so exact transcript accuracy failed. The mic was already active at inspection, and speaking state was not sampled before playback finished; explicit-start/no-residual full lifecycle acceptance remains open. Source-bound local receipt: /private/tmp/migu-server-rate-retest-zd65lg4t/latest-browser-assessment.json. Non-speech filtering is investigated separately; do not mark full usability complete.
+
+At f71d593e67 human UAT observed idle before explicit Start, preparation, listening, Send-now thinking and return to idle, followed by disconnect. User heard playback and said Reply with once, but transcript duplicated/corrupted the prefix. TASK-13201 repairs the reproduced overlapping-fragment failure with bounded whole-turn Whisper snapshots; fresh human transcript acceptance remains pending.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

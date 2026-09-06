@@ -4,6 +4,10 @@ from threading import RLock
 from uuid import uuid4
 
 
+class PersonaVoiceInputLimitError(ValueError):
+    """A spoken turn exceeded its bounded audio buffer before transcription."""
+
+
 class PersonaLiveVoiceRegistry:
     """Project prepared runtimes without granting permission or persisting state."""
 

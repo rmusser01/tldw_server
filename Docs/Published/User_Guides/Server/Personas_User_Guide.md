@@ -459,3 +459,5 @@ Choosing manual control does not indicate a VAD failure.
 Persona accepts up to 300 audio chunks per rolling minute by default, enough for the browser microphone cadence. Operators can override `PERSONA_AUDIO_CHUNKS_PER_MINUTE` (1–1200); a lower setting can interrupt continuous browser capture. If this limit is reached, the browser stops recording and asks you to wait one minute before retrying **Start listening**. **Send now** commits recognized speech; **Stop voice** cancels the turn.
 
 Persona Whisper uses local speech filtering to reduce words inferred from silence. This remains enabled when Auto-commit is off: the filter decides which audio contains speech, while **Send now** still decides when to submit the turn. Filtering reduces silence hallucinations but does not guarantee perfect recognition.
+
+Persona Whisper revises the complete current spoken turn so words crossing an internal decode boundary are not appended twice. Keep each turn within 30 seconds, including silence. If that buffer fills, voice stops with a shorter-turn retry message. **Send now** submits the turn; a new Start begins with a fresh transcript.
