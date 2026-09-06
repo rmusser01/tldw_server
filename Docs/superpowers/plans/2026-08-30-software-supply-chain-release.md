@@ -1610,6 +1610,20 @@ pass five cases with one existing optional failure-model skip. Scoped Bandit
 has no production findings; existing endpoint lint findings are unchanged.
 The shared environment and other sessions remain untouched.
 
+Latest-dev integration: rebase onto `d308a40871` preserved all 13 patches
+exactly. Four new upstream audio/email/video/web summary modules are assigned
+to the existing API shard on all five platforms, with matching expected-set
+additions and unchanged exhaustive/disjoint guards. Independent integration
+review is clean. The expanded matrix reports 1,079 passed and 70 warnings,
+including the new summary modules, real Character dispatch and pinned Docker
+SBOM coverage. Final local garbage collection is unusually slow (native
+sampling identifies `gc_collect_main`); interpreter exit remains to be
+confirmed separately from the passing test summary. Rebased browser suites
+pass five cases with one existing optional failure-model skip. Compilation,
+Ruff, actionlint, pinned offline lock freshness and configured hooks pass.
+The changed workflow contract has only assertions plus its unchanged Bandit
+false positive for the `--cov` option. Fresh exact-head CI remains required.
+
 Wait for all required checks and reviewer comments. Resolve every actionable
 thread with evidence, rerun affected tests, rebase again if `dev` moved, and
 merge only after:
