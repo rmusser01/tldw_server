@@ -16,7 +16,7 @@
 opened at `f43549c209` on user request; implementation continues on the same branch).
 **Approved spec:** `Docs/superpowers/specs/2026-09-05-reading-output-file-reservations-design.md`, user approved after checkpoint `8dc255fcca`.
 **Parent plan:** `Docs/superpowers/plans/2026-09-04-reading-atomic-hard-delete.md`; this plan replaces its generic-file-writer gap, not its remaining Reading DTO/HTTP/reconciliation/release tasks.
-**Status:** Inline execution in progress. Task 1, Task 2a, Task 2b, Task 3a staging/write and Task 3b's recorded commit, copy/publication, recovery and real-process kill/progress checkpoints verified on SQLite/PostgreSQL. Immediate post-commit cleanup reuses recovery under publication exclusion. Task 4a descriptor responses and Task 4b protected generic downloads are implemented; checkpoint verification is recorded below. Task 4c Watchlist readers, history/producer integration and Task 9 background lifecycle/activation remain pending.
+**Status:** Inline execution in progress. Task 1, Task 2a, Task 2b, Task 3a staging/write and Task 3b's recorded commit, copy/publication, recovery and real-process kill/progress checkpoints verified on SQLite/PostgreSQL. Immediate post-commit cleanup reuses recovery under publication exclusion. Task 4a descriptor responses, Task 4b protected generic downloads and Task 4c registered Watchlist readers are implemented; checkpoint verification is recorded below. Unregistered evidence sidecars remain blocked for activated reads pending producer/reconciliation provenance. History/producer integration and Task 9 background lifecycle/activation remain pending.
 
 ---
 
@@ -198,6 +198,7 @@ its compatibility tests establish protected lookup or activated-reader readiness
 
 - [ ] Trace every create/write/rename/unlink into the authoritative output root from these entry points. Record each caller and chosen shared boundary in the checkpoint. Include failed multi-variant generation and cancellation. Any additional writer found is a blocker until mapped/tested; do not claim the file list exhausts the repository.
 - [ ] Extend the inventory to every reader of activated output files, including internal ingestion/content-loading paths reached by producers. Reuse Task 4's protected descriptor primitive and assign each discovered reader an explicit path-reuse regression; no unreviewed pathname-read exception. Unrelated template/config files are not output artifacts.
+- [ ] Resolve the Task 4c evidence-sidecar blocker before activation: `_write_report_snapshot_for_user` currently creates unregistered JSON referenced only by `report_snapshot_path` metadata, shared across generated variants. Establish and review explicit publication/ownership/reconciliation authority for these sidecars, then migrate their reads through the protected boundary. Until that prerequisite is met, activated sidecar reads return sanitized 503 without filesystem access; do not treat metadata filenames as authority or mark reader rollout complete.
 - [ ] Add RED producer tests for reservation before first private byte, unknown-length budget, cancellation, publication collision, idempotency replay and inactive Reading creation. Run `python -m pytest tldw_Server_API/tests/Collections/test_output_file_producers.py -q`.
 - [ ] Adapt text/briefing producer callbacks to bounded bytes, admitted before rendering/production. Network/rendering happens outside storage exclusion and writes use Task 3 chunks. Compound/multi-variant operations retain their existing response policy but every produced file has its own bounded journal authority. Failed generation schedules conditional abort, never an unreserved unlink. No separate named scratch artifact.
 - [ ] Production Reading creation continues using existing item-owned reserve/adopt, with generic cross-claims and explicit activation prerequisites. Do not manufacture a Reading parent for generic outputs. Parent/revision changes during capture reject stale adoption. Keep legacy reconciliation's unchanged-record and namespace checks; this plan does not replace the parent plan's offline manifest implementation.
@@ -967,3 +968,92 @@ Watchlist download/content-loader and sidecar audit is next, not completed here.
 The full Task 4 checklist and TASK-13153 ACs remain incomplete. No activation or
 background-worker registration, full sweep, Docker provisioning or merge; PR
 #2903 remains draft and the human-written Change summary gate remains pending.
+
+### Task 4c: Registered Watchlist output readers and sidecar audit (2026-09-05)
+
+`open_protected_output` now transfers the current DB row and its opened response
+together; generic downloads remain a small wrapper over the same primitive.
+Watchlist downloads and inline content in list/detail/delivery consumers use this
+pair, validate origin/expiry and derive titles/metadata from the same protected
+snapshot. All production callers pass their authenticated/authorized Collections
+adapter, including delegated delivery retries. Cancellation drains pending reads
+before closing, and response construction/validation failures close the descriptor.
+
+MP3 retains descriptor streaming and range/validator semantics. Markdown/HTML
+retain their existing full-text response policy (no ranges/validators), UTF-8 and
+universal-newline handling. Activated text materialization is capped at 8 MiB,
+returning `413 output_content_too_large` before reading larger files; this is a
+bounded-memory safeguard for text DTO/download consumers, not a generic-download
+size limit. Inactive text behavior is unchanged. The content helper always closes
+the descriptor, including limit rejection and cancellation.
+
+File-read audit of `watchlists.py`:
+
+- `_load_output_content`, `_row_to_output` and `download_output`: registered output
+  bytes now pass through the shared protected opener. Legacy pathname reads remain
+  reachable only for genuinely inactive storage.
+- `_load_report_snapshot_for_user`, reached by evidence/readiness: metadata-only
+  JSON sidecars are **not registered artifacts**. Activated reads fail closed with
+  sanitized 503, before pathname resolution. Inactive snapshot success and missing/
+  invalid-path behavior are preserved. Task 7 explicitly owns the provenance and
+  producer/reconciliation prerequisite; no sidecar ownership was guessed here.
+- `_read_log_chunk`, `_read_log_tail` and run-detail `read_text`: run logs resolved
+  under the user's log scope, not output artifacts; unchanged.
+- Snapshot/output `write_text` and cleanup unlinks are producer work, not silently
+  migrated here. No template/config file reads were classified as output bytes.
+
+Initial tests produced 18 expected protected-reader failures and six HTTP
+characterization passes. Additional failures established the sidecar guard and
+bounded-text requirement. Edge tests caught the missing-download error category.
+Independent review found stale recipient metadata in delivery retry and changed
+inactive evidence error translation. Three real-Collections regressions reproduced
+old-recipient delivery, a removed plan still sending, and invalid-path 400 instead
+of legacy 404. Delivery now uses/revalidates the metadata accompanying protected
+content; evidence propagates only the fixed protected-storage 503. Follow-up
+review found no remaining actionable checkpoint issue.
+
+Existing ADR-003 applies. Task 4's full reader rollout remains incomplete until
+the sidecar provenance prerequisite is fulfilled. The next implementation unit is
+Task 5's original-instance history delivery; Task 7/9 must not activate around the
+recorded sidecar blocker. TASK-13153 remains In Progress, full-task ACs unchecked,
+and PR #2903 stays draft with its human-written Change summary gate pending.
+
+Checkpoint verification commands (after activating the existing Server venv):
+
+```bash
+TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Watchlists/test_output_protected_readers.py tldw_Server_API/tests/Collections/test_output_protected_downloads.py tldw_Server_API/tests/Collections/test_output_download_compatibility.py tldw_Server_API/tests/Collections/test_output_file_responses.py -q -k 'not postgres'
+TLDW_TEST_NO_DOCKER=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest tldw_Server_API/tests/Watchlists/test_output_protected_readers.py tldw_Server_API/tests/Collections/test_output_protected_downloads.py tldw_Server_API/tests/Collections/test_output_download_compatibility.py -q -k postgres -n 2
+TLDW_TEST_NO_DOCKER=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest tldw_Server_API/tests/Watchlists/test_output_protected_readers.py -q -k 'postgres and invalid_path'
+TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Watchlists/test_watchlists_api.py -q -k 'output or evidence or readiness or retry_delivery'
+TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py -q -k retry_run_delivery
+TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Watchlists/test_watchlist_reports_api.py -q
+```
+
+The final local combined run passed 137 cases in 86.24 seconds. Existing
+Watchlist output-route checks passed 10 in 95.78 seconds; existing retry checks
+passed three in 2.62 seconds; full-app report/evidence checks passed five in 57.02
+seconds. The final evidence-error correction passed its targeted PostgreSQL
+regression in 31.03 seconds. Earlier RED/overlapping runs are not counted again.
+The broader PostgreSQL run, whose workers loaded code before that final error
+translation patch, finished with 99 passes and that one known failure in 573.35
+seconds. The fresh one-case run above replaces that failed result; it is not an
+additional distinct case. Overall coverage is 155 SQLite/non-backend cases and
+100 required PostgreSQL cases (255 distinct passing cases across the final runs),
+with no required-backend skips. The broad PostgreSQL invocation itself is not
+reported as a clean run. No Docker provisioning or full sweep was performed.
+
+Service/new-test Ruff and Black pass; scoped Black for modified Watchlist lines,
+compile and diff checks pass. Watchlist whole-file Ruff has six pre-existing
+findings, unchanged by code/message against HEAD; it is not claimed clean.
+Production Bandit has no findings/errors without exclusions, and test Bandit
+passes with only B101 (pytest assertions) excluded. No dependency was added.
+
+Logs: `/private/tmp/task-13153-watchlist-{red,bounds-red,green,edges,review-red}.log`,
+`/private/tmp/task-13153-watchlist-local-verified.log`,
+`/private/tmp/task-13153-watchlist-pg.log`,
+`/private/tmp/task-13153-watchlist-pg-evidence-final.log`,
+`/private/tmp/task-13153-watchlist-existing.log`,
+`/private/tmp/task-13153-watchlist-retry-existing.log`,
+`/private/tmp/task-13153-watchlist-reports-existing.log`,
+`/private/tmp/task-13153-watchlist-bandit-final.json`, and
+`/private/tmp/task-13153-watchlist-tests-bandit.json`.

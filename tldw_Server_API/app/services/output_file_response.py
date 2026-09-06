@@ -43,10 +43,35 @@ async def protected_output_response(
     head_only: bool = False,
 ) -> Response | None:
     """Open activated downloads safely; None permits only genuinely inactive legacy dispatch."""
-    response = None
+    opened = await open_protected_output(db, output_id=output_id, title=title, format_=format_)
+    if opened is None:
+        return None
+    _, response = opened
+    if head_only:
+        try:
+            # Preserve the generic HEAD route's existing headers and range policy.
+            return Response(headers={key: response.headers[key] for key in ("content-type", "content-length")})
+        finally:
+            response.close()
+    return response
+
+
+async def open_protected_output(
+    db: CollectionsDatabase,
+    *,
+    output_id: int | None = None,
+    title: str | None = None,
+    format_: str | None = None,
+) -> tuple[CollectionsDatabase.OutputArtifactRow, OpenedOutputResponse] | None:
+    """Transfer current metadata and its protected descriptor together to the caller.
+
+    The caller must close the response or invoke it as an ASGI response. None
+    permits legacy dispatch only when the store is genuinely inactive.
+    """
+    opened = None
     try:
         with anyio.CancelScope(shield=True):
-            response, cancelled = await _wait_worker(
+            opened, cancelled = await _wait_worker(
                 partial(
                     _open_output_response,
                     db,
@@ -58,15 +83,10 @@ async def protected_output_response(
         if cancelled:
             raise asyncio.CancelledError
         await anyio.lowlevel.checkpoint_if_cancelled()
-        if head_only and response is not None:
-            # Preserve the generic HEAD route's existing headers and range policy.
-            headers = {key: response.headers[key] for key in ("content-type", "content-length")}
-            response.close()
-            return Response(headers=headers)
-        return response
+        return opened
     except BaseException:
-        if response is not None:
-            response.close()
+        if opened is not None:
+            opened[1].close()
         raise
 
 
@@ -114,7 +134,7 @@ def _open_output_response(db, *, output_id, title, format_):
                 os.close(fd)
                 raise
             response = OpenedOutputResponse(fd, filename=name, media_type=media_type)
-        return response
+        return row, response
     except BaseException as exc:
         if response is not None:
             response.close()
@@ -169,6 +189,21 @@ class OpenedOutputResponse(StreamingResponse):
         fd, self._fd = self._fd, None
         if fd is not None:
             os.close(fd)
+
+    async def read_text(self, *, max_bytes: int = 8 * 1024 * 1024) -> str:
+        """Materialize bounded UTF-8 content and always close its descriptor."""
+        try:
+            if self.stat_result.st_size > max_bytes:
+                raise HTTPException(413, "output_content_too_large")
+            content = bytearray()
+            async for chunk in self._stream():
+                content.extend(chunk)
+            # Match Path.read_text's universal-newline behavior.
+            return content.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+        except (UnicodeError, RuntimeError):
+            raise HTTPException(503, "output_storage_unavailable") from None
+        finally:
+            self.close()
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         try:
