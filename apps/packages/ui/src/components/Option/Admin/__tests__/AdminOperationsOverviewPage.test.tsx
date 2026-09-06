@@ -7,6 +7,8 @@ const apiMock = vi.hoisted(() => ({
   getSystemStats: vi.fn(),
   getSecurityAlertStatus: vi.fn(),
   listBackups: vi.fn(),
+  listBackupSchedules: vi.fn(),
+  listAlertRules: vi.fn(),
   getLlamacppStatus: vi.fn(),
   getMlxStatus: vi.fn(),
   getGovernorCoverage: vi.fn()
@@ -31,9 +33,14 @@ describe("AdminOperationsOverviewPage", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     connectionMock.serverUrl = "http://127.0.0.1:8000"
+    window.localStorage.clear()
     apiMock.getSystemStats.mockResolvedValue({ users: { total: 1 } })
     apiMock.getSecurityAlertStatus.mockResolvedValue({ health: "ok" })
     apiMock.listBackups.mockResolvedValue({ backups: [] })
+    // Checklist probes default to "all done" so the first-steps card stays
+    // out of the way of the unrelated tests.
+    apiMock.listBackupSchedules.mockResolvedValue({ schedules: [{ id: 1 }] })
+    apiMock.listAlertRules.mockResolvedValue([{ id: 1 }])
     apiMock.getLlamacppStatus.mockRejectedValue(new Error("Request failed: 503"))
     apiMock.getMlxStatus.mockResolvedValue({ active: false })
     apiMock.getGovernorCoverage.mockResolvedValue({ coverage_pct: 78.9 })
@@ -121,6 +128,67 @@ describe("AdminOperationsOverviewPage", () => {
     )
     // The module map stays visible beneath the banner.
     expect(screen.getByTestId("admin-operations-modules")).toBeInTheDocument()
+  })
+
+  it("shows the first-steps checklist while setup tasks remain (#2899 I6)", async () => {
+    // Default mocks: schedules + rules exist, coverage 78.9% (< 80) remains.
+    render(<AdminOperationsOverviewPage />)
+
+    const card = await screen.findByTestId("admin-first-steps")
+    expect(
+      within(card).getByRole("link", { name: "Review unprotected endpoints" })
+    ).toHaveAttribute("href", "/admin/rate-limiting")
+    // Done items render struck-through, not as links.
+    expect(
+      within(card).queryByRole("link", { name: "Create a backup schedule" })
+    ).not.toBeInTheDocument()
+    expect(within(card).getByText("Create a backup schedule")).toBeInTheDocument()
+  })
+
+  it("hides the checklist once every step is done (#2899 I6)", async () => {
+    apiMock.getGovernorCoverage.mockResolvedValue({ coverage_pct: 92 })
+
+    render(<AdminOperationsOverviewPage />)
+
+    // Signals settle (badge appears) without the checklist ever rendering.
+    expect(await screen.findByText("1 user")).toBeInTheDocument()
+    expect(screen.queryByTestId("admin-first-steps")).not.toBeInTheDocument()
+  })
+
+  it("dismissal hides the checklist and persists per server (#2899 I6)", async () => {
+    const first = render(<AdminOperationsOverviewPage />)
+
+    const card = await screen.findByTestId("admin-first-steps")
+    within(card).getByRole("button", { name: "Dismiss" }).click()
+    await waitFor(() => {
+      expect(screen.queryByTestId("admin-first-steps")).not.toBeInTheDocument()
+    })
+
+    // A fresh mount of the same server keeps it dismissed...
+    first.unmount()
+    const second = render(<AdminOperationsOverviewPage />)
+    expect(await screen.findByText("1 user")).toBeInTheDocument()
+    expect(screen.queryByTestId("admin-first-steps")).not.toBeInTheDocument()
+
+    // ...but connecting to a different server gets its own checklist.
+    second.unmount()
+    connectionMock.serverUrl = "http://other-server.local:8000"
+    render(<AdminOperationsOverviewPage />)
+    expect(await screen.findByTestId("admin-first-steps")).toBeInTheDocument()
+  })
+
+  it("reloads signals and checklist when the connection target changes", async () => {
+    const view = render(<AdminOperationsOverviewPage />)
+    expect(await screen.findByText("1 user")).toBeInTheDocument()
+    expect(apiMock.getSystemStats).toHaveBeenCalledTimes(1)
+
+    // Same mounted overview, new server: stale results must not linger.
+    connectionMock.serverUrl = "http://other-server.local:8000"
+    view.rerender(<AdminOperationsOverviewPage />)
+
+    await waitFor(() => {
+      expect(apiMock.getSystemStats).toHaveBeenCalledTimes(2)
+    })
   })
 
   it("omits the connect banner when a server is configured (#2893)", () => {
