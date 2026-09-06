@@ -11,7 +11,9 @@ def test_crypto_probe_signs_and_verifies_with_cryptography() -> None:
     assert probe_crypto().startswith("cryptography.")
 
 
-def test_storage_probe_uses_real_per_user_managers(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_storage_probe_uses_real_per_user_managers_and_rejects_foreign_uuids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from Helper_Scripts.Supply_Chain.runtime_probe import probe_chroma
 
     monkeypatch.delenv("CHROMADB_FORCE_STUB", raising=False)

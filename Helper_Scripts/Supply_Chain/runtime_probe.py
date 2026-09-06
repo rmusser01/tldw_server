@@ -8,6 +8,9 @@ import hashlib
 import importlib.metadata
 import json
 import re
+
+# This module executes one fixed absolute diagnostic command without a shell.
+import subprocess  # nosec B404
 import sys
 import tempfile
 from pathlib import Path
@@ -91,6 +94,76 @@ def probe_crypto() -> str:
     return backend
 
 
+def probe_os_facts() -> dict:
+    """Collect bounded OS facts without inferring vulnerability applicability."""
+    perl = Path("/usr/bin/perl")
+    homed_paths = (Path("/usr/lib/systemd/systemd-homed"), Path("/lib/systemd/systemd-homed"))
+    facts = {
+        "perl": {"path": str(perl), "status": "absent"},
+        "systemd_homed": {"paths": {str(path): path.is_file() for path in homed_paths}},
+    }
+    if not perl.is_file():
+        return facts
+    try:
+        # The executable and arguments are constants, not caller-controlled input.
+        result = subprocess.run(  # nosec B603
+            [str(perl), "-V:ivsize", "-V:ptrsize"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValueError("Perl observation failed") from exc
+    match = re.fullmatch(r"\s*ivsize='(\d+)';\s*ptrsize='(\d+)';\s*", result.stdout)
+    if match is None:
+        raise ValueError("malformed Perl size observation")
+    facts["perl"] = {
+        "path": str(perl),
+        "status": "observed",
+        "ivsize": int(match.group(1)),
+        "ptrsize": int(match.group(2)),
+    }
+    return facts
+
+
+def _require_foreign_collection_uuid_isolation(clients: list, collections: list) -> None:
+    """Require each embedded client to reject every operation on the other UUID."""
+    from chromadb.errors import NotFoundError
+
+    originals = []
+    for collection in collections:
+        result = collection.get(include=["documents"])
+        originals.append({"ids": list(result["ids"]), "documents": list(result["documents"] or [])})
+    for client_index, foreign_index in ((0, 1), (1, 0)):
+        foreign_record_id = originals[foreign_index]["ids"][0]
+        operations = (
+            ("_get", {}),
+            ("_count", {}),
+            ("_query", {"query_embeddings": [[1.0, 0.0]], "n_results": 1}),
+            ("_add", {"ids": ["intruder"], "embeddings": [[1.0, 0.0]]}),
+            ("_update", {"ids": [foreign_record_id], "documents": ["modified"]}),
+            ("_upsert", {"ids": ["intruder"], "embeddings": [[1.0, 0.0]]}),
+            ("_delete", {"ids": [foreign_record_id]}),
+        )
+        for operation, arguments in operations:
+            try:
+                getattr(clients[client_index], operation)(
+                    collection_id=collections[foreign_index].id,
+                    **arguments,
+                )
+            except NotFoundError:
+                continue
+            except Exception as exc:
+                raise ValueError(f"foreign collection UUID {operation} failed unexpectedly") from exc
+            raise ValueError(f"foreign collection UUID {operation} unexpectedly succeeded")
+    for collection, original in zip(collections, originals):
+        result = collection.get(include=["documents"])
+        current = {"ids": list(result["ids"]), "documents": list(result["documents"] or [])}
+        if current != original:
+            raise ValueError("original Chroma collection changed during foreign UUID checks")
+
+
 def probe_chroma(*, proc_net: Path | None = None) -> str:
     """Exercise real application-managed storage in two distinct user directories."""
     from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import ChromaDBManager
@@ -123,6 +196,10 @@ def probe_chroma(*, proc_net: Path | None = None) -> str:
                 result = collection.query(query_embeddings=[[1.0, 0.0]], n_results=1)
                 if result["ids"] != [[f"user-{index}"]]:
                     raise ValueError("Chroma query isolation failed")
+            _require_foreign_collection_uuid_isolation(
+                [manager.client for manager in managers],
+                collections,
+            )
             if proc_net is not None:
                 require_no_listeners(proc_net)
             return backend
@@ -151,6 +228,7 @@ def main() -> None:
         chroma_backend = probe_chroma(proc_net=Path("/proc/net"))
         require_no_listeners()
         jwt_backend = probe_crypto()
+        os_facts = probe_os_facts()
     print(
         json.dumps(
             {
@@ -158,7 +236,12 @@ def main() -> None:
                 "lock_sha256": hashlib.sha256(args.lock.read_bytes()).hexdigest(),
                 "chroma_backend": chroma_backend,
                 "jwt_ec_backend": jwt_backend,
-                "checks": {"per_user_collection_and_query_isolation": True, "no_tcp_listeners": True},
+                "checks": {
+                    "per_user_collection_and_query_isolation": True,
+                    "foreign_collection_uuid_isolation": True,
+                    "no_tcp_listeners": True,
+                },
+                "os_facts": os_facts,
                 "scope": "isolated embedded-client probe; not application startup or a vulnerability waiver",
             },
             sort_keys=True,
