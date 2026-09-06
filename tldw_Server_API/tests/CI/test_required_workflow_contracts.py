@@ -1137,6 +1137,10 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         }
         assert shard_path_sets["media-core-api"] == {
             "tldw_Server_API/tests/Media/test_archive_member_cap.py",
+            "tldw_Server_API/tests/Media/test_audio_summary_service_prompt.py",
+            "tldw_Server_API/tests/Media/test_email_summary_service_prompt.py",
+            "tldw_Server_API/tests/Media/test_video_summary_service_prompt.py",
+            "tldw_Server_API/tests/Media/test_web_summary_service_prompt.py",
             "tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py",
             "tldw_Server_API/tests/Media/test_cache_index.py",
             "tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py",
