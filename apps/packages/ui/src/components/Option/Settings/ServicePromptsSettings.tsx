@@ -150,6 +150,12 @@ const KNOWN_DEFINITIONS = {
     description:
       "Controls system instructions for synchronous document analysis. Without a saved override, server defaults apply."
   },
+  "media.document.insights": {
+    key: "mediaDocumentInsights",
+    label: "Document Insights",
+    description:
+      "Controls analysis and presentation guidance for document insights. JSON output requirements and requested categories remain fixed."
+  },
   "media.pdf.summarization": {
     key: "mediaPdfSummarization",
     label: "PDF summarization",
@@ -226,6 +232,10 @@ const KNOWN_WORKFLOWS: Record<string, { key: string; label: string }> = {
     key: "documentSummarization",
     label: "Synchronous document analysis"
   },
+  "media.document.insights": {
+    key: "documentInsights",
+    label: "Document workspace insights"
+  },
   "media.pdf.summarization": {
     key: "pdfSummarization",
     label: "Synchronous PDF analysis"
@@ -257,6 +267,8 @@ const KNOWN_WORKFLOWS: Record<string, { key: string; label: string }> = {
 }
 
 const KNOWN_PARTS: Record<string, { key: string; label: string }> = {
+  analysis_guidance: { key: "analysisGuidance", label: "Analysis guidance" },
+  presentation_guidance: { key: "presentationGuidance", label: "Presentation guidance" },
   template: { key: "template", label: "Template" },
   system: { key: "system", label: "System instructions" },
   user: { key: "user", label: "User instructions" },
