@@ -20,6 +20,13 @@ CAPABILITY_CATEGORIES = (
     "input_protocols",
     "output_protocols",
 )
+APPROVED_RETIREMENTS = {
+    "encoders": frozenset({"sonic", "sonicls", "v308", "v408", "v410"}),
+    "decoders": frozenset({"sonic", "v308", "v408", "v410"}),
+    "muxers": frozenset({"opengl", "sdl", "sdl2"}),
+    "filters": frozenset({"pp"}),
+    "input_protocols": frozenset({"hls"}),
+}
 _TOP_LEVEL_HEADERS = frozenset({"Encoders:", "Decoders:", "Formats:", "Filters:", "Supported file protocols:"})
 _CODEC_ROW = re.compile(r"^\s[VAS][A-Z.]{5}\s+([A-Za-z0-9_.+,-]+)\s+")
 _FILTER_ROW = re.compile(r"^\s[A-Z.|]{2,4}\s+([A-Za-z0-9_.+,-]+)\s+")
@@ -115,7 +122,7 @@ def compare_capabilities(
     baseline: Mapping[str, set[str]],
     candidate: Mapping[str, set[str]],
 ) -> dict[str, set[str]]:
-    """Return unexplained removals, allowing only FFmpeg 9's removed pp filter."""
+    """Return removals outside the explicitly approved FFmpeg 9 retirements."""
     if any(not baseline.get(category) or not candidate.get(category) for category in CAPABILITY_CATEGORIES):
         raise CandidateError("incomplete or empty capability inventory")
     missing: dict[str, set[str]] = {}
@@ -124,11 +131,23 @@ def compare_capabilities(
         if not expected or not actual:
             raise CandidateError(f"empty or missing {category} inventory")
         removed = expected - actual
-        if category == "filters":
-            removed.discard("pp")
+        removed.difference_update(APPROVED_RETIREMENTS.get(category, ()))
         if removed:
             missing[category] = removed
     return missing
+
+
+def observed_approved_retirements(
+    baseline: Mapping[str, set[str]],
+    candidate: Mapping[str, set[str]],
+) -> dict[str, set[str]]:
+    """Return only approved retirements observed in this capability delta."""
+    observed = {}
+    for category, approved in APPROVED_RETIREMENTS.items():
+        retired = (baseline[category] - candidate[category]) & approved
+        if retired:
+            observed[category] = retired
+    return observed
 
 
 def validate_candidate_image(identity: str) -> None:
@@ -387,6 +406,7 @@ def evaluate_candidate(
     inventory_dir = output_dir / "inventory"
     candidate = collect_inventory(ffmpeg, inventory_dir)
     missing = compare_capabilities(baseline, candidate)
+    approved = observed_approved_retirements(baseline, candidate)
     buildconf = (inventory_dir / "buildconf.txt").read_text(encoding="utf-8")
     configure_arguments = [line.strip() for line in buildconf.splitlines() if line.strip().startswith("--")]
     if not configure_arguments:
@@ -397,6 +417,7 @@ def evaluate_candidate(
         "configure_arguments": configure_arguments,
         "capability_counts": {category: len(values) for category, values in candidate.items()},
         "capabilities": {category: sorted(values) for category, values in candidate.items()},
+        "approved_retirements": {category: sorted(values) for category, values in approved.items()},
         "missing_capabilities": {category: sorted(values) for category, values in missing.items()},
         "probes": run_synthetic_probes(ffmpeg, ffprobe, output_dir / "media"),
         "compatible": not missing,
