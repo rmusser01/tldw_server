@@ -115,11 +115,34 @@ these informational rows do not enter compaction selection. Naturally eligible
 blocked candidates and guarded domain-prefix checks retain the existing
 all-or-nothing policy. This does not introduce generic partial compaction.
 
-Purge review remains open: after a valid next-generation purge is durably stored
-but canonical application temporarily fails, a second signed request can hit
+Purge review initially remained open: after a valid next-generation purge is durably stored
+but projection fails, a second signed request can hit
 that Sync head and enter ordinary candidate capture. Canonical purge state is
 a manifest/barrier, with no purge object head to capture. The approved contract
 does not choose rejection with refresh/reconfirmation versus a dedicated
 deletion-conflict review. Do not synthesize a cross-domain candidate or change
-purge policy without that decision. TASK-13163 remains In Progress; version 0
-and the existing rollout gate remain unchanged.
+purge policy without that decision.
+
+The user subsequently selected rejection with refresh and explicit
+reconfirmation. Implement the existing ADR-002 amendment by reproducing that
+signed failed-ingress scenario, then rejecting stale-lineage purge control
+requests nonretryably before ordinary conflict candidate capture. Return the
+content-free `personal_context_purge_reconfirmation_required` code with a
+refresh/reconfirmation instruction. Preserve exact idempotent retries, normal
+next-generation validation, and existing generation failures. Targeted adapter,
+purge and ingress/recovery checks must pass before completion; no separate
+deletion review, schema, UI or rollout change is introduced. Version 0 and the
+existing rollout gate remain unchanged.
+
+Cover both preflight lineage checks and the insertion compare-and-swap race;
+neither may route a new stale deletion intent into candidate capture. Preserve
+re-entry of an exact previously stored client-ingress request after rejection:
+the full immutable fingerprint is checked before adapter evaluation and again
+at insertion, with signature, identity, generation and activation checks retained.
+Ongoing canonical ingress still does not implement purge application; this fix
+preserves recovery eligibility without claiming canonical deletion completion.
+The original diagnostic's injected canonical-service outage was not reached:
+purge parsing returns a dict, which the existing materializer passes to the
+model-only canonical serializer before service entry. The final regression
+therefore delegates the real materializer and observes original-request re-entry
+after rejection, rather than pretending the canonical-service fault ran.

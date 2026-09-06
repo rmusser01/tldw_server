@@ -1,11 +1,11 @@
 ---
 id: TASK-13163
 title: Resolve Personal Context conflicts through the batched Sync API
-status: In Progress
+status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-03 13:40'
-updated_date: '2026-09-06 00:39'
+updated_date: '2026-09-06 01:12'
 labels:
   - personal-context
   - sync
@@ -35,6 +35,7 @@ Extend the existing batched Sync conflict API for ongoing Personal Context confl
 - [x] #5 Ordinary conflicts freeze one object; key collisions freeze both object IDs and only the contested semantic-key slot while unrelated objects continue.
 - [x] #6 Candidate retention, replay, stale-review, key-collision, batch-partial-failure, authorization, and plaintext-canary tests pass.
 - [x] #7 ADR required: no new ADR; backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md governs conflict authority and retention.
+- [x] #8 A signed valid-next-generation delete-everywhere request with stale lineage is rejected nonretryably with a content-free refresh and explicit reconfirmation instruction, without creating an ordinary conflict candidate; exact idempotent retry and valid purge/generation behavior are preserved.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -43,6 +44,8 @@ Extend the existing batched Sync conflict API for ongoing Personal Context confl
 ADR required: no new ADR. ADR path: backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md. Reason: implement approved ongoing-sync conflict authority and retention. Follow Task 2 in Docs/superpowers/plans/2026-09-03-personal-context-ongoing-sync-02-server-activation-conflict-purge.md after auditing current activation/publication seams. First verify current behavior, identify durable encrypted receipt/freeze storage and migration requirements, and refine exact integration steps without changing approved wire actions. Then add failing candidate retention and replay/stale-review tests, implement canonical batched resolution plus exact freezes, run targeted SQLite/PostgreSQL/canary/authorization tests, and obtain spec and quality review. Keep ongoing_sync_version=0. Isolated branch starts at the verified TASK13192 converter fix 6363466d07; no merge is claimed.
 
 PR #2910 review remediation: verify all ten Qodo findings against approved detail plan and ADR-002; reproduce confirmed relay and duplicate-key bugs before minimal fixes; establish purge reachability and preserve existing retention policy, reporting architectural ambiguity before changing it. Preserve test-only SQL inspection instead of adding production inspection helpers. Run targeted SQLite/PostgreSQL paths with PostgreSQL required, affected Ruff/format/Bandit and diff checks; record per-finding evidence and scoped commit. ADR required: no new ADR for routine fixes; existing ADR-002 governs.
+
+Approved purge-review follow-up: user selected stale delete-everywhere rejection with refresh and explicit reconfirmation. Reproduce retained real signed failed-ingress scenario as a failing assertion, add focused adapter cases preserving normal next-generation validation and exact retry, then reject stale purge lineage before candidate creation. No schema, rollout, UI or ordinary conflict policy changes. Parent updates ADR-002 and spec; this worker owns adapter/tests/task/detail plan. ADR required: existing ADR-002 amendment records approved control-request policy. Run targeted adapter, purge, ingress/recovery checks and affected Ruff/Bandit/diff; require completed process exits and independent scoped review.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -65,6 +68,10 @@ PR #2910 review remediation: fixed missing concrete active semantic-key validati
 Final verification: focused conflict/replay selection22passed exit0, PostgreSQL-required; corrected PostgreSQL fixture selection3passed exit0 (removes introduced serialization warning), existing retention/relay suites75passed exit0. Affected Ruff, scoped formatting, AST docs/types and git diff checks passed. Bandit production scope has zero findings exit0; test scan has expected assertion B101 and the same HEAD-baseline closed-parameter tamper-query B608, no new production findings. Independent scoped review approved remediation source and test fixture correction. No full sweep. Python interpreter cleanup after the22-test summary completed normally before commit.
 
 OPEN review finding1: real factory probe demonstrated a signed next-generation purge persisted accepted/failed during temporary canonical unavailability, then a second valid request hit that Sync head and returned retryable storage_unavailable because canonical purge has no object head. Approved spec does not choose rejection with refresh/reconfirmation versus a dedicated deletion-conflict review. Purge behavior remains unchanged pending owner policy; task stays In Progress and PR readiness is not claimed. ADR required: no new ADR for these routine fixes; existing ADR-002 and approved detail plan govern. Detail plan and testing-evidence lesson updated. No schema/dependency/action/rollout changes; ongoing_sync_version remains0. Parent owns prerequisite restack, publication and GitHub response.
+
+Approved purge follow-up corrects the earlier diagnostic attribution: the signed request was durably stored with real projection failure, but the injected apply_sync_ingress service outage was never reached. Existing purge materialization parses a dict then passes it to the model-only canonical serializer before service entry; ongoing canonical ingress purge remains unsupported and gated. The regression now delegates real PersonalContextMaterializer.apply and observes original-request re-entry after rejecting the second stale intent. Parent recorded user-approved rejection/reconfirmation in ADR-002 and spec; no canonical purge lifecycle expansion is implemented.
+
+Completed approved stale-purge review follow-up: adapter and generic insertion-CAS boundary reject new stale deletion intents nonretryably with personal_context_purge_reconfirmation_required and refresh/explicit reconfirmation instruction, before ordinary candidate capture. Exact previously stored client ingress retains materializer re-entry under existing full immutable fingerprint, signature, identity, generation and activation checks; changed same-ID entity metadata is rejected. No canonical purge lifecycle, schema, UI, dependencies or rollout added. Verification: final4 SQLite/PostgreSQL preflight/race/retry cases passed exit0; targeted adapter/materializer/ingress-repair/purge-retention107 passed exit0 on final production before test-only fixture corrections. Fresh Ruff, amended range formatting, production Bandit zero findings and diff checks exit0. Independent scoped review approved with no Critical/Important findings. Prior OPEN purge finding is superseded by user-approved ADR-002 amendment, recorded in detail plan. Original canonical-service fault attribution corrected above; existing gated dict serialization and unsupported ongoing canonical purge remain unimplemented. Parent owns publication and prerequisite restack; no merge claimed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

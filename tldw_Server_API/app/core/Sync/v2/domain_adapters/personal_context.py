@@ -151,6 +151,22 @@ class PersonalContextDomainAdapter:
 
         head = _current_object_head(envelope, context)
         if head is not None and not _references_head(envelope, head, value):
+            if self.domain == "personal_context.purge":
+                # Push verifies the full immutable fingerprint before evaluation
+                # and insertion; an exact stored ingress may retry its failed apply.
+                if (
+                    envelope.routing_metadata.get("personal_context_authority", {}).get("role") == "client_ingress"
+                    and envelope.client_envelope_id == head.client_envelope_id
+                    and envelope.device_id == head.device_id
+                    and envelope.payload_hash == head.payload_hash
+                ):
+                    return AdapterAccepted(client_envelope_id=envelope.client_envelope_id)
+                return AdapterRejected(
+                    client_envelope_id=envelope.client_envelope_id,
+                    error_code="personal_context_purge_reconfirmation_required",
+                    message="Refresh Personal Context and explicitly reconfirm delete-everywhere.",
+                    retryable=False,
+                )
             return AdapterConflict(
                 client_envelope_id=envelope.client_envelope_id,
                 domain=self.domain,

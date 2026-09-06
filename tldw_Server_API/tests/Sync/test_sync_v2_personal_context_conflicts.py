@@ -305,6 +305,114 @@ def test_signed_invalid_purge_generation_rejected_without_candidate_or_mutation(
         )
 
 
+@pytest.mark.parametrize("boundary", ["preflight", "insertion"])
+@pytest.mark.parametrize("storage_backend", ["sqlite", "postgres"])
+def test_stale_purge_after_failed_ingress_requires_refresh_and_reconfirmation(
+    production_factories: tuple[PersonalContextService, SyncV2Service],
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+    boundary: str,
+    storage_backend: str,
+) -> None:
+    """A stalled deletion intent remains retryable without reviewing a second stale intent."""
+    from tldw_profile_core.canonical import canonical_json_bytes
+
+    from tldw_Server_API.app.core.Sync.v2.materializers.personal_context import PersonalContextMaterializer
+    from tldw_Server_API.app.core.Sync.v2.models import SyncEnvelope
+
+    canonical, sync = production_factories
+    if storage_backend == "postgres":
+        from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+        from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+
+        backend = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
+        request.addfinalizer(backend.get_pool().close_all)
+        sync.store = SyncV2Store(SyncDatabase(backend=backend))
+    relay_type = type(sync.personal_context_relay)
+    original_relay = relay_type.relay_profile
+
+    def deterministic_relay(relay: Any, **kwargs: Any) -> Any:
+        """Drain bootstrap publications without spending the live relay time budget."""
+        relay.clock_ns = lambda: 0
+        return original_relay(relay, **kwargs)
+
+    monkeypatch.setattr(relay_type, "relay_profile", deterministic_relay)
+    linked = _link(canonical, sync)
+    _canonical, _sync, dataset_id, _exchange, record = linked
+    before = canonical.get_manifest()
+    key_id, key = canonical.sync_integrity_key(record.profile_id)
+    payload = {"schema_version": 1, "profile_id": record.profile_id, "purge_generation": 1}
+    encoded = canonical_json_bytes(payload)
+    envelope = SyncEnvelopeCreate(
+        dataset_id=dataset_id,
+        device_id=_DEVICE_ID,
+        client_envelope_id="first-purge-request",
+        domain="personal_context.purge",
+        operation="tombstone",
+        object_id=record.profile_id,
+        parent_id=None,
+        entity_version=1,
+        payload=payload,
+        payload_size_bytes=len(encoded),
+        payload_hash="hmac-sha256-v1:" + hmac.new(key, encoded, hashlib.sha256).hexdigest(),
+        routing_metadata={"integrity_key_id": key_id, "profile_id": record.profile_id, "purge_generation": 0},
+    )
+
+    attempts: list[str] = []
+    apply = PersonalContextMaterializer.apply
+
+    def record_attempt(materializer: PersonalContextMaterializer, stored: SyncEnvelope, **kwargs: Any) -> Any:
+        """Observe real purge materializer entry without replacing its gated behavior."""
+        if stored.domain == "personal_context.purge":
+            attempts.append(stored.client_envelope_id)
+        return apply(materializer, stored, **kwargs)
+
+    monkeypatch.setattr(PersonalContextMaterializer, "apply", record_attempt)
+
+    first_results: list[Any] = []
+
+    def store_first() -> None:
+        """Persist a competing signed request through real ingress with a failed apply."""
+        first_results.append(_push(linked, envelope))
+
+    if boundary == "preflight":
+        store_first()
+    evaluate = sync._evaluate_envelope
+
+    def evaluate_then_compete(*args: Any, **kwargs: Any) -> Any:
+        """Move the real Sync head after validation but before insertion CAS."""
+        outcome = evaluate(*args, **kwargs)
+        if args[1].client_envelope_id == "second-purge-request":
+            store_first()
+        return outcome
+
+    with monkeypatch.context() as race:
+        if boundary == "insertion":
+            race.setattr(sync, "_evaluate_envelope", evaluate_then_compete)
+        result = _push(linked, replace(envelope, client_envelope_id="second-purge-request"))
+    first = first_results[0]
+    first_stored = sync.store.get_envelope_by_client_id(dataset_id, envelope.client_envelope_id)
+    assert first.accepted[0].apply_status == "failed"
+    assert not first.conflicts and not first.rejected
+    assert not result.accepted and not result.conflicts and len(result.rejected) == 1
+    rejection = result.rejected[0]
+    assert rejection.error_code == "personal_context_purge_reconfirmation_required"
+    assert rejection.retryable is False
+    assert rejection.message == "Refresh Personal Context and explicitly reconfirm delete-everywhere."
+    assert canonical.get_manifest() == before
+    assert canonical.get_record(record.record_id) == record
+    assert sync.store.get_envelope_by_client_id(dataset_id, envelope.client_envelope_id) == first_stored
+    assert sync.store.get_envelope_by_client_id(dataset_id, "second-purge-request") is None
+    assert sync.store.list_conflicts(dataset_id) == []
+    changed = _push(linked, replace(envelope, entity_version=2))
+    assert changed.rejected[0].error_code == "idempotency_conflict"
+    assert not changed.accepted and not changed.conflicts
+    exact_retry = _push(linked, envelope)
+    assert not exact_retry.conflicts and not exact_retry.rejected
+    assert exact_retry.accepted[0].server_sequence == first.accepted[0].server_sequence
+    assert attempts == [envelope.client_envelope_id, envelope.client_envelope_id]
+
+
 def test_conflict_canaries_absent_from_sync_storage_and_diagnostics(linked: LinkedRuntime) -> None:
     """Verify conflict canaries absent from sync storage and diagnostics."""
     from pathlib import Path

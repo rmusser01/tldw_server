@@ -4895,6 +4895,16 @@ class SyncV2Service:
                 )
                 continue
             except SyncHeadConflictError:
+                if envelope.domain == "personal_context.purge":
+                    rejected.append(
+                        SyncPushRejected(
+                            client_envelope_id=envelope.client_envelope_id,
+                            error_code="personal_context_purge_reconfirmation_required",
+                            message="Refresh Personal Context and explicitly reconfirm delete-everywhere.",
+                            retryable=False,
+                        )
+                    )
+                    continue
                 outcome = AdapterConflict(
                     client_envelope_id=envelope.client_envelope_id,
                     domain=envelope.domain,
