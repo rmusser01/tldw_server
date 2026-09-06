@@ -4,9 +4,11 @@ title: Apply Web article Service Prompt to web-content ingestion
 status: In Progress
 assignee: []
 created_date: '2026-09-06 01:34'
-updated_date: '2026-09-06 01:52'
+updated_date: '2026-09-06 01:56'
 labels: []
 dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/pull/2913'
 documentation:
   - Docs/Design/web-ingest-service-prompt.md
 ---
@@ -40,6 +42,8 @@ Baseline: 40 passed. Targeted RED tests demonstrated missing owner prompt lookup
 Independent reviewer found no blocking correctness/security/compatibility/over-engineering issues. Added the requested direct-ingestion unscoped regression (real model assembly and saved owner storage) to make that compatibility requirement explicit. Initial complete feature matrix: 75 passed. Final rerun includes this regression, connection cleanup cases, ephemeral boundaries, and strict forwarding contracts. Ruff is clean on changed code; existing B004 at process_web_scraping.py:41 is identical on dev and not modified. Python compilation passed. Temporary dependency symlinks removed without modifying shared dependencies.
 
 Final verification: 87 feature/owner/cleanup/crawl/strict-contract tests passed; 136 registry/API/ingestion compatibility tests passed (223 focused backend total). Shared Settings 76 passed and WebUI Settings 76 passed (152 UI total). Both full feature runs eventually reported success; interpreter/session cleanup was slow, and a stack sample located finalization outside application request handling. No broad full-repository suite was run. All new lint issues fixed; one unchanged pre-existing B004 remains in the touched older endpoint. Bandit: zero findings. OpenAPI fingerprint unchanged. Independent review complete; direct-ingestion regression added. All four implementation stages complete; temporary plan removed per repository convention. Ready for integration choice; no PR created yet.
+
+Published PR #2913 against dev at requester option 2. Implementation commit 75329803a1; existing verification applies unchanged. Worktree preserved for review follow-up. No merge or recurring monitor initiated.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
