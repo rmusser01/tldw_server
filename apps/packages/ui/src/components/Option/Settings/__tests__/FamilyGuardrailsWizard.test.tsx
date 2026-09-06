@@ -96,7 +96,13 @@ const trackerItem = (overrides: Record<string, unknown> = {}) => ({
   ...overrides
 })
 
-describe("FamilyGuardrailsWizard", () => {
+// Suite-scoped timeout: these tests walk a multi-step antd wizard through
+// many userEvent interactions under jsdom (0.6-2s of act() flushing each),
+// so several legitimately take 5-12s and flake at Vitest's 5s default as a
+// function of runner load. Same pattern as sidepanel-flashcards and
+// OverviewTab.quick-setup; describe options keep it from leaking to other
+// files.
+describe("FamilyGuardrailsWizard", { timeout: 60_000 }, () => {
   const originalMatchMedia = window.matchMedia
   const originalClipboard = Object.getOwnPropertyDescriptor(window.navigator, "clipboard")
 
