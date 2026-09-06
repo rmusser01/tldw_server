@@ -153,6 +153,25 @@ the release workflow. The reference-image records contain identity, SBOM, and
 scan evidence only. Do not generate or claim third-party provenance for images
 the project did not build.
 
+### Embedded runtime evidence
+
+The PR container check also loads each Python candidate's existing OCI layout
+into Docker's containerd image store and runs it by the scanned subject digest.
+It does not rebuild or substitute a mutable tag. The probe verifies the selected
+`linux/amd64` manifest/config hashes, locked Chroma/python-jose/cryptography
+versions, real application-managed per-user collection/query isolation, absence
+of TCP listeners while the embedded clients are active, and an ES256 round trip
+through python-jose's cryptography backend. It runs without network access or
+capabilities, with a read-only root and temporary scratch storage.
+
+`runtime-image-<name>.json` records these results, the lock hash, and the subject
+and config digests; it is included in the evidence checksum manifest. Probe
+failure rejects admission but does not suppress vulnerability scans or uploads.
+These narrowly scoped checks are **not** a full application-startup audit or a
+determination that a CVE is inapplicable. They never create exceptions or change
+either vulnerability gate. Third-party server deployments and optional runtime
+paths still need their own applicability review.
+
 ## Vulnerability exceptions
 
 The canonical policy is
