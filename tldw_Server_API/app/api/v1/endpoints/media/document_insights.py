@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import time
 from typing import Any
 
@@ -38,7 +37,7 @@ from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     parse_structured_output,
 )
-from tldw_Server_API.app.core.Prompt_Management.service_prompts import ResolvedServicePrompt, resolve_service_prompt
+from tldw_Server_API.app.core.Prompt_Management.document_insights import prepare_document_insights_prompt
 
 router = APIRouter(tags=["Document Workspace"])
 
@@ -193,26 +192,16 @@ async def generate_document_insights(
     try:
         prompts_db = await get_prompts_db_for_user(http_request, current_user)
 
-        def resolve_and_close() -> ResolvedServicePrompt:
-            """Read the owner snapshot and release its connection on one worker."""
-            try:
-                return resolve_service_prompt(prompts_db, "media.document.insights")
-            finally:
-                prompts_db.close_connection()
-
-        prompt = await asyncio.to_thread(resolve_and_close)
+        system_prompt, prompt_fingerprint = await asyncio.to_thread(prepare_document_insights_prompt, prompts_db)
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Failed to resolve document insights guidance")
+        logger.error(
+            "Failed to resolve document insights guidance (media_id={}, user_id={}, prompt_id=media.document.insights)",
+            media_id,
+            user_id,
+        )
         raise HTTPException(status_code=500, detail="Failed to load document insights guidance") from exc
-
-    system_prompt = (
-        f"{prompt.parts['analysis_guidance']}\n\nReturn JSON with this structure:\n"
-        '{"insights": [{"category": "...", "title": "...", "content": "..."}]}\n\n'
-        f"{prompt.parts['presentation_guidance']}\n- Return ONLY valid JSON, no other text\n"
-    )
-    prompt_fingerprint = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()
 
     # Check cache first unless forced (cached responses don't count against rate limit)
     cache_key = _build_insights_cache_key(

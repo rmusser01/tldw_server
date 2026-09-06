@@ -4,7 +4,7 @@ title: Make Document Insights guidance customizable through Service Prompts
 status: In Progress
 assignee: []
 created_date: '2026-09-06 02:44'
-updated_date: '2026-09-06 03:00'
+updated_date: '2026-09-06 03:12'
 labels: []
 dependencies: []
 references:
@@ -43,6 +43,10 @@ Stage 1: Record approved design and baseline. Stage 2: Add failing public API/mo
 Approved bounded design implemented on isolated codex/document-insights-service-prompt from dev 5ed30d7683. Baseline: 10 passed. RED: 4 failed and 2 passed, demonstrating ignored saved guidance and stale cache reuse. GREEN/final: 111 focused backend tests passed, including 11 HTTP/storage/cache/model-boundary tests; shared Settings 77 passed, WebUI Settings 77 passed, prompt-service/transport 124 passed. Ruff check and format check pass, compilation passes, Bandit on both touched runtime files reports zero findings. OpenAPI export and fingerprint check pass unchanged; TypeScript schema generation passes. Export required existing repository package source paths on PYTHONPATH (no dependency change). Independent review found no actionable findings and independently passed all 11 feature tests. Full repository suite, full frontend typecheck and browser smoke were not run. Temporary dependency symlinks removed after verification; no new dependency. All four implementation stages complete; own temporary plan removed per repository convention. Implementation ready for integration choice; no PR created.
 
 Published PR #2914 against dev at requester option 2. Implementation commit 78239bb760; verification recorded above applies to unchanged implementation. Worktree preserved for review follow-up. No merge or recurring monitor initiated.
+
+Continuing PR #2914 review. Qodo posted four actionable findings: move prompt preparation into core, add safe request identifiers to prompt-resolution error logging, document new test functions/methods, and replace escaping untyped lambdas with typed callbacks. Verifying logging test-first and preserving existing public HTTP/cache regressions during the minimal extraction.
+
+All four initial Qodo findings addressed. Extracted only prompt preparation into core/Prompt_Management/document_insights.py; endpoint retains authenticated storage acquisition and HTTP mapping. Added safe media/user/prompt identifiers to resolution-error logs, with a regression that failed before the fix. Documented all new test methods and replaced escaping lambdas with typed local callbacks. Verification: 112 focused backend tests passed; independent follow-up review found no actionable issues and passed all 12 integration cases. Ruff lint/format, compilation and diff checks pass; Bandit across three runtime files reports zero findings. AST audit found no missing function docstrings or parameter/return annotations in the new core and test modules. Publishing fixes and replying in each Qodo thread.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

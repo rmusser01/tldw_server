@@ -16,6 +16,10 @@ of the assembled system prompt in the existing owner/database-scoped cache key;
 edits and reset cannot retrieve results produced with different guidance. An
 in-flight request retains its original prompt and cache key even if Settings
 changes while the model is running. No new cache, storage table or endpoint.
+Core prompt preparation owns resolution, fixed-instruction assembly and the
+fingerprint; the endpoint supplies authenticated storage and maps failures to
+HTTP. Error logs contain safe media/user/prompt identifiers, not authored text
+or database details.
 
 Verify public HTTP/model-facing behavior with real prompt storage and cache
 serialization: defaults, save/reset, owner isolation, mid-request edits, cache

@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
+from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
@@ -68,9 +69,11 @@ def context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleN
     app.include_router(service_prompts.router, prefix="/api/v1")
 
     async def user() -> User:
+        """Return the current request owner as a real authenticated user model."""
         return User(id=state.owner, username=f"owner-{state.owner}")
 
     async def database(request: Request, owner: User) -> PromptsDatabase:
+        """Supply real storage for the owner captured by the HTTP request."""
         state.reads.append(owner.id)
         return state.databases[owner.id]
 
@@ -80,24 +83,30 @@ def context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleN
         db_path_str = str(tmp_path / "media.db")
 
         def get_media_by_id(self, media_id: int, **kwargs: Any) -> dict[str, Any]:
+            """Return the controlled document at the media database boundary."""
             return {"id": media_id, "content": state.content, "type": "pdf"}
 
     class CacheTransport:
         """In-memory Redis transport; production cache encoding/lookup stays real."""
 
         def get(self, key: str) -> str | None:
+            """Read a serialized response using the production cache key."""
             return state.cache.get(key)
 
         def setex(self, key: str, ttl: int, value: str) -> None:
+            """Store a serialized response for this short-lived fixture."""
             state.cache[key] = value
 
         def sadd(self, *args: Any) -> None:
+            """Ignore invalidation indexing; these tests exercise cache identity."""
             pass
 
         def expire(self, *args: Any) -> None:
+            """Ignore index expiry because fixture teardown releases all entries."""
             pass
 
     def model(self: OpenAIAdapter, payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        """Capture assembled model requests and return controlled provider output."""
         state.calls.append(payload)
         if state.during_model:
             state.during_model()
@@ -108,7 +117,30 @@ def context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleN
         }
 
     async def no_rate_limit() -> None:
+        """Isolate prompt behavior from external rate-limit infrastructure."""
         pass
+
+    def settings_database() -> PromptsDatabase:
+        """Resolve Settings storage using the current authenticated owner."""
+        return state.databases[state.owner]
+
+    def principal() -> AuthPrincipal:
+        """Supply the owner identity required by the real Settings API guards."""
+        return AuthPrincipal(
+            kind="user",
+            user_id=state.owner,
+            username=f"owner-{state.owner}",
+            subject=f"user:{state.owner}",
+            token_type="access",
+        )
+
+    def provider_key(*args: Any, **kwargs: Any) -> tuple[str, None]:
+        """Supply a test credential without touching deployment secrets."""
+        return "test-key", None
+
+    def provider_config() -> dict[str, Any]:
+        """Provide a deterministic model while retaining real model selection."""
+        return {"openai_api": {"model": "test-model"}}
 
     for route in app.routes:
         for dep in getattr(getattr(route, "dependant", None), "dependencies", []):
@@ -116,18 +148,12 @@ def context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleN
                 app.dependency_overrides[dep.call] = no_rate_limit
     app.dependency_overrides[get_request_user] = user
     app.dependency_overrides[get_media_db_for_user] = MediaStore
-    app.dependency_overrides[get_prompts_db_for_user] = lambda: state.databases[state.owner]
-    app.dependency_overrides[get_auth_principal] = lambda: AuthPrincipal(
-        kind="user",
-        user_id=state.owner,
-        username=f"owner-{state.owner}",
-        subject=f"user:{state.owner}",
-        token_type="access",
-    )
+    app.dependency_overrides[get_prompts_db_for_user] = settings_database
+    app.dependency_overrides[get_auth_principal] = principal
     monkeypatch.setattr(endpoint, "get_prompts_db_for_user", database, raising=False)
     monkeypatch.setattr(endpoint, "DEFAULT_LLM_PROVIDER", "openai")
-    monkeypatch.setattr(endpoint, "resolve_provider_api_key", lambda *a, **kw: ("test-key", None))
-    monkeypatch.setattr(endpoint, "load_and_log_configs", lambda: {"openai_api": {"model": "test-model"}})
+    monkeypatch.setattr(endpoint, "resolve_provider_api_key", provider_key)
+    monkeypatch.setattr(endpoint, "load_and_log_configs", provider_config)
     monkeypatch.setattr(OpenAIAdapter, "chat", model)
     monkeypatch.setattr(cache, "get_cache_client", CacheTransport)
     with TestClient(app, raise_server_exceptions=False) as client:
@@ -163,6 +189,7 @@ def generate(context: SimpleNamespace, **options: Any) -> dict[str, Any]:
 
 
 def test_default_messages_and_provider_controls_are_unchanged(context: SimpleNamespace) -> None:
+    """No override preserves both model messages and existing provider controls."""
     generate(context, categories=["methods"], model="chosen-model", max_content_length=500)
     payload = context.calls[0]
     assert payload["messages"] == [
@@ -181,6 +208,7 @@ def test_default_messages_and_provider_controls_are_unchanged(context: SimpleNam
 
 
 def test_saved_guidance_changes_model_message_but_not_json_contract(context: SimpleNamespace) -> None:
+    """Only editable guidance changes while fixed output instructions survive."""
     save(context)
     generate(context)
     assert context.calls[0]["messages"][0]["content"] == (
@@ -192,6 +220,7 @@ def test_saved_guidance_changes_model_message_but_not_json_contract(context: Sim
 
 
 def test_prompt_edits_miss_cache_and_unchanged_prompts_hit(context: SimpleNamespace) -> None:
+    """Either guidance edit changes cache identity without disclosing prompt text."""
     assert generate(context)["cached"] is False
     assert generate(context)["cached"] is True
     save(context)
@@ -204,6 +233,7 @@ def test_prompt_edits_miss_cache_and_unchanged_prompts_hit(context: SimpleNamesp
 
 
 def test_owner_overrides_and_cache_entries_are_isolated(context: SimpleNamespace) -> None:
+    """Switching owners changes guidance and cannot reuse another owner's cache."""
     save(context, "Owner one", "One style")
     generate(context)
     context.owner = 2
@@ -216,8 +246,14 @@ def test_owner_overrides_and_cache_entries_are_isolated(context: SimpleNamespace
 
 
 def test_mid_request_edit_does_not_poison_new_prompt_cache(context: SimpleNamespace) -> None:
+    """An edit during model execution cannot relabel the old result with a new key."""
     save(context, "Old instructions", "Old style")
-    context.during_model = lambda: save(context, "New instructions", "New style")
+
+    def edit_during_model() -> None:
+        """Change saved guidance after the request snapshot has been captured."""
+        save(context, "New instructions", "New style")
+
+    context.during_model = edit_during_model
     generate(context)
     context.during_model = None
     assert generate(context)["cached"] is False
@@ -226,6 +262,7 @@ def test_mid_request_edit_does_not_poison_new_prompt_cache(context: SimpleNamesp
 
 
 def test_custom_guidance_does_not_disable_output_normalization(context: SimpleNamespace) -> None:
+    """Invalid model items are discarded and confidence is normalized as before."""
     save(context, "Invent categories", "Use any output shape")
     context.output = {
         "insights": [
@@ -241,6 +278,7 @@ def test_custom_guidance_does_not_disable_output_normalization(context: SimpleNa
 
 
 def test_settings_save_and_reset_change_generation_and_cache(context: SimpleNamespace) -> None:
+    """Real Settings mutations affect generation and invalidate different-guidance results."""
     path = f"/api/v1/service-prompts/{PROMPT_ID}"
     detail = context.client.get(path)
     assert detail.status_code == 200
@@ -266,6 +304,7 @@ def test_settings_save_and_reset_change_generation_and_cache(context: SimpleName
 
 
 def test_invalid_saved_guidance_does_not_return_previously_cached_insights(context: SimpleNamespace) -> None:
+    """A corrupt override fails explicitly instead of serving prior cached content."""
     generate(context)
     db = context.databases[1]
     db.save_service_prompt_override(PROMPT_ID, {"unexpected": "private prompt text"}, None)
@@ -275,24 +314,50 @@ def test_invalid_saved_guidance_does_not_return_previously_cached_insights(conte
     assert len(context.calls) == 1
 
 
+def test_prompt_resolution_log_identifies_request_without_private_details(context: SimpleNamespace) -> None:
+    """A failed lookup emits safe correlation fields, never authored prompt text."""
+    context.databases[1].save_service_prompt_override(PROMPT_ID, {"unexpected": "private prompt marker"}, None)
+    messages: list[str] = []
+
+    def capture(message: str) -> None:
+        """Retain the real formatted log event without replacing the logger."""
+        messages.append(str(message))
+
+    sink = logger.add(capture, level="ERROR", format="{message}")
+    try:
+        response = context.client.post("/api/v1/media/7/insights", json={})
+    finally:
+        logger.remove(sink)
+    assert response.status_code == 500
+    error = next(message for message in messages if "Failed to resolve document insights guidance" in message)
+    assert "media_id=7" in error
+    assert "user_id=1" in error
+    assert "prompt_id=media.document.insights" in error
+    assert "private prompt marker" not in error
+    assert str(context.databases[1].db_path) not in error
+
+
 @pytest.mark.parametrize("fail_read", [False, True])
 def test_lookup_connection_is_closed_on_its_worker(
     context: SimpleNamespace,
     monkeypatch: pytest.MonkeyPatch,
     fail_read: bool,
 ) -> None:
+    """Successful and failed prompt reads release the connection on its own worker."""
     db = context.databases[1]
     events = []
     original_read = db.get_service_prompt_override
     original_close = db.close_connection
 
     def read(definition_id: str) -> Any:
+        """Track the actual lookup thread and optionally simulate a storage error."""
         events.append(("read", threading.get_ident()))
         if fail_read:
             raise RuntimeError("private database path")
         return original_read(definition_id)
 
     def close() -> None:
+        """Track and execute actual thread-local connection cleanup."""
         events.append(("close", threading.get_ident()))
         original_close()
 
@@ -306,6 +371,7 @@ def test_lookup_connection_is_closed_on_its_worker(
 
 
 def test_truncation_and_force_bypass_remain_effective(context: SimpleNamespace) -> None:
+    """Customization preserves content truncation and explicit cache bypass."""
     save(context)
     context.content = "x" * 501
     generate(context, max_content_length=500)
