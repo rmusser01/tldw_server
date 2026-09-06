@@ -16,6 +16,8 @@
 
 ## Global Constraints
 
+**Snapshot amendment approved 2026-09-06:** Pin only the candidate recipe to Debian and Debian-security snapshots at `20260906T000000Z`, with a shared `snapshot-base` and a separately buildable `build-deps` target. Preserve Debian keyring signature verification, exact source definitions, and all three signed InRelease records separately for builder/runtime; disable only each snapshot source's expiry check for archival replay. This fixes dependency-selection drift, not bit-identical binary reproducibility. Production images, source hashes, configure flags and vulnerability gates remain unchanged. Actual dependency-stage and full-image verification are required before claiming this amendment validated.
+
 - Work only in `/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design`; do not change the shared checkout/environment or unrelated sessions' work.
 - Retain Chroma. No vulnerability exceptions, allowlists, weakened thresholds, or automatic CVE disposition from runtime evidence.
 - Production Dockerfiles and release image selection remain unchanged during candidate evaluation.
@@ -156,3 +158,20 @@ Published head `21227dd09e` passes Characters Harness and macOS E2E. Earlier fai
 Supplemental Grype 0.118.0 (`anchore/grype@sha256:8a93fc48da96bd6ec5981279d099b69de11541dc68fdf222fb9161f8ff284af7`) completed using a valid database built `2026-09-06T06:27:35Z`. It reports 340 total matches, 92 High/Critical matches, zero ignored matches, and zero FFmpeg matches in the Syft catalog. An offline FFmpeg 7.1.5 CPE positive-control query against the same database reports 33 matches, including 23 High/Critical IDs. The control does not cover every earlier Trivy FFmpeg finding, so these results do not close the full authoritative CVE mapping gap. Additional Python and OS matches require reconciliation, not automatic dismissal. Evidence: `grype-clean-ffmpeg9.json`, `grype-ffmpeg715-control.json`, and retained task cache `/private/tmp/task-13013-7-grype-db.ODa4Tl`. The initial 2 GiB tmpfs database hydration failed; the successful retry used private disk-backed storage. No scanner/admission policy was changed.
 
 Acceptance amendment independently reviewed clean and committed as `063def767c` after rebase onto dev `39d67ecaa377d291b6da3db71246a9021730cf55`. All 24 patches are unchanged per range-diff. Post-rebase verification: 261 passed, one opt-in skip, four existing warnings; shard coverage reports `new_uncovered=0` across 4,568 test files. Black/Ruff/Bandit were clean for the unchanged amendment scope. This is not final-head GitHub admission evidence.
+
+### Source-fix mapping follow-up — 2026-09-06
+
+Read-only review mapped the six CVEs absent from the Grype 7.1.5 positive control to release-branch fixes present in the authenticated 9.0.1 archive. Each affected source file matches the upstream `n9.0.1` tag byte-for-byte, and each release fix is an ancestor of that tag:
+
+- CVE-2026-58049: [RASC row-boundary fix `f8d7795`](https://github.com/FFmpeg/FFmpeg/commit/f8d7795dcca36a4dd412e89cbd83e3dfec1e0d81), explicitly cherry-picked from master `11ff18a6`. This mapping is an inference from the exact issue mechanics and patch; CNA/Debian metadata does not yet identify a fix. Do not describe it as vendor clearance.
+- CVE-2026-64831: [Vulkan HEVC bounds fix `3d129a4`](https://github.com/FFmpeg/FFmpeg/commit/3d129a4a8531e9f7baa8558c7c994b4dd36bcf04), explicitly cherry-picked from the CNA-linked master fix. Both this and the preceding fix were already in `n9.0`.
+- CVE-2026-75142: [MPEG-PS header bound `b274f0d`](https://github.com/FFmpeg/FFmpeg/commit/b274f0d21ba684446fd59b49e00f3f8e9ed954df).
+- CVE-2026-75143: [RIST copy bound `8880a17`](https://github.com/FFmpeg/FFmpeg/commit/8880a174d08131f94f58a0492d1c8c6d68b74f67).
+- CVE-2026-75144: [VC-2 packet bound `1afd5c3`](https://github.com/FFmpeg/FFmpeg/commit/1afd5c3ddafda4209e0881cd30684b919e99de7c).
+- CVE-2026-75146: [DASH sequence bounds `999f8ba`](https://github.com/FFmpeg/FFmpeg/commit/999f8ba75ce0bf1167677de7e11a5af678fdb866).
+
+Debian explicitly identifies the last four as `n9.0.1` fixes on their CVE tracker pages. Detailed source hashes, ancestry checks and references are retained in `/private/tmp/task-13013-7-ffmpeg-candidate.08RU6j/ffmpeg-six-cve-mapping.md`. This closes a source-mapping research gap, not package admission: the remaining OS findings, libplacebo/static-glslang catalog coverage, and CVE-2026-58049 metadata reconciliation remain open. No waiver or scanner policy was introduced.
+
+### Snapshot amendment implementation checkpoint
+
+The candidate now uses the approved shared fixed source configuration, preserves separate builder/runtime signed APT metadata, and exposes a `build-deps` validation target. Independent scoped review approved spec compliance and code quality with no blocking findings. The report now preserves the four existing warning texts. Controller verification: 210 Supply Chain tests passed, one opt-in skip, four existing warnings; Black/Ruff clean; scoped test-only Bandit has zero findings (B101 excluded for pytest assertions); shard coverage has `new_uncovered=0` across 4,569 test files. The live dependency-stage build successfully fetched and processed signed metadata for all three snapshot suites, then entered package installation; completion is pending in `snapshot-build-deps.log`. The previous immutable candidate remains retained and unchanged. No full-image rebuild, new-image compatibility result, or new-image security clearance is claimed by this checkpoint.
