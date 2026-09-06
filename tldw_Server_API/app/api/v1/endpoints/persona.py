@@ -8921,6 +8921,9 @@ async def persona_stream(
             session_id: str,
             state: dict[str, Any],
         ) -> None:
+            runtime = state.get("voice_runtime") or {}
+            if not _coerce_bool(runtime.get("enable_vad"), default=True):
+                return
             if bool(state.get("manual_mode_notice_sent")):
                 return
             state["manual_mode_notice_sent"] = True
@@ -10673,6 +10676,8 @@ async def persona_stream(
                 transcript_delta = ""
                 auto_commit_triggered = False
                 buffer_updated_from_snapshot = False
+                transcript_snapshot_changed = False
+                next_snapshot = ""
                 stt_state = persona_live_stt_state_by_session.get(session_id)
                 if stt_state is None:
                     persona_live_voice_registry.clear(
@@ -10705,13 +10710,14 @@ async def persona_stream(
                                 result=result,
                             )
                         else:
-                            next_snapshot = str(transcriber.get_full_transcript() or "").strip()
+                            # No recognition update is not a rollback to the last final.
+                            next_snapshot = previous_snapshot
                         next_snapshot = str(next_snapshot or "").strip()
                         if next_snapshot and bool(stt_state.get("current_utterance_committed")):
                             _clear_persona_live_commit_state(stt_state)
-                        if next_snapshot:
-                            voice_transcript_buffer_by_session[session_id] = next_snapshot
-                            buffer_updated_from_snapshot = True
+                        transcript_snapshot_changed = next_snapshot != previous_snapshot
+                        voice_transcript_buffer_by_session[session_id] = next_snapshot
+                        buffer_updated_from_snapshot = True
                         transcript_delta = _persona_live_forward_delta(
                             previous_snapshot,
                             next_snapshot,
@@ -10740,7 +10746,7 @@ async def persona_stream(
                             message="Speech transcription failed. Check the selected speech model and start voice again.",
                         )
                         continue
-                if transcript_delta:
+                if transcript_snapshot_changed:
                     transcript_seq = transcript_seq_by_session[session_id]
                     transcript_seq_by_session[session_id] += 1
                     if not buffer_updated_from_snapshot:
@@ -10758,6 +10764,7 @@ async def persona_stream(
                             "session_id": session_id,
                             "client_message_id": client_message_id,
                             "text_delta": transcript_delta,
+                            "transcript": next_snapshot,
                             "audio_format": audio_format,
                             "seq": transcript_seq,
                             "timestamp_ms": timestamp_ms,

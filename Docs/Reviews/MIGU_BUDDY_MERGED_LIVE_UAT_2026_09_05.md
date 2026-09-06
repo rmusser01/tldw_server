@@ -124,3 +124,26 @@ a synthetic `voice_commit` transcript produced 25388 speech bytes. Explicit sear
 still produced an unapproved `rag_search` plan, and final Stop returned 200.
 The [rebased source receipt](assets/migu-buddy-conversation-2026-09-05/rebased-source-identity.json)
 identifies revision and source hashes. Microphone and playback were not used.
+
+## Human browser voice UAT and transcript repair
+
+On revision `9ffa9a272e`, the user intentionally spoke once through Persona Live.
+Whisper recognized speech, DeepSeek replied, and Kokoro played audio that the user
+confirmed hearing clearly. The browser showed preparing, listening, thinking,
+speaking and idle. Auto-resume stayed off; Live disconnected after playback.
+The [assessment](assets/migu-buddy-browser-voice-2026-09-05/assessment.json) and
+[backend identity](assets/migu-buddy-browser-voice-2026-09-05/backend-identity.json)
+record sanitized observations and unchanged normal configuration. Server shutdown
+waited for a remaining connection after SIGTERM; SIGINT ended the owned process.
+
+Full acceptance failed: one phrase became repeated transcription fragments and
+affected the provider reply; deliberate manual mode was also reported as a VAD
+failure. TASK13198 repairs snapshot rollback between recognizer updates, browser
+append-only handling of revisions, and the false warning. Last heard uses
+replacement snapshots and the conversation log records one committed utterance.
+Actual repeated words remain intact. Two backend and three frontend regressions
+failed before the fix. Final scopes passed 125 Python and 165 frontend tests.
+Touched Bandit found zero issues, Ruff added no findings, ESLint had zero errors
+and 12 existing warnings, and scoped TypeScript had no owned diagnostics
+(27 dependency diagnostics remain). The first full UI typecheck exceeded Node's
+heap; the scoped check completed. Post-fix human acceptance remains pending.

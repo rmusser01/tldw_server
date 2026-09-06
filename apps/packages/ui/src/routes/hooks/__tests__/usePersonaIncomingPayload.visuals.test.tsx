@@ -26,6 +26,13 @@ it("does not publish rejected late voice replies but retains ordinary text repli
   handlePayload.mockReturnValue(undefined)
   act(() => result.current({ event: "assistant_delta", text_delta: "ordinary text reply" }))
   expect(appendLog).toHaveBeenCalledWith("assistant", "ordinary text reply")
+  appendLog.mockClear()
+  act(() => result.current({ event: "partial_transcript", transcript: "blue note", text_delta: "blue note" }))
+  act(() => result.current({ event: "partial_transcript", transcript: "blue notebook", text_delta: "book" }))
+  expect(appendLog).not.toHaveBeenCalled()
+  act(() => result.current({ event: "notice", reason_code: "VOICE_TURN_COMMITTED", transcript: "blue notebook", message: "Voice turn committed." }))
+  expect(appendLog.mock.calls.filter(([kind]) => kind === "user")).toEqual([["user", "blue notebook"]])
+
 })
 
 describe("usePersonaIncomingPayload visual state overrides", () => {

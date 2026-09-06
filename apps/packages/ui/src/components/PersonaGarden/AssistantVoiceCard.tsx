@@ -220,6 +220,8 @@ export const AssistantVoiceCard: React.FC<AssistantVoiceCardProps> = ({
                 ? "Start checks the selected speech models and conversation provider before requesting microphone access."
               : manualModeRequired
                 ? "Server speech transcription is ready, but VAD auto-commit is unavailable. Use Send now."
+              : !autoCommitEnabled
+                ? "Server speech transcription ready. Use Send now to commit manually."
                 : "Server speech transcription ready with VAD auto-commit."}
           </div>
         </div>

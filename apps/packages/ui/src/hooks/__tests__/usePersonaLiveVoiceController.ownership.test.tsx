@@ -104,6 +104,23 @@ describe("Persona voice readiness and ownership", () => {
   })
   afterEach(() => vi.useRealTimers())
 
+  it("replaces revised transcript snapshots without deleting intentional repeats", async () => {
+    const h = setup({ autoCommitEnabled: false })
+    const { pending } = await h.start()
+    await h.ready(pending)
+    for (const transcript of ["blue boat", "blue notebook is ready", "blue notebook is ready", "blue notebook is ready ready"]) {
+      act(() => h.result.current.handlePayload({
+        ...h.prepare(), event: "partial_transcript", transcript, text_delta: "legacy delta"
+      }))
+    }
+    expect(h.result.current.heardText).toBe("blue notebook is ready ready")
+    act(() => h.result.current.handlePayload({ ...h.prepare(), event: "partial_transcript", transcript: "", text_delta: "" }))
+    expect(h.result.current.heardText).toBe("")
+    act(() => h.result.current.handlePayload({ ...h.prepare(), event: "partial_transcript", transcript: "blue notebook is ready ready" }))
+    act(() => h.result.current.sendCurrentTranscriptNow())
+    expect(h.sent().findLast((message) => message.type === "voice_commit")?.transcript).toBe("blue notebook is ready ready")
+  })
+
   it("waits for matching server readiness before requesting microphone capture", async () => {
     const h = setup()
     const { pending } = await h.start()

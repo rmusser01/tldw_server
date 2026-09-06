@@ -39,3 +39,14 @@ Live currently proposes a RAG tool for ordinary greetings, advertises voice=fals
 ## Follow-up
 
 Focused ownership, admission, readiness and cancellation regressions, then real provider and human microphone/playback UAT under TASK-13197 and TASK-13195.
+
+## Transcript revision semantics (TASK13198)
+
+Persona `partial_transcript` events include a current `transcript` snapshot in
+addition to the legacy append-only `text_delta`. Recognizers may revise
+provisional words; the browser replaces its heard text with the snapshot instead
+of treating a revision as more speech. An audio chunk without a new recognition
+result retains the previous snapshot. The conversation log records the committed
+transcript once, while Last heard displays provisional text. Intentional manual
+auto-commit settings do not signal unavailable VAD. No text deduplication is used,
+so actual repeated speech remains valid.

@@ -1501,12 +1501,11 @@ export const usePersonaLiveVoiceController = ({
 
       if (eventType === "partial_transcript") {
         const delta = String(payload?.text_delta || "").trim()
-        if (!delta) return
-        setHeardText((current) => {
-          const next = current ? `${current} ${delta}` : delta
-          heardTranscriptRef.current = next
-          return next
-        })
+        const snapshot = typeof payload?.transcript === "string" ? payload.transcript.trim() : null
+        if (snapshot === null && !delta) return
+        const next = snapshot ?? (heardTranscriptRef.current ? `${heardTranscriptRef.current} ${delta}` : delta)
+        heardTranscriptRef.current = next
+        setHeardText(next)
         return
       }
 

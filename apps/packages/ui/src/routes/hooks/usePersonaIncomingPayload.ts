@@ -204,7 +204,7 @@ export const usePersonaIncomingPayload = ({
       }
 
       if (eventType === "partial_transcript") {
-        appendLog("user", String(payload?.text_delta || ""))
+        // Last heard displays revisions; the log records only committed speech.
         return
       }
 
@@ -308,6 +308,9 @@ export const usePersonaIncomingPayload = ({
 
       if (eventType === "notice") {
         const reasonCode = String(payload?.reason_code || "").trim().toUpperCase()
+        if (reasonCode === "VOICE_TURN_COMMITTED" && typeof payload?.transcript === "string") {
+          appendLog("user", payload.transcript)
+        }
         if (
           reasonCode === "VOICE_TURN_PROCESSING" ||
           reasonCode === "VOICE_TOOL_EXECUTION_PROCESSING"

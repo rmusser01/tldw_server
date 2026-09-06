@@ -68,4 +68,7 @@ it("offers Stop during preparation and generation without claiming speech is rea
     screen.getByText(/Start checks the selected speech/)
   ).toBeInTheDocument()
   expect(screen.getByRole("button", { name: "Start listening" })).toBeEnabled()
+  view.rerender(<AssistantVoiceCard {...props} isPreparing={false} voiceReady={true} autoCommitEnabled={false} />)
+  expect(screen.getByText("Server speech transcription ready. Use Send now to commit manually.")).toBeInTheDocument()
+  expect(screen.getByRole("checkbox", { name: "Auto-commit (session only)" })).toBeEnabled()
 })

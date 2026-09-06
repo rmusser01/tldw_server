@@ -5808,3 +5808,56 @@ def test_stop_cancels_queued_turn_without_starting_it_and_allows_fresh_send(monk
             assert not old_release_timed_out.is_set()
     finally:
         release_old.set()
+
+
+@pytest.mark.parametrize("auto_commit", [False, True])
+def test_persona_revised_voice_snapshots_do_not_replay_partial_text(monkeypatch, auto_commit):
+    class Transcriber:
+        def __init__(self):
+            self.results = iter([
+                {"type": "partial", "text": "blue boat"},
+                None,
+                {"type": "partial", "text": "blue notebook is ready"},
+                None,
+                {"type": "partial", "text": "blue notebook is ready"},
+                {"type": "partial", "text": "blue notebook is ready ready"},
+            ])
+
+        def initialize(self):
+            pass
+
+        def cleanup(self):
+            pass
+
+        def reset(self):
+            pass
+
+        def get_full_transcript(self):
+            return "Reply with"
+
+        async def process_audio_chunk(self, audio):
+            return next(self.results)
+
+    monkeypatch.setattr(persona_ep, "_create_persona_live_stt_transcriber", lambda **kw: Transcriber())
+    monkeypatch.setattr(persona_ep, "_create_persona_live_turn_detector", lambda **kw: None)
+    events = []
+    with TestClient(fastapi_app) as client:
+        with client.websocket_connect("/api/v1/persona/stream") as ws:
+            ws.receive_json()
+            ws.send_json({"type": "voice_config", "session_id": "snapshot-test", "stt": {"model": "tiny", "enable_vad": auto_commit}})
+            _recv_until(ws, lambda e: e.get("reason_code") == "VOICE_CONFIG_UPDATED")
+            _prepare_test_voice(ws, "snapshot-test")
+            for _ in range(6):
+                ws.send_json({"type": "audio_chunk", "session_id": "snapshot-test", "audio_format": "pcm16", "bytes_base64": base64.b64encode(b"\0\0").decode()})
+            ws.send_json({"type": "voice_commit", "session_id": "snapshot-test"})
+            def committed(event):
+                events.append(event)
+                return event.get("reason_code") == "VOICE_TURN_COMMITTED"
+            result = _recv_until(ws, committed)
+            assert result["transcript"] == "Reply with blue notebook is ready ready"
+    updates = [event for event in events if event.get("event") == "partial_transcript"]
+    assert [event.get("transcript") for event in updates] == [
+        "Reply with blue boat", "Reply with blue notebook is ready", "Reply with blue notebook is ready ready",
+    ]
+    warnings = [event for event in events if event.get("reason_code") == "VOICE_MANUAL_MODE_REQUIRED"]
+    assert bool(warnings) is auto_commit

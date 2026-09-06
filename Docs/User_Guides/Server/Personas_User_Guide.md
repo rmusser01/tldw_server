@@ -447,3 +447,9 @@ explicitly activate a valid pack.
 - `Docs/Code_Documentation/Persona_Visual_Packs.md` - Persona Visual Pack ownership, activation, import/export, and renderer notes.
 - `Docs/User_Guides/WebUI_Extension/Persona_Live_Wake_Phrases.md` - wake phrase behavior in the WebUI/extension surfaces.
 - `Docs/Operations/Persona_Memory_ChaCha_Cutover_Rollback_Runbook_2026_02_22.md` - memory cutover and rollback notes.
+
+
+Persona Live shows provisional recognition under **Last heard**. Recognition may
+revise those words as more speech arrives; the conversation transcript records
+the committed utterance once. With Auto-commit off, use **Send now** when finished.
+Choosing manual control does not indicate a VAD failure.
