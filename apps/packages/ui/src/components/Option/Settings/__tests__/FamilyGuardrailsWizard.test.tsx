@@ -1,5 +1,10 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { configure, fireEvent, render, screen, waitFor } from "@testing-library/react"
+
+// The wizard's step transitions render a heavy antd tree; waitFor/findBy at
+// testing-library's 1s default race them on loaded CI runners (#2911).
+// Environments are per test file under vitest, so this cannot leak.
+configure({ asyncUtilTimeout: 15_000 })
 import { message } from "antd"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -1463,8 +1468,7 @@ describe("FamilyGuardrailsWizard", { timeout: 60_000 }, () => {
       expect(screen.getByRole("heading", { name: "Review + Activate" })).toBeInTheDocument()
       expect(screen.getByText("Caregivers:")).toBeInTheDocument()
     })
-    },
-    15000
+    }
   )
 
   it("requires complete dependent rows before allowing continue", async () => {
