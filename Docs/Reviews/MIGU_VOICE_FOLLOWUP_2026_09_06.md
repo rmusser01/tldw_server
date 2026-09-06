@@ -132,3 +132,18 @@ Evidence: [local phrase result](assets/migu-parakeet-turn-2026-09-06/phrase-resu
 [repetition result](assets/migu-parakeet-turn-2026-09-06/repetition-result.json),
 [phrase harness](assets/migu-parakeet-turn-2026-09-06/phrase-probe.txt), and
 [human receipt](assets/migu-parakeet-turn-2026-09-06/human-attempt.json).
+
+### Human retry on cdf099fff7
+
+The requester confirmed saying “Say the blue notebook is ready.” Browser Last
+heard and Last sent contained “See the blue notebook is ready.” once. Persona
+replied “I see the blue notebook is ready.” Four TTS chunks arrived and Live
+returned to idle. The requester confirmed clear audible playback and that
+recording/playback stopped afterward. The running backend's source hashes matched
+the tested code.
+
+Repeated fragments did not recur in this attempt. Exact transcription remains
+unqualified because “Say” was recognized as “See.” No raw human audio was retained,
+so this receipt alone cannot distinguish an acoustic/model error from submission
+timing. Floating Buddy intermediate states were not observed. TASK-13202 remains
+open. [Source-bound human receipt](assets/migu-parakeet-turn-2026-09-06/human-retry.json).
