@@ -690,6 +690,9 @@ export const Playground = () => {
     typeof setTimeout
   > | null>(null);
   const initializePlaygroundRef = React.useRef(false);
+  const initializePlaygroundCallbackRef = React.useRef<
+    () => Promise<void>
+  >(async () => {});
   const sidepanelHandoffAppliedRef = React.useRef(false);
   const routeCharacterIntentAppliedRef = React.useRef<string | null>(null);
   const routeCharacterIntentInFlightRef = React.useRef<string | null>(null);
@@ -1771,6 +1774,10 @@ export const Playground = () => {
   ]);
 
   React.useEffect(() => {
+    initializePlaygroundCallbackRef.current = initializePlayground;
+  }, [initializePlayground]);
+
+  React.useEffect(() => {
     if (!sessionScopeReady) {
       return;
     }
@@ -1780,7 +1787,10 @@ export const Playground = () => {
     initializePlaygroundRef.current = true;
     let cancelled = false;
     const run = async () => {
-      await initializePlayground();
+      // Invoke through a ref so identity churn of the initialization
+      // callback (caused by state updates during startup) cannot re-run
+      // this one-shot effect and cancel readiness before init resolves.
+      await initializePlaygroundCallbackRef.current();
       if (!cancelled) {
         setPlaygroundReady(true);
       }
@@ -1789,7 +1799,7 @@ export const Playground = () => {
     return () => {
       cancelled = true;
     };
-  }, [initializePlayground, sessionScopeReady]);
+  }, [sessionScopeReady]);
 
   useCharacterGreeting({
     playgroundReady,

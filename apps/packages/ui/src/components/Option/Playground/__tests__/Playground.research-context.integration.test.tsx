@@ -543,7 +543,10 @@ vi.mock("react-router-dom", async () => {
   }
 })
 
-describe("Playground research context integration", () => {
+// Integration tests render the full Playground tree (4k+ lines with many
+// children); individual tests normally take 1-3.5s but can exceed the 5s
+// default timeout under parallel CI load, so give them explicit headroom.
+describe("Playground research context integration", { timeout: 20000 }, () => {
   beforeEach(() => {
     vi.clearAllMocks()
     window.history.replaceState({}, "", "/chat")
