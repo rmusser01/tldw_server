@@ -688,6 +688,7 @@ async def _handle_tts_job(job: dict[str, Any]) -> dict[str, Any]:
         *,
         error_message: str | None = None,
         output_id: int | None = None,
+        output_incarnation: str | None = None,
         artifact_ids: list[Any] | None = None,
     ) -> None:
         nonlocal history_written
@@ -758,6 +759,7 @@ async def _handle_tts_job(job: dict[str, Any]) -> dict[str, Any]:
                 segments_json=segments_json,
                 job_id=job_id if job_id > 0 else None,
                 output_id=output_id,
+                output_incarnation=output_incarnation,
                 artifact_ids=artifact_ids,
                 error_message=error_message,
             )
@@ -887,7 +889,7 @@ async def _handle_tts_job(job: dict[str, Any]) -> dict[str, Any]:
                     "format": request.response_format,
                     **route,
                 }
-                row = cdb.create_output_artifact(
+                row, output_incarnation = cdb.create_output_artifact_with_history_identity(
                     type_="tts_audio",
                     title=f"TTS Job {job.get('id')}",
                     format_=request.response_format,
@@ -913,7 +915,9 @@ async def _handle_tts_job(job: dict[str, Any]) -> dict[str, Any]:
             artifact_ids: list[Any] | None = None
             if getattr(row, "id", None) is not None:
                 artifact_ids = [f"output:{int(row.id)}"]
-            _record_history("success", output_id=row.id, artifact_ids=artifact_ids)
+            _record_history(
+                "success", output_id=row.id, output_incarnation=output_incarnation, artifact_ids=artifact_ids
+            )
 
         _emit_progress(100.0, "tts_completed", eta_seconds=0.0)
         return {

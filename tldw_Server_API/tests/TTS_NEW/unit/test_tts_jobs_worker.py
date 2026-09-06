@@ -211,6 +211,9 @@ async def test_tts_jobs_worker_output_failure_after_synthesis_is_terminal(
                 raise RuntimeError(sentinel)
             pytest.fail("Artifact registration must not run after a file-write failure")
 
+        def create_output_artifact_with_history_identity(self, **kwargs):
+            return self.create_output_artifact(**kwargs), "b" * 32
+
         def __enter__(self):
             return self
 
@@ -606,6 +609,9 @@ async def test_tts_jobs_worker_writes_output(tmp_path, monkeypatch):
                 format=kwargs.get("format_"),
             )
 
+        def create_output_artifact_with_history_identity(self, **kwargs):
+            return self.create_output_artifact(**kwargs), "b" * 32
+
         def __enter__(self):
             return self
 
@@ -687,6 +693,9 @@ async def test_tts_jobs_worker_writes_history_with_artifact_ids(tmp_path, monkey
                 format=kwargs.get("format_"),
             )
 
+        def create_output_artifact_with_history_identity(self, **kwargs):
+            return self.create_output_artifact(**kwargs), "b" * 32
+
         def __enter__(self):
             return self
 
@@ -725,7 +734,7 @@ async def test_tts_jobs_worker_writes_history_with_artifact_ids(tmp_path, monkey
     media_db = MediaDatabase(db_path=str(db_path), client_id="tts_jobs_worker_history_assert")
     try:
         row = media_db.execute_query(
-            "SELECT job_id, output_id, artifact_ids FROM tts_history WHERE user_id = ? ORDER BY id DESC LIMIT 1",
+            "SELECT job_id, output_id, output_incarnation, artifact_ids FROM tts_history WHERE user_id = ? ORDER BY id DESC LIMIT 1",
             ("1",),
         ).fetchone()
     finally:
@@ -734,6 +743,7 @@ async def test_tts_jobs_worker_writes_history_with_artifact_ids(tmp_path, monkey
     assert row is not None
     assert int(row["job_id"]) == 56
     assert int(row["output_id"]) == 987
+    assert row["output_incarnation"] == "b" * 32
     artifact_ids = json.loads(row["artifact_ids"])
     assert artifact_ids == ["output:987"]
 
@@ -779,6 +789,9 @@ async def test_tts_jobs_worker_history_write_failure_logs_job_and_request_id(tmp
                 storage_path=kwargs.get("storage_path"),
                 format=kwargs.get("format_"),
             )
+
+        def create_output_artifact_with_history_identity(self, **kwargs):
+            return self.create_output_artifact(**kwargs), "b" * 32
 
         def __enter__(self):
             return self
@@ -897,6 +910,9 @@ async def test_gateway_tts_worker_resolves_current_owner_and_records_actual_rout
         def create_output_artifact(self, **kwargs):
             artifact_calls.append(kwargs)
             return SimpleNamespace(id=432, storage_path=kwargs["storage_path"], format=kwargs["format_"])
+
+        def create_output_artifact_with_history_identity(self, **kwargs):
+            return self.create_output_artifact(**kwargs), "b" * 32
 
         def __enter__(self):
             return self

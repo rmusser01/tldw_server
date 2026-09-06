@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import hashlib
 import json
 import os
 import re
@@ -43,6 +44,7 @@ from tldw_Server_API.app.core.DB_Management.content_backend import (
     load_content_db_settings,
 )
 from tldw_Server_API.app.core.exceptions import (
+    InvalidStoragePathError,
     InvalidStorageUserIdError,
     StorageUnavailableError,
 )
@@ -70,6 +72,31 @@ _COLLECTIONS_NONCRITICAL_EXCEPTIONS = (
     StorageUnavailableError,
     InvalidStorageUserIdError,
 )
+
+
+class ReadingRevisionConflict(RuntimeError):
+    """The confirmed Reading revision no longer describes the current aggregate."""
+
+
+class ReadingArtifactOwnershipConflict(RuntimeError):
+    """An output cannot be assigned to the requested Reading owner or volume."""
+
+
+class ReadingFileDeletionRequired(RuntimeError):
+    """Managed output removal requires explicit permission for file cleanup."""
+
+
+class ReadingArchiveFileImmutable(RuntimeError):
+    """Managed archive paths and formats cannot be changed in place."""
+
+
+@dataclass(frozen=True)
+class DeletedOutput:
+    """Committed output snapshot; managed paths may only use durable cleanup."""
+
+    storage_path: str
+    managed: bool
+    shared: bool = False
 
 
 def _count_row_total(row: Any) -> int:
@@ -247,6 +274,7 @@ class ContentItemRow:
     tags: list[str]
     is_new: bool = False
     content_changed: bool = False
+    revision: int = 1
 
 
 @dataclass
@@ -681,6 +709,9 @@ class CollectionsDatabase:
             # "the tables exist" says nothing about whether their contents are
             # current. Only the schema DDL above is safe to skip.
             self._seed_watchlists_output_templates()
+
+        # Schema memoization skips DDL, not per-instance search capability detection.
+        self._refresh_fts_capabilities()
 
     @classmethod
     def for_user(cls, user_id: int | str) -> CollectionsDatabase:
@@ -1910,19 +1941,11 @@ class CollectionsDatabase:
         except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Collections schema init failed: {e}")
             raise
-        output_template_columns: set[str] = set()
-        output_columns: set[str] = set()
-        digest_columns: set[str] = set()
-        file_artifact_columns: set[str] = set()
-        content_columns: set[str] = set()
-        audiobook_project_columns: set[str] = set()
-        if self.backend.backend_type == BackendType.SQLITE:
-            output_template_columns = self._sqlite_columns("output_templates")
-            output_columns = self._sqlite_columns("outputs")
-            digest_columns = self._sqlite_columns("reading_digest_schedules")
-            file_artifact_columns = self._sqlite_columns("file_artifacts")
-            content_columns = self._sqlite_columns("content_items")
-            audiobook_project_columns = self._sqlite_columns("audiobook_projects")
+        output_template_columns = self._table_columns("output_templates")
+        output_columns = self._table_columns("outputs")
+        digest_columns = self._table_columns("reading_digest_schedules")
+        file_artifact_columns = self._table_columns("file_artifacts")
+        audiobook_project_columns = self._table_columns("audiobook_projects")
         # Backfill columns for existing tables
         if "metadata_json" not in output_template_columns:
             try:
@@ -2255,7 +2278,8 @@ class CollectionsDatabase:
                 source_id BIGINT,
                 read_at TEXT,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                revision BIGINT NOT NULL DEFAULT 1 CHECK (revision > 0)
             );
 
             CREATE UNIQUE INDEX IF NOT EXISTS ux_content_items_user_canonical ON content_items(user_id, canonical_url) WHERE canonical_url IS NOT NULL;
@@ -2407,7 +2431,8 @@ class CollectionsDatabase:
                 source_id INTEGER,
                 read_at TEXT,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                revision BIGINT NOT NULL DEFAULT 1 CHECK (revision > 0)
             );
 
             CREATE UNIQUE INDEX IF NOT EXISTS ux_content_items_user_canonical ON content_items(user_id, canonical_url) WHERE canonical_url IS NOT NULL;
@@ -2531,8 +2556,7 @@ class CollectionsDatabase:
         except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Collections content_items schema init failed: {e}")
             raise
-        if self.backend.backend_type == BackendType.SQLITE:
-            content_columns = self._sqlite_columns("content_items")
+        content_columns = self._table_columns("content_items")
         if fts_available:
             try:
                 self.backend.create_tables(
@@ -2568,6 +2592,7 @@ class CollectionsDatabase:
                     logger.debug("collections backfill: content_items.{} already exists or skipped", column)
                 else:
                     raise
+        self._ensure_reading_revision_schema()
         # Backfill user_notifications columns
         notif_columns: set[str] = set()
         if self.backend.table_exists("user_notifications"):
@@ -2624,12 +2649,1097 @@ class CollectionsDatabase:
         self._fts_available = fts_available
         self._refresh_fts_capabilities()
 
+    def _ensure_reading_revision_schema(self) -> None:
+        """Install the durable Reading revision clock without resetting tokens."""
+        with self.transaction() as conn:
+            backend = self.backend
+            clock_table = "reading_revision_clock"
+            items_table = "content_items"
+            outputs_table = "outputs"
+            ownership_table = "reading_output_ownership"
+            artifact_table = "reading_artifact_paths"
+            if backend.backend_type == BackendType.POSTGRESQL:
+                # Match the backend's public-schema metadata contract, not search_path.
+                clock_table = "public.reading_revision_clock"
+                items_table = "public.content_items"
+                outputs_table = "public.outputs"
+                ownership_table = "public.reading_output_ownership"
+                artifact_table = "public.reading_artifact_paths"
+                # Serialize first-time DDL before a clock row exists to lock.
+                backend.execute("SELECT pg_advisory_xact_lock(13153)", (), connection=conn)
+                columns = backend.get_table_info("content_items", connection=conn)
+            else:
+                columns = backend.execute("PRAGMA table_info(content_items)", (), connection=conn).rows
+            if not any(row["name"] == "revision" for row in columns):
+                backend.execute(
+                    f"ALTER TABLE {items_table} ADD COLUMN revision BIGINT NOT NULL DEFAULT 1 CHECK (revision > 0)",
+                    (),
+                    connection=conn,
+                )
+            backend.execute(
+                f"CREATE TABLE IF NOT EXISTS {clock_table} ("
+                "id INTEGER PRIMARY KEY CHECK (id = 1), "
+                "value BIGINT NOT NULL CHECK (value >= 0))",
+                (),
+                connection=conn,
+            )
+            backend.execute(
+                f"INSERT INTO {clock_table} (id, value) VALUES (1, 0) ON CONFLICT (id) DO NOTHING",  # nosec B608: fixed identifiers
+                (),
+                connection=conn,
+            )
+            # Never lower the clock: deleted items' tokens must remain spent.
+            backend.execute(
+                f"UPDATE {clock_table} SET value = CASE "  # nosec B608: fixed identifiers
+                f"WHEN value < (SELECT COALESCE(MAX(revision), 0) FROM {items_table}) "
+                f"THEN (SELECT COALESCE(MAX(revision), 0) FROM {items_table}) ELSE value END "
+                "WHERE id = 1",
+                (),
+                connection=conn,
+            )
+            # Composite references enforce same-user ownership even for direct SQL.
+            backend.execute(
+                f"CREATE UNIQUE INDEX IF NOT EXISTS ux_reading_parent_user_id ON {items_table}(user_id, id)",
+                (),
+                connection=conn,
+            )
+            backend.execute(
+                f"CREATE UNIQUE INDEX IF NOT EXISTS ux_reading_output_user_id ON {outputs_table}(user_id, id)",
+                (),
+                connection=conn,
+            )
+            backend.execute(
+                f"CREATE TABLE IF NOT EXISTS {ownership_table} ("
+                "output_id BIGINT NOT NULL PRIMARY KEY, user_id TEXT NOT NULL, item_id BIGINT NOT NULL, "
+                "storage_namespace_id TEXT NOT NULL CHECK (length(trim(storage_namespace_id)) > 0), "
+                f"FOREIGN KEY (user_id, item_id) REFERENCES {items_table}(user_id, id) ON DELETE RESTRICT, "
+                f"FOREIGN KEY (user_id, output_id) REFERENCES {outputs_table}(user_id, id) ON DELETE RESTRICT)",
+                (),
+                connection=conn,
+            )
+            backend.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_reading_output_owner ON {ownership_table}(user_id, item_id)",
+                (),
+                connection=conn,
+            )
+            # No parent FK: unfinished files must remain recoverable after deletion.
+            backend.execute(
+                f"CREATE TABLE IF NOT EXISTS {artifact_table} ("
+                "token TEXT NOT NULL PRIMARY KEY, user_id TEXT NOT NULL, storage_namespace_id TEXT NOT NULL, "
+                "storage_path TEXT NOT NULL, item_id BIGINT NOT NULL, expected_revision BIGINT NOT NULL CHECK (expected_revision > 0), "
+                "lease_until BIGINT NOT NULL, state TEXT NOT NULL CHECK (state IN ('staged', 'pending')), "
+                "attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0), retry_after BIGINT NOT NULL DEFAULT 0, "
+                "last_error TEXT, UNIQUE (user_id, storage_namespace_id, storage_path))",
+                (),
+                connection=conn,
+            )
+            backend.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_reading_artifact_cleanup ON {artifact_table}(user_id, storage_namespace_id, state, retry_after)",
+                (),
+                connection=conn,
+            )
+            self._ensure_output_file_operation_schema(conn)
+
+    def _ensure_output_file_operation_schema(self, connection: Any) -> None:
+        """Install inert generic journal tables inside the existing schema fence.
+
+        No binding is inserted, volume provisioned, or legacy identity inferred.
+        Resource admission and operation transitions are separate rollout steps.
+        """
+        prefix = "public." if self.backend.backend_type == BackendType.POSTGRESQL else ""
+        if prefix:
+            columns = self.backend.get_table_info("outputs", connection=connection)
+        else:
+            columns = self.backend.execute("PRAGMA table_info(outputs)", (), connection=connection).rows
+        if not any(row["name"] == "file_incarnation" for row in columns):
+            self.backend.execute(
+                f"ALTER TABLE {prefix}outputs ADD COLUMN file_incarnation TEXT "  # nosec B608: fixed schema identifier
+                "CHECK (file_incarnation IS NULL OR length(file_incarnation) = 32)",
+                (),
+                connection=connection,
+            )
+        self.backend.execute(
+            f"CREATE UNIQUE INDEX IF NOT EXISTS ux_output_file_incarnation ON {prefix}outputs(user_id, file_incarnation)",  # nosec B608: fixed schema identifier
+            (),
+            connection=connection,
+        )
+        self.backend.execute(
+            f"CREATE TABLE IF NOT EXISTS {prefix}output_storage_bindings ("  # nosec B608: fixed schema identifier
+            "user_id TEXT NOT NULL PRIMARY KEY CHECK (length(trim(user_id)) > 0), "
+            "storage_namespace_id TEXT NOT NULL CHECK (length(trim(storage_namespace_id)) BETWEEN 1 AND 128), "
+            "protocol_version INTEGER NOT NULL CHECK (protocol_version > 0), "
+            "operation_bytes BIGINT NOT NULL CHECK (operation_bytes BETWEEN 1 AND 9223372036854775807), "
+            "user_pending_bytes BIGINT NOT NULL CHECK (user_pending_bytes BETWEEN 1 AND 9223372036854775807), "
+            "active_operations BIGINT NOT NULL CHECK (active_operations BETWEEN 1 AND 9223372036854775807), "
+            "text_input_bytes BIGINT NOT NULL CHECK (text_input_bytes BETWEEN 1 AND 9223372036854775807), "
+            "text_output_bytes BIGINT NOT NULL CHECK (text_output_bytes BETWEEN 1 AND 9223372036854775807), "
+            "free_space_margin_bytes BIGINT NOT NULL CHECK (free_space_margin_bytes BETWEEN 1 AND 9223372036854775807), "
+            "UNIQUE (user_id, storage_namespace_id))",
+            (),
+            connection=connection,
+        )
+        self.backend.execute(
+            f"CREATE TABLE IF NOT EXISTS {prefix}output_file_operations ("  # nosec B608: fixed schema identifiers
+            "token TEXT NOT NULL PRIMARY KEY CHECK (length(trim(token)) BETWEEN 1 AND 128), "
+            "user_id TEXT NOT NULL, storage_namespace_id TEXT NOT NULL, output_id BIGINT, "
+            "kind TEXT NOT NULL CHECK (kind IN ('create', 'replace', 'remove')), "
+            "phase TEXT NOT NULL DEFAULT 'prepared' CHECK (phase IN ('prepared', 'committed', 'aborting')), "
+            "fs_done INTEGER NOT NULL DEFAULT 0 CHECK (fs_done IN (0, 1)), "
+            "source_path TEXT CHECK (length(source_path) BETWEEN 1 AND 255), source_key TEXT, "
+            "stage_path TEXT CHECK (length(stage_path) BETWEEN 1 AND 255), stage_key TEXT, "
+            "destination_path TEXT CHECK (length(destination_path) BETWEEN 1 AND 255), destination_key TEXT, "
+            "original_json TEXT NOT NULL DEFAULT '{}' CHECK (length(original_json) <= 32768), "
+            "intended_json TEXT NOT NULL DEFAULT '{}' CHECK (length(intended_json) <= 32768), "
+            "source_identity_json TEXT CHECK (length(source_identity_json) <= 2048), "
+            "stage_identity_json TEXT CHECK (length(stage_identity_json) <= 2048), "
+            "publication_identity_json TEXT CHECK (length(publication_identity_json) <= 2048), "
+            "written_bytes BIGINT NOT NULL DEFAULT 0 CHECK (written_bytes >= 0), "
+            "reserved_bytes BIGINT NOT NULL DEFAULT 0 CHECK (reserved_bytes >= 0), "
+            "lease_until BIGINT NOT NULL CHECK (lease_until >= 0), "
+            "attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0), "
+            "retry_after BIGINT NOT NULL DEFAULT 0 CHECK (retry_after >= 0), "
+            "last_error TEXT CHECK (length(last_error) <= 64), "
+            "effects_json TEXT NOT NULL DEFAULT '[]' CHECK (length(effects_json) <= 16384), "
+            "effects_pending INTEGER NOT NULL DEFAULT 0 CHECK (effects_pending BETWEEN 0 AND 4), "
+            "CHECK (fs_done = 0 OR (phase IN ('committed', 'aborting') AND reserved_bytes = 0)), "
+            "CHECK ((source_path IS NULL AND source_key IS NULL) OR "
+            "(source_path IS NOT NULL AND source_key IS NOT NULL AND source_key = lower(source_path))), "
+            "CHECK ((stage_path IS NULL AND stage_key IS NULL) OR "
+            "(stage_path IS NOT NULL AND stage_key IS NOT NULL AND stage_key = lower(stage_path))), "
+            "CHECK ((destination_path IS NULL AND destination_key IS NULL) OR "
+            "(destination_path IS NOT NULL AND destination_key IS NOT NULL AND destination_key = lower(destination_path))), "
+            "CHECK ((kind = 'remove' AND source_path IS NOT NULL AND stage_path IS NULL AND destination_path IS NULL) OR "
+            "(kind = 'create' AND source_path IS NULL AND stage_path IS NOT NULL AND destination_path IS NOT NULL) OR "
+            "(kind = 'replace' AND source_path IS NOT NULL AND stage_path IS NOT NULL AND destination_path IS NOT NULL)), "
+            f"FOREIGN KEY (user_id, storage_namespace_id) REFERENCES {prefix}output_storage_bindings(user_id, storage_namespace_id) ON DELETE RESTRICT)",
+            (),
+            connection=connection,
+        )
+        columns = (
+            self.backend.get_table_info("output_file_operations", connection=connection)
+            if prefix
+            else self.backend.execute("PRAGMA table_info(output_file_operations)", (), connection=connection).rows
+        )
+        present = {row["name"] for row in columns}
+        for name, definition in (
+            ("history_attempts", "INTEGER NOT NULL DEFAULT 0 CHECK (history_attempts >= 0)"),
+            ("history_retry_after", "BIGINT NOT NULL DEFAULT 0 CHECK (history_retry_after >= 0)"),
+            ("history_error", "TEXT CHECK (length(history_error) <= 64)"),
+        ):
+            if name not in present:
+                self.backend.execute(
+                    f"ALTER TABLE {prefix}output_file_operations ADD COLUMN {name} {definition}",  # nosec B608: fixed identifiers/definitions
+                    (),
+                    connection=connection,
+                )
+        self.backend.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_output_history_due ON {prefix}output_file_operations"  # nosec B608: fixed schema identifier
+            "(user_id, storage_namespace_id, history_retry_after) WHERE fs_done = 1 AND effects_pending > 0",
+            (),
+            connection=connection,
+        )
+        self.backend.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_output_file_operations_due ON {prefix}output_file_operations(user_id, storage_namespace_id, fs_done, retry_after)",  # nosec B608: fixed schema identifier
+            (),
+            connection=connection,
+        )
+        self.backend.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_output_file_operations_active ON {prefix}output_file_operations(user_id, fs_done, output_id)",  # nosec B608: fixed schema identifier
+            (),
+            connection=connection,
+        )
+
+    def backfill_output_file_incarnations(self) -> int:
+        """Assign missing internal identities for this user during offline upgrade.
+
+        The operator must stop old writers first. This does not activate storage
+        or reconcile ownership/history. Existing identities are never reassigned.
+        All batches share one transaction so an interrupted backfill rolls back.
+        """
+        count = 0
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            while True:
+                rows = self.backend.execute(
+                    "SELECT id FROM outputs WHERE user_id = ? AND file_incarnation IS NULL ORDER BY id LIMIT 100",
+                    (self.user_id,),
+                    connection=conn,
+                ).rows
+                if not rows:
+                    return count
+                for row in rows:
+                    result = self.backend.execute(
+                        "UPDATE outputs SET file_incarnation = ? WHERE user_id = ? AND id = ? AND file_incarnation IS NULL",
+                        (uuid4().hex, self.user_id, row["id"]),
+                        connection=conn,
+                    )
+                    count += result.rowcount
+
+    @staticmethod
+    def _output_operation_filename(value: str) -> str:
+        """Validate a confined ordinary filename without filesystem access."""
+        if not isinstance(value, str) or not 1 <= len(value) <= 255 or value != value.strip():
+            raise ValueError("output_operation_invalid")
+        try:
+            name = normalize_output_storage_filename(value, allow_absolute=False, reject_relative_with_separators=True)
+        except InvalidStoragePathError:
+            raise ValueError("output_operation_invalid") from None
+        if name.lower() in {
+            ".",
+            "..",
+            ".reading-storage.lock",
+            ".reading-storage-namespace",
+        } or name.lower().startswith(".output-stage-"):
+            raise ValueError("output_operation_invalid")
+        return name
+
+    def _output_operation_snapshot(
+        self, output_id: int, connection: Any, *, include_deleted: bool = False
+    ) -> tuple[dict[str, Any], str]:
+        """Fingerprint the complete original row without journaling its content."""
+        row = self.backend.execute(
+            "SELECT * FROM outputs WHERE user_id = ? AND id = ? AND (deleted = 0 OR ? = 1)",
+            (self.user_id, output_id, int(include_deleted)),
+            connection=connection,
+        ).first
+        if not row:
+            raise KeyError("output_not_found")
+        if (
+            not row["file_incarnation"]
+            or self.backend.execute(
+                "SELECT 1 FROM reading_output_ownership WHERE user_id = ? AND output_id = ?",
+                (self.user_id, output_id),
+                connection=connection,
+            ).first
+        ):
+            raise RuntimeError("output_operation_conflict")
+        digest = hashlib.sha256(json.dumps(dict(row), sort_keys=True, default=str).encode("utf-8")).hexdigest()
+        return {"incarnation": row["file_incarnation"], "digest": digest}, row["storage_path"]
+
+    def _output_storage_policy(self, storage_namespace_id: str, connection: Any) -> dict[str, Any]:
+        """Read a supported, finite policy without granting filesystem authority."""
+        row = self.backend.execute(
+            "SELECT * FROM output_storage_bindings WHERE user_id = ? AND storage_namespace_id = ?",
+            (self.user_id, storage_namespace_id),
+            connection=connection,
+        ).first
+        if not row or row["protocol_version"] != 1:
+            raise RuntimeError("output_storage_unavailable")
+        # SQLite's integer affinity alone does not exclude fractional values.
+        if any(
+            type(row[field]) is not int or not 1 <= row[field] <= 2**63 - 1
+            for field in (
+                "operation_bytes",
+                "user_pending_bytes",
+                "active_operations",
+                "text_input_bytes",
+                "text_output_bytes",
+                "free_space_margin_bytes",
+            )
+        ):
+            raise RuntimeError("output_storage_unavailable")
+        return dict(row)
+
+    def prepare_output_file_operation(
+        self,
+        storage_namespace_id: str,
+        *,
+        kind: str,
+        lease_seconds: int,
+        output_id: int | None = None,
+        destination_path: str | None = None,
+        intended: dict[str, Any] | None = None,
+        reserved_bytes: int = 0,
+        connection: Any | None = None,
+    ) -> dict[str, Any]:
+        """Persist an internal prepared record, without file or activation authority.
+
+        Database capacity admission is atomic with this record. The future
+        orchestrator must hold verified storage exclusion, check physical free
+        space and enforce cross-writer claims before using it for file I/O.
+        No runtime caller is enabled by these journal primitives alone.
+        """
+        if (
+            kind not in {"create", "replace", "remove"}
+            or type(lease_seconds) is not int
+            or not 1 <= lease_seconds <= 2**31 - 1
+            or type(reserved_bytes) is not int
+            or not 0 <= reserved_bytes <= 2**63 - 1
+            or (kind == "create" and output_id is not None)
+            or (kind != "create" and (type(output_id) is not int or output_id <= 0))
+            or (kind == "remove" and destination_path is not None)
+        ):
+            raise ValueError("output_operation_invalid")
+        destination = None if kind == "remove" else self._output_operation_filename(destination_path)
+        intended = {} if intended is None else intended
+        if not isinstance(intended, dict) or intended.keys() - {"title", "type", "format", "retention_until"}:
+            raise ValueError("output_operation_invalid")
+        if any(
+            not isinstance(value, str) and not (key == "retention_until" and value is None)
+            for key, value in intended.items()
+        ):
+            raise ValueError("output_operation_invalid")
+        intended_json = json.dumps(intended, sort_keys=True, separators=(",", ":"))
+        if len(intended_json) > 32768 or (kind == "remove" and intended):
+            raise ValueError("output_operation_invalid")
+        token = uuid4().hex
+        stage = None if kind == "remove" else f".output-stage-{uuid4().hex}"
+        with self.transaction() if connection is None else contextlib.nullcontext(connection) as conn:
+            self._lock_reading_revision_clock(conn)
+            binding = self._output_storage_policy(storage_namespace_id, conn)
+            original, source = (
+                ({}, None)
+                if kind == "create"
+                else self._output_operation_snapshot(output_id, conn, include_deleted=kind == "remove")
+            )
+            if source is not None:
+                source = self._output_operation_filename(source)
+            if destination is not None and source is not None and destination.lower() == source.lower():
+                raise ValueError("output_operation_invalid")
+            self._assert_output_operation_paths(
+                {
+                    "output_id": output_id,
+                    "source_path": source,
+                    "stage_path": stage,
+                    "destination_path": destination,
+                    "storage_namespace_id": storage_namespace_id,
+                },
+                conn,
+            )
+            usage = self.backend.execute(
+                "SELECT COUNT(*) AS active, COALESCE(SUM(reserved_bytes), 0) AS reserved "
+                "FROM output_file_operations WHERE user_id = ? AND fs_done = 0",
+                (self.user_id,),
+                connection=conn,
+            ).first
+            if (
+                reserved_bytes > binding["operation_bytes"]
+                or usage["active"] >= binding["active_operations"]
+                or reserved_bytes > binding["user_pending_bytes"] - usage["reserved"]
+            ):
+                raise RuntimeError("output_storage_capacity")
+            lease_until = int(datetime.now(timezone.utc).timestamp()) + lease_seconds
+            self.backend.execute(
+                "INSERT INTO output_file_operations "
+                "(token, user_id, storage_namespace_id, output_id, kind, source_path, source_key, stage_path, stage_key, "
+                "destination_path, destination_key, original_json, intended_json, reserved_bytes, lease_until) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    token,
+                    self.user_id,
+                    storage_namespace_id,
+                    output_id,
+                    kind,
+                    source,
+                    source.lower() if source else None,
+                    stage,
+                    stage,
+                    destination,
+                    destination.lower() if destination else None,
+                    json.dumps(original, sort_keys=True),
+                    intended_json,
+                    reserved_bytes,
+                    lease_until,
+                ),
+                connection=conn,
+            )
+            return self.get_output_file_operation(token, storage_namespace_id, connection=conn)
+
+    def get_output_storage_policy(self, storage_namespace_id: str) -> dict[str, Any]:
+        """Read the validated policy; this does not verify a volume or activate it."""
+        with self._read_snapshot() as conn:
+            return self._output_storage_policy(storage_namespace_id, conn)
+
+    def _output_read_namespace(self, connection: Any) -> str | None:
+        row = self.backend.execute(
+            "SELECT storage_namespace_id, protocol_version FROM output_storage_bindings WHERE user_id = ?",
+            (self.user_id,),
+            connection=connection,
+        ).first
+        if row:
+            namespace = row["storage_namespace_id"]
+            if row["protocol_version"] != 1 or not isinstance(namespace, str) or not namespace.strip():
+                raise RuntimeError("output_storage_unavailable")
+            return namespace
+        if self.backend.execute(
+            "SELECT 1 FROM reading_output_ownership WHERE user_id = ? "
+            "UNION ALL SELECT 1 FROM reading_artifact_paths WHERE user_id = ? "
+            "UNION ALL SELECT 1 FROM output_file_operations WHERE user_id = ? LIMIT 1",
+            (self.user_id, self.user_id, self.user_id),
+            connection=connection,
+        ).first:
+            raise RuntimeError("output_storage_unavailable")
+        return None
+
+    def get_output_read_namespace(self) -> str | None:
+        """Return read binding, or None only for genuinely inactive storage.
+
+        This read does not provision storage or require mutation-worker health.
+        The protected lookup must recheck binding after acquiring exclusion.
+        """
+        with self._read_snapshot() as conn:
+            return self._output_read_namespace(conn)
+
+    def get_output_file_read_state(
+        self,
+        storage_namespace_id: str,
+        *,
+        output_id: int | None = None,
+        title: str | None = None,
+        format_: str | None = None,
+    ) -> tuple[CollectionsDatabase.OutputArtifactRow, dict[str, Any] | None]:
+        """Read current metadata and publication evidence under caller-held storage exclusion."""
+        if (output_id is None) == (title is None):
+            raise ValueError("output_operation_invalid")
+        with self._read_snapshot() as conn:
+            if self._output_read_namespace(conn) != storage_namespace_id:
+                raise RuntimeError("output_storage_unavailable")
+            row = (
+                self.get_output_artifact(output_id, connection=conn)
+                if output_id is not None
+                else self.get_output_artifact_by_title(title, format_, connection=conn)
+            )
+            owner = self.backend.execute(
+                "SELECT user_id, storage_namespace_id FROM reading_output_ownership WHERE output_id = ?",
+                (row.id,),
+                connection=conn,
+            ).first
+            if (
+                owner and (owner["user_id"] != self.user_id or owner["storage_namespace_id"] != storage_namespace_id)
+            ) or (row.type == "reading_archive" and not owner):
+                raise RuntimeError("output_storage_unavailable")
+            name = self._output_operation_filename(row.storage_path)
+            publications = self.backend.execute(
+                "SELECT output_id, phase, destination_path, stage_path, publication_identity_json, written_bytes "
+                "FROM output_file_operations WHERE user_id = ? AND storage_namespace_id = ? AND fs_done = 0 "
+                "AND (destination_key = ? OR stage_key = ?) LIMIT 2",
+                (self.user_id, storage_namespace_id, name.lower(), name.lower()),
+                connection=conn,
+            ).rows
+            proof = dict(publications[0]) if publications else None
+            if proof and (
+                len(publications) != 1
+                or proof["phase"] != "committed"
+                or proof["output_id"] != row.id
+                or proof["destination_path"] != name
+            ):
+                raise RuntimeError("output_storage_unavailable")
+            return row, proof
+
+    def record_output_file_progress(
+        self,
+        token: str,
+        storage_namespace_id: str,
+        *,
+        expected_offset: int,
+        written_bytes: int,
+        source_identity: dict[str, int] | None = None,
+        stage_identity: dict[str, int] | None = None,
+        lease_seconds: int = 60,
+    ) -> dict[str, Any]:
+        """Record immutable file evidence and a compare-and-set durable offset.
+
+        The storage caller holds verified exclusion, collects identities outside
+        this transaction, and syncs/closes writes before acknowledging progress.
+        This method grants no authority to infer identities or repair file bytes.
+        """
+        if (
+            type(expected_offset) is not int
+            or type(written_bytes) is not int
+            or not 0 <= expected_offset <= written_bytes <= 2**63 - 1
+            or written_bytes - expected_offset > 1024 * 1024
+            or type(lease_seconds) is not int
+            or not 1 <= lease_seconds <= 2**31 - 1
+        ):
+            raise ValueError("output_operation_invalid")
+        for identity, source in ((source_identity, True), (stage_identity, False)):
+            if identity is None:
+                continue
+            keys = {"dev", "ino", "mode", "nlink"} | ({"size", "mtime_ns", "ctime_ns"} if source else set())
+            if (
+                not isinstance(identity, dict)
+                or identity.keys() != keys
+                or any(type(value) is not int or not 0 <= value <= 2**64 - 1 for value in identity.values())
+                or identity["mode"] != 0o100000
+                or identity["nlink"] != 1
+            ):
+                raise ValueError("output_operation_invalid")
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            row = self._validate_output_file_operation(token, storage_namespace_id, conn)
+            if row["written_bytes"] != expected_offset or row["publication_identity_json"] is not None:
+                raise RuntimeError("output_operation_conflict")
+            identities = []
+            for column, incoming in (
+                ("source_identity_json", source_identity),
+                ("stage_identity_json", stage_identity),
+            ):
+                existing = json.loads(row[column]) if row[column] is not None else None
+                if existing is not None and incoming is not None and existing != incoming:
+                    raise RuntimeError("output_operation_conflict")
+                identities.append(existing if incoming is None else incoming)
+            source, stage = identities
+            if (
+                (row["kind"] == "create" and source is not None)
+                or (row["kind"] == "remove" and (stage is not None or written_bytes))
+                or (row["source_path"] is not None and stage is not None and source is None)
+                or (written_bytes and stage is None)
+            ):
+                raise RuntimeError("output_operation_conflict")
+            if written_bytes > row["reserved_bytes"] - (source["size"] if source else 0):
+                raise RuntimeError("output_size_limit")
+            self.backend.execute(
+                "UPDATE output_file_operations SET source_identity_json = ?, stage_identity_json = ?, "
+                "written_bytes = ?, lease_until = ? WHERE token = ? AND user_id = ? AND storage_namespace_id = ?",
+                (
+                    json.dumps(source, sort_keys=True) if source is not None else None,
+                    json.dumps(stage, sort_keys=True) if stage is not None else None,
+                    written_bytes,
+                    int(datetime.now(timezone.utc).timestamp()) + lease_seconds,
+                    token,
+                    self.user_id,
+                    storage_namespace_id,
+                ),
+                connection=conn,
+            )
+            return self.get_output_file_operation(token, storage_namespace_id, connection=conn)
+
+    def get_output_file_operation(
+        self, token: str, storage_namespace_id: str, *, connection: Any | None = None
+    ) -> dict[str, Any]:
+        """Read one same-user journal record; never resolve or inspect its files."""
+        row = self.backend.execute(
+            "SELECT * FROM output_file_operations WHERE token = ? AND user_id = ? AND storage_namespace_id = ?",
+            (token, self.user_id, storage_namespace_id),
+            connection=connection,
+        ).first
+        if not row:
+            raise KeyError("output_operation_not_found")
+        return dict(row)
+
+    def read_output_file_operation_outcome(
+        self, token: str, storage_namespace_id: str
+    ) -> tuple[dict[str, Any], CollectionsDatabase.OutputArtifactRow | None]:
+        """Resolve an uncertain commit using a new, non-pooled connection.
+
+        The caller retains volume exclusion. Never reuse a connection whose
+        commit acknowledgement was lost, or infer rollback from an exception.
+        """
+        with self._operation_backend_pin() as backend:
+            conn = backend.connect()
+            try:
+                with backend.transaction(connection=conn):
+                    self._lock_reading_revision_clock(conn)
+                    row = self.get_output_file_operation(token, storage_namespace_id, connection=conn)
+                    output = None
+                    if row["phase"] == "committed" and row["kind"] != "remove":
+                        output = self.get_output_artifact(row["output_id"], connection=conn)
+                    return row, output
+            finally:
+                backend.disconnect(conn)
+
+    def _validate_output_file_operation(self, token: str, storage_namespace_id: str, connection: Any) -> dict[str, Any]:
+        row = self.get_output_file_operation(token, storage_namespace_id, connection=connection)
+        self._output_storage_policy(storage_namespace_id, connection)
+        if (
+            row["phase"] != "prepared"
+            or row["fs_done"]
+            or row["lease_until"] <= int(datetime.now(timezone.utc).timestamp())
+        ):
+            raise RuntimeError("output_operation_conflict")
+        if row["output_id"] is not None:
+            original, _ = self._output_operation_snapshot(
+                row["output_id"], connection, include_deleted=row["kind"] == "remove"
+            )
+            if json.dumps(original, sort_keys=True) != row["original_json"]:
+                raise RuntimeError("output_operation_conflict")
+        self._assert_output_operation_paths(row, connection, exclude_token=token)
+        return row
+
+    def _assert_output_operation_paths(
+        self, operation: dict[str, Any], connection: Any, *, exclude_token: str | None = None
+    ) -> None:
+        """Preflight recorded claims against both journals and surviving outputs."""
+        namespace = operation["storage_namespace_id"]
+        self._assert_output_file_claims(connection, output_id=operation["output_id"], exclude_token=exclude_token)
+        for column in ("source_path", "stage_path", "destination_path"):
+            path = operation[column]
+            if path is None:
+                continue
+            self._assert_output_path_not_reserved(
+                path, connection, storage_namespace_id=namespace, exclude_token=exclude_token
+            )
+            key = path.lower()
+            suffix = "%/" + key.replace("^", "^^").replace("%", "^%").replace("_", "^_")
+            references = self.backend.execute(
+                "SELECT o.id, r.output_id AS owned_id FROM outputs o "
+                "LEFT JOIN reading_output_ownership r ON r.output_id = o.id AND r.user_id = o.user_id "
+                "WHERE o.user_id = ? AND (r.output_id IS NULL OR r.storage_namespace_id = ?) "
+                "AND (lower(replace(o.storage_path, ?, '/')) = ? "
+                "OR lower(replace(o.storage_path, ?, '/')) LIKE (?) ESCAPE '^')",
+                (self.user_id, namespace, "\\", key, "\\", suffix),
+                connection=connection,
+            ).rows
+            if any(column != "source_path" or row["owned_id"] is not None for row in references):
+                raise RuntimeError("output_path_conflict")
+
+    def validate_output_file_operation(
+        self, token: str, storage_namespace_id: str, *, connection: Any | None = None
+    ) -> dict[str, Any]:
+        """Recheck prepared phase, current lease and original row after the fence."""
+        with self.transaction() if connection is None else contextlib.nullcontext(connection) as conn:
+            self._lock_reading_revision_clock(conn)
+            return self._validate_output_file_operation(token, storage_namespace_id, conn)
+
+    @contextlib.contextmanager
+    def commit_output_file_operation(
+        self,
+        token: str,
+        storage_namespace_id: str,
+        *,
+        dispose_history: bool = False,
+        connection: Any | None = None,
+    ) -> Generator[Any, None, None]:
+        """Commit the journal with caller-owned DB changes on the yielded connection.
+
+        The trusted caller must apply the recorded output mutation and same-store
+        accounting using this connection only. The body must contain no file or
+        network I/O. Publication/identity checks belong to the storage orchestrator.
+        This context is not an output mutation implementation by itself. With an
+        external connection, its owner must roll back if an exception propagates.
+        """
+        if type(dispose_history) is not bool:
+            raise ValueError("output_operation_invalid")
+        with self.transaction() if connection is None else contextlib.nullcontext(connection) as conn:
+            self._lock_reading_revision_clock(conn)
+            row = self._validate_output_file_operation(token, storage_namespace_id, conn)
+            if dispose_history and row["kind"] != "remove":
+                raise ValueError("output_operation_invalid")
+            effects = []
+            if dispose_history:
+                effects = [
+                    {
+                        "kind": "dispose_history",
+                        "incarnation": json.loads(row["original_json"])["incarnation"],
+                        "deleted_at": _utcnow_iso(),
+                        "acknowledged": False,
+                    }
+                ]
+            yield conn
+            changed = self.backend.execute(
+                "UPDATE output_file_operations SET phase = 'committed', effects_json = ?, effects_pending = ? "
+                "WHERE token = ? AND user_id = ? AND storage_namespace_id = ? AND phase = 'prepared' AND fs_done = 0",
+                (json.dumps(effects, sort_keys=True), len(effects), token, self.user_id, storage_namespace_id),
+                connection=conn,
+            )
+            if changed.rowcount != 1:
+                raise RuntimeError("output_operation_conflict")
+
+    def apply_output_file_operation(
+        self,
+        token: str,
+        storage_namespace_id: str,
+        *,
+        publication_identity: dict[str, int] | None = None,
+    ) -> CollectionsDatabase.OutputArtifactRow | None:
+        """Apply only the journal's recorded mutation and accounting atomically.
+
+        Trusted storage callers must first prove and sync no-clobber publication
+        under verified exclusion, and recheck source fingerprint and stage length.
+        This DB-only boundary validates their publication evidence against the
+        immutable stage; it never reads files or supplies filesystem authority.
+        Duplicate commits reject before applying any additive accounting again.
+        """
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            row = self._validate_output_file_operation(token, storage_namespace_id, conn)
+            source = json.loads(row["source_identity_json"]) if row["source_identity_json"] else None
+            stage = json.loads(row["stage_identity_json"]) if row["stage_identity_json"] else None
+            kind = row["kind"]
+            if kind != "create" and source is None:
+                raise RuntimeError("output_operation_conflict")
+            if kind == "remove":
+                if publication_identity is not None or stage is not None or row["written_bytes"]:
+                    raise RuntimeError("output_operation_conflict")
+            elif (
+                stage is None
+                or not isinstance(publication_identity, dict)
+                or publication_identity != {**stage, "nlink": 2}
+                or any(type(value) is not int for value in publication_identity.values())
+            ):
+                raise RuntimeError("output_operation_conflict")
+            current = (
+                None
+                if kind == "create"
+                else self.backend.execute(
+                    "SELECT * FROM outputs WHERE user_id = ? AND id = ?",
+                    (self.user_id, row["output_id"]),
+                    connection=conn,
+                ).first
+            )
+            intended = json.loads(row["intended_json"])
+            if kind == "create" and not {"title", "type", "format"} <= intended.keys():
+                raise ValueError("output_operation_invalid")
+            if current is not None and intended.get("type", current["type"]) != current["type"]:
+                raise ValueError("output_operation_invalid")
+            output_type = intended["type"] if current is None else current["type"]
+            metadata_json = current["metadata_json"] if current is not None else None
+            if kind != "remove":
+                try:
+                    metadata = json.loads(metadata_json) if metadata_json else {}
+                    if not isinstance(metadata, dict):
+                        raise ValueError
+                except (TypeError, ValueError):
+                    raise RuntimeError("output_operation_conflict") from None
+                metadata["byte_size"] = row["written_bytes"]
+                metadata_json = json.dumps(metadata, ensure_ascii=False)
+            delta = 0
+            if _is_audiobook_output_type(output_type):
+                old_size = 0
+                if current is not None and not current["deleted"]:
+                    old_size = _extract_output_byte_size(current["metadata_json"])
+                    if old_size is None:
+                        old_size = source["size"]
+                delta = (row["written_bytes"] if kind != "remove" else 0) - old_size
+                if delta:
+                    usage = self.get_audiobook_output_usage(connection=conn)
+                    if usage is None or not 0 <= usage + delta <= 2**63 - 1:
+                        raise RuntimeError("output_accounting_unavailable")
+            result = None
+            with self.commit_output_file_operation(
+                token, storage_namespace_id, dispose_history=kind == "remove", connection=conn
+            ):
+                if kind == "create":
+                    inserted = self._execute_insert(
+                        "INSERT INTO outputs (user_id, type, title, format, storage_path, metadata_json, "
+                        "created_at, deleted, retention_until, file_incarnation) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+                        (
+                            self.user_id,
+                            output_type,
+                            intended["title"],
+                            intended["format"],
+                            row["destination_path"],
+                            metadata_json,
+                            _utcnow_iso(),
+                            intended.get("retention_until"),
+                            uuid4().hex,
+                        ),
+                        connection=conn,
+                    )
+                    output_id = self._extract_lastrowid(inserted)
+                    if not output_id:
+                        raise DatabaseError("output_creation_failed")
+                    self._assert_output_file_claims(conn, output_id=output_id, exclude_token=token)
+                    self.backend.execute(
+                        "UPDATE output_file_operations SET output_id = ? WHERE token = ? AND user_id = ?",
+                        (output_id, token, self.user_id),
+                        connection=conn,
+                    )
+                else:
+                    output_id = row["output_id"]
+                    if kind == "replace":
+                        changed = self.backend.execute(
+                            "UPDATE outputs SET title = ?, format = ?, storage_path = ?, retention_until = ?, "
+                            "metadata_json = ? WHERE user_id = ? AND id = ?",
+                            (
+                                intended.get("title", current["title"]),
+                                intended.get("format", current["format"]),
+                                row["destination_path"],
+                                intended.get("retention_until", current["retention_until"]),
+                                metadata_json,
+                                self.user_id,
+                                output_id,
+                            ),
+                            connection=conn,
+                        )
+                    else:
+                        changed = self.backend.execute(
+                            "DELETE FROM outputs WHERE user_id = ? AND id = ?",
+                            (self.user_id, output_id),
+                            connection=conn,
+                        )
+                    if changed.rowcount != 1:
+                        raise DatabaseError("output_mutation_failed")
+                if kind != "remove":
+                    self.backend.execute(
+                        "UPDATE output_file_operations SET publication_identity_json = ? "
+                        "WHERE token = ? AND user_id = ?",
+                        (json.dumps(publication_identity, sort_keys=True), token, self.user_id),
+                        connection=conn,
+                    )
+                    result = self.get_output_artifact(output_id, connection=conn)
+                if delta:
+                    self.update_audiobook_output_usage(delta, connection=conn)
+            return result
+
+    def abort_output_file_operation(
+        self, token: str, storage_namespace_id: str, *, connection: Any | None = None
+    ) -> bool:
+        """Conditionally abort prepared work; committed always wins over abort."""
+        with self.transaction() if connection is None else contextlib.nullcontext(connection) as conn:
+            self._lock_reading_revision_clock(conn)
+            result = self.backend.execute(
+                "UPDATE output_file_operations SET phase = 'aborting' "
+                "WHERE token = ? AND user_id = ? AND storage_namespace_id = ? AND phase = 'prepared' AND fs_done = 0",
+                (token, self.user_id, storage_namespace_id),
+                connection=conn,
+            )
+            return result.rowcount == 1
+
+    def finish_output_file_operation(
+        self, token: str, storage_namespace_id: str, *, connection: Any | None = None
+    ) -> bool:
+        """Record verified file completion, retaining any undelivered effects.
+
+        Caller must hold the verified namespace lock and have completed required
+        identity-checked cleanup/fsync or reference-preservation. No file is read
+        or removed here. Completed/missing records are idempotent no-ops.
+        """
+        with self.transaction() if connection is None else contextlib.nullcontext(connection) as conn:
+            self._lock_reading_revision_clock(conn)
+            try:
+                row = self.get_output_file_operation(token, storage_namespace_id, connection=conn)
+            except KeyError:
+                return False
+            if row["fs_done"]:
+                return False
+            if row["phase"] not in {"committed", "aborting"}:
+                raise RuntimeError("output_operation_conflict")
+            self.backend.execute(
+                "UPDATE output_file_operations SET fs_done = 1, reserved_bytes = 0 "
+                "WHERE token = ? AND user_id = ? AND storage_namespace_id = ? AND fs_done = 0",
+                (token, self.user_id, storage_namespace_id),
+                connection=conn,
+            )
+            self._retire_output_file_operation(token, storage_namespace_id, conn)
+            return True
+
+    def list_due_output_file_operations(self, storage_namespace_id: str, *, limit: int = 20) -> list[str]:
+        """Select a bounded same-user batch; each token must be rechecked after storage exclusion."""
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("output_operation_invalid")
+        now = int(datetime.now(timezone.utc).timestamp())
+        with self._read_snapshot() as conn:
+            self._output_storage_policy(storage_namespace_id, conn)
+            return [
+                row["token"]
+                for row in self.backend.execute(
+                    "SELECT token FROM output_file_operations WHERE user_id = ? AND storage_namespace_id = ? "
+                    "AND fs_done = 0 AND retry_after <= ? AND (phase <> 'prepared' OR lease_until <= ?) "
+                    "ORDER BY retry_after, token LIMIT ?",
+                    (self.user_id, storage_namespace_id, now, now, limit),
+                    connection=conn,
+                ).rows
+            ]
+
+    def begin_output_file_recovery(self, token: str, storage_namespace_id: str) -> dict[str, Any] | None:
+        """Recheck due authority and surviving source references under the fence.
+
+        Caller holds the verified storage lock through cleanup and completion.
+        No filesystem I/O occurs in this transaction. Claims prevent subsequent
+        compliant source attachments while cleanup takes place outside the DB.
+        """
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            self._output_storage_policy(storage_namespace_id, conn)
+            try:
+                row = self.get_output_file_operation(token, storage_namespace_id, connection=conn)
+            except KeyError:
+                return None
+            now = int(datetime.now(timezone.utc).timestamp())
+            if row["fs_done"] or row["retry_after"] > now or (row["phase"] == "prepared" and row["lease_until"] > now):
+                return None
+            if row["phase"] == "prepared":
+                self.abort_output_file_operation(token, storage_namespace_id, connection=conn)
+                row["phase"] = "aborting"
+            row["source_referenced"] = False
+            if row["phase"] == "committed" and row["source_path"]:
+                key = row["source_path"].lower()
+                suffix = "%/" + key.replace("^", "^^").replace("%", "^%").replace("_", "^_")
+                row["source_referenced"] = bool(
+                    self.backend.execute(
+                        "SELECT 1 FROM outputs o LEFT JOIN reading_output_ownership r "
+                        "ON r.output_id = o.id AND r.user_id = o.user_id "
+                        "WHERE o.user_id = ? AND (r.output_id IS NULL OR r.storage_namespace_id = ?) "
+                        "AND (lower(replace(o.storage_path, ?, '/')) = ? "
+                        "OR lower(replace(o.storage_path, ?, '/')) LIKE (?) ESCAPE '^') LIMIT 1",
+                        (self.user_id, storage_namespace_id, "\\", key, "\\", suffix),
+                        connection=conn,
+                    ).first
+                )
+            return row
+
+    def record_output_file_recovery_failure(self, token: str, storage_namespace_id: str, category: str) -> None:
+        """Retain claims with a finite retry or explicit operator-only identity block."""
+        if category not in {"output_identity_unconfirmed", "output_storage_unavailable", "output_storage_busy"}:
+            raise ValueError("output_operation_invalid")
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            now = int(datetime.now(timezone.utc).timestamp())
+            retry_after = 2**63 - 1 if category == "output_identity_unconfirmed" else now + 60
+            self.backend.execute(
+                "UPDATE output_file_operations SET attempts = CASE WHEN attempts < 2147483647 "
+                "THEN attempts + 1 ELSE attempts END, retry_after = ?, last_error = ? "
+                "WHERE token = ? AND user_id = ? AND storage_namespace_id = ? AND fs_done = 0 "
+                "AND (last_error IS NULL OR last_error <> 'output_identity_unconfirmed')",
+                (retry_after, category, token, self.user_id, storage_namespace_id),
+                connection=conn,
+            )
+
+    def _retire_output_file_operation(self, token: str, storage_namespace_id: str, connection: Any) -> None:
+        self.backend.execute(
+            "DELETE FROM output_file_operations WHERE token = ? AND user_id = ? AND storage_namespace_id = ? "
+            "AND fs_done = 1 AND effects_pending = 0",
+            (token, self.user_id, storage_namespace_id),
+            connection=connection,
+        )
+
+    def list_due_output_history_operations(self, storage_namespace_id: str, *, limit: int = 20) -> list[str]:
+        """Select history-only work independently of filesystem retry/health."""
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("output_operation_invalid")
+        now = int(datetime.now(timezone.utc).timestamp())
+        return [
+            row["token"]
+            for row in self.backend.execute(
+                "SELECT token FROM output_file_operations WHERE user_id = ? AND storage_namespace_id = ? "
+                "AND fs_done = 1 AND phase = 'committed' AND effects_pending > 0 AND history_retry_after <= ? "
+                "ORDER BY history_retry_after, token LIMIT ?",
+                (self.user_id, storage_namespace_id, now, limit),
+            ).rows
+        ]
+
+    def get_due_output_history_operation(self, token: str, storage_namespace_id: str) -> dict[str, Any] | None:
+        """Recheck delivery eligibility; never inspect current outputs or paths."""
+        now = int(datetime.now(timezone.utc).timestamp())
+        return self.backend.execute(
+            "SELECT token, effects_json, effects_pending, original_json FROM output_file_operations "
+            "WHERE token = ? AND user_id = ? AND storage_namespace_id = ? AND fs_done = 1 "
+            "AND phase = 'committed' AND effects_pending > 0 AND history_retry_after <= ?",
+            (token, self.user_id, storage_namespace_id, now),
+        ).first
+
+    def record_output_history_failure(self, token: str, storage_namespace_id: str, category: str) -> None:
+        """Back off transient delivery failures without unblocking operator-only work."""
+        if category not in {"output_history_invalid", "output_history_unavailable"}:
+            raise ValueError("output_operation_invalid")
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            row = self.backend.execute(
+                "SELECT history_attempts FROM output_file_operations WHERE token = ? AND user_id = ? "
+                "AND storage_namespace_id = ? AND fs_done = 1 AND phase = 'committed' AND effects_pending > 0 "
+                "AND (history_error IS NULL OR history_error <> 'output_history_invalid')",
+                (token, self.user_id, storage_namespace_id),
+                connection=conn,
+            ).first
+            if row is None:
+                return
+            retry = (
+                2**63 - 1
+                if category == "output_history_invalid"
+                else (
+                    int(datetime.now(timezone.utc).timestamp()) + min(3600, 60 * 2 ** min(row["history_attempts"], 6))
+                )
+            )
+            self.backend.execute(
+                "UPDATE output_file_operations SET history_attempts = ?, history_retry_after = ?, history_error = ? "
+                "WHERE token = ? AND user_id = ? AND storage_namespace_id = ?",
+                (
+                    min(row["history_attempts"] + 1, 2147483647),
+                    retry,
+                    category,
+                    token,
+                    self.user_id,
+                    storage_namespace_id,
+                ),
+                connection=conn,
+            )
+
+    def ack_output_file_effect(
+        self, token: str, storage_namespace_id: str, effect_kind: str, *, connection: Any | None = None
+    ) -> bool:
+        """Acknowledge one delivered effect without inspecting recycled rows/files."""
+        if effect_kind != "dispose_history":
+            return False
+        with self.transaction() if connection is None else contextlib.nullcontext(connection) as conn:
+            self._lock_reading_revision_clock(conn)
+            try:
+                row = self.get_output_file_operation(token, storage_namespace_id, connection=conn)
+            except KeyError:
+                return False
+            if not row["fs_done"] or row["phase"] != "committed":
+                return False
+            try:
+                effects = json.loads(row["effects_json"])
+            except (TypeError, ValueError):
+                raise RuntimeError("output_operation_conflict") from None
+            if not isinstance(effects, list) or any(not isinstance(effect, dict) for effect in effects):
+                raise RuntimeError("output_operation_conflict")
+            for effect in effects:
+                if effect.get("kind") == effect_kind and effect.get("acknowledged") is False:
+                    effect["acknowledged"] = True
+                    pending = sum(effect.get("acknowledged") is not True for effect in effects)
+                    self.backend.execute(
+                        "UPDATE output_file_operations SET effects_json = ?, effects_pending = ? "
+                        "WHERE token = ? AND user_id = ? AND storage_namespace_id = ? AND fs_done = 1",
+                        (json.dumps(effects, sort_keys=True), pending, token, self.user_id, storage_namespace_id),
+                        connection=conn,
+                    )
+                    self._retire_output_file_operation(token, storage_namespace_id, conn)
+                    return True
+            return False
+
+    def _lock_reading_revision_clock(self, connection: Any) -> None:
+        """Serialize aggregate writers before reading their current state."""
+        clock_table = (
+            "public.reading_revision_clock"
+            if self.backend.backend_type == BackendType.POSTGRESQL
+            else "reading_revision_clock"
+        )
+        result = self.backend.execute(
+            f"UPDATE {clock_table} SET value = value WHERE id = 1",  # nosec B608: fixed identifiers
+            (),
+            connection=connection,
+        )
+        if result.rowcount != 1:
+            raise DatabaseError("Reading revision clock unavailable")
+
+    def _next_reading_revision(self, connection: Any) -> int:
+        """Allocate a positive token inside the caller's mutation transaction."""
+        clock_table = (
+            "public.reading_revision_clock"
+            if self.backend.backend_type == BackendType.POSTGRESQL
+            else "reading_revision_clock"
+        )
+        # ponytail: database-wide clock serializes Reading writes; split only if measured contention warrants it.
+        result = self.backend.execute(
+            f"UPDATE {clock_table} SET value = value + 1 WHERE id = 1 AND value < ?",  # nosec B608: fixed identifiers
+            (2**63 - 1,),
+            connection=connection,
+        )
+        if result.rowcount != 1:
+            row = self.backend.execute(
+                f"SELECT value FROM {clock_table} WHERE id = 1",  # nosec B608: fixed identifiers
+                (),
+                connection=connection,
+            ).first
+            if row is None:
+                raise DatabaseError("Reading revision clock unavailable")
+            raise OverflowError("Reading revision clock exhausted")
+        row = self.backend.execute(
+            f"SELECT value FROM {clock_table} WHERE id = 1",  # nosec B608: fixed identifiers
+            (),
+            connection=connection,
+        ).first
+        return int(row["value"])
+
     def _refresh_fts_capabilities(self) -> None:
         """Refresh FTS behavior flags based on the concrete virtual table definition."""
         self._fts_supports_direct_delete = True
         if not self._fts_available:
             return
         if self.backend.backend_type != BackendType.SQLITE:
+            self._fts_available = False
             return
         try:
             row = self.backend.execute(
@@ -2641,6 +3751,9 @@ class CollectionsDatabase:
                 """,
                 (),
             ).first
+            if row is None:
+                self._fts_available = False
+                return
             ddl = str((row or {}).get("sql") or "").lower()
             # content='' tables are contentless unless explicitly created with contentless_delete=1.
             if "content=''" in ddl and "contentless_delete=1" not in ddl:
@@ -2885,7 +3998,7 @@ class CollectionsDatabase:
             or "malformed match expression" in msg
         )
 
-    def ensure_collection_tag_ids(self, names: Iterable[str]) -> list[int]:
+    def ensure_collection_tag_ids(self, names: Iterable[str], *, connection: Any | None = None) -> list[int]:
         normed: list[str] = []
         seen: set[str] = set()
         for raw in names or []:
@@ -2901,42 +4014,24 @@ class CollectionsDatabase:
 
         ids: list[int] = []
         select_sql = "SELECT id FROM collection_tags WHERE user_id = ? AND name = ?"
-        insert_sql = "INSERT INTO collection_tags (user_id, name) VALUES (?, ?)"
+        insert_sql = "INSERT INTO collection_tags (user_id, name) VALUES (?, ?) ON CONFLICT (user_id, name) DO NOTHING"
         for nm in normed:
             select_params = (self.user_id, nm)
-            row = self.backend.execute(select_sql, select_params).first
-            if row:
-                ids.append(int(row.get("id")))
-                continue
-            insert_exc: Exception | None = None
-            tag_id: int | None = None
-            try:
-                res = self._execute_insert(insert_sql, (self.user_id, nm))
-                tag_id = self._extract_lastrowid(res)
-            except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
-                insert_exc = exc
-            if tag_id is None:
-                row = self.backend.execute(select_sql, select_params).first
-                if row:
-                    tag_id = int(row.get("id"))
-            if tag_id is None:
-                if insert_exc:
-                    raise insert_exc
+            self.backend.execute(insert_sql, select_params, connection=connection)
+            row = self.backend.execute(select_sql, select_params, connection=connection).first
+            if row is None:
                 raise DatabaseError("Failed to ensure collection tag id")
-            ids.append(tag_id)
+            ids.append(int(row["id"]))
         return ids
 
-    def _replace_item_tags(self, item_id: int, tag_ids: Iterable[int]) -> None:
-        self.backend.execute("DELETE FROM content_item_tags WHERE item_id = ?", (item_id,))
+    def _replace_item_tags(self, item_id: int, tag_ids: Iterable[int], *, connection: Any | None = None) -> None:
+        self.backend.execute("DELETE FROM content_item_tags WHERE item_id = ?", (item_id,), connection=connection)
         for tag_id in tag_ids or []:
-            try:
-                self.backend.execute(
-                    "INSERT INTO content_item_tags (item_id, tag_id) VALUES (?, ?)",
-                    (item_id, tag_id),
-                )
-            except DatabaseError:
-                # Ignore unique violations (already linked)
-                continue
+            self.backend.execute(
+                "INSERT INTO content_item_tags (item_id, tag_id) VALUES (?, ?) ON CONFLICT (item_id, tag_id) DO NOTHING",
+                (item_id, tag_id),
+                connection=connection,
+            )
 
     def _fetch_tags_for_item_ids(
         self,
@@ -2954,7 +4049,9 @@ class CollectionsDatabase:
             FROM content_item_tags cit
             JOIN collection_tags ct ON ct.id = cit.tag_id
             WHERE cit.item_id IN ({placeholders})
-            """.format_map(locals()),  # nosec B608
+            """.format_map(
+                locals()
+            ),  # nosec B608
             tuple(ids),
             connection=connection,
         ).rows
@@ -2982,6 +4079,7 @@ class CollectionsDatabase:
         previous_tags: list[str] | None = None,
         previous_metadata_json: str | None = None,
         has_previous_entry: bool = False,
+        connection: Any | None = None,
     ) -> None:
         if not self._fts_available:
             return
@@ -2991,9 +4089,14 @@ class CollectionsDatabase:
                 tags=tags,
                 metadata_json=metadata_json,
             )
-            had_previous = has_previous_entry or any(
-                value is not None for value in (previous_title, previous_summary, previous_notes, previous_metadata_json)
-            ) or bool(previous_tags)
+            had_previous = (
+                has_previous_entry
+                or any(
+                    value is not None
+                    for value in (previous_title, previous_summary, previous_notes, previous_metadata_json)
+                )
+                or bool(previous_tags)
+            )
 
             if had_previous:
                 previous_metadata_text = self._build_content_fts_metadata_text(
@@ -3005,6 +4108,7 @@ class CollectionsDatabase:
                     self.backend.execute(
                         "DELETE FROM content_items_fts WHERE rowid = ?",
                         (item_id,),
+                        connection=connection,
                     )
                 else:
                     # Contentless FTS5 tables require the special delete command with the old indexed values.
@@ -3014,12 +4118,16 @@ class CollectionsDatabase:
                         VALUES('delete', ?, ?, ?, ?)
                         """,
                         (item_id, previous_title or "", previous_summary or "", previous_metadata_text),
+                        connection=connection,
                     )
             self.backend.execute(
                 "INSERT INTO content_items_fts(rowid, title, summary, metadata) VALUES (?, ?, ?, ?)",
                 (item_id, title or "", summary or "", metadata_text),
+                connection=connection,
             )
         except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
+            if connection is not None:
+                raise
             logger.debug(f"Collections FTS update failed for item {item_id}: {exc}")
 
     def _delete_content_fts_entry(
@@ -3031,6 +4139,7 @@ class CollectionsDatabase:
         notes: str | None = None,
         tags: list[str] | None = None,
         metadata_json: str | None = None,
+        connection: Any | None = None,
     ) -> None:
         if not self._fts_available:
             return
@@ -3039,6 +4148,7 @@ class CollectionsDatabase:
                 self.backend.execute(
                     "DELETE FROM content_items_fts WHERE rowid = ?",
                     (item_id,),
+                    connection=connection,
                 )
                 return
 
@@ -3054,8 +4164,11 @@ class CollectionsDatabase:
                 VALUES('delete', ?, ?, ?, ?)
                 """,
                 (item_id, title or "", summary or "", metadata_text),
+                connection=connection,
             )
         except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
+            if connection is not None:
+                raise
             logger.debug(f"Collections FTS delete failed for item {item_id}: {exc}")
 
     def _row_to_content_item(
@@ -3094,59 +4207,72 @@ class CollectionsDatabase:
             tags=tags or [],
             is_new=is_new,
             content_changed=content_changed,
+            revision=int(row["revision"]),
         )
 
-    def get_content_item(self, item_id: int) -> ContentItemRow:
+    def get_content_item(self, item_id: int, *, connection: Any | None = None) -> ContentItemRow:
+        if connection is None:
+            with self._read_snapshot() as snapshot:
+                return self.get_content_item(item_id, connection=snapshot)
         row = self.backend.execute(
             """
             SELECT id, user_id, origin, origin_type, origin_id, url, canonical_url, domain,
                    title, summary, notes, content_hash, word_count, published_at, status, favorite,
-                   metadata_json, media_id, job_id, run_id, source_id, read_at, created_at, updated_at
+                   metadata_json, media_id, job_id, run_id, source_id, read_at, created_at, updated_at, revision
             FROM content_items
             WHERE id = ? AND user_id = ?
             """,
             (item_id, self.user_id),
+            connection=connection,
         ).first
         if not row:
             raise KeyError("content_item_not_found")
-        tags_map = self._fetch_tags_for_item_ids([item_id])
+        tags_map = self._fetch_tags_for_item_ids([item_id], connection=connection)
         return self._row_to_content_item(row, tags_map.get(item_id, []))
 
-    def get_content_item_by_media_id(self, media_id: int) -> ContentItemRow:
+    def get_content_item_by_media_id(self, media_id: int, *, connection: Any | None = None) -> ContentItemRow:
+        if connection is None:
+            with self._read_snapshot() as snapshot:
+                return self.get_content_item_by_media_id(media_id, connection=snapshot)
         row = self.backend.execute(
             """
             SELECT id, user_id, origin, origin_type, origin_id, url, canonical_url, domain,
                    title, summary, notes, content_hash, word_count, published_at, status, favorite,
-                   metadata_json, media_id, job_id, run_id, source_id, read_at, created_at, updated_at
+                   metadata_json, media_id, job_id, run_id, source_id, read_at, created_at, updated_at, revision
             FROM content_items
             WHERE media_id = ? AND user_id = ?
             """,
             (media_id, self.user_id),
+            connection=connection,
         ).first
         if not row:
             raise KeyError("content_item_not_found")
         item_id = int(row.get("id"))
-        tags_map = self._fetch_tags_for_item_ids([item_id])
+        tags_map = self._fetch_tags_for_item_ids([item_id], connection=connection)
         return self._row_to_content_item(row, tags_map.get(item_id, []))
 
-    def get_content_item_by_url(self, url: str) -> ContentItemRow | None:
+    def get_content_item_by_url(self, url: str, *, connection: Any | None = None) -> ContentItemRow | None:
         if not url:
             return None
+        if connection is None:
+            with self._read_snapshot() as snapshot:
+                return self.get_content_item_by_url(url, connection=snapshot)
         row = self.backend.execute(
             """
             SELECT id, user_id, origin, origin_type, origin_id, url, canonical_url, domain,
                    title, summary, notes, content_hash, word_count, published_at, status, favorite,
-                   metadata_json, media_id, job_id, run_id, source_id, read_at, created_at, updated_at
+                   metadata_json, media_id, job_id, run_id, source_id, read_at, created_at, updated_at, revision
             FROM content_items
             WHERE user_id = ? AND (canonical_url = ? OR url = ?)
             ORDER BY updated_at DESC, id DESC
             LIMIT 1
             """,
             (self.user_id, url, url),
+            connection=connection,
         ).first
         if not row:
             return None
-        tags_map = self._fetch_tags_for_item_ids([int(row.get("id"))])
+        tags_map = self._fetch_tags_for_item_ids([int(row.get("id"))], connection=connection)
         return self._row_to_content_item(row, tags_map.get(int(row.get("id")), []))
 
     @staticmethod
@@ -3752,8 +4878,38 @@ class CollectionsDatabase:
         tags: Iterable[str] | None = None,
         merge_tags: bool = False,
         preserve_existing_on_null: bool = False,
+        _connection: Any | None = None,
     ) -> ContentItemRow:
         """Insert or update a content item record and attach tags."""
+        if _connection is None:
+            with self.transaction() as conn:
+                return self.upsert_content_item(
+                    origin=origin,
+                    origin_type=origin_type,
+                    origin_id=origin_id,
+                    url=url,
+                    canonical_url=canonical_url,
+                    domain=domain,
+                    title=title,
+                    summary=summary,
+                    notes=notes,
+                    content_hash=content_hash,
+                    word_count=word_count,
+                    published_at=published_at,
+                    status=status,
+                    favorite=favorite,
+                    metadata=metadata,
+                    media_id=media_id,
+                    job_id=job_id,
+                    run_id=run_id,
+                    source_id=source_id,
+                    read_at=read_at,
+                    tags=tags,
+                    merge_tags=merge_tags,
+                    preserve_existing_on_null=preserve_existing_on_null,
+                    _connection=conn,
+                )
+        self._lock_reading_revision_clock(_connection)
         now = _utcnow_iso()
         canonical = canonical_url or url
 
@@ -3774,8 +4930,11 @@ class CollectionsDatabase:
                            metadata_json, media_id, job_id, run_id, source_id, read_at, created_at, updated_at
                     FROM content_items
                     WHERE user_id = ? AND {column} = ?
-                    """.format_map(locals()),  # nosec B608
+                    """.format_map(
+                        locals()
+                    ),  # nosec B608
                     (self.user_id, value),
+                    connection=_connection,
                 ).first
                 if row:
                     return row, int(row.get("id"))
@@ -3840,7 +4999,9 @@ class CollectionsDatabase:
         existing_row, item_id = _lookup_existing()
         existing_tags_for_fts: list[str] | None = None
         if existing_row and item_id is not None:
-            existing_tags_for_fts = self._fetch_tags_for_item_ids([int(item_id)]).get(int(item_id), [])
+            existing_tags_for_fts = self._fetch_tags_for_item_ids([int(item_id)], connection=_connection).get(
+                int(item_id), []
+            )
         if existing_row and preserve_existing_on_null:
             preserved = _apply_preserve(existing_row)
             origin_type = preserved["origin_type"]
@@ -3864,161 +5025,89 @@ class CollectionsDatabase:
         canonical, domain_val, favorite_int, status_val = _refresh_derived()
         metadata_json = _build_metadata_json(existing_row)
 
-        prev_hash = existing_row.get("content_hash") if existing_row else None
-        created = False
-        content_changed = False
-
-        if item_id is None:
+        created = item_id is None
+        content_changed = created or existing_row.get("content_hash") != content_hash
+        reading_change = origin == "reading" or bool(existing_row and existing_row.get("origin") == "reading")
+        values = {
+            "origin": origin,
+            "origin_type": origin_type,
+            "origin_id": origin_id,
+            "url": url,
+            "canonical_url": canonical,
+            "domain": domain_val,
+            "title": title,
+            "summary": summary,
+            "notes": notes,
+            "content_hash": content_hash,
+            "word_count": word_count,
+            "published_at": published_at,
+            "status": status_val,
+            "favorite": favorite_int,
+            "metadata_json": metadata_json,
+            "media_id": media_id,
+            "job_id": job_id,
+            "run_id": run_id,
+            "source_id": source_id,
+            "read_at": read_at,
+        }
+        changes = {key: value for key, value in values.items() if created or value != existing_row.get(key)}
+        if not created and "metadata_json" in changes:
             try:
-                res = self._execute_insert(
-                    """
-                    INSERT INTO content_items (
-                        user_id, origin, origin_type, origin_id, url, canonical_url, domain, title, summary,
-                        notes, content_hash, word_count, published_at, status, favorite, metadata_json, media_id,
-                        job_id, run_id, source_id, read_at, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        self.user_id,
-                        origin,
-                        origin_type,
-                        origin_id,
-                        url,
-                        canonical,
-                        domain_val,
-                        title,
-                        summary,
-                        notes,
-                        content_hash,
-                        word_count,
-                        published_at,
-                        status_val,
-                        favorite_int,
-                        metadata_json,
-                        media_id,
-                        job_id,
-                        run_id,
-                        source_id,
-                        read_at,
-                        now,
-                        now,
-                    ),
-                )
-                item_id = self._extract_lastrowid(res)
-                if not item_id:
-                    raise DatabaseError("Failed to insert content item")
-                created = True
-                content_changed = True
-            except DatabaseError as exc:
-                if not self._is_unique_violation(exc):
-                    raise
-                existing_row, item_id = _lookup_existing()
-                if not existing_row or item_id is None:
-                    raise
-                existing_tags_for_fts = self._fetch_tags_for_item_ids([int(item_id)]).get(int(item_id), [])
-                if preserve_existing_on_null:
-                    preserved = _apply_preserve(existing_row)
-                    origin_type = preserved["origin_type"]
-                    origin_id = preserved["origin_id"]
-                    url = preserved["url"]
-                    canonical_url = preserved["canonical_url"]
-                    domain = preserved["domain"]
-                    title = preserved["title"]
-                    summary = preserved["summary"]
-                    notes = preserved["notes"]
-                    content_hash = preserved["content_hash"]
-                    word_count = preserved["word_count"]
-                    published_at = preserved["published_at"]
-                    status = preserved["status"]
-                    media_id = preserved["media_id"]
-                    job_id = preserved["job_id"]
-                    run_id = preserved["run_id"]
-                    source_id = preserved["source_id"]
-                    read_at = preserved["read_at"]
-                canonical, domain_val, favorite_int, status_val = _refresh_derived()
-                metadata_json = _build_metadata_json(existing_row)
-                prev_hash = existing_row.get("content_hash")
-
-        if item_id is not None and not created:
-            fields: list[str] = [
-                "origin = ?",
-                "origin_type = ?",
-                "origin_id = ?",
-                "url = ?",
-                "canonical_url = ?",
-                "domain = ?",
-                "title = ?",
-                "summary = ?",
-                "notes = ?",
-                "content_hash = ?",
-                "word_count = ?",
-                "published_at = ?",
-                "status = ?",
-                "favorite = ?",
-                "metadata_json = ?",
-                "media_id = ?",
-                "job_id = ?",
-                "run_id = ?",
-                "source_id = ?",
-                "read_at = ?",
-                "updated_at = ?",
-            ]
-            params = (
-                origin,
-                origin_type,
-                origin_id,
-                url,
-                canonical,
-                domain_val,
-                title,
-                summary,
-                notes,
-                content_hash,
-                word_count,
-                published_at,
-                status_val,
-                favorite_int,
-                metadata_json,
-                media_id,
-                job_id,
-                run_id,
-                source_id,
-                read_at,
-                now,
-                item_id,
-                self.user_id,
-            )
-            self.backend.execute(
-                f"UPDATE content_items SET {', '.join(fields)} WHERE id = ? AND user_id = ?",  # nosec B608
-                params,
-            )
-            content_changed = not (prev_hash == content_hash or prev_hash is None and content_hash is None)
-
+                if json.loads(metadata_json or "{}") == json.loads(existing_row.get("metadata_json") or "{}"):
+                    changes.pop("metadata_json")
+            except (TypeError, ValueError):
+                pass
+        normalized_tags = existing_tags_for_fts or []
         if tags is not None:
-            tag_list = list(tags)
-            if merge_tags and not created:
-                existing_tags = self._fetch_tags_for_item_ids([int(item_id or 0)]).get(int(item_id or 0), [])
-                if existing_tags:
-                    tag_list = list(dict.fromkeys([*existing_tags, *tag_list]))
-            tag_ids = self.ensure_collection_tag_ids(tag_list)
-            self._replace_item_tags(item_id, tag_ids)
-
-        row = self.get_content_item(item_id)
-        with contextlib.suppress(_COLLECTIONS_NONCRITICAL_EXCEPTIONS):
-            self._update_content_fts_entry(
-                item_id,
-                title=row.title,
-                summary=row.summary,
-                notes=row.notes,
-                tags=row.tags,
-                metadata_json=row.metadata_json,
-                previous_title=(existing_row.get("title") if existing_row else None),
-                previous_summary=(existing_row.get("summary") if existing_row else None),
-                previous_notes=(existing_row.get("notes") if existing_row else None),
-                previous_tags=existing_tags_for_fts,
-                previous_metadata_json=(existing_row.get("metadata_json") if existing_row else None),
-                has_previous_entry=bool(existing_row),
+            normalized_tags = sorted(
+                {self._normalize_collection_tag(str(tag)) for tag in tags if tag and str(tag).strip()}
+                | (set(normalized_tags) if merge_tags else set())
             )
+        tags_changed = normalized_tags != (existing_tags_for_fts or [])
+        if not created and not changes and not tags_changed and reading_change:
+            return self.get_content_item(item_id, connection=_connection)
+        changes["updated_at"] = now
+        if reading_change:
+            changes["revision"] = self._next_reading_revision(_connection)
+        if created:
+            changes.update(user_id=self.user_id, created_at=now)
+            columns = ", ".join(changes)
+            placeholders = ", ".join("?" for _ in changes)
+            result = self._execute_insert(
+                f"INSERT INTO content_items ({columns}) VALUES ({placeholders})",  # nosec B608: fixed fields
+                tuple(changes.values()),
+                connection=_connection,
+            )
+            item_id = self._extract_lastrowid(result)
+            if not item_id:
+                raise DatabaseError("Failed to insert content item")
+        else:
+            fields = ", ".join(f"{key} = ?" for key in changes)
+            self.backend.execute(
+                f"UPDATE content_items SET {fields} WHERE id = ? AND user_id = ?",  # nosec B608: fixed fields
+                (*changes.values(), item_id, self.user_id),
+                connection=_connection,
+            )
+        if tags_changed:
+            tag_ids = self.ensure_collection_tag_ids(normalized_tags, connection=_connection)
+            self._replace_item_tags(item_id, tag_ids, connection=_connection)
+
+        row = self.get_content_item(item_id, connection=_connection)
+        self._update_content_fts_entry(
+            item_id,
+            title=row.title,
+            summary=row.summary,
+            notes=row.notes,
+            tags=row.tags,
+            metadata_json=row.metadata_json,
+            previous_title=(existing_row.get("title") if existing_row else None),
+            previous_summary=(existing_row.get("summary") if existing_row else None),
+            previous_notes=(existing_row.get("notes") if existing_row else None),
+            previous_tags=existing_tags_for_fts,
+            previous_metadata_json=(existing_row.get("metadata_json") if existing_row else None),
+            has_previous_entry=bool(existing_row),
+            connection=_connection,
+        )
         row.is_new = created
         row.content_changed = content_changed
         return row
@@ -4156,7 +5245,7 @@ class CollectionsDatabase:
                     ci.id, ci.user_id, ci.origin, ci.origin_type, ci.origin_id, ci.url, ci.canonical_url,
                     ci.domain, ci.title, ci.summary, ci.notes, ci.content_hash, ci.word_count, ci.published_at,
                     ci.status, ci.favorite, ci.metadata_json, ci.media_id, ci.job_id, ci.run_id,
-                    ci.source_id, ci.read_at, ci.created_at, ci.updated_at
+                    ci.source_id, ci.read_at, ci.created_at, ci.updated_at, ci.revision
                 {base_from}
                 WHERE {where_sql}
                 {group_by}
@@ -4228,57 +5317,55 @@ class CollectionsDatabase:
         read_at: str | None = None,
         clear_read_at: bool = False,
     ) -> ContentItemRow:
-        """Update persisted content item fields and tags."""
-        existing = self.get_content_item(item_id)
-        updates: list[str] = []
-        params: list[Any] = []
-        if status is not None:
-            updates.append("status = ?")
-            params.append(status)
-        if favorite is not None:
-            updates.append("favorite = ?")
-            params.append(1 if favorite else 0)
-        if title is not None:
-            updates.append("title = ?")
-            params.append(title)
-        if summary is not None:
-            updates.append("summary = ?")
-            params.append(summary)
-        if notes is not None:
-            updates.append("notes = ?")
-            params.append(notes)
-        if read_at is not None or clear_read_at:
-            updates.append("read_at = ?")
-            params.append(read_at)
-
-        metadata_json = None
-        if metadata is not None:
-            current_meta: dict[str, Any] = {}
-            if existing.metadata_json:
-                try:
-                    current_meta = json.loads(existing.metadata_json)
-                except _COLLECTIONS_NONCRITICAL_EXCEPTIONS:
-                    current_meta = {}
-            current_meta.update(metadata)
-            metadata_json = json.dumps(current_meta, ensure_ascii=False)
-            updates.append("metadata_json = ?")
-            params.append(metadata_json)
-
-        if updates:
-            updates.append("updated_at = ?")
-            params.append(_utcnow_iso())
-            params.extend([item_id, self.user_id])
-            self.backend.execute(
-                f"UPDATE content_items SET {', '.join(updates)} WHERE id = ? AND user_id = ?",  # nosec B608
-                tuple(params),
+        """Atomically update fields, tags, search content and the Reading revision."""
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            existing = self.get_content_item(item_id, connection=conn)
+            reading_item = existing.origin == "reading"
+            proposed = {
+                "status": status,
+                "favorite": favorite,
+                "title": title,
+                "summary": summary,
+                "notes": notes,
+            }
+            changes = {
+                field: value
+                for field, value in proposed.items()
+                if value is not None and (not reading_item or value != getattr(existing, field))
+            }
+            if (read_at is not None or clear_read_at) and (not reading_item or read_at != existing.read_at):
+                changes["read_at"] = read_at
+            if metadata is not None:
+                current = self._json_loads_dict(existing.metadata_json)
+                merged = {**current, **metadata}
+                if not reading_item or merged != current:
+                    changes["metadata_json"] = json.dumps(merged, ensure_ascii=False)
+            normalized_tags = (
+                existing.tags
+                if tags is None
+                else sorted({self._normalize_collection_tag(str(tag)) for tag in tags if tag and str(tag).strip()})
             )
-
-        if tags is not None:
-            tag_ids = self.ensure_collection_tag_ids(tags)
-            self._replace_item_tags(item_id, tag_ids)
-
-        try:
-            tgt = self.get_content_item(item_id)
+            tags_changed = normalized_tags != existing.tags
+            if not changes and not tags_changed:
+                return existing
+            if "favorite" in changes:
+                changes["favorite"] = int(changes["favorite"])
+            if changes or reading_item:
+                changes["updated_at"] = _utcnow_iso()
+            if reading_item:
+                changes["revision"] = self._next_reading_revision(conn)
+            if changes:
+                updates = ", ".join(f"{field} = ?" for field in changes)
+                self.backend.execute(
+                    f"UPDATE content_items SET {updates} WHERE id = ? AND user_id = ?",  # nosec B608: fixed field names
+                    (*changes.values(), item_id, self.user_id),
+                    connection=conn,
+                )
+            if tags_changed:
+                tag_ids = self.ensure_collection_tag_ids(normalized_tags, connection=conn)
+                self._replace_item_tags(item_id, tag_ids, connection=conn)
+            tgt = self.get_content_item(item_id, connection=conn)
             self._update_content_fts_entry(
                 item_id,
                 title=tgt.title,
@@ -4292,14 +5379,159 @@ class CollectionsDatabase:
                 previous_tags=existing.tags,
                 previous_metadata_json=existing.metadata_json,
                 has_previous_entry=True,
+                connection=conn,
             )
-        except _COLLECTIONS_NONCRITICAL_EXCEPTIONS:
-            pass
+            return tgt
 
-        row = self.get_content_item(item_id)
-        row.is_new = False
-        row.content_changed = False
-        return row
+    def hard_delete_reading_item(self, item_id: int, *, expected_revision: int) -> bool:
+        """Delete exactly the confirmed aggregate; return whether cleanup is pending.
+
+        This internal primitive requires established schema/storage readiness at
+        its service boundary. It does no file I/O and never acquires storage locks.
+        Output ownership must already be proven by adoption or reconciliation.
+        """
+        if type(expected_revision) is not int or expected_revision <= 0:
+            raise ValueError("invalid_expected_revision")
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            parent = self._get_reading_parent(item_id, conn)
+            if parent.revision != expected_revision:
+                raise ReadingRevisionConflict("reading_revision_conflict")
+            owned = self._reading_outputs_for_deletion(parent, conn)
+            self._queue_reading_output_disposal(parent, owned, conn)
+            self.backend.execute(
+                "DELETE FROM reading_output_ownership WHERE user_id = ? AND item_id = ?",
+                (self.user_id, item_id),
+                connection=conn,
+            )
+            for output in owned:
+                self.backend.execute(
+                    "DELETE FROM outputs WHERE id = ? AND user_id = ?",
+                    (output["id"], self.user_id),
+                    connection=conn,
+                )
+            self.backend.execute("DELETE FROM content_item_tags WHERE item_id = ?", (item_id,), connection=conn)
+            self.backend.execute(
+                "DELETE FROM content_item_note_links WHERE user_id = ? AND item_id = ?",
+                (self.user_id, item_id),
+                connection=conn,
+            )
+            self.backend.execute(
+                "DELETE FROM reading_highlights WHERE user_id = ? AND item_id = ?",
+                (self.user_id, item_id),
+                connection=conn,
+            )
+            self.backend.execute(
+                "UPDATE media_collection_items SET content_item_id = NULL WHERE user_id = ? AND content_item_id = ?",
+                (self.user_id, item_id),
+                connection=conn,
+            )
+            self._delete_content_fts_entry(
+                item_id,
+                title=parent.title,
+                summary=parent.summary,
+                notes=parent.notes,
+                tags=parent.tags,
+                metadata_json=parent.metadata_json,
+                connection=conn,
+            )
+            deleted = self.backend.execute(
+                "DELETE FROM content_items WHERE id = ? AND user_id = ? AND origin = 'reading' AND revision = ?",
+                (item_id, self.user_id, expected_revision),
+                connection=conn,
+            )
+            if deleted.rowcount != 1:
+                raise ReadingRevisionConflict("reading_revision_conflict")
+            # Outstanding private writers must fail their next lease check, even
+            # when a file was never opened. Keep their original namespace/token.
+            self.backend.execute(
+                "UPDATE reading_artifact_paths SET state = 'pending' WHERE user_id = ? AND item_id = ? AND state = 'staged'",
+                (self.user_id, item_id),
+                connection=conn,
+            )
+            return bool(
+                self.backend.execute(
+                    "SELECT 1 FROM reading_artifact_paths WHERE user_id = ? AND item_id = ? LIMIT 1",
+                    (self.user_id, item_id),
+                    connection=conn,
+                ).first
+            )
+
+    def _queue_reading_output_disposal(
+        self, parent: ContentItemRow, outputs: list[dict[str, Any]], connection: Any
+    ) -> None:
+        """Reserve unshared owned paths before deleting these exact output rows."""
+        for row in outputs:
+            self._assert_output_file_claims(
+                connection,
+                output_id=row["id"],
+                storage_path=row["storage_path"],
+                storage_namespace_id=row["storage_namespace_id"],
+            )
+        removed_ids = {row["id"] for row in outputs}
+        paths = {(row["storage_namespace_id"], row["storage_path"]) for row in outputs}
+        unshared = []
+        for namespace, path in paths:
+            references = self.backend.execute(
+                "SELECT o.id, o.storage_path FROM outputs o LEFT JOIN reading_output_ownership owner ON owner.output_id = o.id "
+                "WHERE o.user_id = ? AND lower(o.storage_path) = lower(?) "
+                "AND (owner.output_id IS NULL OR owner.storage_namespace_id = ?)",
+                (self.user_id, path, namespace),
+                connection=connection,
+            ).rows
+            shared = [row for row in references if row["id"] not in removed_ids]
+            if shared:
+                # Different spellings may be distinct files on Linux. Preserve
+                # authority by rejecting ambiguity across surviving owners.
+                if any(row["storage_path"] != path for row in shared):
+                    raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
+                continue
+            existing = self.backend.execute(
+                "SELECT 1 FROM reading_artifact_paths WHERE user_id = ? AND storage_namespace_id = ? "
+                "AND lower(storage_path) = lower(?) LIMIT 1",
+                (self.user_id, namespace, path),
+                connection=connection,
+            ).first
+            if existing:
+                raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
+            unshared.append((namespace, path))
+        # Exact spellings can name separate files. Preflight the whole set before
+        # inserting our own aliases; generic registration uses this same fence.
+        for namespace, path in unshared:
+            self.backend.execute(
+                "INSERT INTO reading_artifact_paths "
+                "(token, user_id, storage_namespace_id, storage_path, item_id, expected_revision, lease_until, state) "
+                "VALUES (?, ?, ?, ?, ?, ?, 0, 'pending')",
+                (uuid4().hex, self.user_id, namespace, path, parent.id, parent.revision),
+                connection=connection,
+            )
+
+    def _reading_outputs_for_deletion(self, parent: ContentItemRow, connection: Any) -> list[dict[str, Any]]:
+        """Use structural ownership only; legacy hints can block, never authorize."""
+        owned = self.backend.execute(
+            "SELECT o.id, o.type, o.storage_path, r.storage_namespace_id FROM outputs o "
+            "JOIN reading_output_ownership r ON r.output_id = o.id AND r.user_id = o.user_id "
+            "WHERE r.user_id = ? AND r.item_id = ?",
+            (self.user_id, parent.id),
+            connection=connection,
+        ).rows
+        owned_ids = {str(row["id"]) for row in owned}
+        reference = self._json_loads_dict(parent.metadata_json).get("archive_output_id")
+        if (reference is not None and str(reference) not in owned_ids) or any(
+            row["type"] != "reading_archive" for row in owned
+        ):
+            raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
+        # ponytail: scan this user's legacy archives until reconciliation removes
+        # ambiguity; index a normalized candidate key only if measured cost warrants it.
+        candidates = self.backend.execute(
+            "SELECT o.id, o.metadata_json FROM outputs o LEFT JOIN reading_output_ownership r ON r.output_id = o.id "
+            "WHERE o.user_id = ? AND o.type = 'reading_archive' AND r.output_id IS NULL",
+            (self.user_id,),
+            connection=connection,
+        ).rows
+        if any(str(self._json_loads_dict(row["metadata_json"]).get("item_id")) == str(parent.id) for row in candidates):
+            raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
+        return owned
 
     def delete_content_item(self, item_id: int) -> None:
         """Delete a content item and its tags/FTS entry."""
@@ -4504,21 +5736,33 @@ class CollectionsDatabase:
         )
 
     def link_note_to_content_item(self, *, item_id: int, note_id: str) -> ContentItemNoteLinkRow:
-        self.get_content_item(item_id)
-        now = _utcnow_iso()
-        self.backend.execute(
-            "INSERT INTO content_item_note_links (user_id, item_id, note_id, created_at) "
-            "VALUES (?, ?, ?, ?) ON CONFLICT(user_id, item_id, note_id) DO NOTHING",
-            (self.user_id, item_id, note_id, now),
-        )
-        row = self.backend.execute(
-            "SELECT user_id, item_id, note_id, created_at FROM content_item_note_links "
-            "WHERE user_id = ? AND item_id = ? AND note_id = ?",
-            (self.user_id, item_id, note_id),
-        ).first
-        if not row:
-            raise DatabaseError("Failed to link note to content item")
-        return self._content_item_note_link_row_from_db(row)
+        """Attach an external note and advance a changed Reading aggregate atomically."""
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            item = self.get_content_item(item_id, connection=conn)
+            now = _utcnow_iso()
+            result = self.backend.execute(
+                "INSERT INTO content_item_note_links (user_id, item_id, note_id, created_at) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(user_id, item_id, note_id) DO NOTHING",
+                (self.user_id, item_id, note_id, now),
+                connection=conn,
+            )
+            if result.rowcount > 0 and item.origin == "reading":
+                revision = self._next_reading_revision(conn)
+                self.backend.execute(
+                    "UPDATE content_items SET revision = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+                    (revision, now, item_id, self.user_id),
+                    connection=conn,
+                )
+            row = self.backend.execute(
+                "SELECT user_id, item_id, note_id, created_at FROM content_item_note_links "
+                "WHERE user_id = ? AND item_id = ? AND note_id = ?",
+                (self.user_id, item_id, note_id),
+                connection=conn,
+            ).first
+            if not row:
+                raise DatabaseError("Failed to link note to content item")
+            return self._content_item_note_link_row_from_db(row)
 
     def list_note_links_for_content_item(self, item_id: int) -> list[ContentItemNoteLinkRow]:
         self.get_content_item(item_id)
@@ -4530,11 +5774,27 @@ class CollectionsDatabase:
         return [self._content_item_note_link_row_from_db(row) for row in rows]
 
     def unlink_note_from_content_item(self, *, item_id: int, note_id: str) -> bool:
-        res = self.backend.execute(
-            "DELETE FROM content_item_note_links WHERE user_id = ? AND item_id = ? AND note_id = ?",
-            (self.user_id, item_id, note_id),
-        )
-        return bool(res.rowcount and res.rowcount > 0)
+        """Remove only the association, preserving the external note itself."""
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            try:
+                item = self.get_content_item(item_id, connection=conn)
+            except KeyError:
+                return False
+            result = self.backend.execute(
+                "DELETE FROM content_item_note_links WHERE user_id = ? AND item_id = ? AND note_id = ?",
+                (self.user_id, item_id, note_id),
+                connection=conn,
+            )
+            changed = bool(result.rowcount and result.rowcount > 0)
+            if changed and item.origin == "reading":
+                revision = self._next_reading_revision(conn)
+                self.backend.execute(
+                    "UPDATE content_items SET revision = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+                    (revision, _utcnow_iso(), item_id, self.user_id),
+                    connection=conn,
+                )
+            return changed
 
     # ------------------------
     # Output Templates API
@@ -4635,6 +5895,21 @@ class CollectionsDatabase:
     # ------------------------
     # Highlights API
     # ------------------------
+    def _get_reading_parent(self, item_id: int, connection: Any) -> ContentItemRow:
+        item = self.get_content_item(item_id, connection=connection)
+        if item.origin != "reading":
+            raise KeyError("content_item_not_found")
+        return item
+
+    def _advance_reading_parent(self, item_id: int, connection: Any) -> None:
+        """Advance a verified parent while its caller holds the shared writer fence."""
+        revision = self._next_reading_revision(connection)
+        self.backend.execute(
+            "UPDATE content_items SET revision = ?, updated_at = ? WHERE id = ? AND user_id = ? AND origin = 'reading'",
+            (revision, _utcnow_iso(), item_id, self.user_id),
+            connection=connection,
+        )
+
     def create_highlight(
         self,
         item_id: int,
@@ -4670,35 +5945,47 @@ class CollectionsDatabase:
             context_after,
             state,
         )
-        res = self._execute_insert(q, params)
-        new_id = self._extract_lastrowid(res)
-        if not new_id:
-            raise DatabaseError("Failed to create highlight")
-        return self.get_highlight(new_id)
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            self._get_reading_parent(item_id, conn)
+            res = self._execute_insert(q, params, connection=conn)
+            new_id = self._extract_lastrowid(res)
+            if not new_id:
+                raise DatabaseError("Failed to create highlight")
+            self._advance_reading_parent(item_id, conn)
+            return self.get_highlight(new_id, connection=conn)
 
-    def list_highlights_by_item(self, item_id: int) -> list[HighlightRow]:
+    def list_highlights_by_item(self, item_id: int, *, connection: Any | None = None) -> list[HighlightRow]:
         q = (
             "SELECT id, user_id, item_id, quote, start_offset, end_offset, color, note, created_at, "
             "anchor_strategy, content_hash_ref, context_before, context_after, state "
             "FROM reading_highlights WHERE user_id = ? AND item_id = ? ORDER BY created_at ASC"
         )
-        rows = self.backend.execute(q, (self.user_id, item_id)).rows
+        rows = self.backend.execute(q, (self.user_id, item_id), connection=connection).rows
         return [HighlightRow(**row) for row in rows]
 
-    def get_highlight(self, highlight_id: int) -> HighlightRow:
+    def get_highlight(self, highlight_id: int, *, connection: Any | None = None) -> HighlightRow:
         q = (
             "SELECT id, user_id, item_id, quote, start_offset, end_offset, color, note, created_at, "
             "anchor_strategy, content_hash_ref, context_before, context_after, state "
             "FROM reading_highlights WHERE id = ? AND user_id = ?"
         )
-        row = self.backend.execute(q, (highlight_id, self.user_id)).first
+        row = self.backend.execute(q, (highlight_id, self.user_id), connection=connection).first
         if not row:
             raise KeyError("highlight_not_found")
         return HighlightRow(**row)
 
     def update_highlight(self, highlight_id: int, patch: dict[str, Any]) -> HighlightRow:
-        if not patch:
-            return self.get_highlight(highlight_id)
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            highlight = self.get_highlight(highlight_id, connection=conn)
+            self._get_reading_parent(highlight.item_id, conn)
+            if self._update_highlight_fields(highlight, patch, conn):
+                self._advance_reading_parent(highlight.item_id, conn)
+            return self.get_highlight(highlight_id, connection=conn)
+
+    def _update_highlight_fields(self, highlight: HighlightRow, patch: dict[str, Any], connection: Any) -> bool:
+        """Apply material allowed fields inside a caller-owned aggregate transaction."""
         fields = []
         params: list[Any] = []
         for key in (
@@ -4713,40 +6000,36 @@ class CollectionsDatabase:
             "context_after",
             "state",
         ):
-            if key in patch and patch[key] is not None:
+            if key in patch and patch[key] is not None and patch[key] != getattr(highlight, key):
                 fields.append(f"{key} = ?")
                 params.append(patch[key])
         if not fields:
-            return self.get_highlight(highlight_id)
-        params.extend([highlight_id, self.user_id])
+            return False
+        params.extend([highlight.id, self.user_id])
         q = f"UPDATE reading_highlights SET {', '.join(fields)} WHERE id = ? AND user_id = ?"  # nosec B608
-        res = self.backend.execute(q, tuple(params))
+        res = self.backend.execute(q, tuple(params), connection=connection)
         if res.rowcount <= 0:
             raise KeyError("highlight_not_found")
-        return self.get_highlight(highlight_id)
+        return True
 
     def delete_highlight(self, highlight_id: int) -> bool:
-        q = "DELETE FROM reading_highlights WHERE id = ? AND user_id = ?"
-        res = self.backend.execute(q, (highlight_id, self.user_id))
-        return res.rowcount > 0
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            try:
+                highlight = self.get_highlight(highlight_id, connection=conn)
+                self._get_reading_parent(highlight.item_id, conn)
+            except KeyError:
+                return False
+            q = "DELETE FROM reading_highlights WHERE id = ? AND user_id = ?"
+            res = self.backend.execute(q, (highlight_id, self.user_id), connection=conn)
+            if res.rowcount > 0:
+                self._advance_reading_parent(highlight.item_id, conn)
+                return True
+            return False
 
     # ------------------------
     # Maintenance hooks
     # ------------------------
-    def mark_highlights_stale_if_content_changed(self, item_id: int, new_content_hash: str | None) -> int:
-        """Mark highlights as stale if their stored content_hash_ref doesn't match new hash.
-
-        Returns number of rows updated. Intended to be called by item update pipeline.
-        """
-        if not new_content_hash:
-            return 0
-        q = (
-            "UPDATE reading_highlights SET state = 'stale' WHERE user_id = ? AND item_id = ? "
-            "AND content_hash_ref IS NOT NULL AND content_hash_ref <> ?"
-        )
-        res = self.backend.execute(q, (self.user_id, item_id, new_content_hash))
-        return int(res.rowcount or 0)
-
     def reanchor_highlights_for_item(
         self,
         item_id: int,
@@ -4760,10 +6043,17 @@ class CollectionsDatabase:
         if not resolved_hash:
             return {"updated": 0, "stale": 0, "skipped": 0}
 
+        with self._read_snapshot() as conn:
+            parent = self._get_reading_parent(item_id, conn)
+            highlights = self.list_highlights_by_item(item_id, connection=conn)
+        if parent.content_hash != resolved_hash:
+            return {"updated": 0, "stale": 0, "skipped": len(highlights)}
+
         updated = 0
         stale = 0
         skipped = 0
-        for highlight in self.list_highlights_by_item(item_id=item_id):
+        patches: list[tuple[HighlightRow, dict[str, Any]]] = []
+        for highlight in highlights:
             if not highlight.quote:
                 skipped += 1
                 continue
@@ -4778,25 +6068,37 @@ class CollectionsDatabase:
             )
             if span is None:
                 if highlight.state != "stale":
-                    self.update_highlight(highlight.id, {"state": "stale"})
+                    patches.append((highlight, {"state": "stale"}))
                 stale += 1
                 continue
 
             start_offset, end_offset = span
             context_before, context_after = build_highlight_context(content_text, start_offset, end_offset)
-            self.update_highlight(
-                highlight.id,
-                {
-                    "start_offset": start_offset,
-                    "end_offset": end_offset,
-                    "content_hash_ref": resolved_hash,
-                    "context_before": context_before,
-                    "context_after": context_after,
-                    "state": "active",
-                },
+            patches.append(
+                (
+                    highlight,
+                    {
+                        "start_offset": start_offset,
+                        "end_offset": end_offset,
+                        "content_hash_ref": resolved_hash,
+                        "context_before": context_before,
+                        "context_after": context_after,
+                        "state": "active",
+                    },
+                )
             )
             updated += 1
 
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            current = self._get_reading_parent(item_id, conn)
+            if current.revision != parent.revision:
+                return {"updated": 0, "stale": 0, "skipped": len(highlights)}
+            changed = False
+            for highlight, patch in patches:
+                changed = self._update_highlight_fields(highlight, patch, conn) or changed
+            if changed:
+                self._advance_reading_parent(item_id, conn)
         return {"updated": updated, "stale": stale, "skipped": skipped}
 
     # ------------------------
@@ -4880,13 +6182,14 @@ class CollectionsDatabase:
         chatbook_path: str | None = None,
         retention_until: str | None = None,
         idempotency_key: str | None = None,
+        connection: Any | None = None,
     ) -> CollectionsDatabase.OutputArtifactRow:
         now = _utcnow_iso()
         resolved_storage_path = self.resolve_output_storage_path(storage_path)
         normalized_idempotency_key = str(idempotency_key or "").strip() or None
         q = (
-            "INSERT INTO outputs (user_id, job_id, run_id, type, title, format, storage_path, metadata_json, workspace_tag, created_at, media_item_id, chatbook_path, deleted, deleted_at, retention_until, idempotency_key) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)"
+            "INSERT INTO outputs (user_id, job_id, run_id, type, title, format, storage_path, metadata_json, workspace_tag, created_at, media_item_id, chatbook_path, deleted, deleted_at, retention_until, idempotency_key, file_incarnation) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)"
         )
         params = (
             self.user_id,
@@ -4903,31 +6206,53 @@ class CollectionsDatabase:
             chatbook_path,
             retention_until,
             normalized_idempotency_key,
+            uuid4().hex,
         )
-        if normalized_idempotency_key is not None:
-            active_output_predicate = (
-                "idempotency_key IS NOT NULL AND deleted = FALSE"
-                if self.backend.backend_type == BackendType.POSTGRESQL
-                else "idempotency_key IS NOT NULL AND deleted = 0"
-            )
-            self.backend.execute(
-                q
-                + " ON CONFLICT (user_id, idempotency_key) "
-                + f"WHERE {active_output_predicate} DO NOTHING",
-                params,
-            )
-            return self.get_output_artifact_by_idempotency_key(normalized_idempotency_key)
-        res = self._execute_insert(q, params)
-        new_id = self._extract_lastrowid(res)
-        if not new_id:
-            raise DatabaseError("Failed to create output artifact")
-        return self.get_output_artifact(new_id)
+        with self.transaction() if connection is None else contextlib.nullcontext(connection) as conn:
+            self._lock_reading_revision_clock(conn)
+            self._assert_output_path_not_reserved(resolved_storage_path, conn)
+            if normalized_idempotency_key is not None:
+                active_output_predicate = (
+                    "idempotency_key IS NOT NULL AND deleted = FALSE"
+                    if self.backend.backend_type == BackendType.POSTGRESQL
+                    else "idempotency_key IS NOT NULL AND deleted = 0"
+                )
+                self.backend.execute(
+                    q + " ON CONFLICT (user_id, idempotency_key) " + f"WHERE {active_output_predicate} DO NOTHING",
+                    params,
+                    connection=conn,
+                )
+                output = self.get_output_artifact_by_idempotency_key(normalized_idempotency_key, connection=conn)
+                self._assert_output_file_claims(conn, output_id=output.id)
+                return output
+            res = self._execute_insert(q, params, connection=conn)
+            new_id = self._extract_lastrowid(res)
+            if not new_id:
+                raise DatabaseError("Failed to create output artifact")
+            self._assert_output_file_claims(conn, output_id=new_id)
+            return self.get_output_artifact(new_id, connection=conn)
+
+    def create_output_artifact_with_history_identity(
+        self, **kwargs: Any
+    ) -> tuple[CollectionsDatabase.OutputArtifactRow, str]:
+        """Capture internal history identity in the creation transaction, never by a later ID lookup."""
+        with self.transaction() as conn:
+            output = self.create_output_artifact(connection=conn, **kwargs)
+            identity = self.backend.execute(
+                "SELECT file_incarnation FROM outputs WHERE id = ? AND user_id = ?",
+                (output.id, self.user_id),
+                connection=conn,
+            ).scalar
+            if not isinstance(identity, str) or re.fullmatch(r"[0-9a-f]{32}", identity) is None:
+                raise RuntimeError("output_history_identity_unavailable")
+            return output, identity
 
     def get_output_artifact_by_idempotency_key(
         self,
         idempotency_key: str,
         *,
         include_deleted: bool = False,
+        connection: Any | None = None,
     ) -> CollectionsDatabase.OutputArtifactRow:
         """Return the output created for a stable logical operation key."""
         key = str(idempotency_key or "").strip()
@@ -4939,17 +6264,16 @@ class CollectionsDatabase:
             "metadata_json, workspace_tag, created_at, media_item_id, chatbook_path, idempotency_key "
             f"FROM outputs WHERE user_id = ? AND idempotency_key = ?{deleted_clause}",  # nosec B608
             (self.user_id, key),
+            connection=connection,
         ).first
         if not row:
             raise KeyError("output_not_found")
         return CollectionsDatabase.OutputArtifactRow(**row)
 
-    def update_output_media_item_id(self, output_id: int, media_item_id: int | None) -> CollectionsDatabase.OutputArtifactRow:
-        q = "UPDATE outputs SET media_item_id = ? WHERE id = ? AND user_id = ?"
-        res = self.backend.execute(q, (media_item_id, output_id, self.user_id))
-        if res.rowcount <= 0:
-            raise KeyError("output_not_found")
-        return self.get_output_artifact(output_id)
+    def update_output_media_item_id(
+        self, output_id: int, media_item_id: int | None
+    ) -> CollectionsDatabase.OutputArtifactRow:
+        return self._update_output_artifact_fields(output_id, {"media_item_id": media_item_id})
 
     def update_output_artifact_metadata(
         self,
@@ -4958,41 +6282,522 @@ class CollectionsDatabase:
         metadata_json: str | None = None,
         chatbook_path: str | None = None,
     ) -> CollectionsDatabase.OutputArtifactRow:
-        fields: list[str] = []
-        params: list[Any] = []
-        if metadata_json is not None:
-            fields.append("metadata_json = ?")
-            params.append(metadata_json)
-        if chatbook_path is not None:
-            fields.append("chatbook_path = ?")
-            params.append(chatbook_path)
-        if not fields:
-            return self.get_output_artifact(output_id)
-        params.extend([output_id, self.user_id])
-        q = f"UPDATE outputs SET {', '.join(fields)} WHERE id = ? AND user_id = ? AND deleted = 0"  # nosec B608
-        res = self.backend.execute(q, tuple(params))
-        if res.rowcount <= 0:
-            raise KeyError("output_not_found")
-        return self.get_output_artifact(output_id)
+        return self._update_output_artifact_fields(
+            output_id,
+            {
+                key: value
+                for key, value in {"metadata_json": metadata_json, "chatbook_path": chatbook_path}.items()
+                if value is not None
+            },
+        )
 
-    def get_output_artifact(self, output_id: int, include_deleted: bool = False) -> CollectionsDatabase.OutputArtifactRow:
+    def update_output_artifact(
+        self,
+        output_id: int,
+        *,
+        title: str | None = None,
+        storage_path: str | None = None,
+        format_: str | None = None,
+        retention_until: str | None = None,
+    ) -> CollectionsDatabase.OutputArtifactRow:
+        """Update output fields and any structurally owning Reading revision atomically.
+
+        This updates database metadata only. File moves/writes still require the
+        storage lifecycle fence before production archive ownership is enabled.
+        """
+        fields = {"title": title, "storage_path": storage_path, "format": format_, "retention_until": retention_until}
+        return self._update_output_artifact_fields(
+            output_id, {key: value for key, value in fields.items() if value is not None}
+        )
+
+    def update_managed_reading_output(
+        self,
+        output_id: int,
+        *,
+        title: str | None = None,
+        format_: str | None = None,
+        retention_until: str | None = None,
+    ) -> CollectionsDatabase.OutputArtifactRow | None:
+        """Update managed metadata atomically, or return None for an unowned output.
+
+        No filesystem access is needed. None is only a dispatch result, not a
+        lease against later ownership registration during generic file writes.
+        """
+        fields = {"title": title, "format": format_, "retention_until": retention_until}
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            owner = self.backend.execute(
+                "SELECT item_id FROM reading_output_ownership WHERE output_id = ? AND user_id = ?",
+                (output_id, self.user_id),
+                connection=conn,
+            ).first
+            if not owner:
+                return None
+            return self._update_output_artifact_fields(
+                output_id,
+                {key: value for key, value in fields.items() if value is not None},
+                connection=conn,
+            )
+
+    def _update_output_artifact_fields(
+        self, output_id: int, fields: dict[str, Any], *, connection: Any | None = None
+    ) -> CollectionsDatabase.OutputArtifactRow:
+        """Fence the active output and its explicit owner on one connection."""
+        allowed = {
+            "title",
+            "storage_path",
+            "format",
+            "retention_until",
+            "metadata_json",
+            "chatbook_path",
+            "media_item_id",
+        }
+        if fields.keys() - allowed:
+            raise ValueError("invalid_output_update_fields")
+        if "storage_path" in fields:
+            # Validation can touch the filesystem; it must precede the DB lock.
+            fields = {**fields, "storage_path": self.resolve_output_storage_path(fields["storage_path"])}
+        with self.transaction() if connection is None else contextlib.nullcontext(connection) as conn:
+            self._lock_reading_revision_clock(conn)
+            current = self.backend.execute(
+                "SELECT title, storage_path, format, retention_until, metadata_json, chatbook_path, media_item_id "
+                "FROM outputs WHERE id = ? AND user_id = ? AND deleted = 0",
+                (output_id, self.user_id),
+                connection=conn,
+            ).first
+            if not current:
+                raise KeyError("output_not_found")
+            changes = {key: value for key, value in fields.items() if value != current[key]}
+            if "metadata_json" in changes:
+                try:
+                    # Canonical serialization keeps JSON booleans distinct from numbers.
+                    if json.dumps(json.loads(changes["metadata_json"]), sort_keys=True) == json.dumps(
+                        json.loads(current["metadata_json"]), sort_keys=True
+                    ):
+                        changes.pop("metadata_json")
+                except (TypeError, ValueError):
+                    pass  # Legacy invalid JSON remains comparable as raw text.
+            if changes:
+                owner = self.backend.execute(
+                    "SELECT item_id, storage_namespace_id FROM reading_output_ownership WHERE output_id = ? AND user_id = ?",
+                    (output_id, self.user_id),
+                    connection=conn,
+                ).first
+                self._assert_output_file_claims(
+                    conn,
+                    output_id=output_id,
+                    storage_path=current["storage_path"],
+                    storage_namespace_id=owner["storage_namespace_id"] if owner else None,
+                )
+                if owner:
+                    if changes.keys() & {"storage_path", "format"}:
+                        raise ReadingArchiveFileImmutable("reading_archive_file_immutable")
+                    self._get_reading_parent(owner["item_id"], conn)
+                if "storage_path" in changes:
+                    self._assert_output_path_not_reserved(changes["storage_path"], conn)
+                setters = ", ".join(f"{key} = ?" for key in changes)
+                result = self.backend.execute(
+                    f"UPDATE outputs SET {setters} WHERE id = ? AND user_id = ? AND deleted = 0",  # nosec B608
+                    (*changes.values(), output_id, self.user_id),
+                    connection=conn,
+                )
+                if result.rowcount != 1:
+                    raise KeyError("output_not_found")
+                if owner:
+                    self._advance_reading_parent(owner["item_id"], conn)
+            return self.get_output_artifact(output_id, connection=conn)
+
+    def get_output_artifact(
+        self, output_id: int, include_deleted: bool = False, *, connection: Any | None = None
+    ) -> CollectionsDatabase.OutputArtifactRow:
         cond = "id = ? AND user_id = ?" + ("" if include_deleted else " AND deleted = 0")
         q = (
             "SELECT id, user_id, job_id, run_id, type, title, format, storage_path, metadata_json, workspace_tag, created_at, media_item_id, chatbook_path, idempotency_key "  # nosec B608
             f"FROM outputs WHERE {cond}"
         )
-        row = self.backend.execute(q, (output_id, self.user_id)).first
+        row = self.backend.execute(q, (output_id, self.user_id), connection=connection).first
         if not row:
             raise KeyError("output_not_found")
         return CollectionsDatabase.OutputArtifactRow(**row)
 
-    def delete_output_artifact(self, output_id: int, *, hard: bool = False) -> bool:
+    def register_reading_output_ownership(
+        self,
+        item_id: int,
+        output_id: int,
+        *,
+        expected_revision: int,
+        storage_namespace_id: str,
+    ) -> bool:
+        """Register explicit archive ownership; return False for an identical replay.
+
+        This database primitive does not prove filesystem authority. Its trusted
+        caller must first validate the volume and artifact provenance. Archive
+        staging and legacy reconciliation are not wired to this primitive yet.
+        """
+        if type(expected_revision) is not int or expected_revision <= 0:
+            raise ValueError("invalid_expected_revision")
+        if not isinstance(storage_namespace_id, str) or not storage_namespace_id.strip():
+            raise ValueError("invalid_storage_namespace")
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            parent = self._get_reading_parent(item_id, conn)
+            output = self.get_output_artifact(output_id, connection=conn)
+            self._assert_output_file_claims(
+                conn, output_id=output_id, storage_path=output.storage_path, storage_namespace_id=storage_namespace_id
+            )
+            if output.type != "reading_archive":
+                raise ValueError("reading_archive_required")
+            existing = self.backend.execute(
+                "SELECT user_id, item_id, storage_namespace_id FROM reading_output_ownership WHERE output_id = ?",
+                (output_id,),
+                connection=conn,
+            ).first
+            if existing:
+                if (existing["user_id"], existing["item_id"], existing["storage_namespace_id"]) == (
+                    self.user_id,
+                    item_id,
+                    storage_namespace_id,
+                ):
+                    return False
+                raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
+            if parent.revision != expected_revision:
+                raise ReadingRevisionConflict("reading_revision_conflict")
+            self.backend.execute(
+                "INSERT INTO reading_output_ownership (user_id, item_id, output_id, storage_namespace_id) VALUES (?, ?, ?, ?)",
+                (self.user_id, item_id, output_id, storage_namespace_id),
+                connection=conn,
+            )
+            self._advance_reading_parent(item_id, conn)
+            return True
+
+    def reserve_reading_artifact(
+        self, item_id: int, *, expected_revision: int, storage_namespace_id: str, lease_until: int
+    ) -> dict[str, Any]:
+        """Persist an unadopted random path before any file creation by a trusted caller."""
+        if type(expected_revision) is not int or expected_revision <= 0:
+            raise ValueError("invalid_expected_revision")
+        if not isinstance(storage_namespace_id, str) or not storage_namespace_id.strip():
+            raise ValueError("invalid_storage_namespace")
+        if type(lease_until) is not int or not 0 < lease_until < 2**63:
+            raise ValueError("invalid_artifact_lease")
+        token = uuid4().hex
+        path = f"reading_archive_{token}.md"
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            parent = self._get_reading_parent(item_id, conn)
+            if parent.revision != expected_revision:
+                raise ReadingRevisionConflict("reading_revision_conflict")
+            self._assert_output_file_claims(conn, storage_path=path, storage_namespace_id=storage_namespace_id)
+            if self._reading_artifact_has_output_reference(path, storage_namespace_id, conn):
+                raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
+            self.backend.execute(
+                "INSERT INTO reading_artifact_paths "
+                "(token, user_id, storage_namespace_id, storage_path, item_id, expected_revision, lease_until, state) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 'staged')",
+                (token, self.user_id, storage_namespace_id, path, item_id, expected_revision, lease_until),
+                connection=conn,
+            )
+            return self.get_reading_artifact(token, storage_namespace_id, connection=conn)
+
+    def get_reading_artifact(
+        self, token: str, storage_namespace_id: str, *, connection: Any | None = None
+    ) -> dict[str, Any]:
+        """Read an internal reservation without disclosing another user's state."""
+        row = self.backend.execute(
+            "SELECT * FROM reading_artifact_paths WHERE token = ? AND user_id = ? AND storage_namespace_id = ?",
+            (token, self.user_id, storage_namespace_id),
+            connection=connection,
+        ).first
+        if not row:
+            raise KeyError("reading_artifact_not_found")
+        return dict(row)
+
+    def validate_reading_artifact_for_write(self, token: str, storage_namespace_id: str, *, now: int) -> dict[str, Any]:
+        """Recheck reservation and original parent after the caller acquires storage exclusion."""
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            row, _ = self._validate_staged_reading_artifact(token, storage_namespace_id, now, conn)
+            return row
+
+    def _validate_staged_reading_artifact(
+        self, token: str, storage_namespace_id: str, now: int, connection: Any
+    ) -> tuple[dict[str, Any], ContentItemRow]:
+        row = self.get_reading_artifact(token, storage_namespace_id, connection=connection)
+        # A caller's timestamp may precede a wait for the database clock fence.
+        now = max(now, int(datetime.now(timezone.utc).timestamp()))
+        if row["state"] != "staged" or row["lease_until"] <= now:
+            raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
+        parent = self._get_reading_parent(row["item_id"], connection)
+        if parent.revision != row["expected_revision"]:
+            raise ReadingRevisionConflict("reading_revision_conflict")
+        self._assert_output_file_claims(
+            connection, storage_path=row["storage_path"], storage_namespace_id=storage_namespace_id
+        )
+        return row, parent
+
+    def adopt_reading_artifact(
+        self, token: str, storage_namespace_id: str, *, title: str, now: int, retention_until: str | None = None
+    ) -> CollectionsDatabase.OutputArtifactRow:
+        """Atomically replace trusted staging with archive ownership and one revision.
+
+        The caller must hold verified storage exclusion and have completed and
+        synced its exclusive write. This primitive performs no filesystem I/O
+        and is not authority to adopt an arbitrary preexisting file.
+        """
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            row, parent = self._validate_staged_reading_artifact(token, storage_namespace_id, now, conn)
+            if self._reading_artifact_has_output_reference(row["storage_path"], storage_namespace_id, conn):
+                raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
+            result = self._execute_insert(
+                "INSERT INTO outputs (user_id, type, title, format, storage_path, metadata_json, created_at, media_item_id, retention_until, deleted, file_incarnation) "
+                "VALUES (?, 'reading_archive', ?, 'md', ?, ?, ?, ?, ?, 0, ?)",
+                (
+                    self.user_id,
+                    title,
+                    row["storage_path"],
+                    json.dumps({"item_id": parent.id, "url": parent.url}),
+                    _utcnow_iso(),
+                    parent.media_id,
+                    retention_until,
+                    uuid4().hex,
+                ),
+                connection=conn,
+            )
+            output_id = self._extract_lastrowid(result)
+            if not output_id:
+                raise DatabaseError("reading_artifact_adoption_failed")
+            self._assert_output_file_claims(conn, output_id=output_id)
+            self.backend.execute(
+                "INSERT INTO reading_output_ownership (user_id, item_id, output_id, storage_namespace_id) VALUES (?, ?, ?, ?)",
+                (self.user_id, parent.id, output_id, storage_namespace_id),
+                connection=conn,
+            )
+            metadata_json = json.dumps(
+                {**self._json_loads_dict(parent.metadata_json), "archive_output_id": output_id}, ensure_ascii=False
+            )
+            self.backend.execute(
+                "UPDATE content_items SET metadata_json = ? WHERE id = ? AND user_id = ? AND origin = 'reading'",
+                (metadata_json, parent.id, self.user_id),
+                connection=conn,
+            )
+            self._advance_reading_parent(parent.id, conn)
+            self._update_content_fts_entry(
+                parent.id,
+                title=parent.title,
+                summary=parent.summary,
+                notes=parent.notes,
+                tags=parent.tags,
+                metadata_json=metadata_json,
+                previous_title=parent.title,
+                previous_summary=parent.summary,
+                previous_notes=parent.notes,
+                previous_tags=parent.tags,
+                previous_metadata_json=parent.metadata_json,
+                has_previous_entry=True,
+                connection=conn,
+            )
+            removed = self.backend.execute(
+                "DELETE FROM reading_artifact_paths WHERE token = ? AND user_id = ? AND storage_namespace_id = ? AND state = 'staged'",
+                (token, self.user_id, storage_namespace_id),
+                connection=conn,
+            )
+            if removed.rowcount != 1:
+                raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
+            return self.get_output_artifact(output_id, connection=conn)
+
+    def cancel_reading_artifact(self, token: str, storage_namespace_id: str) -> None:
+        """Queue unadopted staging for cleanup; preserve existing failure/backoff state."""
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            self.backend.execute(
+                "UPDATE reading_artifact_paths SET state = 'pending' WHERE token = ? AND user_id = ? "
+                "AND storage_namespace_id = ? AND state = 'staged'",
+                (token, self.user_id, storage_namespace_id),
+                connection=conn,
+            )
+
+    def _reading_artifact_has_output_reference(
+        self, storage_path: str, storage_namespace_id: str, connection: Any
+    ) -> bool:
+        return bool(
+            self.backend.execute(
+                "SELECT 1 FROM outputs o LEFT JOIN reading_output_ownership r ON r.output_id = o.id "
+                "WHERE o.user_id = ? AND lower(o.storage_path) = lower(?) "
+                "AND (r.output_id IS NULL OR r.storage_namespace_id = ?) LIMIT 1",
+                (self.user_id, storage_path, storage_namespace_id),
+                connection=connection,
+            ).first
+        )
+
+    def _assert_output_file_claims(
+        self,
+        connection: Any,
+        *,
+        output_id: int | None = None,
+        storage_path: str | None = None,
+        storage_namespace_id: str | None = None,
+        exclude_token: str | None = None,
+    ) -> None:
+        """Reject unfinished same-user claims; aliases are not filesystem identity.
+
+        Call only under the revision fence. Only the internal operation validator
+        may exclude its own already-validated token; ordinary writers never do.
+        Known path namespaces remain distinct, but row identity is global per user.
+        """
+        key = storage_path.replace("\\", "/").rsplit("/", 1)[-1].lower() if storage_path is not None else None
+        if self.backend.execute(
+            "SELECT 1 FROM output_file_operations WHERE user_id = ? AND fs_done = 0 "
+            "AND (CAST(? AS TEXT) IS NULL OR token <> ?) AND (output_id = ? OR "
+            "((CAST(? AS TEXT) IS NULL OR storage_namespace_id = ?) AND (source_key = ? OR stage_key = ? OR destination_key = ?))) LIMIT 1",
+            (
+                self.user_id,
+                exclude_token,
+                exclude_token,
+                output_id,
+                storage_namespace_id,
+                storage_namespace_id,
+                key,
+                key,
+                key,
+            ),
+            connection=connection,
+        ).first:
+            raise RuntimeError("output_file_busy")
+
+    def _assert_output_path_not_reserved(
+        self,
+        storage_path: str,
+        connection: Any,
+        *,
+        storage_namespace_id: str | None = None,
+        exclude_token: str | None = None,
+    ) -> None:
+        self._assert_output_file_claims(
+            connection,
+            storage_path=storage_path,
+            storage_namespace_id=storage_namespace_id,
+            exclude_token=exclude_token,
+        )
+        # Generic outputs have no namespace authority: conservatively fence all namespaces.
+        key = storage_path.replace("\\", "/").rsplit("/", 1)[-1].lower()
+        suffix = "%/" + key.replace("^", "^^").replace("%", "^%").replace("_", "^_")
+        if self.backend.execute(
+            "SELECT 1 FROM reading_artifact_paths WHERE user_id = ? "
+            "AND (lower(replace(storage_path, ?, '/')) = ? "
+            "OR lower(replace(storage_path, ?, '/')) LIKE (?) ESCAPE '^') "
+            "AND (CAST(? AS TEXT) IS NULL OR storage_namespace_id = ?) LIMIT 1",
+            (self.user_id, "\\", key, "\\", suffix, storage_namespace_id, storage_namespace_id),
+            connection=connection,
+        ).first:
+            raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
+
+    def prepare_reading_artifact_cleanup(
+        self, storage_namespace_id: str, *, now: int, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        """Select a bounded batch while the caller holds the verified storage lock."""
+        if type(limit) is not int or not 1 <= limit <= 1000:
+            raise ValueError("invalid_cleanup_limit")
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            rows = self.backend.execute(
+                "SELECT * FROM reading_artifact_paths WHERE user_id = ? AND storage_namespace_id = ? "
+                "AND ((state = 'staged' AND lease_until <= ?) OR (state = 'pending' AND retry_after <= ?)) "
+                "AND (last_error IS NULL OR last_error NOT IN ('invalid_path', 'path_collision')) "
+                "ORDER BY retry_after, token LIMIT ?",
+                (self.user_id, storage_namespace_id, now, now, limit),
+                connection=conn,
+            ).rows
+            ready = []
+            for row in rows:
+                self._assert_output_file_claims(
+                    conn, storage_path=row["storage_path"], storage_namespace_id=storage_namespace_id
+                )
+                self.backend.execute(
+                    "UPDATE reading_artifact_paths SET state = 'pending' WHERE token = ? AND user_id = ?",
+                    (row["token"], self.user_id),
+                    connection=conn,
+                )
+                if self._reading_artifact_has_output_reference(row["storage_path"], storage_namespace_id, conn):
+                    self._record_reading_artifact_error(row, "shared_output", now, conn)
+                else:
+                    ready.append(dict(row))
+            return ready
+
+    def _record_reading_artifact_error(self, row: dict[str, Any], category: str, now: int, connection: Any) -> None:
+        attempts = min(row["attempts"] + 1, 2**31 - 1)
+        self.backend.execute(
+            "UPDATE reading_artifact_paths SET state = 'pending', attempts = ?, retry_after = ?, last_error = ? "
+            "WHERE token = ? AND user_id = ?",
+            (attempts, now + min(3600, 2 ** min(attempts, 12)), category, row["token"], self.user_id),
+            connection=connection,
+        )
+
+    def record_reading_artifact_error(self, token: str, storage_namespace_id: str, *, category: str, now: int) -> None:
+        """Retain only sanitized failure categories with bounded retry backoff."""
+        if category not in {"io", "permission", "invalid_path", "path_collision", "shared_output"}:
+            raise ValueError("invalid_artifact_error")
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            row = self.get_reading_artifact(token, storage_namespace_id, connection=conn)
+            self._record_reading_artifact_error(row, category, now, conn)
+
+    def finish_reading_artifact_cleanup(self, token: str, storage_namespace_id: str) -> bool:
+        """Retire a pending path only after caller's unlink and directory sync succeed."""
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            row = self.backend.execute(
+                "SELECT storage_path FROM reading_artifact_paths WHERE token = ? AND user_id = ? AND storage_namespace_id = ?",
+                (token, self.user_id, storage_namespace_id),
+                connection=conn,
+            ).first
+            if row:
+                self._assert_output_file_claims(
+                    conn, storage_path=row["storage_path"], storage_namespace_id=storage_namespace_id
+                )
+            result = self.backend.execute(
+                "DELETE FROM reading_artifact_paths WHERE token = ? AND user_id = ? AND storage_namespace_id = ? "
+                "AND state = 'pending' AND NOT EXISTS (SELECT 1 FROM outputs o "
+                "LEFT JOIN reading_output_ownership r ON r.output_id = o.id "
+                "WHERE o.user_id = reading_artifact_paths.user_id AND lower(o.storage_path) = lower(reading_artifact_paths.storage_path) "
+                "AND (r.output_id IS NULL OR r.storage_namespace_id = reading_artifact_paths.storage_namespace_id))",
+                (token, self.user_id, storage_namespace_id),
+                connection=conn,
+            )
+            return result.rowcount == 1
+
+    def delete_output_artifact(self, output_id: int, *, hard: bool = False, purge_before: str | None = None) -> bool:
+        """Trusted internal deletion, including durable managed-file disposal."""
+        return (
+            self.delete_output_artifact_record(
+                output_id, hard=hard, delete_managed_files=True, purge_before=purge_before
+            )
+            is not None
+        )
+
+    def delete_output_artifact_record(
+        self,
+        output_id: int,
+        *,
+        hard: bool = False,
+        delete_managed_files: bool = False,
+        purge_before: str | None = None,
+        soft_deleted_grace_days: int = 30,
+        include_retention: bool = True,
+    ) -> DeletedOutput | None:
+        """Delete output metadata, fencing any Reading owner and durable disposal.
+
+        For managed archives hard deletion schedules file cleanup; callers must
+        not unlink files first. ``purge_before`` is an internal retention scan
+        cutoff, rechecked after locking so a renewed output survives a stale scan.
+        Filesystem quota measurement stays outside the mutation transaction.
+        """
         row = self.backend.execute(
             "SELECT id, type, metadata_json, storage_path, deleted FROM outputs WHERE id = ? AND user_id = ?",
             (output_id, self.user_id),
         ).first
         if not row:
-            return False
+            return None
         deleted_flag = int(row["deleted"] if isinstance(row, dict) else row[4] or 0)
         output_type = row["type"] if isinstance(row, dict) else row[1]
         metadata_json = row["metadata_json"] if isinstance(row, dict) else row[2]
@@ -5004,21 +6809,118 @@ class CollectionsDatabase:
             if size_bytes is None:
                 size_bytes = _resolve_output_size_bytes(self.user_id, storage_path)
 
-        if hard:
-            q = "DELETE FROM outputs WHERE id = ? AND user_id = ?"
-            res = self.backend.execute(q, (output_id, self.user_id))
-        else:
-            q = "UPDATE outputs SET deleted = 1, deleted_at = ? WHERE id = ? AND user_id = ? AND deleted = 0"
-            res = self.backend.execute(q, (_utcnow_iso(), output_id, self.user_id))
-        ok = res.rowcount > 0
+        with self.transaction() as conn:
+            self._lock_reading_revision_clock(conn)
+            current = self.backend.execute(
+                "SELECT id, type, storage_path, deleted FROM outputs WHERE id = ? AND user_id = ?",
+                (output_id, self.user_id),
+                connection=conn,
+            ).first
+            if not current or (not hard and current["deleted"]):
+                return None
+            if purge_before is not None:
+                predicate, params = self._output_purge_predicate(
+                    purge_before, soft_deleted_grace_days, include_retention
+                )
+                eligible = self.backend.execute(
+                    f"SELECT 1 FROM outputs WHERE id = ? AND user_id = ? AND ({predicate})",  # nosec B608: fixed predicate
+                    (output_id, self.user_id, *params),
+                    connection=conn,
+                ).first
+                if not eligible:
+                    return None
+            owner = self.backend.execute(
+                "SELECT item_id, storage_namespace_id FROM reading_output_ownership WHERE output_id = ? AND user_id = ?",
+                (output_id, self.user_id),
+                connection=conn,
+            ).first
+            self._assert_output_file_claims(
+                conn,
+                output_id=output_id,
+                storage_path=current["storage_path"],
+                storage_namespace_id=owner["storage_namespace_id"] if owner else None,
+            )
+            parent = self._get_reading_parent(owner["item_id"], conn) if owner else None
+            # Any surviving reference may acquire Reading ownership after commit.
+            # Generic outputs lack namespace authority, so compare conservatively.
+            # Legacy absolute paths can name the same file as a relative filename.
+            filename = current["storage_path"].replace("\\", "/").rsplit("/", 1)[-1].lower()
+            suffix = "%/" + filename.replace("^", "^^").replace("%", "^%").replace("_", "^_")
+            shared_path = bool(
+                self.backend.execute(
+                    "SELECT 1 FROM outputs WHERE user_id = ? AND id <> ? "
+                    "AND (lower(replace(storage_path, ?, '/')) = ? "
+                    "OR lower(replace(storage_path, ?, '/')) LIKE (?) ESCAPE '^') LIMIT 1",
+                    (self.user_id, output_id, "\\", filename, "\\", suffix),
+                    connection=conn,
+                ).first
+            )
+            if parent and hard:
+                if not delete_managed_files:
+                    raise ReadingFileDeletionRequired("reading_file_deletion_required")
+                if current["type"] != "reading_archive":
+                    raise ReadingArtifactOwnershipConflict("reading_artifact_ownership_conflict")
+                self._queue_reading_output_disposal(parent, [{**current, **owner}], conn)
+                self.backend.execute(
+                    "DELETE FROM reading_output_ownership WHERE output_id = ? AND user_id = ?",
+                    (output_id, self.user_id),
+                    connection=conn,
+                )
+            if hard:
+                res = self.backend.execute(
+                    "DELETE FROM outputs WHERE id = ? AND user_id = ?", (output_id, self.user_id), connection=conn
+                )
+            else:
+                res = self.backend.execute(
+                    "UPDATE outputs SET deleted = 1, deleted_at = ? WHERE id = ? AND user_id = ? AND deleted = 0",
+                    (_utcnow_iso(), output_id, self.user_id),
+                    connection=conn,
+                )
+            ok = res.rowcount > 0
+            if not ok:
+                raise DatabaseError("output_deletion_failed")
+            if parent:
+                metadata = self._json_loads_dict(parent.metadata_json)
+                if str(metadata.get("archive_output_id")) == str(output_id):
+                    metadata.pop("archive_output_id")
+                    metadata_json = json.dumps(metadata, ensure_ascii=False)
+                    self.backend.execute(
+                        "UPDATE content_items SET metadata_json = ? WHERE id = ? AND user_id = ?",
+                        (metadata_json, parent.id, self.user_id),
+                        connection=conn,
+                    )
+                    self._update_content_fts_entry(
+                        parent.id,
+                        title=parent.title,
+                        summary=parent.summary,
+                        notes=parent.notes,
+                        tags=parent.tags,
+                        metadata_json=metadata_json,
+                        previous_title=parent.title,
+                        previous_summary=parent.summary,
+                        previous_notes=parent.notes,
+                        previous_tags=parent.tags,
+                        previous_metadata_json=parent.metadata_json,
+                        has_previous_entry=True,
+                        connection=conn,
+                    )
+                self._advance_reading_parent(parent.id, conn)
+            should_decrement = should_decrement and not current["deleted"]
         if ok and should_decrement and size_bytes:
             try:
                 self.update_audiobook_output_usage(-size_bytes)
             except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
                 logger.warning("audiobook_quota: failed to decrement usage: {}", exc)
-        return ok
+        return DeletedOutput(storage_path=current["storage_path"], managed=bool(owner), shared=shared_path)
 
-    def get_output_artifact_by_title(self, title: str, format_: str | None = None, include_deleted: bool = False) -> CollectionsDatabase.OutputArtifactRow:
+    def get_output_artifact_by_title(
+        self,
+        title: str,
+        format_: str | None = None,
+        include_deleted: bool = False,
+        *,
+        connection: Any | None = None,
+    ) -> CollectionsDatabase.OutputArtifactRow:
         where = ["user_id = ?", "title = ?"]
         params: list[Any] = [self.user_id, title]
         if format_:
@@ -5030,7 +6932,7 @@ class CollectionsDatabase:
             "SELECT id, user_id, job_id, run_id, type, title, format, storage_path, metadata_json, workspace_tag, created_at, media_item_id, chatbook_path, idempotency_key "  # nosec B608
             f"FROM outputs WHERE {' AND '.join(where)} ORDER BY created_at DESC LIMIT 1"
         )
-        row = self.backend.execute(q, tuple(params)).first
+        row = self.backend.execute(q, tuple(params), connection=connection).first
         if not row:
             raise KeyError("output_not_found")
         return CollectionsDatabase.OutputArtifactRow(**row)
@@ -5137,10 +7039,12 @@ class CollectionsDatabase:
         rows = self.backend.execute(sq, tuple(params + [limit, offset])).rows
         return [CollectionsDatabase.OutputArtifactRow(**row) for row in rows], total
 
-    def get_audiobook_output_usage(self) -> int | None:
+    def get_audiobook_output_usage(self, *, connection: Any | None = None) -> int | None:
+        """Read committed-artifact usage, optionally in the output transaction."""
         row = self.backend.execute(
             "SELECT used_bytes FROM audiobook_output_usage WHERE user_id = ?",
             (self.user_id,),
+            connection=connection,
         ).first
         if not row:
             return None
@@ -5150,7 +7054,8 @@ class CollectionsDatabase:
         except (TypeError, ValueError):
             return None
 
-    def set_audiobook_output_usage(self, used_bytes: int) -> int:
+    def set_audiobook_output_usage(self, used_bytes: int, *, connection: Any | None = None) -> int:
+        """Set usage using the caller's connection when composing atomic writes."""
         value = max(0, int(used_bytes))
         now = _utcnow_iso()
         if self.backend.backend_type == BackendType.POSTGRESQL:
@@ -5163,6 +7068,7 @@ class CollectionsDatabase:
                 RETURNING used_bytes
                 """,
                 (self.user_id, value, now),
+                connection=connection,
             ).first
             if row:
                 return int(row["used_bytes"] if isinstance(row, dict) else row[0] or 0)
@@ -5175,10 +7081,16 @@ class CollectionsDatabase:
             SET used_bytes = excluded.used_bytes, updated_at = excluded.updated_at
             """,
             (self.user_id, value, now),
+            connection=connection,
         )
         return value
 
-    def update_audiobook_output_usage(self, delta_bytes: int) -> int:
+    def update_audiobook_output_usage(self, delta_bytes: int, *, connection: Any | None = None) -> int:
+        """Apply a delta once inside the caller's output commit transaction.
+
+        The journal commit context rejects replay before entering its body.
+        This additive helper alone does not provide replay protection.
+        """
         delta = int(delta_bytes or 0)
         now = _utcnow_iso()
         initial = max(0, delta)
@@ -5193,6 +7105,7 @@ class CollectionsDatabase:
                 RETURNING used_bytes
                 """,
                 (self.user_id, initial, now, delta),
+                connection=connection,
             ).first
             if row:
                 return int(row["used_bytes"] if isinstance(row, dict) else row[0] or 0)
@@ -5206,10 +7119,12 @@ class CollectionsDatabase:
                 updated_at = excluded.updated_at
             """,
             (self.user_id, initial, now, delta),
+            connection=connection,
         )
         row = self.backend.execute(
             "SELECT used_bytes FROM audiobook_output_usage WHERE user_id = ?",
             (self.user_id,),
+            connection=connection,
         ).first
         if not row:
             return initial
@@ -5243,18 +7158,7 @@ class CollectionsDatabase:
         return self.set_audiobook_output_usage(total_bytes)
 
     def rename_output_artifact(self, output_id: int, new_title: str, new_storage_path: str | None = None) -> CollectionsDatabase.OutputArtifactRow:
-        fields = ["title = ?"]
-        params: list[Any] = [new_title]
-        if new_storage_path is not None:
-            new_storage_path = self.resolve_output_storage_path(new_storage_path)
-            fields.append("storage_path = ?")
-            params.append(new_storage_path)
-        params.extend([output_id, self.user_id])
-        q = f"UPDATE outputs SET {', '.join(fields)} WHERE id = ? AND user_id = ? AND deleted = 0"  # nosec B608
-        res = self.backend.execute(q, tuple(params))
-        if res.rowcount <= 0:
-            raise KeyError("output_not_found")
-        return self.get_output_artifact(output_id)
+        return self.update_output_artifact(output_id, title=new_title, storage_path=new_storage_path)
 
     # ------------------------
     # Audiobook voice profiles
@@ -7815,36 +9719,49 @@ class CollectionsDatabase:
         res = self.backend.execute(q, (_utcnow_iso(), consumer_name, lease_owner_id))
         return bool(res.rowcount and res.rowcount > 0)
 
-    def purge_expired_outputs(self) -> int:
-        """Hard delete expired/retained outputs. Returns number of rows removed."""
+    def purge_expired_outputs(self, *, delete_managed_files: bool = False) -> int:
+        """Remove expired rows; automatic callers cannot authorize managed unlink.
+
+        Watchlist reads invoke this metadata-maintenance helper. Managed archives
+        therefore survive unless a trusted caller explicitly permits durable file
+        cleanup. Unowned files are never unlinked by this database method.
+        """
         now = _utcnow_iso()
-        if self.backend.backend_type == BackendType.POSTGRESQL:
-            r1 = self.backend.execute(
-                "DELETE FROM outputs WHERE user_id = ? AND retention_until IS NOT NULL AND retention_until::timestamptz <= ?",
-                (self.user_id, now),
-            )
+        removed = 0
+        for output_id in self.find_outputs_to_purge(now):
             try:
-                r2 = self.backend.execute(
-                    "DELETE FROM outputs WHERE user_id = ? AND deleted = 1 AND deleted_at IS NOT NULL AND (NOW() - deleted_at::timestamptz) >= INTERVAL '30 days'",
-                    (self.user_id,),
+                deleted = self.delete_output_artifact_record(
+                    output_id, hard=True, delete_managed_files=delete_managed_files, purge_before=now
                 )
-                return int((r1.rowcount or 0) + (r2.rowcount or 0))
-            except _COLLECTIONS_NONCRITICAL_EXCEPTIONS:
-                return int(r1.rowcount or 0)
-        # Hard delete those with retention_until past
-        r1 = self.backend.execute(
-            "DELETE FROM outputs WHERE user_id = ? AND retention_until IS NOT NULL AND retention_until <= ?",
-            (self.user_id, now),
-        )
-        # Soft-deleted older than 30 days
-        try:
-            r2 = self.backend.execute(
-                "DELETE FROM outputs WHERE user_id = ? AND deleted = 1 AND deleted_at IS NOT NULL AND julianday(?) - julianday(deleted_at) >= 30",
-                (self.user_id, now),
-            )
-            return int((r1.rowcount or 0) + (r2.rowcount or 0))
-        except _COLLECTIONS_NONCRITICAL_EXCEPTIONS:
-            return int(r1.rowcount or 0)
+            except ReadingFileDeletionRequired:
+                continue
+            removed += int(deleted is not None)
+        return removed
+
+    def find_outputs_to_purge(
+        self, now: str, soft_deleted_grace_days: int = 30, include_retention: bool = True
+    ) -> dict[int, str]:
+        """Select candidates; deletion must recheck the same policy under its fence."""
+        predicate, params = self._output_purge_predicate(now, soft_deleted_grace_days, include_retention)
+        rows = self.backend.execute(
+            f"SELECT id, storage_path FROM outputs WHERE user_id = ? AND ({predicate})",  # nosec B608: fixed predicate
+            (self.user_id, *params),
+        ).rows
+        return {row["id"]: row["storage_path"] for row in rows}
+
+    def _output_purge_predicate(
+        self, now: str, soft_deleted_grace_days: int = 30, include_retention: bool = True
+    ) -> tuple[str, tuple[Any, ...]]:
+        """Share the same backend retention predicate for scanning and rechecking."""
+        if self.backend.backend_type == BackendType.POSTGRESQL:
+            retention = "retention_until IS NOT NULL AND retention_until::timestamptz <= ?"
+            grace = "deleted = 1 AND deleted_at IS NOT NULL AND (?::timestamptz - deleted_at::timestamptz) >= (? * INTERVAL '1 day')"
+        else:
+            retention = "retention_until IS NOT NULL AND retention_until <= ?"
+            grace = "deleted = 1 AND deleted_at IS NOT NULL AND julianday(?) - julianday(deleted_at) >= ?"
+        if include_retention:
+            return f"({retention}) OR ({grace})", (now, now, soft_deleted_grace_days)
+        return grace, (now, soft_deleted_grace_days)
 
     # ------------------------
     # File artifacts API

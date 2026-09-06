@@ -387,6 +387,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.tts_history_ops imp
     _build_tts_history_filters,
     count_tts_history,
     create_tts_history_entry,
+    dispose_tts_output_instance,
     get_tts_history_entry,
     list_tts_history,
     list_tts_history_user_ids,
@@ -468,6 +469,9 @@ from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.pos
 from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_operation_owned_clone_media import (
     run_postgres_migrate_to_v25,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_output_history_incarnation import (
+    run_postgres_migrate_to_v27,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_sequence_sync import (
     run_postgres_migrate_to_v18,
 )
@@ -537,7 +541,7 @@ from tldw_Server_API.app.core.DB_Management.sqlite_policy import begin_immediate
 class MediaDatabase:
     """Canonical package-native Media DB runtime class."""
 
-    _CURRENT_SCHEMA_VERSION = 26  # Final staged shared Workspace clone persistence
+    _CURRENT_SCHEMA_VERSION = 27  # Original-output history disposal receiver
 
     # <<< Schema Definition (Version 1) >>>
 
@@ -1334,7 +1338,26 @@ class MediaDatabase:
     CREATE INDEX IF NOT EXISTS idx_media_files_deleted ON MediaFiles(deleted);
     """
 
-    _TTS_HISTORY_TABLE_SQL = """
+    _TTS_OUTPUT_INSTANCES_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS tts_output_instances (
+        user_id TEXT NOT NULL CHECK (length(trim(user_id)) > 0),
+        output_incarnation TEXT NOT NULL CHECK (length(output_incarnation) = 32),
+        state TEXT NOT NULL CHECK (state IN ('live', 'disposed')),
+        disposal_token TEXT,
+        disposed_at TEXT,
+        PRIMARY KEY (user_id, output_incarnation),
+        CHECK (
+            (state = 'live' AND disposal_token IS NULL AND disposed_at IS NULL)
+            OR (state = 'disposed' AND disposal_token IS NOT NULL
+                AND length(disposal_token) = 32 AND disposed_at IS NOT NULL)
+        )
+    );
+    CREATE INDEX IF NOT EXISTS idx_tts_history_incarnation
+        ON tts_history(user_id, output_incarnation);
+    """
+
+    _TTS_HISTORY_TABLE_SQL = (
+        """
     -- TTS History Table --
     CREATE TABLE IF NOT EXISTS tts_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1357,6 +1380,7 @@ class MediaDatabase:
         favorite BOOLEAN NOT NULL DEFAULT 0,
         job_id INTEGER,
         output_id INTEGER,
+        output_incarnation TEXT,
         artifact_ids TEXT,
         artifact_deleted_at TEXT,
         error_message TEXT,
@@ -1370,6 +1394,8 @@ class MediaDatabase:
     CREATE INDEX IF NOT EXISTS idx_tts_history_user_voice_id ON tts_history(user_id, voice_id);
     CREATE INDEX IF NOT EXISTS idx_tts_history_user_text_hash ON tts_history(user_id, text_hash);
     """
+        + _TTS_OUTPUT_INSTANCES_TABLE_SQL
+    )
 
     _AUDIO_PRESETS_TABLE_SQL = """
     -- Audio Presets Table --
@@ -1997,6 +2023,7 @@ MediaDatabase._postgres_migrate_to_v23 = run_postgres_migrate_to_v23
 MediaDatabase._postgres_migrate_to_v24 = run_postgres_migrate_to_v24
 MediaDatabase._postgres_migrate_to_v25 = run_postgres_migrate_to_v25
 MediaDatabase._postgres_migrate_to_v26 = run_postgres_migrate_to_v26
+MediaDatabase._postgres_migrate_to_v27 = run_postgres_migrate_to_v27
 MediaDatabase._get_db_version = get_db_version
 MediaDatabase._update_schema_version_postgres = update_schema_version_postgres
 MediaDatabase._sync_postgres_sequences = sync_postgres_sequences
@@ -2247,6 +2274,7 @@ MediaDatabase.insert_visual_document = insert_visual_document
 MediaDatabase.list_visual_documents_for_media = list_visual_documents_for_media
 MediaDatabase.soft_delete_visual_documents_for_media = soft_delete_visual_documents_for_media
 MediaDatabase.create_tts_history_entry = create_tts_history_entry
+MediaDatabase.dispose_tts_output_instance = dispose_tts_output_instance
 MediaDatabase._build_tts_history_filters = _build_tts_history_filters
 MediaDatabase.list_tts_history = list_tts_history
 MediaDatabase.count_tts_history = count_tts_history

@@ -1181,11 +1181,11 @@ def test_postgres_tts_source_hash_structures_ensure_postgres_tts_history_emits_t
         def execute(self, query: str, *, connection: object) -> None:
             calls.append((query, connection))
 
-    db = SimpleNamespace(backend=FakeBackend())
+    db = SimpleNamespace(backend=FakeBackend(), _TTS_HISTORY_TABLE_SQL=MediaDatabase._TTS_HISTORY_TABLE_SQL)
 
     postgres_tts_source_hash_structures_module.ensure_postgres_tts_history(db, conn)
 
-    assert calls == [
+    assert calls[:7] == [
         (
             "CREATE TABLE IF NOT EXISTS tts_history ("
             "id BIGSERIAL PRIMARY KEY, "
@@ -1223,6 +1223,8 @@ def test_postgres_tts_source_hash_structures_ensure_postgres_tts_history_emits_t
         ("CREATE INDEX IF NOT EXISTS idx_tts_history_user_voice_id ON tts_history(user_id, voice_id)", conn),
         ("CREATE INDEX IF NOT EXISTS idx_tts_history_user_text_hash ON tts_history(user_id, text_hash)", conn),
     ]
+    assert ("ALTER TABLE tts_history ADD COLUMN IF NOT EXISTS output_incarnation TEXT", conn) in calls[7:]
+    assert any("CREATE TABLE IF NOT EXISTS tts_output_instances" in query for query, _ in calls[7:])
 
 
 @pytest.mark.unit
@@ -2268,7 +2270,7 @@ def test_fresh_sqlite_bootstrap_includes_transcript_run_history_columns_and_inde
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='Transcripts'"
         ).fetchone()[0]
 
-        assert db._CURRENT_SCHEMA_VERSION == 26
+        assert db._CURRENT_SCHEMA_VERSION == 27
         assert {
             "latest_transcription_run_id",
             "next_transcription_run_id",
@@ -2672,7 +2674,7 @@ def test_on_disk_sqlite_migration_to_v23_backfills_transcript_run_history(tmp_pa
                     "PRAGMA index_list(claims_monitoring_events)"
                 ).fetchall()
             }
-            assert version_row["version"] == 26
+            assert version_row["version"] == 27
             assert event_index_columns["idx_claims_monitoring_events_user_created_id"] == [
                 "user_id",
                 "created_at",
@@ -2914,8 +2916,8 @@ def test_fresh_sqlite_bootstrap_includes_claims_analytics_export_job_fields() ->
             "SELECT version FROM schema_version LIMIT 1"
         ).fetchone()[0]
 
-        assert version == 26
-        assert db._CURRENT_SCHEMA_VERSION == 26
+        assert version == 27
+        assert db._CURRENT_SCHEMA_VERSION == 27
         assert columns["job_id"] == {"type": "INTEGER", "notnull": 0}
         assert columns["error_code"] == {"type": "TEXT", "notnull": 0}
         assert columns["snapshot_at"] == {"type": "TEXT", "notnull": 0}
@@ -3009,7 +3011,7 @@ def test_on_disk_sqlite_migration_to_v24_adds_claims_export_job_fields_and_prese
                 "SELECT version FROM schema_version LIMIT 1"
             ).fetchone()["version"]
 
-        assert version == 26
+        assert version == 27
         assert columns["job_id"] == {"type": "INTEGER", "notnull": 0}
         assert columns["error_code"] == {"type": "TEXT", "notnull": 0}
         assert columns["snapshot_at"] == {"type": "TEXT", "notnull": 0}
@@ -3335,7 +3337,7 @@ def test_on_disk_sqlite_migration_to_v24_recovers_idempotently_from_present_ddl(
                 ).fetchone()
             )
 
-        assert version == 26
+        assert version == 27
         assert columns["job_id"] == {"type": "INTEGER", "notnull": 0}
         assert columns["error_code"] == {"type": "TEXT", "notnull": 0}
         assert columns["snapshot_at"] == {"type": "TEXT", "notnull": 0}
@@ -3420,8 +3422,8 @@ def test_fresh_sqlite_bootstrap_includes_operation_owned_media_schema_v26() -> N
         }
         version = conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()[0]
 
-        assert version == 26
-        assert db._CURRENT_SCHEMA_VERSION == 26
+        assert version == 27
+        assert db._CURRENT_SCHEMA_VERSION == 27
         assert {
             "system_operation_id",
             "system_operation_kind",
@@ -4492,7 +4494,7 @@ def test_postgres_v26_migration_clears_weak_v25_partial_null_markers(
                 }
                 for row in rows
             )
-            assert version == 26
+            assert version == 27
             assert constraint_validated is True
     finally:
         db.close_connection()

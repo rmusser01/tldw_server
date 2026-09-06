@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path as PathlibPath
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Response
@@ -26,6 +26,11 @@ from tldw_Server_API.app.api.v1.schemas.outputs_schemas import (
 )
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, resolve_user_id_for_request, User
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
+from tldw_Server_API.app.core.DB_Management.Collections_DB import (
+    ReadingArchiveFileImmutable,
+    ReadingArtifactOwnershipConflict,
+    ReadingFileDeletionRequired,
+)
 from tldw_Server_API.app.core.exceptions import InvalidStoragePathError
 from tldw_Server_API.app.services.outputs_service import (
     _build_output_filename,
@@ -36,12 +41,13 @@ from tldw_Server_API.app.services.outputs_service import (
     _strip_html_for_tts,
     _write_tts_audio_file,
     build_items_context_from_content_items,
-    delete_outputs_by_ids,
+    delete_output_with_file,
     find_outputs_to_purge,
     normalize_output_storage_path,
     render_output_template,
     update_output_artifact_db,
 )
+from tldw_Server_API.app.services.output_file_response import protected_output_response
 
 router = APIRouter(prefix="/outputs", tags=["outputs"])
 
@@ -91,7 +97,6 @@ def _normalize_output_storage_path_for_user(
             logger.error("outputs storage_path normalization update failed")
             raise HTTPException(status_code=500, detail="db_update_failed") from exc
     return normalized
-
 
 
 @router.get("", response_model=OutputListResponse, summary="List outputs with filters")
@@ -543,6 +548,9 @@ async def download_output(
     current_user: User = Depends(get_request_user),
     cdb = Depends(get_collections_db_for_user),
 ):
+    protected = await protected_output_response(cdb, output_id=output_id)
+    if protected is not None:
+        return protected
     try:
         row = cdb.get_output_artifact(output_id)
     except KeyError:
@@ -600,6 +608,9 @@ async def download_output_by_name(
     current_user: User = Depends(get_request_user),
     cdb = Depends(get_collections_db_for_user),
 ):
+    protected = await protected_output_response(cdb, title=title, format_=format or None)
+    if protected is not None:
+        return protected
     try:
         row = cdb.get_output_artifact_by_title(title, format_=(format if format else None))
     except KeyError:
@@ -648,6 +659,9 @@ async def head_download_output(
     current_user: User = Depends(get_request_user),
     cdb = Depends(get_collections_db_for_user),
 ):
+    protected = await protected_output_response(cdb, output_id=output_id, head_only=True)
+    if protected is not None:
+        return protected
     try:
         row = cdb.get_output_artifact(output_id)
     except KeyError:
@@ -687,38 +701,18 @@ async def delete_output(
     cdb = Depends(get_collections_db_for_user),
     media_db = Depends(get_media_db_for_user),
 ):
-    # If hard delete and delete_file requested, remove file first
     user_id = resolve_user_id_for_request(
         current_user,
         as_int=True,
         error_status=500,
         invalid_detail="invalid user_id",
     )
-    fs_deleted = False
-    if hard and delete_file:
-        try:
-            row = cdb.get_output_artifact(output_id)
-            try:
-                storage_name = _normalize_output_storage_path_for_user(
-                    cdb=cdb,
-                    user_id=user_id,
-                    output_id=row.id,
-                    storage_path=row.storage_path,
-                    update_db=False,
-                )
-                p = _resolve_output_path_for_user(user_id, storage_name)
-            except HTTPException as e:
-                logger.warning(f"outputs.delete: invalid output path for {output_id}: {e.detail}")
-            else:
-                if p.exists():
-                    p.unlink()
-                    fs_deleted = True
-        except KeyError:
-            raise HTTPException(status_code=404, detail="output_not_found") from None
-        except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
-            fs_deleted = False
-    # Delete metadata (soft by default)
-    ok = cdb.delete_output_artifact(output_id, hard=hard)
+    try:
+        ok, fs_deleted = delete_output_with_file(cdb, user_id, output_id, hard=hard, delete_file=delete_file)
+    except ReadingFileDeletionRequired:
+        raise HTTPException(status_code=409, detail="reading_file_deletion_required") from None
+    except ReadingArtifactOwnershipConflict:
+        raise HTTPException(status_code=409, detail="reading_artifact_ownership_conflict") from None
     if not ok:
         raise HTTPException(status_code=404, detail="output_not_found")
     try:
@@ -739,9 +733,30 @@ async def update_output(
     cdb = Depends(get_collections_db_for_user),
 ):
     try:
+        managed = cdb.update_managed_reading_output(
+            output_id,
+            title=payload.title,
+            format_=payload.format,
+            retention_until=payload.retention_until,
+        )
+        if managed is not None:
+            return OutputArtifact(
+                id=managed.id,
+                title=managed.title,
+                type=managed.type,
+                format=managed.format,  # type: ignore[arg-type]
+                storage_path=managed.storage_path,
+                media_item_id=managed.media_item_id,
+                created_at=datetime.fromisoformat(managed.created_at),
+            )
         row = cdb.get_output_artifact(output_id)
+    except ReadingArchiveFileImmutable:
+        raise HTTPException(status_code=409, detail="reading_archive_file_immutable") from None
     except KeyError:
         raise HTTPException(status_code=404, detail="output_not_found") from None
+    except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
+        logger.error("outputs update failed")
+        raise HTTPException(status_code=409, detail="conflict_on_update") from None
 
     user_id = resolve_user_id_for_request(
         current_user,
@@ -832,9 +847,11 @@ async def update_output(
             new_format=new_format,
             retention_until=payload.retention_until,
         )
-    except _OUTPUTS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"outputs.update conflict or DB error: {e}")
-        raise HTTPException(status_code=409, detail="conflict_on_update") from e
+    except ReadingArchiveFileImmutable:
+        raise HTTPException(status_code=409, detail="reading_archive_file_immutable") from None
+    except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
+        logger.error("outputs update failed")
+        raise HTTPException(status_code=409, detail="conflict_on_update") from None
 
     return OutputArtifact(
         id=final.id,
@@ -865,9 +882,7 @@ async def purge_outputs(
         error_status=500,
         invalid_detail="invalid user_id",
     )
-    now = datetime.utcnow().replace(microsecond=0).isoformat()
-    ids: set[int] = set()
-    paths: dict[int, str] = {}
+    now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
     try:
         candidate_paths = find_outputs_to_purge(
@@ -876,39 +891,29 @@ async def purge_outputs(
             soft_deleted_grace_days=payload.soft_deleted_grace_days,
             include_retention=payload.include_retention,
         )
-        for rid, pth in candidate_paths.items():
-            ids.add(rid)
-            paths[rid] = pth
-    except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
+    except (*_OUTPUTS_NONCRITICAL_EXCEPTIONS, DatabaseError):
         logger.error("outputs.purge: failed to enumerate purge candidates")
-
-    files_deleted = 0
-    if payload.delete_files and ids:
-        for rid, pth in list(paths.items()):
-            try:
-                storage_name = _normalize_output_storage_path_for_user(
-                    cdb=cdb,
-                    user_id=user_id,
-                    output_id=rid,
-                    storage_path=pth,
-                    update_db=False,
-                )
-                p = _resolve_output_path_for_user(user_id, storage_name)
-                if p.exists():
-                    p.unlink()
-                    files_deleted += 1
-            except HTTPException as e:
-                logger.warning(f"outputs.purge: invalid output path for {rid}: {e.detail}")
-            except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
-                logger.warning("outputs.purge: failed to delete file")
-                continue
+        return {"removed": 0, "files_deleted": 0}
 
     removed = 0
-    if ids:
+    files_deleted = 0
+    for output_id in candidate_paths:
         try:
-            removed = delete_outputs_by_ids(cdb=cdb, user_id=cdb.user_id, ids=list(ids))
-        except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
+            deleted, file_deleted = delete_output_with_file(
+                cdb,
+                user_id,
+                output_id,
+                hard=True,
+                delete_file=payload.delete_files,
+                purge_before=now,
+                soft_deleted_grace_days=payload.soft_deleted_grace_days,
+                include_retention=payload.include_retention,
+            )
+            removed += int(deleted)
+            files_deleted += int(file_deleted)
+        except ReadingFileDeletionRequired:
+            continue
+        except (*_OUTPUTS_NONCRITICAL_EXCEPTIONS, DatabaseError):
             logger.error("outputs.purge: DB delete failed")
-            removed = 0
 
     return {"removed": removed, "files_deleted": files_deleted}

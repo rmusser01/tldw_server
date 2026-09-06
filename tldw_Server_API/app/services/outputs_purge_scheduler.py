@@ -2,7 +2,8 @@
 Daily outputs purge scheduler.
 
 Runs a daily cleanup to remove outputs according to retention policy and
-aged soft-deleted rows. Optionally deletes files before removing DB rows.
+aged soft-deleted rows. Managed files use durable post-commit cleanup; optional
+unowned file removal follows successful database deletion.
 
 Enable via env:
   - OUTPUTS_PURGE_ENABLED=true
@@ -23,13 +24,12 @@ import sqlite3
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
-from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase, ReadingFileDeletionRequired
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
-from tldw_Server_API.app.core.exceptions import StoragePathValidationError
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
 from tldw_Server_API.app.core.testing import env_flag_enabled
-from tldw_Server_API.app.services.outputs_service import normalize_output_storage_path
+from tldw_Server_API.app.services.outputs_service import delete_output_with_file, find_outputs_to_purge
 
 _OUTPUTS_PURGE_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -102,85 +102,56 @@ def _enumerate_user_ids() -> list[int]:
 async def _purge_for_user(user_id: int, delete_files: bool, grace_days: int) -> tuple[int, int]:
     """Return (removed, files_deleted)."""
     cdb = CollectionsDatabase.for_user(user_id)
-    media_db = None
-    # Build candidate set similar to /outputs/purge endpoint
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-    ids: set[int] = set()
-    paths: dict[int, str] = {}
     try:
-        cur = cdb.backend.execute(
-            "SELECT id, storage_path FROM outputs WHERE user_id = ? AND retention_until IS NOT NULL AND retention_until <= ?",
-            (str(user_id), now),
-        )
-        for row in cur.rows:
-            rid = int(row["id"]) if isinstance(row, dict) else int(row[0])
-            ids.add(rid)
-            paths[rid] = row["storage_path"] if isinstance(row, dict) else row[1]
+        paths = find_outputs_to_purge(cdb=cdb, now_iso=now, soft_deleted_grace_days=grace_days, include_retention=True)
     except _OUTPUTS_PURGE_NONCRITICAL_EXCEPTIONS as e:
-        logger.bind(error_type=type(e).__name__).warning(
-            f"outputs_purge: error selecting retention candidates for user {user_id}"
-        )
+        logger.bind(error_type=type(e).__name__).warning("outputs_purge: error selecting purge candidates")
         try:
             get_metrics_registry().increment(
                 "app_exception_events_total",
-                labels={"component": "outputs_purge", "event": "select_retention_candidates_failed"},
+                labels={"component": "outputs_purge", "event": "select_purge_candidates_failed"},
             )
         except _OUTPUTS_PURGE_NONCRITICAL_EXCEPTIONS:
-            logger.debug("metrics increment failed for select_retention_candidates_failed")
-    try:
-        cur2 = cdb.backend.execute(
-            "SELECT id, storage_path FROM outputs WHERE user_id = ? AND deleted = 1 AND deleted_at IS NOT NULL AND julianday(?) - julianday(deleted_at) >= ?",
-            (str(user_id), now, grace_days),
-        )
-        for row in cur2.rows:
-            rid = int(row["id"]) if isinstance(row, dict) else int(row[0])
-            ids.add(rid)
-            paths[rid] = row["storage_path"] if isinstance(row, dict) else row[1]
-    except _OUTPUTS_PURGE_NONCRITICAL_EXCEPTIONS as e:
-        logger.bind(error_type=type(e).__name__).warning(
-            f"outputs_purge: error selecting deleted candidates for user {user_id}"
-        )
-        try:
-            get_metrics_registry().increment(
-                "app_exception_events_total",
-                labels={"component": "outputs_purge", "event": "select_deleted_candidates_failed"},
-            )
-        except _OUTPUTS_PURGE_NONCRITICAL_EXCEPTIONS:
-            logger.debug("metrics increment failed for select_deleted_candidates_failed")
+            logger.debug("metrics increment failed for select_purge_candidates_failed")
+        return 0, 0
+
+    removed_ids = []
     files_deleted = 0
-    if delete_files and ids:
-        for rid, pth in list(paths.items()):
+    for output_id in paths:
+        try:
+            deleted, file_deleted = delete_output_with_file(
+                cdb,
+                user_id,
+                output_id,
+                hard=True,
+                delete_file=delete_files,
+                purge_before=now,
+                soft_deleted_grace_days=grace_days,
+            )
+            if deleted:
+                removed_ids.append(output_id)
+            files_deleted += int(file_deleted)
+        except ReadingFileDeletionRequired:
+            continue
+        except _OUTPUTS_PURGE_NONCRITICAL_EXCEPTIONS as e:
+            logger.bind(error_type=type(e).__name__).warning("outputs_purge: DB delete failed")
             try:
-                relative_name = normalize_output_storage_path(user_id, pth)
-                outputs_dir = DatabasePaths.get_user_outputs_dir(user_id)
-                p = outputs_dir / relative_name
-                if p.exists():
-                    p.unlink()
-                    files_deleted += 1
-            except StoragePathValidationError as e:
-                logger.bind(error_type=type(e).__name__).warning(
-                    f"outputs_purge: invalid output path for output {rid}"
+                get_metrics_registry().increment(
+                    "app_exception_events_total",
+                    labels={"component": "outputs_purge", "event": "db_delete_failed"},
                 )
-            except (OSError, PermissionError) as e:
-                logger.bind(error_type=type(e).__name__).warning(
-                    f"outputs_purge: failed to delete file for output {rid}"
-                )
-                try:
-                    get_metrics_registry().increment(
-                        "app_warning_events_total",
-                        labels={"component": "outputs_purge", "event": "file_delete_failed"},
-                    )
-                except _OUTPUTS_PURGE_NONCRITICAL_EXCEPTIONS:
-                    logger.debug("metrics increment failed for file_delete_failed")
-    if ids:
+            except _OUTPUTS_PURGE_NONCRITICAL_EXCEPTIONS:
+                logger.debug("metrics increment failed for db_delete_failed")
+    if removed_ids:
         try:
             with managed_media_database(
                 "outputs_purge",
                 db_path=str(DatabasePaths.get_media_db_path(user_id)),
                 initialize=False,
             ) as media_db:
-                for rid in ids:
+                for rid in removed_ids:
                     try:
                         media_db.mark_tts_history_artifacts_deleted_for_output(
                             user_id=str(user_id),
@@ -194,31 +165,7 @@ async def _purge_for_user(user_id: int, delete_files: bool, grace_days: int) -> 
             logger.bind(error_type=type(exc).__name__).debug(
                 "outputs_purge: failed to open Media DB for history update"
             )
-    removed = 0
-    if ids:
-        placeholders = ",".join(["?"] * len(ids))
-        try:
-            output_ids_clause = f"({placeholders})"
-            purge_sql_template = "DELETE FROM outputs WHERE user_id = ? AND id IN {output_ids_clause}"
-            purge_sql = purge_sql_template.format_map(locals())  # nosec B608
-            cdb.backend.execute(
-                purge_sql,
-                tuple([str(user_id)] + list(ids)),
-            )
-            removed = len(ids)
-        except _OUTPUTS_PURGE_NONCRITICAL_EXCEPTIONS as e:
-            logger.bind(error_type=type(e).__name__).warning(
-                f"outputs_purge: DB delete failed for user {user_id}"
-            )
-            try:
-                get_metrics_registry().increment(
-                    "app_exception_events_total",
-                    labels={"component": "outputs_purge", "event": "db_delete_failed"},
-                )
-            except _OUTPUTS_PURGE_NONCRITICAL_EXCEPTIONS:
-                logger.debug("metrics increment failed for db_delete_failed")
-            removed = 0
-    return removed, files_deleted
+    return len(removed_ids), files_deleted
 
 
 async def start_outputs_purge_scheduler() -> asyncio.Task | None:

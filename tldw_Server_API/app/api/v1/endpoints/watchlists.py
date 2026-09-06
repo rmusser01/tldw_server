@@ -119,6 +119,7 @@ from tldw_Server_API.app.core.Watchlists.watchlists_telemetry_metrics import (
 )
 from tldw_Server_API.app.core.Web_Scraping.selectors import validate_selector_rules
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as _DatabaseError
+from tldw_Server_API.app.services.output_file_response import open_protected_output
 from tldw_Server_API.app.services.outputs_service import (
     _build_output_filename,
     _ingest_output_to_media_db,
@@ -1454,20 +1455,49 @@ def _parse_output_metadata(row) -> dict[str, Any]:
     return metadata if isinstance(metadata, dict) else {}
 
 
-async def _load_output_content(user_id: int, row) -> str | None:
+async def _open_watchlist_output(collections_db: CollectionsDatabase, output_id: int):
+    try:
+        opened = await open_protected_output(collections_db, output_id=output_id)
+    except HTTPException as exc:
+        if exc.status_code == 404 and exc.detail == "file_missing":
+            raise HTTPException(status_code=404, detail="output_file_missing") from None
+        raise
+    if opened is None:
+        return None
+    row, response = opened
+    try:
+        metadata = _parse_output_metadata(row)
+        if metadata.get("origin") != "watchlists" or _is_expired(metadata.get("expires_at")):
+            raise HTTPException(status_code=404, detail="output_not_found")
+        return row, response
+    except BaseException:
+        response.close()
+        raise
+
+
+async def _load_output_content(user_id: int, row, *, collections_db=None) -> tuple[Any, str | None]:
+    if collections_db is None:
+        collections_db = await run_in_threadpool(CollectionsDatabase.for_user, user_id)
+    opened = await _open_watchlist_output(collections_db, row.id)
+    if opened is not None:
+        current, response = opened
+        if str(current.format).lower() == "mp3":
+            response.close()
+            return current, None
+        return current, await response.read_text()
     storage_path = getattr(row, "storage_path", None)
     if not storage_path:
-        return None
+        return row, None
     if str(getattr(row, "format", "")).lower() == "mp3":
-        return None
+        return row, None
     try:
         path = _resolve_output_path_for_user(user_id, storage_path)
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
-        return None
+        return row, None
     try:
-        return await run_in_threadpool(path.read_text, encoding="utf-8")
+        return row, await run_in_threadpool(path.read_text, encoding="utf-8")
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
-        return None
+        return row, None
 
 
 def _build_report_snapshot_filename(output_title: str, ts: str) -> str:
@@ -1501,7 +1531,17 @@ async def _write_report_snapshot_for_user(user_id: int, filename: str, snapshot:
     await run_in_threadpool(path.write_text, payload, encoding="utf-8")
 
 
-async def _load_report_snapshot_for_user(user_id: int, storage_name: str) -> dict[str, Any]:
+async def _load_report_snapshot_for_user(user_id: int, storage_name: str, *, collections_db=None) -> dict[str, Any]:
+    if collections_db is None:
+        collections_db = await run_in_threadpool(CollectionsDatabase.for_user, user_id)
+    try:
+        namespace = await run_in_threadpool(collections_db.get_output_read_namespace)
+    except (RuntimeError, _DatabaseError):
+        raise HTTPException(status_code=503, detail="output_storage_unavailable") from None
+    if namespace is not None:
+        # TASK-13153: metadata-only sidecars need producer/reconciliation provenance
+        # before activation; a metadata filename cannot authorize an output read.
+        raise HTTPException(status_code=503, detail="output_storage_unavailable")
     path = _resolve_output_path_for_user(user_id, storage_name)
     raw_payload = await run_in_threadpool(path.read_text, encoding="utf-8")
     payload = json.loads(raw_payload)
@@ -1563,7 +1603,12 @@ def _report_metadata_from_snapshot(
     }
 
 
-async def _row_to_output(row, *, user_id: int | None = None, content_override: str | None = None) -> WatchlistOutput:
+async def _row_to_output(
+    row, *, user_id: int | None = None, content_override: str | None = None, collections_db=None
+) -> WatchlistOutput:
+    content = content_override
+    if content is None and user_id is not None:
+        row, content = await _load_output_content(user_id, row, collections_db=collections_db)
     metadata = _parse_output_metadata(row)
     version = metadata.get("version")
     try:
@@ -1571,9 +1616,6 @@ async def _row_to_output(row, *, user_id: int | None = None, content_override: s
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
         version = 1
     expires_at = metadata.get("expires_at") if isinstance(metadata, dict) else None
-    content = content_override
-    if content is None and user_id is not None:
-        content = await _load_output_content(user_id, row)
     return WatchlistOutput(
         id=row.id,
         run_id=int(row.run_id or 0),
@@ -5796,7 +5838,10 @@ async def retry_run_delivery(
     if selected_row is None:
         raise HTTPException(status_code=400, detail="delivery_plan_not_found")
 
-    output = await _row_to_output(selected_row, user_id=int(resolved_user_id))
+    output = await _row_to_output(selected_row, user_id=int(resolved_user_id), collections_db=target_collections_db)
+    selected_metadata = dict(output.metadata)
+    if not _has_delivery_plan(selected_metadata):
+        raise HTTPException(status_code=400, detail="delivery_plan_not_found")
     title = output.title or f"watchlist-output-{output.id}"
     output_format = output.format or getattr(selected_row, "format", None) or "md"
     delivery_plan = _external_delivery_plan(selected_metadata.get("delivery_plan"))
@@ -7633,7 +7678,7 @@ async def create_output(
         _cleanup_outputs()
         raise HTTPException(status_code=500, detail="output_create_failed") from exc
 
-    output = await _row_to_output(row, user_id=user_id, content_override=content)
+    output = await _row_to_output(row, user_id=user_id, content_override=content, collections_db=collections_db)
 
     notifications = NotificationsService(
         user_id=resolve_user_id_for_request(
@@ -7783,7 +7828,7 @@ async def create_output(
             metadata_json=json.dumps(metadata_for_update) if metadata_for_update is not None else None,
             chatbook_path=chatbook_path_update,
         )
-        output = await _row_to_output(updated_row, user_id=user_id)
+        output = await _row_to_output(updated_row, user_id=user_id, collections_db=collections_db)
 
     if needs_async_enrichment:
         await schedule_output_enrichment(
@@ -7834,7 +7879,7 @@ async def list_outputs(
         metadata = _parse_output_metadata(row)
         if metadata.get("origin") != "watchlists":
             continue
-        items.append(await _row_to_output(row, user_id=user_id))
+        items.append(await _row_to_output(row, user_id=user_id, collections_db=collections_db))
     return WatchlistOutputsListResponse(
         items=items,
         total=total,
@@ -7867,7 +7912,7 @@ async def get_output(
         error_status=500,
         invalid_detail="invalid user_id",
     )
-    output = await _row_to_output(row, user_id=user_id)
+    output = await _row_to_output(row, user_id=user_id, collections_db=collections_db)
     if output.expired:
         collections_db.purge_expired_outputs()
         raise HTTPException(status_code=404, detail="output_not_found")
@@ -7894,6 +7939,24 @@ async def download_output(
     current_user: User = Depends(get_request_user),
     collections_db=Depends(get_collections_db_for_user),
 ):
+    opened = await _open_watchlist_output(collections_db, output_id)
+    if opened is not None:
+        row, response = opened
+        try:
+            fmt = row.format or "md"
+            filename = (row.title or f"watchlist-output-{output_id}").replace("/", "_")
+            extension = fmt if fmt in {"html", "mp3"} else "md"
+            headers = {"Content-Disposition": f'attachment; filename="{filename}.{extension}"'}
+            if fmt == "mp3":
+                response.headers.update(headers)
+                return response
+            content = await response.read_text()
+            if fmt == "html":
+                return HTMLResponse(content=content, headers=headers)
+            return PlainTextResponse(content=content, media_type="text/markdown", headers=headers)
+        except BaseException:
+            response.close()
+            raise
     collections_db.purge_expired_outputs()
     try:
         row = collections_db.get_output_artifact(output_id)
@@ -7908,7 +7971,7 @@ async def download_output(
         error_status=500,
         invalid_detail="invalid user_id",
     )
-    output = await _row_to_output(row, user_id=user_id)
+    output = await _row_to_output(row, user_id=user_id, collections_db=collections_db)
     if output.expired:
         collections_db.purge_expired_outputs()
         raise HTTPException(status_code=404, detail="output_not_found")
@@ -7954,6 +8017,7 @@ async def _load_output_report_evidence_payload(
     user_id: int,
     output_id: int,
     metadata: dict[str, Any],
+    collections_db=None,
 ) -> dict[str, Any]:
     snapshot_path = metadata.get("report_snapshot_path")
     if not snapshot_path:
@@ -7964,7 +8028,11 @@ async def _load_output_report_evidence_payload(
             "readiness": build_legacy_live_only_readiness(),
         }
     try:
-        snapshot = await _load_report_snapshot_for_user(user_id, str(snapshot_path))
+        snapshot = await _load_report_snapshot_for_user(user_id, str(snapshot_path), collections_db=collections_db)
+    except HTTPException as exc:
+        if exc.status_code == 503 and exc.detail == "output_storage_unavailable":
+            raise
+        raise HTTPException(status_code=404, detail="report_snapshot_missing") from None
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="report_snapshot_missing") from exc
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
@@ -8007,7 +8075,9 @@ async def get_output_evidence(
         error_status=500,
         invalid_detail="invalid user_id",
     )
-    return await _load_output_report_evidence_payload(user_id=user_id, output_id=output_id, metadata=metadata)
+    return await _load_output_report_evidence_payload(
+        user_id=user_id, output_id=output_id, metadata=metadata, collections_db=collections_db
+    )
 
 
 @router.get(
@@ -8033,7 +8103,9 @@ async def get_output_readiness(
         error_status=500,
         invalid_detail="invalid user_id",
     )
-    payload = await _load_output_report_evidence_payload(user_id=user_id, output_id=output_id, metadata=metadata)
+    payload = await _load_output_report_evidence_payload(
+        user_id=user_id, output_id=output_id, metadata=metadata, collections_db=collections_db
+    )
     return payload["readiness"]
 
 

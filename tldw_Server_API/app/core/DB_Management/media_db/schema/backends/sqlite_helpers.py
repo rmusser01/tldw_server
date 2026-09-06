@@ -130,6 +130,7 @@ class _SupportsExecutescript(Protocol):
 
 
 class SupportsSqlitePostCoreStructures(Protocol):
+    backend: Any
     _CLAIMS_TABLE_SQL: str
     _MEDIA_FILES_TABLE_SQL: str
     _TTS_HISTORY_TABLE_SQL: str
@@ -267,7 +268,9 @@ def bootstrap_sqlite_schema(db: SupportsSqlitePostCoreStructures) -> None:
                     apply_sqlite_core_media_schema(db, conn)
                     ensure_sqlite_post_core_structures(db, conn)
                 else:
-                    conn.close()
+                    # Migration opens its own connection. Invalidate the borrowed
+                    # pool handle too, so the next adapter cannot reuse it closed.
+                    db.backend.get_pool().clear_thread_local_connection()
 
                     migrations_dir = None
                     db_name = os.path.basename(db.db_path_str)

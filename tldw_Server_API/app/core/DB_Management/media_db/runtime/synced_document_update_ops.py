@@ -13,15 +13,11 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
     InputError,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.collections import (
-    load_collections_database_cls,
-)
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
 
 _MEDIA_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
-_COLLECTIONS_DB = load_collections_database_cls()
 
 
 def apply_synced_document_content_update(
@@ -124,14 +120,6 @@ def apply_synced_document_content_update(
             new_doc_version_info.get("version_number"),
             new_media_version,
         )
-        try:
-            if _COLLECTIONS_DB is not None and client_id is not None:
-                _COLLECTIONS_DB.from_backend(
-                    user_id=str(client_id),
-                    backend=self.backend,
-                ).mark_highlights_stale_if_content_changed(media_id, new_content_hash)
-        except _MEDIA_NONCRITICAL_EXCEPTIONS as anch_err:
-            logger.debug("Highlight re-anchoring hook (sync update) failed: {}", anch_err)
         try:
             from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (
                 invalidate_intra_doc_vectors,

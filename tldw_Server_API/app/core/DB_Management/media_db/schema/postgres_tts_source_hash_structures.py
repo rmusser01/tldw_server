@@ -8,6 +8,9 @@ from typing import Any, Protocol
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_output_history_incarnation import (
+    run_postgres_migrate_to_v27,
+)
 
 try:
     from loguru import logger
@@ -31,6 +34,7 @@ class PostgresTtsSourceHashDB(Protocol):
     """Protocol for DB objects exposing the backend needed by these helpers."""
 
     backend: _PostgresStatementBackend
+    _TTS_HISTORY_TABLE_SQL: str
 
 
 def ensure_postgres_tts_history(db: PostgresTtsSourceHashDB, conn: Any) -> None:
@@ -102,6 +106,8 @@ def ensure_postgres_tts_history(db: PostgresTtsSourceHashDB, conn: Any) -> None:
         )
     except BackendDatabaseError as exc:
         logger.warning("Could not ensure tts_history table on PostgreSQL: {}", exc)
+    # Receiver installation is required and must not be swallowed by legacy ensures.
+    run_postgres_migrate_to_v27(db, conn)
 
 
 def ensure_postgres_source_hash_column(db: PostgresTtsSourceHashDB, conn: Any) -> None:

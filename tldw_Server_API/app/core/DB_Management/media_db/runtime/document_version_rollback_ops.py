@@ -14,9 +14,6 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
 from tldw_Server_API.app.core.DB_Management.media_db.legacy_wrappers import (
     get_document_version,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.collections import (
-    load_collections_database_cls,
-)
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
@@ -32,7 +29,6 @@ except ImportError:  # pragma: no cover - defensive fallback
     logging = logger
 
 _MEDIA_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
-_CollectionsDB = load_collections_database_cls()
 
 
 def rollback_to_version(
@@ -160,15 +156,6 @@ def rollback_to_version(
             new_doc_version_number,
             new_media_version,
         )
-
-        try:
-            if _CollectionsDB is not None and client_id is not None:
-                _CollectionsDB.from_backend(
-                    user_id=str(client_id),
-                    backend=self.backend,
-                ).mark_highlights_stale_if_content_changed(media_id, new_content_hash)
-        except _MEDIA_NONCRITICAL_EXCEPTIONS as anch_err:
-            logging.debug(f"Highlight re-anchoring hook (rollback) failed: {anch_err}")
 
         try:
             from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (

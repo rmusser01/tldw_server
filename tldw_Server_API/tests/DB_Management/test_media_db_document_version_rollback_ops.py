@@ -131,14 +131,6 @@ def test_rollback_to_version_success_keeps_hook_failures_non_blocking(monkeypatc
         def _update_fts_media(self, _conn, media_id, title, content, **_kwargs):
             fts_updates.append((media_id, title, content))
 
-    class _FailingCollectionsDb:
-        @classmethod
-        def from_backend(cls, **_kwargs):
-            return cls()
-
-        def mark_highlights_stale_if_content_changed(self, *_args, **_kwargs):
-            raise RuntimeError("stale-mark failed")
-
     monkeypatch.setattr(
         rollback_ops,
         "get_document_version",
@@ -148,7 +140,6 @@ def test_rollback_to_version_success_keeps_hook_failures_non_blocking(monkeypatc
             "analysis_content": "analysis-v1",
         },
     )
-    monkeypatch.setattr(rollback_ops, "_CollectionsDB", _FailingCollectionsDb)
 
     agentic_module = types.ModuleType(
         "tldw_Server_API.app.core.RAG.rag_service.agentic_chunker"

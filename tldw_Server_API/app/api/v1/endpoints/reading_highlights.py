@@ -108,6 +108,8 @@ async def create_highlight(
             context_before=context_before,
             context_after=context_after,
         )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="content_item_not_found") from None
     except Exception as e:
         logger.error("create_highlight failed")
         raise HTTPException(status_code=500, detail="highlight_create_failed") from e

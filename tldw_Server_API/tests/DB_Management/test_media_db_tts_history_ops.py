@@ -1,4 +1,5 @@
 import json
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
@@ -191,6 +192,7 @@ def test_create_tts_history_entry_returns_postgres_returning_id_and_serializes_p
     db = SimpleNamespace(
         backend_type=BackendType.POSTGRESQL,
         execute_query=execute_query,
+        transaction=lambda: nullcontext(None),
         _get_current_utc_timestamp_str=lambda: "2026-03-21T00:00:00.000Z",
     )
 
@@ -224,8 +226,8 @@ def test_create_tts_history_entry_returns_postgres_returning_id_and_serializes_p
             "INSERT INTO tts_history "
             "(user_id, created_at, text, text_hash, text_length, provider, model, voice_id, voice_name, "
             "voice_info, format, duration_ms, generation_time_ms, params_json, status, segments_json, "
-            "favorite, job_id, output_id, artifact_ids, artifact_deleted_at, error_message, deleted, deleted_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+            "favorite, job_id, output_id, artifact_ids, artifact_deleted_at, error_message, deleted, deleted_at, output_incarnation) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
             (
                 "1",
                 "2026-03-21T00:00:00.000Z",
@@ -251,8 +253,9 @@ def test_create_tts_history_entry_returns_postgres_returning_id_and_serializes_p
                 None,
                 0,
                 None,
+                None,
             ),
-            True,
+            False,
             None,
         )
     ]

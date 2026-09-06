@@ -129,6 +129,23 @@ Response:
 { "status": "archived", "item_id": 123, "hard": false }
 ```
 
+## Highlights
+
+Highlights belong to saved Reading captures, not to external Media IDs.
+
+- `POST /api/v1/reading/items/{item_id}/highlight` creates a highlight. The parent
+  must be an existing Reading item owned by the authenticated user; otherwise the
+  response is 404 (`content_item_not_found`).
+- `GET /api/v1/reading/items/{item_id}/highlights` lists the user's highlights.
+- `PATCH /api/v1/reading/highlights/{highlight_id}` edits a highlight, and
+  `DELETE /api/v1/reading/highlights/{highlight_id}` removes it. Missing or
+  inaccessible highlights/parents return 404 on mutation.
+
+Changing highlights updates the owning capture's modification time; an equivalent
+patch does not. Reanchoring follows changes to the saved capture and does not
+apply results computed before a newer capture/highlight edit. Editing linked
+external Media does not reanchor or stale the capture's highlights.
+
 ## Summarize
 
 `POST /api/v1/reading/items/{id}/summarize`
@@ -409,6 +426,42 @@ JSONL line example:
 ```
 
 ## Archive
+
+### Managed archive output deletion
+
+For structurally managed Reading archives, `DELETE /api/v1/outputs/{id}?hard=true`
+also requires `delete_file=true`. Without it the API returns 409
+`reading_file_deletion_required` without changing the archive or its file. Soft
+deletion keeps the file and its ownership record. Unowned outputs retain their
+existing file-retention options; a surviving shared reference protects its file.
+
+Explicit managed deletion commits durable file cleanup before removing metadata.
+The returned `file_deleted=false` means no file was synchronously unlinked, not
+that the logical deletion failed; do not repeat DELETE to finish cleanup. API and
+scheduled output purges with `delete_files=false` skip managed archives. Purge
+maintenance triggered automatically by Watchlist reads also preserves managed
+archives; reading a Watchlist does not authorize their file deletion. Purge
+counts include only records actually removed and files actually unlinked, not
+queued cleanup. Both retention and the selected soft-delete grace period are
+rechecked when deletion commits.
+
+This managed lifecycle is being rolled out under TASK-13153. It does not by itself
+enable the optimistic Reading-delete capability or reconcile legacy archives.
+
+### Managed archive output updates
+
+`PATCH /api/v1/outputs/{id}` changes a managed archive's title and retention
+metadata without renaming or rewriting its file. A changed format returns 409
+`reading_archive_file_immutable` and rejects the entire request, including any
+title/retention edits. Repeating the existing format is allowed. The database
+also rejects direct managed path changes. Unowned outputs, including legacy
+archives not yet structurally managed, retain their rename/conversion behavior.
+
+This is a partial lifecycle checkpoint, not a readiness claim: generic file
+operations still need fencing against late ownership registration and writes
+through shared managed paths before the optimistic-delete capability can ship.
+
+### Create an archive
 
 `POST /api/v1/reading/items/{id}/archive`
 

@@ -147,7 +147,6 @@ def test_apply_synced_document_content_update_updates_media_creates_version_logs
     execute_calls: list[tuple[str, tuple[object, ...]]] = []
     sync_payloads: list[dict[str, object]] = []
     fts_calls: list[tuple[object, int, str, str, str | None, str | None]] = []
-    collection_calls: list[tuple[int, str]] = []
     vector_calls: list[str] = []
 
     def _execute(_conn, query, params):
@@ -167,18 +166,6 @@ def test_apply_synced_document_content_update_updates_media_creates_version_logs
         events.append(("update_fts_media", media_id))
         fts_calls.append((conn, media_id, title, content, old_title, old_content))
 
-    class _FakeCollectionsDatabase:
-        @classmethod
-        def from_backend(cls, *, user_id, backend):
-            events.append(("collections_from_backend", (user_id, backend)))
-
-            class _Instance:
-                def mark_highlights_stale_if_content_changed(self, media_id, content_hash):
-                    events.append(("collections_mark_stale", media_id))
-                    collection_calls.append((media_id, content_hash))
-
-            return _Instance()
-
     agentic_chunker_module = types.ModuleType(
         "tldw_Server_API.app.core.RAG.rag_service.agentic_chunker"
     )
@@ -192,12 +179,6 @@ def test_apply_synced_document_content_update_updates_media_creates_version_logs
         sys.modules,
         "tldw_Server_API.app.core.RAG.rag_service.agentic_chunker",
         agentic_chunker_module,
-    )
-    monkeypatch.setattr(
-        synced_document_update_ops_module,
-        "_COLLECTIONS_DB",
-        _FakeCollectionsDatabase,
-        raising=False,
     )
 
     db = SimpleNamespace(
@@ -259,7 +240,6 @@ def test_apply_synced_document_content_update_updates_media_creates_version_logs
     assert fts_calls == [
         ("conn", 9, "Current Title", "updated body", "Current Title", "old body")
     ]
-    assert collection_calls == [(9, expected_hash)]
     assert vector_calls == ["9"]
     assert [name for name, _value in events] == [
         "transaction_enter",
@@ -270,8 +250,6 @@ def test_apply_synced_document_content_update_updates_media_creates_version_logs
         "log_sync_event",
         "update_fts_media",
         "transaction_exit",
-        "collections_from_backend",
-        "collections_mark_stale",
         "invalidate_vectors",
     ]
 
@@ -296,15 +274,6 @@ def test_apply_synced_document_content_update_swallows_best_effort_post_commit_h
     def _fetchone(_conn, _query, _params):
         return fetch_rows.pop(0)
 
-    class _BrokenCollectionsDatabase:
-        @classmethod
-        def from_backend(cls, *, user_id, backend):
-            class _Instance:
-                def mark_highlights_stale_if_content_changed(self, media_id, content_hash):
-                    raise RuntimeError("collections hook failed")
-
-            return _Instance()
-
     agentic_chunker_module = types.ModuleType(
         "tldw_Server_API.app.core.RAG.rag_service.agentic_chunker"
     )
@@ -317,12 +286,6 @@ def test_apply_synced_document_content_update_swallows_best_effort_post_commit_h
         sys.modules,
         "tldw_Server_API.app.core.RAG.rag_service.agentic_chunker",
         agentic_chunker_module,
-    )
-    monkeypatch.setattr(
-        synced_document_update_ops_module,
-        "_COLLECTIONS_DB",
-        _BrokenCollectionsDatabase,
-        raising=False,
     )
 
     db = SimpleNamespace(
