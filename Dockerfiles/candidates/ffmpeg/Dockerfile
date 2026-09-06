@@ -1,12 +1,16 @@
 # Candidate-only FFmpeg 9 build for TASK-13013.7.6. This is not a production image.
-FROM python:3.12.14-slim-trixie@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea AS build
+FROM python:3.12.14-slim-trixie@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea AS snapshot-base
 
 SHELL ["/bin/bash", "-euxo", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
+RUN rm -f /etc/apt/sources.list /etc/apt/sources.list.d/*
+COPY Dockerfiles/candidates/ffmpeg/debian.sources /etc/apt/sources.list.d/debian.sources
+
+FROM snapshot-base AS build-deps
+
 ARG BUILD_JOBS=4
 
-RUN sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/debian.sources \
-    && apt-get update \
+RUN apt-get update \
     && apt-get build-dep -y --no-install-recommends ffmpeg \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -20,7 +24,18 @@ RUN sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/debian.s
         ninja-build \
         python3-glad \
         python3-jinja2 \
+    && evidence_dir=/opt/tldw-ffmpeg9/share/candidate/apt-build \
+    && mkdir -p /opt/tldw-ffmpeg9/share/candidate/apt-build \
+    && cp /etc/apt/sources.list.d/debian.sources "$evidence_dir/" \
+    && for suite in trixie trixie-updates trixie-security; do \
+        metadata=(/var/lib/apt/lists/*_dists_"${suite}"_InRelease); \
+        test "${#metadata[@]}" -eq 1; \
+        test -f "${metadata[0]}"; \
+        cp -- "${metadata[0]}" "$evidence_dir/"; \
+    done \
     && rm -rf /var/lib/apt/lists/*
+
+FROM build-deps AS build
 
 WORKDIR /tmp/sources
 RUN curl --fail --location --proto '=https' --tlsv1.2 --output ffmpeg.tar.xz \
@@ -222,11 +237,9 @@ RUN mapfile -t candidate_elfs < <( \
     && cp /tmp/candidate-ldd.txt /opt/tldw-ffmpeg9/share/candidate/build-ldd.txt \
     && cp /tmp/runtime-packages.txt /opt/tldw-ffmpeg9/share/candidate/required-runtime-packages.txt
 
-FROM python:3.12.14-slim-trixie@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea AS candidate
+FROM snapshot-base AS candidate
 
-SHELL ["/bin/bash", "-euxo", "pipefail", "-c"]
-ENV DEBIAN_FRONTEND=noninteractive \
-    PATH=/opt/tldw-ffmpeg9/bin:$PATH \
+ENV PATH=/opt/tldw-ffmpeg9/bin:$PATH \
     LD_LIBRARY_PATH=/opt/tldw-ffmpeg9/lib
 
 COPY --from=build /opt/tldw-ffmpeg9 /opt/tldw-ffmpeg9
@@ -234,6 +247,15 @@ COPY --from=build /opt/tldw-ffmpeg9 /opt/tldw-ffmpeg9
 RUN apt-get update \
     && xargs -r apt-get install -y --no-install-recommends \
         < /opt/tldw-ffmpeg9/share/candidate/required-runtime-packages.txt \
+    && evidence_dir=/opt/tldw-ffmpeg9/share/candidate/apt-runtime \
+    && mkdir -p /opt/tldw-ffmpeg9/share/candidate/apt-runtime \
+    && cp /etc/apt/sources.list.d/debian.sources "$evidence_dir/" \
+    && for suite in trixie trixie-updates trixie-security; do \
+        metadata=(/var/lib/apt/lists/*_dists_"${suite}"_InRelease); \
+        test "${#metadata[@]}" -eq 1; \
+        test -f "${metadata[0]}"; \
+        cp -- "${metadata[0]}" "$evidence_dir/"; \
+    done \
     && rm -rf /var/lib/apt/lists/* \
     && test "$(dpkg-query -W -f='${db:Status-Status}' ffmpeg 2>/dev/null || true)" != installed \
     && mapfile -t candidate_elfs < <( \
