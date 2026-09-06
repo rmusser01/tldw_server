@@ -774,10 +774,14 @@ class PersonalContextService:
         """Hold this user's canonical authority through local candidate attachment."""
         return self._repository.sync_conflict_staging_guard(self._profile_id(), conflict_id, **identity)
 
-    def resolve_sync_conflict(self, **command: Any) -> dict[str, Any]:
+    def resolve_sync_conflict(self, *, defer_relay: bool = False, **command: Any) -> dict[str, Any]:
         """Apply a reviewed exact choice through the canonical mutation authority."""
         try:
-            return self._repository.resolve_sync_conflict(profile_id=self._profile_id(), **command)
+            profile_id = self._profile_id()
+            receipt = self._repository.resolve_sync_conflict(profile_id=profile_id, **command)
+            if not defer_relay and receipt.get("publication_batch_id") is not None:
+                self._relay_after_commit(profile_id)
+            return receipt
         except (ConcurrentProfileUpdateError, ProfileSemanticKeyCollisionError) as exc:
             raise ProfileConflictError("Personal Context conflict review changed") from exc
 

@@ -235,6 +235,8 @@ class PersonalContextConflictService:
                 raise SyncStoreError("Personal Context resolution envelope is invalid")
             command = asdict(resolution_envelope)
         receipt = canonical.resolve_sync_conflict(
+            # The batch still owns a Sync savepoint; relay follows its outer commit.
+            defer_relay=True,
             conflict_id=conflict.conflict_id,
             dataset_id=dataset.dataset_id,
             device_id=device_id,

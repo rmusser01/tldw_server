@@ -1,5 +1,19 @@
 # Testing Evidence Lessons
 
+## Canonical after-commit may still be inside a Sync savepoint
+
+**Incident (TASK-13163, PR #2910 review, 2026-09-05):** Adding the usual
+Personal Context service after-commit relay to conflict resolution committed
+the canonical choice, then reentered Sync before the enclosing batch savepoint
+closed. A production-factory regression returned a rejected item; exposing the
+savepoint exit showed a SQLite query execution failure at `RELEASE SAVEPOINT`.
+
+**Evidence and rule:** Defer batched relay until the outer Sync fence exits,
+including when canonical commit succeeded but Sync finalization failed. Direct
+service callers still use their ordinary after-commit hook. Verify both stores'
+transaction boundaries and callback failure behavior, rather than treating a
+canonical commit as evidence that every enclosing transaction has finished.
+
 ## A record conflict is not evidence for every Personal Context domain
 
 **Incident (TASK-13163, 2026-09-05):** A 316-test targeted checkpoint passed

@@ -97,3 +97,29 @@ prove no mutation occurs merely from detecting a collision.
 
 Do not enable ongoing_sync_version=1, implement TASK-13164/13165, alter the shared
 profile contract, introduce a second resolution endpoint, or broaden runtime grants.
+
+## PR #2910 review remediation (2026-09-05)
+
+Mutating choices schedule durable relay after the enclosing Sync batch fence
+commits. Direct canonical service callers retain their ordinary after-commit
+hook; batch dispatch explicitly defers that hook because reentering Sync while
+its savepoint is open invalidates the SQLite savepoint. Relay failure preserves
+the committed decision, and an interrupted Sync finalization still leaves an
+exact canonical receipt available for recovery.
+
+Keep-both validation requires an active replacement with a concrete, free
+semantic key. Invalid choice payloads use the centralized
+`PersonalContextConflictInputError`, retaining ValueError compatibility.
+Retention previews label otherwise ineligible protected rows `conflict_pin`;
+these informational rows do not enter compaction selection. Naturally eligible
+blocked candidates and guarded domain-prefix checks retain the existing
+all-or-nothing policy. This does not introduce generic partial compaction.
+
+Purge review remains open: after a valid next-generation purge is durably stored
+but canonical application temporarily fails, a second signed request can hit
+that Sync head and enter ordinary candidate capture. Canonical purge state is
+a manifest/barrier, with no purge object head to capture. The approved contract
+does not choose rejection with refresh/reconfirmation versus a dedicated
+deletion-conflict review. Do not synthesize a cross-domain candidate or change
+purge policy without that decision. TASK-13163 remains In Progress; version 0
+and the existing rollout gate remain unchanged.

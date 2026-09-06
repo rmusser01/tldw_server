@@ -38,6 +38,7 @@ from tldw_Server_API.app.core.exceptions import (
     PersonalContextActivationMissingError,
     PersonalContextActivationPendingError,
     PersonalContextActivationStaleError,
+    PersonalContextConflictInputError,
 )
 from tldw_Server_API.app.core.Personalization.personal_context_crypto import (
     EncryptedEnvelope,
@@ -1290,23 +1291,23 @@ class PersonalContextRepository:
                 if (None if head is None else str(head["version_id"])) != version:
                     raise ConcurrentProfileUpdateError("Personal Context conflict head changed")
             if (action == "skip") != (command is None):
-                raise ValueError("Personal Context resolution payload is invalid")
+                raise PersonalContextConflictInputError("Personal Context resolution payload is invalid")
             if command is not None:
                 target = command["object_id"]
                 if action == "overwrite" and target != journal["candidate_object_id"]:
-                    raise ValueError("Reviewed overwrite must name the shared canonical object")
+                    raise PersonalContextConflictInputError("Reviewed overwrite must name the shared canonical object")
                 if action == "duplicate_rename":
                     if journal["domain"] != "personal_context.record" or target in {
                         item[1] for item in journal["heads"]
                     }:
-                        raise ValueError("Personal Context duplicate requires a new record identity")
+                        raise PersonalContextConflictInputError(
+                            "Personal Context duplicate requires a new record identity"
+                        )
                     if self._head_row(connection, profile_id, "record", target) is not None:
                         raise ConcurrentProfileUpdateError("Personal Context duplicate identity already exists")
-                    if (
-                        self._conflict_key_slot(command["payload"]) == journal["key_slot"]
-                        and journal["key_slot"] is not None
-                    ):
-                        raise ValueError("Personal Context duplicate requires a free key")
+                    replacement_slot = self._conflict_key_slot(command["payload"])
+                    if replacement_slot is None or replacement_slot == journal["key_slot"]:
+                        raise PersonalContextConflictInputError("Personal Context duplicate requires a free key")
             # Only this exact journal is released within the same write transaction;
             # any error rolls this back, and other conflicts remain enforced.
             deciding = {**journal, "state": "resolving"}

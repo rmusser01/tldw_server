@@ -3373,7 +3373,8 @@ class SyncV2Service:
                 latest_by_object=latest_by_object,
             )
             if envelope.server_cursor in pinned_cursors:
-                candidate_type = candidate_type or "envelope_compaction"
+                # Preserve informational pins without inventing eligible compaction work.
+                candidate_type = candidate_type or "conflict_pin"
             if candidate_type is None:
                 continue
             blockers: list[str] = []
@@ -3425,7 +3426,9 @@ class SyncV2Service:
                     required_device_ids=[device.device_id for device in active_devices],
                     unacknowledged_device_ids=unacknowledged,
                     reason=(
-                        "superseded envelope"
+                        "unresolved conflict envelope"
+                        if candidate_type == "conflict_pin"
+                        else "superseded envelope"
                         if candidate_type == "envelope_compaction"
                         else "tombstone retained for deletion window"
                     ),
@@ -6735,6 +6738,7 @@ class SyncV2Service:
     ]:
         """Resolve one ordered batch from a single guarded conflict snapshot."""
 
+        relay_profile_id = None
         with self.store.conflict_resolution_guard(dataset_id) as guarded_store:
             dataset = self._require_dataset_access(
                 user_id=user_id,
@@ -6750,8 +6754,7 @@ class SyncV2Service:
                 )
             verified_exchange = None
             if any(
-                conflict is not None
-                and conflict.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+                conflict is not None and conflict.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
                 for conflict in selected.values()
             ):
                 verified_exchange = self.require_active_exchange(
@@ -6781,8 +6784,7 @@ class SyncV2Service:
                         or idempotency_key is None
                         or (
                             resolution_envelope is not None
-                            and resolution_envelope.domain
-                            not in PERSONAL_CONTEXT_SYNC_DOMAINS
+                            and resolution_envelope.domain not in PERSONAL_CONTEXT_SYNC_DOMAINS
                         )
                     )
                 )
@@ -6806,6 +6808,8 @@ class SyncV2Service:
                         if conflict.domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
                             from .personal_context_conflicts import PersonalContextConflictService
 
+                            if action in {"overwrite", "duplicate_rename"}:
+                                relay_profile_id = dataset.metadata["personal_context"]["profile_id"]
                             outcome = PersonalContextConflictService(self, guarded_store).resolve_batch_item(
                                 user_id=user_id,
                                 dataset=dataset,
@@ -6837,7 +6841,19 @@ class SyncV2Service:
                     continue
                 selected[conflict_id] = outcome
                 resolved.append((index, outcome))
-            return resolved, rejected, verified_exchange
+        # Canonical receipts may have committed even when Sync finalization failed.
+        # Reentering Sync before this outer fence exits would invalidate its savepoint.
+        if relay_profile_id is not None and self.personal_context_relay is not None:
+            try:
+                self.personal_context_relay.relay_profile(
+                    user_id=user_id,
+                    profile_id=relay_profile_id,
+                    dataset_id=dataset_id,
+                    after_server_cursor=None,
+                )
+            except Exception:  # noqa: BLE001 - committed choices retain durable relay debt.
+                logger.warning("personal_context_conflict_relay_failed: durable recovery pending")
+        return resolved, rejected, verified_exchange
 
     def resolve_conflict(
         self,
