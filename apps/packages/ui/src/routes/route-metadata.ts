@@ -911,14 +911,15 @@ export const ROUTE_METADATA = [
   }),
   defineRoute({
     path: "/admin/watchlists-items",
-    label: "Admin Watchlist Items",
+    label: "Watchlists Oversight",
     group: "settings",
     surface: "admin_operator",
     availability: webAndExtension,
     smoke: "manual",
     commandPalette: "show",
     requiresBackend: true,
-    rationale: "Admin route for reviewing collected watchlist updates."
+    rationale:
+      "Fleet-oversight route: inspect any user's watchlist feeds, items, and run health (#2922)."
   }),
   defineRoute({
     path: "/admin/watchlists-runs",

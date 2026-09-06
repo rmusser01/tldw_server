@@ -1,24 +1,20 @@
 import OptionLayout from "~/components/Layouts/Layout"
 import { RouteErrorBoundary } from "@/components/Common/RouteErrorBoundary"
-import { ItemsTab } from "@/components/Option/Watchlists/ItemsTab"
+import WatchlistsOversightPage from "@/components/Option/Admin/WatchlistsOversightPage"
 import { AdminRouteShell } from "@/components/Option/Admin/AdminRouteShell"
 
+/**
+ * Fleet oversight route (#2922): this admin surface inspects ANY user's
+ * watchlists via an explicit user selector. It used to embed the personal
+ * ItemsTab triage tool, which silently showed the operator's own (usually
+ * empty) data - the personal tool lives on /watchlists.
+ */
 const OptionAdminWatchlistsItems = () => {
   return (
-    <RouteErrorBoundary routeId="admin-watchlists-items" routeLabel="Watchlists Items">
+    <RouteErrorBoundary routeId="admin-watchlists-items" routeLabel="Watchlists Oversight">
       <OptionLayout>
         <AdminRouteShell path="/admin/watchlists-items">
-          <div style={{ padding: "24px", maxWidth: "100%" }}>
-            <h1 style={{ marginBottom: 4, fontSize: "1.5rem", fontWeight: 600 }}>
-              Watchlists Items
-            </h1>
-            {/* ItemsTab renders the "review collected updates" line itself;
-                this wrapper only adds the guidance it can't know (#2891). */}
-            <p style={{ marginBottom: 16, color: "var(--color-text-secondary, #888)" }}>
-              Create and configure watchlists on the Watchlists page.
-            </p>
-            <ItemsTab />
-          </div>
+          <WatchlistsOversightPage />
         </AdminRouteShell>
       </OptionLayout>
     </RouteErrorBoundary>

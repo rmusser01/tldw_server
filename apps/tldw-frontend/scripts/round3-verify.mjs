@@ -179,22 +179,24 @@ try {
   })
 
   await section("watchlists-items", async () => {
+    // #2922 replaced the embedded personal triage tool with a fleet
+    // oversight page (user selector, read-only tables) - the round-2 M1/I5
+    // findings no longer apply to this route by construction.
     await go("/admin/watchlists-items", 2500)
     const wl = await page.evaluate(() => {
       const text = document.body.innerText
       return {
+        oversight: /Watchlists Oversight/.test(text),
         staleCopy: /from this Watchlist/.test(text),
-        descCount: (text.match(/Review collected updates, alert matches/g) || []).length,
-        toolboxHidden: !/Mark selected as reviewed/.test(text),
-        cta: /Create a watchlist/.test(text)
+        selector: /Select User:/.test(text),
+        personalToolbox: /Mark selected as reviewed/.test(text)
       }
     })
     check(
-      "M1 no-stale-copy",
-      !wl.staleCopy && wl.descCount === 1,
-      `stale: ${wl.staleCopy}, description count: ${wl.descCount}`
+      "M1+I5 fleet-oversight",
+      wl.oversight && wl.selector && !wl.staleCopy && !wl.personalToolbox,
+      `oversight page: ${wl.oversight}, user selector: ${wl.selector}, no personal triage machinery: ${!wl.personalToolbox}`
     )
-    check("I5 toolbox-hidden", wl.toolboxHidden && wl.cta, `toolbox hidden: ${wl.toolboxHidden}, CTA: ${wl.cta}`)
   })
 
   await section("watchlists-runs", async () => {

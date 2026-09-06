@@ -134,8 +134,8 @@ export const ADMIN_MODULES: AdminModule[] = [
   },
   {
     route: "/admin/watchlists-items",
-    label: "Watchlist Items",
-    description: "Review collected watchlist updates, matches, and briefings.",
+    label: "Watchlists Oversight",
+    description: "Inspect any user's watchlist feeds, items, and run health.",
     group: "Workspace"
   },
   {
