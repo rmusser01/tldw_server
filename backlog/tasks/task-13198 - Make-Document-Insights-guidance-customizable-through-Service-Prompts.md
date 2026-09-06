@@ -4,9 +4,11 @@ title: Make Document Insights guidance customizable through Service Prompts
 status: In Progress
 assignee: []
 created_date: '2026-09-06 02:44'
-updated_date: '2026-09-06 02:56'
+updated_date: '2026-09-06 03:00'
 labels: []
 dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/pull/2914'
 documentation:
   - Docs/Design/document-insights-service-prompt.md
 ---
@@ -39,6 +41,8 @@ Stage 1: Record approved design and baseline. Stage 2: Add failing public API/mo
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Approved bounded design implemented on isolated codex/document-insights-service-prompt from dev 5ed30d7683. Baseline: 10 passed. RED: 4 failed and 2 passed, demonstrating ignored saved guidance and stale cache reuse. GREEN/final: 111 focused backend tests passed, including 11 HTTP/storage/cache/model-boundary tests; shared Settings 77 passed, WebUI Settings 77 passed, prompt-service/transport 124 passed. Ruff check and format check pass, compilation passes, Bandit on both touched runtime files reports zero findings. OpenAPI export and fingerprint check pass unchanged; TypeScript schema generation passes. Export required existing repository package source paths on PYTHONPATH (no dependency change). Independent review found no actionable findings and independently passed all 11 feature tests. Full repository suite, full frontend typecheck and browser smoke were not run. Temporary dependency symlinks removed after verification; no new dependency. All four implementation stages complete; own temporary plan removed per repository convention. Implementation ready for integration choice; no PR created.
+
+Published PR #2914 against dev at requester option 2. Implementation commit 78239bb760; verification recorded above applies to unchanged implementation. Worktree preserved for review follow-up. No merge or recurring monitor initiated.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
