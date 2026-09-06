@@ -1798,6 +1798,11 @@ export const Playground = () => {
     void run();
     return () => {
       cancelled = true;
+      // Unlatch on teardown: a StrictMode replay or a session-scope change
+      // cancels this run's readiness update, so the replacement effect must
+      // be allowed to initialize again - otherwise playgroundReady can stay
+      // false forever.
+      initializePlaygroundRef.current = false;
     };
   }, [sessionScopeReady]);
 

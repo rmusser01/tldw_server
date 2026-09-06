@@ -95,11 +95,12 @@ describe("family guardrails route parity", () => {
     expect(extensionNavEntry).toContain(
       'labelToken: "settings:familyGuardrailsWizardNav"'
     )
-    // Both surfaces pin an explicit nav group and order for the entry.
-    expect(webNavEntry).toMatch(/group:\s*"[a-zA-Z]+"/)
-    expect(extensionNavEntry).toMatch(/group:\s*"[a-zA-Z]+"/)
-    expect(webNavEntry).toMatch(/order:\s*\d/)
-    expect(extensionNavEntry).toMatch(/order:\s*\d/)
+    // The two nav schemes diverged by design; pin each surface's intended
+    // placement explicitly so unintended metadata drift still fails here.
+    expect(webNavEntry).toMatch(/group:\s*"dataAdmin"/)
+    expect(webNavEntry).toMatch(/order:\s*7\b/)
+    expect(extensionNavEntry).toMatch(/group:\s*"server"/)
+    expect(extensionNavEntry).toMatch(/order:\s*8\b/)
   })
 
   it("keeps the dedicated family wizard route modules in sync", () => {

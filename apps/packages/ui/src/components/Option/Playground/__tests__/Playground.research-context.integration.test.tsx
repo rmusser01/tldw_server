@@ -854,6 +854,33 @@ describe("Playground research context integration", { timeout: 20000 }, () => {
     )
   })
 
+  it("initializes to readiness under StrictMode replay (latch unlatches on teardown)", async () => {
+    chatSettingsState.syncChatSettingsForServerChat.mockResolvedValue({
+      updatedAt: "2026-03-08T20:10:00Z",
+      deepResearchAttachment: buildPersistedAttachment(
+        "run_strict",
+        "StrictMode restored run"
+      ),
+      deepResearchAttachmentHistory: []
+    })
+
+    // StrictMode mounts, tears down, and remounts: the first effect run is
+    // cancelled, so readiness (and everything gated on it, like this
+    // persisted restore) only arrives if the init latch resets on cleanup.
+    render(
+      <React.StrictMode>
+        <Playground />
+      </React.StrictMode>
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("playground-form")).toHaveAttribute(
+        "data-attached-run-id",
+        "run_strict"
+      )
+    )
+  })
+
   it("auto-restores persisted attached research context and bounded history for saved chats", async () => {
     chatSettingsState.syncChatSettingsForServerChat.mockResolvedValue({
       updatedAt: "2026-03-08T20:10:00Z",
