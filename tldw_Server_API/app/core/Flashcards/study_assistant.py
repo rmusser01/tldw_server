@@ -37,7 +37,24 @@ STUDY_ASSISTANT_PROMPT_IDS = {
 
 
 def resolve_study_assistant_guidance(database: PromptsDatabase, action: str) -> str:
-    """Resolve one action's immutable guidance and close storage on the same worker."""
+    """Resolve one action's immutable guidance and close its storage connection.
+
+    Args:
+        database: Authenticated-owner prompt storage. The caller runs this
+            function on a worker; its thread-local connection is closed here
+            on that same worker, including when resolution fails.
+        action: explain, mnemonic, follow_up or freeform, normalized by
+            normalize_study_assistant_action.
+
+    Returns:
+        The selected action's saved or packaged literal guidance.
+
+    Raises:
+        InputError: The action is unknown.
+        KeyError: The action has no editable prompt (fact_check).
+        ServicePromptCorruptOverride: Saved guidance is invalid or corrupt.
+        DatabaseError: Prompt storage lookup or connection acquisition fails.
+    """
     try:
         prompt_id = STUDY_ASSISTANT_PROMPT_IDS[normalize_study_assistant_action(action)]
         return resolve_service_prompt(database, prompt_id).parts["guidance"]

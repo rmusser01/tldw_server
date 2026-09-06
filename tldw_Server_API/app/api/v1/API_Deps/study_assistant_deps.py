@@ -17,7 +17,21 @@ async def get_study_assistant_guidance(
     payload: StudyAssistantRespondRequest,
     current_user: User = Depends(get_request_user),
 ) -> str | None:
-    """Capture selected-action guidance; fact-checking does not access prompt storage."""
+    """Capture selected-action guidance from authenticated-owner storage.
+
+    Args:
+        request: HTTP request used to acquire the owner's prompt database.
+        payload: Validated response request selecting the Study Assistant action.
+        current_user: Authenticated owner, shared with the content DB dependency.
+
+    Returns:
+        Immutable effective guidance, or None for fact-checking without reading
+        prompt storage. Reads and connection cleanup run on the same worker.
+
+    Raises:
+        HTTPException: Preserves authentication/storage HTTP failures; maps
+            resolution and cleanup failures to a prompt-safe HTTP 500 response.
+    """
     if payload.action == "fact_check":
         return None
     try:
