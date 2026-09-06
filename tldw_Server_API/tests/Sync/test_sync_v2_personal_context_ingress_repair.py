@@ -74,6 +74,7 @@ def ingress_store(
 
 
 def _ingress_envelope(**overrides: object) -> SyncEnvelopeCreate:
+    """Build an ordinary client-ingress envelope with explicit scenario overrides."""
     values = {
         "dataset_id": "repair-dataset",
         "domain": "personal_context.record",
@@ -94,6 +95,7 @@ def _ingress_envelope(**overrides: object) -> SyncEnvelopeCreate:
 def test_ordinary_ingress_advances_domain_watermark_without_regression(
     ingress_store: tuple[SyncV2Store, int, CanonicalApplyReceipt],
 ) -> None:
+    """Ordinary insertion, replay and re-enrollment never regress domain progress."""
     store, first_cursor, _receipt = ingress_store
     second = store.insert_envelope(
         _ingress_envelope(
@@ -103,15 +105,17 @@ def test_ordinary_ingress_advances_domain_watermark_without_regression(
     )
     assert second.server_cursor > first_cursor
     assert store.insert_envelope(_ingress_envelope()).server_cursor == first_cursor
-    with store.db.backend.transaction() as connection:
-        # Replay may revisit an older sequence; never lower the watermark.
-        store.db._ensure_domain_state(
+    # Re-enrollment revisits the initial sequence through the public store API.
+    store.enroll_dataset(
+        SyncDatasetCreate(
             dataset_id="repair-dataset",
-            domain="personal_context.record",
-            adapter_version=1,
-            server_sequence=first_cursor,
-            connection=connection,
+            owner_user_id="repair-user",
+            encryption_policy="server_trusted_v1",
+            domains=sorted(PERSONAL_CONTEXT_SYNC_DOMAINS),
         )
+    )
+    with store.db.backend.transaction() as connection:
+        # Inspect persisted progress independently of envelope cursor allocation.
         row = store.db.execute(
             "SELECT server_sequence FROM sync_domain_state WHERE dataset_id = ? AND domain = ?",
             ("repair-dataset", "personal_context.record"),

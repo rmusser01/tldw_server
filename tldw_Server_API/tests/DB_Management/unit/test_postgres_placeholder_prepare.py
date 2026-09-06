@@ -8,6 +8,7 @@ from tldw_Server_API.app.core.DB_Management.backends.query_utils import (
 )
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "sql",
     [
@@ -19,7 +20,8 @@ from tldw_Server_API.app.core.DB_Management.backends.query_utils import (
         "UPDATE state SET version = ?, seq = CASE WHEN seq > ? THEN seq ELSE ? END, updated = ? WHERE id = ? AND domain = ?",
     ],
 )
-def test_case_placeholders_preserve_parameter_order(sql):
+def test_case_placeholders_preserve_parameter_order(sql: str) -> None:
+    """CASE binds preserve their order on PostgreSQL and remain unchanged on SQLite."""
     params = tuple(range(sql.count("?")))
     converted, prepared = prepare_backend_statement(BackendType.POSTGRESQL, sql, params)
     assert converted == sql.replace("?", "%s")
@@ -27,6 +29,7 @@ def test_case_placeholders_preserve_parameter_order(sql):
     assert prepare_backend_statement(BackendType.SQLITE, sql, params) == (sql, params)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("sql", "expected"),
     [
@@ -54,7 +57,8 @@ def test_case_placeholders_preserve_parameter_order(sql):
         ),
     ],
 )
-def test_case_preserves_jsonb_operators_and_quoted_text(sql, expected):
+def test_case_preserves_jsonb_operators_and_quoted_text(sql: str, expected: str) -> None:
+    """CASE conversion leaves JSONB operators and quoted question marks intact."""
     assert convert_sqlite_placeholders_to_postgres(sql) == expected
 
 
