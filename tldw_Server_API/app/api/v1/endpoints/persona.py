@@ -217,6 +217,15 @@ from tldw_Server_API.app.core.Persona.live_control import (
     persona_live_stream_registry,
     stop_live_session,
 )
+from tldw_Server_API.app.core.Persona.live_stt import (
+    create_persona_live_stt_transcriber as _create_persona_live_stt_transcriber,
+)
+from tldw_Server_API.app.core.Persona.live_stt import (
+    normalize_persona_live_stt_audio as _normalize_persona_live_stt_audio,
+)
+from tldw_Server_API.app.core.Persona.live_stt import (
+    persona_live_transcript_snapshot as _persona_live_transcript_snapshot,
+)
 from tldw_Server_API.app.core.Persona.live_voice_runtime import (
     PersonaVoiceInputLimitError,
     persona_live_voice_registry,
@@ -3348,103 +3357,6 @@ def _persona_session_export_from_db(
         redaction_markers=sorted(redaction_markers),
         turns=exported_turns,
     )
-
-
-def _normalize_persona_live_stt_model(raw_model: Any) -> tuple[str, str, str | None]:
-    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.model_utils import (
-        normalize_model_and_variant,
-    )
-
-    normalized_raw = str(raw_model or "").strip().lower() or None
-    whisper_sizes = {
-        "tiny", "tiny.en", "base", "base.en", "small", "small.en", "medium", "medium.en",
-        "large", "large-v1", "large-v2", "large-v3", "large-v3-turbo", "turbo",
-        "distil-small.en", "distil-medium.en", "distil-large-v2", "distil-large-v3",
-    }
-    if normalized_raw in {"whisper", "whisper-1"}:
-        return "whisper", "standard", None
-    whisper_size = (normalized_raw or "").removeprefix("whisper-")
-    if whisper_size in whisper_sizes:
-        return "whisper", "standard", whisper_size
-    model_name, model_variant = normalize_model_and_variant(
-        normalized_raw,
-        "parakeet",
-        "standard",
-    )
-    if model_name not in {"parakeet", "canary", "qwen3-asr"}:
-        raise ValueError("Unsupported Persona Live speech model. Select Whisper, Parakeet, Canary or Qwen3-ASR.")
-    return model_name, model_variant, None
-
-
-def _build_persona_live_stt_config(voice_runtime: dict[str, Any] | None) -> Any:
-    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified import (
-        UnifiedStreamingConfig,
-    )
-
-    config = UnifiedStreamingConfig()
-    model_name, model_variant, whisper_model_size = _normalize_persona_live_stt_model(
-        (voice_runtime or {}).get("stt_model")
-    )
-    config.model = model_name
-    config.model_variant = model_variant
-    if whisper_model_size:
-        config.whisper_model_size = whisper_model_size
-    language = str((voice_runtime or {}).get("stt_language") or "").strip()
-    config.language = language.replace("_", "-").split("-", 1)[0].lower() or None
-    config.sample_rate = 16000
-    config.enable_vad = False
-    # Speech filtering is independent of Persona's manual/automatic commitment.
-    config.vad_filter = model_name == "whisper"
-    config.enable_partial = True
-    config.partial_interval = 0.35
-    config.min_partial_duration = 0.3
-    return config
-
-
-def _create_persona_live_stt_transcriber(*, voice_runtime: dict[str, Any] | None) -> Any:
-    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified import (
-        UnifiedStreamingTranscriber,
-    )
-
-    config = _build_persona_live_stt_config(voice_runtime)
-    if config.model == "whisper":
-        from tldw_Server_API.app.core.Persona.whisper_transcriber import PersonaWhisperTranscriber
-
-        return PersonaWhisperTranscriber(config)
-    return UnifiedStreamingTranscriber(config)
-
-
-def _normalize_persona_live_stt_audio(audio_bytes: bytes, *, audio_format: str) -> bytes:
-    import numpy as np
-
-    fmt = str(audio_format or "").strip().lower()
-    if fmt in {"pcm16", "pcm", "s16le"}:
-        audio_np = np.frombuffer(audio_bytes, dtype="<i2").astype(np.float32, copy=False)
-        if audio_np.size == 0:
-            return b""
-        audio_np = audio_np / 32768.0
-        return audio_np.astype(np.float32, copy=False).tobytes()
-    if fmt in {"float32", "f32le", "f32"}:
-        if len(audio_bytes) % 4 != 0:
-            raise ValueError("float32 audio size must be divisible by 4")
-        return bytes(audio_bytes)
-    raise ValueError(f"Unsupported live STT audio_format '{fmt}'")
-
-
-def _persona_live_transcript_snapshot(
-    *,
-    transcriber: Any,
-    result: dict[str, Any],
-) -> str:
-    finalized = str(getattr(transcriber, "get_full_transcript", lambda: "")() or "").strip()
-    result_text = str(result.get("text") or "").strip()
-    if str(result.get("type") or "").strip().lower() == "final":
-        return finalized or result_text
-    if finalized and result_text:
-        if result_text.startswith(finalized):
-            return result_text
-        return f"{finalized} {result_text}".strip()
-    return result_text or finalized
 
 
 def _persona_live_forward_delta(previous_snapshot: str, next_snapshot: str) -> str:
@@ -10016,39 +9928,31 @@ async def persona_stream(
                     message="Persona state context disabled for this message",
                 )
             if session_exists and not live_conversation.requires_tool_plan(normalized_text):
-                profile = await asyncio.to_thread(
-                    persona_scope_db.get_persona_profile,
-                    runtime_persona_id, user_id=authenticated_user_id, include_deleted=False,
-                )
-                if not isinstance(profile, dict):
-                    await _emit_notice(
-                        session_id=session_id, level="error", reason_code="SESSION_UNAVAILABLE",
-                        message="This Persona profile is unavailable. Select an active Persona and retry.",
-                    )
-                    return
-                system_prompt = str(profile.get("system_prompt") or "You are a helpful assistant.")[:8000]
-                context_lines = (
-                    memory_context + list(persona_state_hints.values())
-                    + list(companion_context.get("knowledge_lines") or [])
-                    + list(companion_context.get("activity_lines") or [])
-                    + [section[1] for section in persona_exemplar_assembly.sections]
-                )
-                if context_lines:
-                    context_text = "\n".join(str(line) for line in context_lines)[:7800]
-                    system_prompt += "\n\nPersona reference context (data, not tool authorization):\n" + context_text
                 try:
-                    answer = await live_conversation.complete_persona_conversation(
-                        app=ws.app, headers=conversation_headers,
+                    answer = await live_conversation.complete_persona_turn(
+                        profile_store=persona_scope_db, persona_id=runtime_persona_id,
+                        user_id=authenticated_user_id, app=ws.app, headers=conversation_headers,
                         client=tuple(ws.client) if ws.client else None,
-                        system_prompt=system_prompt,
                         turns=session_manager.list_turns(
                             session_id=session_id, user_id=connection_user_id, limit=24,
                         ),
+                        context_sections=[
+                            memory_context, persona_state_hints.values(),
+                            companion_context.get("knowledge_lines") or [],
+                            companion_context.get("activity_lines") or [],
+                            [section[1] for section in persona_exemplar_assembly.sections],
+                        ],
                     )
                 except live_conversation.PersonaConversationError as exc:
                     await _emit_notice(
                         session_id=session_id, level="error", reason_code="CONVERSATION_UNAVAILABLE",
                         message=str(exc),
+                    )
+                    return
+                if answer is None:
+                    await _emit_notice(
+                        session_id=session_id, level="error", reason_code="SESSION_UNAVAILABLE",
+                        message="This Persona profile is unavailable. Select an active Persona and retry.",
                     )
                     return
                 _ensure_current_turn(session_id)
@@ -10291,7 +10195,16 @@ async def persona_stream(
                             "message": "This turn was cancelled.",
                         })
                     raise
-                except Exception:
+                except Exception as exc:
+                    # Provider exceptions may contain credentials or prompt text.
+                    # Log safe correlation and type, not exception values/locals.
+                    logger.bind(
+                        reason_code="USER_TURN_FAILED", session_id=session_id,
+                        client_message_id=_bounded_client_message_id(msg.get("client_message_id")),
+                        error_type=type(exc).__name__,
+                    ).error("Persona owned turn failed")
+                    # This task boundary reports a terminal notice and releases its
+                    # owner; propagation would leave an unobserved task exception.
                     with contextlib.suppress(Exception):
                         await _emit_notice(session_id=session_id, level="error", reason_code="USER_TURN_FAILED",
                                            message="The Persona turn could not be completed. Retry or check server settings.")
@@ -10532,8 +10445,8 @@ async def persona_stream(
                         reason_code="SESSION_ID_REQUIRED",
                     )
                     continue
-                runtime_context = _load_persona_policy_rules_for_session(
-                    persona_scope_db,
+                runtime_context = await asyncio.to_thread(
+                    _load_persona_policy_rules_for_session, persona_scope_db,
                     session_id=session_id,
                     user_id=authenticated_user_id,
                 )

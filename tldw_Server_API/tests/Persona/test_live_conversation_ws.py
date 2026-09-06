@@ -2,6 +2,8 @@
 
 import asyncio
 import threading
+from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,10 +16,12 @@ from tldw_Server_API.tests.Persona.test_persona_ws import (
     fastapi_app,
 )
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
-def owned_session(tmp_path, monkeypatch):
-    async def auth(*args, **kwargs):
+def owned_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+    async def auth(*args: Any, **kwargs: Any) -> Any:
         return "1", True, True
 
     monkeypatch.setattr(ep, "_resolve_authenticated_user_id", auth)
@@ -26,10 +30,12 @@ def owned_session(tmp_path, monkeypatch):
     return sid
 
 
-def test_owned_greeting_returns_correlated_reply_without_plan(monkeypatch, owned_session):
+def test_owned_greeting_returns_correlated_reply_without_plan(
+    monkeypatch: pytest.MonkeyPatch, owned_session: str
+) -> None:
     calls = []
 
-    async def answer(**kwargs):
+    async def answer(**kwargs: Any) -> Any:
         calls.append(kwargs)
         return "Hello from Migu"
 
@@ -51,12 +57,12 @@ def test_owned_greeting_returns_correlated_reply_without_plan(monkeypatch, owned
     assert calls[0]["system_prompt"].startswith("Helper")
 
 
-def test_cancel_then_retry_drops_late_provider_output(monkeypatch, owned_session):
+def test_cancel_then_retry_drops_late_provider_output(monkeypatch: pytest.MonkeyPatch, owned_session: str) -> None:
     started = threading.Event()
     release_old = asyncio.Event()
     count = 0
 
-    async def answer(**kwargs):
+    async def answer(**kwargs: Any) -> Any:
         nonlocal count
         count += 1
         if count == 1:
@@ -98,8 +104,8 @@ def test_cancel_then_retry_drops_late_provider_output(monkeypatch, owned_session
         assert event["text_delta"] == "Fresh answer"
 
 
-def test_explicit_search_retains_plan(monkeypatch, owned_session):
-    async def forbidden(**kwargs):
+def test_explicit_search_retains_plan(monkeypatch: pytest.MonkeyPatch, owned_session: str) -> None:
+    async def forbidden(**kwargs: Any) -> Any:
         pytest.fail("Tool request bypassed plan review")
 
     monkeypatch.setattr(live_conversation, "complete_persona_conversation", forbidden)
@@ -116,3 +122,37 @@ def test_explicit_search_retains_plan(monkeypatch, owned_session):
         event = _recv_until(ws, lambda event: event.get("event") == "tool_plan")
         assert event["client_message_id"] == "search"
         assert event["steps"][0]["tool"] == "rag_search"
+
+
+def test_unexpected_turn_failure_logs_safe_correlated_diagnostic(
+    monkeypatch: pytest.MonkeyPatch, owned_session: str
+) -> None:
+    from loguru import logger
+
+    records = []
+    sink = logger.add(lambda message: records.append(message.record))
+
+    async def fail(**kwargs: Any) -> Any:
+        raise RuntimeError("secret-provider-payload")
+
+    monkeypatch.setattr(live_conversation, "complete_persona_conversation", fail)
+    try:
+        with TestClient(fastapi_app) as client, client.websocket_connect("/api/v1/persona/stream") as ws:
+            ws.send_json(
+                {
+                    "type": "user_message",
+                    "session_id": owned_session,
+                    "client_message_id": "failed-turn",
+                    "text": "Hi",
+                    "use_companion_context": False,
+                }
+            )
+            event = _recv_until(ws, lambda value: value.get("reason_code") == "USER_TURN_FAILED")
+            assert "secret-provider-payload" not in event["message"]
+        failures = [record for record in records if record["extra"].get("reason_code") == "USER_TURN_FAILED"]
+        assert len(failures) == 1
+        assert failures[0]["extra"]["client_message_id"] == "failed-turn"
+        assert failures[0]["extra"]["error_type"] == "RuntimeError"
+        assert "secret-provider-payload" not in str(failures[0])
+    finally:
+        logger.remove(sink)

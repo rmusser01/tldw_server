@@ -3,9 +3,7 @@
 from threading import RLock
 from uuid import uuid4
 
-
-class PersonaVoiceInputLimitError(ValueError):
-    """A spoken turn exceeded its bounded audio buffer before transcription."""
+from tldw_Server_API.app.core.exceptions import PersonaVoiceInputLimitError  # noqa: F401 - compatibility re-export
 
 
 class PersonaLiveVoiceRegistry:

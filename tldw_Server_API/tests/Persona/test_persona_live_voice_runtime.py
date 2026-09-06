@@ -1,30 +1,38 @@
 """Real voice preparation contracts; no microphone or external provider calls."""
 
+from pathlib import Path
+from typing import Any
+
 import pytest
 
 from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
+from tldw_Server_API.app.core.Persona import live_stt
+
+pytestmark = pytest.mark.integration
 
 
 @pytest.mark.parametrize(
     ("selection", "size"),
     [("tiny", "tiny"), ("whisper-tiny", "tiny"), ("distil-large-v3", "distil-large-v3")],
 )
-def test_whisper_selection_resolves_to_real_whisper(selection, size):
-    assert persona_ep._normalize_persona_live_stt_model(selection) == ("whisper", "standard", size)
+def test_whisper_selection_resolves_to_real_whisper(selection: str, size: str) -> None:
+    assert live_stt.normalize_persona_live_stt_model(selection) == ("whisper", "standard", size)
 
 
-def test_unknown_stt_model_fails_closed():
+def test_unknown_stt_model_fails_closed() -> None:
     with pytest.raises(ValueError, match="Unsupported"):
-        persona_ep._normalize_persona_live_stt_model("nonexistent-asr")
+        live_stt.normalize_persona_live_stt_model("nonexistent-asr")
 
 
-def test_locale_normalized_for_real_whisper():
-    config = persona_ep._build_persona_live_stt_config({"stt_model": "whisper-1", "stt_language": "en-US"})
+def test_locale_normalized_for_real_whisper() -> None:
+    config = live_stt.build_persona_live_stt_config({"stt_model": "whisper-1", "stt_language": "en-US"})
     assert config.language == "en"
 
 
 @pytest.mark.parametrize("auto_commit", [False, True])
-def test_persona_whisper_filters_audio_independently_of_turn_commit(monkeypatch, auto_commit):
+def test_persona_whisper_filters_audio_independently_of_turn_commit(
+    monkeypatch: pytest.MonkeyPatch, auto_commit: bool
+) -> None:
     from types import SimpleNamespace
 
     import numpy as np
@@ -34,13 +42,13 @@ def test_persona_whisper_filters_audio_independently_of_turn_commit(monkeypatch,
     calls = []
 
     class Model:
-        def transcribe(self, audio, **kwargs):
+        def transcribe(self, audio: Any, **kwargs: Any) -> Any:
             calls.append(kwargs)
             # Valid speech must not be removed by a phrase blacklist.
             return [SimpleNamespace(text="Thank you.")], SimpleNamespace()
 
     monkeypatch.setattr(streaming, "get_whisper_model", lambda *args: Model(), raising=False)
-    transcriber = persona_ep._create_persona_live_stt_transcriber(
+    transcriber = live_stt.create_persona_live_stt_transcriber(
         voice_runtime={"stt_model": "tiny.en", "stt_language": "en", "enable_vad": auto_commit},
     )
     transcriber.initialize()
@@ -53,7 +61,7 @@ def test_persona_whisper_filters_audio_independently_of_turn_commit(monkeypatch,
         transcriber.cleanup()
 
 
-def test_readiness_cannot_survive_stop_or_move_between_connections():
+def test_readiness_cannot_survive_stop_or_move_between_connections() -> None:
     from tldw_Server_API.app.core.Persona.live_voice_runtime import PersonaLiveVoiceRegistry
 
     registry = PersonaLiveVoiceRegistry()
@@ -74,17 +82,17 @@ def test_readiness_cannot_survive_stop_or_move_between_connections():
 
 
 @pytest.mark.asyncio
-async def test_live_tts_selects_kokoro_without_provider_fallback(monkeypatch):
+async def test_live_tts_selects_kokoro_without_provider_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.core.TTS import tts_service_v2
 
     calls = []
 
     class Service:
-        async def generate_speech(self, **kwargs):
+        async def generate_speech(self, **kwargs: Any) -> Any:
             calls.append(kwargs)
             yield b"real-audio"
 
-    async def get_service():
+    async def get_service() -> Any:
         return Service()
 
     monkeypatch.setattr(tts_service_v2, "get_tts_service_v2", get_service)
@@ -97,21 +105,21 @@ async def test_live_tts_selects_kokoro_without_provider_fallback(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_preparation_rejects_lazy_adapter_without_loaded_model(monkeypatch):
+async def test_preparation_rejects_lazy_adapter_without_loaded_model(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.core.TTS import tts_service_v2
 
     class Adapter:
-        async def ensure_initialized(self):
+        async def ensure_initialized(self) -> Any:
             return True
 
-        async def _ensure_model_loaded(self):
+        async def _ensure_model_loaded(self) -> Any:
             return False
 
     class Service:
-        async def _get_adapter(self, **kwargs):
+        async def _get_adapter(self, **kwargs: Any) -> Any:
             return Adapter()
 
-    async def get_service():
+    async def get_service() -> Any:
         return Service()
 
     monkeypatch.setattr(tts_service_v2, "get_tts_service_v2", get_service)
@@ -122,12 +130,12 @@ async def test_preparation_rejects_lazy_adapter_without_loaded_model(monkeypatch
 
 
 @pytest.fixture
-def voice_socket(tmp_path, monkeypatch):
+def voice_socket(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     from fastapi.testclient import TestClient
 
     from tldw_Server_API.tests.Persona.test_persona_ws import _seed_persona_session, fastapi_app
 
-    async def authenticate(*args, **kwargs):
+    async def authenticate(*args: Any, **kwargs: Any) -> Any:
         return "1", True, True
 
     monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", authenticate)
@@ -137,7 +145,7 @@ def voice_socket(tmp_path, monkeypatch):
         yield ws
 
 
-def test_audio_without_preparation_does_not_fabricate_transcript(voice_socket):
+def test_audio_without_preparation_does_not_fabricate_transcript(voice_socket: Any) -> None:
     import base64
 
     from tldw_Server_API.tests.Persona.test_persona_ws import _recv_until
@@ -157,7 +165,7 @@ def test_audio_without_preparation_does_not_fabricate_transcript(voice_socket):
     assert event["client_message_id"] == "turn-1"
 
 
-def test_prepare_requires_owned_persisted_session(voice_socket):
+def test_prepare_requires_owned_persisted_session(voice_socket: Any) -> None:
     from tldw_Server_API.tests.Persona.test_persona_ws import _recv_until
 
     voice_socket.send_json({"type": "voice_prepare", "session_id": "unknown", "client_message_id": "prepare-1"})
@@ -168,7 +176,9 @@ def test_prepare_requires_owned_persisted_session(voice_socket):
     assert event["client_message_id"] == "prepare-1"
 
 
-def test_preparation_publishes_real_runtime_and_stop_revokes(voice_socket, monkeypatch):
+def test_preparation_publishes_real_runtime_and_stop_revokes(
+    voice_socket: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from tldw_Server_API.app.core.Persona import live_conversation
     from tldw_Server_API.app.core.Persona.live_voice_runtime import persona_live_voice_registry
     from tldw_Server_API.tests.Persona.test_persona_ws import _recv_until
@@ -176,13 +186,13 @@ def test_preparation_publishes_real_runtime_and_stop_revokes(voice_socket, monke
     initialized = []
 
     class Transcriber:
-        def initialize(self):
+        def initialize(self) -> None:
             initialized.append(True)
 
-        def cleanup(self):
+        def cleanup(self) -> None:
             pass
 
-    async def prepare_tts(runtime):
+    async def prepare_tts(runtime: Any) -> Any:
         assert runtime["tts_provider"] == "tldw"
 
     monkeypatch.setattr(
@@ -208,7 +218,9 @@ def test_preparation_publishes_real_runtime_and_stop_revokes(voice_socket, monke
     assert not persona_live_voice_registry.is_ready(user_id="1", session_id="voice-owned")
 
 
-def test_stop_during_model_initialization_cannot_publish_readiness(voice_socket, monkeypatch):
+def test_stop_during_model_initialization_cannot_publish_readiness(
+    voice_socket: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import threading
 
     from tldw_Server_API.app.core.Persona import live_conversation
@@ -219,14 +231,14 @@ def test_stop_during_model_initialization_cannot_publish_readiness(voice_socket,
     later_stages = []
 
     class Transcriber:
-        def initialize(self):
+        def initialize(self) -> None:
             started.set()
             release.wait(5)
 
-        def cleanup(self):
+        def cleanup(self) -> None:
             cleaned.set()
 
-    async def prepare_tts(runtime):
+    async def prepare_tts(runtime: Any) -> Any:
         later_stages.append("tts")
 
     monkeypatch.setattr(live_conversation, "require_persona_voice_conversation_credentials", lambda: object())
@@ -251,7 +263,9 @@ def test_stop_during_model_initialization_cannot_publish_readiness(voice_socket,
 
 
 @pytest.mark.asyncio
-async def test_kokoro_model_construction_does_not_block_control_loop(tmp_path, monkeypatch):
+async def test_kokoro_model_construction_does_not_block_control_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import sys
     import threading
     from types import SimpleNamespace
@@ -265,10 +279,10 @@ async def test_kokoro_model_construction_does_not_block_control_loop(tmp_path, m
     constructor_threads = []
 
     class Kokoro:
-        def __init__(self, *args, **kwargs):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
             constructor_threads.append(threading.get_ident())
 
-    async def resource_manager():
+    async def resource_manager() -> Any:
         return SimpleNamespace(register_model=lambda **kwargs: None)
 
     monkeypatch.setitem(sys.modules, "kokoro_onnx", SimpleNamespace(Kokoro=Kokoro, EspeakConfig=lambda **kwargs: None))
@@ -285,33 +299,33 @@ async def test_kokoro_model_construction_does_not_block_control_loop(tmp_path, m
 
 
 @pytest.fixture
-def prepared_voice(voice_socket, monkeypatch):
+def prepared_voice(voice_socket: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     from tldw_Server_API.app.core.Persona import live_conversation
     from tldw_Server_API.tests.Persona.test_persona_ws import _recv_until
 
     class Transcriber:
         fail = False
 
-        def initialize(self):
+        def initialize(self) -> None:
             pass
 
-        def cleanup(self):
+        def cleanup(self) -> None:
             pass
 
-        def reset(self):
+        def reset(self) -> None:
             pass
 
-        def get_full_transcript(self):
+        def get_full_transcript(self) -> Any:
             return ""
 
-        async def process_audio_chunk(self, audio):
+        async def process_audio_chunk(self, audio: Any) -> Any:
             if self.fail:
                 raise RuntimeError("private internal model path")
             return {"type": "partial", "text": "Actual transcript"}
 
     transcriber = Transcriber()
 
-    async def prepare_tts(runtime):
+    async def prepare_tts(runtime: Any) -> Any:
         pass
 
     monkeypatch.setattr(live_conversation, "require_persona_voice_conversation_credentials", lambda: object())
@@ -327,7 +341,7 @@ def prepared_voice(voice_socket, monkeypatch):
     return voice_socket, transcriber
 
 
-def test_real_transcript_correlation_and_no_client_requested_fake_tts(prepared_voice):
+def test_real_transcript_correlation_and_no_client_requested_fake_tts(prepared_voice: Any) -> None:
     import base64
 
     from tldw_Server_API.tests.Persona.test_persona_ws import _recv_until
@@ -353,7 +367,9 @@ def test_real_transcript_correlation_and_no_client_requested_fake_tts(prepared_v
 
 
 @pytest.mark.parametrize("input_limit", [False, True])
-def test_real_transcription_failure_revokes_runtime_without_placeholder(prepared_voice, monkeypatch, input_limit):
+def test_real_transcription_failure_revokes_runtime_without_placeholder(
+    prepared_voice: Any, monkeypatch: pytest.MonkeyPatch, input_limit: bool
+) -> None:
     import base64
 
     from tldw_Server_API.app.core.Persona.live_voice_runtime import persona_live_voice_registry
@@ -364,7 +380,7 @@ def test_real_transcription_failure_revokes_runtime_without_placeholder(prepared
     if input_limit:
         from tldw_Server_API.app.core.Persona.live_voice_runtime import PersonaVoiceInputLimitError
 
-        async def exceed_buffer(audio):
+        async def exceed_buffer(audio: Any) -> Any:
             raise PersonaVoiceInputLimitError("Keep spoken turns within 30 seconds and start voice again.")
 
         monkeypatch.setattr(transcriber, "process_audio_chunk", exceed_buffer)
@@ -386,7 +402,7 @@ def test_real_transcription_failure_revokes_runtime_without_placeholder(prepared
     assert not persona_live_voice_registry.is_ready(user_id="1", session_id="voice-owned")
 
 
-def test_config_change_revokes_ready_runtime(prepared_voice):
+def test_config_change_revokes_ready_runtime(prepared_voice: Any) -> None:
     from tldw_Server_API.app.core.Persona.live_voice_runtime import persona_live_voice_registry
     from tldw_Server_API.tests.Persona.test_persona_ws import _recv_until
 
@@ -398,7 +414,7 @@ def test_config_change_revokes_ready_runtime(prepared_voice):
     assert not persona_live_voice_registry.is_ready(user_id="1", session_id="voice-owned")
 
 
-def test_preparation_keeps_own_connection_configuration(voice_socket, monkeypatch):
+def test_preparation_keeps_own_connection_configuration(voice_socket: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi.testclient import TestClient
 
     from tldw_Server_API.app.core.Persona import live_conversation
@@ -407,13 +423,13 @@ def test_preparation_keeps_own_connection_configuration(voice_socket, monkeypatc
     selected = []
 
     class Transcriber:
-        def initialize(self):
+        def initialize(self) -> None:
             pass
 
-        def cleanup(self):
+        def cleanup(self) -> None:
             pass
 
-    async def prepare_tts(runtime):
+    async def prepare_tts(runtime: Any) -> Any:
         selected.append(runtime["tts_provider"])
 
     monkeypatch.setattr(live_conversation, "require_persona_voice_conversation_credentials", lambda: object())
@@ -434,23 +450,25 @@ def test_preparation_keeps_own_connection_configuration(voice_socket, monkeypatc
 
 
 @pytest.mark.parametrize("stage", ["CONVERSATION", "STT", "TTS"])
-def test_preparation_failures_are_actionable_and_never_ready(voice_socket, monkeypatch, stage):
+def test_preparation_failures_are_actionable_and_never_ready(
+    voice_socket: Any, monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
     from tldw_Server_API.app.core.Persona import live_conversation
     from tldw_Server_API.app.core.Persona.live_voice_runtime import persona_live_voice_registry
     from tldw_Server_API.tests.Persona.test_persona_ws import _recv_until
 
-    def fail():
+    def fail() -> Any:
         raise RuntimeError("secret credential or model path")
 
     class Transcriber:
-        def initialize(self):
+        def initialize(self) -> None:
             if stage == "STT":
                 fail()
 
-        def cleanup(self):
+        def cleanup(self) -> None:
             pass
 
-    async def prepare_tts(runtime):
+    async def prepare_tts(runtime: Any) -> Any:
         if stage == "TTS":
             fail()
 
@@ -473,7 +491,7 @@ def test_preparation_failures_are_actionable_and_never_ready(voice_socket, monke
 
 
 @pytest.mark.asyncio
-async def test_concurrent_sessions_keep_audio_headers_and_bytes_paired():
+async def test_concurrent_sessions_keep_audio_headers_and_bytes_paired() -> None:
     import asyncio
     from types import SimpleNamespace
 
@@ -482,20 +500,20 @@ async def test_concurrent_sessions_keep_audio_headers_and_bytes_paired():
     events = []
     first_header, release_first, second_started = asyncio.Event(), asyncio.Event(), asyncio.Event()
 
-    async def send_json(payload):
+    async def send_json(payload: Any) -> Any:
         session_id = payload["session_id"]
         events.append(("header", session_id))
         if session_id == "first":
             first_header.set()
             await release_first.wait()
 
-    async def send_bytes(audio):
+    async def send_bytes(audio: Any) -> Any:
         events.append(("binary", audio.decode()))
 
     stream = SimpleNamespace(send_json=send_json, ws=SimpleNamespace(send_bytes=send_bytes))
     lock = asyncio.Lock()
 
-    async def publish(session_id):
+    async def publish(session_id: str) -> Any:
         if session_id == "second":
             second_started.set()
         return await send_pair(
@@ -526,7 +544,7 @@ async def test_concurrent_sessions_keep_audio_headers_and_bytes_paired():
         ({"type": "voice_commit"}, "TRANSCRIPT_REQUIRED"),
     ],
 )
-def test_receive_loop_voice_notices_retain_capture_identity(prepared_voice, payload, reason):
+def test_receive_loop_voice_notices_retain_capture_identity(prepared_voice: Any, payload: Any, reason: str) -> None:
     from tldw_Server_API.tests.Persona.test_persona_ws import _recv_until
 
     ws, _ = prepared_voice
@@ -537,7 +555,9 @@ def test_receive_loop_voice_notices_retain_capture_identity(prepared_voice, payl
 
 
 @pytest.mark.parametrize("source", ["query", "subprotocol"])
-def test_voice_preparation_preserves_credentials_for_auth_watchdog(tmp_path, monkeypatch, source):
+def test_voice_preparation_preserves_credentials_for_auth_watchdog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str
+) -> None:
     import threading
 
     from fastapi.testclient import TestClient
@@ -549,14 +569,14 @@ def test_voice_preparation_preserves_credentials_for_auth_watchdog(tmp_path, mon
     revalidated = threading.Event()
     observed_credentials = []
 
-    async def authenticate(ws, token, api_key):
+    async def authenticate(ws: Any, token: str | None, api_key: str | None) -> Any:
         credential, _ = persona_ep._extract_auth_credentials(ws, token, api_key)
         if preparation_started.is_set():
             observed_credentials.append(credential)
             revalidated.set()
         return "1", True, True
 
-    def resolve_target():
+    def resolve_target() -> Any:
         preparation_started.set()
         return object()
 
@@ -578,7 +598,7 @@ def test_voice_preparation_preserves_credentials_for_auth_watchdog(tmp_path, mon
         assert observed_credentials == ["original-credential"] * len(observed_credentials)
 
 
-def test_voice_stop_cancels_only_the_owned_session_tasks(voice_socket):
+def test_voice_stop_cancels_only_the_owned_session_tasks(voice_socket: Any) -> None:
     import asyncio
     import threading
 
@@ -588,13 +608,13 @@ def test_voice_stop_cancels_only_the_owned_session_tasks(voice_socket):
     cancelled = threading.Event()
     tasks = []
 
-    async def wait_for_stop():
+    async def wait_for_stop() -> Any:
         try:
             await asyncio.Event().wait()
         finally:
             cancelled.set()
 
-    async def register():
+    async def register() -> Any:
         owned = asyncio.create_task(wait_for_stop())
         other = asyncio.create_task(asyncio.Event().wait())
         tasks.extend([owned, other])
@@ -602,7 +622,7 @@ def test_voice_stop_cancels_only_the_owned_session_tasks(voice_socket):
         persona_live_turn_registry.register(user_id="2", session_id="voice-owned", task=other)
         await asyncio.sleep(0)
 
-    async def cleanup():
+    async def cleanup() -> None:
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -620,7 +640,7 @@ def test_voice_stop_cancels_only_the_owned_session_tasks(voice_socket):
         voice_socket.portal.call(cleanup)
 
 
-def test_preparation_is_singleflight_until_worker_finishes(voice_socket, monkeypatch):
+def test_preparation_is_singleflight_until_worker_finishes(voice_socket: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     import threading
 
     from tldw_Server_API.app.core.Persona import live_conversation
@@ -630,15 +650,15 @@ def test_preparation_is_singleflight_until_worker_finishes(voice_socket, monkeyp
     initialized = []
 
     class Transcriber:
-        def initialize(self):
+        def initialize(self) -> None:
             initialized.append(True)
             started.set()
             release.wait(5)
 
-        def cleanup(self):
+        def cleanup(self) -> None:
             pass
 
-    async def prepare_tts(runtime):
+    async def prepare_tts(runtime: Any) -> Any:
         return None
 
     monkeypatch.setattr(live_conversation, "require_persona_voice_conversation_credentials", lambda: object())
@@ -666,7 +686,7 @@ def test_preparation_is_singleflight_until_worker_finishes(voice_socket, monkeyp
 
 
 @pytest.fixture
-def blocked_voice_initialization(voice_socket, monkeypatch):
+def blocked_voice_initialization(voice_socket: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     import threading
 
     from tldw_Server_API.app.core.Persona import live_conversation
@@ -676,16 +696,16 @@ def blocked_voice_initialization(voice_socket, monkeypatch):
     calls = {"initialize": 0, "cleanup": 0, "tts": 0}
 
     class Transcriber:
-        def initialize(self):
+        def initialize(self) -> None:
             calls["initialize"] += 1
             started.set()
             release.wait(5)
 
-        def cleanup(self):
+        def cleanup(self) -> None:
             calls["cleanup"] += 1
             cleaned.set()
 
-    async def prepare_tts(runtime):
+    async def prepare_tts(runtime: Any) -> Any:
         calls["tts"] += 1
 
     monkeypatch.setattr(live_conversation, "require_persona_voice_conversation_credentials", lambda: object())
@@ -703,8 +723,8 @@ def blocked_voice_initialization(voice_socket, monkeypatch):
 
 
 def test_disconnected_socket_does_not_wait_for_stt_worker_and_cleans_late_once(
-    blocked_voice_initialization, monkeypatch
-):
+    blocked_voice_initialization: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import threading
 
     from tldw_Server_API.app.core.Persona.live_voice_runtime import persona_live_voice_registry
@@ -713,7 +733,7 @@ def test_disconnected_socket_does_not_wait_for_stt_worker_and_cleans_late_once(
     stopped = threading.Event()
     original_stop = persona_ep.WebSocketStream.stop
 
-    async def stop(stream):
+    async def stop(stream: Any) -> Any:
         await original_stop(stream)
         stopped.set()
 
@@ -731,7 +751,9 @@ def test_disconnected_socket_does_not_wait_for_stt_worker_and_cleans_late_once(
     assert calls == {"initialize": 1, "cleanup": 1, "tts": 0}
 
 
-def test_stt_timeout_retains_singleflight_and_cleans_late_once(blocked_voice_initialization, monkeypatch):
+def test_stt_timeout_retains_singleflight_and_cleans_late_once(
+    blocked_voice_initialization: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from tldw_Server_API.app.core.Persona.live_voice_runtime import persona_live_voice_registry
     from tldw_Server_API.tests.Persona.test_persona_ws import _recv_until
 
@@ -756,7 +778,9 @@ def test_stt_timeout_retains_singleflight_and_cleans_late_once(blocked_voice_ini
 
 
 @pytest.mark.parametrize("capacity", ["STREAM_TASK_MAX_ACTIVE", "STREAM_CLEANUP_TASK_MAX_ACTIVE"])
-def test_stt_capacity_exhaustion_never_starts_worker(blocked_voice_initialization, monkeypatch, capacity):
+def test_stt_capacity_exhaustion_never_starts_worker(
+    blocked_voice_initialization: Any, monkeypatch: pytest.MonkeyPatch, capacity: int
+) -> None:
     from tldw_Server_API.app.core.Chat import streaming_utils
     from tldw_Server_API.tests.Persona.test_persona_ws import _recv_until
 
@@ -769,3 +793,28 @@ def test_stt_capacity_exhaustion_never_starts_worker(blocked_voice_initializatio
     assert event["reason_code"] == "VOICE_STT_UNAVAILABLE"
     assert cleaned.wait(2)
     assert calls == {"initialize": 0, "cleanup": 1, "tts": 0}
+
+
+def test_voice_commit_policy_reads_run_off_socket_event_loop(
+    voice_socket: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+
+    from tldw_Server_API.tests.Persona.test_persona_ws import _recv_until
+
+    original = persona_ep._load_persona_policy_rules_for_session
+    on_event_loop = []
+
+    def record_thread(*args: Any, **kwargs: Any) -> Any:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            on_event_loop.append(False)
+        else:
+            on_event_loop.append(True)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(persona_ep, "_load_persona_policy_rules_for_session", record_thread)
+    voice_socket.send_json({"type": "voice_commit", "session_id": "voice-owned", "text": "Hi"})
+    _recv_until(voice_socket, lambda value: value.get("reason_code") == "VOICE_NOT_PREPARED")
+    assert on_event_loop == [False]

@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections.abc import Iterable
 from threading import RLock
 from typing import Any
 
 import httpx
 
-
-class PersonaConversationError(RuntimeError):
-    """Safe user-facing failure without provider response details."""
+from tldw_Server_API.app.core.exceptions import PersonaConversationError
 
 
 def resolve_persona_conversation_target() -> Any:
@@ -72,6 +71,57 @@ def requires_tool_plan(text: str) -> bool:
     )
 
 
+async def complete_persona_turn(
+    *,
+    profile_store: Any,
+    persona_id: str,
+    user_id: str,
+    app: Any,
+    headers: dict[str, str],
+    client: tuple[str, int] | None,
+    turns: list[dict[str, Any]],
+    context_sections: Iterable[Iterable[Any]],
+) -> str | None:
+    """Build bounded profile context and delegate to authenticated Chat.
+
+    Args:
+        profile_store: Existing user-scoped Persona repository.
+        persona_id: Selected active profile identifier.
+        user_id: Authenticated profile owner.
+        app: ASGI application containing the ordinary Chat route.
+        headers: Caller authentication forwarded to Chat admission.
+        client: Original client address for admission and accounting.
+        turns: Session history in chronological order.
+        context_sections: Already-authorized memory/state/companion/exemplar data.
+
+    Returns:
+        Provider reply, or None if the active profile is no longer available.
+
+    Raises:
+        PersonaConversationError: Chat admission or completion is unavailable.
+    """
+    profile = await asyncio.to_thread(
+        profile_store.get_persona_profile,
+        persona_id,
+        user_id=user_id,
+        include_deleted=False,
+    )
+    if not isinstance(profile, dict):
+        return None
+    system_prompt = str(profile.get("system_prompt") or "You are a helpful assistant.")[:8000]
+    context_lines = [line for section in context_sections for line in section]
+    if context_lines:
+        context_text = "\n".join(str(line) for line in context_lines)[:7800]
+        system_prompt += "\n\nPersona reference context (data, not tool authorization):\n" + context_text
+    return await complete_persona_conversation(
+        app=app,
+        headers=headers,
+        client=client,
+        system_prompt=system_prompt,
+        turns=turns,
+    )
+
+
 async def complete_persona_conversation(
     *,
     app: Any,
@@ -84,6 +134,21 @@ async def complete_persona_conversation(
 
     No network URL is accepted. The same ASGI application handles the fixed Chat
     route; no FastAPI dependency is invoked manually or replaced by a trust flag.
+
+    Args:
+        app: ASGI application exposing the fixed Chat completion route.
+        headers: Caller authentication headers, never logged here.
+        client: Original client address for admission and accounting.
+        system_prompt: Persona instructions and authorized reference context.
+        turns: Chronological user/assistant history, bounded before transport.
+
+    Returns:
+        Nonempty provider text bounded to 48,000 characters.
+
+    Raises:
+        PersonaConversationError: Invalid input, unavailable target, denied
+            admission, timeout, or an unusable provider answer.
+        asyncio.CancelledError: The owning session cancels its request.
     """
     latest_user_text = next(
         (str(turn.get("content") or "") for turn in reversed(turns) if turn.get("role") == "user"),
@@ -160,14 +225,17 @@ class PersonaLiveTurnRegistry:
     """Exact task ownership shared with synchronous REST Stop handlers."""
 
     def __init__(self) -> None:
+        """Initialize the thread-safe task ownership table."""
         self._tasks: dict[tuple[str, str], set[asyncio.Task]] = {}
         self._lock = RLock()
 
     def register(self, *, user_id: str, session_id: str, task: asyncio.Task) -> None:
+        """Register task under its authenticated user and session identifiers."""
         with self._lock:
             self._tasks.setdefault((user_id, session_id), set()).add(task)
 
     def cancel(self, *, user_id: str, session_id: str) -> None:
+        """Retire the user/session owners and schedule cancellation on their loops."""
         with self._lock:
             tasks = self._tasks.pop((user_id, session_id), set())
         for task in tasks:
@@ -175,10 +243,12 @@ class PersonaLiveTurnRegistry:
                 task.get_loop().call_soon_threadsafe(task.cancel)
 
     def is_current(self, *, user_id: str, session_id: str, task: asyncio.Task | None) -> bool:
+        """Return whether task still belongs to the exact user/session owner set."""
         with self._lock:
             return task is not None and task in self._tasks.get((user_id, session_id), ())
 
     def release(self, *, user_id: str, session_id: str, task: asyncio.Task) -> None:
+        """Remove the completed task without disturbing other session owners."""
         with self._lock:
             key = (user_id, session_id)
             tasks = self._tasks.get(key)
