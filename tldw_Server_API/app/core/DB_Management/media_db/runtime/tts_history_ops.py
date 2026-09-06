@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from contextlib import suppress
-from datetime import datetime, timedelta, timezone
 import json
+from contextlib import nullcontext, suppress
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
@@ -42,72 +42,144 @@ def create_tts_history_entry(
     error_message: str | None = None,
     deleted: bool = False,
     deleted_at: str | None = None,
+    output_incarnation: str | None = None,
     conn: Any | None = None,
 ) -> int | None:
-    """Insert a TTS history row and return its id."""
+    """Insert history without committing a supplied or enclosing transaction."""
     now = created_at or self._get_current_utc_timestamp_str()
     insert_sql = (
         "INSERT INTO tts_history "
         "(user_id, created_at, text, text_hash, text_length, provider, model, voice_id, voice_name, "
         "voice_info, format, duration_ms, generation_time_ms, params_json, status, segments_json, "
-        "favorite, job_id, output_id, artifact_ids, artifact_deleted_at, error_message, deleted, deleted_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "favorite, job_id, output_id, artifact_ids, artifact_deleted_at, error_message, deleted, deleted_at, output_incarnation) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     )
     if self.backend_type == BackendType.POSTGRESQL:
         insert_sql += " RETURNING id"
 
-    voice_info_str = (
-        json.dumps(voice_info, separators=(",", ":"), ensure_ascii=True) if voice_info else None
-    )
-    params_str = (
-        json.dumps(params_json, separators=(",", ":"), ensure_ascii=True) if params_json else None
-    )
-    segments_str = (
-        json.dumps(segments_json, separators=(",", ":"), ensure_ascii=True)
-        if segments_json
-        else None
-    )
-    artifacts_str = (
-        json.dumps(artifact_ids, separators=(",", ":"), ensure_ascii=True)
-        if artifact_ids
-        else None
-    )
+    voice_info_str = json.dumps(voice_info, separators=(",", ":"), ensure_ascii=True) if voice_info else None
+    params_str = json.dumps(params_json, separators=(",", ":"), ensure_ascii=True) if params_json else None
+    segments_str = json.dumps(segments_json, separators=(",", ":"), ensure_ascii=True) if segments_json else None
+    artifacts_str = json.dumps(artifact_ids, separators=(",", ":"), ensure_ascii=True) if artifact_ids else None
 
-    cursor = self.execute_query(
-        insert_sql,
-        (
-            str(user_id),
-            now,
-            text,
-            str(text_hash),
-            int(text_length) if text_length is not None else None,
-            provider,
-            model,
-            voice_id,
-            voice_name,
-            voice_info_str,
-            format,
-            int(duration_ms) if duration_ms is not None else None,
-            int(generation_time_ms) if generation_time_ms is not None else None,
-            params_str,
-            status,
-            segments_str,
-            1 if favorite else 0,
-            int(job_id) if job_id is not None else None,
-            int(output_id) if output_id is not None else None,
-            artifacts_str,
-            artifact_deleted_at,
-            error_message,
-            1 if deleted else 0,
-            deleted_at,
-        ),
-        commit=True,
+    if output_incarnation is not None:
+        _validate_output_history_identity(user_id, output_incarnation)
+    context = self.transaction() if conn is None else nullcontext(conn)
+    with context as history_conn:
+        if output_incarnation is not None:
+            instance = _lock_output_history_instance(self, str(user_id), output_incarnation, history_conn)
+            if instance["state"] == "disposed":
+                output_id, artifacts_str, artifact_deleted_at = None, None, instance["disposed_at"]
+        cursor = self.execute_query(
+            insert_sql,
+            (
+                str(user_id),
+                now,
+                text,
+                str(text_hash),
+                int(text_length) if text_length is not None else None,
+                provider,
+                model,
+                voice_id,
+                voice_name,
+                voice_info_str,
+                format,
+                int(duration_ms) if duration_ms is not None else None,
+                int(generation_time_ms) if generation_time_ms is not None else None,
+                params_str,
+                status,
+                segments_str,
+                bool(favorite),
+                int(job_id) if job_id is not None else None,
+                int(output_id) if output_id is not None else None,
+                artifacts_str,
+                artifact_deleted_at,
+                error_message,
+                bool(deleted),
+                deleted_at,
+                output_incarnation,
+            ),
+            commit=False,
+            connection=history_conn,
+        )
+        if self.backend_type == BackendType.POSTGRESQL:
+            row = cursor.fetchone()
+            return int(row["id"]) if row and row.get("id") is not None else None
+        return cursor.lastrowid
+
+
+def _validate_output_history_identity(user_id: str, incarnation: str) -> None:
+    if (
+        user_id is None
+        or not str(user_id).strip()
+        or not isinstance(incarnation, str)
+        or len(incarnation) != 32
+        or any(char not in "0123456789abcdef" for char in incarnation)
+    ):
+        raise ValueError("output_history_invalid")
+
+
+def _lock_output_history_instance(self, user_id: str, incarnation: str, conn: Any) -> dict[str, Any]:
+    """Acquire the shared insert/dispose fence inside the caller's transaction."""
+    self.execute_query(
+        "INSERT INTO tts_output_instances (user_id, output_incarnation, state) VALUES (?, ?, 'live') "
+        "ON CONFLICT (user_id, output_incarnation) DO NOTHING",
+        (user_id, incarnation),
         connection=conn,
+        log_errors=False,
     )
+    query = "SELECT state, disposal_token, disposed_at FROM tts_output_instances WHERE user_id = ? AND output_incarnation = ?"
     if self.backend_type == BackendType.POSTGRESQL:
-        row = cursor.fetchone()
-        return int(row["id"]) if row and row.get("id") is not None else None
-    return cursor.lastrowid
+        query += " FOR UPDATE"
+    row = self.execute_query(query, (user_id, incarnation), connection=conn, log_errors=False).fetchone()
+    if row is None:
+        raise RuntimeError("output_history_unavailable")
+    return dict(row)
+
+
+def dispose_tts_output_instance(
+    self,
+    *,
+    user_id: str,
+    output_incarnation: str,
+    disposal_token: str,
+    deleted_at: str,
+    conn: Any | None = None,
+) -> int:
+    """Permanently clear this user's original-instance links, including late inserts.
+
+    A supplied connection must belong to a caller-owned transaction. Replays
+    preserve the first disposal token/timestamp; numeric output IDs are not used.
+    """
+    _validate_output_history_identity(user_id, output_incarnation)
+    _validate_output_history_identity(user_id, disposal_token)
+    try:
+        timestamp = datetime.fromisoformat(deleted_at)
+        if timestamp.tzinfo is None:
+            raise ValueError
+    except (TypeError, ValueError):
+        raise ValueError("output_history_invalid") from None
+    with self.transaction() if conn is None else nullcontext(conn) as history_conn:
+        instance = _lock_output_history_instance(self, str(user_id), output_incarnation, history_conn)
+        if instance["state"] == "live":
+            self.execute_query(
+                "UPDATE tts_output_instances SET state = 'disposed', disposal_token = ?, disposed_at = ? "
+                "WHERE user_id = ? AND output_incarnation = ? AND state = 'live'",
+                (disposal_token, deleted_at, str(user_id), output_incarnation),
+                connection=history_conn,
+                log_errors=False,
+            )
+        else:
+            deleted_at = instance["disposed_at"]
+        cursor = self.execute_query(
+            "UPDATE tts_history SET artifact_deleted_at = ?, output_id = NULL, artifact_ids = NULL "
+            "WHERE user_id = ? AND output_incarnation = ? "
+            "AND (output_id IS NOT NULL OR artifact_ids IS NOT NULL OR artifact_deleted_at IS NULL)",
+            (deleted_at, str(user_id), output_incarnation),
+            connection=history_conn,
+            log_errors=False,
+        )
+        return int(cursor.rowcount or 0)
 
 
 def _build_tts_history_filters(
@@ -473,6 +545,7 @@ def list_tts_history_user_ids(self) -> list[str]:
 
 __all__ = [
     "create_tts_history_entry",
+    "dispose_tts_output_instance",
     "_build_tts_history_filters",
     "list_tts_history",
     "count_tts_history",

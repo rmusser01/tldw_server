@@ -1,5 +1,18 @@
 # Testing Evidence Lessons
 
+## Closing a borrowed SQLite connection must invalidate its pool entry
+
+**Incident (TASK-13153, 2026-09-05):** The new Media v26-to-v27 migration passed,
+but constructing a second adapter for the same file failed with a closed-database
+error. Bootstrap directly closed its borrowed connection before running the
+migrator; the shared thread-local pool still returned that closed handle.
+
+**Evidence and rule:** Clearing the connection through the pool's existing
+`clear_thread_local_connection()` method made the real on-disk upgrade/reopen
+regression pass. Verify repeated production adapter construction after migration,
+not just the migrated file through a separate raw connection. Pool ownership must
+be updated whenever bootstrap closes a borrowed handle.
+
 ## Delayed retry reports must not clear an operator-only block
 
 **Incident (TASK-13153, 2026-09-05):** Recovery records its failure after releasing

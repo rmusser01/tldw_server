@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-03 02:27'
-updated_date: '2026-09-06 00:13'
+updated_date: '2026-09-06 01:22'
 labels:
   - collections
   - reading-list
@@ -52,5 +52,11 @@ diagnostic-privacy behavior are covered.
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-ADR required: yes; ADR path: backlog/decisions/003-reading-atomic-hard-delete.md (existing). Continue approved Docs/superpowers/plans/2026-09-05-reading-output-file-reservations.md inline on draft PR 2903. Task 4c registered Watchlist readers implemented and reviewed: current metadata and descriptor transfer together, shared protected lookup, origin/expiry validation, current recipient plan for retry delivery, authenticated Collections adapter propagation, preserved text/audio HTTP behavior and descriptor cleanup. Activated text materialization is bounded at 8 MiB; inactive behavior unchanged. Metadata-only report sidecars deliberately fail closed for activated reads; Task 7 must establish reviewed producer/reconciliation provenance before Task 9 activation. Audit and exact tests/logs in plan checkpoint. Verification: 137 combined local cases, 10 existing output routes, three existing retry cases, five full-app report/evidence cases; broader PG run 99 passed plus one known failure from pre-final-patch worker code, replaced by a fresh passing targeted PG rerun (100 distinct PG cases; 255 overall, no backend skips). No claim that the broader PG invocation was clean. Service/new-test Ruff and Black, scoped Watchlist Black, compile/diff and Bandit pass; six pre-existing Watchlist Ruff findings unchanged. Review issues reproduced RED and fixed; bounded follow-up found no remaining actionable issues. Next implementation: Task 5 original-instance history delivery; sidecar provenance remains an explicit rollout blocker. No activation/background registration/full sweep/Docker provisioning/merge; task In Progress, AC unchecked, PR draft and human-written Change summary gate pending.
+ADR required: yes; ADR path: backlog/decisions/003-reading-atomic-hard-delete.md. Approved output-file-reservations plan continues inline. Task 5a receiver foundation verified: Media v27 original-instance live/disposed receiver, both migrations, late-insert and reused-ID/user isolation, first disposal evidence, caller transaction ownership including mixed legacy inserts, optional/partial schema recovery and SQLite pooled-handle migration fix. Verification: 34 real SQLite/PostgreSQL receiver cases, 97 existing local schema/history/purge cases, 5 required PostgreSQL schema cases and 62 TTS consumer cases passed (198 distinct); no required backend skips. Scoped static/security checks pass with one unchanged SQLite bootstrap I001 baseline. Independent review transaction finding reproduced RED and fixed; follow-up cleared it. Next Task 5b: RED post-fs_done outage/lost-ack/recycled-ID tests, original-incarnation capture at TTS producer time, bounded durable delivery outside filesystem exclusion, independent backoff and conditional acknowledgement. No runtime activation, full sweep, Docker or merge. Full task In Progress, ACs unchecked, PR 2903 draft; human Change summary gate pending.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Task 5a checkpoint: implemented and independently reviewed original-instance Media history disposal receiver, schema v27 migrations and transaction ownership fixes. Existing ADR-003 applies; detailed evidence and remaining Task 5b are in Docs/superpowers/plans/2026-09-05-reading-output-file-reservations.md. Targeted evidence: 198 distinct passing cases across receiver, migration, history, TTS worker/endpoint/cleanup and pagination suites; 22 real PostgreSQL cases included, none skipped in their final required-backend runs. Production Bandit zero findings/errors; test Bandit excludes only assertions; changed-range Black/compile/diff checks pass. No new Ruff findings; one unchanged SQLite bootstrap import-order baseline remains. No activation or full-task completion claimed.
+<!-- SECTION:NOTES:END -->

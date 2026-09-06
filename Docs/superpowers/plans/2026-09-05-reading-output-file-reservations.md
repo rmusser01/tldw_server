@@ -175,9 +175,18 @@ its compatibility tests establish protected lookup or activated-reader readiness
 
 **Files:** Modify `tldw_Server_API/app/core/DB_Management/media_db/runtime/tts_history_ops.py`, `tldw_Server_API/app/core/DB_Management/media_db/media_database_impl.py`, `tldw_Server_API/app/core/DB_Management/media_db/schema/migrations.py`, `tldw_Server_API/app/core/DB_Management/media_db/schema/postgres_tts_source_hash_structures.py`; create `tldw_Server_API/app/core/DB_Management/migrations/027_output_history_incarnation.sql` and `tldw_Server_API/app/core/DB_Management/media_db/schema/migration_bodies/postgres_output_history_incarnation.py`. Extend `tldw_Server_API/app/services/output_file_operations.py`, `tldw_Server_API/tests/DB_Management/test_media_db_tts_history_ops.py`; create `tldw_Server_API/tests/Collections/test_output_file_history_delivery.py`. Modify history-link callers `tldw_Server_API/app/core/TTS/tts_jobs_worker.py` and `tldw_Server_API/app/api/v1/endpoints/audio/audio_tts.py`.
 
+### Task 5a: Receiver foundation (verified checkpoint)
+
+Additional files: `tldw_Server_API/tests/DB_Management/test_output_history_receiver.py`, existing schema bootstrap tests, and the SQLite bootstrap connection-release correction in `media_db/schema/backends/sqlite_helpers.py`.
+
+- [x] Prove missing receiver behavior with real Media adapters; cover replay, late inserts, numeric-ID/user isolation, rollback, both threaded commit orders, soft-deleted history, validation, schema constraints, optional history installation, partial DDL and repeated on-disk upgrades.
+- [x] Implement the approved original-output-incarnation option, not replay by numeric ID. Media v27 adds nullable internal `tts_history.output_incarnation` and one narrow tombstone relation keyed by `(user_id, output_incarnation)`, containing the stable disposal operation token and timestamp. Register both migrations and bump the current version from 26 to 27. Fresh and upgraded schemas must match; no silent migration failure. No public DTO or general-purpose delivery table.
+- [x] Receiver relation uses explicit `live`/`disposed` state. Disposal transaction inserts a disposed row if absent, or atomically transitions an existing live row to disposed, recording the first disposal token/timestamp; already-disposed replays preserve that evidence. Then clear links only for the same user's matching incarnation. History creation inserts/locks that same keyed receiver row before checking disposal state and holds that lock through its history insert; disposed instances always produce cleared links. Never resurrect disposed. Test history creation → disposal → delayed history insertion, and both concurrent commit orders, including an existing live receiver row.
+- [x] Preserve caller transaction ownership for explicit connections and implicit nested legacy inserts. Review, targeted verification and security evidence are recorded below.
+
+### Task 5b: Sender delivery and producer capture (next)
+
 - [ ] Add RED tests for post-fs_done Media outage, acknowledgement lost after successful update, newer file/path/ID reuse, and history insertion arriving after deletion delivery. Run `python -m pytest tldw_Server_API/tests/Collections/test_output_file_history_delivery.py -q`.
-- [ ] Implement the approved original-output-incarnation option, not replay by numeric ID. Media v27 adds nullable internal `tts_history.output_incarnation` and one narrow tombstone relation keyed by `(user_id, output_incarnation)`, containing the stable disposal operation token and timestamp. Register both migrations and bump the current version from 26 to 27 (if the branch has changed, resolve the next unoccupied version before editing). Fresh and upgraded schemas must match; no silent migration failure. No public DTO or general-purpose delivery table.
-- [ ] Receiver relation uses explicit `live`/`disposed` state. Disposal transaction inserts a disposed row if absent, or atomically transitions an existing live row to disposed, recording the first disposal token/timestamp; already-disposed replays preserve that evidence. Then clear links only for the same user's matching incarnation. Do not use conflict-do-nothing as the entire disposal transition. History creation inserts/locks that same keyed receiver row before checking disposal state and holds that lock through its history insert; disposed instances always produce cleared links. Never resurrect disposed. This narrow monotonic receiver state is necessary because a SELECT-then-INSERT test alone races on PostgreSQL. Test history creation → disposal → delayed history insertion, and both concurrent commit orders, including an existing live receiver row.
 - [ ] TTS callers capture the internal incarnation when the output is produced, not by fetching a potentially recycled ID later. Pass it only internally to history creation. Non-output file-ID history remains unchanged. If an old activated association lacks proven incarnation, leave a sanitized blocked-delivery effect; do not guess. Offline activation reconciles existing known output/history links with writers stopped and leaves ambiguity explicit.
 - [ ] At logical output commit record a bounded `dispose_history` effect with token, incarnation and fixed timestamp. File recovery marks fs_done/releases claims without Media access. Delivery pass processes fs_done effects outside the OS lock; stable receiver identity makes newer output updates safe. Acknowledge conditionally only after receiver commit; retire only after all bounded effects acknowledge. Separate backoff/status from filesystem health. Preserve tombstones while delayed history writers could still reference an old incarnation; no age-only retirement.
 - [ ] Run new delivery tests and `python -m pytest tldw_Server_API/tests/DB_Management/test_media_db_tts_history_ops.py tldw_Server_API/tests/TTS_NEW/integration/test_tts_history_artifact_purge.py -q`. Test migration twice and disposal/late-insert commit orders on real SQLite/PostgreSQL. Review/commit: `fix(outputs): replay history effects for original output instances (TASK-13153)`.
@@ -1057,3 +1066,62 @@ Logs: `/private/tmp/task-13153-watchlist-{red,bounds-red,green,edges,review-red}
 `/private/tmp/task-13153-watchlist-reports-existing.log`,
 `/private/tmp/task-13153-watchlist-bandit-final.json`, and
 `/private/tmp/task-13153-watchlist-tests-bandit.json`.
+
+### Task 5a: Original-instance Media history receiver (2026-09-05)
+
+Adds Media schema v27 and a nullable internal history incarnation. A narrow
+user/incarnation receiver retains live/disposed state and the first disposal
+token/time. Creation and disposal share the same transactional fence (SQLite
+write transaction; PostgreSQL row lock). Disposal clears only matching original
+links, including soft-deleted rows; delayed inserts start cleared. Public history
+DTOs and legacy rows without proven incarnation remain unchanged. Tombstones have
+no age-only retirement. Existing ADR-003 applies; delivery and producer capture
+are deliberately split into Task 5b, not claimed complete here.
+
+Migration testing exposed optional history tables absent from older databases,
+already-installed DDL, and a closed SQLite pool handle after migration. The v27
+upgrade uses existing idempotent migration support, installs absent optional
+history, and propagates required receiver failures. SQLite bootstrap now clears
+its borrowed pool entry before migration. PostgreSQL inserts use native boolean
+flags after a synthetic probe confirmed the previous integers caused
+`DatatypeMismatch` on the favorite column.
+
+Independent read-only review found a legacy insert could commit an enclosing
+receiver transaction. Both explicit-connection and implicit nested-call RED
+regressions reproduced it. Creation now always uses an owned/nested transaction
+when no connection is supplied, never commits an explicit connection, and leaves
+the outermost transaction responsible for commit. Follow-up review found no
+remaining actionable issue in that correction. The threaded tests verify both
+final commit orders; their start event is not instrumentation proving the exact
+database lock-wait instant. Stronger contention instrumentation remains an
+integrated failure-matrix improvement, not claimed evidence here.
+
+Core verification: 34 receiver cases passed on real SQLite/PostgreSQL in 137.70s;
+97 existing schema/history/purge cases passed in 25.75s. The latter sandbox run
+skipped five existing PostgreSQL schema cases; all five then passed with required
+PostgreSQL outside the network sandbox in 8.66s. One old schema-version assertion
+was updated to 27 after that required-backend rerun exposed it. These are 136
+distinct passing core/regression cases, excluding overlapping RED/diagnostic runs.
+No required PostgreSQL case remains skipped; no Docker or full sweep was run.
+An additional 62 existing TTS endpoint, worker, cleanup and pagination cases
+passed in 191.27s, including a real 2,000-row cursor-pagination dataset. Total
+checkpoint coverage is 198 distinct passing cases.
+
+Commands (after activating the existing Server environment):
+
+```bash
+TLDW_TEST_NO_DOCKER=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest tldw_Server_API/tests/DB_Management/test_output_history_receiver.py -q --tb=short -n 2
+TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/DB_Management/test_media_db_tts_history_ops.py tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py tldw_Server_API/tests/TTS_NEW/integration/test_tts_history_artifact_purge.py -q --tb=short -rs
+TLDW_TEST_NO_DOCKER=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py -q -m postgres --tb=short -rs
+TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/TTS_NEW/unit/test_tts_history_endpoints.py tldw_Server_API/tests/TTS_NEW/unit/test_tts_jobs_worker.py tldw_Server_API/tests/Services/test_tts_history_cleanup_service.py tldw_Server_API/tests/TTS_NEW/integration/test_tts_history_perf_sanity.py -q --tb=short
+```
+
+Changed-range Black, new-file Black, compilation, diff checks and scoped Bandit
+pass. Production Bandit has zero findings/errors with no exclusions; test Bandit
+excludes only B101 for pytest assertions. Ruff has no new findings; the untouched
+SQLite bootstrap import-order finding is unchanged from HEAD and is not called
+clean. No dependency or background registration was added. TASK-13153 remains In
+Progress, full-task ACs unchecked, PR #2903 draft and human Change summary pending.
+
+Logs: `/private/tmp/task-13153-receiver-{red,schema-red,upgrade-red,edge-red,review-red,review-green,all-final,legacy-final,legacy-pg-verified,consumers,static-final}.log`;
+security reports: `/private/tmp/task-13153-receiver-bandit-{app,tests}-final.json`.
