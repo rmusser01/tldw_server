@@ -695,16 +695,37 @@ async def process_web_scraping_task(
             ) from e
 
 
+def _ingest_crawl_articles(service_result: Any) -> list[dict[str, Any]]:
+    """Recover crawl articles from the enhanced envelope or legacy inline result."""
+    if isinstance(service_result, dict) and service_result.get("ephemeral_id"):
+        stored = ephemeral_storage.get_data(service_result["ephemeral_id"])
+        if stored is None:
+            raise RuntimeError("Web crawl results expired before ingestion")
+        service_result = stored["result"]
+    if isinstance(service_result, dict):
+        service_result = service_result.get("articles") or service_result.get("results") or []
+    articles = service_result if isinstance(service_result, list) else []
+    for article in articles:
+        if isinstance(article, dict) and "summary" in article and "analysis" not in article:
+            article["analysis"] = article.get("summary")
+    return articles
+
+
 async def ingest_web_content_orchestrate(
     request: Any,
     db: Any,
     usage_log: Any,
+    *,
+    summary_prompt_overrides: Mapping[str, str] | None = None,
 ) -> Optional[list[dict[str, Any]]]:
     """
-    Shared helper for `/media/ingest-web-content` side effects and, for
-    selected scrape methods, the scraping + summarization:
+    Shared helper for `/media/ingest-web-content` side effects and summarization:
       - ScrapeMethod.INDIVIDUAL: per-URL scrape + summary
       - ScrapeMethod.SITEMAP: sitemap scrape + summary
+      - URL_LEVEL / RECURSIVE: crawl task + ephemeral result retrieval
+
+    The HTTP caller may supply one owner-bound prompt snapshot. Unscoped callers
+    retain existing defaults without acquiring user prompt storage.
     """
 
     # Log usage for web scraping ingest
@@ -774,10 +795,14 @@ async def ingest_web_content_orchestrate(
 
         analysis_results = analyze(
             input_data=content,
-            custom_prompt_arg=getattr(request, "custom_prompt", None) or "Summarize this article.",
+            custom_prompt_arg=(summary_prompt_overrides or {}).get(
+                "user", getattr(request, "custom_prompt", None) or "Summarize this article."
+            ),
             api_name=api_name,
             temp=0.7,
-            system_message=getattr(request, "system_prompt", None) or "Act as a professional summarizer.",
+            system_message=(summary_prompt_overrides or {}).get(
+                "system", getattr(request, "system_prompt", None) or "Act as a professional summarizer."
+            ),
         )
         if not _sanitize_analysis_result(article, "analysis", analysis_results):
             article["analysis"] = analysis_results
@@ -928,6 +953,7 @@ async def ingest_web_content_orchestrate(
                 max_pages=requested_max_pages,
                 max_depth=level,
                 summarize_checkbox=bool(getattr(request, "perform_analysis", False)),
+                summary_prompt_overrides=summary_prompt_overrides,
                 custom_prompt=getattr(request, "custom_prompt", None),
                 api_name=getattr(request, "api_name", None),
                 api_key=None,
@@ -951,18 +977,7 @@ async def ingest_web_content_orchestrate(
                 auto_chunking_goal=getattr(request, "auto_chunking_goal", "balanced"),
                 auto_chunking_use_llm=bool(getattr(request, "auto_chunking_use_llm", False)),
             )
-            articles: list[dict[str, Any]] = []
-            if isinstance(service_result, dict):
-                if service_result.get("articles"):
-                    articles = service_result["articles"]
-                elif service_result.get("results"):
-                    articles = service_result["results"]
-
-            for r in articles:
-                if isinstance(r, dict) and "summary" in r and "analysis" not in r:
-                    r["analysis"] = r.get("summary")
-
-            return articles
+            return _ingest_crawl_articles(service_result)
         except Exception as exc:  # pragma: no cover - propagate for fallback handler
             logging.exception(f"Enhanced URL Level crawl failed: {exc}")
             raise
@@ -994,6 +1009,7 @@ async def ingest_web_content_orchestrate(
                 max_pages=max_pages,
                 max_depth=max_depth,
                 summarize_checkbox=bool(getattr(request, "perform_analysis", False)),
+                summary_prompt_overrides=summary_prompt_overrides,
                 custom_prompt=getattr(request, "custom_prompt", None),
                 api_name=getattr(request, "api_name", None),
                 api_key=None,
@@ -1017,20 +1033,7 @@ async def ingest_web_content_orchestrate(
                 auto_chunking_goal=getattr(request, "auto_chunking_goal", "balanced"),
                 auto_chunking_use_llm=bool(getattr(request, "auto_chunking_use_llm", False)),
             )
-            articles: list[dict[str, Any]] = []
-            if isinstance(service_result, list):
-                articles = service_result
-            elif isinstance(service_result, dict):
-                if service_result.get("articles"):
-                    articles = service_result.get("articles") or []
-                elif service_result.get("results"):
-                    articles = service_result.get("results") or []
-
-            for r in articles:
-                if isinstance(r, dict) and "summary" in r and "analysis" not in r:
-                    r["analysis"] = r.get("summary")
-
-            return articles
+            return _ingest_crawl_articles(service_result)
         except Exception as exc:  # pragma: no cover - propagate for fallback handler
             logging.exception(f"Enhanced recursive crawl failed: {exc}")
             raise

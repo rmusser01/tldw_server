@@ -87,7 +87,10 @@ async def process_web_scraping_endpoint(
 
         task = _resolve_process_web_scraping_task()
         summary_prompt_overrides = await resolve_web_summary_overrides(
-            payload, lambda: get_prompts_db_for_user(request, current_user)
+            lambda: get_prompts_db_for_user(request, current_user),
+            enabled=payload.summarize_checkbox,
+            system_prompt=payload.system_prompt,
+            custom_prompt=payload.custom_prompt,
         )
 
         result = await task(

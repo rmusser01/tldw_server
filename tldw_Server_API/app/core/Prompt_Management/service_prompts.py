@@ -362,7 +362,7 @@ _DEFINITION_SEQUENCE = (
     ServicePromptDefinition(
         id="media.web.summarization",
         label="Web article summarization",
-        description="Controls summary instructions for synchronous web scraping. Reset restores each scraping engine's existing defaults; the displayed defaults are the deployed web-article prompts.",
+        description="Controls summary instructions for synchronous web scraping and web-content ingestion. Reset restores each scraping engine's existing defaults; the displayed defaults are the deployed web-article prompts.",
         parts=(
             ServicePromptPart(key="system", label="System instructions", mode="literal", required_variables=()),
             ServicePromptPart(key="user", label="User instructions", mode="literal", required_variables=()),
@@ -371,7 +371,7 @@ _DEFINITION_SEQUENCE = (
             "system": "You are a professional summarizer who produces accurate, concise summaries of web content.",
             "user": "Summarize this article concisely. Focus on the main points, facts, and any actionable insights.",
         }),
-        affected_workflows=(ServicePromptWorkflow(id="media.web.summarization", label="Synchronous web scraping"),),
+        affected_workflows=(ServicePromptWorkflow(id="media.web.summarization", label="Synchronous web scraping and ingestion"),),
     ),
     ServicePromptDefinition(
         id="media.text.translation",

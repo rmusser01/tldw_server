@@ -231,12 +231,12 @@ def test_service_prompt_catalog_returns_exact_metadata_without_prompt_bodies(
         {
             "id": "media.web.summarization",
             "label": "Web article summarization",
-            "description": "Controls summary instructions for synchronous web scraping. Reset restores each scraping engine's existing defaults; the displayed defaults are the deployed web-article prompts.",
+            "description": "Controls summary instructions for synchronous web scraping and web-content ingestion. Reset restores each scraping engine's existing defaults; the displayed defaults are the deployed web-article prompts.",
             "parts": [
                 {"key": "system", "label": "System instructions", "mode": "literal", "required_variables": []},
                 {"key": "user", "label": "User instructions", "mode": "literal", "required_variables": []},
             ],
-            "affected_workflows": [{"id": "media.web.summarization", "label": "Synchronous web scraping"}],
+            "affected_workflows": [{"id": "media.web.summarization", "label": "Synchronous web scraping and ingestion"}],
         },
         {
             "id": "media.text.translation",

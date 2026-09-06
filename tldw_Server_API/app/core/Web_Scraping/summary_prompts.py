@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from tldw_Server_API.app.core.Prompt_Management.service_prompts import resolve_service_prompt
 
@@ -19,18 +19,24 @@ if TYPE_CHECKING:
 
 
 async def resolve_web_summary_overrides(
-    payload: Any, get_prompts_db: Callable[[], Awaitable[PromptsDatabase]]
+    get_prompts_db: Callable[[], Awaitable[PromptsDatabase]],
+    *,
+    enabled: bool,
+    system_prompt: str | None,
+    custom_prompt: str | None,
 ) -> Mapping[str, str] | None:
     """Freeze explicit/saved parts while leaving absent engine defaults untouched.
 
-    Only the synchronous HTTP caller supplies owner-bound storage. No lookup is
+    Only synchronous HTTP callers supply owner-bound storage. No lookup is
     needed for disabled summarization or a complete pair of explicit parts.
 
     Args:
-        payload: Request carrying summarize_checkbox, system_prompt, and
-            custom_prompt. None means an absent part; an empty string is explicit.
         get_prompts_db: Async factory bound to the authenticated request owner.
             Its database is read and its worker connection closed in one worker.
+        enabled: Whether this request enables summarization.
+        system_prompt: Explicit system instructions; None means absent.
+        custom_prompt: Explicit user instructions; None means absent. Empty
+            strings in either part remain explicit overrides.
 
     Returns:
         None when summarization is disabled; otherwise an immutable mapping of
@@ -41,13 +47,9 @@ async def resolve_web_summary_overrides(
         ServicePromptCorruptOverride: Saved instructions fail validation.
         Exception: Database acquisition, lookup, or cleanup errors propagate.
     """
-    if not payload.summarize_checkbox:
+    if not enabled:
         return None
-    parts = {
-        key: value
-        for key, value in (("system", payload.system_prompt), ("user", payload.custom_prompt))
-        if value is not None
-    }
+    parts = {key: value for key, value in (("system", system_prompt), ("user", custom_prompt)) if value is not None}
     if len(parts) < 2:
         database = await get_prompts_db()
 
