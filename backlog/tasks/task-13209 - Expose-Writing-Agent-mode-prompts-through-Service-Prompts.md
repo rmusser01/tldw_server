@@ -4,7 +4,7 @@ title: Expose Writing Agent mode prompts through Service Prompts
 status: In Progress
 assignee: []
 created_date: '2026-09-06 15:38'
-updated_date: '2026-09-06 16:07'
+updated_date: '2026-09-06 16:19'
 labels: []
 dependencies: []
 references:
@@ -45,6 +45,10 @@ Final backend verification: 132 passed (manuscript HTTP integration plus Service
 Consolidated final shared frontend run completed: 438 passed across 12 files (65.78 seconds), zero failures. Final backend run: 132 passed, zero failures. WebUI harness: Settings 87 and current component 17 passed. Fresh Bandit and Python compilation also pass. Temporary dependency symlinks removed before staging; no dependency changes.
 
 Published PR #2926 against dev from codex/writing-agent-service-prompts. Implementation commit 1381222da64540e0a93bf17c96812c0a6bc91ab5. Remote dev matched the branch base at publication; no rebase needed. Awaiting CI and PR review; worktree preserved.
+
+Qodo review on implementation head reported three actionable items: contextual missing-prompt errors, grouped authentication imports, and bare-array manuscript character/world-info responses being treated as empty. Verified server list response models and all three client consumers expect wrappers; plan minimal normalization in the two shared helpers with real-payload regression coverage, plus error context and import cleanup. Backend-required failed OpenAPI fingerprint drift after optional header dependencies; requested approval for contract artifact refresh separately.
+
+Qodo fixes verified: 8 RED failures then 191 shared UI tests GREEN; WebUI 25 passed; nine optional expected-user endpoint regressions passed. Bandit zero findings and py_compile pass. Scoped ESLint from repo root with WebUI config has no code findings (only known pages-directory config warning). Independent read-only fix review approved. Shared list helpers normalize arrays once while preserving existing wrappers and totals; tests feed bare arrays through real helpers into Agent context. Missing prompt errors identify each mode ID; auth imports grouped. OpenAPI regeneration still awaits approval; diagnostic export currently needs repository-local tldw_profile_core on PYTHONPATH.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

@@ -74,8 +74,8 @@ beforeEach(() => {
   })
   mocks.request.mockImplementation(async ({ path }: { path: string }) => {
     if (path.includes("/scenes/")) return { title: "Opening", content_plain: "Scene text" }
-    if (path.endsWith("/characters")) return { characters: [{ name: "Ari", role: "hero" }] }
-    if (path.endsWith("/world-info")) return { items: [{ name: "Harbor", kind: "location" }] }
+    if (path.endsWith("/characters")) return [{ name: "Ari", role: "hero" }]
+    if (path.endsWith("/world-info")) return [{ name: "Harbor", kind: "location" }]
     throw new Error(`Unexpected request ${path}`)
   })
   mocks.send.mockResolvedValue("A useful answer")
@@ -83,6 +83,19 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe("Writing Agent service prompts", () => {
+  it.each(["Quick", "Planning", "Brainstorm"])("identifies the invalid %s prompt without dispatching", async (label) => {
+    const id = `writing.agent.${label.toLowerCase()}`
+    const snapshot = await mocks.load([id])
+    snapshot.definitions[id].parts.system = " "
+    mocks.load.mockResolvedValueOnce(snapshot)
+    render(<AIAgentTab isOnline />)
+    fireEvent.click(screen.getByText(label))
+    send()
+    await screen.findByText(new RegExp(`Error:.*${id}`))
+    expect(mocks.request).not.toHaveBeenCalled()
+    expect(mocks.send).not.toHaveBeenCalled()
+  })
+
   it.each([
     ["Quick", "quick", 0.3, 256],
     ["Planning", "planning", 0.6, 1024],
@@ -111,8 +124,8 @@ describe("Writing Agent service prompts", () => {
     mocks.request.mockImplementation(async ({ path }: { path: string }) => path.includes("/scenes/")
       ? { title: "Long scene", content_plain: "x".repeat(2001) }
       : path.endsWith("/characters")
-        ? { characters: Array.from({ length: 11 }, (_, i) => ({ name: `Person${i}`, role: "hero" })) }
-        : { items: Array.from({ length: 11 }, (_, i) => ({ name: `Place${i}`, kind: "location" })) })
+        ? Array.from({ length: 11 }, (_, i) => ({ name: `Person${i}`, role: "hero" }))
+        : Array.from({ length: 11 }, (_, i) => ({ name: `Place${i}`, kind: "location" })))
     render(<AIAgentTab isOnline />)
     send()
     await screen.findByText("A useful answer")

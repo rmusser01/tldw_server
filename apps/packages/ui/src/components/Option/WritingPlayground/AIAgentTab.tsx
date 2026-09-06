@@ -160,7 +160,7 @@ export function AIAgentTab({ isOnline }: AIAgentTabProps) {
         controller.abort()
       }
       const system = snapshot.definitions[id]?.parts.system
-      if (typeof system !== "string" || !system.trim()) throw new Error("Writing Agent prompt is unavailable.")
+      if (typeof system !== "string" || !system.trim()) throw new Error(`Writing Agent prompt ${id} is unavailable.`)
       const context = await buildContextSnippet(snapshot)
       if (!isCurrent()) return
       const systemPrompt = system + context

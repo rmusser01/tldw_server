@@ -1157,12 +1157,13 @@ export async function listManuscriptCharacters(
   if (params?.cast_group) query.set("cast_group", params.cast_group)
   const qs = query.toString()
   const path = `/api/v1/writing/manuscripts/projects/${encodeURIComponent(projectId)}/characters${qs ? `?${qs}` : ""}`
-  return await bgRequest<ManuscriptCharacterListResponse>({
+  const response = await bgRequest<ManuscriptCharacter[] | ManuscriptCharacterListResponse>({
     path: path as AllowedPath,
     method: "GET",
     abortSignal: options?.signal,
     ...requestScopeFields(options?.requestScope),
   })
+  return Array.isArray(response) ? { characters: response, total: response.length } : response
 }
 
 export async function createManuscriptCharacter(
@@ -1219,12 +1220,13 @@ export async function listManuscriptWorldInfo(
   if (params?.kind) query.set("kind", params.kind)
   const qs = query.toString()
   const path = `/api/v1/writing/manuscripts/projects/${encodeURIComponent(projectId)}/world-info${qs ? `?${qs}` : ""}`
-  return await bgRequest<ManuscriptWorldInfoListResponse>({
+  const response = await bgRequest<ManuscriptWorldInfoItem[] | ManuscriptWorldInfoListResponse>({
     path: path as AllowedPath,
     method: "GET",
     abortSignal: options?.signal,
     ...requestScopeFields(options?.requestScope),
   })
+  return Array.isArray(response) ? { items: response, total: response.length } : response
 }
 
 export async function createManuscriptWorldInfo(
