@@ -533,6 +533,32 @@ def test_container_build_check_covers_all_images_without_registry_writes() -> No
     assert "packages: write" not in CONTAINER_WORKFLOW.read_text(encoding="utf-8")
 
 
+def test_container_runtime_probe_is_bound_to_the_scanned_candidate() -> None:
+    job = _load(CONTAINER_WORKFLOW)["jobs"]["build-and-scan"]
+    steps = job["steps"]
+    probe = _get_step(steps, "Verify embedded Python runtime")
+    assert probe["continue-on-error"] is True
+    assert probe["id"] == "runtime"
+    assert "matrix.python_runtime" in probe["if"]
+    script = _run(probe)
+    for contract in (
+        "runtime_probe.py config", '--subject "$SUBJECT_DIGEST"',
+        '--entrypoint python "$SUBJECT_DIGEST"', "--pull never", "--network none",
+        "--cap-drop ALL", "--read-only", "--security-opt no-new-privileges:true",
+        "runtime_probe.py probe --lock /probe/uv.lock", '"config_digest":',
+        '"subject_digest":', 'docker image rm "$SUBJECT_DIGEST"',
+    ):
+        assert contract in script
+    gate = _run(_get_step(steps, "Require candidate admission"))
+    assert "steps.policy.outcome" in gate
+    assert "steps.runtime.outcome" in gate
+    hashes = _run(_get_step(steps, "Hash container admission evidence"))
+    assert "runtime-image-${{ matrix.name }}.json" in hashes
+    assert [row["name"] for row in job["strategy"]["matrix"]["include"] if row.get("python_runtime")] == [
+        "app", "worker", "audio-worker",
+    ]
+
+
 @pytest.mark.parametrize(
     "path", [RELEASE_WORKFLOW, MAIN_WORKFLOW, CONTAINER_WORKFLOW]
 )
