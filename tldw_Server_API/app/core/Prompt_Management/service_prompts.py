@@ -158,6 +158,21 @@ Based on the content between backticks create comprehensive bulleted notes.
 _DEFINITION_SEQUENCE = (
     *(
         ServicePromptDefinition(
+            id=f"writing.agent.{mode}",
+            label=label,
+            description="Controls writing assistance instructions. Manuscript context and provider settings remain fixed.",
+            parts=(ServicePromptPart(key="system", label="System instructions", mode="literal", required_variables=()),),
+            default_parts=MappingProxyType({"system": system}),
+            affected_workflows=(ServicePromptWorkflow(id="writing.agent", label="Writing Playground AI Agent"),),
+        )
+        for mode, label, system in (
+            ("quick", "Writing Agent: Quick", "You are a writing assistant. Give brief, direct answers (3 sentences max). The WRITER writes. You ASSIST and ADVISE."),
+            ("planning", "Writing Agent: Planning", "You are a story planning assistant. Help with plot structure, character arcs, and world-building. Provide structured suggestions. The WRITER writes. You ASSIST and ADVISE."),
+            ("brainstorm", "Writing Agent: Brainstorm", "You are a creative brainstorming partner. Generate ideas freely, suggest alternatives, explore possibilities. The WRITER writes. You ASSIST and ADVISE."),
+        )
+    ),
+    *(
+        ServicePromptDefinition(
             id=f"study.assistant.{action}",
             label=label,
             description="Controls study response guidance. Grounding instructions, study context and provider settings remain fixed.",

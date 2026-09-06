@@ -290,6 +290,18 @@ const freezeRenderDefinition = (
 })
 
 const LEGACY_RENDER_DEFINITIONS = Object.freeze({
+  "writing.agent.quick": freezeRenderDefinition({
+    id: "writing.agent.quick",
+    parts: [{ key: "system", mode: "literal", required_variables: [] }]
+  }),
+  "writing.agent.planning": freezeRenderDefinition({
+    id: "writing.agent.planning",
+    parts: [{ key: "system", mode: "literal", required_variables: [] }]
+  }),
+  "writing.agent.brainstorm": freezeRenderDefinition({
+    id: "writing.agent.brainstorm",
+    parts: [{ key: "system", mode: "literal", required_variables: [] }]
+  }),
   "chat.rag.answer": freezeRenderDefinition({
     id: "chat.rag.answer",
     parts: [{
@@ -337,6 +349,24 @@ const LEGACY_RENDER_DEFINITIONS = Object.freeze({
       }
     ]
   })
+})
+
+// These features shipped before their Service Prompts definitions.
+const PACKAGED_FALLBACK_IDS = [
+  "image.prompt.refinement",
+  "writing.agent.quick",
+  "writing.agent.planning",
+  "writing.agent.brainstorm"
+] as const
+type PackagedFallbackId = typeof PACKAGED_FALLBACK_IDS[number]
+const hasPackagedFallback = (id: KnownServicePromptId): id is PackagedFallbackId =>
+  PACKAGED_FALLBACK_IDS.some((candidate) => candidate === id)
+
+const packagedFallback = (id: PackagedFallbackId): SnapshotDefinition => ({
+  definition: LEGACY_RENDER_DEFINITIONS[id],
+  parts: { ...LEGACY_SERVICE_PROMPT_DEFAULTS[id] },
+  source: "packaged",
+  revision: null
 })
 
 const legacyLocalStorage = createSafeStorage({ area: "local" })
@@ -706,20 +736,8 @@ const legacySnapshot = async (
     }
   }
 
-  if (requested.has("image.prompt.refinement")) {
-    definitions["image.prompt.refinement"] = {
-      definition: LEGACY_RENDER_DEFINITIONS["image.prompt.refinement"],
-      parts: {
-        system_semantics:
-          LEGACY_SERVICE_PROMPT_DEFAULTS["image.prompt.refinement"]
-            .system_semantics,
-        rewrite_semantics:
-          LEGACY_SERVICE_PROMPT_DEFAULTS["image.prompt.refinement"]
-            .rewrite_semantics
-      },
-      source: "packaged",
-      revision: null
-    }
+  for (const id of PACKAGED_FALLBACK_IDS) {
+    if (requested.has(id)) definitions[id] = packagedFallback(id)
   }
 
   throwIfAborted(lease.signal)
@@ -776,11 +794,9 @@ export const loadServicePromptSnapshot = async (
     }
 
     const advertisedIds = new Set(catalog.map((definition) => definition.id))
-    const catalogOmitsImageRefinement =
-      requested.includes("image.prompt.refinement") &&
-      !advertisedIds.has("image.prompt.refinement")
+    const fallbackIds = new Set(requested.filter((id) => hasPackagedFallback(id) && !advertisedIds.has(id)))
     const requestedFromServer = requested.filter(
-      (id) => id !== "image.prompt.refinement" || !catalogOmitsImageRefinement
+      (id) => !fallbackIds.has(id)
     )
     const candidates = requestedFromServer.length > 0
       ? await readLegacyServicePromptCandidates({ signal: lease.signal })
@@ -807,18 +823,17 @@ export const loadServicePromptSnapshot = async (
         })
       } catch (error) {
         if (
-          id === "image.prompt.refinement" &&
+          hasPackagedFallback(id) &&
           error instanceof ServicePromptApiError &&
           error.status === 404
         ) {
+          fallbackIds.add(id)
           return null
         }
         throw error
       }
     }))
     throwIfAborted(lease.signal)
-    const usePackagedImageRefinement =
-      catalogOmitsImageRefinement || details.some((detail) => detail === null)
     const definitions: Partial<Record<KnownServicePromptId, SnapshotDefinition>> = {}
     for (const detail of details) {
       if (!detail) continue
@@ -829,20 +844,8 @@ export const loadServicePromptSnapshot = async (
         revision: detail.revision
       }
     }
-    if (usePackagedImageRefinement) {
-      definitions["image.prompt.refinement"] = {
-        definition: LEGACY_RENDER_DEFINITIONS["image.prompt.refinement"],
-        parts: {
-          system_semantics:
-            LEGACY_SERVICE_PROMPT_DEFAULTS["image.prompt.refinement"]
-              .system_semantics,
-          rewrite_semantics:
-            LEGACY_SERVICE_PROMPT_DEFAULTS["image.prompt.refinement"]
-              .rewrite_semantics
-        },
-        source: "packaged",
-        revision: null
-      }
+    for (const id of fallbackIds) {
+      if (hasPackagedFallback(id)) definitions[id] = packagedFallback(id)
     }
     return freezeSnapshot(scope, "supported", definitions, lease)
   } catch (error) {

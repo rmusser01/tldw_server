@@ -5,6 +5,9 @@ import type {
 } from "@/services/tldw/TldwApiClient"
 
 export type KnownServicePromptId =
+  | "writing.agent.quick"
+  | "writing.agent.planning"
+  | "writing.agent.brainstorm"
   | "study.assistant.explain"
   | "study.assistant.mnemonic"
   | "study.assistant.followup"

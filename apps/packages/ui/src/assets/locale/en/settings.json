@@ -23,6 +23,18 @@
     "title": "Workflow prompts",
     "description": "Review and customize the instructions used by supported content workflows.",
     "definitions": {
+      "writingAgentQuick": {
+        "label": "Writing Agent: Quick",
+        "description": "Controls writing assistance instructions. Manuscript context and provider settings remain fixed."
+      },
+      "writingAgentPlanning": {
+        "label": "Writing Agent: Planning",
+        "description": "Controls writing assistance instructions. Manuscript context and provider settings remain fixed."
+      },
+      "writingAgentBrainstorm": {
+        "label": "Writing Agent: Brainstorm",
+        "description": "Controls writing assistance instructions. Manuscript context and provider settings remain fixed."
+      },
       "studyAssistantExplain": {
         "label": "Study explanation",
         "description": "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed."
@@ -101,6 +113,7 @@
       }
     },
     "workflows": {
+      "writingAgent": "Writing Playground AI Agent",
       "studyAssistantFlashcard": "Flashcard Study Assistant",
       "studyAssistantQuiz": "Quiz Study Assistant",
       "mainChatRag": "Main chat RAG",

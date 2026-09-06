@@ -61,6 +61,30 @@ const jwtForUser = (userId: string | number): string =>
   `header.${btoa(JSON.stringify({ sub: String(userId) }))}.signature`
 
 describe("background proxy web token refresh", () => {
+  it.each([
+    "/api/v1/writing/manuscripts/scenes/scene-a",
+    "/api/v1/writing/manuscripts/projects/project-a/characters?role=protagonist",
+    "/api/v1/writing/manuscripts/projects/project-a/world-info?kind=location",
+  ])("dispatches the scoped manuscript read %s through the real transport", async (path) => {
+    mocks.store.tldwConfig = {
+      serverUrl: "https://api.example.com", authMode: "multi-user", accessToken: jwtForUser(42)
+    }
+    const fetchSpy = vi.fn().mockResolvedValue(new Response(JSON.stringify({ context: "owner-42" }), {
+      status: 200, headers: { "content-type": "application/json" }
+    }))
+    vi.stubGlobal("fetch", fetchSpy)
+    const { bgRequest } = await importProxy()
+    await expect(bgRequest({
+      path: path as `/api/v1/writing/manuscripts/scenes/${string}`,
+      method: "GET",
+      headers: { "X-TLDW-Expected-User-ID": "42" },
+      servicePromptConfig: { serverUrl: "https://api.example.com", authMode: "multi-user", expectedUserId: 42 }
+    })).resolves.toEqual({ context: "owner-42" })
+    expect(fetchSpy.mock.calls[0][0]).toBe(`https://api.example.com${path}`)
+    expect(new Headers(fetchSpy.mock.calls[0][1].headers).get("X-TLDW-Expected-User-ID")).toBe("42")
+    expect(new Headers(fetchSpy.mock.calls[0][1].headers).get("Authorization")).toBe(`Bearer ${jwtForUser(42)}`)
+  })
+
   beforeEach(() => {
     vi.resetModules()
     vi.useRealTimers()

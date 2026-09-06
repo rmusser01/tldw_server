@@ -1,6 +1,12 @@
 import { bgRequest } from "@/services/background-proxy"
 import { buildQuery, createResourceClient } from "@/services/resource-client"
 import type { AllowedPath } from "@/services/tldw/openapi-guard"
+import { requestScopeFields, type ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
+
+type ManuscriptReadOptions = {
+  signal?: AbortSignal
+  requestScope?: ServicePromptRequestScope
+}
 
 export type ManuscriptProjectResponse = {
   id: string
@@ -1114,10 +1120,12 @@ export async function createManuscriptScene(
   })
 }
 
-export async function getManuscriptScene(sceneId: string): Promise<ManuscriptSceneResponse> {
+export async function getManuscriptScene(sceneId: string, options?: ManuscriptReadOptions): Promise<ManuscriptSceneResponse> {
   return await bgRequest<ManuscriptSceneResponse>({
     path: `/api/v1/writing/manuscripts/scenes/${encodeURIComponent(sceneId)}` as AllowedPath,
     method: "GET",
+    abortSignal: options?.signal,
+    ...requestScopeFields(options?.requestScope),
   })
 }
 
@@ -1142,16 +1150,20 @@ export async function updateManuscriptScene(
 export async function listManuscriptCharacters(
   projectId: string,
   params?: { role?: string; cast_group?: string },
+  options?: ManuscriptReadOptions,
 ): Promise<ManuscriptCharacterListResponse> {
   const query = new URLSearchParams()
   if (params?.role) query.set("role", params.role)
   if (params?.cast_group) query.set("cast_group", params.cast_group)
   const qs = query.toString()
   const path = `/api/v1/writing/manuscripts/projects/${encodeURIComponent(projectId)}/characters${qs ? `?${qs}` : ""}`
-  return await bgRequest<ManuscriptCharacterListResponse>({
+  const response = await bgRequest<ManuscriptCharacter[] | ManuscriptCharacterListResponse>({
     path: path as AllowedPath,
     method: "GET",
+    abortSignal: options?.signal,
+    ...requestScopeFields(options?.requestScope),
   })
+  return Array.isArray(response) ? { characters: response, total: response.length } : response
 }
 
 export async function createManuscriptCharacter(
@@ -1202,15 +1214,19 @@ export async function createManuscriptRelationship(
 export async function listManuscriptWorldInfo(
   projectId: string,
   params?: { kind?: string },
+  options?: ManuscriptReadOptions,
 ): Promise<ManuscriptWorldInfoListResponse> {
   const query = new URLSearchParams()
   if (params?.kind) query.set("kind", params.kind)
   const qs = query.toString()
   const path = `/api/v1/writing/manuscripts/projects/${encodeURIComponent(projectId)}/world-info${qs ? `?${qs}` : ""}`
-  return await bgRequest<ManuscriptWorldInfoListResponse>({
+  const response = await bgRequest<ManuscriptWorldInfoItem[] | ManuscriptWorldInfoListResponse>({
     path: path as AllowedPath,
     method: "GET",
+    abortSignal: options?.signal,
+    ...requestScopeFields(options?.requestScope),
   })
+  return Array.isArray(response) ? { items: response, total: response.length } : response
 }
 
 export async function createManuscriptWorldInfo(

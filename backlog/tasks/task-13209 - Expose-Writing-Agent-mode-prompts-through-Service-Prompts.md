@@ -1,0 +1,78 @@
+---
+id: TASK-13209
+title: Expose Writing Agent mode prompts through Service Prompts
+status: In Progress
+assignee: []
+created_date: '2026-09-06 15:38'
+updated_date: '2026-09-06 18:09'
+labels: []
+dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/pull/2926'
+documentation:
+  - Docs/Design/writing-agent-service-prompts.md
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Approved bounded slice: make Quick, Planning, and Brainstorm Writing Playground AI Agent instructions editable in shared WebUI/extension Settings using existing owner-scoped Service Prompts. Preserve defaults, model settings, manuscript bounds and older-server compatibility; prevent cross-scope context and stale replies after account/server, project, or mode changes.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 Three mode-specific prompts support existing Settings save/reset and preserve packaged defaults.
+- [x] #2 Each send captures one owner-scoped prompt configuration and uses that scope for manuscript reads and model dispatch.
+- [x] #3 Stale context, replies and errors are discarded after scope, project or mode changes; unscoped service callers remain compatible.
+- [x] #4 Affected frontend/backend tests, lint, Bandit and code review pass with known skips documented.
+<!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Establish baseline and add regression tests. 2. Register three prompts and wire scoped context/generation using existing helpers. 3. Verify Settings, old-server fallback, request lifecycle, and review the bounded diff.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Baseline: 90 registry/API and 91 frontend checks passed. RED: component 11 failures/1 pass, snapshot compatibility 4 failures/79 passes, Settings 3 expected failures, backend registry 2 expected failures. Implemented 3 literal mode definitions, shared Settings labels, explicit packaged fallback allowlist, optional scoped manuscript reads, and retained history scope lease. Additional regression reproduced unverified failed-load text leaking into later request history; now excluded. Backend registry/API: 93 passed. Broad frontend, WebUI shim, lint/typecheck and independent read-only review in progress. Bandit on touched Python runtime and Ruff on touched Python runtime/tests pass.
+
+Independent review found and verified two issues: first-load errors without a retained lease could remain visible across account changes; scoped manuscript GETs were rejected by the existing transport allowlist. Both addressed test-first. Unbound config/auth cleanup regressions: 2 RED then 17 component tests GREEN. Scoped transport regressions: 6 RED then 70 real-transport/guard tests GREEN. HTTP expected-user regressions: 3 RED, 6 compatible cases passed; now adding the existing expected-user dependency only to those three GET endpoints. Follow-up review approved with no actionable findings. Broader scope suite: 286 passed. Shared Settings/save-reset regression and other affected suites passed, with final totals pending. WebUI Settings 87 passed and component rerun underway. Bandit on both Python runtime files reports zero findings. Five Ruff findings in preexisting manuscript endpoint/test code were verified against HEAD; other touched Python files pass. Frontend ESLint has no errors; 10 existing any warnings in tldw-server.ts. Full shared TypeScript check reports 158 existing diagnostics outside changed runtime code; corrected a preexisting over-broad fixture Record annotation. Locale generator run, retaining only this slice’s seven generated keys to avoid unrelated prior locale drift.
+
+Final backend verification: 132 passed (manuscript HTTP integration plus Service Prompts registry/API), including all nine optional expected-user cases. Current frontend coverage: 438 shared UI tests and 104 WebUI-harness tests pass across focused runs; consolidated shared UI rerun pending. Bandit: zero findings on both touched runtime files. Independent follow-up review approved, no remaining actionable findings. Full repository suite, production frontend builds and live-browser smoke were not run; focused suites match the approved design. Existing TypeScript diagnostics (158; none on changed lines), five preexisting Ruff findings in manuscript files, and existing frontend lint warnings are not newly introduced. No PR exists yet; branch is ready for integration choice after commit.
+
+Consolidated final shared frontend run completed: 438 passed across 12 files (65.78 seconds), zero failures. Final backend run: 132 passed, zero failures. WebUI harness: Settings 87 and current component 17 passed. Fresh Bandit and Python compilation also pass. Temporary dependency symlinks removed before staging; no dependency changes.
+
+Published PR #2926 against dev from codex/writing-agent-service-prompts. Implementation commit 1381222da64540e0a93bf17c96812c0a6bc91ab5. Remote dev matched the branch base at publication; no rebase needed. Awaiting CI and PR review; worktree preserved.
+
+Qodo review on implementation head reported three actionable items: contextual missing-prompt errors, grouped authentication imports, and bare-array manuscript character/world-info responses being treated as empty. Verified server list response models and all three client consumers expect wrappers; plan minimal normalization in the two shared helpers with real-payload regression coverage, plus error context and import cleanup. Backend-required failed OpenAPI fingerprint drift after optional header dependencies; requested approval for contract artifact refresh separately.
+
+Qodo fixes verified: 8 RED failures then 191 shared UI tests GREEN; WebUI 25 passed; nine optional expected-user endpoint regressions passed. Bandit zero findings and py_compile pass. Scoped ESLint from repo root with WebUI config has no code findings (only known pages-directory config warning). Independent read-only fix review approved. Shared list helpers normalize arrays once while preserving existing wrappers and totals; tests feed bare arrays through real helpers into Agent context. Missing prompt errors identify each mode ID; auth imports grouped. OpenAPI regeneration still awaits approval; diagnostic export currently needs repository-local tldw_profile_core on PYTHONPATH.
+
+User approved the OpenAPI fingerprint and generated-type refresh. Regenerate with the canonical exporter, verify the schema change is restricted to the three optional expected-user manuscript headers, regenerate TypeScript declarations, and rerun the drift gate before pushing.
+
+Approved contract refresh complete. Canonical exporter succeeded with PYTHONPATH including packages/tldw_profile_core/src. Fingerprint now e72e58af304408bc1b44bb380d7d4b3a34f126fc87b2c0bc01c9611147d597da, matching the CI-computed value. Removed exactly the three optional X-TLDW-Expected-User-ID parameters from the exported schema in a diagnostic copy; canonical hashing reproduced the original 5c815e778af28b517b73f608b3b458f98c9751313590432e625ea81afe91792c hash. This proves no unrelated contract drift. Counts unchanged: 2073 paths, 3142 schemas. openapi-typescript 7.13.0 generated the ignored schema.d.ts successfully. Fresh export_openapi_schema.py --check passes; git diff --check passes. Only the fingerprint and tracking record are committed; no runtime code changed, so no additional Bandit run needed for this artifact-only fix.
+
+User approved rebase and force-with-lease update. Rebased four commits onto origin/dev c5b777e9ba7f2ef755185fdb0d350fa1c0d2ce2e without conflicts. git range-diff reports all four patches unchanged. Current rebased implementation/fixes: 0ff1a07b37, d3e2e31f46, 6396c88d2f, 20ab6669ff. Fresh affected backend/shared UI/WebUI tests, Bandit and OpenAPI drift verification running before publication.
+
+Post-rebase verification complete: 132 backend tests, 443 shared UI tests across 12 files, and 25 WebUI-harness checks passed. Bandit on both touched runtime Python files reports no findings; OpenAPI drift check passes on latest dev; scoped ESLint has no code findings (existing pages-path configuration warning only). Temporary dependency symlinks removed. Remote dev remains c5b777e9ba7f2ef755185fdb0d350fa1c0d2ce2e and remote PR head remains 01036a690ca5b60881c0d8394dda9bcaa9e668db; publishing with an explicit expected-head lease.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented Quick, Planning and Brainstorm prompt customization through existing shared Service Prompts Settings. Preserved exact defaults and generation settings, added narrow scoped manuscript GET support and optional server-side identity assertions, and retained a scope lease to clear stale requests/history. Older-server fallback remains explicit and auth/non-404 errors propagate. Verified actionable review findings with failing regressions before minimal fixes. Implementation and review complete; awaiting PR/integration choice.
+
+PR: https://github.com/rmusser01/tldw_server/pull/2926 (base dev). Awaiting CI/review and merge readiness.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->

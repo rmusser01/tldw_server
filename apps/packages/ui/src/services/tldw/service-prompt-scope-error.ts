@@ -104,6 +104,9 @@ export const isServicePromptRequestPath = (
   if (/^\/api\/v1\/service-prompts\/[^/]+$/.test(pathname)) {
     return ["GET", "PUT", "DELETE"].includes(requestMethod)
   }
+  if (requestMethod === "GET") {
+    return /^\/api\/v1\/writing\/manuscripts\/(?:scenes\/[^/]+|projects\/[^/]+\/(?:characters|world-info))$/.test(pathname)
+  }
   if (requestMethod !== "POST") return false
   if (pathname === "/api/v1/chats/") return true
   return /^\/api\/v1\/(?:auth\/refresh|chat\/completions|media\/add|rag\/search|research\/websearch)$/.test(pathname) ||

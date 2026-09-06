@@ -6352,5 +6352,26 @@
   },
   "chatMacrosNav": {
     "message": "Chat Macros"
+  },
+  "servicePrompts_definitions_writingAgentQuick_label": {
+    "message": "Writing Agent: Quick"
+  },
+  "servicePrompts_definitions_writingAgentQuick_description": {
+    "message": "Controls writing assistance instructions. Manuscript context and provider settings remain fixed."
+  },
+  "servicePrompts_definitions_writingAgentPlanning_label": {
+    "message": "Writing Agent: Planning"
+  },
+  "servicePrompts_definitions_writingAgentPlanning_description": {
+    "message": "Controls writing assistance instructions. Manuscript context and provider settings remain fixed."
+  },
+  "servicePrompts_definitions_writingAgentBrainstorm_label": {
+    "message": "Writing Agent: Brainstorm"
+  },
+  "servicePrompts_definitions_writingAgentBrainstorm_description": {
+    "message": "Controls writing assistance instructions. Manuscript context and provider settings remain fixed."
+  },
+  "servicePrompts_workflows_writingAgent": {
+    "message": "Writing Playground AI Agent"
   }
 }

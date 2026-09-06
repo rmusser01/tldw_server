@@ -310,6 +310,13 @@ const catalog: ServicePromptCatalogItem[] = [
     ],
     affected_workflows: [{ id: "media.document.insights", label: "Server insights workflow" }]
   },
+  ...["quick", "planning", "brainstorm"].map((mode) => ({
+    id: `writing.agent.${mode}`,
+    label: `Server ${mode}`,
+    description: "Server writing instruction",
+    parts: [{ key: "system", label: "System instructions", mode: "literal" as const, required_variables: [] }],
+    affected_workflows: [{ id: "writing.agent", label: "Server writing workflow" }],
+  })),
   ...["explain", "mnemonic", "followup", "freeform"].map((action) => ({
     id: `study.assistant.${action}`,
     label: `Server ${action} prompt`,
@@ -330,7 +337,9 @@ const detailFor = (
     parts?: Record<string, string>
   } = {}
 ): ServicePromptDetail => {
-  const defaults = definition.id.startsWith("study.assistant.")
+  const defaults = definition.id.startsWith("writing.agent.")
+    ? { system: "Assist the writer." }
+    : definition.id.startsWith("study.assistant.")
     ? { guidance: "Help the learner." }
     : definition.id === "media.document.insights"
     ? { analysis_guidance: "Extract research insights.", presentation_guidance: "Use concise titles." }
@@ -605,7 +614,7 @@ describe("ServicePromptsSettings", () => {
     renderSettings()
 
     expect(await screen.findAllByTestId("service-prompt-list-item"))
-      .toHaveLength(19)
+      .toHaveLength(22)
     expect(await screen.findByRole("heading", { name: "Text translation" }))
       .toBeInTheDocument()
     expect(screen.getByText("Server default")).toBeInTheDocument()
@@ -685,6 +694,35 @@ describe("ServicePromptsSettings", () => {
       { parts: { guidance: "Teach in French {literally}." }, expected_revision: null },
       { signal: expect.any(AbortSignal), requestScope: scopeOne }
     ))
+  })
+
+  it.each(["Quick", "Planning", "Brainstorm"])("edits the Writing Agent %s prompt", async (mode) => {
+    renderSettings()
+    await openPrompt(`Writing Agent: ${mode}`)
+    expect(screen.getByText("Writing Playground AI Agent")).toBeVisible()
+    expect(screen.getByLabelText("System instructions")).toHaveValue("Assist the writer.")
+    fireEvent.change(screen.getByLabelText("System instructions"), { target: { value: "Advise in French {literally}." } })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledWith(
+      `writing.agent.${mode.toLowerCase()}`,
+      { parts: { system: "Advise in French {literally}." }, expected_revision: null },
+      { signal: expect.any(AbortSignal), requestScope: scopeOne }
+    ))
+  })
+
+  it.each(["Quick", "Planning", "Brainstorm"])("resets the Writing Agent %s prompt", async (mode) => {
+    const id = `writing.agent.${mode.toLowerCase()}`
+    mocks.get.mockImplementation(async (key: string) => detailFor(catalog.find((item) => item.id === key)!, {
+      source: "user", revision: "saved-writing", parts: { system: "Custom writing style." }
+    }))
+    renderSettings()
+    await openPrompt(`Writing Agent: ${mode}`)
+    fireEvent.click(screen.getByRole("button", { name: "Reset to default" }))
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Reset" }))
+    await waitFor(() => expect(mocks.reset).toHaveBeenCalledWith(
+      id, "saved-writing", { signal: expect.any(AbortSignal), requestScope: scopeOne }
+    ))
+    await waitFor(() => expect(screen.getByLabelText("System instructions")).toHaveValue("Assist the writer."))
   })
 
   it("edits document insights guidance without exposing its JSON contract", async () => {
