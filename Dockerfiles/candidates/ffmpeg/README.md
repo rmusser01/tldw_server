@@ -16,8 +16,10 @@ The FFmpeg configuration is a fixed list copied from the captured baseline build
 
 - removed `--disable-omx` is omitted; OMX was already disabled, so this does not remove an enabled feature;
 - removed `--enable-libglslang` is not passed; the Vulkan shaders are compiled with the installed external `glslangValidator` tool;
-- the retired `pp`/libpostproc facility is the only allowed capability removal;
+- the accepted FFmpeg 9 retirements are limited by category to filter `pp`; decoders `sonic`, `v308`, `v408`, and `v410`; encoders `sonic`, `sonicls`, `v308`, `v408`, and `v410`; input protocol `hls`; and muxers `opengl`, `sdl`, and `sdl2`;
 - libplacebo remains enabled using the isolated `/opt/tldw-ffmpeg9` prefix.
+
+These names are not interchangeable across categories. In particular, the HLS demuxer and an `hls` output protocol remain required when present in the baseline; their removal is not approved.
 
 `ffmpeg`, `ffprobe`, and `ffplay` are all retained. The build fails when an enabled dependency cannot be configured or compiled.
 
@@ -77,7 +79,9 @@ The caller is responsible for obtaining the image ID with `docker image inspect`
 
 The recipe performs the actual GnuPG signature verification before extracting FFmpeg. The helper independently enforces the pinned source-archive hash; it deliberately does not accept a saved GnuPG status log as authentication. Such logs may be retained as build attachments, but their text alone is not cryptographic proof.
 
-The helper preserves raw build and capability listings, parses aliases and input/output protocols separately, reports every unexplained baseline capability loss, and runs real media workflows: WAV resampling; MP3, FLAC, Opus, and AAC round trips; H.264/AAC MP4; ffprobe metadata; thumbnail extraction; and segment/concat. It checks decoded, non-silent sample data rather than relying on command exit codes alone.
+The helper preserves raw build and capability listings, parses aliases and input/output protocols separately, and runs real media workflows: WAV resampling; MP3, FLAC, Opus, and AAC round trips; H.264/AAC MP4; ffprobe metadata; thumbnail extraction; and segment/concat. It checks decoded, non-silent sample data rather than relying on command exit codes alone.
+
+The JSON `approved_retirements` field contains only approved names actually observed in the baseline-minus-candidate delta. It does not list hypothetical or unobserved policy entries. `missing_capabilities` contains every unapproved removal and remains blocking. A category crossover is unapproved even when the same name is accepted elsewhere.
 
 These are software-only probes. They do not prove access to or behavior of a real GPU, capture device, audio device, hardware encoder, or driver.
 
@@ -85,9 +89,11 @@ These are software-only probes. They do not prove access to or behavior of a rea
 
 This candidate must not be promoted unless all of the following are attached to the immutable image ID and independently reviewed:
 
-- no unexplained capability delta other than the retired `pp` filter;
+- no unexplained capability delta outside the exact category-specific retirement set above;
 - every synthetic probe passes and any required real GPU/device validation is completed separately;
 - runtime dependency evidence contains no missing library, Debian FFmpeg package, libpostproc, or old libav ABI;
 - fresh SBOM and vulnerability scans explicitly identify both source-built FFmpeg and libplacebo.
 
 Trivy documents C/C++ package coverage through supported package metadata such as Conan lock files. A scan that does not identify these source-built components is a coverage gap and blocks promotion; it is not evidence of a clean or no-CVE result. This candidate does not invent Conan metadata or change admission policy.
+
+`compatible: true` means the capability comparison has no unapproved removal and all required software-only probes completed successfully. It does not mean the image is secure, release-ready, or approved for production; provenance review, device-specific validation, dependency evidence, SBOM coverage, and vulnerability review remain separate promotion gates.

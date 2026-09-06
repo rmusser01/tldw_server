@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox syntax for tracking.
 
-**Goal:** Persist stronger runtime evidence and evaluate an authenticated FFmpeg security-remediation candidate without weakening release admission; only the explicitly approved legacy `pp` capability may be retired.
+**Goal:** Persist stronger runtime evidence and evaluate an authenticated FFmpeg security-remediation candidate without weakening release admission; only explicitly approved upstream capabilities may be retired.
 
 **Architecture:** Extend the existing isolated Python runtime probe, which CI already binds to the exact OCI candidate. Evaluate FFmpeg separately from production packaging, using signed upstream source, an immutable source hash, the existing Debian feature inventory, synthetic compatibility probes, and a fresh scan.
 
@@ -12,12 +12,14 @@
 
 **Approved amendment:** The requester subsequently approved retiring `pp`/libpostproc and building a pinned newer libplacebo to continue the FFmpeg 9 candidate. That approval does not permit any other unassessed capability loss or production promotion before verification.
 
+**Additional acceptance — 2026-09-06:** The requester explicitly accepted Sonic (`sonic` decoder; `sonic`/`sonicls` encoders), V4xx (`v308`/`v408`/`v410` encoders and decoders), old `hls` input protocol, and `opengl`/`sdl`/`sdl2` muxer/output retirements. The HLS demuxer and output protocol remain required. Record observed accepted retirements separately from blocking unexplained losses. This supersedes the historical pp-only comparison requirements below, not any vulnerability or production-promotion gate.
+
 ## Global Constraints
 
 - Work only in `/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design`; do not change the shared checkout/environment or unrelated sessions' work.
 - Retain Chroma. No vulnerability exceptions, allowlists, weakened thresholds, or automatic CVE disposition from runtime evidence.
 - Production Dockerfiles and release image selection remain unchanged during candidate evaluation.
-- The only approved removed capability is the `pp` filter/libpostproc. Preserve or explicitly report every other baseline inventory delta; do not suppress vulnerability findings.
+- Approved removals are exactly the category-specific names in the acceptance amendment above, plus the `pp` filter/libpostproc. Preserve and explicitly report every baseline delta; any other loss blocks compatibility. Do not suppress vulnerability findings.
 - Use task-owned temporary data and containers; runtime probes have no network, capabilities, host secrets, or writable host data mounts.
 - Activate the project virtual environment before Python, pytest or Bandit. The task-owned PyJWT environment is `/private/tmp/task-13013-7-pyjwt-verification-venv`; shared dependencies are read-only. Host Chroma is not the locked image version.
 - Test first, run scoped Bandit and formatting, and obtain independent review. Stop and reassess after three failed attempts per issue.
@@ -122,11 +124,11 @@ The candidate-only build succeeded. Immutable local image/index identity: `sha25
 
 All 179 derived runtime package versions match their builder selections; the full runtime has 275 installed packages, versus 785 recorded builder packages. Runtime dependency checks found no unresolved libraries, old FFmpeg ABI packages, or compiler packages. `gcc-14-base` is runtime support, not the compiler. The actual evaluator ran as UID/GID 65534 with no network or capabilities, three read-only input-file mounts, and container-owned output storage.
 
-All synthetic media probes passed. The evaluator correctly returned exit 1 and `compatible: false` for these additional upstream retirements; only `pp` is currently approved:
+All synthetic media probes passed. Before the latest acceptance, the evaluator correctly returned exit 1 and `compatible: false` for these additional upstream retirements. The requester has now accepted these exact deltas. The amended evaluator returned exit 0 and `compatible: true` on the same immutable image, with no unapproved losses and all observed approved retirements listed separately. The historical result is retained:
 
 | Surface | Additional missing names | Assessment |
 | --- | --- | --- |
-| Encoders/decoders | `sonic`, `sonicls` (encoder only) | Upstream removed the Sonic implementation; no retirement approval yet. |
+| Encoders/decoders | `sonic`, `sonicls` (encoder only) | Upstream removed the Sonic implementation; retirement now explicitly accepted. |
 | Encoders/decoders | `v308`, `v408`, `v410` | Explicit codec names retired in favor of raw pixel formats. Baseline-generated MOV files decoded identically in supporting diagnostic tests. |
 | Input protocol | `hls` | Old protocol handler removed; ordinary local HLS demuxing/decoding passed a supporting diagnostic test. |
 | Output devices | `opengl`, `sdl`, `sdl2` | Upstream retired these outputs; `ffplay` remains present, but this is not transparent CLI compatibility. |
@@ -139,4 +141,14 @@ The recipe records exact selected Debian package versions but does not pin a Deb
 
 Independent task review and two scoped correction rounds are clean. Final controller verification: 255 tests passed, one opt-in Bun/Docker skip, four existing warnings; Black/Ruff clean; Bandit zero findings. The helper verifies the fixed source hash; genuine detached-signature verification belongs to the build recipe, not substring checks over saved logs. A final whole-branch merge review remains pending the unresolved release blockers.
 
-Evidence directory: `/private/tmp/task-13013-7-ffmpeg-candidate.08RU6j`, including `clean-image-build-evidence/`, `clean-runtime-evaluation/candidate-evaluation.json`, `trivy-clean-ffmpeg9.json`, `sbom-clean-ffmpeg9.cdx.json`, build logs, and final test/Bandit reports. Production packaging and PR merge remain blocked. The requester has been asked to choose additional upstream interface retirements versus compatibility-preserving 7.x security backports; no additional retirement is assumed.
+Evidence directory: `/private/tmp/task-13013-7-ffmpeg-candidate.08RU6j`, including `clean-image-build-evidence/`, `clean-runtime-evaluation/candidate-evaluation.json`, `trivy-clean-ffmpeg9.json`, `sbom-clean-ffmpeg9.cdx.json`, build logs, and final test/Bandit reports. Production packaging and PR merge remain blocked on security evidence and reproducibility. The requester accepted the additional upstream interface retirements; no further capability approval question is pending.
+
+### Accepted-retirement execution and coverage follow-up
+
+The updated report is `accepted-runtime-evaluation/candidate-evaluation.json`. Container `fd73a5a53b6a2298a54deac8f24c305a8d02c2c1ae1d098d162599286814f5f2` ran the retained image as UID/GID 65534, network `none`, all capabilities dropped, and only three read-only input-file mounts. Exit 0; every synthetic workflow passed. The Dockerfile and candidate binaries were unchanged.
+
+Supplemental Syft 1.51.1 (`anchore/syft@sha256:95fe0835e5bebc6f8b1f8acef68d47d63d594ef4c0f25c097ff853b23cbac74c`) cataloged the exact retained image archive offline: 284 components, including binary-classified FFmpeg 9.0.1 at the actual library paths, with config identity matching `5a8d1fd5...`. This uses [documented binary recognition](https://oss.anchore.com/docs/capabilities/binary/), not fabricated package metadata. Libplacebo and static glslang are still not identified as components. The archive adapter synthesizes a Docker-format manifest digest; do not confuse that digest with the original OCI platform manifest. Full source-built vulnerability coverage remains open.
+
+The OS scan has no fixed-version entry for its remaining 73 High/Critical findings. For example, [Debian's util-linux CVE-2026-76642 record](https://security-tracker.debian.org/tracker/CVE-2026-76642) still marks the installed Trixie security version vulnerable while Sid is fixed; this is not authority to install Sid binaries or waive the finding. Source-compatible remediation/applicability work remains required.
+
+Published head `21227dd09e` passes Characters Harness and macOS E2E. Earlier failure explanations remain unproven; no speculative test change was made. Security/container/source-SBOM checks still fail, and no new inline review comments were present when checked.

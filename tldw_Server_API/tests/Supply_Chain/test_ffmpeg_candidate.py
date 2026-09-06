@@ -116,21 +116,82 @@ def test_parse_capabilities_rejects_empty_or_malformed_inventory(listing: str) -
         parse_capabilities(listing, "encoders")
 
 
-def test_compare_capabilities_allows_only_removed_pp_filter() -> None:
+def test_compare_capabilities_allows_exact_approved_retirements() -> None:
     from Helper_Scripts.Supply_Chain.ffmpeg_candidate import compare_capabilities
 
     baseline = {
-        "encoders": {"libx264", "libmp3lame", "libopus"},
-        "decoders": {"h264", "mp3", "opus"},
-        "demuxers": {"mp3", "mov"},
-        "muxers": {"mp3", "mp4"},
-        "filters": {"aresample", "libplacebo", "pp"},
-        "input_protocols": {"file", "http"},
-        "output_protocols": {"file", "rtmp"},
+        "encoders": {"libx264", "sonic", "sonicls", "v308", "v408", "v410"},
+        "decoders": {"h264", "sonic", "v308", "v408", "v410"},
+        "demuxers": {"matroska"},
+        "muxers": {"mp4", "opengl", "sdl", "sdl2"},
+        "filters": {"aresample", "pp"},
+        "input_protocols": {"file", "hls"},
+        "output_protocols": {"file"},
+    }
+    candidate = {
+        "encoders": {"libx264"},
+        "decoders": {"h264"},
+        "demuxers": {"matroska"},
+        "muxers": {"mp4"},
+        "filters": {"aresample"},
+        "input_protocols": {"file"},
+        "output_protocols": {"file"},
+    }
+    assert compare_capabilities(baseline, candidate) == {}
+
+
+def test_observed_approved_retirements_excludes_unobserved_policy_entries() -> None:
+    from Helper_Scripts.Supply_Chain.ffmpeg_candidate import observed_approved_retirements
+
+    baseline = {
+        "encoders": {"libx264", "sonic", "sonicls", "v308", "v408", "v410"},
+        "decoders": {"h264", "sonic", "v308", "v408", "v410"},
+        "demuxers": {"matroska"},
+        "muxers": {"mp4", "opengl", "sdl", "sdl2"},
+        "filters": {"aresample", "pp"},
+        "input_protocols": {"file", "hls"},
+        "output_protocols": {"file"},
     }
     candidate = {category: set(values) for category, values in baseline.items()}
-    candidate["filters"].remove("pp")
-    assert compare_capabilities(baseline, candidate) == {}
+    candidate["encoders"].remove("sonicls")
+    candidate["decoders"].remove("v410")
+    candidate["muxers"].remove("sdl2")
+    candidate["input_protocols"].remove("hls")
+
+    assert observed_approved_retirements(baseline, candidate) == {
+        "encoders": {"sonicls"},
+        "decoders": {"v410"},
+        "input_protocols": {"hls"},
+        "muxers": {"sdl2"},
+    }
+
+
+@pytest.mark.parametrize(
+    ("category", "name"),
+    [
+        ("encoders", "pp"),
+        ("decoders", "sonicls"),
+        ("demuxers", "sdl"),
+        ("demuxers", "hls"),
+        ("output_protocols", "hls"),
+    ],
+)
+def test_compare_capabilities_keeps_category_crossovers_blocking(category: str, name: str) -> None:
+    from Helper_Scripts.Supply_Chain.ffmpeg_candidate import compare_capabilities
+
+    baseline = {
+        "encoders": {"libx264"},
+        "decoders": {"h264"},
+        "demuxers": {"matroska"},
+        "muxers": {"mp4"},
+        "filters": {"aresample"},
+        "input_protocols": {"file"},
+        "output_protocols": {"file"},
+    }
+    candidate = {capability: set(values) for capability, values in baseline.items()}
+    baseline[category].add(name)
+
+    assert compare_capabilities(baseline, candidate) == {category: {name}}
 
 
 def test_compare_capabilities_reports_every_other_removed_capability() -> None:
@@ -240,11 +301,25 @@ def test_evaluate_candidate_creates_a_compatible_real_report(tmp_path: Path, mon
 
     ffmpeg, ffprobe = _real_tools()
     baseline = tmp_path / "baseline.txt"
-    baseline.write_text(_combined_baseline(ffmpeg))
+    baseline.write_text(
+        _combined_baseline(ffmpeg).replace(
+            "Filters:",
+            "Filters:\n ... pp                V->V       Retired libpostproc filter.",
+            1,
+        )
+    )
     source = tmp_path / "ffmpeg.tar.xz"
     source.write_bytes(b"portable source fixture")
     expected_source_sha256 = hashlib.sha256(source.read_bytes()).hexdigest()
     monkeypatch.setattr(ffmpeg_candidate, "FFMPEG_SOURCE_SHA256", expected_source_sha256)
+    real_collect_inventory = ffmpeg_candidate.collect_inventory
+
+    def collect_without_retired_pp(candidate_ffmpeg: Path, inventory_dir: Path) -> dict[str, set[str]]:
+        inventory = real_collect_inventory(candidate_ffmpeg, inventory_dir)
+        inventory["filters"].discard("pp")
+        return inventory
+
+    monkeypatch.setattr(ffmpeg_candidate, "collect_inventory", collect_without_retired_pp)
     output = tmp_path / "output"
     report = ffmpeg_candidate.evaluate_candidate(
         ffmpeg=ffmpeg,
@@ -258,6 +333,12 @@ def test_evaluate_candidate_creates_a_compatible_real_report(tmp_path: Path, mon
     assert report["compatible"] is True
     assert report["source"]["sha256"] == expected_source_sha256
     assert report["missing_capabilities"] == {}
+    assert report["approved_retirements"] == {"filters": ["pp"]}
+    assert report["probes"]["wav_resample"] == {
+        "codec_name": "pcm_s16le",
+        "sample_rate": "16000",
+        "channels": 1,
+    }
     assert report["configure_arguments"]
     assert "signature_evidence" not in report
     assert json.loads((output / "candidate-evaluation.json").read_text()) == report
