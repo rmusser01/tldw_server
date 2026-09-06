@@ -3,7 +3,7 @@ id: TASK-13202
 title: Qualify an actual voice-capable Persona Buddy session
 status: In Progress
 created_date: 2026-09-06 02:07
-updated_date: 2026-09-06 02:40
+updated_date: 2026-09-06 03:03
 labels:
 - persona
 - buddy
@@ -24,9 +24,9 @@ Post-merge Migu UAT on dev 220bf544b7 confirms the real live-control session adv
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Voice capability becomes available only when the supported end-to-end voice runtime is ready; absent credentials or unsupported backends retain actionable unavailable state.
-- [ ] #2 Microphone startup is explicitly user initiated and Stop/session changes release recording and playback ownership.
+- [x] #2 Microphone startup is explicitly user initiated and Stop/session changes release recording and playback ownership.
 - [ ] #3 An intentional human speech test produces a provider reply and actual audio output with request-correlated Buddy listening/thinking/speaking/idle states.
-- [ ] #4 Targeted lifecycle regressions and sanitized live evidence verify no audio capture before the explicit start and no residual capture after Stop.
+- [x] #4 Targeted lifecycle regressions and sanitized live evidence verify no audio capture before the explicit start and no residual capture after Stop.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -58,6 +58,7 @@ Manual human microphone → Whisper → DeepSeek → Kokoro path passed on 31046
 
 Renumbered from TASK-13195 after latest dev allocated that ID to an unrelated task; existing evidence is preserved.
 Latest human manual voice retest used backend 0f5ac351f213c78ab922c724f4d6b501e82af885 and the source-hashed TASK-13205 frontend. After explicit user readiness and operator Send-now authorization, the transcript was Reply with the Blue Notebook is ready. once; configured DeepSeek answered The Blue Notebook is ready. and four Kokoro audio chunks appeared. Live UI listening → thinking → speaking → idle was directly observed, followed by Disconnect. User confirmed clear playback and stopping afterward. Earlier mixed-background speech was canceled without submission; Stop returned idle and disabled Send now. Receipt: Docs/Reviews/assets/migu-buddy-browser-voice-2026-09-05/manual-voice-lifecycle-acceptance.json. This resolves the missed Live speaking-state observation but does not directly inspect raw MediaStream handles or independent floating Buddy animation. Keep the broader task In Progress; BYOK-only voice and intermittent optional visual/analytics fetch failures remain unqualified. Latest relevant automated scopes: 214 Python; 90 controller/mic/playback tests; 117 route/setup/ownership tests, with overlap between frontend scopes. Scoped TypeScript passed; lint adds no findings; touched Python Bandit zero findings.
+Additional final checks passed 38 floating Buddy host tests (including four new idle/listening/thinking/speaking render cases), 22 voice ownership tests, 7 microphone resource tests and 4 streaming playback leak tests. Combined with the prior human explicit Start/Stop/Send/playback/disconnect observations, AC2 and AC4 have targeted cleanup and sanitized live evidence. Raw live MediaStream handles are not claimed as directly inspected. Twenty conversation tests also reconfirm server-credential preflight rejects missing static credentials; BYOK-only voice remains unsupported under ADR046, not an admitted capability. AC3 remains open only for a direct observation of the floating sprite transitions during a human turn.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 

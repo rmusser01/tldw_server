@@ -466,3 +466,5 @@ Persona Whisper uses local speech filtering to reduce words inferred from silenc
 Persona Whisper revises the complete current spoken turn so words crossing an internal decode boundary are not appended twice. Keep each turn within 30 seconds, including silence. If that buffer fills, voice stops with a shorter-turn retry message. **Send now** submits the turn; a new Start begins with a fresh transcript.
 
 Changing Persona through setup or Live ends the former connection and clears its resume selection, transcript and pending approvals. Use **Connect** to begin a session for the newly selected Persona. Previously saved setup and voice defaults remain available.
+
+Use **Refresh catalog** to reload bundled Buddy choices. If loading fails, **Retry catalog** repeats the read without copying, activating, or replacing the current pack. The button is disabled during the request. Voice preparation currently requires server-configured credentials for the default Chat provider; user/team/organization BYOK-only credentials are not qualified by this voice preflight.

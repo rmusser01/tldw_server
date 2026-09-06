@@ -1150,6 +1150,36 @@ describe("BuddyShellHost", () => {
     ).not.toBeInTheDocument()
   })
 
+  it.each(["idle", "listening", "thinking", "speaking"] as const)(
+    "renders the active Live voice %s state on the floating Buddy",
+    async (state) => {
+      const basePack = buildVisualPack("persona-1")
+      const visualPack = {
+        ...basePack,
+        manifest: {
+          ...basePack.manifest,
+          states: { ...basePack.manifest.states, [state]: { animation_id: state } },
+          animations: { ...basePack.manifest.animations, [state]: {
+            frames: [{ asset_id: "voice-state-asset", duration_ms: 100 }]
+          } }
+        },
+        assets_by_id: { ...basePack.assets_by_id, "voice-state-asset": {
+          ...basePack.assets_by_id["idle-asset"], id: "voice-state-asset", url: `/assets/${state}.png`
+        } }
+      }
+      visualMocks.listPersonaVisualPacks.mockResolvedValue({ packs: [visualPack], active_pack: visualPack })
+      renderHost({ context: {
+        surface_id: "persona-garden", surface_active: true, active_persona_id: "persona-1",
+        position_bucket: "web-desktop", persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1"), live_session_id: "live-session-1",
+        live_voice_state: state, live_voice_is_listening: state === "listening"
+      } })
+      await waitFor(() => expect(screen.getByTestId("persona-visual-frame"))
+        .toHaveAttribute("data-visual-state", state))
+      expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute("src", expect.stringContaining(`/assets/${state}.png`))
+    }
+  )
+
   it("maps active tool status into the tool_running visual state", async () => {
     const visualPack = buildVisualPack("persona-1")
     visualMocks.listPersonaVisualPacks.mockResolvedValue({

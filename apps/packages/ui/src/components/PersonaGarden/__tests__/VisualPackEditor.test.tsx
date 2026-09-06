@@ -250,6 +250,38 @@ describe("VisualPackEditor", () => {
     )
   })
 
+  it("retries a failed bundled catalog without replacing the active Buddy", async () => {
+    const pack = makeVisualPack({ status: "active" })
+    const retry = deferredResponse<Awaited<ReturnType<typeof okResponse>>>()
+    let catalogReads = 0
+    mocks.fetchWithAuth.mockImplementation((path: string) => {
+      if (path === "/api/v1/persona/visual-starter-packs") {
+        catalogReads += 1
+        return catalogReads === 1
+          ? Promise.resolve({ ok: false, status: 0, error: "Failed to fetch", json: async () => null })
+          : retry.promise
+      }
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs") {
+        return okResponse({ packs: [pack], active_pack: pack })
+      }
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1") return okResponse(pack)
+      if (path === "/api/v1/persona/catalog") return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      return okResponse({ items: [], candidates: [] })
+    })
+    render(<VisualPackEditor selectedPersonaId="persona-1" selectedPersonaName="Garden Helper" isActive />)
+    const catalog = await screen.findByTestId("buddy-builder-starter-catalog")
+    await waitFor(() => expect(catalog).toHaveTextContent("Failed to fetch"))
+    fireEvent.click(within(catalog).getByRole("button", { name: "Retry catalog" }))
+    expect(within(catalog).getByRole("button", { name: "Refresh catalog" })).toBeDisabled()
+    fireEvent.click(within(catalog).getByRole("button", { name: "Refresh catalog" }))
+    expect(catalogReads).toBe(2)
+    await act(async () => retry.resolve(await okResponse(starterCatalogPayload)))
+    await waitFor(() => expect(catalog).toHaveTextContent("Search Lens Buddy"))
+    expect(within(catalog).queryByText("Failed to fetch")).not.toBeInTheDocument()
+    expect(screen.getByTestId("buddy-guided-builder-active-pack")).toHaveTextContent("Animated pack")
+    expect(mocks.fetchWithAuth.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true)
+  })
+
   it("shows the guided builder when there is no active pack and no packs", async () => {
     mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
       const method = init?.method || "GET"
