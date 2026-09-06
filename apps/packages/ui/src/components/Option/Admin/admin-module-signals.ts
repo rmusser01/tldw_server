@@ -19,7 +19,9 @@ export interface AdminModuleSignal {
 
 const SIGNAL_TIMEOUT_MS = 4000
 
-const withTimeout = async <T>(work: Promise<T>): Promise<T> => {
+/** Race a signal request against the shared signal timeout. Exported for the
+ *  first-steps checklist, which probes the same cheap admin endpoints. */
+export const withSignalTimeout = async <T>(work: Promise<T>): Promise<T> => {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     return await Promise.race([
@@ -41,7 +43,7 @@ const plural = (count: number, noun: string): string =>
 
 const SIGNAL_FETCHERS: Record<string, () => Promise<AdminModuleSignal>> = {
   "/admin/server": async () => {
-    const stats = await withTimeout(tldwClient.getSystemStats())
+    const stats = await withSignalTimeout(tldwClient.getSystemStats())
     const total = stats?.users?.total
     return {
       state: "healthy",
@@ -53,7 +55,7 @@ const SIGNAL_FETCHERS: Record<string, () => Promise<AdminModuleSignal>> = {
     // The alerts/history endpoint is an audit log of alert actions, not a
     // list of open alerts, so the aggregated security alert health is the
     // honest signal here ("ok" | "degraded" | "errors").
-    const status = await withTimeout(tldwClient.getSecurityAlertStatus())
+    const status = await withSignalTimeout(tldwClient.getSecurityAlertStatus())
     const health = String(status?.health ?? "").toLowerCase()
     if (health === "ok") {
       return { state: "healthy", detail: "Alerting healthy" }
@@ -64,7 +66,7 @@ const SIGNAL_FETCHERS: Record<string, () => Promise<AdminModuleSignal>> = {
     return { state: "healthy", detail: "Monitoring reachable" }
   },
   "/admin/data-ops": async () => {
-    const result = await withTimeout(tldwClient.listBackups())
+    const result = await withSignalTimeout(tldwClient.listBackups())
     const backups = Array.isArray(result)
       ? result
       : (result?.backups ?? result?.items ?? [])
@@ -74,20 +76,20 @@ const SIGNAL_FETCHERS: Record<string, () => Promise<AdminModuleSignal>> = {
     return { state: "healthy", detail: plural(backups.length, "backup") }
   },
   "/admin/llamacpp": async () => {
-    const status = await withTimeout(tldwClient.getLlamacppStatus())
+    const status = await withSignalTimeout(tldwClient.getLlamacppStatus())
     const state = String(status?.state ?? status?.status ?? "").toLowerCase()
     return state === "running"
       ? { state: "healthy", detail: "Runtime running" }
       : { state: "attention", detail: "Runtime stopped" }
   },
   "/admin/mlx": async () => {
-    const status = await withTimeout(tldwClient.getMlxStatus())
+    const status = await withSignalTimeout(tldwClient.getMlxStatus())
     return status?.active
       ? { state: "healthy", detail: "Model loaded" }
       : { state: "attention", detail: "No model loaded" }
   },
   "/admin/rate-limiting": async () => {
-    const coverage = await withTimeout(tldwClient.getGovernorCoverage())
+    const coverage = await withSignalTimeout(tldwClient.getGovernorCoverage())
     const pct = coverage?.coverage_pct
     return typeof pct === "number"
       ? {

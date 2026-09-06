@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -157,6 +158,7 @@ async def test_legacy_fallback_forwards_system_message_with_real_helper_signatur
         custom_cookies: list[dict[str, Any]] | None = None,
         temperature: float = 0.7,
         allow_llm_extraction: bool = True,
+        summary_prompt_overrides: Mapping[str, str] | None = None,
     ) -> list[dict[str, Any]]:
         received.update(
             {
@@ -171,6 +173,7 @@ async def test_legacy_fallback_forwards_system_message_with_real_helper_signatur
                 "custom_cookies": custom_cookies,
                 "temperature": temperature,
                 "allow_llm_extraction": allow_llm_extraction,
+                "summary_prompt_overrides": summary_prompt_overrides,
             }
         )
         return [
@@ -221,6 +224,7 @@ async def test_legacy_fallback_forwards_system_message_with_real_helper_signatur
         mode="ephemeral",
         user_id=1,
         perform_chunking=False,
+        summary_prompt_overrides={"system": "Saved system", "user": "Saved summary"},
     )
 
     assert result["status"] == "ephemeral-ok"
@@ -236,4 +240,5 @@ async def test_legacy_fallback_forwards_system_message_with_real_helper_signatur
         "custom_cookies": [{"name": "session", "value": "cookie-value"}],
         "temperature": 0.2,
         "allow_llm_extraction": True,
+        "summary_prompt_overrides": {"system": "Saved system", "user": "Saved summary"},
     }

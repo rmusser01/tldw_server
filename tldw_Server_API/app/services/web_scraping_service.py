@@ -8,6 +8,7 @@ import asyncio
 import contextlib
 import json
 import logging
+from collections.abc import Mapping
 from types import SimpleNamespace
 from typing import Any, Optional
 
@@ -242,6 +243,7 @@ async def process_web_scraping_task(
     chunking_mode: Optional[str] = None,
     auto_chunking_goal: str = "balanced",
     auto_chunking_use_llm: bool = False,
+    summary_prompt_overrides: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """
     Enhanced web scraping with production features:
@@ -337,6 +339,7 @@ async def process_web_scraping_task(
             keywords=keywords,
             custom_titles=custom_titles,
             system_prompt=system_prompt,
+            summary_prompt_overrides=summary_prompt_overrides,
             temperature=temperature,
             custom_cookies=custom_cookies,
             mode=mode,
@@ -412,6 +415,7 @@ async def process_web_scraping_task(
                     custom_cookies=custom_cookies,
                     temperature=temperature,
                     allow_llm_extraction=summarize_checkbox,
+                    summary_prompt_overrides=summary_prompt_overrides,
                 )
             elif scrape_method == "Sitemap":
                 # Synchronous approach in your code, might need `asyncio.to_thread`
@@ -495,11 +499,11 @@ async def process_web_scraping_task(
                         else:
                             summary = analyze(
                                 input_data=content,
-                                custom_prompt_arg=custom_prompt or "",
+                                custom_prompt_arg=(summary_prompt_overrides or {}).get("user", custom_prompt or ""),
                                 api_name=api_name,
                                 api_key=api_key,
                                 temp=temperature,
-                                system_message=system_prompt or "",
+                                system_message=(summary_prompt_overrides or {}).get("system", system_prompt or ""),
                             )
                             if not _sanitize_analysis_result(article, "summary", summary):
                                 article["summary"] = summary

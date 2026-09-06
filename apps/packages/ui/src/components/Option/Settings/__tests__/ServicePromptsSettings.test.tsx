@@ -269,6 +269,16 @@ const catalog: ServicePromptCatalogItem[] = [
     affected_workflows: [{ id: "media.video.summarization", label: "Server video workflow" }]
   },
   {
+    id: "media.web.summarization",
+    label: "Server web prompt",
+    description: "Server web description",
+    parts: [
+      { key: "system", label: "System instructions", mode: "literal", required_variables: [] },
+      { key: "user", label: "User instructions", mode: "literal", required_variables: [] }
+    ],
+    affected_workflows: [{ id: "media.web.summarization", label: "Server web workflow" }]
+  },
+  {
     id: "notes.title.generate",
     label: "Server Notes title prompt",
     description: "Server Notes title prompt description",
@@ -300,7 +310,9 @@ const detailFor = (
     parts?: Record<string, string>
   } = {}
 ): ServicePromptDetail => {
-  const defaults = definition.id === "media.video.summarization"
+  const defaults = definition.id === "media.web.summarization"
+    ? { system: "Web system guidance.", user: "Web summary guidance." }
+    : definition.id === "media.video.summarization"
     ? { system: "Video system guidance.", final_summary: "Combine video summaries." }
     : definition.id === "media.audio.analysis"
     ? { system: "Audio system guidance.", user: "Audio user guidance." }
@@ -569,7 +581,7 @@ describe("ServicePromptsSettings", () => {
     renderSettings()
 
     expect(await screen.findAllByTestId("service-prompt-list-item"))
-      .toHaveLength(13)
+      .toHaveLength(14)
     expect(await screen.findByRole("heading", { name: "Text translation" }))
       .toBeInTheDocument()
     expect(screen.getByText("Server default")).toBeInTheDocument()
@@ -629,6 +641,23 @@ describe("ServicePromptsSettings", () => {
     expect(screen.getByText("Synchronous PDF analysis")).toBeVisible()
     expect(screen.getAllByText(/Without a saved override, server defaults apply/)[0]).toBeVisible()
     expect(screen.queryByText("Server PDF prompt")).not.toBeInTheDocument()
+  })
+
+  it("edits web system and summary instructions as one pair", async () => {
+    renderSettings()
+    await openPrompt("Web article summarization")
+    expect(screen.getByLabelText("System instructions")).toHaveValue("Web system guidance.")
+    expect(screen.getByLabelText("User instructions")).toHaveValue("Web summary guidance.")
+    expect(screen.getByText("Synchronous web scraping")).toBeVisible()
+    expect(screen.getByText(/Reset restores each scraping engine/, { selector: "p" })).toBeVisible()
+    fireEvent.change(screen.getByLabelText("System instructions"), { target: { value: "Web {system}" } })
+    fireEvent.change(screen.getByLabelText("User instructions"), { target: { value: "Web {summary}" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledWith(
+      "media.web.summarization",
+      { parts: { system: "Web {system}", user: "Web {summary}" }, expected_revision: null },
+      { signal: expect.any(AbortSignal), requestScope: scopeOne }
+    ))
   })
 
   it("edits video system and final-summary instructions as one pair", async () => {

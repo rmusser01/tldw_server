@@ -1882,6 +1882,7 @@ class EnhancedWebScraper:
         **kwargs,
     ) -> list[dict[str, Any]]:
         """Scrape multiple URLs concurrently"""
+        summary_prompt_overrides = kwargs.pop("summary_prompt_overrides", None)
         jobs = []
         futures = []
 
@@ -1929,6 +1930,7 @@ class EnhancedWebScraper:
                 if summarize and result.get('extraction_successful') and result.get('content'):
                     summary = await self._summarize_content(
                         result['content'],
+                        summary_prompt_overrides=summary_prompt_overrides,
                         **kwargs
                     )
                     result['summary'] = summary
@@ -1940,13 +1942,17 @@ class EnhancedWebScraper:
     async def _summarize_content(self, content: str, **kwargs) -> str:
         """Summarize content using LLM"""
         try:
+            overrides = kwargs.get('summary_prompt_overrides') or {}
+            system_default = kwargs.get('system_prompt')
+            if system_default is None:
+                system_default = 'Summarize this article concisely.'
             summary = analyze(
                 input_data=content,
-                custom_prompt_arg=kwargs.get('custom_prompt', ''),
+                custom_prompt_arg=overrides.get('user', kwargs.get('custom_prompt', '')),
                 api_name=kwargs.get('api_name', 'openai'),
                 api_key=kwargs.get('api_key'),
                 temp=kwargs.get('temperature', 0.7),
-                system_message=kwargs.get('system_message', 'Summarize this article concisely.')
+                system_message=overrides.get('system', kwargs.get('system_message', system_default))
             )
             return summary
         except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as e:
