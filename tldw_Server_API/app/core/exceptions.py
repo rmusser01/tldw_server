@@ -43,6 +43,24 @@ class PersonaConversationError(RuntimeError):
     """Safe Persona Chat admission/completion failure without provider details."""
 
 
+class PersonaVoiceRecognitionError(RuntimeError):
+    """Expected recognition failure with a safe message and classifiable code.
+
+    Args:
+        code: Whether recognition is unavailable, stopped, or failed during a turn.
+    """
+
+    def __init__(self, code: Literal["unavailable", "stopped", "failed"]) -> None:
+        self.code = code
+        super().__init__(
+            {
+                "unavailable": "Parakeet ONNX speech recognition is unavailable.",
+                "stopped": "Speech recognition is stopped. Prepare voice again.",
+                "failed": "Speech recognition failed. Check the selected speech model and start voice again.",
+            }[code]
+        )
+
+
 class PersonaVoiceInputLimitError(ValueError):
     """A spoken turn exceeded its bounded audio buffer before transcription."""
 

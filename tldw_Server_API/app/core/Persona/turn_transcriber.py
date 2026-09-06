@@ -3,6 +3,8 @@
 import asyncio
 import threading
 import time
+import traceback
+from pathlib import Path
 from time import monotonic
 from typing import Any
 
@@ -13,14 +15,25 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     await_bounded_owned_operation,
     create_bounded_stream_task,
 )
+from tldw_Server_API.app.core.exceptions import PersonaVoiceInputLimitError, PersonaVoiceRecognitionError
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified import (
     BaseStreamingTranscriber,
 )
-from tldw_Server_API.app.core.Persona.live_voice_runtime import PersonaVoiceInputLimitError
 
 
 class PersonaTurnTranscriber(BaseStreamingTranscriber):
-    """Revise one spoken turn without joining separately decoded overlaps."""
+    """Own one bounded, revisable speech turn and at most one background decode.
+
+    Args:
+        config: Streaming configuration defining float32 sample rate, buffer bound
+            and partial cadence. A backend subclass must initialize its model and
+            implement _transcribe_audio plus recognition_model_name.
+
+    Use from one event loop after backend initialization. Ingestion never waits
+    for native decoding; later calls collect revisions or raise retained failures.
+    Reset invalidates publication while retaining native work. Cleanup retires the
+    instance permanently and defers model release until owned work actually exits.
+    """
 
     DECODE_TIMEOUT_SECONDS = 30.0
 
@@ -38,21 +51,33 @@ class PersonaTurnTranscriber(BaseStreamingTranscriber):
 
     @property
     def recognition_pending(self) -> bool:
-        """Whether this runtime still owns inference, including late cleanup."""
+        """Return whether native inference or its retained cleanup is still owned."""
         return self._decode_pending
 
     @property
     def auto_commit_pending(self) -> bool:
-        """Whether VAD has frozen a turn that still needs commitment."""
+        """Return whether VAD has frozen a boundary still awaiting commitment/reset."""
         return self._auto_commit_samples is not None
 
     def request_auto_commit(self) -> None:
-        """Freeze the first VAD boundary while subsequent audio stays buffered."""
+        """Freeze the first VAD boundary until reset; repeated requests do nothing.
+
+        Later audio remains buffered under the same total bound, but is excluded
+        from boundary recognition and returned by audio_after_auto_commit.
+        """
         if self._auto_commit_samples is None:
             self._auto_commit_samples = sum(len(chunk) for chunk in self.buffer.data)
 
     def auto_commit_ready(self, result: dict[str, Any] | None) -> bool:
-        """Commit only a completed snapshot covering the frozen boundary."""
+        """Check whether a collected result exactly covers the frozen VAD boundary.
+
+        Args:
+            result: Optional recognition frame from process_audio_chunk, including
+                its buffer_duration in seconds.
+
+        Returns:
+            True only when the result covers the first requested boundary.
+        """
         return (
             self._auto_commit_samples is not None
             and result is not None
@@ -60,14 +85,23 @@ class PersonaTurnTranscriber(BaseStreamingTranscriber):
         )
 
     def audio_after_auto_commit(self) -> bytes:
-        """Return audio to replay once into the next turn and its VAD detector."""
+        """Return buffered float32 audio after the frozen boundary, or empty bytes.
+
+        The caller retrieves this before reset, then replays it once into the next
+        turn and its VAD detector. Reading does not consume or clear the carry.
+        """
         audio = self.buffer.get_audio()
         if self._auto_commit_samples is None or audio is None:
             return b""
         return audio[self._auto_commit_samples :].tobytes()
 
     def reset(self) -> None:
-        """Discard the turn, retaining any worker until it really exits."""
+        """Clear audio, transcript, failure and VAD boundary; invalidate late output.
+
+        Native inference continues under ownership. A fresh turn waits for that
+        worker and the completion-based cadence before scheduling its next decode.
+        Reset does not reopen an instance retired by cleanup.
+        """
         super().reset()
         self._generation += 1
         self._decoded_samples = 0
@@ -76,7 +110,11 @@ class PersonaTurnTranscriber(BaseStreamingTranscriber):
         self._error = None
 
     def cleanup(self) -> None:
-        """Retire this runtime without releasing a model used by native code."""
+        """Permanently stop ingestion and invalidate all pending publication.
+
+        Returns immediately. Model release occurs now if idle, or in the owned
+        worker completion callback; recognition_pending remains true until then.
+        """
         self._closed = True
         self.reset()
         if not self._decode_pending:
@@ -119,7 +157,16 @@ class PersonaTurnTranscriber(BaseStreamingTranscriber):
                     **self._prepare_partial_metadata(duration),
                 }
         except Exception as exc:  # noqa: BLE001 - retain failures for the socket's existing STT error path
-            logger.warning("Persona speech decoding failed (type={})", type(exc).__name__)
+            # Preserve stack locations, never native messages, source lines or locals.
+            frames = [
+                {"file": Path(frame.filename).name, "line": frame.lineno, "function": frame.name}
+                for frame in traceback.extract_tb(exc.__traceback__, limit=20)
+            ]
+            logger.bind(
+                recognition_model=self.recognition_model_name,
+                recognition_generation=generation,
+                recognition_traceback=frames,
+            ).warning("Persona speech decoding failed (type={})", type(exc).__name__)
             if generation == self._generation and not self._closed:
                 self._error = exc
         finally:
@@ -127,9 +174,26 @@ class PersonaTurnTranscriber(BaseStreamingTranscriber):
                 self._finish_decode()
 
     async def process_audio_chunk(self, audio_data: bytes) -> dict[str, Any] | None:
-        """Ingest bounded audio and collect a completed snapshot without waiting."""
+        """Ingest audio and collect a completed revision without waiting for inference.
+
+        Args:
+            audio_data: Mono float32 PCM at config.sample_rate; empty bytes poll
+                completed work without adding audio.
+
+        Returns:
+            A partial frame with text (possibly empty), timestamp, is_final=False,
+            model and buffer_duration, or None if no revision is ready. New text
+            replaces the whole prior hypothesis rather than appending fragments.
+
+        Raises:
+            PersonaVoiceRecognitionError: This instance is stopped or the decoder
+                returned a known failure status.
+            PersonaVoiceInputLimitError: Audio exceeds the configured turn bound.
+            Exception: A retained backend/timeout failure or bounded-task admission
+                failure. Callers must retire the instance through the STT error path.
+        """
         if self._closed:
-            raise RuntimeError("Speech recognition is stopped. Prepare voice again.")
+            raise PersonaVoiceRecognitionError("stopped")
         if self._error is not None:
             raise self._error
         audio = np.frombuffer(audio_data, dtype=np.float32)

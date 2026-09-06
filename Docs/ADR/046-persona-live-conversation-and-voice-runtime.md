@@ -113,3 +113,19 @@ bound, retained worker cleanup, responsive ingestion, and frozen VAD boundary
 apply to both adapters. Manual Send now still submits the currently displayed
 revision. Full-turn decoding prevents stale chunk concatenation but cannot
 promise accurate intermediate hypotheses or perfect recognition of human audio.
+
+### Recognition failures and diagnostics (TASK-13212)
+
+Persona's ONNX adapter maps the legacy decoder's six exact error-status strings
+to a typed `PersonaVoiceRecognitionError` before vocabulary processing or transcript
+publication. Stopped and unavailable recognition use the same safe exception
+contract with distinct codes. Ordinary words and bracketed speech are preserved;
+this is not a general phrase filter, and the legacy file API is unchanged.
+
+Audio ingestion supplies bounded session/client correlation through the existing
+logger context inherited by background decoding. Failure records retain model,
+generation and up to 20 traceback locations (basename, line and function), excluding
+exception messages, source lines and locals. Logging a native exception object
+was rejected because decoder exception payloads and frame locals can contain
+private speech, credentials or audio. The socket's existing STT failure path
+revokes readiness and returns its safe retry notice.

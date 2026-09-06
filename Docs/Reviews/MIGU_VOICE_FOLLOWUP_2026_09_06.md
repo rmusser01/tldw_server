@@ -178,3 +178,25 @@ production Python files. No full test sweep was run. Previously linked sanitized
 JSON receipts are explicitly staged despite the repository-wide JSON ignore rule.
 
 [Sanitized visual observations and request metadata](assets/migu-parakeet-turn-2026-09-06/visual-follow-up.json).
+
+## Qodo review repair — TASK-13212
+
+Qodo identified six legacy ONNX error-status strings that could enter the Persona
+transcript. New factory-level regressions reproduced this failure, and a real
+TestClient socket reproduced a partial transcript instead of the expected STT
+unavailable notice. Exact error statuses now raise a typed safe recognition
+failure before publication. The existing socket error path revokes readiness;
+ordinary speech, including unbracketed error words and deliberate repetition, is
+preserved. Stopped and unavailable recognition also expose distinct typed codes.
+
+The review's diagnostic gap is covered by structured stack locations and inherited
+session/client correlation. Native exception messages, locals and source lines
+are excluded. Public lifecycle contracts and the helper return annotation were
+expanded. The initial focused run failed nine adapter/diagnostic cases, plus one
+socket regression; all 14 focused cases passed after repair.
+
+Final review-fix verification passed 202 targeted Python regressions; 13 adapter
+cases were rerun after tightening their typed exception assertions (an overlapping
+subset). Ruff/Black passed the changed standalone scope and Bandit reported zero
+findings across seven production files. Independent review found no actionable
+issues. The earlier 129 frontend compatibility checks remain unchanged evidence.

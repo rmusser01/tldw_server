@@ -1011,3 +1011,60 @@ def test_voice_commit_policy_reads_run_off_socket_event_loop(
     voice_socket.send_json({"type": "voice_commit", "session_id": "voice-owned", "text": "Hi"})
     _recv_until(voice_socket, lambda value: value.get("reason_code") == "VOICE_NOT_PREPARED")
     assert on_event_loop == [False]
+
+
+def test_onnx_status_failure_revokes_socket_readiness_and_keeps_log_correlation(
+    prepared_voice: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import base64
+    import threading
+    import time
+
+    from loguru import logger
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Transcription_Parakeet_ONNX as onnx
+    from tldw_Server_API.app.core.Persona.live_voice_runtime import persona_live_voice_registry
+    from tldw_Server_API.tests.Persona.test_persona_ws import _recv_until
+
+    ws, _ = prepared_voice
+    decoded = threading.Event()
+    records = []
+
+    def decode(*args: Any, **kwargs: Any) -> str:
+        decoded.set()
+        return "[Error: Failed to load ONNX model]"
+
+    monkeypatch.setattr(onnx, "transcribe_with_parakeet_onnx", decode)
+    transcriber = live_stt.create_persona_live_stt_transcriber(voice_runtime={"stt_model": "parakeet-onnx"})
+    monkeypatch.setattr(persona_ep, "_create_persona_live_stt_transcriber", lambda **kwargs: transcriber)
+    ws.send_json({"type": "voice_stop", "session_id": "voice-owned"})
+    _recv_until(ws, lambda value: value.get("reason_code") == "VOICE_STOPPED")
+    ws.send_json({"type": "voice_prepare", "session_id": "voice-owned"})
+    assert _recv_until(ws, lambda value: value.get("event") == "voice_readiness")["ready"]
+    frame = {
+        "type": "audio_chunk",
+        "session_id": "voice-owned",
+        "client_message_id": "onnx-failure-turn",
+        "audio_format": "pcm16",
+        "bytes_base64": base64.b64encode(b"\0\0" * 16000).decode(),
+    }
+    sink = logger.add(lambda message: records.append(message.record))
+    try:
+        ws.send_json(frame)
+        assert decoded.wait(2)
+        deadline = time.monotonic() + 2
+        while transcriber.recognition_pending and time.monotonic() < deadline:
+            time.sleep(0.005)
+        assert not transcriber.recognition_pending
+        ws.send_json(frame)
+        event = _recv_until(
+            ws, lambda value: value.get("event") == "partial_transcript" or value.get("level") == "error"
+        )
+        assert event.get("reason_code") == "VOICE_STT_UNAVAILABLE"
+        assert event["client_message_id"] == "onnx-failure-turn"
+        assert not persona_live_voice_registry.is_ready(user_id="1", session_id="voice-owned")
+        failure = next(record for record in records if "Persona speech decoding failed" in record["message"])
+        assert failure["extra"]["persona_session_id"] == "voice-owned"
+        assert failure["extra"]["client_message_id"] == "onnx-failure-turn"
+    finally:
+        logger.remove(sink)

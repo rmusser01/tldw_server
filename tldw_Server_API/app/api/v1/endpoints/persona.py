@@ -10647,7 +10647,10 @@ async def persona_stream(
                         previous_snapshot = str(
                             voice_transcript_buffer_by_session.get(session_id) or ""
                         ).strip()
-                        result = await transcriber.process_audio_chunk(normalized_audio)
+                        with logger.contextualize(
+                            persona_session_id=session_id, client_message_id=client_message_id,
+                        ):
+                            result = await transcriber.process_audio_chunk(normalized_audio)
                         if isinstance(result, dict):
                             next_snapshot = _persona_live_transcript_snapshot(
                                 transcriber=transcriber,
@@ -10683,9 +10686,9 @@ async def persona_stream(
                             auto_commit_triggered = transcriber.auto_commit_ready(result)
                     except Exception as exc:
                         logger.debug(
-                            "persona live STT processing failed for session {}: {}",
+                            "persona live STT processing failed for session {} (type={})",
                             session_id,
-                            exc,
+                            type(exc).__name__,
                         )
                         _cleanup_persona_live_stt_state(session_id)
                         persona_live_voice_registry.clear(
