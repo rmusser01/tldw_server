@@ -4,9 +4,11 @@ title: Expose Writing Agent mode prompts through Service Prompts
 status: In Progress
 assignee: []
 created_date: '2026-09-06 15:38'
-updated_date: '2026-09-06 16:05'
+updated_date: '2026-09-06 16:07'
 labels: []
 dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/pull/2926'
 documentation:
   - Docs/Design/writing-agent-service-prompts.md
 ---
@@ -41,12 +43,16 @@ Independent review found and verified two issues: first-load errors without a re
 Final backend verification: 132 passed (manuscript HTTP integration plus Service Prompts registry/API), including all nine optional expected-user cases. Current frontend coverage: 438 shared UI tests and 104 WebUI-harness tests pass across focused runs; consolidated shared UI rerun pending. Bandit: zero findings on both touched runtime files. Independent follow-up review approved, no remaining actionable findings. Full repository suite, production frontend builds and live-browser smoke were not run; focused suites match the approved design. Existing TypeScript diagnostics (158; none on changed lines), five preexisting Ruff findings in manuscript files, and existing frontend lint warnings are not newly introduced. No PR exists yet; branch is ready for integration choice after commit.
 
 Consolidated final shared frontend run completed: 438 passed across 12 files (65.78 seconds), zero failures. Final backend run: 132 passed, zero failures. WebUI harness: Settings 87 and current component 17 passed. Fresh Bandit and Python compilation also pass. Temporary dependency symlinks removed before staging; no dependency changes.
+
+Published PR #2926 against dev from codex/writing-agent-service-prompts. Implementation commit 1381222da64540e0a93bf17c96812c0a6bc91ab5. Remote dev matched the branch base at publication; no rebase needed. Awaiting CI and PR review; worktree preserved.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Implemented Quick, Planning and Brainstorm prompt customization through existing shared Service Prompts Settings. Preserved exact defaults and generation settings, added narrow scoped manuscript GET support and optional server-side identity assertions, and retained a scope lease to clear stale requests/history. Older-server fallback remains explicit and auth/non-404 errors propagate. Verified actionable review findings with failing regressions before minimal fixes. Implementation and review complete; awaiting PR/integration choice.
+
+PR: https://github.com/rmusser01/tldw_server/pull/2926 (base dev). Awaiting CI/review and merge readiness.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
