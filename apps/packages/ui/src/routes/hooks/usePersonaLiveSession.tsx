@@ -179,7 +179,6 @@ export interface UsePersonaLiveSessionDeps {
   capabilities: { hasPersonalization?: boolean; hasAudio?: boolean } | null
   capsLoading: boolean
   /** Route bootstrap */
-  routeBootstrapPersonaId: string | null | undefined
   routeBootstrapSessionId?: string | null
 }
 
@@ -236,7 +235,6 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
     pendingPlan,
     capabilities,
     capsLoading,
-    routeBootstrapPersonaId,
     routeBootstrapSessionId,
   } = deps
 
@@ -505,7 +503,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
 
       const preferredPersonaId = isCompanionMode
         ? DEFAULT_PERSONA_ID
-        : routeBootstrapPersonaId || selectedPersonaId
+        : selectedPersonaId
       const selectedPersonaIsValid = personas.some(
         (persona) => String(persona.id || "") === preferredPersonaId
       )
@@ -770,7 +768,6 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
     personaSetupWizardIsSetupRequired,
     resetApprovalHighlightMotion,
     resumeSessionId,
-    routeBootstrapPersonaId,
     runtimeApprovalRowRefs,
     savedPersonaVoiceDefaults,
     selectedPersonaId,
@@ -1254,20 +1251,59 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
     ]
   )
 
-  // ── handlePersonaSelectionChange ──
-  const handlePersonaSelectionChange = React.useCallback(
+  // Both setup and Live selection retire the previous Persona's authority.
+  // Callers perform the unsaved-draft confirmation before applying selection.
+  const applyPersonaSelection = React.useCallback(
     (value: string) => {
       const nextPersonaId = String(value || "").trim()
       if (!nextPersonaId || nextPersonaId === selectedPersonaId)
         return
-      if (!confirmDiscardUnsavedStateDrafts("persona_switch")) return
+      connectAttemptRef.current += 1
+      const previousSocket = wsRef.current
+      if (previousSocket) {
+        previousSocket.onopen = null
+        previousSocket.onmessage = null
+        previousSocket.onerror = null
+        previousSocket.onclose = null
+      }
+      liveVoiceControllerRef.current?.resetTurn()
+      disconnect({ force: true })
+      setConnecting(false)
+      setSessionId(null)
+      setResumeSessionId("")
+      setSessionHistory([])
+      setPendingRecoveryReconnectToken(0)
+      setPendingPlan(null)
+      setPendingApprovals([])
+      setApprovedStepMap({})
+      setLogs([])
+      setError(null)
       setSelectedPersonaId(nextPersonaId)
     },
     [
-      confirmDiscardUnsavedStateDrafts,
+      disconnect,
+      liveVoiceControllerRef,
       selectedPersonaId,
+      setApprovedStepMap,
+      setConnecting,
+      setError,
+      setLogs,
+      setPendingApprovals,
+      setPendingPlan,
       setSelectedPersonaId,
+      setSessionId,
+      wsRef,
     ]
+  )
+
+  const handlePersonaSelectionChange = React.useCallback(
+    (value: string) => {
+      const nextPersonaId = String(value || "").trim()
+      if (!nextPersonaId || nextPersonaId === selectedPersonaId) return
+      if (!confirmDiscardUnsavedStateDrafts("persona_switch")) return
+      applyPersonaSelection(nextPersonaId)
+    },
+    [applyPersonaSelection, confirmDiscardUnsavedStateDrafts, selectedPersonaId]
   )
 
   // ── handleReconnectPersonaSessionFromRecovery ──
@@ -1333,6 +1369,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
     handleReconnectPersonaSessionFromRecovery,
     handleCopyLastVoiceCommandToComposer,
     handlePersonaSelectionChange,
+    applyPersonaSelection,
     triggerRecoveryReconnect,
     saveCompanionCheckIn,
     updatePersonaStateContextDefault,

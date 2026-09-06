@@ -3,7 +3,7 @@ id: TASK-13202
 title: Qualify an actual voice-capable Persona Buddy session
 status: In Progress
 created_date: 2026-09-06 02:07
-updated_date: 2026-09-06 02:07
+updated_date: 2026-09-06 02:40
 labels:
 - persona
 - buddy
@@ -57,8 +57,8 @@ At f71d593e67 human UAT observed idle before explicit Start, preparation, listen
 Manual human microphone → Whisper → DeepSeek → Kokoro path passed on 31046b8937: user clicked Send now, correct nonduplicated notebook transcript was committed once, provider reply matched, and user confirmed clear playback. Source-bound receipt is Docs/Reviews/assets/migu-buddy-browser-voice-2026-09-05/whole-turn-human-acceptance.json. Observed idle/preparing/listening/thinking/idle and disconnect; the short speaking badge was not sampled and raw MediaStream track state was not inspected. Keep broader lifecycle/state acceptance open rather than claiming those observations.
 
 Renumbered from TASK-13195 after latest dev allocated that ID to an unrelated task; existing evidence is preserved.
+Latest human manual voice retest used backend 0f5ac351f213c78ab922c724f4d6b501e82af885 and the source-hashed TASK-13205 frontend. After explicit user readiness and operator Send-now authorization, the transcript was Reply with the Blue Notebook is ready. once; configured DeepSeek answered The Blue Notebook is ready. and four Kokoro audio chunks appeared. Live UI listening → thinking → speaking → idle was directly observed, followed by Disconnect. User confirmed clear playback and stopping afterward. Earlier mixed-background speech was canceled without submission; Stop returned idle and disabled Send now. Receipt: Docs/Reviews/assets/migu-buddy-browser-voice-2026-09-05/manual-voice-lifecycle-acceptance.json. This resolves the missed Live speaking-state observation but does not directly inspect raw MediaStream handles or independent floating Buddy animation. Keep the broader task In Progress; BYOK-only voice and intermittent optional visual/analytics fetch failures remain unqualified. Latest relevant automated scopes: 214 Python; 90 controller/mic/playback tests; 117 route/setup/ownership tests, with overlap between frontend scopes. Scoped TypeScript passed; lint adds no findings; touched Python Bandit zero findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->

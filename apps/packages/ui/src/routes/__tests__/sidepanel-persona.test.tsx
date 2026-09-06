@@ -2775,6 +2775,48 @@ describe("SidepanelPersona", () => {
     expect(profilePatches).toEqual([])
   })
 
+  it("retires the former live session when setup chooses a different Persona", async () => {
+    mocks.location.search = "?persona_id=research_assistant&tab=live"
+    mocks.getConfig.mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "single-user", apiKey: "" })
+    let researchReads = 0
+    const connections: Record<string, unknown>[] = []
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { body?: Record<string, unknown> }) => {
+      let data: unknown = []
+      if (path === "/api/v1/persona/catalog") data = [
+        { id: "research_assistant", name: "Research Assistant" },
+        { id: "garden-helper", name: "Garden Helper" }
+      ]
+      if (path === "/api/v1/persona/profiles/research_assistant") data = {
+        id: "research_assistant", version: 1,
+        setup: { status: ++researchReads === 1 ? "completed" : "not_started", current_step: "persona" }
+      }
+      if (path === "/api/v1/persona/profiles/garden-helper") data = {
+        id: "garden-helper", version: 2, setup: { status: "completed", current_step: "test" }
+      }
+      if (path === "/api/v1/persona/session") {
+        connections.push(init?.body || {})
+        data = { session_id: connections.length === 1 ? "old-persona-session" : "new-persona-session", persona: { id: init?.body?.persona_id } }
+      }
+      return Promise.resolve({ ok: true, json: async () => data })
+    })
+    render(<SidepanelPersona />)
+    fireEvent.click(await screen.findByRole("button", { name: "Connect", exact: true }))
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1))
+    act(() => { MockWebSocket.instances[0].emitOpen() })
+    fireEvent.click(await screen.findByRole("button", { name: "Use Garden Helper persona" }))
+    await waitFor(() => expect(screen.queryByTestId("assistant-setup-overlay")).not.toBeInTheDocument())
+    expect(screen.queryByRole("button", { name: "Disconnect", exact: true })).not.toBeInTheDocument()
+    act(() => { MockWebSocket.instances[0].emitMessage(JSON.stringify({
+      event: "assistant_delta", session_id: "old-persona-session", text_delta: "Late former Persona reply"
+    })) })
+    expect(screen.queryByText("Late former Persona reply")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Connect", exact: true }))
+    await waitFor(() => expect(connections).toHaveLength(2))
+    expect(connections[1].persona_id).toBe("garden-helper")
+    expect(connections[1].resume_session_id).toBeUndefined()
+    expect(screen.queryByText("session: old-pers")).not.toBeInTheDocument()
+  })
+
   it("clears the setup live detour when setup is reset", async () => {
     mocks.location.search = "?persona_id=garden-helper&tab=live"
     mocks.getConfig.mockResolvedValue({

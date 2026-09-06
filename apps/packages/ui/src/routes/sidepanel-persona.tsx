@@ -428,6 +428,13 @@ const SidepanelPersona = ({
     () => true
   )
   const triggerRecoveryReconnectRef = React.useRef<() => void>(() => {})
+  const applySetupPersonaSelectionRef = React.useRef<(id: string) => void>(setSelectedPersonaId)
+  const setSetupPersonaId = React.useCallback<React.Dispatch<React.SetStateAction<string>>>(
+    (value) => applySetupPersonaSelectionRef.current(
+      typeof value === "function" ? value(selectedPersonaId) : value
+    ),
+    [selectedPersonaId]
+  )
 
   // Keep refs in sync
   confirmDiscardUnsavedStateDraftsRef.current = stateDocs.confirmDiscardUnsavedStateDrafts
@@ -435,7 +442,7 @@ const SidepanelPersona = ({
   // ── Setup orchestrator hook ──
   const setupOrch = usePersonaSetupOrchestrator({
     selectedPersonaId,
-    setSelectedPersonaId,
+    setSelectedPersonaId: setSetupPersonaId,
     isCompanionMode,
     activeTab,
     setActiveTab,
@@ -557,9 +564,9 @@ const SidepanelPersona = ({
     pendingPlan,
     capabilities,
     capsLoading,
-    routeBootstrapPersonaId: routeBootstrap.personaId,
     routeBootstrapSessionId: routeBootstrap.sessionId,
   })
+  applySetupPersonaSelectionRef.current = liveSession.applyPersonaSelection
   const {
     sessionHistory,
     resumeSessionId,
