@@ -238,7 +238,11 @@ async def list_backups(
             _require_user_id_for_dataset(normalized_dataset, user_id)
         if user_id is not None:
             await _enforce_admin_user_scope(principal, user_id, require_hierarchy=False)
-        items, total = svc_list_backup_items(
+        # Directory scans (now spanning every user_<id>/ subtree for the
+        # unfiltered admin view) are synchronous filesystem work - keep them
+        # off the event loop.
+        items, total = await asyncio.to_thread(
+            svc_list_backup_items,
             dataset=normalized_dataset,
             user_id=user_id,
             limit=limit,

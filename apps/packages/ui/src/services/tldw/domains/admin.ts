@@ -36,7 +36,12 @@ export const adminMethods = {
   },
 
   async resetAdminUserPassword(
-    userId: number
+    userId: number,
+    payload: {
+      temporary_password: string
+      reason: string
+      force_password_change?: boolean
+    }
   ): Promise<{ user_id: number; force_password_change: boolean; message: string }> {
     return await bgRequest<{
       user_id: number
@@ -46,7 +51,10 @@ export const adminMethods = {
       path: `/api/v1/admin/users/${userId}/reset-password`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: {}
+      body: {
+        force_password_change: true,
+        ...payload
+      }
     })
   },
 

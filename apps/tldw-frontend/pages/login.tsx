@@ -1,5 +1,6 @@
 import React from "react"
 import dynamic from "next/dynamic"
+import Link from "next/link"
 import { useRouter } from "next/router"
 
 import { RouteRedirect } from "@web/components/navigation/RouteRedirect"
@@ -68,9 +69,9 @@ const SelfHostLogin: React.FC<{ serverUrl: string }> = ({ serverUrl }) => {
         <h1 className="text-2xl font-semibold text-text">Sign in to tldw</h1>
         <p className="mt-1 text-sm text-text-muted">
           {serverUrl}{" "}
-          <a className="underline hover:text-text" href="/settings/tldw">
+          <Link className="underline hover:text-text" href="/settings/tldw">
             Change server
-          </a>
+          </Link>
         </p>
         <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
           <label className="block">
@@ -110,9 +111,9 @@ const SelfHostLogin: React.FC<{ serverUrl: string }> = ({ serverUrl }) => {
         </form>
         <p className="mt-4 text-xs text-text-muted">
           Trouble signing in? Server URL and auth mode are configured in{" "}
-          <a className="underline hover:text-text" href="/settings/tldw">
+          <Link className="underline hover:text-text" href="/settings/tldw">
             tldw settings
-          </a>
+          </Link>
           .
         </p>
       </div>

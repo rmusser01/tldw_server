@@ -703,6 +703,11 @@ async def ensure_authnz_schema_ready_once() -> None:
                 "AuthNZ Startup: baseline RBAC seed failed (continuing): {}",
                 seed_err,
             )
+            # Do not latch the ensured key on a failed seed: the schema
+            # ensure above is idempotent, and skipping here lets the next
+            # call retry the seed instead of leaving the catalog empty for
+            # the process lifetime.
+            return
 
         _SCHEMA_ENSURED_KEYS.add(key)
 

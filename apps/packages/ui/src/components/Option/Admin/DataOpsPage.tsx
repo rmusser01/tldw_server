@@ -75,7 +75,7 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
     setLoading(true)
     try {
       const result = await tldwClient.listBackups()
-      setBackups(Array.isArray(result) ? result : result?.data ?? result?.backups ?? [])
+      setBackups(Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.backups ?? [])
     } catch (err) {
       onGuardError(err)
     } finally {
@@ -87,7 +87,7 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
     setSchedulesLoading(true)
     try {
       const result = await tldwClient.listBackupSchedules()
-      setSchedules(Array.isArray(result) ? result : result?.data ?? result?.schedules ?? [])
+      setSchedules(Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.schedules ?? [])
     } catch (err) {
       onGuardError(err)
     } finally {
@@ -443,7 +443,7 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
               rules={[
                 { required: true, message: t("settings:adminDataOps.timeRequired", "Time is required") },
                 {
-                  pattern: /^\d{2}:\d{2}$/,
+                  pattern: /^([01]\d|2[0-3]):[0-5]\d$/,
                   message: t("settings:adminDataOps.timeFormat", "Use 24h HH:MM, e.g. 02:00")
                 }
               ]}
