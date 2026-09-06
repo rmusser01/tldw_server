@@ -1,0 +1,13 @@
+Types: deb deb-src
+URIs: https://snapshot.debian.org/archive/debian/20260906T000000Z/
+Suites: trixie trixie-updates
+Components: main
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+Check-Valid-Until: no
+
+Types: deb deb-src
+URIs: https://snapshot.debian.org/archive/debian-security/20260906T000000Z/
+Suites: trixie-security
+Components: main
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+Check-Valid-Until: no

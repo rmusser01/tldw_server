@@ -23,6 +23,25 @@ These names are not interchangeable across categories. In particular, the HLS de
 
 `ffmpeg`, `ffprobe`, and `ffplay` are all retained. The build fails when an enabled dependency cannot be configured or compiled.
 
+## Debian dependency snapshot
+
+Both the builder and candidate runtime inherit one snapshot base using the same pinned Python image and the repository definition in `debian.sources`. Debian main and source packages resolve from `20260906T000000Z` for `trixie` and `trixie-updates`; security packages resolve from the same timestamp for `trixie-security`. No moving Debian mirror or configurable snapshot override remains.
+
+Debian Snapshot defines a timestamp as the latest archive import no later than that fixed time. Each historical source stanza sets `Check-Valid-Until: no` so archival metadata can be replayed after its normal expiry, as described in [Debian Snapshot usage](https://snapshot.debian.org/#usage). This does not disable signature authentication: both stanzas retain `Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg`, and no trusted, insecure, or unauthenticated APT option is enabled.
+
+The `build-deps` stage ends immediately after snapshot package resolution and evidence capture, before source download or compilation. It can be used by the controller to verify dependency availability without rebuilding FFmpeg:
+
+```bash
+docker build \
+  --target build-deps \
+  --file Dockerfiles/candidates/ffmpeg/Dockerfile \
+  .
+```
+
+The image retains the exact source definition and the actual signed `InRelease` files consumed by each `apt-get update` under separate `apt-build/` and `apt-runtime/` evidence directories. Missing metadata for any expected suite fails the stage before APT lists are cleared. Existing exact build and runtime package manifests remain separate.
+
+This makes Debian dependency selection reproducible for the fixed snapshot. It does not claim byte-identical or bit-reproducible compilation: toolchain behavior, build paths, timestamps, and other build-process inputs can still affect image bytes. A rebuild therefore still needs a new immutable identity, evaluation, SBOM, and vulnerability review.
+
 ## Build and evaluate
 
 Build this candidate from the repository root:
@@ -35,7 +54,7 @@ docker build \
 docker image inspect --format '{{.Id}}' tldw-ffmpeg9-candidate:task-13013-7-6
 ```
 
-The builder derives a complete library inventory from the final ELF files, fails on unresolved libraries or old libav ABI, maps canonical library paths to Debian package owners, and writes exact `package=version` requirements. The runtime stage installs that derived set and verifies the installed versions. Evidence under `/opt/tldw-ffmpeg9/share/candidate/` keeps source identities, signature status, exact `-buildconf`, all builder package versions, required runtime package versions, installed runtime package versions, and build/runtime `ldd` results. Build packages and runtime components are deliberately recorded separately.
+The builder derives a complete library inventory from the final ELF files, fails on unresolved libraries or old libav ABI, maps canonical library paths to Debian package owners, and writes exact `package=version` requirements. The runtime stage installs that derived set and verifies the installed versions. Evidence under `/opt/tldw-ffmpeg9/share/candidate/` keeps repository sources and signed metadata, source identities, signature status, exact `-buildconf`, all builder package versions, required runtime package versions, installed runtime package versions, and build/runtime `ldd` results. Build packages and runtime components are deliberately recorded separately.
 
 Run the helper inside the exact image under evaluation. Mount only the helper, baseline, and pinned source archive read-only. The container runs without network access, Linux capabilities, or root privileges and writes only to its own `/tmp`; copy the evidence out after the evaluation container stops:
 
