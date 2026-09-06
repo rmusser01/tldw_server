@@ -11,6 +11,7 @@ export type KnownServicePromptId =
   | "chat.title.generation"
   | "image.prompt.refinement"
   | "media.document.summarization"
+  | "media.document.insights"
   | "media.pdf.summarization"
   | "media.ebook.summarization"
   | "media.email.summarization"

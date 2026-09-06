@@ -117,6 +117,26 @@ Text to translate:
 _NOTES_TITLE_SYSTEM_DEFAULT = "You are a helpful assistant that writes concise document titles."
 _NOTES_TITLE_INSTRUCTION_DEFAULT = "Write a descriptive title"
 
+_DOCUMENT_INSIGHTS_ANALYSIS_DEFAULT = """You are a research analyst. Analyze the following document and extract structured insights.
+For each category, provide a concise title and detailed content.
+
+Categories to analyze:
+- research_gap: What problem or gap does this work address?
+- research_question: What is the main research question?
+- motivation: Why is this research important?
+- methods: What methods or approaches were used?
+- key_findings: What are the main results or findings?
+- limitations: What are the limitations or caveats?
+- future_work: What future work is suggested?
+- summary: A brief 2-3 sentence summary"""
+
+_DOCUMENT_INSIGHTS_PRESENTATION_DEFAULT = """Important:
+- Only include categories that are relevant to the document
+- Keep titles short (5-10 words)
+- Keep content concise but informative (1-3 sentences)
+- If the document is not a research paper, adapt the categories as appropriate
+- For non-academic documents, focus on: summary, key_findings, and any applicable categories"""
+
 _DOCUMENT_SUMMARY_SYSTEM_DEFAULT = """You are a bulleted notes specialist. ```When creating comprehensive bulleted notes, you should follow these guidelines: Use multiple headings based on the referenced topics, not categories like quotes or terms. Headings should be surrounded by bold formatting and not be listed as bullet points themselves. Leave no space between headings and their corresponding list items underneath. Important terms within the content should be emphasized by setting them in bold font. Any text that ends with a colon should also be bolded. Before submitting your response, review the instructions, and make any corrections necessary to adhered to the specified format. Do not reference these instructions within the notes.```
 Based on the content between backticks create comprehensive bulleted notes.
 **Bulleted Note Creation Guidelines**
@@ -367,11 +387,35 @@ _DEFINITION_SEQUENCE = (
             ServicePromptPart(key="system", label="System instructions", mode="literal", required_variables=()),
             ServicePromptPart(key="user", label="User instructions", mode="literal", required_variables=()),
         ),
-        default_parts=MappingProxyType({
-            "system": "You are a professional summarizer who produces accurate, concise summaries of web content.",
-            "user": "Summarize this article concisely. Focus on the main points, facts, and any actionable insights.",
-        }),
-        affected_workflows=(ServicePromptWorkflow(id="media.web.summarization", label="Synchronous web scraping and ingestion"),),
+        default_parts=MappingProxyType(
+            {
+                "system": "You are a professional summarizer who produces accurate, concise summaries of web content.",
+                "user": "Summarize this article concisely. Focus on the main points, facts, and any actionable insights.",
+            }
+        ),
+        affected_workflows=(
+            ServicePromptWorkflow(id="media.web.summarization", label="Synchronous web scraping and ingestion"),
+        ),
+    ),
+    ServicePromptDefinition(
+        id="media.document.insights",
+        label="Document Insights",
+        description="Controls analysis and presentation guidance for document insights. JSON output requirements and requested categories remain fixed.",
+        parts=(
+            ServicePromptPart(
+                key="analysis_guidance", label="Analysis guidance", mode="literal", required_variables=()
+            ),
+            ServicePromptPart(
+                key="presentation_guidance", label="Presentation guidance", mode="literal", required_variables=()
+            ),
+        ),
+        default_parts=MappingProxyType(
+            {
+                "analysis_guidance": _DOCUMENT_INSIGHTS_ANALYSIS_DEFAULT,
+                "presentation_guidance": _DOCUMENT_INSIGHTS_PRESENTATION_DEFAULT,
+            }
+        ),
+        affected_workflows=(ServicePromptWorkflow(id="media.document.insights", label="Document workspace insights"),),
     ),
     ServicePromptDefinition(
         id="media.text.translation",
@@ -616,10 +660,12 @@ def resolve_service_prompt_default(definition: ServicePromptDefinition) -> Resol
     elif definition.id == "media.web.summarization":
         from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 
-        parts = MappingProxyType({
-            "system": load_prompt("webscraping", "article_summary_system") or "You are a professional summarizer.",
-            "user": load_prompt("webscraping", "article_summary_user") or "Summarize this article concisely.",
-        })
+        parts = MappingProxyType(
+            {
+                "system": load_prompt("webscraping", "article_summary_system") or "You are a professional summarizer.",
+                "user": load_prompt("webscraping", "article_summary_user") or "Summarize this article concisely.",
+            }
+        )
     elif definition.id == "media.audio.analysis":
         from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import _resolve_default_system_prompt
         from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt

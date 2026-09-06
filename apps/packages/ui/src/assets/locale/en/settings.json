@@ -51,6 +51,10 @@
         "label": "Document summarization",
         "description": "Controls system instructions for synchronous document analysis. Without a saved override, server defaults apply."
       },
+      "mediaDocumentInsights": {
+        "label": "Document Insights",
+        "description": "Controls analysis and presentation guidance for document insights. JSON output requirements and requested categories remain fixed."
+      },
       "mediaPdfSummarization": {
         "label": "PDF summarization",
         "description": "Controls system instructions for synchronous PDF analysis. Without a saved override, server defaults apply."
@@ -97,6 +101,7 @@
       "audioAnalysis": "Synchronous audio analysis",
       "videoSummarization": "Synchronous video analysis",
       "webSummarization": "Synchronous web scraping and ingestion",
+      "documentInsights": "Document workspace insights",
       "automaticNotesTitles": "Automatic Notes titles"
     },
     "titleGeneration": {
@@ -109,6 +114,8 @@
       "user": "User instructions",
       "finalSummary": "Final-summary instructions",
       "systemSemantics": "Refinement guidance",
+      "analysisGuidance": "Analysis guidance",
+      "presentationGuidance": "Presentation guidance",
       "rewriteSemantics": "Rewrite guidance",
       "titleInstruction": "Title instruction",
       "userTemplate": "User template"

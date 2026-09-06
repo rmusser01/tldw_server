@@ -236,7 +236,24 @@ def test_service_prompt_catalog_returns_exact_metadata_without_prompt_bodies(
                 {"key": "system", "label": "System instructions", "mode": "literal", "required_variables": []},
                 {"key": "user", "label": "User instructions", "mode": "literal", "required_variables": []},
             ],
-            "affected_workflows": [{"id": "media.web.summarization", "label": "Synchronous web scraping and ingestion"}],
+            "affected_workflows": [
+                {"id": "media.web.summarization", "label": "Synchronous web scraping and ingestion"}
+            ],
+        },
+        {
+            "id": "media.document.insights",
+            "label": "Document Insights",
+            "description": "Controls analysis and presentation guidance for document insights. JSON output requirements and requested categories remain fixed.",
+            "parts": [
+                {"key": "analysis_guidance", "label": "Analysis guidance", "mode": "literal", "required_variables": []},
+                {
+                    "key": "presentation_guidance",
+                    "label": "Presentation guidance",
+                    "mode": "literal",
+                    "required_variables": [],
+                },
+            ],
+            "affected_workflows": [{"id": "media.document.insights", "label": "Document workspace insights"}],
         },
         {
             "id": "media.text.translation",

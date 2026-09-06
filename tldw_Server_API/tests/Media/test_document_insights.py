@@ -12,7 +12,7 @@ from httpx import ASGITransport, AsyncClient
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.endpoints.media import document_insights as insights_mod
 from tldw_Server_API.app.api.v1.schemas.document_insights import GenerateInsightsRequest
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 
 
 async def _allow_non_authz_dep() -> None:
@@ -44,10 +44,7 @@ def reset_app_dependency_overrides():
 
 @pytest.fixture
 def mock_user():
-    user = MagicMock()
-    user.id = 1
-    user.username = "testuser"
-    return user
+    return User(id=1, username="testuser")
 
 
 @pytest.fixture
@@ -169,6 +166,7 @@ def test_build_insights_cache_key_includes_scope_and_length(mock_db):
         user_id="42",
         db_scope=mock_db.db_path_str,
         max_content_length=1234,
+        prompt_fingerprint="test-fingerprint",
     )
     assert "user:42" in key
     assert f"db:{mock_db.db_path_str}" in key
@@ -182,10 +180,7 @@ async def test_generate_document_insights_parses_fenced_json_with_think(mock_use
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
 
     fenced_payload = (
-        "<think>analysis</think>\n"
-        "```json\n"
-        '{"insights":[{"category":"summary","title":"T","content":"C"}]}\n'
-        "```"
+        '<think>analysis</think>\n```json\n{"insights":[{"category":"summary","title":"T","content":"C"}]}\n```'
     )
 
     with (
@@ -355,9 +350,7 @@ async def test_generate_document_insights_sanitizes_configuration_errors(mock_us
 
     assert response.status_code == 503
     assert response.json()["detail"] == "LLM provider configuration error"
-    assert [args[0] for args, _kwargs in logger_stub.error_calls if args] == [
-        "LLM configuration error for insights"
-    ]
+    assert [args[0] for args, _kwargs in logger_stub.error_calls if args] == ["LLM configuration error for insights"]
     assert all(not kwargs.get("exc_info") for _args, kwargs in logger_stub.error_calls)
     rendered_calls = repr(logger_stub.error_calls)
     assert "Model is required" not in rendered_calls

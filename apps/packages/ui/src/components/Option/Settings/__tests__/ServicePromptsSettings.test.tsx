@@ -299,6 +299,16 @@ const catalog: ServicePromptCatalogItem[] = [
     affected_workflows: [
       { id: "notes.title.generate", label: "Server Notes title workflow" }
     ]
+  },
+  {
+    id: "media.document.insights",
+    label: "Server insights prompt",
+    description: "Server insights description",
+    parts: [
+      { key: "analysis_guidance", label: "Analysis guidance", mode: "literal", required_variables: [] },
+      { key: "presentation_guidance", label: "Presentation guidance", mode: "literal", required_variables: [] }
+    ],
+    affected_workflows: [{ id: "media.document.insights", label: "Server insights workflow" }]
   }
 ]
 
@@ -310,7 +320,9 @@ const detailFor = (
     parts?: Record<string, string>
   } = {}
 ): ServicePromptDetail => {
-  const defaults = definition.id === "media.web.summarization"
+  const defaults = definition.id === "media.document.insights"
+    ? { analysis_guidance: "Extract research insights.", presentation_guidance: "Use concise titles." }
+    : definition.id === "media.web.summarization"
     ? { system: "Web system guidance.", user: "Web summary guidance." }
     : definition.id === "media.video.summarization"
     ? { system: "Video system guidance.", final_summary: "Combine video summaries." }
@@ -581,7 +593,7 @@ describe("ServicePromptsSettings", () => {
     renderSettings()
 
     expect(await screen.findAllByTestId("service-prompt-list-item"))
-      .toHaveLength(14)
+      .toHaveLength(15)
     expect(await screen.findByRole("heading", { name: "Text translation" }))
       .toBeInTheDocument()
     expect(screen.getByText("Server default")).toBeInTheDocument()
@@ -641,6 +653,23 @@ describe("ServicePromptsSettings", () => {
     expect(screen.getByText("Synchronous PDF analysis")).toBeVisible()
     expect(screen.getAllByText(/Without a saved override, server defaults apply/)[0]).toBeVisible()
     expect(screen.queryByText("Server PDF prompt")).not.toBeInTheDocument()
+  })
+
+  it("edits document insights guidance without exposing its JSON contract", async () => {
+    renderSettings()
+    await openPrompt("Document Insights")
+    expect(screen.getByLabelText("Analysis guidance")).toHaveValue("Extract research insights.")
+    expect(screen.getByLabelText("Presentation guidance")).toHaveValue("Use concise titles.")
+    expect(screen.getByText("Document workspace insights")).toBeVisible()
+    expect(screen.getByText(/JSON output requirements and requested categories remain fixed/, { selector: "p" })).toBeVisible()
+    fireEvent.change(screen.getByLabelText("Analysis guidance"), { target: { value: "Focus on methods {literally}" } })
+    fireEvent.change(screen.getByLabelText("Presentation guidance"), { target: { value: "Write in French" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledWith(
+      "media.document.insights",
+      { parts: { analysis_guidance: "Focus on methods {literally}", presentation_guidance: "Write in French" }, expected_revision: null },
+      { signal: expect.any(AbortSignal), requestScope: scopeOne }
+    ))
   })
 
   it("edits web system and summary instructions as one pair", async () => {

@@ -119,6 +119,15 @@ EXPECTED_REGISTRY = {
         "parts": (("system", "System instructions", "literal", ()), ("user", "User instructions", "literal", ())),
         "workflows": (("media.web.summarization", "Synchronous web scraping and ingestion"),),
     },
+    "media.document.insights": {
+        "label": "Document Insights",
+        "description": "Controls analysis and presentation guidance for document insights. JSON output requirements and requested categories remain fixed.",
+        "parts": (
+            ("analysis_guidance", "Analysis guidance", "literal", ()),
+            ("presentation_guidance", "Presentation guidance", "literal", ()),
+        ),
+        "workflows": (("media.document.insights", "Document workspace insights"),),
+    },
     "media.text.translation": {
         "label": "Text translation",
         "description": "Controls the visible instructions used by synchronous text translation.",
