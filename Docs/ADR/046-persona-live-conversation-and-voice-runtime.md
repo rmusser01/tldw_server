@@ -64,3 +64,68 @@ Persona enables the existing local Whisper `vad_filter` independently of its tur
 Persona Whisper keeps one bounded turn and revises its full transcript. It does not concatenate five-second finalized text with a decoded overlap. The existing Whisper loader, speech filter and model selection are retained; the generic streaming endpoints and other Persona STT backends are unchanged. Reset/Stop clears the turn. The existing 30-second audio buffer bound becomes an explicit rejection before overflow, rather than silently dropping earlier audio. The browser receives an actionable shorter-turn retry message through the existing owned STT failure path. Full-buffer decoding trades additional work on long turns for coherent revisions within that bound.
 
 Real local-model probes rejected zero overlap: it stopped some duplicated words but corrupted boundary words. Textual suffix/prefix deduplication was rejected because repeated speech is valid. Timestamp-based fragment reconciliation remains an alternative for future long-form streaming, which is outside this bounded Persona conversation path.
+
+### Responsive Whisper ownership (TASK-13208)
+
+Whole-turn Whisper decoding runs outside the socket event loop. Audio ingestion
+returns promptly and coalesces incoming samples in the existing bounded turn
+buffer; each transcriber admits one decode at a time. The partial interval starts
+when inference completes, and unchanged audio is not decoded again. Completed
+snapshots are delivered on subsequent audio frames, retaining the existing manual
+commit contract: Send now commits the transcript currently shown.
+
+Automatic VAD commitment freezes the exact audio boundary and waits for its
+recognition snapshot, including utterances shorter than the partial-update
+minimum. Later audio stays within the same bounded buffer and is replayed once
+to the fresh transcriber turn and detector after automatic commitment. Manual
+commitment, Stop and session changes discard that carry. A VAD event cannot
+commit an older partial or combine speech from a later turn.
+
+Recognition reuses Chat's bounded task and owned-operation helpers, including a
+30-second deadline and reserved cleanup capacity. Reset invalidates publication
+authority without cancelling native inference. Stop/disconnect retire the
+transcriber immediately, but release its model only after its worker exits. A
+timeout or cancelled supervisor retains that ownership through the existing late
+cleanup path. Capacity rejection starts no decoder and reaches the existing STT
+failure response. No additional executor or unbounded per-frame task queue is
+introduced.
+
+Awaiting a thread directly in audio ingestion was rejected: it frees the event
+loop but still holds the socket receive loop, delaying Stop. Cancelling a thread
+future and immediately clearing its model was rejected because native inference
+may still be using it. Other speech backends and model selection are unchanged.
+
+### Whole-turn Parakeet ONNX snapshots (TASK-13210)
+
+Physical UAT sent stale recognized fragments that the requester had not spoken.
+A paced local ONNX probe reproduced a mistaken early final retained alongside a
+later corrected decode. Persona now applies its existing bounded whole-turn
+contract to explicit `parakeet-onnx` selection, reusing the owned scheduler
+extracted from the Whisper adapter. Whisper retains its existing loader and
+recognition options; ONNX retains its existing decoder, CPU model cache and
+custom vocabulary processing. Generic streaming routes and other STT selections
+are unchanged. ONNX model loading remains lazy, so preparation is not proof of
+actual inference availability.
+
+One complete transcript replaces the previous revision, including an empty
+correction. There is no word blacklist or repetition removal. The 30-second
+bound, retained worker cleanup, responsive ingestion, and frozen VAD boundary
+apply to both adapters. Manual Send now still submits the currently displayed
+revision. Full-turn decoding prevents stale chunk concatenation but cannot
+promise accurate intermediate hypotheses or perfect recognition of human audio.
+
+### Recognition failures and diagnostics (TASK-13212)
+
+Persona's ONNX adapter maps the legacy decoder's six exact error-status strings
+to a typed `PersonaVoiceRecognitionError` before vocabulary processing or transcript
+publication. Stopped and unavailable recognition use the same safe exception
+contract with distinct codes. Ordinary words and bracketed speech are preserved;
+this is not a general phrase filter, and the legacy file API is unchanged.
+
+Audio ingestion supplies bounded session/client correlation through the existing
+logger context inherited by background decoding. Failure records retain model,
+generation and up to 20 traceback locations (basename, line and function), excluding
+exception messages, source lines and locals. Logging a native exception object
+was rejected because decoder exception payloads and frame locals can contain
+private speech, credentials or audio. The socket's existing STT failure path
+revokes readiness and returns its safe retry notice.

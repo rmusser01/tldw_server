@@ -112,6 +112,10 @@ def create_persona_live_stt_transcriber(*, voice_runtime: dict[str, Any] | None)
         from tldw_Server_API.app.core.Persona.whisper_transcriber import PersonaWhisperTranscriber
 
         return PersonaWhisperTranscriber(config)
+    if config.model == "parakeet" and config.model_variant == "onnx":
+        from tldw_Server_API.app.core.Persona.parakeet_transcriber import PersonaParakeetOnnxTranscriber
+
+        return PersonaParakeetOnnxTranscriber(config)
     return UnifiedStreamingTranscriber(config)
 
 

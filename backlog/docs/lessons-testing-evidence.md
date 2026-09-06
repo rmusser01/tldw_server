@@ -1,5 +1,19 @@
 # Testing Evidence Lessons
 
+## Background recognition changes the meaning of VAD completion
+
+**Incident (TASK-13208, 2026-09-06):** Moving Persona Whisper inference off the
+socket loop passed responsiveness and cleanup regressions, but independent
+review found that VAD could now commit an old partial before decoding finished.
+The correction freezes the VAD audio boundary, waits for that exact snapshot,
+and replays later audio into the next transcriber turn and detector once.
+
+**Evidence and rule:** The WebSocket regression blocks recognition, triggers
+VAD, sends later speech, then verifies the full first transcript and its original
+correlation ID plus exact carry into the next turn. When moving work into the
+background, test consumers that previously relied on synchronous completion;
+responsive Stop alone does not prove automatic finalization remains correct.
+
 ## Canonical after-commit may still be inside a Sync savepoint
 
 **Incident (TASK-13163, PR #2910 review, 2026-09-05):** Adding the usual
@@ -250,3 +264,16 @@ Persona overwrote completion and sent the user back to Voice defaults.
 completion and saved speech defaults in the same reload/reselection flow.
 Include a fresh-page return to a completed profile in setup acceptance; the
 initial success screen cannot prove that subsequent selection preserves it.
+
+## Speech probes must match callback cadence
+
+**Incident (TASK-13210, 2026-09-06):** An ONNX probe that slept a full capture
+interval after each awaited decode produced only partials and missed stale chunk
+history. Accounting for decode elapsed time reproduced an early mistaken final
+retained next to a corrected whole phrase; physical UAT also sent repeated words
+that the requester had not said.
+
+**Evidence and rule:** Match the real capture cadence and include leading/trailing
+silence and chunk boundaries. Assert the final complete transcript, not whether
+any partial contains the expected substring. Preserve intermediate hypotheses in
+sanitized evidence so a corrected final does not hide earlier errors.
