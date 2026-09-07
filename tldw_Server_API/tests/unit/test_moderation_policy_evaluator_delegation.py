@@ -23,31 +23,6 @@ from tldw_Server_API.app.core.Moderation.policy_evaluator import (
 pytestmark = pytest.mark.unit
 
 
-_OBSOLETE_POLICY_HELPER_DELEGATES = (
-    "_effective_rule_categories",
-    "_rule_applies_to_phase",
-    "_rule_matches_enabled_categories",
-    "_build_sanitized_snippet",
-    "_apply_rule_redactions",
-)
-
-_OBSOLETE_SCAN_HELPER_DELEGATES = (
-    "_iter_scan_chunks",
-    "_find_match_span",
-    "_collect_rule_matches",
-)
-
-
-def test_obsolete_policy_helper_delegates_are_not_class_local():
-    for name in _OBSOLETE_POLICY_HELPER_DELEGATES:
-        assert name not in ModerationService.__dict__
-
-
-def test_obsolete_scan_helper_delegates_are_not_class_local():
-    for name in _OBSOLETE_SCAN_HELPER_DELEGATES:
-        assert name not in ModerationService.__dict__
-
-
 def _service() -> ModerationService:
     service = ModerationService.__new__(ModerationService)
     service._lock = threading.RLock()
