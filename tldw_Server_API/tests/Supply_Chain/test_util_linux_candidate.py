@@ -176,9 +176,17 @@ sed -n "s/^$3: //p" "$2"
     return package_dir, env
 
 
-def _write_package_control(package_dir: Path, package: str, version: str, source: str) -> None:
-    (package_dir / f"{package}.deb").write_text(
-        f"Package: {package}\nVersion: {version}\nSource: {source}\n",
+def _write_package_control(
+    package_dir: Path,
+    package: str,
+    version: str,
+    source: str,
+    *,
+    architecture: str = "amd64",
+    filename: str | None = None,
+) -> None:
+    (package_dir / (filename or f"{package}.deb")).write_text(
+        f"Package: {package}\nVersion: {version}\nSource: {source}\nArchitecture: {architecture}\n",
         encoding="utf-8",
     )
 
@@ -201,10 +209,11 @@ esac
         fake_bin / "apt-get",
         """#!/bin/sh
 printf 'apt-get %s\\n' "$*" >> "$FAKE_INSTALL_LOG"
-if test "$1" = install; then
-  exit "${FAKE_APT_INSTALL_STATUS:-0}"
-fi
-test "$1" = check
+case " $* " in
+  *" install "*) exit "${FAKE_APT_INSTALL_STATUS:-0}" ;;
+  " check ") exit 0 ;;
+  *) exit 2 ;;
+esac
 """,
     )
     _write_executable(
@@ -442,23 +451,42 @@ def test_install_uses_apt_for_every_local_package_with_offline_safety_guards(tmp
     package_dir = tmp_path / "packages"
     package_dir.mkdir()
     evidence = tmp_path / "evidence"
-    for package in ("libblkid1", "mount", "util-linux"):
+    cache_dir = tmp_path / "apt-archives"
+    packages = {
+        "bsdutils": ("1:2.41.5-0+deb13u1+tldw1", "amd64"),
+        "libblkid1": ("2.41.5-0+deb13u1+tldw1", "amd64"),
+        "mount": ("2.41.5-0+deb13u1+tldw1", "amd64"),
+        "util-linux": ("2.41.5-0+deb13u1+tldw1", "amd64"),
+        "util-linux-locales": ("2.41.5-0+deb13u1+tldw1", "all"),
+    }
+    for package, (version, architecture) in packages.items():
         _write_package_control(
             package_dir,
             package,
-            "2.41.5-0+deb13u1+tldw1",
+            version,
             "util-linux (2.41.5-0+deb13u1+tldw1)",
+            architecture=architecture,
         )
     env = _install_command_environment(tmp_path, package_dir)
 
-    result = _run_qualify("install-packages", str(package_dir), str(evidence), env=env)
+    result = _run_qualify(
+        "install-packages",
+        str(package_dir),
+        str(evidence),
+        str(cache_dir),
+        env=env,
+    )
 
     assert result.returncode == 0, result.stderr
     commands = (tmp_path / "install-commands.log").read_text().splitlines()
     assert commands[0] == (
-        "apt-get install -y --no-download --no-remove --no-install-recommends "
-        + " ".join(str(package_dir / f"{package}.deb") for package in ("libblkid1", "mount", "util-linux"))
+        f"apt-get -o Dir::Cache::archives={cache_dir}/ "
+        "install -y --no-download --no-remove --no-install-recommends "
+        + " ".join(str(path) for path in sorted(package_dir.glob("*.deb")))
     )
+    for package, (version, architecture) in packages.items():
+        cache_name = f"{package}_{version.replace(':', '%3a')}_{architecture}.deb"
+        assert (cache_dir / cache_name).read_bytes() == (package_dir / f"{package}.deb").read_bytes()
     assert "apt-get check" in commands
     assert "dpkg --audit" in commands
     assert all(
@@ -472,6 +500,7 @@ def test_apt_install_failure_stops_audit_smokes_and_success_marker(tmp_path: Pat
     package_dir = tmp_path / "packages"
     package_dir.mkdir()
     evidence = tmp_path / "evidence"
+    cache_dir = tmp_path / "apt-archives"
     _write_package_control(
         package_dir,
         "util-linux",
@@ -481,15 +510,98 @@ def test_apt_install_failure_stops_audit_smokes_and_success_marker(tmp_path: Pat
     env = _install_command_environment(tmp_path, package_dir)
     env["FAKE_APT_INSTALL_STATUS"] = "42"
 
-    result = _run_qualify("install-packages", str(package_dir), str(evidence), env=env)
+    result = _run_qualify(
+        "install-packages",
+        str(package_dir),
+        str(evidence),
+        str(cache_dir),
+        env=env,
+    )
 
     assert result.returncode == 42
     commands = (tmp_path / "install-commands.log").read_text().splitlines()
     assert len(commands) == 1
-    assert commands[0].startswith("apt-get install -y --no-download --no-remove --no-install-recommends ")
+    assert commands[0].startswith(
+        f"apt-get -o Dir::Cache::archives={cache_dir}/ " "install -y --no-download --no-remove --no-install-recommends "
+    )
+    assert (cache_dir / "util-linux_2.41.5-0+deb13u1+tldw1_amd64.deb").read_bytes() == (
+        package_dir / "util-linux.deb"
+    ).read_bytes()
     assert (evidence / "install").is_dir()
     assert not (evidence / "install/dpkg-audit.txt").exists()
     assert not (evidence / "install/smoke-tests.log").exists()
+    assert not (evidence / "status/install.exit").exists()
+
+
+@pytest.mark.parametrize(
+    ("package", "architecture", "error"),
+    [
+        ("unsafe/name", "amd64", "unsafe package metadata"),
+        ("util-linux", "arm64", "unsupported package architecture"),
+    ],
+)
+def test_install_rejects_unsafe_metadata_before_cache_staging_or_apt(
+    tmp_path: Path, package: str, architecture: str, error: str
+) -> None:
+    package_dir = tmp_path / "packages"
+    package_dir.mkdir()
+    evidence = tmp_path / "evidence"
+    cache_dir = tmp_path / "apt-archives"
+    _write_package_control(
+        package_dir,
+        package,
+        "2.41.5-0+deb13u1+tldw1",
+        "util-linux (2.41.5-0+deb13u1+tldw1)",
+        architecture=architecture,
+        filename="candidate.deb",
+    )
+    env = _install_command_environment(tmp_path, package_dir)
+
+    result = _run_qualify(
+        "install-packages",
+        str(package_dir),
+        str(evidence),
+        str(cache_dir),
+        env=env,
+    )
+
+    assert result.returncode != 0
+    assert error in result.stderr
+    assert not cache_dir.exists()
+    assert not (tmp_path / "install-commands.log").exists()
+
+
+def test_install_rejects_duplicate_canonical_cache_names_before_copy_or_apt(tmp_path: Path) -> None:
+    package_dir = tmp_path / "packages"
+    package_dir.mkdir()
+    evidence = tmp_path / "evidence"
+    cache_dir = tmp_path / "apt-archives"
+    for filename, payload in (("first.deb", "first bytes\n"), ("second.deb", "second bytes\n")):
+        _write_package_control(
+            package_dir,
+            "util-linux",
+            "2.41.5-0+deb13u1+tldw1",
+            "util-linux (2.41.5-0+deb13u1+tldw1)",
+            filename=filename,
+        )
+        with (package_dir / filename).open("a", encoding="utf-8") as package_file:
+            package_file.write(payload)
+    original_bytes = {path.name: path.read_bytes() for path in package_dir.glob("*.deb")}
+    env = _install_command_environment(tmp_path, package_dir)
+
+    result = _run_qualify(
+        "install-packages",
+        str(package_dir),
+        str(evidence),
+        str(cache_dir),
+        env=env,
+    )
+
+    assert result.returncode != 0
+    assert "duplicate APT cache metadata" in result.stderr
+    assert not cache_dir.exists()
+    assert not (tmp_path / "install-commands.log").exists()
+    assert {path.name: path.read_bytes() for path in package_dir.glob("*.deb")} == original_bytes
     assert not (evidence / "status/install.exit").exists()
 
 
