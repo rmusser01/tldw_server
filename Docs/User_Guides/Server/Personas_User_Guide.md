@@ -256,8 +256,17 @@ then **Start listening**. Preparation checks the configured Chat target and
 prepares the selected STT and TTS services before the browser requests microphone
 access. Under **Profiles**, choose **TTS provider**, optionally set **TTS model**
 and **TTS voice**, and choose **Save assistant defaults**. Blank model and voice
-fields use the selected provider's applicable defaults. The Live STT/TTS summaries
-show the effective settings; change saved selections under Profiles.
+fields use the selected provider's applicable defaults. A blank voice uses the
+server's configured voice only when the selected provider is its default provider;
+otherwise the selected adapter resolves its default. Browser-wide voice preferences
+do not override a blank Persona voice. The **browser** provider uses its native
+default voice when this field is blank.
+
+After saving changes, choose **Disconnect → Connect** if Live was connected.
+Connected sessions keep their original voice settings until reconnect; returning
+from Profiles or retrying Start does not refresh them. Live shows the provider,
+model selection and voice for the current connection. A “default model” or
+“default voice” label leaves that value for the provider to resolve.
 
 The provider list includes **browser**, registered server providers, and configured
 speech gateways. Browser speech uses the browser's speech synthesis and available

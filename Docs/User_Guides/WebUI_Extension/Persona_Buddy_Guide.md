@@ -82,8 +82,16 @@ idle or speaking image alone is not evidence that the provider returned an answe
 Before recording, open **Profiles**, set **STT model** and **TTS provider**, then
 choose **Save assistant defaults**. **TTS model** and **TTS voice** are optional
 overrides: leave them blank to use the selected provider's applicable defaults,
-or enter values that provider supports. Return to the intended Live session and
-check its displayed settings before starting.
+or enter values that provider supports. A blank voice uses the server's configured
+voice when this is its default provider; otherwise the selected adapter supplies
+its own default. Browser-wide voice preferences do not override a blank Persona
+voice. For **browser**, blank selects the browser's native default voice.
+
+If Live is already connected, choose **Disconnect**, then **Connect** after saving.
+A connected session keeps the settings captured when it connected. Returning from
+Profiles or choosing Start again does not apply saved changes. Check Live's TTS
+provider, model selection and voice before starting; “default model” or “default
+voice” means the provider will resolve that omitted value.
 
 Choose **browser** for the browser's speech synthesis, or choose a server TTS
 provider or configured speech gateway from the provider list. A listed provider
@@ -95,14 +103,14 @@ provider shown in Live. See [TTS setup](TTS-SETUP-GUIDE.md) for provider setup.
 
 Persona Live uses the selected route and does not silently switch providers when
 preparation or synthesis fails. Fix the reported setup problem or explicitly
-select another provider. Browser speech requires browser support and an available
+select another provider, save defaults, and reconnect Live. Browser speech requires browser support and an available
 voice; server readiness cannot prove that browser playback will work.
 
 Start with manual control so you decide when recognized speech is submitted:
 
 1. From Buddy, open **Open Full Live View** for the intended session. If the
    session is disconnected, choose **Connect**.
-2. Check the displayed **STT** model/language and **TTS** provider/voice. These
+2. Check the displayed **STT** model/language and **TTS** provider/model/voice. These
    are read-only summaries; correct them under **Profiles** and save the assistant
    defaults if they are wrong.
 3. Leave **Auto-commit**, **Auto-resume**, and **Barge-in** off for the initial
@@ -167,7 +175,7 @@ that it is the one shown by Buddy.
 | **Send now** is unavailable | It needs recognized speech in the current listening turn. If you already stopped, sent, or disconnected, start a fresh turn or use text. |
 | Wrong or repeated words | Wait for the provisional text to settle before sending; pause background audio. If wrong, cancel and retry. A successful previous phrase does not guarantee the next one. |
 | No reply or no sound | Read the provider/TTS error and committed transcript. Check browser audio permission, output device, volume, and the selected voice. An audio-chunk notice or animated sprite alone does not prove audible playback. |
-| Selected TTS provider fails | Check that provider's model, voice, dependencies or credentials. For a gateway, check its configured route. Persona Live does not silently substitute Kokoro or another provider. |
+| Selected TTS provider fails | Check that provider's model, voice, dependencies or credentials. After changing saved defaults, choose **Disconnect → Connect** in Live. For a gateway, check its configured route. Persona Live does not silently substitute Kokoro or another provider. |
 | Voice prepares but Chat fails | Check the actual Chat error, authenticated access, effective credentials, and budget. Preparation checks the target; Chat admission happens when the turn is submitted. |
 | Shorter-turn or busy notice | Keep the retry under 30 seconds; after Stop, allow the previous decoder's cleanup to finish. |
 | Audio rate limit | The browser stops capture. Wait one minute before retrying **Start listening**, as directed by the notice. Operators should review configured limits rather than bypass them. |

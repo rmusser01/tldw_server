@@ -79,3 +79,39 @@ The broader audio defaults resolver has its own `tldw` alias/default policy;
 Persona deliberately preserves its existing alias instead of silently adopting
 a different provider default. This correction does not redefine other audio
 surfaces or claim a common alias across the server and Chatbook.
+
+## Follow-up review corrections
+
+A second review found four gaps after the initial commit. All four are corrected:
+
+- Blank Persona voices now stay unset in the browser. The server uses the global
+  configured voice only for its configured default provider; other providers
+  retain their own defaults. Explicit voices are preserved. The global `tldw`
+  audio alias does not cause a Kitten voice to cross into legacy Persona Kokoro.
+- Kitten preparation resolves the voice against the loaded runtime. Invalid or
+  stale voices fail before recording, without generating speech.
+- Speech generators close before their credential scope exits, including an
+  error after partial audio. Such errors discard the incomplete output.
+- Both guides and Live itself explain Disconnect → Connect after saving voice
+  defaults. Live displays its current provider, model selection and voice; the
+  Profiles preview labels an omitted voice as Provider default.
+
+The failure-first run reproduced five backend and seven frontend failures. After
+correction, 278 focused Python tests and 116 frontend tests passed. The regressions
+exercise configured/default/explicit voice precedence, cross-provider isolation,
+real Kitten voice resolution with model I/O controlled, generator cleanup order,
+partial-output rejection and cancellation. Bandit found no issues in the changed
+production Python module; targeted Ruff and Black passed. Frontend ESLint found
+zero errors and two existing warnings in unchanged hook dependency code.
+
+Two scoped independent re-reviews reported no residual findings. Both Published
+mirrors match their canonical guides, local links resolve, and MkDocs built with
+the same local serial-plugin workaround. The running browser visibly showed the
+new reconnect guidance and `browser · default model · default voice` summary.
+This follow-up did not open a microphone or repeat physical speech playback.
+
+Logs: `/private/tmp/persona-review-fixes-final-python.log`,
+`/private/tmp/persona-review-fixes-final-frontend.log`,
+`/private/tmp/persona-review-fixes-bandit.json`, and
+`/private/tmp/persona-review-fixes-docs-build.log`. The restarted isolated backend's
+source manifest is under `/private/tmp/persona-review-fixes-20260907/`.

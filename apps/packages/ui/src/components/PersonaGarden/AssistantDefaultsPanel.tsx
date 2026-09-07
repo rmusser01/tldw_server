@@ -691,7 +691,7 @@ export const AssistantDefaultsPanel: React.FC<AssistantDefaultsPanelProps> = ({
           </div>
           <div>
             <dt className="text-xs text-text-muted">TTS voice</dt>
-            <dd>{resolvedDefaults.ttsVoice || "unset"}</dd>
+            <dd>{resolvedDefaults.ttsVoice || "Provider default"}</dd>
           </div>
           <div>
             <dt className="text-xs text-text-muted">Confirmation mode</dt>

@@ -29,11 +29,17 @@ def kitten_assets(monkeypatch):
             raise FileNotFoundError("Selected model assets are unavailable")
         return SimpleNamespace(repo_id=model_name, revision="fixture-revision")
 
+    real_runtime = kitten.KittenRuntime
+
     class Runtime:
         sample_rate = 24000
+        resolve_voice = real_runtime.resolve_voice
 
         def __init__(self, assets):
             self.assets = assets
+            self.voice_aliases = dict(kitten.DEFAULT_VOICE_ALIASES)
+            self._lower_aliases = {name.lower(): value for name, value in self.voice_aliases.items()}
+            self.voices = dict.fromkeys(self.voice_aliases.values())
 
         def generate(self, text, **kwargs):
             synthesized.append((self.assets.repo_id, text))
@@ -76,7 +82,7 @@ def kitten_preparation(monkeypatch, kitten_assets):
     async def route(**kwargs):
         from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
 
-        request = OpenAISpeechRequest(model=kwargs["model"], input=kwargs["text"], voice="Bella")
+        request = OpenAISpeechRequest(model=kwargs["model"], input=kwargs["text"], voice=kwargs["voice"] or "")
         yield Service(), "kitten_tts", request, None
 
     monkeypatch.setattr(live_tts, "resolve_persona_speech", route)
@@ -134,4 +140,24 @@ async def test_preparation_rejects_unavailable_selected_kitten_model(
                 "tts_voice": "Bella",
             }
         )
+    assert kitten_assets.synthesized == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("voice", ["af_heart", "not-a-kitten-voice"])
+async def test_preparation_rejects_voice_missing_from_loaded_kitten_runtime(kitten_preparation, kitten_assets, voice):
+    with pytest.raises(ValueError, match="not available"):
+        await live_tts.prepare_persona_speech(
+            {"tts_provider": "kitten_tts", "tts_model": SELECTED_MODEL, "tts_voice": voice}
+        )
+    assert kitten_assets.synthesized == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("voice", ["", "bella", "Bella"])
+async def test_preparation_accepts_kitten_default_and_supported_aliases(kitten_preparation, kitten_assets, voice):
+    await live_tts.prepare_persona_speech(
+        {"tts_provider": "kitten_tts", "tts_model": SELECTED_MODEL, "tts_voice": voice}
+    )
+    assert kitten_assets.loaded == [SELECTED_MODEL]
     assert kitten_assets.synthesized == []

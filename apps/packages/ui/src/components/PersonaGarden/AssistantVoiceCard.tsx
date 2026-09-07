@@ -168,8 +168,8 @@ export const AssistantVoiceCard: React.FC<AssistantVoiceCardProps> = ({
         <div>
           <Typography.Text strong>Assistant Voice</Typography.Text>
           <Typography.Text type="secondary" className="mt-1 block text-xs">
-            Saved defaults live under Profiles. The toggles here only affect this live
-            session.
+            Save voice defaults under Profiles, then disconnect and reconnect Live to apply changes.
+            The toggles here only affect this live session.
           </Typography.Text>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -207,7 +207,7 @@ export const AssistantVoiceCard: React.FC<AssistantVoiceCardProps> = ({
         </div>
         <div className="rounded border border-border bg-surface2 px-2 py-1.5">
           <div className="text-text-muted">TTS</div>
-          <div className="mt-1">{`${resolvedDefaults.ttsProvider} · ${resolvedDefaults.ttsVoice || "default voice"}`}</div>
+          <div className="mt-1">{`${resolvedDefaults.ttsProvider} · ${resolvedDefaults.ttsModel || "default model"} · ${resolvedDefaults.ttsVoice || "default voice"}`}</div>
         </div>
         <div className="rounded border border-border bg-surface2 px-2 py-1.5">
           <div className="text-text-muted">Live status</div>

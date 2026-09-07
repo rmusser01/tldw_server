@@ -36,3 +36,15 @@ We reject both broad removal of all readiness checks and a second hard-coded
 provider allowlist. An installed/configured adapter is the runtime boundary;
 physical qualification of one provider does not establish support for only that
 provider or prove every other deployment works.
+
+A blank Persona voice is not an instruction to copy another browser surface's
+voice preference. The browser leaves it unset; the server uses its configured
+global voice only when the selected provider matches the configured default
+provider, otherwise the selected adapter supplies its own default. Global audio
+provider aliases retain their own meaning during that comparison (global `tldw`
+means Kitten; the legacy Persona alias remains Kokoro). Explicit Persona voices
+remain authoritative. Kitten readiness validates the voice against the loaded
+model without synthesizing, and speech streams close inside their credential
+scope even when an error arrives after partial audio. Connected Live settings
+remain fixed for that connection; saving defaults requires reconnecting, and
+Live displays the active model override to make this visible.

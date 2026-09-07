@@ -294,3 +294,11 @@ provider and preserve its selected model/voice through preparation and output.
 Passing a user ID is not proof of BYOK enforcement: exercise the existing
 authenticated credential scope. Document the UAT configuration as evidence,
 not as an allowlist or prerequisite.
+
+The follow-up review on the same day found that mocked provider/config boundaries
+hid a global default-voice mismatch and a fake Kitten runtime never exercised
+voice-name validation. Tests now use the real TTSConfig schema and Kitten voice
+resolver while replacing only credential/network/model-weight I/O. A retained
+async-generator reference also exposed error cleanup running after credential
+disposal; asserting cleanup order before returning catches what eventual-GC
+checks miss.

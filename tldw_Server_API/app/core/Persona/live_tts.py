@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import aclosing, asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
 
@@ -86,7 +86,14 @@ async def resolve_persona_speech(
         "kitten_tts": "KittenML/kitten-tts-nano-0.8",
     }
     resolved_model = _text(model) or _text(config.get("model")) or model_defaults.get(selected, selected)
-    resolved_voice = _text(voice) or _text(config.get("default_voice"))
+    from tldw_Server_API.app.core.TTS.tts_config import get_tts_config
+    from tldw_Server_API.app.core.TTS.tts_request_resolution import normalize_tts_provider
+
+    resolved_voice = _text(voice)
+    if not resolved_voice:
+        tts_config = get_tts_config()
+        if normalize_tts_provider(tts_config.default_provider) == selected:
+            resolved_voice = _text(tts_config.default_voice)
     async with tts_provider_credential_scope(
         provider=selected,
         model=resolved_model,
@@ -148,7 +155,8 @@ async def prepare_persona_speech(
             # Kitten initialization is model-independent; warm the exact model
             # through its cached loader, which synthesis also uses.
             if selected == "kitten_tts":
-                await adapter._load_runtime_for_model(adapter._resolve_model_name(prepared.model))
+                runtime = await adapter._load_runtime_for_model(adapter._resolve_model_name(prepared.model))
+                runtime.resolve_voice(prepared.voice)
             # Kokoro loads assets lazily after initialization.
             if selected == "kokoro" and not await adapter._ensure_model_loaded():
                 raise RuntimeError("Kokoro model and voice assets could not be loaded.")
@@ -182,15 +190,18 @@ async def generate_persona_speech(
         auth_request=auth_request,
     ) as (service, selected, request, overrides):
         chunks: list[bytes] = []
-        async for chunk in service.generate_speech(
-            request=request,
-            provider=selected,
-            fallback=False,
-            user_id=user_id,
-            provider_overrides=overrides,
-        ):
-            if chunk:
-                if not chunks and chunk.startswith(b"ERROR:"):
-                    raise RuntimeError("The selected speech provider failed to generate audio.")
-                chunks.append(chunk)
+        async with aclosing(
+            service.generate_speech(
+                request=request,
+                provider=selected,
+                fallback=False,
+                user_id=user_id,
+                provider_overrides=overrides,
+            )
+        ) as speech:
+            async for chunk in speech:
+                if chunk:
+                    if chunk.startswith(b"ERROR:"):
+                        raise RuntimeError("The selected speech provider failed to generate audio.")
+                    chunks.append(chunk)
         return b"".join(chunks), response_format
