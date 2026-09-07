@@ -110,6 +110,18 @@ Approved correction: use isolated workers for both baseline and candidate suites
 with regression coverage for worker isolation, all five suites, timeout and report
 arguments. No test omissions or admission changes; native re-execution required.
 
+Native re-execution completed: run `34160485207` at
+`9f585a9f0dcd499b02f02fd58c54dd0d5dafbd6a` passed both jobs. Parent independently
+ran all seven phase-evidence gates and verified all 13 system and three Python
+artifact hashes, plus the four installed Python binaries read from the archive.
+Both XML runs report 806 tests/13 skips, with no missing identities or new skips.
+Installed Python 3.12.14's pyexpat and ElementTree report Expat 2.8.4; all source
+SBOM, legitimate-control, scaling and ELF gates pass. Both system libraries also
+report 2.8.4. Retained evidence directories end in
+`expat-system-qualified-34160485207` and `expat-python-qualified-34160485207`
+under `/private/tmp/task-13013-7-`. Same-image integration remains Stage 3;
+neither separate job establishes application-image or scanner admission.
+
 The independent Python-harness review found that bare Bash `!` commands did
 not enforce negative ELF checks under `set -e`. Reproduced all three cases
 (missing dependency, dynamic system Expat linkage, unprefixed dynamic symbols)
