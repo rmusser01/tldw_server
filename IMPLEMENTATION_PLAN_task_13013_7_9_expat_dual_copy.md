@@ -162,7 +162,15 @@ Fresh CPython boundary investigation (before its implementation) confirmed:
 **Goal:** Establish that the candidate preserves application behavior and that evidence covers both embedded and system sources.
 **Success Criteria:** Actual combined candidate XML/rendering tests and source-aware scanner artifacts bind to its immutable digest; independent review finds no confirmed bypass/regression. Production adoption remains a separate decision.
 **Tests:** XML ingestion/chunking suites, font discovery, drawtext/subtitles and existing FFmpeg capability controls; source/SBOM consistency and current scanner runs.
-**Status:** Not Started
+**Status:** In Progress
+
+Input handoff checkpoint: `combined-inputs.py` and the workflow's dependent
+`combined-inputs` job verify same-checkout producer identities, existing phase
+gates, container statuses, exact artifact inventories and every payload hash.
+Inputs are not extracted or installed, and the output scope is explicitly
+`qualified-inputs-only`. Both producer jobs must succeed in the same workflow
+run before the handoff job runs. This checkpoint does not complete any combined
+application, rendering or scanner qualification below.
 
 - [ ] Integrate the qualified artifacts into a separately named candidate image, without changing production recipes. Run `tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py` and Chunking tests `test_xml_allows_url_text.py`, `test_json_xml_offsets.py`, `test_xml_tail_preservation.py` against that image.
 - [ ] Run fontconfig discovery and FFmpeg drawtext/subtitle controls; compare the previously accepted FFmpeg capability inventory without broadening accepted retirements.
