@@ -277,3 +277,28 @@ that the requester had not said.
 silence and chunk boundaries. Assert the final complete transcript, not whether
 any partial contains the expected substring. Preserve intermediate hypotheses in
 sanitized evidence so a corrected final does not hide earlier errors.
+
+## 2026-09-07: A UAT provider is not a product requirement
+
+During Migu Buddy UAT, a Kokoro preparation allowlist was introduced even though
+Persona advertised other TTS providers. Tests exercised only Kokoro, and the
+new guides then described the accidental restriction as mandatory. TASK-13214
+removed that restriction and added selected-provider/model/voice, credential,
+failure and cleanup checks. Native browser speech was exercised through the
+production controller with a controlled transcript; native start/end and Stop
+were observed, while microphone recognition and human audibility were explicitly
+outside that check.
+
+Before claiming a configurable provider feature works, test a non-default
+provider and preserve its selected model/voice through preparation and output.
+Passing a user ID is not proof of BYOK enforcement: exercise the existing
+authenticated credential scope. Document the UAT configuration as evidence,
+not as an allowlist or prerequisite.
+
+The follow-up review on the same day found that mocked provider/config boundaries
+hid a global default-voice mismatch and a fake Kitten runtime never exercised
+voice-name validation. Tests now use the real TTSConfig schema and Kitten voice
+resolver while replacing only credential/network/model-weight I/O. A retained
+async-generator reference also exposed error cleanup running after credential
+disposal; asserting cleanup order before returning catches what eventual-GC
+checks miss.

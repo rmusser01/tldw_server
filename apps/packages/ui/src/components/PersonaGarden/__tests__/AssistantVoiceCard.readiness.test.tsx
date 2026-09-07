@@ -39,6 +39,7 @@ it("offers Stop during preparation and generation without claiming speech is rea
       sttLanguage: "en",
       sttModel: "whisper",
       ttsProvider: "kokoro",
+      ttsModel: "selected-model",
       ttsVoice: "af_heart",
       confirmationMode: "destructive_only" as const,
       wakeBehavior: "one_shot" as const,
@@ -53,6 +54,7 @@ it("offers Stop during preparation and generation without claiming speech is rea
     }
   }
   const view = render(<AssistantVoiceCard {...props} />)
+  expect(screen.getByText("kokoro · selected-model · af_heart")).toBeInTheDocument()
   expect(screen.getByText(/Preparing the selected speech/)).toBeInTheDocument()
   fireEvent.click(screen.getByRole("button", { name: "Stop voice" }))
   expect(stop).toHaveBeenCalledOnce()

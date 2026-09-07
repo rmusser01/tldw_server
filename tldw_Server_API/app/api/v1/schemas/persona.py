@@ -765,6 +765,7 @@ class PersonaVoiceDefaults(BaseModel):
     stt_language: str | None = None
     stt_model: str | None = None
     tts_provider: str | None = None
+    tts_model: str | None = None
     tts_voice: str | None = None
     confirmation_mode: PersonaConfirmationMode | None = None
     voice_chat_trigger_phrases: list[str] = Field(default_factory=list)
@@ -777,7 +778,7 @@ class PersonaVoiceDefaults(BaseModel):
     turn_stop_secs: float | None = None
     min_utterance_secs: float | None = None
 
-    @field_validator("stt_language", "stt_model", "tts_provider", "tts_voice", mode="before")
+    @field_validator("stt_language", "stt_model", "tts_provider", "tts_model", "tts_voice", mode="before")
     @classmethod
     def _strip_optional_text(cls, value: Any) -> Any:
         if not isinstance(value, str):

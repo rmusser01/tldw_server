@@ -2386,7 +2386,7 @@ async def test_tts_authoritative_overrides_disable_cross_provider_fallback() -> 
             return SimpleNamespace()
 
         def _convert_request(self, _request):
-            return SimpleNamespace(extra_params={})
+            return SimpleNamespace(extra_params={}, backend=None)
 
         def _resolve_observability_context(self, _request, *, explicit_request_id=None):
             return explicit_request_id or "request-id", None

@@ -559,6 +559,28 @@ class TTSServiceV2:
             with suppress(_TTS_NONCRITICAL_EXCEPTIONS):
                 await audio_stream.aclose()
 
+    async def _close_request_adapter(
+        self, adapter: Optional[TTSAdapter], provider_overrides: Optional[dict[str, Any]]
+    ) -> None:
+        """Close non-cached adapters selected by `_get_adapter` for this request.
+
+        Explicit overrides and OmniVoice's injected supervisor create owned
+        instances. All other adapters remain owned by the registry cache.
+        """
+        if adapter is None:
+            return
+        provider_key = self._resolve_provider_key(adapter)
+        if not provider_overrides and provider_key != "omnivoice":
+            return
+        registry = getattr(self.factory or self._factory, "registry", None)
+        cached_adapters = getattr(registry, "_adapters", {})
+        if any(cached is adapter for cached in cached_adapters.values()):
+            return
+        try:
+            await adapter.close()
+        except Exception as exc:  # noqa: BLE001 - cleanup must preserve the primary result.
+            logger.warning("Error closing request-owned {} adapter ({})", provider_key, type(exc).__name__)
+
     async def _prepare_generate_speech_request(
         self,
         *,
@@ -572,6 +594,7 @@ class TTSServiceV2:
     ) -> tuple[TTSAdapter, str, TTSRequest]:
         """Resolve provider-managed request state before execution begins."""
         prepared = False
+        adapter: Optional[TTSAdapter] = None
         try:
             self._apply_token_defaults(tts_request)
             # Run a generic validation pass first so provider-specific requirements
@@ -617,7 +640,10 @@ class TTSServiceV2:
             return adapter, provider_key, request_for_provider
         finally:
             if not prepared:
-                self._cleanup_transient_pocket_tts_cpp_voice_path(tts_request)
+                try:
+                    self._cleanup_transient_pocket_tts_cpp_voice_path(tts_request)
+                finally:
+                    await self._close_request_adapter(adapter, provider_overrides)
 
     def _get_tts_request_observability(
         self,
@@ -2163,19 +2189,20 @@ class TTSServiceV2:
             except _TTS_NONCRITICAL_EXCEPTIONS:
                 pass
 
-        await self._increment_active_requests(provider_key)
-
         # Generate speech with circuit breaker and comprehensive error handling
+        active_requests_incremented = False
+        circuit_breaker = None
+        manual_stream_breaker = False
+        manual_stream_breaker_recorded = False
         try:
+            await self._increment_active_requests(provider_key)
+            active_requests_incremented = True
             async with self._semaphore:
                 async with self._provider_concurrency_guard(provider_key):
                     logger.info(f"Generating speech with {provider_key}")
 
                     # Get circuit breaker if available
-                    circuit_breaker = None
                     breaker_provider_key = provider_key
-                    manual_stream_breaker = False
-                    manual_stream_breaker_recorded = False
                     if self.circuit_manager:
                         breaker_provider_key = self._resolve_circuit_breaker_key(provider_key, adapter)
                         circuit_breaker = await self.circuit_manager.get_breaker(breaker_provider_key)
@@ -2497,13 +2524,16 @@ class TTSServiceV2:
                 else:
                     raise_detached_error(tts_error)
         finally:
-            await self._close_response_audio_stream(response)
-            self._cleanup_transient_pocket_tts_cpp_voice_path(request_for_provider)
             try:
-                if not released_active_slot:
-                    await self._decrement_active_requests(provider_key)
-            except _TTS_NONCRITICAL_EXCEPTIONS:
-                pass
+                await self._close_response_audio_stream(response)
+                self._cleanup_transient_pocket_tts_cpp_voice_path(request_for_provider)
+                try:
+                    if active_requests_incremented and not released_active_slot:
+                        await self._decrement_active_requests(provider_key)
+                except _TTS_NONCRITICAL_EXCEPTIONS:
+                    pass
+            finally:
+                await self._close_request_adapter(adapter, provider_overrides)
 
         if fallback_plan:
             if metadata_only:

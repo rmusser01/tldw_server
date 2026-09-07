@@ -3532,59 +3532,24 @@ async def _send_persona_live_audio_pair(
         return True
 
 
-async def _prepare_persona_live_tts(voice_runtime: dict[str, Any]) -> None:
-    """Load the supported local speech runtime without synthesizing or playing audio."""
-    provider = str(voice_runtime.get("tts_provider") or "").strip().lower()
-    if provider not in {"tldw", "kokoro"}:
-        raise ValueError("Select local Kokoro speech output in Persona Live voice settings.")
-    from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
+async def _prepare_persona_live_tts(voice_runtime: dict[str, Any], *, user_id: int | None = None, auth_request: Any = None) -> None:
+    """Validate the authenticated Live speech selection before recording begins."""
+    from tldw_Server_API.app.core.Persona.live_tts import prepare_persona_speech
 
-    service = await get_tts_service_v2()
-    adapter = await service._get_adapter(model="kokoro", provider="kokoro")
-    if adapter is None or not await adapter.ensure_initialized():
-        raise RuntimeError("Kokoro speech output is unavailable.")
-    # Kokoro's lazy initialize reports AVAILABLE before loading model/voice assets.
-    if not await adapter._ensure_model_loaded():
-        raise RuntimeError("Kokoro model and voice assets could not be loaded.")
+    await prepare_persona_speech(voice_runtime, user_id=user_id, auth_request=auth_request)
 
 
 async def _generate_persona_live_tts_audio(
-    text: str,
-    *,
-    provider: str | None,
-    voice: str | None,
-    response_format: str = "mp3",
+    text: str, *, provider: str | None, voice: str | None, model: str | None = None,
+    response_format: str = "mp3", user_id: int | None = None, auth_request: Any = None,
 ) -> tuple[bytes, str]:
-    provider_norm = str(provider or "").strip().lower()
-    voice_norm = str(voice or "").strip()
-    if not provider_norm or provider_norm == "browser":
-        return b"", response_format
+    """Return Live audio bytes and format through the selected authenticated provider."""
+    from tldw_Server_API.app.core.Persona.live_tts import generate_persona_speech
 
-    provider_norm = "kokoro" if provider_norm == "tldw" else provider_norm
-    model_name = "tts-1" if provider_norm == "openai" else provider_norm
-
-    from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
-    from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
-
-    tts_service = await get_tts_service_v2()
-    request = OpenAISpeechRequest(
-        model=model_name,
-        input=text,
-        voice=voice_norm or "af_heart",
-        response_format=response_format,
-        stream=False,
+    return await generate_persona_speech(
+        text, provider=provider, model=model, voice=voice,
+        response_format=response_format, user_id=user_id, auth_request=auth_request,
     )
-
-    audio_chunks: list[bytes] = []
-    async for chunk in tts_service.generate_speech(
-        request=request,
-        provider=provider_norm,
-        fallback=False,
-    ):
-        if chunk:
-            audio_chunks.append(chunk)
-
-    return b"".join(audio_chunks), response_format
 
 
 def _is_authnz_access_token(token: str) -> bool:
@@ -8432,7 +8397,10 @@ async def persona_stream(
                 audio_bytes, audio_format = await _generate_persona_live_tts_audio(
                     assistant_text,
                     provider=provider,
+                    model=voice_runtime.get("tts_model"),
                     voice=voice,
+                    user_id=int(authenticated_user_id),
+                    auth_request=ws,
                     response_format="mp3",
                 )
                 if not audio_bytes:
@@ -8450,7 +8418,7 @@ async def persona_stream(
                         user_id=connection_user_id,
                         preferences={"voice_runtime": updated_voice_runtime},
                     )
-                logger.debug(f"persona live TTS unavailable for session {session_id}: {exc}")
+                logger.debug("Persona Live TTS unavailable; error_type={}", type(exc).__name__)
                 _mark_persona_live_processing_progress(session_id)
                 _upsert_persona_live_session_summary_safe(
                     session_id=session_id,
@@ -8660,8 +8628,8 @@ async def persona_stream(
                 if not persona_live_voice_registry.is_preparing(**key, token=token):
                     return
                 reason_code = "VOICE_TTS_UNAVAILABLE"
-                message = "Select local Kokoro speech output and install its model and voice assets in server audio settings."
-                await _prepare_persona_live_tts(voice_runtime)
+                message = "The selected speech output could not prepare. Check its provider, model, voice, credentials and dependencies in audio settings."
+                await _prepare_persona_live_tts(voice_runtime, user_id=int(authenticated_user_id), auth_request=ws)
                 if not persona_live_voice_registry.is_preparing(**key, token=token):
                     return
                 turn_detector = None
@@ -10178,6 +10146,7 @@ async def persona_stream(
                 ),
                 "tts_provider": str(tts_payload.get("provider") or "").strip() or None,
                 "tts_voice": str(tts_payload.get("voice") or "").strip() or None,
+                "tts_model": str(tts_payload.get("model") or "").strip() or None,
                 "text_only_due_to_tts_failure": False,
             }
 

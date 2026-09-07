@@ -1,6 +1,8 @@
 # Personas User Guide
 
-Last Updated: 2026-06-01
+For a step-by-step browser walkthrough, see the [Persona Buddy guide](../WebUI_Extension/Persona_Buddy_Guide.md): setup, Migu, dragging, live voice, approvals, and troubleshooting.
+
+Last Updated: 2026-09-07
 
 ## Overview
 
@@ -247,23 +249,53 @@ Common server events include:
 The stream enforces feature flags, authentication, policy checks, tool
 confirmation, audio limits, and rate limits.
 
-### Preparing local voice
+### Preparing voice with the selected provider
 
-Open the exact Buddy session in Full Live and choose Start. Preparation checks
-the configured Chat provider and initializes the selected STT and TTS models
-before the browser requests microphone access. The initial qualified speech path
-uses local Whisper and Kokoro. Other selections return setup feedback when they
-cannot be prepared; no substitute transcript or audio is generated.
+Open the exact Buddy session in Full Live, choose **Connect** if needed, and
+then **Start listening**. Preparation checks the configured Chat target and
+prepares the selected STT and TTS services before the browser requests microphone
+access. Under **Profiles**, choose **TTS provider**, optionally set **TTS model**
+and **TTS voice**, and choose **Save assistant defaults**. Blank model and voice
+fields use the selected provider's applicable defaults. A blank voice uses the
+server's configured voice only when the selected provider is its default provider;
+otherwise the selected adapter resolves its default. Browser-wide voice preferences
+do not override a blank Persona voice. The **browser** provider uses its native
+default voice when this field is blank.
+
+After saving changes, choose **Disconnect → Connect** if Live was connected.
+Connected sessions keep their original voice settings until reconnect; returning
+from Profiles or retrying Start does not refresh them. Live shows the provider,
+model selection and voice for the current connection. A “default model” or
+“default voice” label leaves that value for the provider to resolve.
+
+The provider list includes **browser**, registered server providers, and configured
+speech gateways. Browser speech uses the browser's speech synthesis and available
+voices. Local server providers need their models, voice assets, and dependencies;
+remote providers and gateways need the appropriate configuration and credentials.
+The legacy Persona **tldw** value remains an alias for **kokoro**. Kokoro is an
+available provider, not a prerequisite for every Persona voice session.
+**Use browser fallback** inherits the browser-wide provider preference rather than
+forcing browser speech. Persona Live does not silently switch providers on
+preparation or synthesis failure. See [TTS setup](../WebUI_Extension/TTS-SETUP-GUIDE.md).
+
+Recorded physical tests used Parakeet ONNX and Kokoro; Whisper was also tested.
+These are historical test choices, not qualification of every provider or browser
+voice. A failed preparation returns setup feedback; no substitute transcript or
+audio is generated. Browser speech support and audible playback must be checked
+in the browser itself.
 
 WebSocket clients send `voice_config`, then `voice_prepare` with a unique
-`client_message_id`. Wait for the matching `voice_readiness` event. Supply a
-supported Whisper model size (for example `tiny.en`) and `tts.provider` set to
-`kokoro` (or its `tldw` alias). The server must have the selected models and a
-usable default Chat provider with server-configured credentials. This preparation
-check does not yet qualify user/team/organization BYOK credentials for voice.
-A failed preparation does not authorize
-capture. The WebUI cancels a preparation that exceeds its 30-second wait and
-offers retry guidance.
+`client_message_id`. Wait for the matching `voice_readiness` event. For STT,
+use a supported selected model such as `tiny.en` for Whisper or `parakeet-onnx`
+for Parakeet ONNX. Set `tts.provider` to `browser`, a registered server provider,
+or a configured speech gateway ID; optional `tts.model` and `tts.voice` select
+provider-supported values. The server must have the selected local models and a
+configured default Chat provider/model. Preparation resolves the Chat target;
+it does not require a server-static Chat key or certify Chat admission. Each
+submitted turn enters the authenticated Chat route, which resolves effective
+credentials (including applicable BYOK) and enforces access policy, moderation,
+and budget. A failed preparation does not authorize capture. The WebUI cancels
+a preparation that exceeds its 30-second wait and offers retry guidance.
 
 Voice readiness belongs to the connection and session. Session summaries report
 `capabilities.voice=true` only while an owned runtime is prepared. Stop, changes
@@ -473,4 +505,4 @@ until cleanup completes. Stop always discards its late transcript.
 
 Changing Persona through setup or Live ends the former connection and clears its resume selection, transcript and pending approvals. Use **Connect** to begin a session for the newly selected Persona. Previously saved setup and voice defaults remain available.
 
-Use **Refresh catalog** to reload bundled Buddy choices. If loading fails, **Retry catalog** repeats the read without copying, activating, or replacing the current pack. The button is disabled during the request. Voice preparation currently requires server-configured credentials for the default Chat provider; user/team/organization BYOK-only credentials are not qualified by this voice preflight.
+Use **Refresh catalog** to reload bundled Buddy choices. If loading fails, **Retry catalog** repeats the read without copying, activating, or replacing the current pack. The button is disabled during the request. If voice prepares but a submitted turn fails, read the Chat error and check authenticated access, effective credentials, and budget; preparation alone does not certify Chat admission.

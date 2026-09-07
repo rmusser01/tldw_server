@@ -212,6 +212,237 @@ describe("usePersonaLiveVoiceController", () => {
     })
   })
 
+  it("forwards the selected server TTS model in voice configuration", () => {
+    const ws = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn()
+    } as unknown as WebSocket
+    renderHook(() =>
+      usePersonaLiveVoiceController({
+        ws,
+        connected: true,
+        sessionId: "sess-voice",
+        personaId: "persona-1",
+        resolvedDefaults: {
+          ...resolvedDefaults,
+          ttsProvider: "piper",
+          ttsModel: "en_US-lessac-medium"
+        },
+        canUseServerStt: true
+      })
+    )
+    expect(ownerPayload(ws).tts).toEqual({
+      provider: "piper",
+      voice: "alloy",
+      model: "en_US-lessac-medium"
+    })
+  })
+
+  it.each(["construct", "getVoices", "speak", "cancel-event"])(
+    "finishes a browser voice turn after synchronous %s failure",
+    async (failure) => {
+      let activeUtterance: { onerror?: () => void } | undefined
+      const synthesis = {
+        cancel: vi.fn(() => {
+          const cancelled = activeUtterance
+          activeUtterance = undefined
+          cancelled?.onerror?.()
+        }),
+        getVoices: vi.fn(() => {
+          if (failure === "getVoices") throw new Error("unavailable")
+          return []
+        }),
+        speak: vi.fn((utterance) => {
+          if (failure === "cancel-event") activeUtterance = utterance
+          if (failure === "speak" || failure === "cancel-event")
+            throw new Error("unavailable")
+        })
+      }
+      vi.stubGlobal("speechSynthesis", synthesis)
+      vi.stubGlobal(
+        "SpeechSynthesisUtterance",
+        class {
+          constructor() {
+            if (failure === "construct") throw new Error("unavailable")
+          }
+        }
+      )
+      try {
+        const ws = {
+          readyState: WebSocket.OPEN,
+          send: vi.fn()
+        } as unknown as WebSocket
+        const { result } = renderHook(() =>
+          usePersonaLiveVoiceController({
+            ws,
+            connected: true,
+            sessionId: "sess-voice",
+            personaId: "persona-1",
+            resolvedDefaults: {
+              ...resolvedDefaults,
+              ttsProvider: "browser",
+              ttsVoice: "",
+              autoResume: false
+            },
+            canUseServerStt: true
+          })
+        )
+        await act(async () => {
+          await startPreparedVoice(result, ws)
+        })
+        const cancelsBeforeSpeech = synthesis.cancel.mock.calls.length
+        act(() => {
+          deliverPayload(result, ws, {
+            event: "assistant_delta",
+            text_delta: "Hello"
+          })
+        })
+        expect(synthesis.cancel.mock.calls.length - cancelsBeforeSpeech).toBe(2)
+        expect(result.current.textOnlyDueToTtsFailure).toBe(true)
+        expect(result.current.warningReasonCode).toBe(
+          "voice_tts_unavailable_text_only"
+        )
+        expect(result.current.state).not.toBe("speaking")
+        act(() => result.current.stopListening())
+        expect(result.current.state).toBe("idle")
+        expect(hookMocks.audioStart).not.toHaveBeenCalled()
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    }
+  )
+
+  it.each([
+    ["synchronous", "onerror"],
+    ["synchronous", "onend"],
+    ["delayed", "onerror"],
+    ["delayed", "onend"]
+  ] as const)(
+    "ignores %s stale %s callbacks when replacing speech in the same turn",
+    async (timing, callback) => {
+      let activeUtterance: SpeechSynthesisUtterance | undefined
+      let staleCallback: (() => void) | undefined
+      const synthesis = {
+        cancel: vi.fn(() => {
+          const cancelled = activeUtterance
+          activeUtterance = undefined
+          if (!cancelled) return
+          const notify = () => cancelled[callback]?.call(cancelled, {} as SpeechSynthesisErrorEvent)
+          if (timing === "synchronous") notify()
+          else staleCallback = notify
+        }),
+        getVoices: vi.fn(() => []),
+        speak: vi.fn((utterance: SpeechSynthesisUtterance) => {
+          activeUtterance = utterance
+        })
+      }
+      vi.stubGlobal("speechSynthesis", synthesis)
+      vi.stubGlobal("SpeechSynthesisUtterance", class {})
+      try {
+        const ws = { readyState: WebSocket.OPEN, send: vi.fn() } as unknown as WebSocket
+        const { result } = renderHook(() =>
+          usePersonaLiveVoiceController({
+            ws,
+            connected: true,
+            sessionId: "sess-voice",
+            personaId: "persona-1",
+            resolvedDefaults: {
+              ...resolvedDefaults,
+              ttsProvider: "browser",
+              ttsVoice: "",
+              autoResume: false
+            },
+            canUseServerStt: true
+          })
+        )
+        await act(async () => { await startPreparedVoice(result, ws) })
+        act(() => deliverPayload(result, ws, { event: "assistant_delta", text_delta: "First" }))
+        expect(result.current.state).toBe("speaking")
+        act(() => deliverPayload(result, ws, { event: "assistant_delta", text_delta: "Replacement" }))
+        const replacement = activeUtterance
+        act(() => staleCallback?.())
+        expect(result.current.textOnlyDueToTtsFailure).toBe(false)
+        expect(result.current.warning).toBeNull()
+        expect(result.current.state).toBe("speaking")
+        expect(activeUtterance).toBe(replacement)
+        expect(replacement).toBeDefined()
+        act(() => replacement?.onend?.({} as SpeechSynthesisEvent))
+        expect(result.current.state).toBe("idle")
+        await act(async () => { await startPreparedVoice(result, ws) })
+        act(() => deliverPayload(result, ws, { event: "assistant_delta", text_delta: "Stop this speech" }))
+        expect(result.current.state).toBe("speaking")
+        act(() => result.current.stopListening())
+        expect(activeUtterance).toBeUndefined()
+        act(() => staleCallback?.())
+        expect(result.current.state).toBe("idle")
+        expect(result.current.textOnlyDueToTtsFailure).toBe(false)
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    }
+  )
+
+  it.each(["missing-voice", "voice-uri", "Known voice", ""])(
+    "honors browser voice selection %s without hidden substitution",
+    async (ttsVoice) => {
+      const voice = { voiceURI: "voice-uri", name: "Known voice" }
+      const synthesis = {
+        cancel: vi.fn(),
+        getVoices: vi.fn(() => [voice]),
+        speak: vi.fn()
+      }
+      vi.stubGlobal("speechSynthesis", synthesis)
+      vi.stubGlobal("SpeechSynthesisUtterance", class {})
+      try {
+        const ws = {
+          readyState: WebSocket.OPEN,
+          send: vi.fn()
+        } as unknown as WebSocket
+        const { result } = renderHook(() =>
+          usePersonaLiveVoiceController({
+            ws,
+            connected: true,
+            sessionId: "sess-voice",
+            personaId: "persona-1",
+            resolvedDefaults: {
+              ...resolvedDefaults,
+              ttsProvider: "browser",
+              ttsVoice,
+              autoResume: false
+            },
+            canUseServerStt: true
+          })
+        )
+        await act(async () => {
+          await startPreparedVoice(result, ws)
+        })
+        act(() => {
+          deliverPayload(result, ws, {
+            event: "assistant_delta",
+            text_delta: "Hello"
+          })
+        })
+        if (ttsVoice === "missing-voice") {
+          expect(synthesis.speak).not.toHaveBeenCalled()
+          expect(result.current.textOnlyDueToTtsFailure).toBe(true)
+          expect(result.current.warning).toContain("selected browser voice")
+          expect(result.current.state).toBe("idle")
+          expect(hookMocks.audioStart).not.toHaveBeenCalled()
+        } else {
+          expect(synthesis.speak).toHaveBeenCalledTimes(1)
+          expect(synthesis.speak.mock.calls[0][0].voice).toBe(
+            ttsVoice ? voice : undefined
+          )
+          expect(result.current.state).toBe("speaking")
+        }
+        act(() => result.current.stopListening())
+        expect(result.current.state).toBe("idle")
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    }
+  )
+
   it("initializes session turn detection to the balanced preset", () => {
     const ws = {
       readyState: WebSocket.OPEN,
