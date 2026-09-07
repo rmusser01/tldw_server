@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -121,11 +122,107 @@ class _RecordingHttpAuthServer:
                 "request": request,
                 "user_id": kwargs.get("user_id"),
                 "metadata": dict(kwargs.get("metadata") or {}),
+                "server_auth_scope": kwargs.get("server_auth_scope"),
             }
         )
         if kwargs.get("user_id") is None:
             return MCPResponse(error=MCPError(code=-32001, message="Insufficient permissions"), id=request.id)
         return MCPResponse(result={"tools": []}, id=request.id)
+
+    async def handle_http_batch(self, requests: list[Any], *_args: Any, **kwargs: Any):
+        from tldw_Server_API.app.core.MCP_unified import MCPResponse
+
+        self.calls.append(
+            {
+                "requests": requests,
+                "user_id": kwargs.get("user_id"),
+                "metadata": dict(kwargs.get("metadata") or {}),
+                "server_auth_scope": kwargs.get("server_auth_scope"),
+            }
+        )
+        return [MCPResponse(result={"ok": True}, id=request.id) for request in requests]
+
+
+def test_mounted_http_transports_forward_authenticated_scope_separately(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+    from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import TokenData
+    from tldw_Server_API.app.core.MCP_unified.protocol_types import AuthenticatedExecutionScope
+
+    scope = AuthenticatedExecutionScope(active_org_id=7, active_team_id=11)
+
+    async def _scoped_auth_override() -> Any:
+        return mcp_unified_endpoint.McpAuthContext(
+            user=TokenData(sub="41", roles=["admin"], permissions=["*"]),
+            principal=AuthPrincipal(
+                kind="user",
+                user_id=41,
+                active_org_id=7,
+                active_team_id=11,
+            ),
+            api_key_info=None,
+            raw_api_key=None,
+        )
+
+    server = _RecordingHttpAuthServer()
+    monkeypatch.setattr(mcp_unified_endpoint, "get_mcp_server", lambda: server)
+
+    with build_mcp_test_client(auth_principal_override=_scoped_auth_override) as client:
+        response = client.post(
+            "/api/v1/mcp/request",
+            json={"jsonrpc": "2.0", "method": "tools/list", "id": "scoped-request"},
+            headers=_auth_headers(),
+        )
+        batch_response = client.post(
+            "/api/v1/mcp/request/batch",
+            json=[{"jsonrpc": "2.0", "method": "ping", "id": "scoped-batch"}],
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 200
+    assert batch_response.status_code == 200
+    assert [call["server_auth_scope"] for call in server.calls] == [scope, scope]
+    assert all("server_auth_scope" not in call["metadata"] for call in server.calls)
+
+
+def test_mounted_http_principal_dependency_projects_authenticated_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+    from tldw_Server_API.app.core.MCP_unified.protocol_types import AuthenticatedExecutionScope
+
+    principal = AuthPrincipal(
+        kind="user",
+        user_id=41,
+        roles=["admin"],
+        permissions=["*"],
+        active_org_id=7,
+        active_team_id=11,
+    )
+
+    async def _scoped_principal(_request: Any) -> AuthPrincipal:
+        return principal
+
+    server = _RecordingHttpAuthServer()
+    monkeypatch.setattr(mcp_unified_endpoint, "get_auth_principal", _scoped_principal)
+    monkeypatch.setattr(mcp_unified_endpoint, "get_mcp_server", lambda: server)
+
+    with build_mcp_test_client() as client:
+        response = client.post(
+            "/api/v1/mcp/request",
+            json={"jsonrpc": "2.0", "method": "tools/list", "id": "scoped-principal"},
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 200
+    assert server.calls[-1]["user_id"] == "41"
+    assert server.calls[-1]["server_auth_scope"] == AuthenticatedExecutionScope(
+        active_org_id=7,
+        active_team_id=11,
+    )
 
 
 def test_mounted_http_single_user_api_key_attaches_trusted_mounted_metadata(
@@ -321,6 +418,372 @@ def _install_mounted_ws_single_user_compat(
     return protocol
 
 
+class _ScopedWsAuthProvider:
+    def __init__(
+        self,
+        *,
+        identity: Any | None = None,
+        api_key_info: dict[str, Any] | None = None,
+        is_authnz_token: bool | None = None,
+    ) -> None:
+        self.identity = identity
+        self.api_key_info = api_key_info
+        self.is_authnz_token = identity is not None if is_authnz_token is None else is_authnz_token
+
+    async def authenticate_authnz_websocket_token(self, *_args: Any, **_kwargs: Any) -> Any | None:
+        return self.identity
+
+    async def validate_api_key(self, *_args: Any, **_kwargs: Any) -> dict[str, Any] | None:
+        return self.api_key_info
+
+    def normalize_api_key_permissions(self, _info: Any) -> list[str]:
+        return []
+
+    def is_authnz_access_token(self, _token: str) -> bool:
+        return self.is_authnz_token
+
+
+@pytest.mark.parametrize("auth_kind", ["authnz_jwt", "api_key"])
+def test_mounted_ws_propagates_authenticated_scope(
+    monkeypatch: pytest.MonkeyPatch,
+    auth_kind: str,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified import get_mcp_server
+    from tldw_Server_API.app.core.MCP_unified.interfaces.runtime import AuthenticatedIdentity
+    from tldw_Server_API.app.core.MCP_unified.protocol_types import AuthenticatedExecutionScope
+
+    server = get_mcp_server()
+    protocol = _install_mounted_ws_single_user_compat(
+        monkeypatch,
+        server=server,
+        api_key="unrelated-single-user-key-12345",
+        test_mode=True,
+    )
+    if auth_kind == "authnz_jwt":
+        server.auth_provider = _ScopedWsAuthProvider(
+            identity=AuthenticatedIdentity(
+                user_id="41",
+                roles=["user"],
+                permissions=["mcp:read"],
+                active_org_id=7,
+                active_team_id=11,
+            )
+        )
+        headers = {"Authorization": "Bearer scoped-authnz-token"}
+    else:
+        server.auth_provider = _ScopedWsAuthProvider(
+            api_key_info={"user_id": "41", "org_id": 7, "team_id": 11}
+        )
+        headers = {"X-API-KEY": "scoped-api-key"}
+
+    with build_mcp_test_client() as client:
+        with client.websocket_connect(
+            f"/api/v1/mcp/ws?client_id=ws-scoped-{auth_kind}",
+            headers=headers,
+        ) as ws:
+            ws.send_json({"jsonrpc": "2.0", "method": "tools/list", "id": f"ws-{auth_kind}"})
+            body = ws.receive_json()
+
+    assert body["result"] == {"tools": []}
+    assert protocol.contexts[-1].server_auth_scope == AuthenticatedExecutionScope(
+        active_org_id=7,
+        active_team_id=11,
+    )
+
+
+def test_mounted_ws_authnz_identity_takes_precedence_over_api_key_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified import get_mcp_server
+    from tldw_Server_API.app.core.MCP_unified.interfaces.runtime import AuthenticatedIdentity
+    from tldw_Server_API.app.core.MCP_unified.protocol_types import AuthenticatedExecutionScope
+
+    class _RecordingAuthProvider(_ScopedWsAuthProvider):
+        def __init__(self) -> None:
+            super().__init__(
+                identity=AuthenticatedIdentity(
+                    user_id="41",
+                    active_org_id=7,
+                    active_team_id=11,
+                ),
+                api_key_info={"user_id": "99", "org_id": 13, "team_id": 17},
+            )
+            self.api_key_calls = 0
+
+        async def validate_api_key(self, *_args: Any, **_kwargs: Any) -> dict[str, Any] | None:
+            self.api_key_calls += 1
+            return self.api_key_info
+
+    server = get_mcp_server()
+    protocol = _install_mounted_ws_single_user_compat(
+        monkeypatch,
+        server=server,
+        api_key="unrelated-single-user-key-12345",
+        test_mode=True,
+    )
+    auth_provider = _RecordingAuthProvider()
+    server.auth_provider = auth_provider
+
+    with build_mcp_test_client() as client:
+        with client.websocket_connect(
+            "/api/v1/mcp/ws?client_id=ws-mixed-credentials",
+            headers={
+                "Authorization": "Bearer valid-authnz-token",
+                "X-API-KEY": "ignored-api-key",
+            },
+        ) as ws:
+            ws.send_json({"jsonrpc": "2.0", "method": "tools/list", "id": "mixed-credentials"})
+            body = ws.receive_json()
+
+    assert body["result"] == {"tools": []}
+    assert auth_provider.api_key_calls == 0
+    assert protocol.contexts[-1].user_id == "41"
+    assert protocol.contexts[-1].server_auth_scope == AuthenticatedExecutionScope(
+        active_org_id=7,
+        active_team_id=11,
+    )
+
+
+def test_mounted_ws_rejects_malformed_api_key_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified import get_mcp_server
+
+    server = get_mcp_server()
+    _install_mounted_ws_single_user_compat(
+        monkeypatch,
+        server=server,
+        api_key="unrelated-single-user-key-12345",
+        test_mode=True,
+    )
+    server.auth_provider = _ScopedWsAuthProvider(
+        api_key_info={"user_id": "41", "org_id": True}
+    )
+
+    with build_mcp_test_client() as client:
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            with client.websocket_connect(
+                "/api/v1/mcp/ws?client_id=ws-malformed-scope",
+                headers={"X-API-KEY": "malformed-scope-key"},
+            ):
+                pass
+
+    assert exc_info.value.code == 1008
+    assert exc_info.value.reason == "Authentication failed"
+
+
+def test_mounted_ws_malformed_authnz_identity_cannot_fall_back_to_mcp_jwt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified import get_mcp_server
+
+    class _RecordingJwtManager:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def verify_token(self, _token: str) -> None:
+            self.calls += 1
+            raise HTTPException(status_code=401, detail="invalid")
+
+    server = get_mcp_server()
+    _install_mounted_ws_single_user_compat(
+        monkeypatch,
+        server=server,
+        api_key="unrelated-single-user-key-12345",
+        test_mode=True,
+    )
+    server.auth_provider = _ScopedWsAuthProvider(
+        identity=SimpleNamespace(
+            user_id="41",
+            roles=[],
+            permissions=[],
+            active_org_id=True,
+            active_team_id=None,
+        ),
+        is_authnz_token=False,
+    )
+    jwt_manager = _RecordingJwtManager()
+    monkeypatch.setattr(server, "jwt_manager", jwt_manager)
+
+    with build_mcp_test_client() as client:
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            with client.websocket_connect(
+                "/api/v1/mcp/ws?client_id=ws-malformed-authnz",
+                headers={"Authorization": "Bearer malformed-authnz-token"},
+            ):
+                pass
+
+    assert jwt_manager.calls == 0
+    assert exc_info.value.code == 1008
+    assert exc_info.value.reason == "Authentication failed"
+
+
+def test_mounted_ws_malformed_authnz_identity_cannot_fall_back_to_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified import get_mcp_server
+
+    class _RecordingAuthProvider(_ScopedWsAuthProvider):
+        def __init__(self) -> None:
+            super().__init__(
+                identity=SimpleNamespace(
+                    user_id="41",
+                    roles=[],
+                    permissions=[],
+                    active_org_id=True,
+                    active_team_id=None,
+                ),
+                api_key_info={"user_id": "99", "org_id": 7},
+                is_authnz_token=False,
+            )
+            self.api_key_calls = 0
+
+        async def validate_api_key(self, *_args: Any, **_kwargs: Any) -> dict[str, Any] | None:
+            self.api_key_calls += 1
+            return self.api_key_info
+
+    server = get_mcp_server()
+    _install_mounted_ws_single_user_compat(
+        monkeypatch,
+        server=server,
+        api_key="unrelated-single-user-key-12345",
+        test_mode=True,
+    )
+    auth_provider = _RecordingAuthProvider()
+    server.auth_provider = auth_provider
+
+    with build_mcp_test_client() as client:
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            with client.websocket_connect(
+                "/api/v1/mcp/ws?client_id=ws-malformed-authnz-api-key",
+                headers={
+                    "Authorization": "Bearer malformed-authnz-token",
+                    "X-API-KEY": "fallback-api-key",
+                },
+            ) as ws:
+                ws.send_json({"jsonrpc": "2.0", "method": "tools/list", "id": "scope-downgrade"})
+                ws.receive_json()
+
+    assert exc_info.value.code == 1008
+    assert exc_info.value.reason == "Authentication failed"
+    assert auth_provider.api_key_calls == 0
+
+
+def test_mounted_ws_authnz_identity_without_user_cannot_fall_back_to_mcp_jwt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified import get_mcp_server
+
+    class _RecordingJwtManager:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def verify_token(self, _token: str) -> None:
+            self.calls += 1
+            raise HTTPException(status_code=401, detail="invalid")
+
+    server = get_mcp_server()
+    _install_mounted_ws_single_user_compat(
+        monkeypatch,
+        server=server,
+        api_key="unrelated-single-user-key-12345",
+        test_mode=True,
+    )
+    server.auth_provider = _ScopedWsAuthProvider(
+        identity=SimpleNamespace(
+            user_id="",
+            roles=[],
+            permissions=[],
+            active_org_id=None,
+            active_team_id=None,
+        ),
+        is_authnz_token=False,
+    )
+    jwt_manager = _RecordingJwtManager()
+    monkeypatch.setattr(server, "jwt_manager", jwt_manager)
+
+    with build_mcp_test_client() as client:
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            with client.websocket_connect(
+                "/api/v1/mcp/ws?client_id=ws-missing-authnz-user",
+                headers={"Authorization": "Bearer malformed-authnz-token"},
+            ):
+                pass
+
+    assert jwt_manager.calls == 0
+    assert exc_info.value.code == 1008
+    assert exc_info.value.reason == "Authentication failed"
+
+
+def test_mounted_ws_personal_mcp_jwt_preserves_absent_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified import get_mcp_server
+
+    server = get_mcp_server()
+    protocol = _install_mounted_ws_single_user_compat(
+        monkeypatch,
+        server=server,
+        api_key="unrelated-single-user-key-12345",
+        test_mode=True,
+    )
+    token = server.jwt_manager.create_access_token(subject="41")
+
+    with build_mcp_test_client() as client:
+        with client.websocket_connect(
+            "/api/v1/mcp/ws?client_id=ws-personal-jwt",
+            headers={"Authorization": f"Bearer {token}"},
+        ) as ws:
+            ws.send_json({"jsonrpc": "2.0", "method": "tools/list", "id": "ws-personal-jwt"})
+            body = ws.receive_json()
+
+    assert body["result"] == {"tools": []}
+    assert protocol.contexts[-1].server_auth_scope is None
+
+
+def test_mounted_ws_single_user_cookie_preserves_absent_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+    from tldw_Server_API.app.core.MCP_unified import get_mcp_server
+
+    server = get_mcp_server()
+    protocol = _install_mounted_ws_single_user_compat(
+        monkeypatch,
+        server=server,
+        api_key="unrelated-single-user-key-12345",
+        test_mode=True,
+    )
+
+    async def _cookie_identity(websocket: Any) -> Any:
+        websocket.state.single_user_session_id = 17
+        websocket.state.user_id = 41
+        websocket.state.single_user_cookie_websocket_close_code = None
+        websocket.state.auth_principal = AuthPrincipal(
+            kind="user",
+            user_id=41,
+            token_type="single_user_session",
+            roles=["admin"],
+            permissions=["*"],
+        )
+        return object()
+
+    monkeypatch.setattr(
+        mcp_unified_endpoint,
+        "resolve_single_user_cookie_websocket",
+        _cookie_identity,
+    )
+
+    with build_mcp_test_client() as client:
+        with client.websocket_connect("/api/v1/mcp/ws?client_id=ws-cookie") as ws:
+            ws.send_json({"jsonrpc": "2.0", "method": "tools/list", "id": "ws-cookie"})
+            body = ws.receive_json()
+
+    assert body["result"] == {"tools": []}
+    assert protocol.contexts[-1].server_auth_scope is None
+
+
 def test_mounted_ws_single_user_api_key_attaches_trusted_mounted_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -349,6 +812,7 @@ def test_mounted_ws_single_user_api_key_attaches_trusted_mounted_metadata(
     assert context.metadata["auth_via"] == "single_user_api_key"
     assert context.metadata["trusted_auth_claims"] is True
     assert context.metadata["compat_claims_source"] == "mounted_ws"
+    assert context.server_auth_scope is None
 
 
 def test_mounted_ws_single_user_test_api_key_rejected_when_test_mode_false(
@@ -407,6 +871,7 @@ def test_mounted_ws_single_user_test_api_key_attaches_test_metadata_with_guard(
     assert context.metadata["auth_via"] == "single_user_test_api_key"
     assert context.metadata["trusted_auth_claims"] is True
     assert context.metadata["compat_claims_source"] == "mounted_ws"
+    assert context.server_auth_scope is None
 
 
 def test_mounted_request_success_omits_error():

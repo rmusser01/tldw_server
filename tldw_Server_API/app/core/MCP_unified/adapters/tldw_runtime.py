@@ -281,11 +281,20 @@ class TldwServerAuthProvider:
         user_id = str(getattr(user, "id", None) or "")
         if not user_id:
             return None
-        return AuthenticatedIdentity(
-            user_id=user_id,
-            roles=list(getattr(user, "roles", []) or []),
-            permissions=list(getattr(user, "permissions", []) or []),
-        )
+        try:
+            return AuthenticatedIdentity(
+                user_id=user_id,
+                roles=list(getattr(user, "roles", []) or []),
+                permissions=list(getattr(user, "permissions", []) or []),
+                active_org_id=getattr(user, "active_org_id", None),
+                active_team_id=getattr(user, "active_team_id", None),
+            )
+        except _TLDW_RUNTIME_ADAPTER_EXCEPTIONS as exc:
+            logger.debug(
+                "MCP AuthNZ websocket identity projection failed closed: {}",
+                exc.__class__.__name__,
+            )
+            return None
 
     async def validate_api_key(
         self,

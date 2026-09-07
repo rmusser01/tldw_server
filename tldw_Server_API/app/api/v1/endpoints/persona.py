@@ -178,7 +178,9 @@ from tldw_Server_API.app.core.Image_Generation.adapter_registry import (
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.MCP_unified import MCPRequest, get_mcp_server
+from tldw_Server_API.app.core.MCP_unified.auth_scope import project_authenticated_execution_scope
 from tldw_Server_API.app.core.MCP_unified.persona_scope import normalize_persona_scope_payload
+from tldw_Server_API.app.core.MCP_unified.protocol_types import AuthenticatedExecutionScope
 from tldw_Server_API.app.core.Metrics import increment_counter
 from tldw_Server_API.app.core.Persona import live_conversation
 from tldw_Server_API.app.core.Persona.buddy import (
@@ -2485,9 +2487,12 @@ def _persona_visual_starter_catalog_error_to_http(exc: PersonaVisualStarterCatal
     status_code = status.HTTP_400_BAD_REQUEST
     if exc.code in {"starter_pack_not_found", "starter_asset_not_found", "target_persona_not_found"}:
         status_code = status.HTTP_404_NOT_FOUND
-    elif exc.code in {"invalid_starter_fixture", "duplicate_starter_fixture"}:
-        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
-    elif exc.code in {"invalid_starter_asset", "invalid_starter_manifest"}:
+    elif exc.code in {
+        "invalid_starter_fixture",
+        "duplicate_starter_fixture",
+        "invalid_starter_asset",
+        "invalid_starter_manifest",
+    }:
         status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
     elif exc.code in {"persona_id_required", "user_id_required"}:
         status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
@@ -3577,12 +3582,26 @@ async def _resolve_authenticated_user_id(ws: WebSocket) -> tuple[str | None, boo
     except WebSocketException as exc:
         # Fail closed until the socket closes: forward no credential and deny every scoped tool.
         ws.state.persona_auth_method, ws.state.persona_api_key_scopes = "", []
+        ws.state.persona_server_auth_scope = None
         return None, exc.reason != "authentication_required", False
     if principal.user_id is None:  # a service token has no user to own persona state
         ws.state.persona_auth_method, ws.state.persona_api_key_scopes = "", []
+        ws.state.persona_server_auth_scope = None
+        return None, True, False
+    try:
+        server_auth_scope = project_authenticated_execution_scope(
+            authenticated_user_id=str(principal.user_id),
+            principal_user_id=principal.user_id,
+            principal_active_org_id=principal.active_org_id,
+            principal_active_team_id=principal.active_team_id,
+        )
+    except ValueError:
+        ws.state.persona_auth_method, ws.state.persona_api_key_scopes = "", []
+        ws.state.persona_server_auth_scope = None
         return None, True, False
     ws.state.persona_auth_method = principal.token_type or ""
     ws.state.persona_api_key_scopes = getattr(ws.state, "ws_api_key_scopes", None)
+    ws.state.persona_server_auth_scope = server_auth_scope
     return str(principal.user_id), True, True
 
 
@@ -9230,7 +9249,14 @@ async def persona_stream(
                     "persona_ws_scope_resolution_total",
                     {"source": "mcp_tool", "result": "miss"},
                 )
-            resp = await server.handle_http_request(req, user_id=authenticated_user_id, metadata=audit_metadata)
+            mcp_call_kwargs: dict[str, Any] = {
+                "user_id": authenticated_user_id,
+                "metadata": audit_metadata,
+            }
+            server_auth_scope = getattr(ws.state, "persona_server_auth_scope", None)
+            if server_auth_scope is not None:
+                mcp_call_kwargs["server_auth_scope"] = server_auth_scope
+            resp = await server.handle_http_request(req, **mcp_call_kwargs)
             if resp is None:
                 logger.warning(
                     "Persona MCP tool call returned no response: tool={} mapped_tool={} session_id={} plan_id={}",

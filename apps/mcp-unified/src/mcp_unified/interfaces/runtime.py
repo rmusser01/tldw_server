@@ -256,6 +256,13 @@ class AuthenticatedIdentity:
     user_id: str
     roles: list[str] = field(default_factory=list)
     permissions: list[str] = field(default_factory=list)
+    active_org_id: int | None = None
+    active_team_id: int | None = None
+
+    def __post_init__(self) -> None:
+        for value in (self.active_org_id, self.active_team_id):
+            if value is not None and (type(value) is not int or value < 1):
+                raise ValueError("Active scope IDs must be positive non-boolean integers")
 
 
 class ServerAuthProvider(Protocol):

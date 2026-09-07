@@ -23,8 +23,9 @@ class _CaptureServer:
         request: mcp_unified_endpoint.MCPRequest,
         user_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        server_auth_scope: Any | None = None,
     ) -> SimpleNamespace:
-        _ = (user_id, metadata)
+        _ = (user_id, metadata, server_auth_scope)
         self.request = request
         return SimpleNamespace(error=None, result={"prompts": [], "nextCursor": "next"})
 
