@@ -46,9 +46,16 @@ Checkpoint: 13 tests passed (4 existing repository warnings), Black/compileall p
 **Goal:** Complete system and bundled fixes with executable regression/compatibility evidence.
 **Success Criteria:** Native amd64 source-package build, explicit upstream parser tests, CPython rebuild/test suite, ABI and installed-copy probes pass. Missing evidence or any failure blocks qualification.
 **Tests:** Debian `make -C build check` (the packaging rules do not run it), CMake sanitizer tests, CPython XML tests, bounded attribute-scaling and legitimate controls.
-**Status:** Not Started
+**Status:** In Progress
 
 **Files:** Create `Dockerfiles/candidates/expat/Dockerfile`, `Dockerfiles/candidates/expat/qualify.sh`, `.github/workflows/expat-candidate.yml`; extend the Stage 1 test file for controller failure propagation.
+
+Authentication checkpoint: the Stage 1 helper now offers a separate
+`authenticate-sources` command. It verifies the five hashes before GnuPG, uses a
+fresh private keyring, checks the exact signer/primary pairs and retains fresh
+process evidence. The real signed input bundle passes; wrong-archive-signature
+and wrong-public-key substitutions fail. Native workflow integration, builds,
+parser tests and binary qualification below remain outstanding.
 
 - [ ] Test that controller preparation/build/test/install failures propagate and evidence upload still runs; reject non-native hosts/images, missing status files and missing parser-test output.
 - [ ] Use native `ubuntu-24.04`; pin checkout/upload actions to the same verified commits as util-linux qualification. Preserve read-only repository permissions, exact checkout SHA, image identities and logs. No registry push, privileged mode, Docker socket bind, host secrets or production deploy.
