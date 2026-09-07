@@ -11,16 +11,21 @@ labels:
 priority: High
 references:
 - codex/jobs-completion-foundation@877c86e7bb
+- TASK-13216
+- TASK-13217
 documentation:
 - Docs/superpowers/specs/2026-09-07-jobs-completion-row-identity-atomicity-design.md
 - Docs/superpowers/plans/2026-09-07-jobs-completion-row-identity-atomicity-implementation-plan.md
 modified_files:
 - Docs/superpowers/specs/2026-09-07-jobs-completion-row-identity-atomicity-design.md
 - Docs/superpowers/plans/2026-09-07-jobs-completion-row-identity-atomicity-implementation-plan.md
+- backlog/tasks/task-13215 - Fix-Jobs-completion-missing-row-concurrent-insert-atomicity.md
+- backlog/tasks/task-13216 - Migrate-acquired-job-completion-callers-to-UUID-preconditions.md
+- backlog/tasks/task-13217 - Assess-historical-Jobs-completion-bookkeeping-drift.md
 - tldw_Server_API/app/core/Jobs/manager.py
 - tldw_Server_API/app/core/Jobs/worker_sdk.py
 - tldw_Server_API/tests/Jobs
-updated_date: 2026-09-07 19:45
+updated_date: 2026-09-07 20:10
 ---
 
 ## Description
@@ -33,9 +38,9 @@ Blocking remediation required before strict complete_job extraction. A completio
 <!-- AC:BEGIN -->
 - [ ] #1 A deterministic SQLite regression reproduces the initial-miss/concurrent-insert race before the fix.
 - [ ] #2 A real-PostgreSQL regression validates whether the same race is possible under the configured isolation and RLS cursor path.
-- [ ] #3 No completion can commit successfully unless the operation has authoritative facts for the exact durable row identity it transitions.
+- [ ] #3 No completion can commit successfully unless the operation has authoritative facts for the exact durable row identity established by its locked lookup.
 - [ ] #4 An applied completion updates or reconciles the correct lifecycle counter and writes job.completed atomically when the outbox is enabled.
-- [ ] #5 Concurrent insert, delete/reinsert, and row-visibility changes cannot cause completion of a different row incarnation selected only by a reused numeric id.
+- [ ] #5 After the authoritative locked lookup begins, concurrent insert, delete/reinsert, and row-visibility changes cannot redirect completion to another row incarnation selected only by a reused numeric id; pre-call protection is asserted only when a usable expected_uuid is supplied.
 - [ ] #6 Normal processing completion, permitted queued completion, token replay, missing-row, failure precedence, and RLS behavior are explicitly characterized and intentionally updated where remediation requires it.
 - [ ] #7 Focused SQLite and required real-PostgreSQL tests, full relevant Jobs regressions, formatting/lint, and scoped Bandit pass.
 <!-- AC:END -->
@@ -43,8 +48,7 @@ Blocking remediation required before strict complete_job extraction. A completio
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Validated on SQLite and real PostgreSQL 18 under READ COMMITTED, including the forced-RLS visible-row path: after an initial missing SELECT, a concurrent queued insert with the same numeric id can be completed while only job.created exists and ready_count remains 1. The approved remediation locks and loads the target at transaction start, returns False on initial miss, captures the stored UUID as row-incarnation identity, and guards every transition/replay query by id plus null-safe stored UUID. PostgreSQL uses SELECT FOR UPDATE; SQLite uses BEGIN IMMEDIATE. expected_uuid is optional and WorkerSDK supplies it. Completion outbox and lifecycle counter bookkeeping remain mandatory and atomic; SLA persistence remains best-effort under its existing savepoint; metrics and observers remain post-commit. Strict completion extraction stays paused until this blocker merges. The previous provisional TASK-13112.3 was not carried forward because current dev already assigns TASK-13112 to unrelated work.
-Design written and re-audited on 2026-09-07 against origin/dev e3174f1ad9f6. The audit clarified that null/empty legacy UUIDs cannot provide pre-call incarnation distinction, even when WorkerSDK forwards the exposed empty UUID; those rows receive only the transaction's in-operation replacement protection. It also records why the slides-specific terminal-result operation is not a suitable reuse target for ordinary completion.
+Validated on SQLite and real PostgreSQL 18 under READ COMMITTED, including forced RLS with a visible chatbooks/u1 row: after an initial missing SELECT, a concurrent queued insert with the same numeric id can be completed while only job.created exists and ready_count remains 1. The approved remediation loads the authoritative row under SELECT FOR UPDATE on PostgreSQL or BEGIN IMMEDIATE on SQLite, returns False on a locked miss, captures the raw stored UUID, and guards every mutation/replay query by id plus null-safe stored UUID. expected_uuid is optional and WorkerSDK supplies the acquired UUID; legacy null/empty UUIDs receive only in-operation replacement protection. Completion outbox and lifecycle counter bookkeeping are mandatory and atomic when enabled. SLA attachment/event statement failures remain best-effort only after a savepoint is established; savepoint-control failures propagate. Metrics and observers remain post-commit. The slides-specific terminal-result operation is not a suitable reuse target because it does not preserve general result or queued-completion semantics. Strict completion extraction stays paused until this blocker merges. The provisional TASK-13112.3 was not carried forward because current dev already assigns TASK-13112 to unrelated work. Second design review added stable database error-code/class assertions, bounded concurrency teardown, exact same-token side-effect coverage, explicit SQLite contention behavior, and tracked follow-ups TASK-13216 (direct-caller UUID adoption) and TASK-13217 (historical bookkeeping drift).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

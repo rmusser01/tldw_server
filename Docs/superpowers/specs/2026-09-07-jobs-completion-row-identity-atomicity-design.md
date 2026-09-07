@@ -48,8 +48,8 @@ method into backend operation modules.
 - Bind one invocation to the visible row incarnation loaded at its transaction
   boundary.
 - Return `False` when the initial locked lookup sees no visible row.
-- Prevent a later insert or delete/reinsert with the same numeric ID from being
-  completed by that invocation.
+- Prevent an insert or delete/reinsert after the authoritative locked lookup
+  from redirecting that invocation to the same numeric ID's new row.
 - Preserve normal processing completion, explicitly allowed queued completion,
   and exact completion-token replay behavior.
 - Let UUID-aware callers reject a stale row before mutation while preserving
@@ -136,6 +136,12 @@ expected_uuid: str | None = None
 Existing direct callers remain source-compatible. `WorkerSDK` supplies the UUID
 from the acquired job for ordinary successful completion.
 
+`WorkerSDK` must call the expanded contract directly. It must not catch a
+`TypeError` and retry without `expected_uuid`, because such a compatibility
+fallback would silently remove the intended stale-worker precondition. Strict
+test doubles used with `WorkerSDK` are updated to accept and assert the new
+keyword.
+
 When `expected_uuid` is not `None`, the locked row's external UUID
 representation must match before state classification or mutation. A mismatch
 returns `False`. For legacy rows, a null stored UUID has the same external
@@ -154,10 +160,17 @@ cannot distinguish two pre-call row incarnations that both lack usable UUIDs;
 its guarantee is limited to the in-operation lock boundary. Migrating callers
 and legacy data policy are separate follow-ups.
 
+The temporal boundary is explicit: the locked lookup, not receipt of a numeric
+ID by some earlier caller, starts this operation's row-incarnation guarantee.
+An insert after a locked miss cannot be mutated because the method returns
+immediately. A replacement before the locked lookup is distinguishable only
+when the caller supplies a usable expected UUID. This task does not claim a
+stronger guarantee for numeric-ID-only or null-UUID callers.
+
 ## Identity Boundary
 
-The initial visible row is authoritative for the complete operation. The
-locked projection must include at least:
+The initial locked, visible row is authoritative for the complete operation.
+The locked projection must include at least:
 
 - `id`, `uuid`, and `status`
 - `completion_token`, `worker_id`, and `lease_id`
@@ -210,8 +223,8 @@ Inside the transaction:
 7. If the update unexpectedly affects zero rows, permit only an exact
    completed-token replay scoped to the same captured row identity.
 8. For an applied transition, perform enabled lifecycle-counter bookkeeping,
-   stage best-effort SLA handling, persist the enabled `job.completed` outbox
-   event, and queue post-commit callbacks.
+   stage savepoint-scoped SLA handling, persist the enabled `job.completed`
+   outbox event, and queue post-commit callbacks.
 9. Commit the transaction.
 10. Run metrics, tracing, observers, non-outbox event emission, and audit work
     only after a successful commit, retaining existing nonfatal handling.
@@ -231,8 +244,8 @@ already-completed state. Every other expected no-transition returns `False`.
 | `processing` | Enforcement enabled and worker, lease, and token guards match | Apply completion |
 | `processing` | Enforcement enabled and an ownership guard fails | `False` |
 | `processing` | Enforcement disabled and token guard permits | Apply completion |
-| `queued` | Enforcement disabled and locked domain is allowlisted | Apply completion |
-| `queued` | Enforcement enabled or domain not allowlisted | `False` |
+| `queued` | Enforcement disabled, locked domain is allowlisted, and token guard permits | Apply completion |
+| `queued` | Enforcement enabled, domain disallowed, or token guard rejects | `False` |
 | Any other state | Any inputs | `False` |
 
 The allowlist is computed from the existing environment setting and fallback.
@@ -253,10 +266,12 @@ and occurs in the same transaction. A counter, reconciliation, outbox, or
 commit failure rolls back the job transition and propagates the original
 failure. No queued post-commit side effect runs after a failed commit.
 
-SLA-breach attachment and event staging retain the current savepoint-backed,
-best-effort behavior. They are observability enrichment, not authoritative
-completion bookkeeping, and a failure there does not invalidate an otherwise
-sound completion.
+SLA-breach attachment and event writes retain the current savepoint-backed,
+best-effort behavior after the savepoint has been established. Their handled
+statement failures roll back to that savepoint and do not invalidate an
+otherwise sound completion. Failure to create, roll back, or release the
+savepoint itself is a transaction-control failure and must propagate rather
+than risk committing an unknown transaction state.
 
 ## Backend Details
 
@@ -281,6 +296,11 @@ sound completion.
 - Use `IS ?` for nullable stored UUID guards.
 - Keep all state, counters, SLA savepoint work, and outbox persistence inside
   the one transaction context.
+- The stronger boundary means missing-row and terminal-replay calls also
+  request the SQLite writer reservation. They use the configured connection
+  timeout and may surface the existing SQLite busy/locked database exception
+  under contention. This task adds no hidden retry loop; contention remains
+  visible to callers and the lock is released on every return path.
 
 ## Lock Ordering
 
@@ -298,15 +318,18 @@ read-only. Redesigning that lookup is outside this defect fix.
 ### SQLite regression harness
 
 Instrument the connection/cursor boundary to pause immediately after the
-target initial `fetchone()` rather than relying on sleeps.
+target initial `fetchone()` rather than relying on sleeps. Coordination uses
+bounded events/barriers, and teardown releases every paused worker in a
+`finally` block so a failed assertion cannot hang the suite.
 
 For an initial miss:
 
 1. Start completion and pause after the missing lookup.
 2. Attempt the competing insert through a second connection with `timeout=0`.
 3. Demonstrate that the pre-fix path permits the insert and can transition it.
-4. On the fixed path, assert the insert receives `database is locked` while
-   completion returns `False`.
+4. On the fixed path, assert the insert receives a SQLite busy/locked error
+   code while completion returns `False`; do not bind the test to one localized
+   exception message.
 5. Retry the insert after completion exits and verify the new job remains
    queued with correct creation bookkeeping.
 
@@ -323,7 +346,8 @@ Use isolated roles/databases and the real production cursor behavior.
   to succeed; verify completion returns `False` and the inserted row remains
   queued.
 - Existing visible row: prove the completion transaction owns the row lock by
-  asserting a competing `SELECT ... FOR UPDATE NOWAIT` fails immediately.
+  asserting a competing `SELECT ... FOR UPDATE NOWAIT` raises psycopg's
+  lock-not-available error immediately.
 - Repeat the relevant cases under normal `READ COMMITTED` and forced RLS with a
   visible scoped row.
 - Verify an RLS-hidden row remains unchanged and completion returns `False`.
@@ -339,11 +363,17 @@ Add or strengthen tests for:
 - enforcement-disabled processing completion
 - allowlisted and disallowed queued completion
 - exact completion-token replay and mismatched-token rejection
+- concurrent same-token finalizers producing one mutation, one counter delta,
+  and one durable completion event
 - enabled counter and outbox success in the same commit
 - counter, reconciliation, outbox, and commit fault rollback
 - no post-commit callback after rollback
 - existing best-effort SLA failure behavior
 - `WorkerSDK` forwarding the acquired job UUID
+- strict `WorkerSDK` doubles accepting the new keyword without a retry that
+  drops it
+- required-token, result-size, and malformed size-configuration precedence on
+  missing and stale-UUID rows
 
 Do not add a nonserializable-result characterization to this PR.
 
@@ -360,8 +390,22 @@ the required real-PostgreSQL matrix with
 formatting/lint checks, and Bandit over `manager.py` and `worker_sdk.py`.
 Broader or stress validation belongs in the dedicated mandatory Jobs CI path.
 
-No migration, rollout flag, or data rewrite is required. The change is
-revertible as one facade-level defect fix.
+No migration, rollout flag, or data rewrite is required for prevention. The
+change is revertible as one facade-level defect fix.
+
+## Historical Data Boundary
+
+This preventive fix does not prove whether the race occurred in an existing
+deployment and does not rewrite historical rows. A completed job without a
+`job.completed` event is not sufficient evidence because the outbox may have
+been disabled at transition time. Synthesizing events would therefore create
+false history. Counter values can be rebuilt from durable current state, but a
+global repair has different locking and operator-impact concerns from the
+runtime fix.
+
+TASK-13217 owns the bounded assessment, idempotent counter reconciliation, and
+operator guidance for possible pre-fix drift. This PR records the residual
+risk without performing an unsafe automatic repair.
 
 ## Follow-Up Work
 
@@ -369,7 +413,9 @@ After this remediation merges:
 
 1. Resume the approved strict extraction of completion into backend-specific
    operation modules without changing behavior.
-2. Inventory direct `complete_job` callers and migrate appropriate acquired-job
-   paths to pass `expected_uuid` in a separate compatibility-focused PR.
-3. Track unrelated serialization or SLA-connection concerns independently if
-   their characterization demonstrates a defect.
+2. TASK-13216 inventories direct `complete_job` callers and migrates appropriate
+   acquired-job paths to pass `expected_uuid` in a compatibility-focused PR.
+3. TASK-13217 assesses possible historical counter and event drift without
+   inventing unverifiable outbox history.
+4. Unrelated serialization or SLA-connection concerns require independent
+   characterization and a dedicated Backlog task before implementation.
