@@ -32,6 +32,7 @@ PYTHON_PRODUCTION_PROFILES = {
     "audio-worker": ("Dockerfiles/Dockerfile.audio_gpu_worker", None),
 }
 WEB_REQUIRED_OVERRIDES = {
+    "@opentelemetry/core": "2.11.0",
     "@playwright/test": "1.58.0",
     "@xmldom/xmldom": "0.8.15",
     "antd": "6.2.1",
@@ -43,10 +44,12 @@ WEB_REQUIRED_OVERRIDES = {
     "wxt": "0.20.27",
 }
 ADMIN_REQUIRED_OVERRIDES = {
+    "@opentelemetry/core": "2.11.0",
     "baseline-browser-mapping": "2.9.19",
     "eslint-plugin-react-hooks": "7.0.1",
 }
 KNOWN_VULNERABLE_BUN_RELEASES = {
+    "@opentelemetry/core@2.6.0",
     "@xmldom/xmldom@0.7.13",
     "@xmldom/xmldom@0.8.13",
     "prismjs@1.27.0",
