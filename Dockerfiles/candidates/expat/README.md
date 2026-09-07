@@ -4,7 +4,8 @@ Tracking: TASK-13013.7.9. Execution plan:
 `IMPLEMENTATION_PLAN_task_13013_7_9_expat_dual_copy.md`.
 
 This directory does **not** supply a production replacement or a qualified image.
-Source preparation and automated source authentication are implemented; native builds, parser/ABI tests, combined
+Source preparation, automated authentication and the native system-build harness
+are implemented; successful native builds, parser/ABI tests, combined
 application compatibility, source-aware scans and final security review remain
 required. No vulnerability waiver follows from this evidence.
 
@@ -97,6 +98,52 @@ Python signature for the Expat archive, or removing the Expat public certificate
 by substituting the Python certificate, each failed without a success record.
 Evidence: `/private/tmp/task-13013-7-expat-auth-real.jMY6Yy`. These bounded checks
 still establish **source authentication only**, not Expat remediation.
+
+## Native system-library qualification
+
+The `Expat Native System Candidate Qualification` workflow uses native amd64
+`ubuntu-24.04`, pinned checkout/upload actions, read-only repository permissions,
+the approved Python/Trixie base digest and signed Debian snapshot. It publishes
+no image and changes no production recipe or scan policy. The native controller
+rejects other host/daemon/image architectures and reused evidence directories.
+
+The image build installs build dependencies and downloads the pinned sources
+and public certificates; it does not execute downloaded source. Separate
+networkless containers then authenticate and prepare sources, build/test, run
+ASan/UBSan tests, and check installation. Build and test containers run as UID
+1000 without capabilities; only the fresh package-install container uses root
+with ordinary container capabilities. None uses privileged mode or host mounts.
+The controller records immutable input-image IDs and the checkout SHA, retains
+phase exit codes and uploads evidence even when a phase fails.
+
+System qualification includes:
+
+- A full Debian 2.8.4 source-package rebuild with local candidate revision
+  `2.8.4-1~deb13u1+tldw1`, rather than unstable binary packages.
+- Explicit ordinary `make check`, plus verbose execution evidence for
+  `test_default_attr_index_after_dtd_copy`.
+- SONAME and all defined public-export comparisons for both `libexpat` and
+  `libexpatw`, including unversioned symbols, and dynamic dependency checks.
+- Dedicated unsigned-short wide-character controls for namespaces, defaults,
+  first-declaration precedence, CDATA/NMTOKENS normalization and external-child
+  parser lifecycle, with whole-buffer and small-chunk input. Upstream's test
+  suite explicitly rejects Debian's unsigned-short mode; no wide upstream-suite
+  pass is claimed. The external-child test retains the non-null context needed
+  to exercise `dtdCopy`.
+- CPU-bounded attribute scaling at 4,000/8,000/16,000 NMTOKENS attributes with
+  unnormalized values. Five-sample median process CPU times are measured for
+  whole-buffer and 64 KiB incremental input. The baseline must reproduce greater
+  than 3× growth for the last doubling; the candidate must grow less than 3× and
+  consume less than 60% of the baseline's largest-input time. Failure is retained,
+  not treated as a timing exemption. CPU and address-space limits are enforced.
+- Upstream ASan/UBSan tests in a separate unprivileged, networkless container.
+- Fresh-container package installation, exact installed parser version checks,
+  repeated wide controls, `apt-get check` and empty `dpkg --audit`.
+
+The workflow's result is **system-only**. It records the still-unmodified Python
+bundled parser and cannot admit a dual-copy release. CPython refresh/rebuild,
+source SBOM regeneration, Python XML tests and combined application/rendering
+qualification remain required by the implementation plan.
 
 ## CPython preparation contract
 
