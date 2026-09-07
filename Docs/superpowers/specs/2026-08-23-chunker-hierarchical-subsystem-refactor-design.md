@@ -18,14 +18,17 @@ first, with narrowly reproduced corrections allowed under the gate defined below
 
 ## Baseline
 
-The implementation baseline was reconciled on 2026-09-07 against refreshed
-`origin/dev` commit `01b516d4805ddf5eb7cddac35a11ef0e062facc5`. The required
+The implementation baseline was reconciled again on 2026-09-07 against
+refreshed `origin/dev` commit
+`e3174f1ad9f6dd0b11e4ecb20d48c1c4090d3bfe`. The required scoped diff from
+the prior reconciled baseline `01b516d4805ddf5eb7cddac35a11ef0e062facc5`
+through current `origin/dev` was empty, so no hierarchy or `process_text`
+contract changed in the reviewed Chunking source and test paths. The initial
 scoped diff from the design baseline
-`4958cfed65d3c6e9baa43ea47e2b155fed204e13` through current `origin/dev` was
-empty, so no hierarchy or `process_text` contract changed in the reviewed
-Chunking source and test paths. The local `dev` branch is divergent and dirty,
-so implementation must use the isolated worktree based on refreshed
-`origin/dev` and must not modify or reset the local checkout.
+`4958cfed65d3c6e9baa43ea47e2b155fed204e13` through the prior reconciled
+baseline was also empty. The local `dev` branch is divergent and dirty, so
+implementation must use the isolated worktree based on refreshed `origin/dev`
+and must not modify or reset the local checkout.
 
 Immediately before implementation begins, fetch `origin/dev` and compare it with
 the recorded baseline. If it is unchanged, proceed from the pinned commit. If it
@@ -35,8 +38,7 @@ rebase the isolated branch onto the new `origin/dev`, update the baseline hash i
 this spec and the Backlog task, and rerun the focused characterization suite before
 editing production code. Any resulting contract change returns to design review.
 
-Focused baseline verification on the rebased isolated worktree passed on
-2026-09-07:
+Focused baseline verification after the second rebase passed on 2026-09-07:
 
 - 92 tests collected
 - 91 passed
@@ -48,7 +50,8 @@ The run covered hierarchy rewrite offsets, additional offsets, template
 classification, Thai/table spans, hierarchical template options, `process_text`
 components, and `process_text` output equivalence. Environmental output noted
 the existing no-`.env` fallback to `config.txt`, legacy single-user API-key
-warning, isolated test database fallback, and emitted OpenTelemetry spans.
+warning, isolated test database fallback, and emitted OpenTelemetry spans. The
+second reconciliation run completed in 1.86 seconds.
 
 ## Goals
 
