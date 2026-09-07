@@ -45,8 +45,9 @@ prepare() {
     run_step sbom env -u CI python "$PY_SOURCE/Tools/build/generate_sbom.py"
     run_step source-verification python "$TOOL_DIR/python-source.py" "$PY_SOURCE" "$EVIDENCE/baseline"
     run_step source-archive tar --exclude=.git -cJf "$EVIDENCE/python-source.tar.xz" -C /work Python-3.12.14
+    # Isolate ElementTree module reloads from the parent's JUnit aggregation.
     run_step baseline-tests env PYTHONPATH="$PY_SOURCE/Lib" /usr/local/bin/python3.12 -m test \
-        -v --timeout 300 --junit-xml "$EVIDENCE/baseline.xml" "${XML_TESTS[@]}"
+        -j1 -v --timeout 300 --junit-xml "$EVIDENCE/baseline.xml" "${XML_TESTS[@]}"
     run_step baseline-validation python "$TOOL_DIR/python-suite.py" "$EVIDENCE/baseline.xml" "$EVIDENCE/baseline.xml"
     run_step scaling-baseline /usr/local/bin/python3.12 "$TOOL_DIR/python-controls.py" measure
 }
@@ -85,7 +86,7 @@ build() {
     run_step python-relink make -j4 "EXTRA_CFLAGS=$cflags" "LDFLAGS=$ldflags -Wl,-rpath='\$\$ORIGIN/../lib'" python
     export LD_LIBRARY_PATH="$PY_SOURCE"
     run_step python-controls ./python "$TOOL_DIR/python-controls.py" controls --prefix "$PY_SOURCE"
-    run_step xml-tests ./python -m test -v --timeout 300 --junit-xml "$EVIDENCE/xml-results.xml" "${XML_TESTS[@]}"
+    run_step xml-tests ./python -m test -j1 -v --timeout 300 --junit-xml "$EVIDENCE/xml-results.xml" "${XML_TESTS[@]}"
     run_step suite-comparison python "$TOOL_DIR/python-suite.py" /work/evidence/prepare/baseline.xml "$EVIDENCE/xml-results.xml"
     run_step scaling-candidate ./python "$TOOL_DIR/python-controls.py" measure
     run_step scaling-comparison python "$TOOL_DIR/attribute-scaling.py" compare \

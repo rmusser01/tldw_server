@@ -180,6 +180,28 @@ def test_python_xml_controls_cover_non_null_child_and_legitimate_documents() -> 
     assert load_tool("python-controls.py").controls() == {"default-precedence": 3, "child-dtd-copy": 3, "namespace": 3}
 
 
+@pytest.mark.parametrize("step", ["baseline-tests", "xml-tests"])
+def test_xml_runner_isolates_module_reloads_without_dropping_suites(step: str) -> None:
+    # Removing worker isolation reproduces CPython's JUnit Element-type crash.
+    script = (DIRECTORY / "python-qualify.sh").read_text().replace("\\\n", "")
+    command = next(line.strip() for line in script.splitlines() if line.strip().startswith(f"run_step {step} "))
+    probe = """
+set -euo pipefail
+PY_SOURCE=/candidate
+EVIDENCE=/evidence
+XML_TESTS=(test_pyexpat test_xml_etree test_xml_etree_c test_minidom test_sax)
+run_step() { printf '%s\\0' "$@"; }
+"""
+    result = subprocess.run(  # nosec B603
+        ["/bin/bash", "-c", probe + command], capture_output=True, check=True, timeout=10
+    )
+    arguments = result.stdout.decode().rstrip("\0").split("\0")
+    assert "-j1" in arguments
+    assert arguments[-5:] == ["test_pyexpat", "test_xml_etree", "test_xml_etree_c", "test_minidom", "test_sax"]
+    assert arguments[arguments.index("--timeout") + 1] == "300"
+    assert arguments[arguments.index("--junit-xml") + 1].startswith("/evidence/")
+
+
 @pytest.mark.parametrize("mutation", [None, "failure", "new-skip", "missing-suite", "empty"])
 def test_xml_suite_gate_rejects_failures_new_skips_and_missing_coverage(tmp_path: Path, mutation: str | None) -> None:
     cases = [
