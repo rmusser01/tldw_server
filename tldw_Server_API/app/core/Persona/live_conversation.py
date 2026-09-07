@@ -27,30 +27,16 @@ def resolve_persona_conversation_target() -> Any:
 
 
 def require_persona_voice_conversation_credentials() -> Any:
-    """Conservatively qualify voice against server-configured Chat credentials.
+    """Validate the configured voice Chat target, retaining the legacy name.
 
-    User-scoped BYOK credentials remain supported by the normal text Chat route;
-    this local preparation check does not certify their availability for voice.
+    Preparation has no authenticated credential scope and cannot establish
+    readiness from server keys: the caller may use BYOK, and a configured key
+    does not guarantee admission. Each turn enters the ordinary authenticated
+    Chat HTTP route, which owns effective credentials, moderation and budgets.
+    This check performs no provider request and does not certify Chat access.
     """
-    from tldw_Server_API.app.core.Chat.chat_service import resolve_static_provider_fallback
-    from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
-    from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
-
     try:
-        target = resolve_persona_conversation_target()
-        credentials = resolve_static_provider_fallback(target.provider)
-        if provider_requires_api_key(target.provider) and not provider_auth_is_resolved(
-            target.provider,
-            api_key=credentials.api_key,
-            app_config=credentials.app_config,
-            credentials_resolved=True,
-        ):
-            raise PersonaConversationError(
-                "Voice preparation requires server-configured credentials for the default Chat provider."
-            )
-        return target
-    except PersonaConversationError:
-        raise
+        return resolve_persona_conversation_target()
     except (ValueError, TypeError, KeyError):
         raise PersonaConversationError(
             "Configure a supported default Chat provider and model in server settings."

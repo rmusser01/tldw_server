@@ -117,12 +117,12 @@ class KittenTTSAdapter(TTSAdapter):
             self._runtime = runtime
             self.model_name = assets.repo_id
             self.model_revision = assets.revision
+            self.sample_rate = int(getattr(runtime, "sample_rate", self.sample_rate))
             return runtime
 
     async def initialize(self) -> bool:
-        runtime = await self._load_runtime_for_model(self.model_name)
-        self.sample_rate = int(getattr(runtime, "sample_rate", self.sample_rate))
-        logger.info("KittenTTS adapter initialized for model {}", self.model_name)
+        """Initialize capabilities; load the request-selected model on demand."""
+        logger.info("KittenTTS adapter initialized; model assets load on demand")
         return True
 
     async def get_capabilities(self) -> TTSCapabilities:

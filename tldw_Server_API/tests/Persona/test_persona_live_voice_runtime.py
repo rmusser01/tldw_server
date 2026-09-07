@@ -81,8 +81,22 @@ def test_readiness_cannot_survive_stop_or_move_between_connections() -> None:
     assert not registry.is_ready(user_id="1", session_id="session")
 
 
+@pytest.fixture
+def local_tts_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    from contextlib import asynccontextmanager
+    from tldw_Server_API.app.core.Audio import tts_service
+
+    @asynccontextmanager
+    async def local_scope(**kwargs: Any) -> Any:
+        yield 1, {"credentials_resolved": True}, None, None
+
+    monkeypatch.setattr(tts_service, "tts_provider_credential_scope", local_scope)
+
+
 @pytest.mark.asyncio
-async def test_live_tts_selects_kokoro_without_provider_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_live_tts_selects_kokoro_without_provider_fallback(
+    monkeypatch: pytest.MonkeyPatch, local_tts_credentials: None
+) -> None:
     from tldw_Server_API.app.core.TTS import tts_service_v2
 
     calls = []
@@ -105,28 +119,40 @@ async def test_live_tts_selects_kokoro_without_provider_fallback(monkeypatch: py
 
 
 @pytest.mark.asyncio
-async def test_preparation_rejects_lazy_adapter_without_loaded_model(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_preparation_rejects_lazy_adapter_without_loaded_model(
+    monkeypatch: pytest.MonkeyPatch, local_tts_credentials: None
+) -> None:
     from tldw_Server_API.app.core.TTS import tts_service_v2
 
     class Adapter:
-        async def ensure_initialized(self) -> Any:
+        async def ensure_initialized(self) -> bool:
             return True
 
-        async def _ensure_model_loaded(self) -> Any:
+        async def validate_request(self, request: Any) -> None:
+            pass
+
+        async def _ensure_model_loaded(self) -> bool:
             return False
 
     class Service:
-        async def _get_adapter(self, **kwargs: Any) -> Any:
-            return Adapter()
+        def _convert_request(self, request: Any) -> Any:
+            return request
+
+        async def _prepare_generate_speech_request(self, **kwargs: Any) -> Any:
+            return Adapter(), kwargs["provider"], kwargs["tts_request"]
+
+        def _cleanup_transient_pocket_tts_cpp_voice_path(self, request: Any) -> None:
+            pass
+
+        async def _close_request_adapter(self, adapter: Any, overrides: Any) -> None:
+            pass
 
     async def get_service() -> Any:
         return Service()
 
     monkeypatch.setattr(tts_service_v2, "get_tts_service_v2", get_service)
-    prepare = getattr(persona_ep, "_prepare_persona_live_tts", None)
-    assert callable(prepare), "Real TTS preparation must exist"
-    with pytest.raises(RuntimeError):
-        await prepare({"tts_provider": "tldw", "tts_voice": "af_heart"})
+    with pytest.raises(RuntimeError, match="Kokoro model and voice assets"):
+        await persona_ep._prepare_persona_live_tts({"tts_provider": "tldw", "tts_voice": "af_heart"})
 
 
 @pytest.fixture
@@ -192,7 +218,7 @@ def test_preparation_publishes_real_runtime_and_stop_revokes(
         def cleanup(self) -> None:
             pass
 
-    async def prepare_tts(runtime: Any) -> Any:
+    async def prepare_tts(runtime: Any, **kwargs: Any) -> Any:
         assert runtime["tts_provider"] == "tldw"
 
     monkeypatch.setattr(
@@ -238,7 +264,7 @@ def test_stop_during_model_initialization_cannot_publish_readiness(
         def cleanup(self) -> None:
             cleaned.set()
 
-    async def prepare_tts(runtime: Any) -> Any:
+    async def prepare_tts(runtime: Any, **kwargs: Any) -> Any:
         later_stages.append("tts")
 
     monkeypatch.setattr(live_conversation, "require_persona_voice_conversation_credentials", lambda: object())
@@ -325,7 +351,7 @@ def prepared_voice(voice_socket: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
 
     transcriber = Transcriber()
 
-    async def prepare_tts(runtime: Any) -> Any:
+    async def prepare_tts(runtime: Any, **kwargs: Any) -> Any:
         pass
 
     monkeypatch.setattr(live_conversation, "require_persona_voice_conversation_credentials", lambda: object())
@@ -509,7 +535,7 @@ def test_socket_control_does_not_wait_for_decode(
         original_cleanup()
         retired.set()
 
-    async def prepare_tts(runtime: Any) -> None:
+    async def prepare_tts(runtime: Any, **kwargs: Any) -> None:
         pass
 
     monkeypatch.setattr(transcriber, "initialize", initialize)
@@ -622,7 +648,7 @@ def test_preparation_keeps_own_connection_configuration(voice_socket: Any, monke
         def cleanup(self) -> None:
             pass
 
-    async def prepare_tts(runtime: Any) -> Any:
+    async def prepare_tts(runtime: Any, **kwargs: Any) -> Any:
         selected.append(runtime["tts_provider"])
 
     monkeypatch.setattr(live_conversation, "require_persona_voice_conversation_credentials", lambda: object())
@@ -661,7 +687,7 @@ def test_preparation_failures_are_actionable_and_never_ready(
         def cleanup(self) -> None:
             pass
 
-    async def prepare_tts(runtime: Any) -> Any:
+    async def prepare_tts(runtime: Any, **kwargs: Any) -> Any:
         if stage == "TTS":
             fail()
 
@@ -851,7 +877,7 @@ def test_preparation_is_singleflight_until_worker_finishes(voice_socket: Any, mo
         def cleanup(self) -> None:
             pass
 
-    async def prepare_tts(runtime: Any) -> Any:
+    async def prepare_tts(runtime: Any, **kwargs: Any) -> Any:
         return None
 
     monkeypatch.setattr(live_conversation, "require_persona_voice_conversation_credentials", lambda: object())
@@ -898,7 +924,7 @@ def blocked_voice_initialization(voice_socket: Any, monkeypatch: pytest.MonkeyPa
             calls["cleanup"] += 1
             cleaned.set()
 
-    async def prepare_tts(runtime: Any) -> Any:
+    async def prepare_tts(runtime: Any, **kwargs: Any) -> Any:
         calls["tts"] += 1
 
     monkeypatch.setattr(live_conversation, "require_persona_voice_conversation_credentials", lambda: object())

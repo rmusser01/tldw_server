@@ -22,6 +22,7 @@ export type PersonaVoiceDefaults = {
   stt_language?: string | null
   stt_model?: string | null
   tts_provider?: string | null
+  tts_model?: string | null
   tts_voice?: string | null
   confirmation_mode?: PersonaConfirmationMode | null
   wake_behavior?: PersonaWakeBehavior | null
@@ -39,6 +40,7 @@ export type ResolvedPersonaVoiceDefaults = {
   sttLanguage: string
   sttModel: string
   ttsProvider: string
+  ttsModel?: string
   ttsVoice: string
   confirmationMode: PersonaConfirmationMode
   wakeBehavior: PersonaWakeBehavior
@@ -103,7 +105,10 @@ const resolveDefaultTtsVoice = (
   if (normalizedProvider === "elevenlabs") {
     return normalizeText(elevenLabsVoice) || ""
   }
-  return normalizeText(tldwVoice) || DEFAULT_TLDW_TTS_VOICE
+  if (normalizedProvider === "tldw") {
+    return normalizeText(tldwVoice) || DEFAULT_TLDW_TTS_VOICE
+  }
+  return ""
 }
 
 export const useResolvedPersonaVoiceDefaults = (
@@ -144,6 +149,7 @@ export const useResolvedPersonaVoiceDefaults = (
         normalizeText(String(sttSettings.model || "")) ||
         "",
       ttsProvider: resolvedProvider,
+      ttsModel: normalizeText(personaVoiceDefaults?.tts_model) || undefined,
       ttsVoice:
         normalizeText(personaVoiceDefaults?.tts_voice) ||
         resolveDefaultTtsVoice(

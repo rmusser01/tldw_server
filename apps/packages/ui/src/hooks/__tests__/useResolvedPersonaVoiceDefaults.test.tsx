@@ -140,6 +140,27 @@ describe("useResolvedPersonaVoiceDefaults", () => {
     expect(result.current.wakeBehavior).toBe("one_shot")
   })
 
+  it.each(["browser", "kokoro", "piper", "custom-server"])(
+    "does not borrow the tldw voice for %s",
+    (provider) => {
+      const { result } = renderHook(() =>
+        useResolvedPersonaVoiceDefaults({ tts_provider: provider })
+      )
+      expect(result.current.ttsVoice).toBe("")
+      expect(result.current.ttsProvider).toBe(provider)
+    }
+  )
+
+  it("resolves an optional persona TTS model without borrowing another provider model", () => {
+    const { result } = renderHook(() =>
+      useResolvedPersonaVoiceDefaults({
+        tts_provider: "piper",
+        tts_model: " en_US-lessac-medium "
+      })
+    )
+    expect(result.current.ttsModel).toBe("en_US-lessac-medium")
+  })
+
   it("resolves explicit persona wake behavior", () => {
     const { result } = renderHook(() =>
       useResolvedPersonaVoiceDefaults({

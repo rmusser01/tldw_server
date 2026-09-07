@@ -23,7 +23,7 @@ def test_target_resolution_does_not_require_static_credentials(monkeypatch: pyte
     assert live.resolve_persona_conversation_target() is target
 
 
-def test_voice_preflight_rejects_missing_server_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_voice_preflight_accepts_target_without_server_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.core.Chat import chat_service
     from tldw_Server_API.app.core.LLM_Calls import adapter_utils, provider_metadata
 
@@ -35,8 +35,8 @@ def test_voice_preflight_rejects_missing_server_credentials(monkeypatch: pytest.
     )
     monkeypatch.setattr(provider_metadata, "provider_requires_api_key", lambda provider: True)
     monkeypatch.setattr(adapter_utils, "provider_auth_is_resolved", lambda *args, **kwargs: False)
-    with pytest.raises(live.PersonaConversationError, match="server-configured credentials"):
-        live.require_persona_voice_conversation_credentials()
+    target = live.require_persona_voice_conversation_credentials()
+    assert (target.provider, target.model) == ("deepseek", "deepseek-chat")
 
 
 pytestmark = pytest.mark.unit

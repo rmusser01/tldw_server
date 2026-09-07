@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   fetchWithAuth: vi.fn(),
+  fetchTtsProviders: vi.fn(),
   resolvedDefaults: {
     sttLanguage: "en-US",
     sttModel: "parakeet",
@@ -20,6 +21,10 @@ const mocks = vi.hoisted(() => ({
     turnStopSecs: 0.2,
     minUtteranceSecs: 0.4
   }
+}))
+
+vi.mock("@/services/tldw/audio-providers", () => ({
+  fetchTtsProviders: mocks.fetchTtsProviders
 }))
 
 vi.mock("react-i18next", () => ({
@@ -208,6 +213,7 @@ describe("AssistantDefaultsPanel", () => {
       configurable: true,
       value: vi.fn()
     })
+    mocks.fetchTtsProviders.mockResolvedValue({ providers: { piper: {} } })
     mocks.fetchWithAuth.mockReset()
     mocks.resolvedDefaults = {
       sttLanguage: "en-US",
@@ -272,6 +278,54 @@ describe("AssistantDefaultsPanel", () => {
         json: async () => ({})
       })
     })
+  })
+
+  it("offers server providers and preserves a saved provider absent from the catalog", async () => {
+    mocks.fetchWithAuth.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        id: "persona-1",
+        voice_defaults: {
+          tts_provider: "custom-server",
+          tts_model: "custom-model"
+        }
+      })
+    })
+    render(
+      <AssistantDefaultsPanel
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Helper"
+        isActive
+      />
+    )
+    await waitFor(() =>
+      expect(screen.getByLabelText("TTS provider")).toHaveValue("custom-server")
+    )
+    expect(screen.getByRole("option", { name: "piper" })).toBeInTheDocument()
+    expect(screen.getByLabelText("TTS model")).toHaveValue("custom-model")
+    fireEvent.change(screen.getByLabelText("TTS provider"), {
+      target: { value: "piper" }
+    })
+    fireEvent.change(screen.getByLabelText("TTS model"), {
+      target: { value: "en_US-lessac-medium" }
+    })
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save assistant defaults" })
+    )
+    await waitFor(() =>
+      expect(mocks.fetchWithAuth).toHaveBeenCalledWith(
+        "/api/v1/persona/profiles/persona-1",
+        expect.objectContaining({
+          method: "PATCH",
+          body: expect.objectContaining({
+            voice_defaults: expect.objectContaining({
+              tts_provider: "piper",
+              tts_model: "en_US-lessac-medium"
+            })
+          })
+        })
+      )
+    )
   })
 
   it("loads persona defaults, explains fallback behavior, and saves edits", async () => {
@@ -365,6 +419,7 @@ describe("AssistantDefaultsPanel", () => {
               stt_language: "fr-FR",
               stt_model: "whisper-1",
               tts_provider: "openai",
+              tts_model: null,
               tts_voice: "nova",
               confirmation_mode: "destructive_only",
               voice_chat_trigger_phrases: [

@@ -17,6 +17,7 @@ import {
 } from "@/hooks/useResolvedPersonaVoiceDefaults"
 import type { PersonaProfileResponse } from "@/routes/personaTypes"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { fetchTtsProviders } from "@/services/tldw/audio-providers"
 import { toAllowedPath } from "@/services/tldw/path-utils"
 
 type AssistantDefaultsPanelProps = {
@@ -40,6 +41,7 @@ type AssistantDefaultsFormState = {
   sttLanguage: string
   sttModel: string
   ttsProvider: string
+  ttsModel: string
   ttsVoice: string
   confirmationMode: PersonaConfirmationMode
   wakeBehavior: PersonaWakeBehavior
@@ -57,6 +59,7 @@ const DEFAULT_FORM_STATE: AssistantDefaultsFormState = {
   sttLanguage: "",
   sttModel: "",
   ttsProvider: "",
+  ttsModel: "",
   ttsVoice: "",
   confirmationMode: "destructive_only",
   wakeBehavior: "one_shot",
@@ -92,6 +95,7 @@ const buildFormState = (
   sttLanguage: normalizeText(voiceDefaults?.stt_language),
   sttModel: normalizeText(voiceDefaults?.stt_model),
   ttsProvider: normalizeText(voiceDefaults?.tts_provider),
+  ttsModel: normalizeText(voiceDefaults?.tts_model),
   ttsVoice: normalizeText(voiceDefaults?.tts_voice),
   confirmationMode: voiceDefaults?.confirmation_mode || "destructive_only",
   wakeBehavior: voiceDefaults?.wake_behavior || "one_shot",
@@ -130,6 +134,7 @@ const buildPayload = (
   stt_language: normalizeText(formState.sttLanguage) || null,
   stt_model: normalizeText(formState.sttModel) || null,
   tts_provider: normalizeText(formState.ttsProvider) || null,
+  tts_model: normalizeText(formState.ttsModel) || null,
   tts_voice: normalizeText(formState.ttsVoice) || null,
   confirmation_mode: formState.confirmationMode,
   wake_behavior: formState.wakeBehavior,
@@ -176,6 +181,28 @@ export const AssistantDefaultsPanel: React.FC<AssistantDefaultsPanelProps> = ({
   const sttLanguageInputRef = React.useRef<HTMLInputElement | null>(null)
   const confirmationModeRef = React.useRef<HTMLSelectElement | null>(null)
   const lastHandledHandoffTokenRef = React.useRef<number | null>(null)
+
+  const [serverProviders, setServerProviders] = React.useState<string[]>([])
+  React.useEffect(() => {
+    if (!isActive || !selectedPersonaId) return
+    let cancelled = false
+    void fetchTtsProviders().then((catalog) => {
+      if (!cancelled) setServerProviders(Object.keys(catalog?.providers || {}))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [isActive, selectedPersonaId])
+  const ttsProviderOptions = Array.from(
+    new Set([
+      "browser",
+      "tldw",
+      "openai",
+      "elevenlabs",
+      ...serverProviders,
+      ...(formState.ttsProvider ? [formState.ttsProvider] : [])
+    ])
+  )
 
   const saveGenerationRef = React.useRef(0)
 
@@ -438,11 +465,27 @@ export const AssistantDefaultsPanel: React.FC<AssistantDefaultsPanelProps> = ({
                 defaultValue: "Use browser fallback"
               })}
             </option>
-            <option value="browser">browser</option>
-            <option value="tldw">tldw</option>
-            <option value="openai">openai</option>
-            <option value="elevenlabs">elevenlabs</option>
+            {ttsProviderOptions.map((provider) => (
+              <option key={provider} value={provider}>
+                {provider}
+              </option>
+            ))}
           </select>
+        </label>
+
+        <label className="flex flex-col gap-1 text-sm text-text">
+          <span>
+            {t("sidepanel:personaGarden.profile.assistantDefaults.ttsModel", {
+              defaultValue: "TTS model"
+            })}
+          </span>
+          <input
+            id="persona-assistant-defaults-tts-model"
+            className="rounded-md border border-border bg-surface2 px-3 py-2 text-sm text-text"
+            value={formState.ttsModel}
+            onChange={(event) => updateField("ttsModel", event.target.value)}
+            disabled={!selectedPersonaId || loading || saving}
+          />
         </label>
 
         <label className="flex flex-col gap-1 text-sm text-text">
@@ -641,6 +684,10 @@ export const AssistantDefaultsPanel: React.FC<AssistantDefaultsPanelProps> = ({
           <div>
             <dt className="text-xs text-text-muted">TTS provider</dt>
             <dd>{resolvedDefaults.ttsProvider || "unset"}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-text-muted">TTS model</dt>
+            <dd>{resolvedDefaults.ttsModel || "Server default"}</dd>
           </div>
           <div>
             <dt className="text-xs text-text-muted">TTS voice</dt>

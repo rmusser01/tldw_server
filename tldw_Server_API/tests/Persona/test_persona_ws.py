@@ -74,7 +74,7 @@ def _prepare_test_voice(ws, session_id: str, *, configure: bool = False) -> None
         async def process_audio_chunk(self, audio):
             return {"type": "partial", "text": "hello from audio"}
 
-    async def prepare_tts(runtime):
+    async def prepare_tts(runtime, **kwargs):
         return None
 
     with pytest.MonkeyPatch.context() as patch:
@@ -3709,6 +3709,7 @@ def test_persona_voice_config_stores_runtime_preferences(monkeypatch):
         "vad_turn_stop_secs": 0.2,
         "vad_min_utterance_secs": 0.4,
         "tts_provider": "openai",
+        "tts_model": None,
         "tts_voice": "alloy",
         "text_only_due_to_tts_failure": False,
     }

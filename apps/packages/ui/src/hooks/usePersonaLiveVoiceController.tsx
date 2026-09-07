@@ -1178,40 +1178,66 @@ export const usePersonaLiveVoiceController = ({
       }
 
       stopBrowserSpeech()
-      const synthesis = window.speechSynthesis
-      const utterance = new SpeechSynthesisUtterance(spokenText)
-      if (resolvedDefaults.sttLanguage) {
-        utterance.lang = resolvedDefaults.sttLanguage
-      }
-      const availableVoices = synthesis.getVoices()
-      const matchedVoice = availableVoices.find(
-        (voice) =>
-          voice.voiceURI === resolvedDefaults.ttsVoice ||
-          voice.name === resolvedDefaults.ttsVoice
-      )
-      if (matchedVoice) {
-        utterance.voice = matchedVoice
-      }
-      browserUtteranceActiveRef.current = true
       const owner = voiceOwnerRef.current
-      utterance.onend = () => {
-        if (!owner || voiceOwnerRef.current !== owner || !voiceEnabledRef.current) return
-        browserUtteranceActiveRef.current = false
-        finishVoiceTurn()
-      }
-      utterance.onerror = () => {
-        if (!owner || voiceOwnerRef.current !== owner || !voiceEnabledRef.current) return
-        browserUtteranceActiveRef.current = false
+      let completed = false
+      const handleSpeechFailure = (
+        message = "Browser speech playback failed. Continuing in text-only mode."
+      ) => {
+        if (
+          completed ||
+          !owner ||
+          voiceOwnerRef.current !== owner ||
+          !voiceEnabledRef.current
+        )
+          return
+        completed = true
+        stopBrowserSpeech()
         textOnlyDueToTtsFailureRef.current = true
         setTextOnlyDueToTtsFailure(true)
         setVoiceWarning(
-          "Browser speech playback failed. Continuing in text-only mode.",
+          message,
           "voice_tts_unavailable_text_only"
         )
         finishVoiceTurn()
       }
-      setState("speaking")
-      synthesis.speak(utterance)
+      try {
+        const synthesis = window.speechSynthesis
+        const utterance = new SpeechSynthesisUtterance(spokenText)
+        if (resolvedDefaults.sttLanguage)
+          utterance.lang = resolvedDefaults.sttLanguage
+        const matchedVoice = synthesis
+          .getVoices()
+          .find(
+            (voice) =>
+              voice.voiceURI === resolvedDefaults.ttsVoice ||
+              voice.name === resolvedDefaults.ttsVoice
+          )
+        if (resolvedDefaults.ttsVoice && !matchedVoice) {
+          handleSpeechFailure(
+            "The selected browser voice is unavailable. Continuing in text-only mode. Retry after browser voices load or choose an available voice."
+          )
+          return
+        }
+        if (matchedVoice) utterance.voice = matchedVoice
+        browserUtteranceActiveRef.current = true
+        utterance.onend = () => {
+          if (
+            completed ||
+            !owner ||
+            voiceOwnerRef.current !== owner ||
+            !voiceEnabledRef.current
+          )
+            return
+          completed = true
+          browserUtteranceActiveRef.current = false
+          finishVoiceTurn()
+        }
+        utterance.onerror = () => handleSpeechFailure()
+        setState("speaking")
+        synthesis.speak(utterance)
+      } catch {
+        handleSpeechFailure()
+      }
     },
     [
       finishVoiceTurn,
@@ -1398,7 +1424,10 @@ export const usePersonaLiveVoiceController = ({
           },
           tts: {
             provider: resolvedDefaults.ttsProvider,
-            voice: resolvedDefaults.ttsVoice
+            voice: resolvedDefaults.ttsVoice,
+            ...(resolvedDefaults.ttsModel
+              ? { model: resolvedDefaults.ttsModel }
+              : {})
           }
         })
       )
@@ -1412,6 +1441,7 @@ export const usePersonaLiveVoiceController = ({
     stopCurrentPlayback,
     resolvedDefaults.sttLanguage,
     resolvedDefaults.sttModel,
+    resolvedDefaults.ttsModel,
     resolvedDefaults.ttsProvider,
     resolvedDefaults.ttsVoice,
     resolvedDefaults.voiceChatTriggerPhrases,

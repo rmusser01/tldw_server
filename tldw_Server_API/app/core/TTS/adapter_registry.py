@@ -715,8 +715,13 @@ class TTSAdapterRegistry:
             provider_cfg.update(overrides)
 
         adapter = adapter_class(config=provider_cfg)
+        initialized = False
         try:
-            success = await adapter.ensure_initialized()
+            initialized = await adapter.ensure_initialized()
+            if not initialized:
+                logger.error(f"Failed to initialize {provider_key} adapter with overrides")
+                return None
+            return adapter
         except _TTS_REGISTRY_ADAPTER_EXCEPTIONS as exc:
             logger.error(
                 "Error initializing {} adapter with overrides ({})",
@@ -724,10 +729,16 @@ class TTSAdapterRegistry:
                 _safe_exception_label(exc),
             )
             return None
-        if not success:
-            logger.error(f"Failed to initialize {provider_key} adapter with overrides")
-            return None
-        return adapter
+        finally:
+            if not initialized:
+                try:
+                    await adapter.close()
+                except Exception as close_error:  # noqa: BLE001 - preserve the primary init result.
+                    logger.warning(
+                        "Error closing abandoned {} override adapter ({})",
+                        provider_key,
+                        type(close_error).__name__,
+                    )
 
     async def _initialize_adapter(
         self,
