@@ -38,4 +38,6 @@ Approved scope: expose Writing Playground mood and Echo instructions in the exis
 - Bandit: no findings. Ruff: clean. ESLint: no errors; 10 existing explicit-any warnings in untouched portions of the shared server service.
 - Global shared-UI typecheck: 158 existing diagnostics, none in changed files (required an 8 GiB Node heap).
 - Independent review approved after a test-first fix preventing late scope errors from cancelled requests from clearing newer feedback.
+- Qodo follow-up: failed, invalid, empty or cancelled feedback releases its temporary snapshot without replacing the lease for existing visible feedback. Unexpected failures log only a static feedback kind and operation stage; cancellation and scope-control flow remain quiet.
+- Qodo fix verification: 249 affected client tests and 97 backend tests passed; 10 added runtime regressions; independent review approved; touched-scope ESLint/Ruff clean and Bandit reported no findings.
 - Full repository tests, production builds and live browser smoke tests were not run.

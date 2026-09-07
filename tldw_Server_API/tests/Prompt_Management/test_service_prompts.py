@@ -282,6 +282,7 @@ def test_registry_contains_exact_locked_metadata_and_workflows() -> None:
 
 @pytest.mark.parametrize("definition_id", ["writing.feedback.mood", "writing.feedback.echo"])
 def test_feedback_overrides_are_atomic_literal_parts(definition_id: str) -> None:
+    """For the selected mood/Echo definition, render complete literal overrides and reject incomplete bundles."""
     definition = get_service_prompt_definition(definition_id)
     parts = {key: f"Custom {key} {{literal}}" for key in FIXTURE["defaults"][definition_id]}
     resolved = resolve_service_prompt(_FakePromptsDatabase(_OverrideRow(definition_id, json.dumps(parts), "revision-1")), definition_id)

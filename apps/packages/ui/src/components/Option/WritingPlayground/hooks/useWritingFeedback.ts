@@ -148,31 +148,38 @@ export function useWritingFeedback({
     kind: "mood" | "echo", text: string, model: string | undefined,
     controller: AbortController, personaPart?: typeof ECHO_PERSONAS[number]["part"],
   ): Promise<string> => {
+    let phase = "prompt_lookup"
+    let pendingRelease: (() => void) | undefined
+    const discardPending = () => {
+      pendingRelease?.()
+      pendingRelease = undefined
+    }
     try {
       const id = kind === "mood" ? "writing.feedback.mood" : "writing.feedback.echo"
       const snapshot = await loadServicePromptSnapshot([id], { signal: controller.signal })
-      if (controller.signal.aborted || snapshot.scopeSignal.aborted || snapshot.scopeInvalidatedSignal.aborted) {
+      const onScopeInvalidated = () => resetFeedback()
+      const releaseSnapshot = () => {
+        snapshot.scopeInvalidatedSignal.removeEventListener("abort", onScopeInvalidated)
         snapshot.release()
+      }
+      pendingRelease = releaseSnapshot
+      if (controller.signal.aborted || snapshot.scopeSignal.aborted || snapshot.scopeInvalidatedSignal.aborted) {
         return ""
       }
       if (Object.values(leasesRef.current).some((lease) => lease.scopeKey !== snapshot.scopeKey)) {
-        snapshot.release()
         resetFeedback()
         return ""
-      }
-      leasesRef.current[kind]?.release()
-      snapshot.scopeInvalidatedSignal.addEventListener("abort", resetFeedback, { once: true })
-      leasesRef.current[kind] = {
-        scopeKey: snapshot.scopeKey,
-        release: () => {
-          snapshot.scopeInvalidatedSignal.removeEventListener("abort", resetFeedback)
-          snapshot.release()
-        },
       }
       const parts = snapshot.definitions[id]?.parts
       const system = parts?.[kind === "mood" ? "system_semantics" : (personaPart ?? "")]
       const classification = parts?.classification_semantics
-      if (!system?.trim() || (kind === "mood" && !classification?.trim())) return ""
+      if (!system?.trim() || (kind === "mood" && !classification?.trim())) {
+        console.warn("Writing feedback request failed", { kind, phase: "prompt_validation" })
+        return ""
+      }
+      snapshot.scopeInvalidatedSignal.addEventListener("abort", onScopeInvalidated, { once: true })
+      controller.signal.addEventListener("abort", discardPending, { once: true })
+      phase = "chat_generation"
       const result = await callChat(
         kind === "mood" ? `${system} Respond with exactly one word.` : system,
         kind === "mood"
@@ -180,11 +187,27 @@ export function useWritingFeedback({
           : `React to this passage:\n\n${text.slice(-1000)}`,
         model, snapshot,
       )
-      return controller.signal.aborted || snapshot.scopeSignal.aborted || snapshot.scopeInvalidatedSignal.aborted ? "" : result
+      if (controller.signal.aborted || snapshot.scopeSignal.aborted || snapshot.scopeInvalidatedSignal.aborted) return ""
+      const mood = result.toLowerCase().trim().replace(/[^a-z]/g, "")
+      if (!result || (kind === "mood" && !VALID_MOODS.has(mood))) return ""
+      // Only usable feedback replaces the lease protecting already visible state.
+      leasesRef.current[kind]?.release()
+      leasesRef.current[kind] = { scopeKey: snapshot.scopeKey, release: releaseSnapshot }
+      pendingRelease = undefined
+      return result
     } catch (error) {
-      if (!controller.signal.aborted && isRequestConfigScopeChangedError(error)) resetFeedback()
+      if (!controller.signal.aborted) {
+        if (isRequestConfigScopeChangedError(error)) resetFeedback()
+        else if ((error as { name?: unknown } | null)?.name !== "AbortError") {
+          // Do not log prompt text, credentials, server URLs or provider payloads.
+          console.warn("Writing feedback request failed", { kind, phase })
+        }
+      }
       // Feedback remains best-effort, but failed lookups never dispatch defaults.
       return ""
+    } finally {
+      controller.signal.removeEventListener("abort", discardPending)
+      discardPending()
     }
   }, [resetFeedback])
 

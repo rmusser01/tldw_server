@@ -4,7 +4,7 @@ title: Expose Writing mood and Echo prompts through Service Prompts
 status: In Progress
 assignee: []
 created_date: '2026-09-07 20:14'
-updated_date: '2026-09-07 20:37'
+updated_date: '2026-09-07 20:54'
 labels: []
 dependencies: []
 references:
@@ -39,6 +39,10 @@ Approved bounded follow-up to Writing Agent prompts: expose mood classifier sema
 Implemented and independently reviewed on codex/writing-feedback-service-prompts from dev e3174f1ad9. Test-first red/green captured for missing definitions/fallbacks, customized/scoped hook requests, Settings classifier label, and stale scope-error race. Verification: 97 backend registry/API tests; 281 focused shared-client tests; 47 direct-browser transport tests; 12 locale mirrors match; Bandit zero findings; Ruff clean; ESLint zero errors and 10 preexisting explicit-any warnings. Shared-UI tsc completes with 158 existing diagnostics, none in changed files, with 8 GiB Node heap. Full-repo tests/build/live browser smoke not run. Ready for integration choice; no PR pushed yet.
 
 PR #2930 created against dev at user request. Feature commit ef699229c6 pushed. Awaiting remote review/checks and integration; worktree retained.
+
+Qodo review at ef699229c6 reported three findings: silent unexpected-error diagnostics, missing registry-test docstring, and retaining new scope leases for failed/invalid feedback. Verified against current head; addressing with targeted regressions while preserving leases for existing visible feedback.
+
+Addressed all three Qodo findings: request-local snapshots now release on invalid/failed/empty/cancelled results and only usable feedback replaces a retained visible-state lease; unique callbacks preserve listener ownership. Unexpected failures log static kind and phase only, with cancellation/scope control flow quiet. Added Python test docstring. Ten added regression cases reproduced failures before the fix. Verification: 249 affected client tests and 97 backend tests pass; touched-scope ESLint/Ruff clean, Bandit zero findings; independent review approved.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

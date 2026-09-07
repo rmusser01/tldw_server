@@ -45,6 +45,7 @@ beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(60_000)
   vi.clearAllMocks()
+  vi.spyOn(console, "warn").mockImplementation(() => {})
   scope = new AbortController()
   snapshots = []
   custom = true
@@ -68,6 +69,68 @@ afterEach(() => {
 })
 
 describe("Writing feedback Service Prompts", () => {
+  it.each(["prompt_lookup", "chat_generation"])("reports safe diagnostics for %s failures without logging private payloads", async (phase) => {
+    const error = Object.assign(new Error("private prompt and credential"), { status: 403, body: "private response" })
+    if (phase === "prompt_lookup") mocks.load.mockRejectedValueOnce(error)
+    else mocks.request.mockRejectedValueOnce(error)
+    const hook = setup()
+    act(() => hook.result.current.setEchoEnabled(true))
+    hook.rerender("secret".repeat(100))
+    await tick()
+    expect(console.warn).toHaveBeenCalledExactlyOnceWith("Writing feedback request failed", { kind: "echo", phase })
+    expect(hook.result.current.echoReactions).toEqual([])
+  })
+
+  it.each(["cancelled", "scope_changed"])("does not warn for %s request control flow", async (reason) => {
+    const response = deferred<unknown>()
+    mocks.request.mockReturnValueOnce(response.promise)
+    const hook = setup()
+    act(() => hook.result.current.setEchoEnabled(true))
+    hook.rerender("x".repeat(500))
+    await tick()
+    if (reason === "cancelled") act(() => hook.result.current.setEchoEnabled(false))
+    await act(async () => response.reject(reason === "cancelled"
+      ? new DOMException("Aborted", "AbortError")
+      : Object.assign(new Error("Scope changed"), { status: 412, details: { detail: { code: "request_config_scope_changed" } } })))
+    expect(console.warn).not.toHaveBeenCalled()
+  })
+
+  it.each(["request_error", "empty", "invalid_mood"])("releases the new lease after %s without retaining invisible feedback", async (outcome) => {
+    if (outcome === "request_error") mocks.request.mockRejectedValueOnce(new Error("Provider failed"))
+    else mocks.request.mockResolvedValueOnce({ choices: [{ message: { content: outcome === "empty" ? "" : "angry" } }] })
+    const hook = setup()
+    act(() => outcome === "invalid_mood" ? hook.result.current.setMoodEnabled(true) : hook.result.current.setEchoEnabled(true))
+    hook.rerender("x".repeat(500))
+    await tick(10_000)
+    expect(snapshots[0].release).toHaveBeenCalledOnce()
+    expect(hook.result.current.currentMood).toBeNull()
+    expect(hook.result.current.echoReactions).toEqual([])
+  })
+
+  it.each(["invalid", "failed", "empty"])("keeps the existing visible-feedback lease when a replacement is %s", async (outcome) => {
+    const hook = setup()
+    act(() => hook.result.current.setEchoEnabled(true))
+    hook.rerender("x".repeat(500))
+    await tick()
+    if (outcome === "invalid") {
+      const loader = mocks.load.getMockImplementation()!
+      mocks.load.mockImplementationOnce(async (...args) => {
+        const snapshot = await loader(...args)
+        snapshot.definitions["writing.feedback.echo"].parts = {}
+        return snapshot
+      })
+    } else if (outcome === "failed") mocks.request.mockRejectedValueOnce(new Error("Provider failed"))
+    else mocks.request.mockResolvedValueOnce({ choices: [{ message: { content: "" } }] })
+    await tick(30_000)
+    hook.rerender("x".repeat(1000))
+    await tick()
+    expect(hook.result.current.echoReactions).toHaveLength(1)
+    expect(snapshots[0].release).not.toHaveBeenCalled()
+    expect(snapshots[1].release).toHaveBeenCalledOnce()
+    act(() => scope.abort())
+    expect(hook.result.current.echoReactions).toEqual([])
+    expect(snapshots[0].release).toHaveBeenCalledOnce()
+  })
   it("does not let a stale scope error clear feedback from a newer request", async () => {
     const response = deferred<unknown>()
     mocks.request.mockReturnValueOnce(response.promise)
@@ -109,6 +172,7 @@ describe("Writing feedback Service Prompts", () => {
     hook.rerender("x".repeat(500))
     await tick(10_000)
     expect(mocks.request).not.toHaveBeenCalled()
+    expect(snapshots[0].release).toHaveBeenCalledOnce()
   })
   it("does not look up prompts or generate while feedback is disabled", async () => {
     const hook = setup()
