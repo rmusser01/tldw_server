@@ -7,10 +7,6 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-from tldw_Server_API.app.core.AuthNZ.exceptions import (
-    RollbackSignal,
-    UserRegistrationException,
-)
 from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
     _execute_membership_scope_sql,
 )
@@ -19,76 +15,26 @@ from tldw_Server_API.app.core.AuthNZ.profile_version import (
     VersionedUserWriteGateway,
     normalize_profile_version,
 )
-
-_INVALID_CONTRACT_MESSAGE = "Invalid membership writer contract."
-_OFFLINE_MIGRATION_SERVING_MESSAGE = (
-    "Offline migration membership context is unavailable while serving."
+from tldw_Server_API.app.core.exceptions import (
+    MembershipAuthorizationError,
+    MembershipPreflightChanged,
+    MembershipScopeNotFound,
+    MembershipTargetNotFound,
+    MembershipWriterContractError,
+    OfflineMigrationContextRejected,
+    _MembershipScopeDeletionRetry,
 )
+from tldw_Server_API.app.core.exceptions import (
+    MembershipParentRequired as MembershipParentRequired,
+)
+from tldw_Server_API.app.core.exceptions import (
+    MembershipReadError as MembershipReadError,
+)
+from tldw_Server_API.app.core.exceptions import (
+    MembershipWriteError as MembershipWriteError,
+)
+
 _MEMBERSHIP_ROLES = frozenset({"owner", "admin", "lead", "member"})
-
-
-class MembershipWriterContractError(ValueError):
-    """Raised when membership planning input violates the closed contract."""
-
-    def __init__(self) -> None:
-        super().__init__(_INVALID_CONTRACT_MESSAGE)
-
-
-class OfflineMigrationContextRejected(MembershipWriterContractError):
-    """Raised when an offline-only context reaches a serving boundary."""
-
-    def __init__(self) -> None:
-        ValueError.__init__(self, _OFFLINE_MIGRATION_SERVING_MESSAGE)
-
-
-class MembershipWriteError(UserRegistrationException):
-    """Base class for sanitized runtime membership-write failures."""
-
-
-class MembershipReadError(UserRegistrationException):
-    """A membership-state read failed without exposing backend details."""
-
-    def __init__(self) -> None:
-        super().__init__("Membership state could not be read.")
-
-
-class MembershipAuthorizationError(MembershipWriteError):
-    """The persisted actor authority is insufficient for the locked scopes."""
-
-    def __init__(self) -> None:
-        super().__init__("Membership write is not authorized.")
-
-
-class MembershipScopeNotFound(MembershipWriteError):
-    """A requested organization or team is absent or inactive."""
-
-    def __init__(self) -> None:
-        super().__init__("Membership scope was not found.")
-
-
-class MembershipTargetNotFound(MembershipWriteError):
-    """A requested target user is absent."""
-
-    def __init__(self) -> None:
-        super().__init__("Membership target was not found.")
-
-
-class MembershipParentRequired(MembershipWriteError):
-    """A team-add target lacks an active parent-organization membership."""
-
-    def __init__(self) -> None:
-        super().__init__("Active parent organization membership is required.")
-
-
-class MembershipPreflightChanged(MembershipWriteError):
-    """Database-derived lock inputs changed before all locks were held."""
-
-    def __init__(self) -> None:
-        super().__init__("Membership write preconditions changed.")
-
-
-class _MembershipScopeDeletionRetry(RollbackSignal):
-    """Private signal forcing scope-deletion retry after transaction rollback."""
 
 
 class _ClosedMembershipEnum(str, Enum):
@@ -2361,23 +2307,36 @@ class MembershipWriter:
         scope_id: int,
         user_id: int,
     ) -> dict[str, Any] | None:
-        is_org = scope_type is MembershipScopeType.ORGANIZATION
-        table = "org_members" if is_org else "team_members"
-        scope_column = "org_id" if is_org else "team_id"
         if self._backend is MembershipLockBackend.POSTGRESQL:
-            row = await conn.fetchrow(
-                f"SELECT role, status FROM public.{table} "  # nosec B608
-                f"WHERE {scope_column} = $1 AND user_id = $2",
-                scope_id,
-                user_id,
-            )
+            if scope_type is MembershipScopeType.ORGANIZATION:
+                row = await conn.fetchrow(
+                    "SELECT role, status FROM public.org_members "
+                    "WHERE org_id = $1 AND user_id = $2",
+                    scope_id,
+                    user_id,
+                )
+            else:
+                row = await conn.fetchrow(
+                    "SELECT role, status FROM public.team_members "
+                    "WHERE team_id = $1 AND user_id = $2",
+                    scope_id,
+                    user_id,
+                )
         else:
-            row = await _sqlite_fetchone(
-                conn,
-                f"SELECT role, status FROM main.{table} "  # nosec B608
-                f"WHERE {scope_column} = ? AND user_id = ?",
-                (scope_id, user_id),
-            )
+            if scope_type is MembershipScopeType.ORGANIZATION:
+                row = await _sqlite_fetchone(
+                    conn,
+                    "SELECT role, status FROM main.org_members "
+                    "WHERE org_id = ? AND user_id = ?",
+                    (scope_id, user_id),
+                )
+            else:
+                row = await _sqlite_fetchone(
+                    conn,
+                    "SELECT role, status FROM main.team_members "
+                    "WHERE team_id = ? AND user_id = ?",
+                    (scope_id, user_id),
+                )
         if row is None:
             return None
         return {
