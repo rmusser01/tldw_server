@@ -4,10 +4,10 @@ Tracking: TASK-13013.7.9. Execution plan:
 `IMPLEMENTATION_PLAN_task_13013_7_9_expat_dual_copy.md`.
 
 This directory does **not** supply a production replacement or a qualified image.
-Source preparation, automated authentication and the native system-build harness
-are implemented; successful native builds, parser/ABI tests, combined
-application compatibility, source-aware scans and final security review remain
-required. No vulnerability waiver follows from this evidence.
+Source preparation, automated authentication and separate native system/Python
+build and parser qualification have passed. Combined application compatibility,
+source-aware scans and final candidate security review remain required. No
+vulnerability waiver follows from this evidence.
 
 ## Why both copies matter
 
@@ -73,8 +73,8 @@ Use read-only input mounts, no network, an unprivileged user, and a new writable
 evidence directory. The helper creates its own temporary private keyring and
 disables user configuration, automatic key retrieval/import and agent startup.
 It does not import into the operator's keyring, extract source or run build code.
-The eventual build controller must preserve input immutability through use;
-this standalone gate is not yet connected to a native build workflow.
+The native build controllers preserve input immutability through use and run
+this gate before source extraction and execution.
 
 All five source hashes must match before GnuPG starts. Each verification must
 exit successfully and emit exactly one valid signature matching **both** approved
@@ -101,7 +101,7 @@ still establish **source authentication only**, not Expat remediation.
 
 ## Native system-library qualification
 
-The `Expat Native System Candidate Qualification` workflow uses native amd64
+The `Expat Native Candidate Qualification` workflow uses native amd64
 `ubuntu-24.04`, pinned checkout/upload actions, read-only repository permissions,
 the approved Python/Trixie base digest and signed Debian snapshot. It publishes
 no image and changes no production recipe or scan policy. The native controller
@@ -140,10 +140,10 @@ System qualification includes:
 - Fresh-container package installation, exact installed parser version checks,
   repeated wide controls, `apt-get check` and empty `dpkg --audit`.
 
-The workflow's result is **system-only**. It records the still-unmodified Python
-bundled parser and cannot admit a dual-copy release. CPython refresh/rebuild,
-source SBOM regeneration, Python XML tests and combined application/rendering
-qualification remain required by the implementation plan.
+The system job's result is **system-only**. It records the still-unmodified
+Python bundled parser in that container and cannot admit a dual-copy release.
+The separate Python job qualifies the owning interpreter; combined
+application/rendering qualification remains required by the implementation plan.
 
 ## CPython preparation contract
 
@@ -199,5 +199,23 @@ qualifies only that bundled parser build. System and Python qualification still
 do not establish combined application compatibility, source-aware scanner
 admission, or production readiness.
 
-The successful system-only run is [34157012667](https://github.com/rmusser01/tldw_server/actions/runs/34157012667),
-at commit `82c78368d4`. Python native qualification is still pending.
+## Verified native checkpoint
+
+Both jobs passed in [run 34160485207](https://github.com/rmusser01/tldw_server/actions/runs/34160485207)
+at commit `9f585a9f0dcd499b02f02fd58c54dd0d5dafbd6a`:
+
+- System prepare/build/sanitizer/install evidence gates pass; both installed
+  libraries report `expat_2.8.4`. All 13 source/binary artifact hashes verify.
+- Python prepare/build/install evidence gates pass. The source verifier covers
+  23 refreshed Expat files. Baseline and candidate each report 806 XML tests and
+  13 skips; test-identity comparison accepts no new skips or missing tests.
+- The installed Python 3.12.14, pyexpat and ElementTree report Expat 2.8.4.
+  Legitimate XML, non-null-context child-parser, scaling and ELF checks pass.
+  All three retained artifact hashes and four archived installed-binary hashes
+  independently verify.
+
+Local evidence directories are
+`/private/tmp/task-13013-7-expat-system-qualified-34160485207` and
+`/private/tmp/task-13013-7-expat-python-qualified-34160485207`.
+These are separate qualified builds, not a combined application image, a clean
+vulnerability scan, or approval for production adoption.
