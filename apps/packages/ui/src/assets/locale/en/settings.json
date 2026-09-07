@@ -23,6 +23,14 @@
     "title": "Workflow prompts",
     "description": "Review and customize the instructions used by supported content workflows.",
     "definitions": {
+      "writingFeedbackMood": {
+        "label": "Writing feedback: Mood",
+        "description": "Controls mood classification guidance. The seven allowed moods, one-word response, passage and provider settings remain fixed."
+      },
+      "writingFeedbackEcho": {
+        "label": "Writing feedback: Echo",
+        "description": "Controls the five reader reactions. Persona identities, rotation, passage and provider settings remain fixed."
+      },
       "writingAgentQuick": {
         "label": "Writing Agent: Quick",
         "description": "Controls writing assistance instructions. Manuscript context and provider settings remain fixed."
@@ -114,6 +122,7 @@
     },
     "workflows": {
       "writingAgent": "Writing Playground AI Agent",
+      "writingFeedback": "Writing Playground feedback",
       "studyAssistantFlashcard": "Flashcard Study Assistant",
       "studyAssistantQuiz": "Quiz Study Assistant",
       "mainChatRag": "Main chat RAG",
@@ -140,6 +149,13 @@
       "openChatSettings": "Open Chat settings"
     },
     "parts": {
+      "classifierGuidance": "Classifier guidance",
+      "classificationSemantics": "Classification instructions",
+      "alexSystem": "Alex instructions",
+      "samSystem": "Sam instructions",
+      "maxSystem": "Max instructions",
+      "rileySystem": "Riley instructions",
+      "jordanSystem": "Jordan instructions",
       "guidance": "Guidance",
       "template": "Template",
       "system": "System instructions",

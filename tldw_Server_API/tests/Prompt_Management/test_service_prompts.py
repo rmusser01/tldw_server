@@ -29,6 +29,18 @@ FIXTURE_PATH = (
 FIXTURE = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
 
 EXPECTED_REGISTRY = {
+    "writing.feedback.mood": {
+        "label": "Writing feedback: Mood",
+        "description": "Controls mood classification guidance. The seven allowed moods, one-word response, passage and provider settings remain fixed.",
+        "parts": (("system_semantics", "Classifier guidance", "literal", ()), ("classification_semantics", "Classification instructions", "literal", ())),
+        "workflows": (("writing.feedback", "Writing Playground feedback"),),
+    },
+    "writing.feedback.echo": {
+        "label": "Writing feedback: Echo",
+        "description": "Controls the five reader reactions. Persona identities, rotation, passage and provider settings remain fixed.",
+        "parts": tuple((f"{name.lower()}_system", f"{name} instructions", "literal", ()) for name in ("Alex", "Sam", "Max", "Riley", "Jordan")),
+        "workflows": (("writing.feedback", "Writing Playground feedback"),),
+    },
     "writing.agent.quick": {
         "label": "Writing Agent: Quick",
         "description": "Controls writing assistance instructions. Manuscript context and provider settings remain fixed.",
@@ -266,6 +278,21 @@ def test_registry_contains_exact_locked_metadata_and_workflows() -> None:
         assert (
             tuple((workflow.id, workflow.label) for workflow in definition.affected_workflows) == expected["workflows"]
         )
+
+
+@pytest.mark.parametrize("definition_id", ["writing.feedback.mood", "writing.feedback.echo"])
+def test_feedback_overrides_are_atomic_literal_parts(definition_id: str) -> None:
+    """For the selected mood/Echo definition, render complete literal overrides and reject incomplete bundles."""
+    definition = get_service_prompt_definition(definition_id)
+    parts = {key: f"Custom {key} {{literal}}" for key in FIXTURE["defaults"][definition_id]}
+    resolved = resolve_service_prompt(_FakePromptsDatabase(_OverrideRow(definition_id, json.dumps(parts), "revision-1")), definition_id)
+    assert dict(resolved.parts) == parts
+    for key, value in parts.items():
+        assert render_service_prompt_part(definition, key, value, {}) == value
+    incomplete = dict(parts)
+    incomplete.pop(next(iter(incomplete)))
+    with pytest.raises(ServicePromptValidationError):
+        validate_service_prompt_parts(definition, incomplete)
 
 
 def test_registry_and_resolved_mappings_are_immutable() -> None:

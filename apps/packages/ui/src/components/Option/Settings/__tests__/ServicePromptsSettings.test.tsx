@@ -326,7 +326,75 @@ const catalog: ServicePromptCatalogItem[] = [
       { id: "study.assistant.flashcard", label: "Server flashcard workflow" },
       { id: "study.assistant.quiz", label: "Server quiz workflow" }
     ]
-  }))
+  })),
+  {
+    "id": "writing.feedback.mood",
+    "label": "Writing feedback: Mood",
+    "description": "Controls mood classification guidance. The seven allowed moods, one-word response, passage and provider settings remain fixed.",
+    "parts": [
+      {
+        "key": "system_semantics",
+        "label": "Classifier guidance",
+        "mode": "literal",
+        "required_variables": []
+      },
+      {
+        "key": "classification_semantics",
+        "label": "Classification instructions",
+        "mode": "literal",
+        "required_variables": []
+      }
+    ],
+    "affected_workflows": [
+      {
+        "id": "writing.feedback",
+        "label": "Writing Playground feedback"
+      }
+    ]
+  },
+  {
+    "id": "writing.feedback.echo",
+    "label": "Writing feedback: Echo",
+    "description": "Controls the five reader reactions. Persona identities, rotation, passage and provider settings remain fixed.",
+    "parts": [
+      {
+        "key": "alex_system",
+        "label": "Alex instructions",
+        "mode": "literal",
+        "required_variables": []
+      },
+      {
+        "key": "sam_system",
+        "label": "Sam instructions",
+        "mode": "literal",
+        "required_variables": []
+      },
+      {
+        "key": "max_system",
+        "label": "Max instructions",
+        "mode": "literal",
+        "required_variables": []
+      },
+      {
+        "key": "riley_system",
+        "label": "Riley instructions",
+        "mode": "literal",
+        "required_variables": []
+      },
+      {
+        "key": "jordan_system",
+        "label": "Jordan instructions",
+        "mode": "literal",
+        "required_variables": []
+      }
+    ],
+    "affected_workflows": [
+      {
+        "id": "writing.feedback",
+        "label": "Writing Playground feedback"
+      }
+    ]
+  },
 ]
 
 const detailFor = (
@@ -337,7 +405,9 @@ const detailFor = (
     parts?: Record<string, string>
   } = {}
 ): ServicePromptDetail => {
-  const defaults = definition.id.startsWith("writing.agent.")
+  const defaults = definition.id.startsWith("writing.feedback.")
+    ? Object.fromEntries(definition.parts.map((part) => [part.key, "Default " + part.key]))
+    : definition.id.startsWith("writing.agent.")
     ? { system: "Assist the writer." }
     : definition.id.startsWith("study.assistant.")
     ? { guidance: "Help the learner." }
@@ -614,7 +684,7 @@ describe("ServicePromptsSettings", () => {
     renderSettings()
 
     expect(await screen.findAllByTestId("service-prompt-list-item"))
-      .toHaveLength(22)
+      .toHaveLength(24)
     expect(await screen.findByRole("heading", { name: "Text translation" }))
       .toBeInTheDocument()
     expect(screen.getByText("Server default")).toBeInTheDocument()
@@ -692,6 +762,27 @@ describe("ServicePromptsSettings", () => {
     await waitFor(() => expect(mocks.save).toHaveBeenCalledWith(
       `study.assistant.${action}`,
       { parts: { guidance: "Teach in French {literally}." }, expected_revision: null },
+      { signal: expect.any(AbortSignal), requestScope: scopeOne }
+    ))
+  })
+
+  it.each(["Mood", "Echo"])("edits and saves the complete Writing feedback %s bundle", async (kind) => {
+    renderSettings()
+    await openPrompt(`Writing feedback: ${kind}`)
+    const labels = kind === "Mood"
+      ? [["system_semantics", "Classifier guidance"], ["classification_semantics", "Classification instructions"]]
+      : ["Alex", "Sam", "Max", "Riley", "Jordan"].map((name) => [`${name.toLowerCase()}_system`, `${name} instructions`])
+    expect(screen.getByText("Writing Playground feedback")).toBeVisible()
+    const parts: Record<string, string> = {}
+    for (const [key, label] of labels) {
+      expect(screen.getByLabelText(label)).toHaveValue("Default " + key)
+      parts[key] = "Custom " + key + " {literal}"
+      fireEvent.change(screen.getByLabelText(label), { target: { value: parts[key] } })
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledWith(
+      `writing.feedback.${kind.toLowerCase()}`,
+      { parts, expected_revision: null },
       { signal: expect.any(AbortSignal), requestScope: scopeOne }
     ))
   })

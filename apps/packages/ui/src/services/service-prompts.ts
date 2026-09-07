@@ -290,6 +290,23 @@ const freezeRenderDefinition = (
 })
 
 const LEGACY_RENDER_DEFINITIONS = Object.freeze({
+  "writing.feedback.mood": freezeRenderDefinition({
+    id: "writing.feedback.mood",
+    parts: [
+      { key: "system_semantics", mode: "literal", required_variables: [] },
+      { key: "classification_semantics", mode: "literal", required_variables: [] },
+    ]
+  }),
+  "writing.feedback.echo": freezeRenderDefinition({
+    id: "writing.feedback.echo",
+    parts: [
+      { key: "alex_system", mode: "literal", required_variables: [] },
+      { key: "sam_system", mode: "literal", required_variables: [] },
+      { key: "max_system", mode: "literal", required_variables: [] },
+      { key: "riley_system", mode: "literal", required_variables: [] },
+      { key: "jordan_system", mode: "literal", required_variables: [] },
+    ]
+  }),
   "writing.agent.quick": freezeRenderDefinition({
     id: "writing.agent.quick",
     parts: [{ key: "system", mode: "literal", required_variables: [] }]
@@ -353,6 +370,8 @@ const LEGACY_RENDER_DEFINITIONS = Object.freeze({
 
 // These features shipped before their Service Prompts definitions.
 const PACKAGED_FALLBACK_IDS = [
+  "writing.feedback.mood",
+  "writing.feedback.echo",
   "image.prompt.refinement",
   "writing.agent.quick",
   "writing.agent.planning",

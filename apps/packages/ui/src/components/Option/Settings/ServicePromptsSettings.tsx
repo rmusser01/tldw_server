@@ -150,6 +150,16 @@ const KNOWN_DEFINITIONS = {
     description:
       "Controls system instructions for synchronous document analysis. Without a saved override, server defaults apply."
   },
+  "writing.feedback.mood": {
+    key: "writingFeedbackMood",
+    label: "Writing feedback: Mood",
+    description: "Controls mood classification guidance. The seven allowed moods, one-word response, passage and provider settings remain fixed."
+  },
+  "writing.feedback.echo": {
+    key: "writingFeedbackEcho",
+    label: "Writing feedback: Echo",
+    description: "Controls the five reader reactions. Persona identities, rotation, passage and provider settings remain fixed."
+  },
   "writing.agent.quick": {
     key: "writingAgentQuick",
     label: "Writing Agent: Quick",
@@ -238,6 +248,7 @@ const KNOWN_DEFINITIONS = {
 const KNOWN_WORKFLOWS: Record<string, { key: string; label: string }> = {
   "study.assistant.flashcard": { key: "studyAssistantFlashcard", label: "Flashcard Study Assistant" },
   "writing.agent": { key: "writingAgent", label: "Writing Playground AI Agent" },
+  "writing.feedback": { key: "writingFeedback", label: "Writing Playground feedback" },
   "study.assistant.quiz": { key: "studyAssistantQuiz", label: "Quiz Study Assistant" },
   "chat.main.rag": { key: "mainChatRag", label: "Main chat RAG" },
   "chat.tab.rag": { key: "tabChatRag", label: "Tab chat RAG" },
@@ -305,6 +316,12 @@ const KNOWN_WORKFLOWS: Record<string, { key: string; label: string }> = {
 }
 
 const KNOWN_PARTS: Record<string, { key: string; label: string }> = {
+  classification_semantics: {"key":"classificationSemantics","label":"Classification instructions"},
+  alex_system: {"key":"alexSystem","label":"Alex instructions"},
+  sam_system: {"key":"samSystem","label":"Sam instructions"},
+  max_system: {"key":"maxSystem","label":"Max instructions"},
+  riley_system: {"key":"rileySystem","label":"Riley instructions"},
+  jordan_system: {"key":"jordanSystem","label":"Jordan instructions"},
   guidance: { key: "guidance", label: "Guidance" },
   analysis_guidance: { key: "analysisGuidance", label: "Analysis guidance" },
   presentation_guidance: { key: "presentationGuidance", label: "Presentation guidance" },
@@ -356,8 +373,12 @@ const getWorkflowLabel = (
 const getPartLabel = (
   key: string,
   fallback: string,
-  t: ReturnType<typeof useTranslation>["t"]
+  t: ReturnType<typeof useTranslation>["t"],
+  definitionId: string
 ): string => {
+  if (definitionId === "writing.feedback.mood" && key === "system_semantics") {
+    return t("servicePrompts.parts.classifierGuidance", { defaultValue: "Classifier guidance" })
+  }
   const known = KNOWN_PARTS[key]
   return known
     ? t(`servicePrompts.parts.${known.key}`, { defaultValue: known.label })
@@ -2041,7 +2062,7 @@ export const ServicePromptsSettings = () => {
                 <Form className="mt-5" layout="vertical" onFinish={() => void saveDraft()}>
                   <div className="flex flex-col gap-5">
                     {selectedDefinition.parts.map((part) => {
-                      const partLabel = getPartLabel(part.key, part.label, t)
+                      const partLabel = getPartLabel(part.key, part.label, t, selectedDefinition.id)
                       const fieldId = `service-prompt-${toDomId(
                         selectedDefinition.id
                       )}-${toDomId(part.key)}`
@@ -2104,7 +2125,7 @@ export const ServicePromptsSettings = () => {
                         {selectedDefinition.parts.map((part) => (
                           <div key={part.key} className="min-w-0">
                             <p className="text-xs font-medium text-text-muted">
-                              {getPartLabel(part.key, part.label, t)}
+                              {getPartLabel(part.key, part.label, t, selectedDefinition.id)}
                             </p>
                             <pre
                               className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-surface p-3 text-sm text-text"

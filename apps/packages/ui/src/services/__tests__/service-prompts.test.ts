@@ -100,6 +100,11 @@ const definition = (
 })
 
 const definitions: Partial<Record<KnownServicePromptId, ServicePromptCatalogItem>> = {
+  ...Object.fromEntries(["writing.feedback.mood", "writing.feedback.echo"].map((id) => [
+    id, definition(id as KnownServicePromptId, Object.keys(fixture.defaults[id as keyof typeof fixture.defaults]).map((key) => ({
+      key, label: key, mode: "literal", required_variables: []
+    })))
+  ])),
   "writing.agent.quick": definition("writing.agent.quick", [{ key: "system", label: "System instructions", mode: "literal", required_variables: [] }]),
   "writing.agent.planning": definition("writing.agent.planning", [{ key: "system", label: "System instructions", mode: "literal", required_variables: [] }]),
   "writing.agent.brainstorm": definition("writing.agent.brainstorm", [{ key: "system", label: "System instructions", mode: "literal", required_variables: [] }]),
@@ -180,6 +185,8 @@ const definitions: Partial<Record<KnownServicePromptId, ServicePromptCatalogItem
 describe("Service Prompt validation and rendering", () => {
   it("keeps old-server defaults byte-equivalent to the shared fixture", () => {
     expect(LEGACY_SERVICE_PROMPT_DEFAULTS).toEqual({
+      "writing.feedback.mood": fixture.defaults["writing.feedback.mood"],
+      "writing.feedback.echo": fixture.defaults["writing.feedback.echo"],
       "writing.agent.quick": fixture.defaults["writing.agent.quick"],
       "writing.agent.planning": fixture.defaults["writing.agent.planning"],
       "writing.agent.brainstorm": fixture.defaults["writing.agent.brainstorm"],
@@ -385,6 +392,23 @@ const renderDefinitionFor = (id: KnownServicePromptId) => ({
 })
 
 describe("Service Prompt migration and runtime snapshots", () => {
+  it.each(["writing.feedback.mood", "writing.feedback.echo"] as const)("loads %s atomically with old-server fallback but does not hide errors", async (id) => {
+    const saved = Object.fromEntries(Object.keys(fixture.defaults[id]).map((key) => [key, `Custom ${key} {literal}`]))
+    for (const fallback of ["catalog-404", "omitted", "detail-404", "saved"]) {
+      mocks.listServicePrompts.mockResolvedValue(fallback === "omitted" ? [] : catalog)
+      if (fallback === "catalog-404") mocks.listServicePrompts.mockRejectedValueOnce(new ServicePromptApiError("Not found", { status: 404 }))
+      mocks.getServicePrompt.mockResolvedValue(detailFor(id, { effective_parts: saved, source: "user" }))
+      if (fallback === "detail-404") mocks.getServicePrompt.mockRejectedValueOnce(new ServicePromptApiError("Not found", { status: 404 }))
+      const snapshot = await loadServicePromptSnapshot([id])
+      expect(snapshot.definitions[id]?.parts).toEqual(fallback === "saved" ? saved : fixture.defaults[id])
+      snapshot.release()
+    }
+    for (const status of [401, 403, 409, 422, 500]) {
+      const error = new ServicePromptApiError("Failed", { status })
+      mocks.getServicePrompt.mockRejectedValueOnce(error)
+      await expect(loadServicePromptSnapshot([id])).rejects.toBe(error)
+    }
+  })
   it.each(["quick", "planning", "brainstorm"] as const)("loads %s writing instructions with compatible defaults and no silent error fallback", async (mode) => {
     const id = `writing.agent.${mode}` as const
     for (const fallback of ["catalog-404", "omitted", "detail-404", "saved"]) {
