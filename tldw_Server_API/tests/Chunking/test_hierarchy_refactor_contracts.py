@@ -19,6 +19,17 @@ class BrokenBool:
         raise RuntimeError("cannot decide")
 
 
+class EventBool:
+    """Option value that records when its truthiness is evaluated."""
+
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+
+    def __bool__(self) -> bool:
+        self.events.append("truthiness")
+        return True
+
+
 def _patch_single_block(
     monkeypatch: pytest.MonkeyPatch,
     chunker: Chunker,
@@ -110,6 +121,8 @@ def test_public_flat_method_composes_overridable_public_methods(
             "method_options": method_options,
         },
     )
+    assert calls[0][1]["template"] is template
+    assert calls[0][1]["method_options"] is method_options
     assert calls[1][0] == "flatten"
     assert calls[1][1] is sentinel_tree
 
@@ -157,6 +170,35 @@ def test_hierarchy_options_are_shallow_copied_and_sanitization_is_resolved_first
     assert resolved_options[0]["nested"] is nested
     assert "sanitize_output" not in resolved_options[0]
     assert original_options.get("sanitize_output") is method_options.get("sanitize_output")
+
+
+def test_sanitize_output_truthiness_is_evaluated_before_method_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chunker = Chunker()
+    events: list[str] = []
+
+    monkeypatch.setattr(chunker, "_sanitize_input", lambda *_args, **_kwargs: "SAN")
+
+    def fake_resolve_method(
+        _method: str,
+        _language: str,
+        _options: dict[str, Any],
+    ) -> str:
+        events.append("resolve")
+        return "structure_aware"
+
+    monkeypatch.setattr(chunker, "_resolve_method", fake_resolve_method)
+
+    chunker.chunk_text_hierarchical_tree(
+        "raw",
+        method="structure_aware",
+        max_size=10,
+        overlap=0,
+        method_options={"sanitize_output": EventBool(events)},
+    )
+
+    assert events == ["truthiness", "resolve"]
 
 
 @pytest.mark.parametrize("method", ["words", "sentences", "tokens"])
@@ -304,7 +346,7 @@ def test_non_metadata_leaf_call_traces(
     assert trace == expected_trace
 
 
-@pytest.mark.parametrize("method", ["words", "fixed"])
+@pytest.mark.parametrize("method", ["words", "fixed", "semantic"])
 def test_sanitize_output_is_not_forwarded_to_leaf_calls(
     monkeypatch: pytest.MonkeyPatch,
     method: str,
