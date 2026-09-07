@@ -4,9 +4,11 @@ title: Expose Writing mood and Echo prompts through Service Prompts
 status: In Progress
 assignee: []
 created_date: '2026-09-07 20:14'
-updated_date: '2026-09-07 20:29'
+updated_date: '2026-09-07 20:37'
 labels: []
 dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/pull/2930'
 documentation:
   - Docs/Design/writing-feedback-service-prompts.md
 ---
@@ -35,6 +37,8 @@ Approved bounded follow-up to Writing Agent prompts: expose mood classifier sema
 
 <!-- SECTION:NOTES:BEGIN -->
 Implemented and independently reviewed on codex/writing-feedback-service-prompts from dev e3174f1ad9. Test-first red/green captured for missing definitions/fallbacks, customized/scoped hook requests, Settings classifier label, and stale scope-error race. Verification: 97 backend registry/API tests; 281 focused shared-client tests; 47 direct-browser transport tests; 12 locale mirrors match; Bandit zero findings; Ruff clean; ESLint zero errors and 10 preexisting explicit-any warnings. Shared-UI tsc completes with 158 existing diagnostics, none in changed files, with 8 GiB Node heap. Full-repo tests/build/live browser smoke not run. Ready for integration choice; no PR pushed yet.
+
+PR #2930 created against dev at user request. Feature commit ef699229c6 pushed. Awaiting remote review/checks and integration; worktree retained.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
