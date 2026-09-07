@@ -1,15 +1,16 @@
 import os
-from typing import Dict, Any, List
+from typing import Any
 
 import pytest
 from fastapi import HTTPException
 
-from tldw_Server_API.app.core.MCP_unified.server import MCPServer
-from tldw_Server_API.app.core.MCP_unified.protocol import MCPRequest
+from tldw_Server_API.app.core.MCP_unified import config as config_module
 from tldw_Server_API.app.core.MCP_unified.modules.base import BaseModule, ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.registry import reset_module_registry
-from tldw_Server_API.app.core.MCP_unified import config as config_module
 from tldw_Server_API.app.core.MCP_unified.monitoring import metrics as metrics_module
+from tldw_Server_API.app.core.MCP_unified.protocol import MCPRequest
+from tldw_Server_API.app.core.MCP_unified.protocol_types import AuthenticatedExecutionScope
+from tldw_Server_API.app.core.MCP_unified.server import MCPServer
 
 
 class _AllowAll:
@@ -26,10 +27,10 @@ def _ensure_env() -> None:
 class DictResultModule(BaseModule):
     async def on_initialize(self) -> None: ...
     async def on_shutdown(self) -> None: ...
-    async def check_health(self) -> Dict[str, bool]:
+    async def check_health(self) -> dict[str, bool]:
         return {"ok": True}
 
-    async def get_tools(self) -> List[Dict[str, Any]]:
+    async def get_tools(self) -> list[dict[str, Any]]:
         return [
             {
                 "name": "dict.echo",
@@ -42,10 +43,49 @@ class DictResultModule(BaseModule):
             }
         ]
 
-    async def execute_tool(self, tool_name: str, arguments: Dict[str, Any], context: Any | None = None) -> Any:
+    async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
         if tool_name == "dict.echo":
             return {"ok": True, "x": arguments.get("x")}
         raise ValueError(tool_name)
+
+
+@pytest.mark.asyncio
+async def test_http_transports_propagate_only_explicit_authenticated_scope():
+    _ensure_env()
+    server = MCPServer()
+    contexts: list[Any] = []
+
+    async def _ping(params: dict[str, Any], context: Any) -> dict[str, bool]:
+        contexts.append(context)
+        return {"ok": True}
+
+    server.protocol.handlers["ping"] = _ping  # type: ignore[assignment]
+    trusted_scope = AuthenticatedExecutionScope(active_org_id=7, active_team_id=11)
+
+    await server.handle_http_request(
+        MCPRequest(method="ping", params={}, id="scoped-request"),
+        user_id="41",
+        metadata={"org_id": 999, "team_id": 998},
+        server_auth_scope=trusted_scope,
+    )
+    assert contexts[-1].server_auth_scope is trusted_scope
+
+    await server.handle_http_batch(
+        [MCPRequest(method="ping", params={}, id="scoped-batch")],
+        user_id="41",
+        metadata={"org_id": 999, "team_id": 998},
+        server_auth_scope=trusted_scope,
+    )
+    assert contexts[-1].server_auth_scope is trusted_scope
+
+    await server.handle_http_request(
+        MCPRequest(method="ping", params={}, id="metadata-only"),
+        user_id="41",
+        metadata={"active_org_id": 999, "active_team_id": 998},
+    )
+    assert contexts[-1].server_auth_scope is None
+
+    await server.shutdown()
 
 
 @pytest.mark.asyncio
@@ -100,7 +140,7 @@ async def test_safe_config_clamped_without_session():
     _ensure_env()
     server = MCPServer()
 
-    async def _ping(params: Dict[str, Any], context):
+    async def _ping(params: dict[str, Any], context):
         return {"safe_config": context.metadata.get("safe_config")}
 
     server.protocol.handlers["ping"] = _ping  # type: ignore[assignment]
@@ -134,7 +174,7 @@ async def test_batch_session_semantics_enforced_and_seen_uris_saved():
     _ensure_env()
     server = MCPServer()
 
-    async def _ping(params: Dict[str, Any], context):
+    async def _ping(params: dict[str, Any], context):
         seen = context.metadata.get("seen_uris")
         if not isinstance(seen, list):
             seen = []

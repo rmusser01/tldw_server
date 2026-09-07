@@ -35,7 +35,7 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 
 **Tests:** Contract immutability/minimization, package import boundary, HTTP/batch/WS scope projection, API-key/JWT/cookie/single-user paths, spoofed metadata isolation, integrity tamper rejection.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 1.1: Define the minimized completion contracts
 
@@ -83,6 +83,14 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
      tldw_Server_API/tests/MCP_unified/test_mcp_http_auth_paths.py
    ```
 7. Commit: `feat(mcp): propagate authenticated active scope`
+
+**Stage 1 verification (2026-09-07):**
+- Independent review findings were reproduced and fixed: API-key owner mismatch, malformed AuthNZ WebSocket downgrade, Persona scope omission, and process-global registry contamination.
+- The plan's combined transport gate passed: `149 passed`.
+- The full Persona WebSocket suite passed: `98 passed`.
+- Focused model-contract, extraction-boundary, security-hardening, prompt/error-mapping, and package-boundary gates passed: `39 + 143 + 12 + 16 + 2` tests.
+- Ruff passed on all touched files; `compileall` passed on all touched production files; Bandit reported zero findings and zero scan errors across 15,036 lines.
+- One unrelated baseline assertion remains outside the stage gate: `test_tools_call_dict_result_is_json_content` expects an exact dictionary while the existing runtime adds its established `eval` field.
 
 ## Stage 2: Authoritative Credential Resolution
 

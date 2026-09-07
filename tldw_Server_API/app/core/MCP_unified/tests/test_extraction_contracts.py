@@ -2059,6 +2059,74 @@ async def test_tldw_auth_provider_fails_closed_when_authnz_ws_verify_rejects(
     )
 
 
+@pytest.mark.asyncio
+async def test_tldw_auth_provider_projects_active_scope_from_verified_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified.adapters import tldw_runtime
+
+    async def _verified_user(*_args: Any, **_kwargs: Any) -> SimpleNamespace:
+        return SimpleNamespace(
+            id=41,
+            roles=["user"],
+            permissions=["mcp:read"],
+            active_org_id=7,
+            active_team_id=11,
+        )
+
+    monkeypatch.setattr(tldw_runtime, "get_jwt_manager", lambda: object())
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.AuthNZ.User_DB_Handling.verify_jwt_and_fetch_user",
+        _verified_user,
+    )
+
+    identity = await tldw_runtime.TldwServerAuthProvider().authenticate_authnz_websocket_token(
+        "token",
+        websocket=SimpleNamespace(headers={}, client=None),
+    )
+
+    assert identity is not None
+    assert identity.active_org_id == 7
+    assert identity.active_team_id == 11
+
+
+@pytest.mark.asyncio
+async def test_tldw_auth_provider_fails_closed_for_malformed_verified_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified.adapters import tldw_runtime
+
+    async def _verified_user(*_args: Any, **_kwargs: Any) -> SimpleNamespace:
+        return SimpleNamespace(
+            id=41,
+            roles=["user"],
+            permissions=[],
+            active_org_id=True,
+            active_team_id=None,
+        )
+
+    monkeypatch.setattr(tldw_runtime, "get_jwt_manager", lambda: object())
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.AuthNZ.User_DB_Handling.verify_jwt_and_fetch_user",
+        _verified_user,
+    )
+
+    identity = await tldw_runtime.TldwServerAuthProvider().authenticate_authnz_websocket_token(
+        "token",
+        websocket=SimpleNamespace(headers={}, client=None),
+    )
+
+    assert identity is None
+
+
+@pytest.mark.parametrize("invalid_id", [0, -1, True, "7"])
+def test_authenticated_identity_rejects_malformed_active_scope_ids(invalid_id: Any) -> None:
+    from mcp_unified.interfaces.runtime import AuthenticatedIdentity
+
+    with pytest.raises(ValueError):
+        AuthenticatedIdentity(user_id="41", active_org_id=invalid_id)
+
+
 def test_stage3_runtime_contracts_are_exported_by_interface_packages() -> None:
     import mcp_unified.interfaces as standalone_interfaces
 
