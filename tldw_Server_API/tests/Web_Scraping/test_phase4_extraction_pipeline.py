@@ -77,9 +77,7 @@ async def test_legacy_article_scrape_denies_transport_before_page_creation(
         auth_mode="multi_user",
         outbound_policy_mode="strict",
     )
-    context = SimpleNamespace(
-        new_page=AsyncMock(side_effect=AssertionError("page must not be created"))
-    )
+    context = SimpleNamespace(new_page=AsyncMock(side_effect=AssertionError("page must not be created")))
     monkeypatch.setattr(legacy, "default_browser_transport_decision", lambda: denied, raising=False)
 
     result = await legacy.scrape_article_async(context, URL)
@@ -151,9 +149,7 @@ async def test_legacy_article_scrape_uses_guarded_browser_instead_of_caller_cont
         auth_mode="single_user",
         outbound_policy_mode="compat",
     )
-    caller_context = SimpleNamespace(
-        new_page=AsyncMock(side_effect=AssertionError("unguarded context used"))
-    )
+    caller_context = SimpleNamespace(new_page=AsyncMock(side_effect=AssertionError("unguarded context used")))
     browser_instances: list[object] = []
 
     class GuardedBrowser:
@@ -474,12 +470,46 @@ def test_default_regex_result_survives_later_failure(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(pipeline, "extract_regex_entities", lambda *_args, **_kwargs: regex_result)
     monkeypatch.setattr(pipeline, "extract_with_trafilatura", lambda *_args: _result(success=False))
 
-    result = pipeline.extract_article_with_pipeline(HTML, URL)
+    result = pipeline.extract_article_with_pipeline(HTML, URL, strategy_order=None)
 
-    assert result["extraction_successful"] is True
-    assert result["content"] == "email"
+    assert result["extraction_successful"] is False
+    assert result["extraction_strategy"] is None
     assert result["regex_matches"] == regex_result["regex_matches"]
-    assert result["extraction_strategy"] == "regex"
+    assert result["regex_matches"] is not regex_result["regex_matches"]
+    assert result["extraction_trace"] == [
+        {"strategy": "jsonld", "status": "failed", "reason": "jsonld_no_content"},
+        {
+            "strategy": "schema",
+            "status": "skipped",
+            "reason": "no_schema_rules_or_handler",
+        },
+        {"strategy": "regex", "status": "enriched", "reason": "regex_enriched"},
+        {"strategy": "llm", "status": "failed", "reason": "llm_no_content"},
+        {"strategy": "cluster", "status": "failed", "reason": "cluster_no_content"},
+        {"strategy": "trafilatura", "status": "failed", "reason": "no_content"},
+    ]
+
+
+def test_default_regex_cannot_become_primary_when_no_later_strategy_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    regex_result = _result(
+        success=True,
+        content="email",
+        regex_matches=[{"label": "email", "value": "demo@example.com"}],
+    )
+    monkeypatch.setattr(pipeline, "DEFAULT_EXTRACTION_STRATEGY_ORDER", ["regex"])
+    monkeypatch.setattr(pipeline, "extract_regex_entities", lambda *_args, **_kwargs: regex_result)
+
+    result = pipeline.extract_article_with_pipeline(HTML, URL, strategy_order=None)
+
+    assert result["extraction_successful"] is False
+    assert result["extraction_strategy"] is None
+    assert result["content"] == ""
+    assert result["regex_matches"] == regex_result["regex_matches"]
+    assert result["extraction_trace"] == [
+        {"strategy": "regex", "status": "enriched", "reason": "regex_enriched"},
+    ]
 
 
 def test_jsonld_summary_carries_forward_without_mutating_strategy_result(monkeypatch: pytest.MonkeyPatch) -> None:
