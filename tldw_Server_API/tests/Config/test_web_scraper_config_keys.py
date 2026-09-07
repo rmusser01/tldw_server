@@ -85,9 +85,7 @@ def test_web_scraper_transport_uses_supplied_environment(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cfg, "load_comprehensive_config", FakeConfig)
 
-    data = cfg.load_and_log_configs(
-        environment={"WEB_BROWSER_TRANSPORT_MODE": "auto"}
-    )
+    data = cfg.load_and_log_configs(environment={"WEB_BROWSER_TRANSPORT_MODE": "auto"})
 
     assert data is not None
     assert data["web_scraper"]["web_browser_transport_mode"] == "auto"

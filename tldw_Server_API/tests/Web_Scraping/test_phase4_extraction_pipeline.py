@@ -77,9 +77,7 @@ async def test_legacy_article_scrape_denies_transport_before_page_creation(
         auth_mode="multi_user",
         outbound_policy_mode="strict",
     )
-    context = SimpleNamespace(
-        new_page=AsyncMock(side_effect=AssertionError("page must not be created"))
-    )
+    context = SimpleNamespace(new_page=AsyncMock(side_effect=AssertionError("page must not be created")))
     monkeypatch.setattr(legacy, "default_browser_transport_decision", lambda: denied, raising=False)
 
     result = await legacy.scrape_article_async(context, URL)
@@ -151,9 +149,7 @@ async def test_legacy_article_scrape_uses_guarded_browser_instead_of_caller_cont
         auth_mode="single_user",
         outbound_policy_mode="compat",
     )
-    caller_context = SimpleNamespace(
-        new_page=AsyncMock(side_effect=AssertionError("unguarded context used"))
-    )
+    caller_context = SimpleNamespace(new_page=AsyncMock(side_effect=AssertionError("unguarded context used")))
     browser_instances: list[object] = []
 
     class GuardedBrowser:
