@@ -33,10 +33,11 @@ PYTHON_PRODUCTION_PROFILES = {
 }
 WEB_REQUIRED_OVERRIDES = {
     "@playwright/test": "1.58.0",
-    "@xmldom/xmldom": "0.8.13",
+    "@xmldom/xmldom": "0.8.15",
     "antd": "6.2.1",
     "linkify-it": "5.0.2",
     "playwright": "1.58.0",
+    "prismjs": "1.30.0",
     "tmp": "0.2.7",
     "vitest": "4.0.18",
     "wxt": "0.20.27",
@@ -47,6 +48,8 @@ ADMIN_REQUIRED_OVERRIDES = {
 }
 KNOWN_VULNERABLE_BUN_RELEASES = {
     "@xmldom/xmldom@0.7.13",
+    "@xmldom/xmldom@0.8.13",
+    "prismjs@1.27.0",
     "brace-expansion@1.1.12",
     "brace-expansion@2.0.2",
     "brace-expansion@5.0.0",
