@@ -25,7 +25,7 @@ modified_files:
 - tldw_Server_API/app/core/Jobs/manager.py
 - tldw_Server_API/app/core/Jobs/worker_sdk.py
 - tldw_Server_API/tests/Jobs
-updated_date: 2026-09-07 20:10
+updated_date: 2026-09-07 20:41
 ---
 
 ## Description
@@ -45,10 +45,18 @@ Blocking remediation required before strict complete_job extraction. A completio
 - [ ] #7 Focused SQLite and required real-PostgreSQL tests, full relevant Jobs regressions, formatting/lint, and scoped Bandit pass.
 <!-- AC:END -->
 
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Execute `Docs/superpowers/plans/2026-09-07-jobs-completion-row-identity-atomicity-implementation-plan.md` in five stages: refresh and baseline latest dev; add deterministic red SQLite/PostgreSQL/RLS and contract tests; implement both backend lock/identity paths as one green manager change; bind WorkerSDK ordinary completion to the acquired UUID; then run focused cross-backend verification, Ruff/Black/compile/Bandit, code review, and PR-readiness checks. TASK-13216 and TASK-13217 remain excluded.
+<!-- SECTION:PLAN:END -->
+
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Validated on SQLite and real PostgreSQL 18 under READ COMMITTED, including forced RLS with a visible chatbooks/u1 row: after an initial missing SELECT, a concurrent queued insert with the same numeric id can be completed while only job.created exists and ready_count remains 1. The approved remediation loads the authoritative row under SELECT FOR UPDATE on PostgreSQL or BEGIN IMMEDIATE on SQLite, returns False on a locked miss, captures the raw stored UUID, and guards every mutation/replay query by id plus null-safe stored UUID. expected_uuid is optional and WorkerSDK supplies the acquired UUID; legacy null/empty UUIDs receive only in-operation replacement protection. Completion outbox and lifecycle counter bookkeeping are mandatory and atomic when enabled. SLA attachment/event statement failures remain best-effort only after a savepoint is established; savepoint-control failures propagate. Metrics and observers remain post-commit. The slides-specific terminal-result operation is not a suitable reuse target because it does not preserve general result or queued-completion semantics. Strict completion extraction stays paused until this blocker merges. The provisional TASK-13112.3 was not carried forward because current dev already assigns TASK-13112 to unrelated work. Second design review added stable database error-code/class assertions, bounded concurrency teardown, exact same-token side-effect coverage, explicit SQLite contention behavior, and tracked follow-ups TASK-13216 (direct-caller UUID adoption) and TASK-13217 (historical bookkeeping drift).
+Implementation plan drafted and self-reviewed on 2026-09-07. The plan keeps both backend behavior changes in one green commit, requires red evidence for the validated races, uses zero-timeout SQLite error codes and PostgreSQL LockNotAvailable rather than sleeps/messages, checks counter and outbox snapshots, exercises forced RLS and legacy UUID replay, preserves savepoint-control failure rollback, and requires fresh verification after the final dev rebase.
+Final plan review verified the live remote dev tip remains e3174f1ad9f6dd0b11e4ecb20d48c1c4090d3bfe after correcting a locally rewritten origin/dev ref. No requirement or test-coverage gaps remain. The review made the forced-RLS cursor wrapper/import explicit and scoped Black to the new test module because all five existing touched files already fail whole-file Black on the unchanged baseline; Ruff currently passes those files, and the plan retains Ruff, syntax, diff, and changed-hunk formatting checks across the full touched scope.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
