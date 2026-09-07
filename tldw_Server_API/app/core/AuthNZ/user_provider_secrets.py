@@ -4,8 +4,8 @@ import json
 from typing import Any
 
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.exceptions import ProviderCredentialAliasConflictError
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
-from tldw_Server_API.app.core.exceptions import TransactionPassthroughError
 from tldw_Server_API.app.core.Security.crypto import (
     decrypt_json_blob_with_key,
     encrypt_json_blob_with_key,
@@ -14,14 +14,6 @@ from tldw_Server_API.app.core.Security.crypto import (
 
 def normalize_provider_name(provider: str) -> str:
     return (provider or "").strip().lower()
-
-
-class ProviderCredentialAliasConflictError(TransactionPassthroughError, ValueError):
-    """Raised when more than one legacy alias row exists for one provider.
-
-    Raised inside AuthNZ write transactions, which sanitize ordinary exceptions to
-    TransactionError without a cause; passthrough keeps the typed conflict.
-    """
 
 
 def fold_provider_credential_rows(
