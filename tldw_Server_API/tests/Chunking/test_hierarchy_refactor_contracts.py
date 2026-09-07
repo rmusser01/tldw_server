@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import ast
+import importlib.util
 import inspect
+from dataclasses import FrozenInstanceError
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -10,6 +14,27 @@ import pytest
 from loguru import logger
 
 from tldw_Server_API.app.core.Chunking import Chunker
+from tldw_Server_API.app.core.Chunking import chunker as chunker_module
+from tldw_Server_API.app.core.Chunking.hierarchical.models import (
+    HierarchyContext,
+    HierarchyTextViews,
+    LeafChunkingContext,
+    ResolvedHierarchyOptions,
+)
+from tldw_Server_API.app.core.Chunking.process_text.models import ProcessTextContext
+
+_CHUNKING_PACKAGE_NAME = "tldw_Server_API.app.core.Chunking"
+_HIERARCHICAL_PACKAGE_NAME = f"{_CHUNKING_PACKAGE_NAME}.hierarchical"
+_HIERARCHICAL_PACKAGE = Path(__file__).parents[2] / "app" / "core" / "Chunking" / "hierarchical"
+_FORBIDDEN_HIERARCHICAL_IMPORTS = {
+    f"{_CHUNKING_PACKAGE_NAME}.chunker",
+    f"{_CHUNKING_PACKAGE_NAME}.process_text",
+}
+_FORBIDDEN_LOWER_LAYER_IMPORTS = {
+    f"{_HIERARCHICAL_PACKAGE_NAME}.builder",
+    f"{_HIERARCHICAL_PACKAGE_NAME}.flatten",
+    f"{_HIERARCHICAL_PACKAGE_NAME}.service",
+}
 
 
 class BrokenBool:
@@ -38,8 +63,8 @@ def _patch_single_block(
 ) -> None:
     monkeypatch.setattr(chunker, "_sanitize_input", lambda *_args, **_kwargs: "raw")
     monkeypatch.setattr(
-        chunker,
-        "_compute_paragraph_spans",
+        chunker_module,
+        "compute_paragraph_spans",
         lambda *_args, **_kwargs: [(0, 3, "paragraph")],
     )
     monkeypatch.setattr(
@@ -47,6 +72,34 @@ def _patch_single_block(
         "_resolve_method",
         lambda *_args, **_kwargs: resolved_method,
     )
+
+
+def _resolved_imports(module_path: Path) -> list[str]:
+    tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
+    imports: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports.extend(alias.name for alias in node.names)
+            continue
+        if not isinstance(node, ast.ImportFrom):
+            continue
+
+        if node.level:
+            relative_name = f"{'.' * node.level}{node.module or ''}"
+            resolved_module = importlib.util.resolve_name(relative_name, _HIERARCHICAL_PACKAGE_NAME)
+        else:
+            resolved_module = node.module or ""
+        if resolved_module:
+            imports.append(resolved_module)
+            imports.extend(f"{resolved_module}.{alias.name}" for alias in node.names if alias.name != "*")
+    return imports
+
+
+def _assert_no_resolved_imports_containing(module_path: Path, forbidden: set[str]) -> None:
+    offenders = [
+        resolved for resolved in _resolved_imports(module_path) if any(blocked in resolved for blocked in forbidden)
+    ]
+    assert offenders == [], f"{module_path.name} imports forbidden modules: {offenders}"
 
 
 def _capture_log_records(call: Any) -> list[dict[str, Any]]:
@@ -75,6 +128,93 @@ def test_public_hierarchy_signatures_are_stable() -> None:
         "template: dict[str, Any] | None = None, "
         "method_options: dict[str, Any] | None = None) -> list[dict[str, typing.Any]]"
     )
+
+
+def test_hierarchy_models_are_passive_and_frozen() -> None:
+    nested: list[str] = []
+    options = ResolvedHierarchyOptions("words", "10", 0, None, {"nested": nested}, True)
+    views = HierarchyTextViews(original="a", sanitized="bb", output="ccc")
+
+    assert options.method_options["nested"] is nested
+    assert (views.original, views.sanitized, views.output) == ("a", "bb", "ccc")
+    with pytest.raises(FrozenInstanceError):
+        views.output = "changed"  # type: ignore[misc]
+
+
+def test_hierarchy_protocols_expose_required_members() -> None:
+    leaf_members = {"chunk_text", "chunk_text_with_metadata"}
+    hierarchy_members = {
+        "config",
+        "_enforce_text_size",
+        "_normalize_method_argument",
+        "_resolve_method",
+        "_sanitize_input",
+        "normalize_chunk_type",
+        *leaf_members,
+    }
+    available_hierarchy_members = (
+        set(HierarchyContext.__dict__) | set(HierarchyContext.__annotations__) | set(LeafChunkingContext.__dict__)
+    )
+
+    assert leaf_members.issubset(LeafChunkingContext.__dict__)
+    assert hierarchy_members.issubset(available_hierarchy_members)
+    assert LeafChunkingContext in HierarchyContext.__mro__
+    assert HierarchyContext.__annotations__["config"] == "ChunkerConfig"
+
+    for method_name in leaf_members:
+        signature = inspect.signature(getattr(LeafChunkingContext, method_name))
+        assert list(signature.parameters) == [
+            "self",
+            "text",
+            "method",
+            "max_size",
+            "overlap",
+            "language",
+            "options",
+        ]
+        assert all(signature.parameters[name].default is None for name in ("method", "max_size", "overlap", "language"))
+        assert signature.parameters["options"].kind is inspect.Parameter.VAR_KEYWORD
+
+    enforce_signature = inspect.signature(HierarchyContext._enforce_text_size)
+    sanitize_signature = inspect.signature(HierarchyContext._sanitize_input)
+    assert enforce_signature.parameters["source"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert sanitize_signature.parameters["suppress_security_log"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert sanitize_signature.parameters["suppress_security_log"].default is False
+
+
+def test_process_text_context_no_longer_exposes_private_paragraph_spans() -> None:
+    assert "_compute_paragraph_spans" not in ProcessTextContext.__dict__
+
+
+def test_hierarchical_modules_do_not_import_outer_owners() -> None:
+    for module_path in sorted(_HIERARCHICAL_PACKAGE.glob("*.py")):
+        _assert_no_resolved_imports_containing(module_path, _FORBIDDEN_HIERARCHICAL_IMPORTS)
+
+
+def test_hierarchical_lower_layers_do_not_import_upper_layers() -> None:
+    for module_name in ("leaves.py", "grouping.py"):
+        module_path = _HIERARCHICAL_PACKAGE / module_name
+        if module_path.exists():
+            _assert_no_resolved_imports_containing(module_path, _FORBIDDEN_LOWER_LAYER_IMPORTS)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import tldw_Server_API.app.core.Chunking.chunker\n",
+        "from .. import chunker\n",
+        "from ..process_text import dispatch\n",
+    ],
+)
+def test_hierarchical_import_boundary_resolves_absolute_and_relative_imports(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    module_path = tmp_path / "candidate.py"
+    module_path.write_text(source, encoding="utf-8")
+
+    with pytest.raises(AssertionError):
+        _assert_no_resolved_imports_containing(module_path, _FORBIDDEN_HIERARCHICAL_IMPORTS)
 
 
 def test_public_flat_method_composes_overridable_public_methods(
