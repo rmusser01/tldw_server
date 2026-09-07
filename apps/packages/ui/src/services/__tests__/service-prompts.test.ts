@@ -706,9 +706,10 @@ describe("Service Prompt migration and runtime snapshots", () => {
       return { id: 84, username: "resolved" }
     })
 
-    await expect(resolveServicePromptScope()).rejects.toThrow(
-      "Authenticated Service Prompt scope changed while resolving."
-    )
+    await expect(resolveServicePromptScope()).rejects.toMatchObject({
+      status: 412,
+      details: { detail: { code: "request_config_scope_changed" } }
+    })
   })
 
   it("does not resolve a user for single-user scope", async () => {

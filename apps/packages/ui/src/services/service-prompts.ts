@@ -533,7 +533,7 @@ export const resolveServicePromptScope = async (
       throw new Error("tldw server is not configured.")
     }
     if (!servicePromptTargetsMatch(initialConfig, refreshedConfig)) {
-      throw new Error("Authenticated Service Prompt scope changed while resolving.")
+      throw createServicePromptScopeChangedError()
     }
     resolvedConfig = refreshedConfig
     userId = user.id
