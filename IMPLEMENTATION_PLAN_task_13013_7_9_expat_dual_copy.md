@@ -57,6 +57,15 @@ process evidence. The real signed input bundle passes; wrong-archive-signature
 and wrong-public-key substitutions fail. Native workflow integration, builds,
 parser tests and binary qualification below remain outstanding.
 
+Native system harness checkpoint: `expat-candidate.yml` now orchestrates separate
+offline prepare/build/sanitizer/install phases and retains each result. Wide
+testing uses purpose-built unsigned-short controls: upstream `tests/common.h`
+rejects Debian's `XML_UNICODE` mode, so `make -C buildw check` cannot be honestly
+used as a gate. The dedicated controls cover the non-null-context `dtdCopy`
+regression as well as normal XML semantics. CPython native build integration is
+still outstanding; system-only evidence must never be reported as dual-copy
+qualification.
+
 - [ ] Test that controller preparation/build/test/install failures propagate and evidence upload still runs; reject non-native hosts/images, missing status files and missing parser-test output.
 - [ ] Use native `ubuntu-24.04`; pin checkout/upload actions to the same verified commits as util-linux qualification. Preserve read-only repository permissions, exact checkout SHA, image identities and logs. No registry push, privileged mode, Docker socket bind, host secrets or production deploy.
 - [ ] Authenticate Debian `.dsc` and upstream/Python detached signatures in an isolated keyring, retaining full signer fingerprints and status output; never present GitHub's tag verification as local archive-signature verification. Abort before source execution if authentication fails.
