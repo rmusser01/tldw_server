@@ -58,3 +58,32 @@ lookup cancellation, stale chunks/responses/logprobs/errors/finalizers,
 session/scene changes, manual Stop, unmount and cleanup. Preserve existing
 Writing Playground and TldwChat regression suites. Run backend registry/API
 tests, touched-scope lint and Bandit, then independent code review.
+
+## Verification results
+
+At `d95697c95c`, the seven-file shared UI union passed 322/322 tests. The backend
+registry/API pair passed 101/101 tests with 14 existing environment/deprecation
+warnings. Ruff passed for the registry and its two test modules. Bandit reported
+zero findings and zero errors across the 748-line production registry module.
+
+Repository-pinned ESLint passed all eight changed TypeScript/TSX files with zero
+errors. It retained 37 baseline warnings: 27 unused-variable/React-hook warnings
+in the pre-existing Writing Playground component and 10 `no-explicit-any`
+warnings in `tldw-server.ts`, plus the existing root-invocation Next pages
+directory notice. The fresh shared UI typecheck at this head produced 158
+diagnostics; after line/column normalization its diagnostic multiset exactly
+matched the 158-diagnostic pre-change baseline, so this patch adds no TypeScript
+diagnostic. All five new English locale values match between the nested WebUI
+tree and flattened extension `.message` entries.
+
+The Task 1 registry/default/fallback/Settings patch and Task 2 scoped-generation
+patch each received independent approval. A controller-owned full base-to-head
+review is still pending, so Stage 3 and TASK-13216 remain in progress. Full
+frontend builds and live-browser checks were not run. The broad accidental TTS
+suite's two failures were reproduced at the original base revision with the same
+dependencies and are recorded as baseline; no TTS changes were made.
+
+Known runner output remains visible rather than suppressed: Ant Design Drawer
+deprecation messages, Node experimental `localStorage` warnings, jsdom
+navigation notices, expected logged abort/timeout errors, pytest configuration
+warnings and the legacy single-user API-key warning.
