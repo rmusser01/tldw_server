@@ -1,23 +1,148 @@
-name: Publish Docker images
+name: Publish verified Docker release
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
-      manual_tag:
-        description: Optional tag for manual runs (e.g., test-123)
-        required: false
+      release_tag:
+        description: Existing draft release tag to verify and publish
+        required: true
         type: string
+      confirmation:
+        description: Type "publish <tag>" to authorize final promotion
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-docker-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  TRIVY_IMAGE: ghcr.io/aquasecurity/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
 
 jobs:
-  push_to_registries:
-    name: Push ${{ matrix.name }} image to GHCR
+  validate-release:
+    name: Validate trusted draft release
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      source_commit: ${{ steps.validate.outputs.source_commit }}
+      release_version: ${{ steps.validate.outputs.release_version }}
+    steps:
+      - name: Checkout exact release tag
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ inputs.release_tag }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify trusted draft release
+        id: validate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_CONFIRMATION: ${{ inputs.confirmation }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          expected_ref="refs/tags/$RELEASE_TAG"
+          test "$GITHUB_REF" = "$expected_ref"
+          test "$RELEASE_CONFIRMATION" = "publish $RELEASE_TAG"
+          printf '%s\n' "$RELEASE_TAG" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+$'
+          tag_commit="$(git rev-parse "$RELEASE_TAG^{}")"
+          test "$tag_commit" = "$EXPECTED_SHA"
+          release_json="$(gh release view "$RELEASE_TAG" --json isDraft,tagName)"
+          test "$(jq -r '.isDraft' <<<"$release_json")" = "true"
+          test "$(jq -r '.tagName' <<<"$release_json")" = "$RELEASE_TAG"
+          release_version="${RELEASE_TAG#v}"
+          printf 'source_commit=%s\n' "$EXPECTED_SHA" >> "$GITHUB_OUTPUT"
+          printf 'release_version=%s\n' "$release_version" >> "$GITHUB_OUTPUT"
+
+  source-admission:
+    name: Admit exact source dependencies
+    needs: validate-release
+    uses: ./.github/workflows/sbom.yml
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      statuses: read
+
+  prepare-scanner:
+    name: Prepare fresh Trivy database
+    needs:
+      - validate-release
+      - source-admission
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Prepare fresh pinned Trivy database
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p scanner
+          docker run --rm --platform linux/amd64 \
+            --user "$(id -u):$(id -g)" \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --read-only \
+            --tmpfs /tmp:rw,nosuid,nodev,size=256m \
+            --volume "$PWD/scanner:/trivy-cache:rw" \
+            "$TRIVY_IMAGE" image --download-db-only --cache-dir /trivy-cache
+          docker run --rm --platform linux/amd64 "$TRIVY_IMAGE" --version \
+            | tee scanner/trivy-version.txt
+          grep -Eq '^Version: 0\.74\.0$' scanner/trivy-version.txt
+          SCANNER_IMAGE="$TRIVY_IMAGE" python - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timedelta, timezone
+          from pathlib import Path
+
+          now = datetime.now(timezone.utc)
+          path = Path("scanner/db/metadata.json")
+          payload = json.loads(path.read_text(encoding="utf-8"))
+          updated = datetime.fromisoformat(payload["UpdatedAt"].replace("Z", "+00:00"))
+          age = now - updated
+          assert timedelta(minutes=-5) <= age <= timedelta(hours=24), age
+          metadata = {
+              "name": "trivy",
+              "version": "0.74.0",
+              "image": os.environ["SCANNER_IMAGE"],
+              "database_updated_at": updated.isoformat().replace("+00:00", "Z"),
+              "database_downloaded_at": now.isoformat().replace("+00:00", "Z"),
+              "scan_started_at": now.isoformat().replace("+00:00", "Z"),
+          }
+          Path("scanner/scanner-metadata.json").write_text(
+              json.dumps(metadata, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Upload pinned scanner database
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-trivy-database
+          path: scanner/
+          if-no-files-found: error
+          retention-days: 1
+
+  build-backend-candidates:
+    name: Build and admit ${{ matrix.name }}
+    needs:
+      - validate-release
+      - source-admission
+      - prepare-scanner
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
     permissions:
       contents: read
       packages: write
@@ -29,16 +154,19 @@ jobs:
         include:
           - name: app
             dockerfile: Dockerfiles/Dockerfile.prod
-            ghcr_suffix: ""
+            image_suffix: ""
           - name: worker
             dockerfile: Dockerfiles/Dockerfile.worker
-            ghcr_suffix: "-worker"
+            image_suffix: -worker
           - name: audio-worker
             dockerfile: Dockerfiles/Dockerfile.audio_gpu_worker
-            ghcr_suffix: "-audio-worker"
+            image_suffix: -audio-worker
     steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - name: Checkout exact release source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ needs.validate-release.outputs.source_commit }}
+          persist-credentials: false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
@@ -50,34 +178,1068 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels) for GHCR
-        id: meta
-        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9
-        with:
-          images: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.ghcr_suffix }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
-            type=raw,value=${{ inputs.manual_tag }},enable=${{ github.event_name == 'workflow_dispatch' && inputs.manual_tag != '' }}
-            type=sha,format=short,enable=${{ github.event_name == 'workflow_dispatch' }}
-
-      - name: Build and push Docker images
-        id: push
+      - name: Build and push immutable candidate
+        id: build
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf
         with:
           context: .
           file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.image_suffix }}:candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          cache-from: type=gha,scope=release-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=release-${{ matrix.name }}
 
-      - name: Generate artifact attestation (GHCR)
+      - name: Inspect exact backend subject
+        id: identity
+        shell: bash
+        env:
+          SUBJECT_DIGEST: ${{ steps.build.outputs.digest }}
+          CANDIDATE_TAG: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.image_suffix }}:candidate-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          candidate_ref="$CANDIDATE_TAG@$SUBJECT_DIGEST"
+          docker buildx imagetools inspect "$candidate_ref" --raw > evidence/subject-${{ matrix.name }}.json
+          SUBJECT_DIGEST="$SUBJECT_DIGEST" python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          raw = Path("evidence/subject-${{ matrix.name }}.json").read_bytes()
+          assert "sha256:" + hashlib.sha256(raw).hexdigest() == os.environ["SUBJECT_DIGEST"]
+          payload = json.loads(raw)
+          media_type = payload["mediaType"]
+          if media_type in {
+              "application/vnd.oci.image.index.v1+json",
+              "application/vnd.docker.distribution.manifest.list.v2+json",
+          }:
+              matches = [
+                  item
+                  for item in payload["manifests"]
+                  if item.get("platform", {}).get("os") == "linux"
+                  and item.get("platform", {}).get("architecture") == "amd64"
+                  and item.get("annotations", {}).get(
+                      "vnd.docker.reference.type"
+                  ) != "attestation-manifest"
+              ]
+              assert len(matches) == 1, matches
+              child = matches[0]["digest"]
+          else:
+              child = os.environ["SUBJECT_DIGEST"]
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              print(f"media_type={media_type}", file=output)
+              print(f"platform_digest={child}", file=output)
+          PY
+          printf 'candidate_ref=%s\n' "$candidate_ref" >> "$GITHUB_OUTPUT"
+
+      - name: Download pinned scanner database
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: release-trivy-database
+          path: scanner
+
+      - name: Scan exact backend subject
+        shell: bash
+        env:
+          CANDIDATE_REF: ${{ steps.identity.outputs.candidate_ref }}
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          trivy() (
+            scratch_dir="$(mktemp -d "$RUNNER_TEMP/trivy.XXXXXX")"
+            trap 'rm -rf -- "$scratch_dir"' EXIT
+            docker run --rm --platform linux/amd64 \
+              --user "$(id -u):$(id -g)" \
+              --cap-drop ALL \
+              --security-opt no-new-privileges:true \
+              --read-only \
+              --volume "$scratch_dir:/tmp:rw" \
+              --env TRIVY_USERNAME \
+              --env TRIVY_PASSWORD \
+              --volume "$PWD/evidence:/work:rw" \
+              --volume "$PWD/scanner:/trivy-cache:rw" \
+              --workdir /work \
+              "$TRIVY_IMAGE" "$@"
+          )
+          trivy image --platform linux/amd64 \
+            --cache-dir /trivy-cache --skip-db-update \
+            --scanners vuln --ignore-unfixed=false --format json \
+            --output trivy-image-${{ matrix.name }}.json "$CANDIDATE_REF"
+          trivy image --platform linux/amd64 \
+            --cache-dir /trivy-cache --skip-db-update \
+            --scanners vuln --ignore-unfixed=false --format cyclonedx \
+            --output sbom-image-${{ matrix.name }}.cdx.json "$CANDIDATE_REF"
+
+      - name: Evaluate backend vulnerability policy
+        id: policy
+        continue-on-error: true
+        shell: bash
+        env:
+          COMPONENT: image-${{ matrix.name }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from dataclasses import asdict
+          from datetime import date
+          from pathlib import Path
+
+          from Helper_Scripts.Supply_Chain.exception_policy import (
+              evaluate_trivy_report,
+              load_policy,
+          )
+
+          name = "${{ matrix.name }}"
+          root = Path("evidence")
+          report = json.loads((root / f"trivy-image-{name}.json").read_text())
+          policy = load_policy(
+              Path(".github/supply-chain/vulnerability-exceptions.json"),
+              today=date.today(),
+          )
+          decision = evaluate_trivy_report(
+              report,
+              component=os.environ["COMPONENT"],
+              policy=policy,
+              today=date.today(),
+          )
+          payload = {
+              "component": decision.component,
+              "blocking": [asdict(item) for item in decision.blocking],
+              "excepted": [asdict(item) for item in decision.excepted],
+              "unmatched_exception_ids": list(decision.unmatched_exception_ids),
+          }
+          (root / f"scan-decision-image-{name}.json").write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n"
+          )
+          if decision.blocking or decision.unmatched_exception_ids:
+              raise SystemExit("backend candidate rejected by vulnerability policy")
+          PY
+
+      - name: Attest exact backend subject
+        id: attest
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32
         with:
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.ghcr_suffix }}
-          subject-digest: ${{ steps.push.outputs.digest }}
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.image_suffix }}
+          subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
+
+      - name: Write backend evidence record
+        shell: bash
+        env:
+          SUBJECT_DIGEST: ${{ steps.build.outputs.digest }}
+          PLATFORM_DIGEST: ${{ steps.identity.outputs.platform_digest }}
+          SUBJECT_MEDIA_TYPE: ${{ steps.identity.outputs.media_type }}
+          CANDIDATE_REF: ${{ steps.identity.outputs.candidate_ref }}
+          PROVENANCE_REF: ${{ steps.attest.outputs.attestation-url }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          name = "${{ matrix.name }}"
+          record = {
+              "schema_version": 1,
+              "name": name,
+              "ownership": "project-built",
+              "platform": "linux/amd64",
+              "subject_digest": os.environ["SUBJECT_DIGEST"],
+              "platform_manifest_digest": os.environ["PLATFORM_DIGEST"],
+              "subject_media_type": os.environ["SUBJECT_MEDIA_TYPE"],
+              "scan_subject_digest": os.environ["SUBJECT_DIGEST"],
+              "scan_platform_manifest_digest": os.environ["PLATFORM_DIGEST"],
+              "reference": os.environ["CANDIDATE_REF"],
+              "dockerfile": "${{ matrix.dockerfile }}",
+              "publication": "promoted",
+              "sbom_file": f"sbom-image-{name}.cdx.json",
+              "scan_file": f"trivy-image-{name}.json",
+              "decision_file": f"scan-decision-image-{name}.json",
+              "provenance_ref": os.environ["PROVENANCE_REF"],
+          }
+          Path(f"evidence/image-{name}.json").write_text(
+              json.dumps(record, indent=2, sort_keys=True) + "\n"
+          )
+          PY
+
+      - name: Hash backend evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "${{ steps.attest.outputs.bundle-path }}" \
+            evidence/provenance-image-${{ matrix.name }}.jsonl
+          cp scanner/scanner-metadata.json \
+            evidence/scanner-image-${{ matrix.name }}.json
+          (
+            cd evidence
+            sha256sum \
+              image-${{ matrix.name }}.json \
+              sbom-image-${{ matrix.name }}.cdx.json \
+              trivy-image-${{ matrix.name }}.json \
+              scan-decision-image-${{ matrix.name }}.json \
+              scanner-image-${{ matrix.name }}.json \
+              subject-${{ matrix.name }}.json \
+              provenance-image-${{ matrix.name }}.jsonl \
+              > SHA256SUMS-image-${{ matrix.name }}
+            sha256sum -c SHA256SUMS-image-${{ matrix.name }}
+          )
+
+      - name: Upload backend evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-image-${{ matrix.name }}
+          path: evidence/
+          if-no-files-found: error
+
+      - name: Require backend admission
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ steps.policy.outcome }}" = "success"
+
+  build-frontend-candidates:
+    name: Build and admit local ${{ matrix.name }}
+    needs:
+      - validate-release
+      - source-admission
+      - prepare-scanner
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      attestations: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: webui
+            dockerfile: Dockerfiles/Dockerfile.webui
+            build_args: |
+              NEXT_PUBLIC_API_URL=
+              NEXT_PUBLIC_API_BASE_URL=
+              NEXT_PUBLIC_API_VERSION=v1
+              NEXT_PUBLIC_X_API_KEY=
+              NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=quickstart
+              TLDW_INTERNAL_API_ORIGIN=http://app:8000
+          - name: admin-ui
+            dockerfile: Dockerfiles/Dockerfile.admin-ui
+            build_args: |
+              NEXT_PUBLIC_API_URL=http://app:8000
+              NEXT_PUBLIC_API_VERSION=v1
+              NEXT_PUBLIC_DEFAULT_AUTH_MODE=multi_user
+              NEXT_PUBLIC_ALLOW_ADMIN_API_KEY_LOGIN=false
+              NEXT_PUBLIC_BILLING_ENABLED=false
+    steps:
+      - name: Checkout exact release source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ needs.validate-release.outputs.source_commit }}
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
+
+      - name: Build local frontend OCI candidate
+        id: build
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          build-args: ${{ matrix.build_args }}
+          platforms: linux/amd64
+          push: false
+          provenance: mode=max
+          sbom: true
+          outputs: type=oci,dest=${{ runner.temp }}/${{ matrix.name }}.oci.tar
+          cache-from: type=gha,scope=release-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=release-${{ matrix.name }}
+
+      - name: Extract exact frontend OCI subject
+        id: identity
+        shell: bash
+        env:
+          SUBJECT_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence "$RUNNER_TEMP/${{ matrix.name }}-layout"
+          tar -xf "$RUNNER_TEMP/${{ matrix.name }}.oci.tar" \
+            -C "$RUNNER_TEMP/${{ matrix.name }}-layout"
+          SUBJECT_DIGEST="$SUBJECT_DIGEST" LAYOUT="$RUNNER_TEMP/${{ matrix.name }}-layout" \
+            python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["LAYOUT"])
+          subject = os.environ["SUBJECT_DIGEST"]
+          index_raw = (root / "index.json").read_bytes()
+          index_digest = "sha256:" + hashlib.sha256(index_raw).hexdigest()
+          index = json.loads(index_raw)
+          descriptors = index["manifests"]
+          descriptor = next(
+              (item for item in descriptors if item["digest"] == subject),
+              None,
+          )
+          if subject == index_digest:
+              media_type = "application/vnd.oci.image.index.v1+json"
+              matches = [
+                  item
+                  for item in descriptors
+                  if item.get("platform", {}).get("os") == "linux"
+                  and item.get("platform", {}).get("architecture") == "amd64"
+                  and item.get("annotations", {}).get(
+                      "vnd.docker.reference.type"
+                  ) != "attestation-manifest"
+              ]
+              assert len(matches) == 1, matches
+              child = matches[0]["digest"]
+          else:
+              assert descriptor is not None, (subject, index_digest, descriptors)
+              media_type = descriptor["mediaType"]
+              child = subject
+          digest_path = root / "blobs" / "sha256" / subject.removeprefix("sha256:")
+          subject_raw = index_raw if subject == index_digest else digest_path.read_bytes()
+          assert "sha256:" + hashlib.sha256(subject_raw).hexdigest() == subject
+          Path("evidence/subject-${{ matrix.name }}.json").write_bytes(subject_raw)
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              print(f"media_type={media_type}", file=output)
+              print(f"platform_digest={child}", file=output)
+          PY
+
+      - name: Download pinned scanner database
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: release-trivy-database
+          path: scanner
+
+      - name: Scan exact frontend archive
+        shell: bash
+        env:
+          SUBJECT_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          trivy() (
+            scratch_dir="$(mktemp -d "$RUNNER_TEMP/trivy.XXXXXX")"
+            trap 'rm -rf -- "$scratch_dir"' EXIT
+            docker run --rm --platform linux/amd64 \
+              --user "$(id -u):$(id -g)" \
+              --network none \
+              --cap-drop ALL \
+              --security-opt no-new-privileges:true \
+              --read-only \
+              --volume "$scratch_dir:/tmp:rw" \
+              --volume "$PWD/evidence:/work:rw" \
+              --volume "$PWD/scanner:/trivy-cache:rw" \
+              --volume "$RUNNER_TEMP/${{ matrix.name }}-layout:/input:ro" \
+              --workdir /work \
+              "$TRIVY_IMAGE" "$@"
+          )
+          trivy image --platform linux/amd64 \
+            --cache-dir /trivy-cache --skip-db-update \
+            --scanners vuln --ignore-unfixed=false --format json \
+            --output trivy-image-${{ matrix.name }}.json \
+            --input "/input@$SUBJECT_DIGEST"
+          trivy image --platform linux/amd64 \
+            --cache-dir /trivy-cache --skip-db-update \
+            --scanners vuln --ignore-unfixed=false --format cyclonedx \
+            --output sbom-image-${{ matrix.name }}.cdx.json \
+            --input "/input@$SUBJECT_DIGEST"
+
+      - name: Evaluate frontend vulnerability policy
+        id: policy
+        continue-on-error: true
+        shell: bash
+        env:
+          COMPONENT: image-${{ matrix.name }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from dataclasses import asdict
+          from datetime import date
+          from pathlib import Path
+
+          from Helper_Scripts.Supply_Chain.exception_policy import (
+              evaluate_trivy_report,
+              load_policy,
+          )
+
+          name = "${{ matrix.name }}"
+          root = Path("evidence")
+          report = json.loads((root / f"trivy-image-{name}.json").read_text())
+          policy = load_policy(
+              Path(".github/supply-chain/vulnerability-exceptions.json"),
+              today=date.today(),
+          )
+          decision = evaluate_trivy_report(
+              report,
+              component=os.environ["COMPONENT"],
+              policy=policy,
+              today=date.today(),
+          )
+          payload = {
+              "component": decision.component,
+              "blocking": [asdict(item) for item in decision.blocking],
+              "excepted": [asdict(item) for item in decision.excepted],
+              "unmatched_exception_ids": list(decision.unmatched_exception_ids),
+          }
+          (root / f"scan-decision-image-{name}.json").write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n"
+          )
+          if decision.blocking or decision.unmatched_exception_ids:
+              raise SystemExit("frontend candidate rejected by vulnerability policy")
+          PY
+
+      - name: Attest exact frontend subject
+        id: attest
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32
+        with:
+          subject-name: local.invalid/tldw/${{ matrix.name }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: false
+
+      - name: Write frontend evidence record
+        shell: bash
+        env:
+          SUBJECT_DIGEST: ${{ steps.build.outputs.digest }}
+          PLATFORM_DIGEST: ${{ steps.identity.outputs.platform_digest }}
+          SUBJECT_MEDIA_TYPE: ${{ steps.identity.outputs.media_type }}
+          PROVENANCE_REF: ${{ steps.attest.outputs.attestation-url }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          name = "${{ matrix.name }}"
+          subject = os.environ["SUBJECT_DIGEST"]
+          record = {
+              "schema_version": 1,
+              "name": name,
+              "ownership": "project-built",
+              "platform": "linux/amd64",
+              "subject_digest": subject,
+              "platform_manifest_digest": os.environ["PLATFORM_DIGEST"],
+              "subject_media_type": os.environ["SUBJECT_MEDIA_TYPE"],
+              "scan_subject_digest": subject,
+              "scan_platform_manifest_digest": os.environ["PLATFORM_DIGEST"],
+              "reference": f"local.invalid/tldw/{name}:${{ github.run_id }}@{subject}",
+              "dockerfile": "${{ matrix.dockerfile }}",
+              "publication": "build-and-scan-only",
+              "sbom_file": f"sbom-image-{name}.cdx.json",
+              "scan_file": f"trivy-image-{name}.json",
+              "decision_file": f"scan-decision-image-{name}.json",
+              "provenance_ref": os.environ["PROVENANCE_REF"],
+          }
+          Path(f"evidence/image-{name}.json").write_text(
+              json.dumps(record, indent=2, sort_keys=True) + "\n"
+          )
+          PY
+
+      - name: Hash frontend evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "${{ steps.attest.outputs.bundle-path }}" \
+            evidence/provenance-image-${{ matrix.name }}.jsonl
+          cp scanner/scanner-metadata.json \
+            evidence/scanner-image-${{ matrix.name }}.json
+          (
+            cd evidence
+            sha256sum \
+              image-${{ matrix.name }}.json \
+              sbom-image-${{ matrix.name }}.cdx.json \
+              trivy-image-${{ matrix.name }}.json \
+              scan-decision-image-${{ matrix.name }}.json \
+              scanner-image-${{ matrix.name }}.json \
+              subject-${{ matrix.name }}.json \
+              provenance-image-${{ matrix.name }}.jsonl \
+              > SHA256SUMS-image-${{ matrix.name }}
+            sha256sum -c SHA256SUMS-image-${{ matrix.name }}
+          )
+
+      - name: Upload frontend evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-image-${{ matrix.name }}
+          path: evidence/
+          if-no-files-found: error
+
+      - name: Require frontend admission
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ steps.policy.outcome }}" = "success"
+
+  scan-reference-images:
+    name: Admit reference ${{ matrix.name }}
+    needs:
+      - validate-release
+      - source-admission
+      - prepare-scanner
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: caddy
+          - name: postgres
+          - name: redis
+          - name: prometheus
+          - name: alertmanager
+          - name: grafana
+    steps:
+      - name: Checkout reference inventory
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ needs.validate-release.outputs.source_commit }}
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
+
+      - name: Resolve and verify reference identity
+        id: identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          name = "${{ matrix.name }}"
+          inventory = json.loads(
+              Path(".github/supply-chain/reference-images.json").read_text()
+          )
+          matches = [item for item in inventory["images"] if item["name"] == name]
+          assert len(matches) == 1, matches
+          item = matches[0]
+          with Path("reference.env").open("w", encoding="utf-8") as output:
+              for key in ("reference", "index_digest", "platform_manifest_digest"):
+                  print(f"{key.upper()}={item[key]}", file=output)
+          PY
+          source reference.env
+          docker buildx imagetools inspect "$REFERENCE" --raw \
+            > evidence/subject-${{ matrix.name }}.json
+          REFERENCE="$REFERENCE" INDEX_DIGEST="$INDEX_DIGEST" \
+            PLATFORM_MANIFEST_DIGEST="$PLATFORM_MANIFEST_DIGEST" python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          raw = Path("evidence/subject-${{ matrix.name }}.json").read_bytes()
+          subject = "sha256:" + hashlib.sha256(raw).hexdigest()
+          assert subject == os.environ["INDEX_DIGEST"]
+          assert os.environ["REFERENCE"].endswith("@" + subject)
+          payload = json.loads(raw)
+          media_type = payload["mediaType"]
+          matches = [
+              item
+              for item in payload["manifests"]
+              if item.get("platform", {}).get("os") == "linux"
+              and item.get("platform", {}).get("architecture") == "amd64"
+          ]
+          assert len(matches) == 1, matches
+          assert matches[0]["digest"] == os.environ["PLATFORM_MANIFEST_DIGEST"]
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              print(f"reference={os.environ['REFERENCE']}", file=output)
+              print(f"subject_digest={subject}", file=output)
+              print(
+                  f"platform_digest={os.environ['PLATFORM_MANIFEST_DIGEST']}",
+                  file=output,
+              )
+              print(f"media_type={media_type}", file=output)
+          PY
+
+      - name: Download pinned scanner database
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: release-trivy-database
+          path: scanner
+
+      - name: Scan exact reference subject
+        shell: bash
+        env:
+          REFERENCE: ${{ steps.identity.outputs.reference }}
+        run: |
+          set -euo pipefail
+          trivy() (
+            scratch_dir="$(mktemp -d "$RUNNER_TEMP/trivy.XXXXXX")"
+            trap 'rm -rf -- "$scratch_dir"' EXIT
+            docker run --rm --platform linux/amd64 \
+              --user "$(id -u):$(id -g)" \
+              --cap-drop ALL \
+              --security-opt no-new-privileges:true \
+              --read-only \
+              --volume "$scratch_dir:/tmp:rw" \
+              --volume "$PWD/evidence:/work:rw" \
+              --volume "$PWD/scanner:/trivy-cache:rw" \
+              --workdir /work \
+              "$TRIVY_IMAGE" "$@"
+          )
+          trivy image --platform linux/amd64 \
+            --cache-dir /trivy-cache --skip-db-update \
+            --scanners vuln --ignore-unfixed=false --format json \
+            --output trivy-image-${{ matrix.name }}.json "$REFERENCE"
+          trivy image --platform linux/amd64 \
+            --cache-dir /trivy-cache --skip-db-update \
+            --scanners vuln --ignore-unfixed=false --format cyclonedx \
+            --output sbom-image-${{ matrix.name }}.cdx.json "$REFERENCE"
+
+      - name: Evaluate reference vulnerability policy
+        id: policy
+        continue-on-error: true
+        shell: bash
+        env:
+          COMPONENT: ${{ matrix.name == 'postgres' && 'reference-postgresql' || format('reference-{0}', matrix.name) }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from dataclasses import asdict
+          from datetime import date
+          from pathlib import Path
+
+          from Helper_Scripts.Supply_Chain.exception_policy import (
+              evaluate_trivy_report,
+              load_policy,
+          )
+
+          name = "${{ matrix.name }}"
+          root = Path("evidence")
+          report = json.loads((root / f"trivy-image-{name}.json").read_text())
+          policy = load_policy(
+              Path(".github/supply-chain/vulnerability-exceptions.json"),
+              today=date.today(),
+          )
+          decision = evaluate_trivy_report(
+              report,
+              component=os.environ["COMPONENT"],
+              policy=policy,
+              today=date.today(),
+          )
+          payload = {
+              "component": decision.component,
+              "blocking": [asdict(item) for item in decision.blocking],
+              "excepted": [asdict(item) for item in decision.excepted],
+              "unmatched_exception_ids": list(decision.unmatched_exception_ids),
+          }
+          (root / f"scan-decision-image-{name}.json").write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n"
+          )
+          if decision.blocking or decision.unmatched_exception_ids:
+              raise SystemExit("reference image rejected by vulnerability policy")
+          PY
+
+      - name: Write reference evidence record
+        shell: bash
+        env:
+          SUBJECT_DIGEST: ${{ steps.identity.outputs.subject_digest }}
+          PLATFORM_DIGEST: ${{ steps.identity.outputs.platform_digest }}
+          SUBJECT_MEDIA_TYPE: ${{ steps.identity.outputs.media_type }}
+          REFERENCE: ${{ steps.identity.outputs.reference }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          name = "${{ matrix.name }}"
+          record = {
+              "schema_version": 1,
+              "name": name,
+              "ownership": "third-party-reference",
+              "platform": "linux/amd64",
+              "subject_digest": os.environ["SUBJECT_DIGEST"],
+              "platform_manifest_digest": os.environ["PLATFORM_DIGEST"],
+              "subject_media_type": os.environ["SUBJECT_MEDIA_TYPE"],
+              "scan_subject_digest": os.environ["SUBJECT_DIGEST"],
+              "scan_platform_manifest_digest": os.environ["PLATFORM_DIGEST"],
+              "reference": os.environ["REFERENCE"],
+              "dockerfile": None,
+              "publication": "build-and-scan-only",
+              "sbom_file": f"sbom-image-{name}.cdx.json",
+              "scan_file": f"trivy-image-{name}.json",
+              "decision_file": f"scan-decision-image-{name}.json",
+              "provenance_ref": None,
+          }
+          Path(f"evidence/image-{name}.json").write_text(
+              json.dumps(record, indent=2, sort_keys=True) + "\n"
+          )
+          PY
+
+      - name: Hash reference evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp scanner/scanner-metadata.json \
+            evidence/scanner-image-${{ matrix.name }}.json
+          (
+            cd evidence
+            sha256sum \
+              image-${{ matrix.name }}.json \
+              sbom-image-${{ matrix.name }}.cdx.json \
+              trivy-image-${{ matrix.name }}.json \
+              scan-decision-image-${{ matrix.name }}.json \
+              scanner-image-${{ matrix.name }}.json \
+              subject-${{ matrix.name }}.json \
+              > SHA256SUMS-image-${{ matrix.name }}
+            sha256sum -c SHA256SUMS-image-${{ matrix.name }}
+          )
+
+      - name: Upload reference evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-image-${{ matrix.name }}
+          path: evidence/
+          if-no-files-found: error
+
+      - name: Require reference admission
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ steps.policy.outcome }}" = "success"
+
+  admit-release-evidence:
+    name: Admit complete release evidence
+    if: ${{ always() && !cancelled() }}
+    needs:
+      - validate-release
+      - source-admission
+      - prepare-scanner
+      - build-backend-candidates
+      - build-frontend-candidates
+      - scan-reference-images
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Require every release producer
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ needs.validate-release.result }}" = "success"
+          test "${{ needs.source-admission.result }}" = "success"
+          test "${{ needs.prepare-scanner.result }}" = "success"
+          test "${{ needs.build-backend-candidates.result }}" = "success"
+          test "${{ needs.build-frontend-candidates.result }}" = "success"
+          test "${{ needs.scan-reference-images.result }}" = "success"
+
+      - name: Checkout evidence verifier
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ needs.validate-release.outputs.source_commit }}
+          persist-credentials: false
+
+      - name: Download image evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: release-image-*
+          path: release-evidence
+          merge-multiple: true
+
+      - name: Download aggregate source evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: source-sbom-aggregate
+          path: release-evidence
+
+      - name: Download source scan evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: source-sbom-scans
+          path: release-evidence
+
+      - name: Download scanner metadata
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: release-trivy-database
+          path: downloaded-scanner
+
+      - name: Assemble and verify release evidence
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_COMMIT: ${{ needs.validate-release.outputs.source_commit }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          checksum_count="$(find release-evidence -maxdepth 1 -type f \
+            -name 'SHA256SUMS-image-*' | wc -l | tr -d ' ')"
+          test "$checksum_count" = "11"
+          (
+            cd release-evidence
+            for checksum in SHA256SUMS-image-*; do
+              sha256sum -c "$checksum"
+            done
+            sha256sum -c SHA256SUMS.source
+            sha256sum -c SHA256SUMS.scan
+          )
+          cp .github/supply-chain/vulnerability-exceptions.json \
+            release-evidence/vulnerability-exceptions.json
+          cp .github/supply-chain/release-evidence.schema.json \
+            release-evidence.schema.json
+          cp downloaded-scanner/scanner-metadata.json \
+            release-evidence/scanner-metadata.json
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          scanner = json.loads(
+              Path("downloaded-scanner/scanner-metadata.json").read_text()
+          )
+          metadata = {
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "source_commit": os.environ["SOURCE_COMMIT"],
+              "release_tag": os.environ["RELEASE_TAG"],
+              "workflow_run": (
+                  f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/"
+                  f"{os.environ['GITHUB_RUN_ID']}"
+              ),
+              "platform": "linux/amd64",
+              "policy_file": "vulnerability-exceptions.json",
+              "scanner": scanner,
+              "decision": "pass",
+          }
+          Path("release-metadata.json").write_text(
+              json.dumps(metadata, indent=2, sort_keys=True) + "\n"
+          )
+          PY
+          python Helper_Scripts/Supply_Chain/release_evidence.py assemble \
+            --evidence-dir release-evidence \
+            --metadata release-metadata.json \
+            --output release-manifest.json
+          python Helper_Scripts/Supply_Chain/release_evidence.py verify \
+            --manifest release-manifest.json \
+            --evidence-dir release-evidence
+
+      - name: Upload admitted release evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: admitted-release-evidence
+          path: |
+            release-evidence/
+            release-manifest.json
+            release-evidence.schema.json
+          if-no-files-found: error
+
+  promote-version:
+    name: Promote ${{ matrix.name }} version
+    needs:
+      - validate-release
+      - admit-release-evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: app
+            image_suffix: ""
+          - name: worker
+            image_suffix: -worker
+          - name: audio-worker
+            image_suffix: -audio-worker
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
+
+      - name: Log in to GHCR
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download admitted evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: admitted-release-evidence
+          path: admitted
+
+      - name: Promote verified version tag
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.validate-release.outputs.release_version }}
+        run: |
+          set -euo pipefail
+          record="admitted/release-evidence/image-${{ matrix.name }}.json"
+          expected_digest="$(jq -r '.subject_digest' "$record")"
+          candidate_ref="$(jq -r '.reference' "$record")"
+          release_version="$RELEASE_VERSION"
+          version_ref="$REGISTRY/$IMAGE_NAME${{ matrix.image_suffix }}:$release_version"
+          if existing_digest="$(docker buildx imagetools inspect "$version_ref" \
+            --format '{{json .Manifest.Digest}}' 2>version-lookup.stderr | tr -d '"')"; then
+            if [[ "$existing_digest" != "$expected_digest" ]]; then
+              echo "Refusing to replace an existing release version with different content" >&2
+              exit 1
+            fi
+          else
+            # Only an exact missing-tag response permits creation. Auth/network
+            # failures must not be mistaken for an unused release version.
+            if [[ "$(cat version-lookup.stderr)" != "ERROR: $version_ref: not found" ]]; then
+              cat version-lookup.stderr >&2
+              exit 1
+            fi
+            docker buildx imagetools create --tag "$version_ref" "$candidate_ref"
+          fi
+          actual_digest="$(docker buildx imagetools inspect "$version_ref" \
+            --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          test "$actual_digest" = "$expected_digest"
+
+  promote-floating:
+    name: Promote ${{ matrix.name }} floating tags
+    needs:
+      - validate-release
+      - admit-release-evidence
+      - promote-version
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: app
+            image_suffix: ""
+          - name: worker
+            image_suffix: -worker
+          - name: audio-worker
+            image_suffix: -audio-worker
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
+
+      - name: Log in to GHCR
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download admitted evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: admitted-release-evidence
+          path: admitted
+
+      - name: Promote verified floating tags
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.validate-release.outputs.release_version }}
+        run: |
+          set -euo pipefail
+          record="admitted/release-evidence/image-${{ matrix.name }}.json"
+          expected_digest="$(jq -r '.subject_digest' "$record")"
+          repository="$REGISTRY/$IMAGE_NAME${{ matrix.image_suffix }}"
+          version_ref="$repository:$RELEASE_VERSION@$expected_digest"
+          major_tag="${RELEASE_VERSION%%.*}"
+          minor_tag="${RELEASE_VERSION%.*}"
+          targets=(
+            "$repository:$major_tag"
+            "$repository:$minor_tag"
+            "$repository:latest"
+          )
+          for target in "${targets[@]}"; do
+            docker buildx imagetools create --tag "$target" "$version_ref"
+            actual_digest="$(docker buildx imagetools inspect "$target" \
+              --format '{{json .Manifest.Digest}}' | tr -d '"')"
+            test "$actual_digest" = "$expected_digest"
+          done
+
+  publish-release:
+    name: Publish verified GitHub release
+    needs:
+      - validate-release
+      - admit-release-evidence
+      - promote-floating
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout evidence verifier
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ needs.validate-release.outputs.source_commit }}
+          persist-credentials: false
+
+      - name: Download admitted evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: admitted-release-evidence
+          path: admitted
+
+      - name: Verify admitted release manifest
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python Helper_Scripts/Supply_Chain/release_evidence.py verify \
+            --manifest admitted/release-manifest.json \
+            --evidence-dir admitted/release-evidence
+
+      - name: Upload and verify release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          asset="release-evidence-$RELEASE_TAG.tar.gz"
+          tar -C admitted -czf "$asset" \
+            release-evidence release-manifest.json release-evidence.schema.json
+          cp admitted/release-manifest.json .
+          cp admitted/release-evidence.schema.json .
+          sha256sum "$asset" release-manifest.json release-evidence.schema.json \
+            > SHA256SUMS.release
+          gh release upload "$RELEASE_TAG" \
+            "$asset" release-manifest.json release-evidence.schema.json \
+            SHA256SUMS.release --clobber
+          assets="$(gh release view "$RELEASE_TAG" --json assets)"
+          for expected in \
+            "$asset" release-manifest.json release-evidence.schema.json \
+            SHA256SUMS.release; do
+            jq -e --arg name "$expected" \
+              '.assets | map(.name) | index($name) != null' <<<"$assets"
+          done
+
+      - name: Publish verified draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          gh release edit "$RELEASE_TAG" --draft=false

@@ -1,21 +1,29 @@
-name: SBOM
+name: Source SBOM Admission
 
 on:
-  push:
-    branches: [ main ]
+  workflow_call:
+  workflow_dispatch:
   pull_request:
   workflow_run:
     workflows: [Frontend License Gate Audit]
     types: [completed]
-  workflow_dispatch:
+  push:
+    branches:
+      - main
 
 permissions:
   contents: read
-  packages: read
 
 concurrency:
-  group: sbom-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
+  group: source-sbom-${{ github.workflow }}-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
   cancel-in-progress: true
+
+env:
+  UV_IMAGE: ghcr.io/astral-sh/uv:0.12.7@sha256:95f2aa1fe59274951cfe9b0cbc7972e879ff1004bc8945d130a32eb0dbd85945
+  CDXGEN_IMAGE: ghcr.io/cdxgen/cdxgen:v13@sha256:0be75639a833b59d1ba29b3c8ac00dfd2e41e7568d56b6c039007caadebebc0d
+  CYCLONEDX_IMAGE: docker.io/cyclonedx/cyclonedx-cli:0.33.1@sha256:252c2e26f468c25fea1e63ecde1bc3198ad6e9dbb57f5ed3236bddcb2281b3a7
+  TRIVY_IMAGE: ghcr.io/aquasecurity/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+  EVIDENCE_DIR: artifacts/source-sbom
 
 jobs:
   admission:
@@ -32,7 +40,94 @@ jobs:
       pull-requests: read
       statuses: read
 
-  build-sbom:
+  generate-python:
+    name: Generate Python source SBOM
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: Generate locked Python CycloneDX
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR"
+          uv_container="$(docker create --platform linux/amd64 "$UV_IMAGE")"
+          trap 'docker rm -f "$uv_container" >/dev/null 2>&1 || true' EXIT
+          docker cp "$uv_container:/uv" "$RUNNER_TEMP/uv"
+          docker rm "$uv_container"
+          trap - EXIT
+          chmod +x "$RUNNER_TEMP/uv"
+          "$RUNNER_TEMP/uv" --version | grep -Eq '^uv 0\.12\.7 '
+          "$RUNNER_TEMP/uv" export \
+            --locked \
+            --no-dev \
+            --no-editable \
+            --format cyclonedx1.5 \
+            --output-file "$EVIDENCE_DIR/sbom-python-root.cdx.json" \
+            >/dev/null
+          python - <<'PY'
+          import json
+          import os
+          import uuid
+          from pathlib import Path
+
+          SENSITIVE_ENV_MARKERS = ("TOKEN", "PASSWORD", "SECRET", "API_KEY")
+
+          path = Path("artifacts/source-sbom/sbom-python-root.cdx.json")
+          payload = json.loads(path.read_text(encoding="utf-8"))
+          assert payload["bomFormat"] == "CycloneDX"
+          assert payload["specVersion"] == "1.5"
+          serial = payload["serialNumber"]
+          assert serial.startswith("urn:uuid:")
+          uuid.UUID(serial.removeprefix("urn:uuid:"))
+          assert payload["metadata"]["component"]["name"] == "tldw-server"
+          assert payload["components"]
+          serialized = json.dumps(payload, sort_keys=True)
+          sensitive_values = {
+              value
+              for key, value in os.environ.items()
+              if len(value) >= 8
+              and any(marker in key.upper() for marker in SENSITIVE_ENV_MARKERS)
+          }
+          assert not any(value in serialized for value in sensitive_values)
+          PY
+          (
+            cd "$EVIDENCE_DIR"
+            sha256sum sbom-python-root.cdx.json > sbom-python-root.cdx.json.sha256
+          )
+
+      - name: Upload Python source SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: source-sbom-python
+          path: |
+            artifacts/source-sbom/sbom-python-root.cdx.json
+            artifacts/source-sbom/sbom-python-root.cdx.json.sha256
+          if-no-files-found: error
+
+  generate-apps-workspace:
+    name: Generate applications workspace source SBOM
     needs: admission
     if: >-
       always() && !cancelled() &&
@@ -46,198 +141,635 @@ jobs:
       )
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      # Populated in "Gather SBOM files" step
-      SBOM_FILES: ""
-      SBOM_COUNT: "0"
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-
-      - name: Generate Python SBOM (CycloneDX)
+      - name: Generate required-only Bun workspace CycloneDX
+        shell: bash
         run: |
           set -euo pipefail
-          repo_root="${GITHUB_WORKSPACE:-$PWD}"
-          # Install CycloneDX Python tooling. Newer releases expose the `cyclonedx-py` CLI,
-          # older ones expose `cyclonedx-bom`. We support both.
-          python -m pip install -q cyclonedx-bom
-
-          gen_from_requirements() {
-            local req="$1"
-            local req_dir req_file out_file
-            local pyproject_args=()
-            req_dir="$(dirname "$req")"
-            req_file="$(basename "$req")"
-            out_file="$repo_root/sbom-python.cdx.json"
-            if [ -f "$repo_root/pyproject.toml" ]; then
-              pyproject_args=(--pyproject "$repo_root/pyproject.toml")
-            fi
-            echo "Generating Python SBOM from ${req}"
-
-            # Try modern CLI first: cyclonedx-py requirements <file>
-            if command -v cyclonedx-py >/dev/null 2>&1; then
-              echo "Using cyclonedx-py"
-              if (cd "$req_dir" && cyclonedx-py requirements "$req_file" "${pyproject_args[@]}" -o "$out_file"); then
-                return 0
-              fi
-              echo "cyclonedx-py positional requirements failed; trying input flag form"
-              if (cd "$req_dir" && cyclonedx-py requirements -i "$req_file" "${pyproject_args[@]}" -o "$out_file"); then
-                return 0
-              fi
-              echo "cyclonedx-py input flag requirements failed; trying stdin form"
-              if (cd "$req_dir" && cyclonedx-py requirements - -o "$out_file" < "$req_file"); then
-                return 0
-              fi
-              echo "cyclonedx-py failed; will try fallbacks"
-            fi
-
-            # Module invocation for modern CLI (avoid depending on CLI binary layout)
-            if python -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('cyclonedx_py') else 1)" >/dev/null 2>&1; then
-              echo "Using python -m cyclonedx_py"
-              if (cd "$req_dir" && python -m cyclonedx_py requirements "$req_file" -o "$out_file"); then
-                return 0
-              fi
-              echo "python -m cyclonedx_py positional requirements failed; trying stdin form"
-              if (cd "$req_dir" && python -m cyclonedx_py requirements - -o "$out_file" < "$req_file"); then
-                return 0
-              fi
-              echo "python -m cyclonedx_py failed; trying legacy CLI"
-            fi
-
-            # Legacy CLI: cyclonedx-bom -r -i <file>
-            if command -v cyclonedx-bom >/dev/null 2>&1; then
-              echo "Using cyclonedx-bom (legacy)"
-              if (cd "$req_dir" && cyclonedx-bom -r -i "$req_file" -o "$out_file"); then
-                return 0
-              fi
-              echo "cyclonedx-bom failed; trying legacy module"
-            fi
-
-            # Legacy module invocation
-            if python -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('cyclonedx_bom') else 1)" >/dev/null 2>&1; then
-              echo "Using python -m cyclonedx_bom (legacy)"
-              if (cd "$req_dir" && python -m cyclonedx_bom -r -i "$req_file" -o "$out_file"); then
-                return 0
-              fi
-            fi
-
-            echo "All Python SBOM generation strategies failed" >&2
-            return 1
+          mkdir -p "$EVIDENCE_DIR"
+          cdxgen() {
+            docker run --rm --platform linux/amd64 \
+              --user "$(id -u):$(id -g)" \
+              --network none \
+              --cap-drop ALL \
+              --security-opt no-new-privileges:true \
+              --read-only \
+              --tmpfs /tmp:rw,nosuid,nodev,size=1g \
+              --env FETCH_LICENSE=false \
+              --env HOME=/tmp \
+              --env SWIFT_SIGNING_KEY= \
+              --volume "$GITHUB_WORKSPACE/apps:/workspace/apps:ro" \
+              --volume "$GITHUB_WORKSPACE/$EVIDENCE_DIR:/out:rw" \
+              --workdir /workspace/apps \
+              "$CDXGEN_IMAGE" "$@"
           }
+          version="$(cdxgen --version)"
+          printf '%s\n' "$version" | grep -Eq 'CycloneDX Generator 13\.0\.1([^0-9]|$)'
+          cdxgen \
+            -t bun \
+            --recurse \
+            --required-only \
+            --fail-on-error \
+            --no-install-deps \
+            --no-babel \
+            --no-cache \
+            --no-progress \
+            --color never \
+            --exclude "**/.next/**" \
+            --exclude "**/node_modules/**" \
+            --spec-version 1.6 \
+            --output /out/sbom-apps-workspace.cdx.json \
+            /workspace/apps
+          python - <<'PY'
+          import json
+          import os
+          import uuid
+          from pathlib import Path
+          from urllib.parse import quote
 
-          gen_requirements_from_pyproject() {
-            local pyproject="$1"
-            local generated_req
-            generated_req="$(mktemp)"
-            python - "$pyproject" "$generated_req" <<'PY'
-          import sys
-          import tomllib
+          SENSITIVE_ENV_MARKERS = ("TOKEN", "PASSWORD", "SECRET", "API_KEY")
+
+          path = Path("artifacts/source-sbom/sbom-apps-workspace.cdx.json")
+          payload = json.loads(path.read_text(encoding="utf-8"))
+          # Children have no locks: identify them from checked-in manifests,
+          # while leaving the canonical Bun dependency inventory untouched.
+          metadata_roots = []
+          for directory in (
+              "apps/tldw-frontend",
+              "apps/extension",
+              "apps/packages/ui",
+          ):
+              manifest = json.loads(Path(directory, "package.json").read_text(encoding="utf-8"))
+              group, _, name = manifest["name"].rpartition("/")
+              version = manifest["version"]
+              assert isinstance(version, str) and version
+              purl = f"pkg:npm/{quote(manifest['name'], safe='/')}@{quote(version, safe='')}"
+              metadata_roots.append({
+                  "type": "application", "group": group, "name": name,
+                  "version": version, "purl": purl, "bom-ref": purl,
+              })
+          metadata_root_ids = {
+              (item.get("group", ""), item["name"]) for item in metadata_roots
+          }
+          assert metadata_root_ids == {
+              ("", "tldw-frontend"),
+              ("", "tldw-assistant"),
+              ("@tldw", "ui"),
+          }
+          payload["metadata"]["component"]["components"] = metadata_roots
+          path.write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          assert payload["bomFormat"] == "CycloneDX"
+          assert payload["specVersion"] == "1.6"
+          serial = payload["serialNumber"]
+          assert serial.startswith("urn:uuid:")
+          uuid.UUID(serial.removeprefix("urn:uuid:"))
+          assert payload["components"]
+          serialized = json.dumps(payload, sort_keys=True)
+          for root in ("tldw-monorepo", "tldw-frontend", "tldw-assistant", "@tldw/ui"):
+              assert root in serialized
+          names = {item.get("name") for item in payload["components"]}
+          assert "@playwright/test" not in names
+          sensitive_values = {
+              value
+              for key, value in os.environ.items()
+              if len(value) >= 8
+              and any(marker in key.upper() for marker in SENSITIVE_ENV_MARKERS)
+          }
+          assert not any(value in serialized for value in sensitive_values)
+          PY
+          (
+            cd "$EVIDENCE_DIR"
+            sha256sum sbom-apps-workspace.cdx.json > sbom-apps-workspace.cdx.json.sha256
+          )
+
+      - name: Upload applications workspace source SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: source-sbom-apps-workspace
+          path: |
+            artifacts/source-sbom/sbom-apps-workspace.cdx.json
+            artifacts/source-sbom/sbom-apps-workspace.cdx.json.sha256
+          if-no-files-found: error
+
+  generate-admin-ui:
+    name: Generate Admin UI source SBOM
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Generate required-only Admin UI CycloneDX
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR"
+          cdxgen() {
+            docker run --rm --platform linux/amd64 \
+              --user "$(id -u):$(id -g)" \
+              --network none \
+              --cap-drop ALL \
+              --security-opt no-new-privileges:true \
+              --read-only \
+              --tmpfs /tmp:rw,nosuid,nodev,size=1g \
+              --env FETCH_LICENSE=false \
+              --env HOME=/tmp \
+              --env SWIFT_SIGNING_KEY= \
+              --volume "$GITHUB_WORKSPACE/admin-ui:/workspace/admin-ui:ro" \
+              --volume "$GITHUB_WORKSPACE/$EVIDENCE_DIR:/out:rw" \
+              --workdir /workspace/admin-ui \
+              "$CDXGEN_IMAGE" "$@"
+          }
+          version="$(cdxgen --version)"
+          printf '%s\n' "$version" | grep -Eq 'CycloneDX Generator 13\.0\.1([^0-9]|$)'
+          cdxgen \
+            -t bun \
+            --required-only \
+            --fail-on-error \
+            --no-install-deps \
+            --no-babel \
+            --no-cache \
+            --no-progress \
+            --color never \
+            --exclude "**/.next/**" \
+            --exclude "**/node_modules/**" \
+            --spec-version 1.6 \
+            --output /out/sbom-admin-ui.cdx.json \
+            /workspace/admin-ui
+          python - <<'PY'
+          import json
+          import os
+          import uuid
           from pathlib import Path
 
-          pyproject = Path(sys.argv[1])
-          generated_req = Path(sys.argv[2])
-          data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-          dependencies = data.get("project", {}).get("dependencies") or []
-          dependencies = [str(dependency).strip() for dependency in dependencies if str(dependency).strip()]
-          if not dependencies:
-              raise SystemExit(f"No [project].dependencies entries found in {pyproject}")
+          SENSITIVE_ENV_MARKERS = ("TOKEN", "PASSWORD", "SECRET", "API_KEY")
 
-          generated_req.write_text("\n".join(dependencies) + "\n", encoding="utf-8")
-          print(f"Wrote {len(dependencies)} requirements from {pyproject} to {generated_req}")
-          PY
-            if gen_from_requirements "$generated_req"; then
-              rm -f "$generated_req"
-              return 0
-            fi
-            rm -f "$generated_req"
-            return 1
+          path = Path("artifacts/source-sbom/sbom-admin-ui.cdx.json")
+          payload = json.loads(path.read_text(encoding="utf-8"))
+          assert payload["bomFormat"] == "CycloneDX"
+          assert payload["specVersion"] == "1.6"
+          serial = payload["serialNumber"]
+          assert serial.startswith("urn:uuid:")
+          uuid.UUID(serial.removeprefix("urn:uuid:"))
+          assert payload["components"]
+          serialized = json.dumps(payload, sort_keys=True)
+          assert "tldw-admin" in serialized
+          names = {item.get("name") for item in payload["components"]}
+          assert "@playwright/test" not in names
+          sensitive_values = {
+              value
+              for key, value in os.environ.items()
+              if len(value) >= 8
+              and any(marker in key.upper() for marker in SENSITIVE_ENV_MARKERS)
           }
+          assert not any(value in serialized for value in sensitive_values)
+          PY
+          (
+            cd "$EVIDENCE_DIR"
+            sha256sum sbom-admin-ui.cdx.json > sbom-admin-ui.cdx.json.sha256
+          )
 
-          if [ -f "$repo_root/tldw_Server_API/requirements.txt" ]; then
-            gen_from_requirements "$repo_root/tldw_Server_API/requirements.txt"
-          elif [ -f "$repo_root/requirements.txt" ]; then
-            gen_from_requirements "$repo_root/requirements.txt"
-          elif [ -f "$repo_root/pyproject.toml" ]; then
-            gen_requirements_from_pyproject "$repo_root/pyproject.toml"
-          else
-            echo "No Python dependency source found; cannot generate SBOM" >&2
-            exit 1
-          fi
-
-      - name: Setup Node
-        uses: actions/setup-node@v6
+      - name: Upload Admin UI source SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          node-version: '20'
+          name: source-sbom-admin-ui
+          path: |
+            artifacts/source-sbom/sbom-admin-ui.cdx.json
+            artifacts/source-sbom/sbom-admin-ui.cdx.json.sha256
+          if-no-files-found: error
 
-      - name: Generate Node SBOM (CycloneDX NPM)
-        run: |
-          if [ -f apps/package-lock.json ]; then \
-            (cd apps && npx -y @cyclonedx/cyclonedx-npm --output-file ../sbom-node.cdx.json); \
-          elif [ -f apps/tldw-frontend/package-lock.json ]; then \
-            (cd apps/tldw-frontend && npx -y @cyclonedx/cyclonedx-npm --output-file ../../sbom-node.cdx.json); \
-          else \
-            echo "No package-lock.json found; skipping Node SBOM"; \
-          fi
+  merge-source:
+    name: Validate and merge source SBOMs
+    needs:
+      - generate-python
+      - generate-apps-workspace
+      - generate-admin-ui
+    # Direct PR runs intentionally skip the transitive admission ancestor.
+    if: >-
+      always() && !cancelled() &&
+      needs.generate-python.result == 'success' &&
+      needs.generate-apps-workspace.result == 'success' &&
+      needs.generate-admin-ui.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
+      - name: Download Python source SBOM
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: source-sbom-python
+          path: evidence
 
-      - name: Authenticate to GHCR
-        if: ${{ github.event_name != 'workflow_run' && hashFiles('sbom-python.cdx.json') != '' && hashFiles('sbom-node.cdx.json') != '' }}
-        run: |
-          echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Download applications workspace source SBOM
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: source-sbom-apps-workspace
+          path: evidence
 
-      - name: Resolve CycloneDX CLI digest
-        if: ${{ hashFiles('sbom-python.cdx.json') != '' && hashFiles('sbom-node.cdx.json') != '' }}
+      - name: Download Admin UI source SBOM
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: source-sbom-admin-ui
+          path: evidence
+
+      - name: Validate and merge exact source roots
+        shell: bash
         run: |
           set -euo pipefail
-          ref="ghcr.io/cyclonedx/cyclonedx-cli:0.30.0"
-          echo "Resolving digest for ${ref}"
-          # Prefer buildx imagetools; fallback to manifest inspect if needed
-          if docker buildx imagetools inspect "$ref" >/dev/null 2>&1; then \
-            digest=$(docker buildx imagetools inspect "$ref" | awk '/^Digest:/ {print $2; exit}'); \
-          else \
-            digest=$(docker manifest inspect "$ref" | jq -r '.manifests[0].digest' || true); \
-          fi
-          if [ -z "${digest:-}" ] || ! echo "$digest" | grep -Eq '^sha256:[0-9a-f]{64}$'; then \
-            echo "Failed to resolve digest for $ref"; \
-            exit 1; \
-          fi
-          echo "CDX_CLI_DIGEST=$digest" >> "$GITHUB_ENV"
-          echo "Resolved digest: $digest"
+          cd evidence
+          sha256sum -c sbom-python-root.cdx.json.sha256
+          sha256sum -c sbom-apps-workspace.cdx.json.sha256
+          sha256sum -c sbom-admin-ui.cdx.json.sha256
+          cyclonedx() {
+            docker run --rm --platform linux/amd64 \
+              --user "$(id -u):$(id -g)" \
+              --network none \
+              --cap-drop ALL \
+              --security-opt no-new-privileges:true \
+              --read-only \
+              --tmpfs /tmp:rw,nosuid,nodev,size=256m \
+              --volume "$PWD:/work:rw" \
+              --workdir /work \
+              "$CYCLONEDX_IMAGE" "$@"
+          }
+          cyclonedx --version | grep -Eq '^0\.33\.1($|\+)'
+          cyclonedx validate --input-file sbom-python-root.cdx.json
+          cyclonedx validate --input-file sbom-apps-workspace.cdx.json
+          cyclonedx validate --input-file sbom-admin-ui.cdx.json
+          cyclonedx merge \
+            --input-files \
+            sbom-python-root.cdx.json \
+            sbom-apps-workspace.cdx.json \
+            sbom-admin-ui.cdx.json \
+            --output-file sbom-source-aggregate.cdx.json
+          cyclonedx validate --input-file sbom-source-aggregate.cdx.json
+          COMPONENT_BOUNDS='{"python-root":[276,461],"apps-workspace":[937,1563],"admin-ui":[253,423]}' \
+            python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
 
-      - name: Merge SBOMs (CycloneDX CLI)
+          SENSITIVE_ENV_MARKERS = ("TOKEN", "PASSWORD", "SECRET", "API_KEY")
+
+          bounds = json.loads(os.environ["COMPONENT_BOUNDS"])
+          files = {
+              "python-root": "sbom-python-root.cdx.json",
+              "apps-workspace": "sbom-apps-workspace.cdx.json",
+              "admin-ui": "sbom-admin-ui.cdx.json",
+          }
+          counts = {}
+          for component, filename in files.items():
+              payload = json.loads(Path(filename).read_text(encoding="utf-8"))
+              count = len(payload["components"])
+              minimum, maximum = bounds[component]
+              assert minimum <= count <= maximum, (component, count, minimum, maximum)
+              counts[component] = count
+
+          aggregate = json.loads(
+              Path("sbom-source-aggregate.cdx.json").read_text(encoding="utf-8")
+          )
+          assert aggregate["bomFormat"] == "CycloneDX"
+          serialized = json.dumps(aggregate, sort_keys=True)
+          for root in ("tldw-server", "tldw-monorepo", "tldw-admin"):
+              assert root in serialized
+          sensitive_values = {
+              value
+              for key, value in os.environ.items()
+              if len(value) >= 8
+              and any(marker in key.upper() for marker in SENSITIVE_ENV_MARKERS)
+          }
+          assert not any(value in serialized for value in sensitive_values)
+          Path("source-component-counts.json").write_text(
+              json.dumps(counts, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          sha256sum \
+            sbom-python-root.cdx.json \
+            sbom-apps-workspace.cdx.json \
+            sbom-admin-ui.cdx.json \
+            sbom-source-aggregate.cdx.json \
+            source-component-counts.json \
+            > SHA256SUMS.source
+
+      - name: Upload validated aggregate source evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: source-sbom-aggregate
+          path: |
+            evidence/sbom-python-root.cdx.json
+            evidence/sbom-apps-workspace.cdx.json
+            evidence/sbom-admin-ui.cdx.json
+            evidence/sbom-source-aggregate.cdx.json
+            evidence/source-component-counts.json
+            evidence/SHA256SUMS.source
+          if-no-files-found: error
+
+  scan-source:
+    name: Scan source SBOMs
+    needs:
+      - merge-source
+    if: >-
+      always() && !cancelled() &&
+      needs.merge-source.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout policy evaluator
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: Download validated source SBOMs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: source-sbom-aggregate
+          path: evidence
+
+      - name: Scan complete source SBOM reports
+        shell: bash
         run: |
           set -euo pipefail
-          if [ -f sbom-python.cdx.json ] && [ -f sbom-node.cdx.json ]; then \
-            docker run --rm -v "$PWD":/work -w /work "ghcr.io/cyclonedx/cyclonedx-cli@${CDX_CLI_DIGEST}" \
-              merge --input-files sbom-python.cdx.json sbom-node.cdx.json --output-file sbom.cdx.json; \
-          elif [ -f sbom-python.cdx.json ]; then \
-            cp sbom-python.cdx.json sbom.cdx.json; \
-          elif [ -f sbom-node.cdx.json ]; then \
-            cp sbom-node.cdx.json sbom.cdx.json; \
-          else \
-            echo "No SBOMs generated"; \
-            exit 1; \
-          fi
+          mkdir -p "$RUNNER_TEMP/trivy-cache"
+          trivy() {
+            docker run --rm --platform linux/amd64 \
+              --user "$(id -u):$(id -g)" \
+              --cap-drop ALL \
+              --security-opt no-new-privileges:true \
+              --read-only \
+              --tmpfs /tmp:rw,nosuid,nodev,size=512m \
+              --volume "$PWD/evidence:/work:rw" \
+              --volume "$RUNNER_TEMP/trivy-cache:/trivy-cache:rw" \
+              --workdir /work \
+              "$TRIVY_IMAGE" "$@"
+          }
+          trivy_scan() {
+            docker run --rm --platform linux/amd64 \
+              --user "$(id -u):$(id -g)" \
+              --network none \
+              --cap-drop ALL \
+              --security-opt no-new-privileges:true \
+              --read-only \
+              --tmpfs /tmp:rw,nosuid,nodev,size=512m \
+              --volume "$PWD/evidence:/work:rw" \
+              --volume "$RUNNER_TEMP/trivy-cache:/trivy-cache:rw" \
+              --workdir /work \
+              "$TRIVY_IMAGE" "$@"
+          }
+          trivy --version | tee evidence/trivy-version.txt
+          grep -Eq '^Version: 0\.74\.0$' evidence/trivy-version.txt
+          trivy image --download-db-only --cache-dir /trivy-cache
+          test -s "$RUNNER_TEMP/trivy-cache/db/metadata.json"
+          cp "$RUNNER_TEMP/trivy-cache/db/metadata.json" evidence/trivy-db-metadata.json
+          python - <<'PY'
+          import json
+          from datetime import datetime, timedelta, timezone
+          from pathlib import Path
 
-      - name: Upload SBOM artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: sbom-cyclonedx
-          path: sbom.cdx.json
+          metadata = json.loads(
+              Path("evidence/trivy-db-metadata.json").read_text(encoding="utf-8")
+          )
+          assert metadata["Version"] == 2
+          updated_at = datetime.fromisoformat(metadata["UpdatedAt"].replace("Z", "+00:00"))
+          age = datetime.now(timezone.utc) - updated_at
+          assert timedelta(minutes=-5) <= age <= timedelta(hours=24), age
+          PY
+          for component in python-root apps-workspace admin-ui; do
+            trivy_scan sbom \
+              --cache-dir /trivy-cache \
+              --skip-db-update \
+              --scanners vuln \
+              --ignore-unfixed=false \
+              --format json \
+              --output "/work/trivy-source-$component.json" \
+              "/work/sbom-$component.cdx.json"
+            test -s "evidence/trivy-source-$component.json"
+          done
 
-      - name: Validate SBOM (CycloneDX CLI - pinned digest)
-        if: ${{ hashFiles('sbom.cdx.json') != '' && hashFiles('sbom-python.cdx.json') != '' && hashFiles('sbom-node.cdx.json') != '' }}
-        continue-on-error: true
+      - name: Apply reviewed vulnerability exception policy
+        shell: bash
         run: |
-          docker run --rm -v "$PWD":/work -w /work "ghcr.io/cyclonedx/cyclonedx-cli@${CDX_CLI_DIGEST}" \
-            validate --input-file sbom.cdx.json
+          set -euo pipefail
+          set +e
+          python - <<'PY'
+          import json
+          from collections import Counter
+          from dataclasses import asdict
+          from datetime import date
+          from pathlib import Path
+
+          from Helper_Scripts.Supply_Chain.exception_policy import (
+              evaluate_trivy_report,
+              load_policy,
+          )
+
+          evidence = Path("evidence")
+          policy = load_policy(
+              Path(".github/supply-chain/vulnerability-exceptions.json"),
+              today=date.today(),
+          )
+          failed_components = []
+          for component in ("python-root", "apps-workspace", "admin-ui"):
+              report_path = evidence / f"trivy-source-{component}.json"
+              report = json.loads(report_path.read_text(encoding="utf-8"))
+              decision = evaluate_trivy_report(
+                  report,
+                  component=f"source-{component}",
+                  policy=policy,
+                  today=date.today(),
+              )
+              severity_counts = Counter()
+              for result in report.get("Results", []):
+                  for finding in result.get("Vulnerabilities") or []:
+                      severity_counts[str(finding.get("Severity", "UNKNOWN"))] += 1
+              payload = {
+                  "component": decision.component,
+                  "raw_severity_counts": dict(sorted(severity_counts.items())),
+                  "blocking": [asdict(item) for item in decision.blocking],
+                  "excepted": [asdict(item) for item in decision.excepted],
+                  "unmatched_exception_ids": list(decision.unmatched_exception_ids),
+              }
+              output = evidence / f"scan-decision-source-{component}.json"
+              output.write_text(
+                  json.dumps(payload, indent=2, sort_keys=True) + "\n",
+                  encoding="utf-8",
+              )
+              if decision.blocking or decision.unmatched_exception_ids:
+                  failed_components.append(f"source-{component}")
+          if failed_components:
+              raise SystemExit(
+                  "vulnerability policy failed: " + ", ".join(failed_components)
+              )
+          PY
+          policy_status=$?
+          set -e
+          (
+            cd evidence
+            sha256sum \
+              trivy-source-python-root.json \
+              trivy-source-apps-workspace.json \
+              trivy-source-admin-ui.json \
+              scan-decision-source-python-root.json \
+              scan-decision-source-apps-workspace.json \
+              scan-decision-source-admin-ui.json \
+              trivy-version.txt \
+              trivy-db-metadata.json \
+              > SHA256SUMS.scan
+          )
+          exit "$policy_status"
+
+      - name: Upload complete source scan evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: source-sbom-scans
+          path: |
+            evidence/trivy-source-python-root.json
+            evidence/trivy-source-apps-workspace.json
+            evidence/trivy-source-admin-ui.json
+            evidence/scan-decision-source-python-root.json
+            evidence/scan-decision-source-apps-workspace.json
+            evidence/scan-decision-source-admin-ui.json
+            evidence/trivy-version.txt
+            evidence/trivy-db-metadata.json
+            evidence/SHA256SUMS.scan
+          if-no-files-found: error
+
+  source-gate:
+    name: Source SBOM result gate
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
+    needs:
+      - admission
+      - generate-python
+      - generate-apps-workspace
+      - generate-admin-ui
+      - merge-source
+      - scan-source
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Require every producer to succeed
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ needs.generate-python.result }}" = "success"
+          test "${{ needs.generate-apps-workspace.result }}" = "success"
+          test "${{ needs.generate-admin-ui.result }}" = "success"
+          test "${{ needs.merge-source.result }}" = "success"
+          test "${{ needs.scan-source.result }}" = "success"
+
+      - name: Download Python evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: source-sbom-python
+          path: gate/python
+
+      - name: Download applications workspace evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: source-sbom-apps-workspace
+          path: gate/apps
+
+      - name: Download Admin UI evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: source-sbom-admin-ui
+          path: gate/admin
+
+      - name: Download aggregate evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: source-sbom-aggregate
+          path: gate/aggregate
+
+      - name: Download scan evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: source-sbom-scans
+          path: gate/scans
+
+      - name: Verify every named file and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd gate/python
+            sha256sum -c sbom-python-root.cdx.json.sha256
+          )
+          (
+            cd gate/apps
+            sha256sum -c sbom-apps-workspace.cdx.json.sha256
+          )
+          (
+            cd gate/admin
+            sha256sum -c sbom-admin-ui.cdx.json.sha256
+          )
+          (
+            cd gate/aggregate
+            sha256sum -c SHA256SUMS.source
+          )
+          (
+            cd gate/scans
+            sha256sum -c SHA256SUMS.scan
+          )
+          cmp gate/python/sbom-python-root.cdx.json \
+            gate/aggregate/sbom-python-root.cdx.json
+          cmp gate/apps/sbom-apps-workspace.cdx.json \
+            gate/aggregate/sbom-apps-workspace.cdx.json
+          cmp gate/admin/sbom-admin-ui.cdx.json \
+            gate/aggregate/sbom-admin-ui.cdx.json
+          for path in \
+            gate/aggregate/sbom-python-root.cdx.json \
+            gate/aggregate/sbom-apps-workspace.cdx.json \
+            gate/aggregate/sbom-admin-ui.cdx.json \
+            gate/aggregate/sbom-source-aggregate.cdx.json \
+            gate/scans/trivy-source-python-root.json \
+            gate/scans/trivy-source-apps-workspace.json \
+            gate/scans/trivy-source-admin-ui.json \
+            gate/scans/scan-decision-source-python-root.json \
+            gate/scans/scan-decision-source-apps-workspace.json \
+            gate/scans/scan-decision-source-admin-ui.json; do
+            test -s "$path"
+          done

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from configparser import ConfigParser
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -10,6 +11,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints import llm_providers
+from tldw_Server_API.app.core import config
+from tldw_Server_API.app.core.config_paths import resolve_config_file, resolve_config_root
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
     ModelDiscoveryResult,
     provider_readiness,
@@ -492,6 +495,52 @@ def test_custom_openai_catalog_uses_env_endpoint_and_model_without_api_section(
     model = _model(models_response.json(), "custom_openai_api", "local-gemma.gguf")
     assert model["is_configured"] is True
     assert model["provider_enabled"] is True
+    assert model["availability"] == "enabled"
+
+
+@pytest.mark.unit
+def test_critical_e2e_fixture_discovers_only_the_env_custom_openai_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The critical fixture keeps legacy local-provider probes out of E2E startup."""
+    fixture_path = (
+        Path(__file__).resolve().parents[3]
+        / "Config_Files"
+        / "e2e-critical-config.txt"
+    )
+    mock_endpoint = "http://127.0.0.1:18091/v1"
+    monkeypatch.setenv("TLDW_CONFIG_FILE", str(fixture_path))
+    monkeypatch.setenv("CUSTOM_OPENAI_API_IP", mock_endpoint)
+    monkeypatch.setenv("CUSTOM_OPENAI_API_KEY", "sk-uat-mock-openai")
+    monkeypatch.setenv("CUSTOM_OPENAI_API_MODEL", "local-uat-chat")
+    monkeypatch.setenv("LLM_PROVIDER_READINESS_PROBE_ENDPOINTS", "1")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWED_PORTS", "*")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "false")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWLIST", "127.0.0.1,localhost")
+    config.clear_config_cache()
+
+    assert fixture_path.is_file()
+    assert resolve_config_file() == fixture_path
+    assert resolve_config_root() == fixture_path.parent
+    parser = config.load_comprehensive_config()
+    discovery_calls: list[tuple[str, str]] = []
+
+    def discover(provider_name: str, endpoint_url: str, *_args, **_kwargs):
+        discovery_calls.append((provider_name, endpoint_url))
+        return ModelDiscoveryResult("ready", ("local-uat-chat",))
+
+    try:
+        with _client_for_config(monkeypatch, parser) as client:
+            monkeypatch.setattr(llm_providers, "discover_models_from_endpoint", discover)
+            response = client.get("/api/v1/llm/models/metadata?type=chat&output_modality=text")
+    finally:
+        config.clear_config_cache()
+
+    assert response.status_code == 200, response.text
+    assert discovery_calls == [("custom_openai_api", mock_endpoint)]
+    model = _model(response.json(), "custom_openai_api", "local-uat-chat")
+    assert model["provider_enabled"] is True
+    assert model["catalog_only"] is False
     assert model["availability"] == "enabled"
 
 

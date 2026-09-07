@@ -284,6 +284,7 @@ describe("WatchlistsPlaygroundPage orientation guidance", () => {
     ;(window as { __TLDW_WATCHLISTS_IA_EXPERIMENT__?: unknown }).__TLDW_WATCHLISTS_IA_EXPERIMENT__ = false
     localStorage.removeItem("watchlists:guided-tour:v1")
     localStorage.removeItem("watchlists:ia-experiment:v1")
+    localStorage.removeItem("watchlists:show-all-views:v1")
     localStorage.removeItem("watchlists:secondary-expanded:v1")
     localStorage.removeItem("watchlists:teach-points:v1")
   })
@@ -293,6 +294,7 @@ describe("WatchlistsPlaygroundPage orientation guidance", () => {
     delete (window as { __TLDW_WATCHLISTS_IA_EXPERIMENT__?: unknown }).__TLDW_WATCHLISTS_IA_EXPERIMENT__
     localStorage.removeItem("watchlists:guided-tour:v1")
     localStorage.removeItem("watchlists:ia-experiment:v1")
+    localStorage.removeItem("watchlists:show-all-views:v1")
     localStorage.removeItem("watchlists:secondary-expanded:v1")
     localStorage.removeItem("watchlists:teach-points:v1")
   })
@@ -308,6 +310,7 @@ describe("WatchlistsPlaygroundPage orientation guidance", () => {
 
   it("closes Help before navigating from orientation guidance and restores trigger focus", async () => {
     mocks.state.activeTab = "runs"
+    localStorage.setItem("watchlists:show-all-views:v1", "true")
     renderPage()
     const helpTrigger = screen.getByRole("button", { name: "Open Watchlists help" })
     helpTrigger.focus()
@@ -330,6 +333,7 @@ describe("WatchlistsPlaygroundPage orientation guidance", () => {
 
   it("uses the canonical alert for tab teach points", () => {
     mocks.state.activeTab = "jobs"
+    localStorage.setItem("watchlists:show-all-views:v1", "true")
     render(<WatchlistsPlaygroundPage />)
     fireEvent.click(screen.getByTestId("watchlists-help-icon"))
 
@@ -379,6 +383,22 @@ describe("WatchlistsPlaygroundPage orientation guidance", () => {
     expect(mocks.state.setActiveTab).toHaveBeenCalledWith("outputs")
   })
 
+  it("normalizes a direct Activity store transition into the expanded Updates surface", async () => {
+    const { rerender } = renderPage()
+
+    mocks.state.setActiveTab("runs")
+    rerender(
+      <MemoryRouter initialEntries={["/watchlists"]}>
+        <WatchlistsPlaygroundPage />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(mocks.state.setActiveTab).toHaveBeenLastCalledWith("items")
+      expect(localStorage.getItem("watchlists:secondary-expanded:v1")).toContain("\"activity\":true")
+    })
+  })
+
   it("keeps command palette reachable through Help without duplicate jump strips", () => {
     renderPage()
 
@@ -391,6 +411,7 @@ describe("WatchlistsPlaygroundPage orientation guidance", () => {
 
   it("keeps orientation guidance in Help instead of the viewport", () => {
     mocks.state.activeTab = "runs"
+    localStorage.setItem("watchlists:show-all-views:v1", "true")
     renderPage()
 
     expect(screen.queryByTestId("watchlists-orientation-alert")).not.toBeInTheDocument()

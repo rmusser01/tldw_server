@@ -7,7 +7,10 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
+
+pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW_PATH = REPO_ROOT / ".github/workflows/license-first-admission.yml"
@@ -67,8 +70,8 @@ DIRECT_TRIGGER_DIGESTS = {
     "notes-remediation-targeted.yml": "090c7ff3c4b668cd6c76fc3b9fc9a1b3be128b21b3b2b236cdfe33dd6f5edb5a",
     "onboarding-docs-gate.yml": "38fc27642d68b7b198e20a9e910ddfa2e1f626b32be5911df63d64c89cb60afa",
     "pre-commit.yml": "d3d381eead20326078cb0268da7340f8217d95336af86c8d9701419c5e67d3be",
-    "pypi-package.yml": "1faf356cfe858d94100ea61d578f0b9d132c73533277c552fd03f1e3ac141823",
-    "sbom.yml": "6ba4774ab2129a605bb160c5ee6f48ebc51544881592ad60ad5268b910fcfbde",
+    "pypi-package.yml": "b8c950acc85a2ebfeaf6c723b8292694a0ba366743c89cd7d3066a255e9abaaa",
+    "sbom.yml": "21235ecb8d09d7a7f94d70ed0f4e2a24094d0d655f76373efa663c58a5dc7852",
     "security-required.yml": "4b65b09e5b40faee5abc68a5e88fd114d8fd4b5b0ae84eb977474336ffdd6653",
     "ui-characters-harness-tests.yml": "8977899d9903b59c454c686e1fda272a7b919f63782d84ec8c24973449f2eee6",
     "ui-dictionaries-tests.yml": "f191b9920abca964265ff7ff4510cc9ac554770d4e4a0b8b172854147c0c0dbe",
@@ -106,7 +109,7 @@ ORIGINAL_JOB_NAMES = {
         "character-chat-rate-limits",
     ),
     "codeql.yml": ("analyze",),
-    "container-build-check.yml": ("build", "container-build-check"),
+    "container-build-check.yml": ("build-and-scan", "container-build-check"),
     "coverage-required.yml": ("changes", "coverage-required"),
     "e2e-required.yml": ("changes", "e2e-required"),
     "e2e-smoke.yml": ("e2e-smoke",),
@@ -118,8 +121,11 @@ ORIGINAL_JOB_NAMES = {
     "notes-remediation-targeted.yml": ("notes-ui-remediation", "notes-backend-remediation"),
     "onboarding-docs-gate.yml": ("onboarding-docs-gate",),
     "pre-commit.yml": ("run-pre-commit",),
-    "pypi-package.yml": ("build-and-check",),
-    "sbom.yml": ("build-sbom",),
+    "pypi-package.yml": ("build",),
+    "sbom.yml": (
+        "generate-python", "generate-apps-workspace", "generate-admin-ui",
+        "merge-source", "scan-source", "source-gate",
+    ),
     "security-required.yml": ("changes", "security-required"),
     "ui-characters-harness-tests.yml": ("characters-harness",),
     "ui-dictionaries-tests.yml": ("dictionaries-vitest",),
@@ -151,7 +157,15 @@ ORIGINAL_DEPENDENCIES = {
         "full-suite-linux-313-summary",
         "changes",
     ),
-    ("container-build-check.yml", "container-build-check"): ("build",),
+    ("container-build-check.yml", "container-build-check"): ("build-and-scan",),
+    ("sbom.yml", "merge-source"): (
+        "generate-python", "generate-apps-workspace", "generate-admin-ui",
+    ),
+    ("sbom.yml", "scan-source"): ("merge-source",),
+    ("sbom.yml", "source-gate"): (
+        "generate-python", "generate-apps-workspace", "generate-admin-ui",
+        "merge-source", "scan-source",
+    ),
     ("coverage-required.yml", "coverage-required"): ("changes",),
     ("e2e-required.yml", "e2e-required"): ("changes",),
     ("frontend-required.yml", "frontend-unit-tests"): ("changes",),
@@ -163,6 +177,7 @@ ORIGINAL_DEPENDENCIES = {
     ("security-required.yml", "security-required"): ("changes",),
 }
 ALWAYS_ROLLUPS = {
+    ("sbom.yml", "source-gate"),
     ("container-build-check.yml", "container-build-check"),
     ("ci.yml", "full-suite-linux-312-summary"),
     ("ci.yml", "full-suite-linux-313-summary"),
@@ -452,6 +467,19 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     assert _normalized(job.get("if")) == _normalized(
                         "always() && !cancelled() && needs.changes.result == 'success'"
                     )
+                elif name == "sbom.yml" and job_name in {"merge-source", "scan-source"}:
+                    expected_condition = {
+                        "merge-source": (
+                            "always() && !cancelled() && "
+                            "needs.generate-python.result == 'success' && "
+                            "needs.generate-apps-workspace.result == 'success' && "
+                            "needs.generate-admin-ui.result == 'success'"
+                        ),
+                        "scan-source": (
+                            "always() && !cancelled() && needs.merge-source.result == 'success'"
+                        ),
+                    }[job_name]
+                    assert _normalized(job.get("if")) == _normalized(expected_condition), (name, job_name)
                 else:
                     assert job.get("if") is None, (name, job_name)
 
@@ -476,7 +504,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 )
                 assert other_inputs == expected_other_inputs, (name, job_name)
 
-    assert checkout_count == 55
+    assert checkout_count == 58
 
 
 def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
@@ -490,6 +518,8 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
             assert "concurrency" not in data
         else:
             prefix = "${{ github.workflow }}" if name == "jobs-suite.yml" else name.removesuffix(".yml")
+            if name == "sbom.yml":
+                prefix = "source-sbom-${{ github.workflow }}"
             assert data["concurrency"]["group"] == f"{prefix}-{concurrency_suffix}", name
             expected_cancel: object = True
             if name == "jobs-suite.yml":
@@ -508,8 +538,8 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
     combined_text = "\n".join(text for _, text in workflows.values())
     assert combined_text.count("github.event.workflow_run.pull_requests[0].number") == 27
     assert combined_text.count("github.event.pull_request.number") == 27
-    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 55
-    assert combined_text.count("github.event.pull_request.head.sha") == 52
+    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 58
+    assert combined_text.count("github.event.pull_request.head.sha") == 55
     assert combined_text.count("github.event.pull_request.base.sha") == 5
     assert combined_text.count("needs.admission.outputs.base_sha") == 11
 

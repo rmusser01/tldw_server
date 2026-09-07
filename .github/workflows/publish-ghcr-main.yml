@@ -1,39 +1,48 @@
-name: publish-ghcr-main
+name: Publish verified GHCR main image
 
 on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 concurrency:
   group: publish-ghcr-main-${{ github.ref }}
   cancel-in-progress: true
-
-permissions:
-  contents: read
-  packages: write
-  attestations: write
-  id-token: write
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  publish-ghcr-main:
-    name: publish-ghcr-main
+  source-admission:
+    name: Admit exact source dependencies
+    uses: ./.github/workflows/sbom.yml
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      statuses: read
+
+  build-scan-promote:
+    name: Build, scan, and promote main
+    needs:
+      - source-admission
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: app
-            dockerfile: Dockerfiles/Dockerfile.prod
-            image_suffix: ""
-            build_args: ""
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    env:
+      TRIVY_IMAGE: ghcr.io/aquasecurity/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
     steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - name: Checkout exact main commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
@@ -45,32 +54,193 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels) for GHCR
-        id: meta
-        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9
-        with:
-          images: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.image_suffix }}
-          tags: |
-            type=raw,value=main
-            type=sha,format=short
-
-      - name: Build and push Docker images
-        id: push
+      - name: Build and push immutable candidate
+        id: build
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf
         with:
           context: .
-          file: ${{ matrix.dockerfile }}
+          file: Dockerfiles/Dockerfile.prod
+          platforms: linux/amd64
           push: true
-          build-args: ${{ matrix.build_args }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          cache-from: type=gha,scope=main-app
+          cache-to: type=gha,mode=max,scope=main-app
 
-      - name: Generate artifact attestation (GHCR)
+      - name: Inspect exact candidate subject
+        id: identity
+        shell: bash
+        env:
+          SUBJECT_DIGEST: ${{ steps.build.outputs.digest }}
+          CANDIDATE_TAG: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:candidate-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence scanner
+          candidate_ref="$CANDIDATE_TAG@$SUBJECT_DIGEST"
+          docker buildx imagetools inspect "$candidate_ref" --raw \
+            > evidence/subject-app.json
+          SUBJECT_DIGEST="$SUBJECT_DIGEST" python - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+
+          raw = Path("evidence/subject-app.json").read_bytes()
+          actual = "sha256:" + hashlib.sha256(raw).hexdigest()
+          assert actual == os.environ["SUBJECT_DIGEST"], (actual, os.environ["SUBJECT_DIGEST"])
+          PY
+          printf 'candidate_ref=%s\n' "$candidate_ref" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare fresh pinned Trivy database
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --platform linux/amd64 \
+            --user "$(id -u):$(id -g)" \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --read-only \
+            --tmpfs /tmp:rw,nosuid,nodev,size=256m \
+            --volume "$PWD/scanner:/trivy-cache:rw" \
+            "$TRIVY_IMAGE" image --download-db-only --cache-dir /trivy-cache
+          python - <<'PY'
+          import json
+          from datetime import datetime, timedelta, timezone
+          from pathlib import Path
+
+          payload = json.loads(Path("scanner/db/metadata.json").read_text())
+          updated = datetime.fromisoformat(payload["UpdatedAt"].replace("Z", "+00:00"))
+          age = datetime.now(timezone.utc) - updated
+          assert timedelta(minutes=-5) <= age <= timedelta(hours=24), age
+          PY
+
+      - name: Scan exact candidate subject
+        shell: bash
+        env:
+          CANDIDATE_REF: ${{ steps.identity.outputs.candidate_ref }}
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          trivy() {
+            docker run --rm --platform linux/amd64 \
+              --user "$(id -u):$(id -g)" \
+              --cap-drop ALL \
+              --security-opt no-new-privileges:true \
+              --read-only \
+              --tmpfs /tmp:rw,nosuid,nodev,size=512m \
+              --env TRIVY_USERNAME \
+              --env TRIVY_PASSWORD \
+              --volume "$PWD/evidence:/work:rw" \
+              --volume "$PWD/scanner:/trivy-cache:rw" \
+              --workdir /work \
+              "$TRIVY_IMAGE" "$@"
+          }
+          trivy image --platform linux/amd64 \
+            --cache-dir /trivy-cache --skip-db-update \
+            --scanners vuln --ignore-unfixed=false --format json \
+            --output trivy-image-app.json "$CANDIDATE_REF"
+          trivy image --platform linux/amd64 \
+            --cache-dir /trivy-cache --skip-db-update \
+            --scanners vuln --ignore-unfixed=false --format cyclonedx \
+            --output sbom-image-app.cdx.json "$CANDIDATE_REF"
+
+      - name: Evaluate candidate vulnerability policy
+        id: policy
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from dataclasses import asdict
+          from datetime import date
+          from pathlib import Path
+
+          from Helper_Scripts.Supply_Chain.exception_policy import (
+              evaluate_trivy_report,
+              load_policy,
+          )
+
+          root = Path("evidence")
+          report = json.loads((root / "trivy-image-app.json").read_text())
+          policy = load_policy(
+              Path(".github/supply-chain/vulnerability-exceptions.json"),
+              today=date.today(),
+          )
+          decision = evaluate_trivy_report(
+              report,
+              component="image-app",
+              policy=policy,
+              today=date.today(),
+          )
+          payload = {
+              "component": decision.component,
+              "blocking": [asdict(item) for item in decision.blocking],
+              "excepted": [asdict(item) for item in decision.excepted],
+              "unmatched_exception_ids": list(decision.unmatched_exception_ids),
+          }
+          (root / "scan-decision-image-app.json").write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n"
+          )
+          if decision.blocking or decision.unmatched_exception_ids:
+              raise SystemExit("main candidate rejected by vulnerability policy")
+          PY
+
+      - name: Attest exact candidate subject
+        id: attest
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32
         with:
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.image_suffix }}
-          subject-digest: ${{ steps.push.outputs.digest }}
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
+
+      - name: Hash candidate evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "${{ steps.attest.outputs.bundle-path }}" \
+            evidence/provenance-image-app.jsonl
+          (
+            cd evidence
+            sha256sum \
+              subject-app.json \
+              trivy-image-app.json \
+              sbom-image-app.cdx.json \
+              scan-decision-image-app.json \
+              provenance-image-app.jsonl \
+              > SHA256SUMS-image-app
+            sha256sum -c SHA256SUMS-image-app
+          )
+
+      - name: Upload candidate evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: main-image-admission-evidence
+          path: evidence/
+          if-no-files-found: error
+
+      - name: Require candidate admission
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ steps.policy.outcome }}" = "success"
+
+      - name: Promote verified main aliases
+        shell: bash
+        env:
+          EXPECTED_DIGEST: ${{ steps.build.outputs.digest }}
+          CANDIDATE_REF: ${{ steps.identity.outputs.candidate_ref }}
+        run: |
+          set -euo pipefail
+          expected_digest="$EXPECTED_DIGEST"
+          short_sha="${GITHUB_SHA:0:12}"
+          for tag in main "sha-$short_sha"; do
+            target="$REGISTRY/$IMAGE_NAME:$tag"
+            docker buildx imagetools create --tag "$target" "$CANDIDATE_REF"
+            actual_digest="$(docker buildx imagetools inspect "$target" \
+              --format '{{json .Manifest.Digest}}' | tr -d '"')"
+            test "$actual_digest" = "$expected_digest"
+          done

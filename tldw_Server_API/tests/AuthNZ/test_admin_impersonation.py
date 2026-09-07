@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 from fastapi import HTTPException
-from jose import jwt
+from tldw_Server_API.app.core.Utils import jwt_compat as jwt
 
 from tldw_Server_API.app.api.v1.endpoints.admin import admin_impersonation
 from tldw_Server_API.app.api.v1.endpoints.admin.admin_impersonation import (

@@ -789,6 +789,7 @@ jobs:
               tldw_Server_API/tests/Usage
           - name: core-utils-tooling
             paths: >-
+              tldw_Server_API/tests/Supply_Chain
               tldw_Server_API/tests/Helper_Scripts
               tldw_Server_API/tests/Context_Integrity
               tldw_Server_API/tests/Utils
@@ -1290,10 +1291,16 @@ jobs:
           - name: media-core-documents
             paths: >-
               tldw_Server_API/tests/Media/test_document*.py
+              tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_pdf_text_normalization.py
           - name: media-core-api
             paths: >-
               tldw_Server_API/tests/Media/test_archive_member_cap.py
+              tldw_Server_API/tests/Media/test_audio_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_email_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_video_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_web_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py
               tldw_Server_API/tests/Media/test_cache_index.py
               tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py
@@ -1449,6 +1456,7 @@ jobs:
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_provider_payload.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
           - name: chat-character-integration-context
             paths: >-
@@ -2278,6 +2286,7 @@ jobs:
               tldw_Server_API/tests/Usage
           - name: core-utils-tooling
             paths: >-
+              tldw_Server_API/tests/Supply_Chain
               tldw_Server_API/tests/Helper_Scripts
               tldw_Server_API/tests/Context_Integrity
               tldw_Server_API/tests/Utils
@@ -2779,10 +2788,16 @@ jobs:
           - name: media-core-documents
             paths: >-
               tldw_Server_API/tests/Media/test_document*.py
+              tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_pdf_text_normalization.py
           - name: media-core-api
             paths: >-
               tldw_Server_API/tests/Media/test_archive_member_cap.py
+              tldw_Server_API/tests/Media/test_audio_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_email_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_video_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_web_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py
               tldw_Server_API/tests/Media/test_cache_index.py
               tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py
@@ -2932,10 +2947,12 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_provider_payload.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
           - name: chat-character-integration-context
             paths: >-
@@ -3636,6 +3653,7 @@ jobs:
               tldw_Server_API/tests/Usage
           - name: core-utils-tooling
             paths: >-
+              tldw_Server_API/tests/Supply_Chain
               tldw_Server_API/tests/Helper_Scripts
               tldw_Server_API/tests/Context_Integrity
               tldw_Server_API/tests/Utils
@@ -4137,10 +4155,16 @@ jobs:
           - name: media-core-documents
             paths: >-
               tldw_Server_API/tests/Media/test_document*.py
+              tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_pdf_text_normalization.py
           - name: media-core-api
             paths: >-
               tldw_Server_API/tests/Media/test_archive_member_cap.py
+              tldw_Server_API/tests/Media/test_audio_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_email_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_video_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_web_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py
               tldw_Server_API/tests/Media/test_cache_index.py
               tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py
@@ -4290,10 +4314,12 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_provider_payload.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
           - name: chat-character-integration-context
             paths: >-
@@ -4917,6 +4943,7 @@ jobs:
               tldw_Server_API/tests/Usage
           - name: core-utils-tooling
             paths: >-
+              tldw_Server_API/tests/Supply_Chain
               tldw_Server_API/tests/Helper_Scripts
               tldw_Server_API/tests/Context_Integrity
               tldw_Server_API/tests/Utils
@@ -5418,10 +5445,16 @@ jobs:
           - name: media-core-documents
             paths: >-
               tldw_Server_API/tests/Media/test_document*.py
+              tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_pdf_text_normalization.py
           - name: media-core-api
             paths: >-
               tldw_Server_API/tests/Media/test_archive_member_cap.py
+              tldw_Server_API/tests/Media/test_audio_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_email_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_video_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_web_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py
               tldw_Server_API/tests/Media/test_cache_index.py
               tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py
@@ -5571,10 +5604,12 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_provider_payload.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
           - name: chat-character-integration-context
             paths: >-
@@ -6204,6 +6239,7 @@ jobs:
               tldw_Server_API/tests/Usage
           - name: core-utils-tooling
             paths: >-
+              tldw_Server_API/tests/Supply_Chain
               tldw_Server_API/tests/Helper_Scripts
               tldw_Server_API/tests/Context_Integrity
               tldw_Server_API/tests/Utils
@@ -6705,10 +6741,16 @@ jobs:
           - name: media-core-documents
             paths: >-
               tldw_Server_API/tests/Media/test_document*.py
+              tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_pdf_text_normalization.py
           - name: media-core-api
             paths: >-
               tldw_Server_API/tests/Media/test_archive_member_cap.py
+              tldw_Server_API/tests/Media/test_audio_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_email_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_video_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_web_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py
               tldw_Server_API/tests/Media/test_cache_index.py
               tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py
@@ -6858,10 +6900,12 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_provider_payload.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
           - name: chat-character-integration-context
             paths: >-

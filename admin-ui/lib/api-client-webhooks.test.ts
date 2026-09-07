@@ -240,6 +240,34 @@ describe('webhook API detection and compatibility isolation', () => {
     vi.clearAllMocks();
   });
 
+  it('accepts the delivery diagnostics extension without exposing it as page state', async () => {
+    const delivery = {
+      canonical_schema_version: 1,
+      schema_ready: true,
+      delivery_schema_ready: true,
+      migration_complete: true,
+      key_ready: true,
+      key_primary_match: true,
+      jobs_database_ready: true,
+      queue_ready: true,
+      job_type_ready: true,
+      jobs_backend: 'sqlite',
+      worker: { component: 'worker', ready: false, reason_code: 'mode_migrate', heartbeat_age_seconds: null },
+      reconciler: { component: 'reconciler', ready: false, reason_code: 'mode_migrate', heartbeat_age_seconds: null },
+      retention: { component: 'retention', ready: false, reason_code: 'mode_migrate', heartbeat_age_seconds: null },
+      backlog: { pending: 0, enqueue_claimed: 0, queued: 0, processing: 0, retry_wait: 0 },
+      oldest_nonterminal_age_seconds: null,
+      acquisition_ready: false,
+      acquisition_reason_code: 'mode_migrate',
+      delivery_capability_ready: false,
+    };
+    httpMocks.requestJson.mockResolvedValue({ ...STATUS, delivery });
+
+    await expect(detectWebhookApi()).resolves.toEqual({
+      kind: 'canonical', status: STATUS, client: canonicalWebhookApi,
+    });
+  });
+
   it.each([
     ['canonical', canonicalWebhookApi],
     ['legacy', legacyWebhookApi],
@@ -259,6 +287,11 @@ describe('webhook API detection and compatibility isolation', () => {
   });
 
   it.each([
+    { ...STATUS, delivery: null },
+    { ...STATUS, delivery: [] },
+    { ...STATUS, delivery: 'unavailable' },
+    { ...STATUS, delivery: {}, delivery_capability_ready: 'yes' },
+    { ...STATUS, delivery: {}, unexpected: true },
     { ...STATUS, route_selection: 'unknown' },
     { ...STATUS, migration: { ...STATUS.migration, legacy_file_restore_permitted: 'yes' } },
     { ...STATUS, migration: { ...STATUS.migration, rollback_window_expires_at: '2026-08-22 12:00:00' } },

@@ -4,7 +4,10 @@ import json
 import re
 from pathlib import Path
 
+import pytest
 import yaml
+
+pytestmark = pytest.mark.unit
 
 
 def _load(path: str) -> dict:
@@ -381,6 +384,75 @@ def test_frontend_e2e_tiers_install_portaudio_before_backend_dependency_setup() 
             "Install FFmpeg and PortAudio (Linux)",
         )
         assert install_step["with"]["install-ffmpeg"] == "false"
+
+
+def test_frontend_critical_direct_uvicorn_uses_e2e_isolation_without_test_mode() -> None:
+    """Prevents a direct E2E server from tripping the pytest-only TEST_MODE guard."""
+    workflow = _load(".github/workflows/frontend-e2e-tiers.yml")
+    critical = workflow["jobs"]["critical"]
+    env = critical["env"]
+    mock_provider = _get_step(critical["steps"], "Start deterministic mock OpenAI provider")
+    backend = _get_step(critical["steps"], "Start backend server")
+    critical_run = _get_step(critical["steps"], "Run critical E2E tests")
+    mock_run = " ".join(mock_provider["run"].split()).replace("\\ ", "")
+
+    assert mock_provider["working-directory"] == "apps/tldw-frontend/e2e/onboarding-uat/mock-openai"
+    assert "python -m mock_openai.server --config configs/local-success.json --host 127.0.0.1 --port 5000" in mock_run
+    assert "PYTHONPATH=\"${GITHUB_WORKSPACE}/mock_openai_server${PYTHONPATH:+:${PYTHONPATH}}\"" in mock_run
+    assert "curl -sf http://127.0.0.1:5000/health" in mock_run
+    assert critical["steps"].index(mock_provider) < critical["steps"].index(backend) < critical["steps"].index(critical_run)
+    assert "python -m uvicorn tldw_Server_API.app.main:app" in backend["run"]
+    assert 'curl -sf -H "X-API-KEY: ${SINGLE_USER_API_KEY}"' in backend["run"]
+    assert backend["run"].count(
+        'curl -sf -H "X-API-KEY: ${SINGLE_USER_API_KEY}" '
+        "http://127.0.0.1:8000/api/v1/health"
+    ) == 2
+    assert "TEST_MODE" not in env
+    assert env["AUTH_MODE"] == "single_user"
+    assert env["SINGLE_USER_API_KEY"] == "test-api-key-for-e2e-testing-12345"
+    assert env["DEFAULT_LLM_PROVIDER"] == "openai"
+    assert env["OPENAI_API_KEY"] == "sk-uat-mock-openai"
+    assert env["OPENAI_API_BASE_URL"] == "http://127.0.0.1:5000/v1"
+    assert env["CUSTOM_OPENAI_API_IP"] == env["OPENAI_API_BASE_URL"]
+    assert env["CUSTOM_OPENAI_API_KEY"] == env["OPENAI_API_KEY"]
+    assert env["CUSTOM_OPENAI_API_MODEL"] == "local-uat-chat"
+    assert env["TLDW_E2E_CHARACTER_CALLABLE_MODEL"] == (
+        "tldw:custom-openai-api:local-uat-chat"
+    )
+    assert env["WORKFLOWS_EGRESS_ALLOWLIST"] == "localhost"
+    assert env["WORKFLOWS_EGRESS_BLOCK_PRIVATE"] == "false"
+    assert "WORKFLOWS_EGRESS_ALLOWED_PORTS" not in env
+    assert env["REDIS_URL"] == "redis://127.0.0.1:6379/0"
+    assert env["TLDW_SERVER_URL"] == "http://127.0.0.1:8000"
+    assert env["TLDW_API_KEY"] == env["SINGLE_USER_API_KEY"]
+    assert env["NEXT_PUBLIC_API_URL"] == env["TLDW_SERVER_URL"]
+
+
+@pytest.mark.parametrize(("url", "allowed"), [
+    ("http://localhost:8080/e2e/feed.xml", True),
+    ("http://localhost:5000/", False),
+    ("http://127.0.0.1:8080/", False),
+    ("http://10.0.0.1:8080/", False),
+    ("http://169.254.169.254/", False),
+    ("http://example.com/", False),
+])
+def test_frontend_fixture_egress_retains_host_and_port_checks(
+    monkeypatch: pytest.MonkeyPatch, url: str, allowed: bool,
+) -> None:
+    """Check actual CI policy without pytest's localhost-port bypass or DNS calls."""
+    import os
+
+    from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
+
+    for key in tuple(os.environ):
+        if "EGRESS" in key or key in {"TESTING", "PYTEST_CURRENT_TEST"}:
+            monkeypatch.delenv(key)
+    env = _load(".github/workflows/frontend-e2e-tiers.yml")["jobs"]["critical"]["env"]
+    for key, value in env.items():
+        if "EGRESS" in key:
+            monkeypatch.setenv(key, str(value))
+    result = evaluate_url_policy(url, resolved_ips_override=["127.0.0.1"])
+    assert result.allowed is allowed
 
 
 def test_frontend_ux_gates_skip_ffmpeg_but_keep_portaudio() -> None:
@@ -778,6 +850,28 @@ def test_linux_311_smoke_is_sharded_for_timeout_control() -> None:
     assert "test-results-linux-3.11-smoke" not in run_script
 
 
+@pytest.mark.parametrize("job_name", [
+    "full-suite-linux-312-shards",
+    "full-suite-linux-313-shards",
+    "full-suite-macos-312-shards",
+    "full-suite-os-313-release-shards",
+    "full-suite-windows-312-shards",
+])
+def test_supply_chain_tests_are_collected_by_each_full_suite(job_name: str) -> None:
+    """Release safety regressions must not silently disappear from any platform."""
+    from Helper_Scripts.ci.check_shard_coverage import find_uncovered
+
+    job = _load(".github/workflows/ci.yml")["jobs"][job_name]
+    patterns = [
+        pattern
+        for shard in job["strategy"]["matrix"]["shard"]
+        for pattern in shard["paths"].split()
+    ]
+    files = [path.as_posix() for path in Path("tldw_Server_API/tests/Supply_Chain").glob("test_*.py")]
+    assert files
+    assert find_uncovered(files, patterns) == []
+
+
 def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
     workflow = _load(".github/workflows/ci.yml")
     matrix_jobs = [
@@ -1037,10 +1131,16 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         }
         assert shard_path_sets["media-core-documents"] == {
             "tldw_Server_API/tests/Media/test_document*.py",
+            "tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py",
+            "tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py",
             "tldw_Server_API/tests/Media/test_pdf_text_normalization.py",
         }
         assert shard_path_sets["media-core-api"] == {
             "tldw_Server_API/tests/Media/test_archive_member_cap.py",
+            "tldw_Server_API/tests/Media/test_audio_summary_service_prompt.py",
+            "tldw_Server_API/tests/Media/test_email_summary_service_prompt.py",
+            "tldw_Server_API/tests/Media/test_video_summary_service_prompt.py",
+            "tldw_Server_API/tests/Media/test_web_summary_service_prompt.py",
             "tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py",
             "tldw_Server_API/tests/Media/test_cache_index.py",
             "tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py",
@@ -1241,6 +1341,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "Logging",
             "Security",
             "Setup",
+            "Supply_Chain",
             "Usage",
             "Utils",
             "helpers",

@@ -2,7 +2,7 @@
 # pyproject.toml for tldw_Server_API
 ###########################
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools==84.0.0", "wheel==0.48.0"]
 build-backend = "setuptools.build_meta"
 
 ###########################
@@ -103,8 +103,7 @@ dependencies = [
   "keyring>=24.0.0",
   "puremagic>=1.15",
   "pycryptodomex>=3.18.0",
-  "PyJWT>=2.8.0",
-  "python-jose[cryptography]>=3.3.0",
+  "PyJWT[crypto]>=2.13.0",
   "yara-python>=4.3.0",
   "pyotp",
 
@@ -146,7 +145,7 @@ dependencies = [
   "openai>=1.0.0",
   "optimum>=1.13.0",
   "torch>=2.11.0",
-  "transformers>=5.5.3",
+  "transformers>=5.10.0",
   "sentence-transformers>=5.4.0",
 
   # Research/Web
@@ -291,7 +290,7 @@ media_wiki = [
 ]
 
 ingestion_email = [
-  "pypff>=0.6.3"
+  "pypff>=0.6.3; python_version >= '3.11'"
 ]
 
 # Web research features
@@ -393,7 +392,7 @@ TTS_sovits = [
 TTS_higgs = [
   "torch>=2.11.0",
   "torchaudio>=2.11.0",
-  "transformers>=5.5.3",
+  "transformers>=5.10.0",
   "accelerate>=0.20.0",
   # Note: higgs-audio must be installed from source:
   # git clone https://github.com/boson-ai/higgs-audio.git && cd higgs-audio && pip install -e .
@@ -402,7 +401,7 @@ TTS_higgs = [
 TTS_vibevoice = [
   "torch>=2.11.0",
   "torchaudio>=2.11.0",
-  "transformers>=5.5.3",
+  "transformers>=5.10.0",
   "accelerate>=0.20.0",
   "flash-attn>=2.5.8; platform_system == \"Linux\" and platform_machine == \"x86_64\"",
   "sageattention>=1.0.0; platform_system == \"Linux\" and platform_machine == \"x86_64\"",
@@ -420,19 +419,19 @@ TTS_echo_tts = [
   "einops>=0.8.0"
 ]
 
-# Optional language preprocessing extras for multilingual text tokenization
+# Registry-backed language preprocessing extras for multilingual text tokenization.
+# russian_text_stresser is source-only and must not enter published metadata.
 TTS_chatterbox_lang = [
   "pykakasi>=2.2.1",          # Japanese romanization -> hiragana
-  "dicta-onnx>=0.2.0",        # Hebrew diacritics
+  "dicta-onnx>=0.2.0; python_version >= '3.11'",  # Hebrew diacritics
   "spacy-pkuseg>=0.0.33",     # Chinese segmentation
-  "russian_text_stresser>=1.0.5",  # Russian stress marks
 ]
 
 # NeuTTS Air (Neuphonic)
 TTS_neutts = [
   "librosa>=0.10.0",
   "phonemizer>=3.2.1",
-  "transformers>=5.5.3",
+  "transformers>=5.10.0",
   "torch>=2.11.0",
   "neucodec>=0.0.4",
   "resemble-perth>=1.0.0",
@@ -480,6 +479,25 @@ all = [
   "tldw-server[dev,evaluation,data-tools,chunking_multilingual,gradio,ingestion_email,media_wiki,web_research,STT_All,TTS_All,TTS_higgs,TTS_vibevoice,backend_onnx,db_postgres,ocr_points_sglang,gpu_monitoring]"
 ]
 
+[dependency-groups]
+release = [
+  "build==1.6.0",
+  "loguru==0.7.3",
+  "twine==7.0.0",
+  "setuptools==84.0.0",
+  "wheel==0.48.0",
+]
+
+[tool.uv]
+# Release tooling is never installed with the optional vLLM runtime. Current
+# vLLM metadata caps setuptools below the exact PEP 517/release-tool baseline.
+conflicts = [
+  [
+    { group = "release" },
+    { extra = "backend-vllm" },
+  ],
+]
+
 ###########################
 # Entry Points
 ###########################
@@ -506,7 +524,7 @@ include = [
   "tldw_profile_core",
   "tldw_profile_core.*",
 ]
-namespaces = false
+namespaces = true
 exclude = [
   "tests*",
   "docs*",
