@@ -655,28 +655,6 @@ class ModerationService:
         self._log_compilation_report(report)
         return compiled
 
-    @classmethod
-    def _effective_rule_categories(cls, rule: PatternRule) -> set[str]:
-        return PolicyEvaluator.effective_rule_categories(rule)
-
-    @staticmethod
-    def _rule_applies_to_phase(
-        rule: PatternRule,
-        phase: str | None,
-    ) -> bool:
-        return PolicyEvaluator.rule_applies_to_phase(rule, phase)
-
-    @classmethod
-    def _rule_matches_enabled_categories(
-        cls,
-        rule: PatternRule,
-        categories_enabled: set[str] | None,
-    ) -> bool:
-        return PolicyEvaluator.rule_matches_enabled_categories(
-            rule,
-            categories_enabled,
-        )
-
     def effective_policy_snapshot(self, user_id: str | None) -> dict[str, object]:
         """Return a serializable dict of the effective policy for inspection."""
         return self.get_effective_policy(user_id).to_dict()
@@ -704,18 +682,6 @@ class ModerationService:
             include_redacted_text=False,
         )
         return result.action != "pass", result.sample
-
-    @staticmethod
-    def _build_sanitized_snippet(
-        text: str,
-        match_span: tuple[int, int],
-        replacement: str,
-    ) -> str | None:
-        return PolicyEvaluator.build_sanitized_snippet_for_replacement(
-            text,
-            match_span,
-            replacement,
-        )
 
     def build_sanitized_snippet(
         self,
@@ -821,51 +787,6 @@ class ModerationService:
         """Decide action and return the match span when available."""
         result = self.evaluate_text(text, policy, phase)
         return result.action, result.redacted_text, result.matched_pattern, result.category, result.match_span
-
-    def _iter_scan_chunks(
-        self,
-        text: str,
-    ) -> Iterator[tuple[int, int]]:
-        yield from self._policy_evaluator.iter_scan_chunks(
-            text,
-            self._evaluation_limits(),
-        )
-
-    def _find_match_span(
-        self,
-        pat: re.Pattern,
-        text: str,
-    ) -> tuple[int, int] | None:
-        return self._policy_evaluator.find_match_span(
-            pat,
-            text,
-            self._evaluation_limits(),
-        )
-
-    def _collect_rule_matches(
-        self,
-        text: str,
-        pat: re.Pattern,
-    ) -> list[re.Match]:
-        """Collect non-overlapping matches across scan chunks for soft-capped redaction."""
-        return self._policy_evaluator.collect_rule_matches(
-            text,
-            pat,
-            self._evaluation_limits(),
-        )
-
-    @staticmethod
-    def _apply_rule_redactions(
-        text: str,
-        matches: list[re.Match],
-        replacement: str,
-    ) -> str:
-        """Apply redactions using precomputed match objects."""
-        return PolicyEvaluator.apply_rule_redactions(
-            text,
-            matches,
-            replacement,
-        )
 
     # --------------- Persistence helpers ---------------
     def list_user_overrides(self) -> dict[str, dict[str, object]]:
