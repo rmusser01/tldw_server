@@ -4,7 +4,7 @@ title: Implement Chunker hierarchical subsystem refactor
 status: In Progress
 assignee: []
 created_date: 2026-09-07 19:26
-updated_date: 2026-09-07 21:26
+updated_date: 2026-09-07 22:03
 labels:
 - chunking
 - refactor
@@ -39,7 +39,7 @@ Implement the approved Chunker hierarchical subsystem design in an isolated work
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 The implementation branch is reconciled with current origin/dev and focused baseline characterization is rerun before production edits
-- [ ] #2 Frozen characterization tests cover option handling, leaf call traces, spans, malformed trees, flatten aliasing, logging, signatures, and import boundaries
+- [x] #2 Frozen characterization tests cover option handling, leaf call traces, spans, malformed trees, flatten aliasing, logging, signatures, and import boundaries
 - [ ] #3 The hierarchical package is extracted with the approved component interfaces and dependency direction while public hierarchy behavior remains compatible
 - [ ] #4 The approved private span and header-title helpers are removed and process_text imports the shared span function directly
 - [ ] #5 Focused and complete Chunking tests, compileall, Ruff, scoped Black, Bandit, and git diff --check pass with results recorded
@@ -77,4 +77,9 @@ This record supersedes the colliding active TASK-13113 after rebasing onto origi
 2026-09-07 Task 2 specification-review correction: acceptance criterion #2 remains unchanged in wording but is now unchecked because it also includes import boundaries, which belong to Task 3 and have not been implemented. Task 2's characterization portion is complete and its implementation-plan checkboxes remain accurately checked; this tracking correction does not start Task 3. Strengthened the Task 2 tests to record sanitize_output truthiness before method resolution, cover sanitize_output removal on the semantic rewrite branch as well as metadata and ordinary branches, and assert identity for template and method_options forwarded by the public flat wrapper.
 Task 2 specification-review verification: focused three-file suite collected 56 cases and completed with 56 passed, 0 failed, and 123 warnings in 1.17s. Ruff reported All checks passed. Black --check reported all 3 files would be left unchanged. Bandit excluding the expected pytest B101 assertion rule completed with 0 findings and 0 errors. git diff --check exited 0 with no output. The change scope contains only tldw_Server_API/tests/Chunking/test_hierarchy_refactor_contracts.py and this official TASK-13215 record; no production file or Task 3 file changed.
 Task 2 quality-review correction: hardened safe_search lookup-failure interception, exact public-wrapper call count, words/sentences/tokens metadata fallback and outer-retry traces, all missing/invalid start/end offset cases, and exact single-record fallback logging. Focused suite: 70 passed, 0 failed, 151 warnings in 1.25s; Ruff and Black --check passed; Bandit excluding B101 reported 0 findings/errors; git diff --check passed. Only the two Task 2 test files and this tracking record changed; no production or Task 3 files changed. AC #2 remains unchecked pending Task 3 import-boundary work.
+2026-09-07 Task 3 shared models and paragraph spans completed test-first. RED evidence: after editing tests only, the two-file hierarchy run exited 2 during collection with two expected ModuleNotFoundError errors because tldw_Server_API.app.core.Chunking.hierarchical did not yet exist. Direct GREEN: 67 passed, 0 failed, 145 warnings in 1.09s. Required five-file GREEN: 151 passed, 1 skipped, 0 failed, 315 warnings in 1.75s; the existing Thai optional-dependency skip was preserved.
+
+Created tldw_Server_API/app/core/Chunking/hierarchical/__init__.py, models.py, and spans.py. Modified tldw_Server_API/app/core/Chunking/chunker.py, process_text/models.py, process_text/dispatch.py, tests/Chunking/test_hierarchical_spans.py, tests/Chunking/test_hierarchy_refactor_contracts.py, tests/Chunking/test_process_text_components.py, and Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md. The span helper's executable AST matches the pre-extraction method after normalizing only relative-import depth and type annotations. Chunker and process_text now use module-level call-time symbols, and ProcessTextContext no longer exposes the private span helper.
+
+Checks: Ruff passed on all 9 touched Python files. Black --check left the 8 scoped new/process/test files unchanged; separate line-range checks left both changed chunker.py lookup lines unchanged, avoiding unrelated formatting churn in the legacy file. compileall passed for hierarchical, chunker.py, and process_text. Bandit scanned 2,652 production LOC with 0 findings and 0 errors. git diff --check passed. Import inspection found no forbidden hierarchical dependency and no import cycle. AC #2 is now fully satisfied: Task 2 covered option handling, leaf call traces, spans, malformed trees, flatten aliasing, logging, and signatures; Task 3 adds the remaining absolute/relative AST import-boundary coverage. AC #3-#5 remain open because later extraction and full-suite tasks are not complete.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

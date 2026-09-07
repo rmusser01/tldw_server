@@ -8,7 +8,8 @@ from typing import Any
 import pytest
 from loguru import logger
 
-from tldw_Server_API.app.core.Chunking import Chunker, regex_safety
+from tldw_Server_API.app.core.Chunking import regex_safety
+from tldw_Server_API.app.core.Chunking.hierarchical.spans import compute_paragraph_spans
 
 
 @pytest.mark.parametrize(
@@ -28,7 +29,7 @@ def test_builtin_paragraph_span_kinds(
     text: str,
     expected: list[tuple[int, int, str]],
 ) -> None:
-    assert Chunker()._compute_paragraph_spans(text) == expected
+    assert compute_paragraph_spans(text) == expected
 
 
 @pytest.mark.parametrize(
@@ -44,20 +45,20 @@ def test_closed_and_unclosed_fence_spans(
     text: str,
     expected: list[tuple[int, int, str]],
 ) -> None:
-    assert Chunker()._compute_paragraph_spans(text) == expected
+    assert compute_paragraph_spans(text) == expected
 
 
 def test_template_boundary_accepts_custom_kind_and_flags() -> None:
     template = {"boundaries": [{"kind": "custom_heading", "pattern": "^custom", "flags": "i"}]}
 
-    assert Chunker()._compute_paragraph_spans("CUSTOM\n", template) == [(0, 7, "custom_heading")]
+    assert compute_paragraph_spans("CUSTOM\n", template) == [(0, 7, "custom_heading")]
 
 
 def test_template_boundary_uses_only_first_twenty_rules() -> None:
     boundaries = [{"kind": f"ignored_{index}", "pattern": "^does-not-match$"} for index in range(20)]
     boundaries.append({"kind": "too_late", "pattern": "^target"})
 
-    assert Chunker()._compute_paragraph_spans("target\n", {"boundaries": boundaries}) == [(0, 7, "paragraph")]
+    assert compute_paragraph_spans("target\n", {"boundaries": boundaries}) == [(0, 7, "paragraph")]
 
 
 @pytest.mark.parametrize(
@@ -69,20 +70,20 @@ def test_template_boundary_uses_only_first_twenty_rules() -> None:
     ],
 )
 def test_invalid_template_rules_are_skipped(rule: object) -> None:
-    assert Chunker()._compute_paragraph_spans("ordinary\n", {"boundaries": [rule]}) == [(0, 9, "paragraph")]
+    assert compute_paragraph_spans("ordinary\n", {"boundaries": [rule]}) == [(0, 9, "paragraph")]
 
 
 def test_invalid_template_flags_fall_back_to_no_flags() -> None:
     template = {"boundaries": [{"kind": "case_sensitive", "pattern": "^CUSTOM", "flags": "invalid"}]}
 
-    assert Chunker()._compute_paragraph_spans("custom\n", template) == [(0, 7, "paragraph")]
+    assert compute_paragraph_spans("custom\n", template) == [(0, 7, "paragraph")]
 
 
 def test_invalid_template_rule_warnings_have_stable_level_and_text() -> None:
     records: list[dict[str, Any]] = []
     sink_id = logger.add(lambda message: records.append(message.record), level="WARNING")
     try:
-        Chunker()._compute_paragraph_spans(
+        compute_paragraph_spans(
             "ordinary\n",
             {
                 "boundaries": [
@@ -112,7 +113,7 @@ def test_safe_search_is_looked_up_at_call_time(
 
     monkeypatch.setattr(regex_safety, "safe_search", replacement)
 
-    spans = Chunker()._compute_paragraph_spans(
+    spans = compute_paragraph_spans(
         "anything\n",
         {"boundaries": [{"kind": "runtime", "pattern": "^never$"}]},
     )
@@ -136,7 +137,7 @@ def test_safe_search_lookup_failure_uses_direct_pattern_search(
     ) -> Any:
         package = (globals or {}).get("__package__")
         chunking_regex_import = name == "tldw_Server_API.app.core.Chunking.regex_safety" or (
-            name == "regex_safety" and level == 1 and package == "tldw_Server_API.app.core.Chunking"
+            name == "regex_safety" and level == 2 and package == "tldw_Server_API.app.core.Chunking.hierarchical"
         )
         if chunking_regex_import and "safe_search" in fromlist:
             guarded_interceptions.append("Chunking.regex_safety.safe_search")
@@ -145,7 +146,7 @@ def test_safe_search_lookup_failure_uses_direct_pattern_search(
 
     monkeypatch.setattr(builtins, "__import__", guarded_import)
 
-    assert Chunker()._compute_paragraph_spans(
+    assert compute_paragraph_spans(
         "CUSTOM\n",
         {"boundaries": [{"kind": "direct", "pattern": "^CUSTOM"}]},
     ) == [(0, 7, "direct")]
@@ -163,7 +164,7 @@ def test_safe_search_invocation_failure_skips_pattern_without_direct_retry(
 
     monkeypatch.setattr(regex_safety, "safe_search", failing_safe_search)
 
-    assert Chunker()._compute_paragraph_spans(
+    assert compute_paragraph_spans(
         "CUSTOM\n",
         {"boundaries": [{"kind": "not_emitted", "pattern": "^CUSTOM"}]},
     ) == [(0, 7, "paragraph")]

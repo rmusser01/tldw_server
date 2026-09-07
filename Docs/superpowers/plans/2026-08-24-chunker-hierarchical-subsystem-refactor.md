@@ -449,7 +449,7 @@ git commit -m "test: characterize hierarchical chunking contracts"
 - Modify `tldw_Server_API/tests/Chunking/test_process_text_components.py`
 - Modify `tldw_Server_API/tests/Chunking/test_hierarchy_refactor_contracts.py`
 
-- [ ] **Step 1: Add failing model and span import tests**
+- [x] **Step 1: Add failing model and span import tests**
 
 Change `test_hierarchical_spans.py` to import:
 
@@ -473,7 +473,7 @@ def test_hierarchy_models_are_passive_and_frozen() -> None:
 
 Run the two files. Expected red: the `hierarchical` package or symbols do not exist.
 
-- [ ] **Step 2: Create passive models and move span logic**
+- [x] **Step 2: Create passive models and move span logic**
 
 Create the package marker with only a module docstring. Implement `models.py` exactly as specified in Required Internal Interfaces.
 
@@ -489,7 +489,7 @@ Move `_compute_paragraph_spans(...)` into `spans.py` as `compute_paragraph_spans
 
 Use package-relative imports from `..error_policy` and `..regex_safety`. Do not import `Chunker`, `chunker`, or `process_text`.
 
-- [ ] **Step 3: Wire both active span callers and remove the private seam**
+- [x] **Step 3: Wire both active span callers and remove the private seam**
 
 In `chunker.py`, import `compute_paragraph_spans`, replace the current tree call with:
 
@@ -515,7 +515,7 @@ monkeypatch.setattr(process_dispatch, "compute_paragraph_spans", fake_spans)
 
 Update the protocol member assertion so the private helper is absent.
 
-- [ ] **Step 4: Add import-boundary tests**
+- [x] **Step 4: Add import-boundary tests**
 
 Use AST inspection, not substring matching. Assert every module under `hierarchical/` rejects imports whose resolved module contains either:
 
@@ -526,7 +526,7 @@ tldw_Server_API.app.core.Chunking.process_text
 
 Also assert `leaves.py` and `grouping.py`, once present, do not import `service`, `builder`, or `flatten`. Keep this assertion data-driven so missing future files are ignored until their tasks create them.
 
-- [ ] **Step 5: Run focused green tests**
+- [x] **Step 5: Run focused green tests**
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -541,7 +541,7 @@ python -m pytest \
 
 Expected: all pass with the same existing skip status.
 
-- [ ] **Step 6: Commit the shared models and spans**
+- [x] **Step 6: Commit the shared models and spans**
 
 ```bash
 git add Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md tldw_Server_API/app/core/Chunking/hierarchical tldw_Server_API/app/core/Chunking/chunker.py tldw_Server_API/app/core/Chunking/process_text/models.py tldw_Server_API/app/core/Chunking/process_text/dispatch.py tldw_Server_API/tests/Chunking/test_hierarchical_spans.py tldw_Server_API/tests/Chunking/test_hierarchy_refactor_contracts.py tldw_Server_API/tests/Chunking/test_process_text_components.py "backlog/tasks/task-13215 - Implement-Chunker-hierarchical-subsystem-refactor.md"
