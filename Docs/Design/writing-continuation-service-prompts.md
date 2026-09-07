@@ -61,12 +61,12 @@ tests, touched-scope lint and Bandit, then independent code review.
 
 ## Verification results
 
-At `d95697c95c`, the seven-file shared UI union passed 322/322 tests. The backend
+At `3f67f71fa4`, the final 13-file shared UI union passed 388/388 tests. The backend
 registry/API pair passed 101/101 tests with 14 existing environment/deprecation
 warnings. Ruff passed for the registry and its two test modules. Bandit reported
 zero findings and zero errors across the 748-line production registry module.
 
-Repository-pinned ESLint passed all eight changed TypeScript/TSX files with zero
+Repository-pinned ESLint passed the changed TypeScript/TSX files with zero
 errors. It retained 37 baseline warnings: 27 unused-variable/React-hook warnings
 in the pre-existing Writing Playground component and 10 `no-explicit-any`
 warnings in `tldw-server.ts`, plus the existing root-invocation Next pages
@@ -76,9 +76,13 @@ matched the 158-diagnostic pre-change baseline, so this patch adds no TypeScript
 diagnostic. All five new English locale values match between the nested WebUI
 tree and flattened extension `.message` entries.
 
-The Task 1 registry/default/fallback/Settings patch and Task 2 scoped-generation
-patch each received independent approval. A controller-owned full base-to-head
-review is still pending, so Stage 3 and TASK-13216 remain in progress. Full
+The registry/default/fallback/Settings and scoped-generation patches each
+received independent approval. Full-branch review found that revision preset
+and queue mutations could autosave provisional continuation text. The final fix
+adds disabled controls and synchronous mutation-admission guards; regression
+tests inspect actual saved payloads after scope invalidation and debounce.
+The fix passed 134 Writing regression tests and scoped re-review with no new
+blocking findings, followed by the 388-test combined run above. Full
 frontend builds and live-browser checks were not run. The broad accidental TTS
 suite's two failures were reproduced at the original base revision with the same
 dependencies and are recorded as baseline; no TTS changes were made.
@@ -87,3 +91,8 @@ Known runner output remains visible rather than suppressed: Ant Design Drawer
 deprecation messages, Node experimental `localStorage` warnings, jsdom
 navigation notices, expected logged abort/timeout errors, pytest configuration
 warnings and the legacy single-user API-key warning.
+
+An adjacent unchanged idle revision Apply path can persist previous manuscript
+text alongside applied status: the editor update precedes revision persistence
+through a callback capturing old editor text. This was documented for separate
+follow-up in TASK-13217, not fixed by changing continuation or session persistence here.
