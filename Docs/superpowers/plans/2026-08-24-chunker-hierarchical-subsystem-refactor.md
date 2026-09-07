@@ -255,7 +255,7 @@ If the spec hash was already current after rebase, include only the Backlog evid
 - Create `tldw_Server_API/tests/Chunking/test_hierarchy_malformed_contracts.py`
 - Create `tldw_Server_API/tests/Chunking/test_hierarchical_spans.py`
 
-- [ ] **Step 1: Add exact public signature and composition tests**
+- [x] **Step 1: Add exact public signature and composition tests**
 
 In `test_hierarchy_refactor_contracts.py`, assert the three current signatures with `inspect.signature` and prove the flat wrapper uses public overrides:
 
@@ -302,7 +302,7 @@ def test_public_flat_method_composes_overridable_public_methods(
     assert calls[1] == ("flatten", sentinel_tree)
 ```
 
-- [ ] **Step 2: Freeze option ordering and shallow-copy behavior**
+- [x] **Step 2: Freeze option ordering and shallow-copy behavior**
 
 Use a same-length sanitizer result and `structure_aware` mode so no leaf strategy obscures option behavior. Assert:
 
@@ -323,7 +323,7 @@ class BrokenBool:
 
 Patch `_resolve_method` to capture its options and return `"structure_aware"`. Patch `_sanitize_input` to return `"SAN"` for input `"raw"`. Assert the emitted structure-aware chunk is `"SAN"` for the default and `BrokenBool`, and `"raw"` for `False`.
 
-- [ ] **Step 3: Freeze leaf call order and multiplicity through the public API**
+- [x] **Step 3: Freeze leaf call order and multiplicity through the public API**
 
 Add deterministic instance fakes for these per-block traces:
 
@@ -341,7 +341,7 @@ structure_aware success                []
 
 For metadata results, use `SimpleNamespace(metadata=SimpleNamespace(start_char=0, end_char=3))`. For the bounded second plain attempt, make the first `chunk_text(...)` call raise `RuntimeError("first plain failure")` and the second return `["raw"]`; assert exactly two plain calls and one output block.
 
-- [ ] **Step 4: Freeze log levels and stable message text**
+- [x] **Step 4: Freeze log levels and stable message text**
 
 Capture Loguru records with a temporary sink and always remove it:
 
@@ -365,7 +365,7 @@ Cover:
 
 Do not assert module, function, path, line, timestamp, or formatted color output.
 
-- [ ] **Step 5: Freeze malformed and aliasing behavior**
+- [x] **Step 5: Freeze malformed and aliasing behavior**
 
 In `test_hierarchy_malformed_contracts.py`, use explicit trees and assert this exact matrix:
 
@@ -401,7 +401,7 @@ Also assert that flattening:
 - shares the same `ancestry_titles` list between sibling rows in one ancestry context;
 - preserves preexisting `chunk_index` and `total_chunks` through `setdefault`.
 
-- [ ] **Step 6: Freeze span and regex-safety behavior**
+- [x] **Step 6: Freeze span and regex-safety behavior**
 
 In `test_hierarchical_spans.py`, initially call `Chunker()._compute_paragraph_spans(...)`. Use explicit expected span tuples for:
 
@@ -415,7 +415,7 @@ In `test_hierarchical_spans.py`, initially call `Chunker()._compute_paragraph_sp
 
 For the lookup-failure case, patch `builtins.__import__` only when the requested module is the Chunking `regex_safety` module and `fromlist` contains `safe_search`; delegate every other import to the original function. This distinguishes lookup failure from invocation failure.
 
-- [ ] **Step 7: Run the characterization tests against the unextracted code**
+- [x] **Step 7: Run the characterization tests against the unextracted code**
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -428,7 +428,7 @@ python -m pytest \
 
 Expected: all tests pass before any hierarchy production logic moves. If an expectation fails, update it to the observed baseline behavior and record the discrepancy in `TASK-13215`; do not change production code to satisfy the draft expectation.
 
-- [ ] **Step 8: Commit the frozen contracts**
+- [x] **Step 8: Commit the frozen contracts**
 
 ```bash
 git add Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md tldw_Server_API/tests/Chunking/test_hierarchy_refactor_contracts.py tldw_Server_API/tests/Chunking/test_hierarchy_malformed_contracts.py tldw_Server_API/tests/Chunking/test_hierarchical_spans.py "backlog/tasks/task-13215 - Implement-Chunker-hierarchical-subsystem-refactor.md"
@@ -1144,7 +1144,7 @@ If any step cannot be satisfied, document the finding and defer it without chang
 ## Completion Checklist
 
 - [x] Reconciled current `origin/dev` baseline recorded before production edits.
-- [ ] Frozen public/malformed/identity/call/log/span characterizations pass.
+- [x] Frozen public/malformed/identity/call/log/span characterizations pass.
 - [ ] Shared models and spans extracted; process protocol/private span seam removed.
 - [ ] Leaves extracted with exact call multiplicity and offset fallback behavior.
 - [ ] Builder/service extracted; private header-title seam removed.
