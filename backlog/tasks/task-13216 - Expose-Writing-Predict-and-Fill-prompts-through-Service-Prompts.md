@@ -4,11 +4,13 @@ title: Expose Writing Predict and Fill prompts through Service Prompts
 status: Done
 assignee: []
 created_date: 2026-09-07 21:52
-updated_date: 2026-09-07 23:09
+updated_date: 2026-09-07 23:16
 labels: []
 dependencies: []
 documentation:
 - Docs/Design/writing-continuation-service-prompts.md
+references:
+- https://github.com/rmusser01/tldw_server/pull/2931
 ---
 
 ## Description
