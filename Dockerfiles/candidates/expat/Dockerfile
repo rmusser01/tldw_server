@@ -1,4 +1,4 @@
-FROM python:3.12.14-slim-trixie@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea
+FROM python:3.12.14-slim-trixie@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea AS system
 
 SHELL ["/bin/bash", "-euxo", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
@@ -23,3 +23,16 @@ COPY --chmod=0755 Dockerfiles/candidates/expat/qualify.sh /opt/expat/qualify.sh
 USER 1000:1000
 RUN /opt/expat/qualify.sh fetch
 ENTRYPOINT ["/opt/expat/qualify.sh"]
+
+FROM system AS python
+USER 0:0
+RUN apt-get install -y --no-install-recommends \
+    libbluetooth-dev libbz2-dev libdb-dev libffi-dev libgdbm-dev \
+    liblzma-dev libncursesw5-dev libreadline-dev libsqlite3-dev libssl-dev \
+    tk-dev uuid-dev xz-utils zlib1g-dev \
+    && dpkg-query -W > /opt/expat/apt/python-build-packages.txt
+COPY Dockerfiles/candidates/expat/python-source.py Dockerfiles/candidates/expat/python-controls.py Dockerfiles/candidates/expat/python-suite.py /opt/expat/
+COPY --chmod=0755 Dockerfiles/candidates/expat/offline-bin/curl /opt/expat/offline-bin/curl
+COPY --chmod=0755 Dockerfiles/candidates/expat/python-qualify.sh /opt/expat/python-qualify.sh
+USER 1000:1000
+ENTRYPOINT ["/opt/expat/python-qualify.sh"]

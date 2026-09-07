@@ -88,6 +88,26 @@ without force flags; keep the container network disabled and all dependency,
 version and installed-parser checks. The earlier path-only diagnosis was
 insufficient. Local installation is a control, not native qualification.
 
+System qualification completed in native run `34157012667` at `82c78368d4`:
+all four phase gates pass, both installed system libraries report `expat_2.8.4`,
+and installation dependency/audit checks pass. Retained evidence:
+`/private/tmp/task-13013-7-expat-native-qualified`. This does not qualify Python.
+
+Python harness implementation checkpoint: a separate native workflow job now
+uses a dedicated Docker build target and offline prepare/build/install phases.
+It runs the same five XML suites on the baseline and rebuilt interpreter,
+requiring every baseline test identity and no new skips; all skip reasons are
+retained. The authenticated CPython archive names the DOM suite `test_minidom`,
+not `test_xml_dom_minidom`. Source, ELF, installed-binary hashes, actual runtime
+mapping, legitimate controls and bounded parser scaling are separate gates.
+Native Python execution remains required before claiming qualification.
+
+The independent Python-harness review found that bare Bash `!` commands did
+not enforce negative ELF checks under `set -e`. Reproduced all three cases
+(missing dependency, dynamic system Expat linkage, unprefixed dynamic symbols)
+and replaced them with explicit fatal branches. The same unresolved-dependency
+pattern in the system harness was corrected. No gate was relaxed.
+
 Fresh CPython boundary investigation (before its implementation) confirmed:
 
 - Rebuild `_elementtree` with pyexpat: its capsule check includes Expat's micro
@@ -113,7 +133,7 @@ Fresh CPython boundary investigation (before its implementation) confirmed:
 - [ ] Authenticate Debian `.dsc` and upstream/Python detached signatures in an isolated keyring, retaining full signer fingerprints and status output; never present GitHub's tag verification as local archive-signature verification. Abort before source execution if authentication fails.
 - [ ] Extract the authenticated Debian package with `dpkg-source -x`, set an explicit local candidate package revision, and build against Trixie only. Run `DEB_BUILD_OPTIONS=parallel=4 dpkg-buildpackage -us -uc -b` followed by `make -C build check`; no `nocheck`/`stage1` profiles. Test both ordinary and wide-character builds. Retain `test_default_attr_index_after_dtd_copy` registration and execution evidence.
 - [ ] Call the metadata updater, execute the exact CPython refresh script under Bash 4+, then use CPython's source SBOM generator. Verify Expat's new version/hash/CPE and per-file checksums; retain all unrelated package identities. Compare `expat_config.h` and `pyexpatns.h` to the authenticated baseline.
-- [ ] Rebuild Python 3.12.14 using the official image's configure/build flags (`--enable-loadable-sqlite-extensions --enable-optimizations --enable-option-checking=fatal --enable-shared --with-lto --with-ensurepip`) and Trixie dependencies. Run `./python -m test -v test_pyexpat test_xml_etree test_xml_etree_c test_xml_dom_minidom test_sax`; preserve failure statuses and unexpected skips.
+- [ ] Rebuild Python 3.12.14 using the official image's configure/build flags (`--enable-loadable-sqlite-extensions --enable-optimizations --enable-option-checking=fatal --enable-shared --with-lto --with-ensurepip`) and Trixie dependencies. Run `./python -m test -v test_pyexpat test_xml_etree test_xml_etree_c test_minidom test_sax`; preserve failure statuses and unexpected skips.
 - [ ] Run bounded synthetic whole-buffer and incremental XML controls: namespaces, default attributes, first-declaration precedence, CDATA/NMTOKENS normalization and external-subparser lifecycle. Attribute-scaling input is generated locally, CPU/time bounded, and compared to the baseline; no downloaded exploit.
 - [ ] Run upstream ASan/UBSan tests in a separate unprivileged, networkless build container. Compare system SONAME and all public exports (including unversioned ones), and check for missing dynamic dependencies.
 - [ ] Install only into a fresh candidate container. Assert both `ctypes` system `XML_ExpatVersion()` and `pyexpat.EXPAT_VERSION` report 2.8.4; record pyexpat path, hash, configure args and DT_NEEDED. Run `apt-get check` and require empty `dpkg --audit`.
