@@ -135,7 +135,8 @@ prepare() {
         --public-keys /work/downloads --evidence "$EVIDENCE/authentication"
     cp "$EVIDENCE/authentication/authentication.json" "$EVIDENCE/"
     cp -a /opt/expat/apt "$EVIDENCE/"
-    cp /work/downloads/expat_2.8.4.orig.tar.gz /work/
+    # dpkg-source copies its authenticated input archives into /work itself.
+    # Pre-copying a read-only download makes that destination unwritable.
     run_step source-extract dpkg-source -x /work/downloads/expat_2.8.4-1.dsc "$SOURCE"
     run_step upstream-extract tar -xzf /work/downloads/expat-2.8.4.tar.gz -C /work --one-top-level=upstream
     {
