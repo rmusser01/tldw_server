@@ -183,6 +183,74 @@ def _write_package_control(package_dir: Path, package: str, version: str, source
     )
 
 
+def _install_command_environment(tmp_path: Path, package_dir: Path) -> dict[str, str]:
+    fake_bin = tmp_path / "install-tools"
+    fake_bin.mkdir()
+    _write_executable(fake_bin / "id", "#!/bin/sh\nprintf '0\\n'\n")
+    _write_executable(
+        fake_bin / "uname",
+        """#!/bin/sh
+case "$1" in
+  -s) printf 'Linux\\n' ;;
+  -m) printf 'x86_64\\n' ;;
+  *) exit 2 ;;
+esac
+""",
+    )
+    _write_executable(
+        fake_bin / "apt-get",
+        """#!/bin/sh
+printf 'apt-get %s\\n' "$*" >> "$FAKE_INSTALL_LOG"
+if test "$1" = install; then
+  exit "${FAKE_APT_INSTALL_STATUS:-0}"
+fi
+test "$1" = check
+""",
+    )
+    _write_executable(
+        fake_bin / "dpkg",
+        """#!/bin/sh
+printf 'dpkg %s\\n' "$*" >> "$FAKE_INSTALL_LOG"
+test "$1" = --audit
+""",
+    )
+    _write_executable(
+        fake_bin / "dpkg-deb",
+        """#!/bin/sh
+set -eu
+test "$1" = -f
+sed -n "s/^$3: //p" "$2"
+""",
+    )
+    _write_executable(
+        fake_bin / "dpkg-query",
+        """#!/bin/sh
+set -eu
+printf 'dpkg-query %s\\n' "$*" >> "$FAKE_INSTALL_LOG"
+if test "$#" = 2; then
+  printf 'installed candidate package inventory\\n'
+  exit 0
+fi
+package="$3"
+sed -n 's/^Version: //p' "$FAKE_PACKAGE_DIR/$package.deb"
+""",
+    )
+    for command in ("mount", "findmnt", "lsblk", "blkid", "uuidgen", "lastlog2"):
+        _write_executable(
+            fake_bin / command,
+            f'#!/bin/sh\nprintf \'{command} %s\\n\' "$*" >> "$FAKE_INSTALL_LOG"\n',
+        )
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{fake_bin}:{env['PATH']}",
+            "FAKE_INSTALL_LOG": str(tmp_path / "install-commands.log"),
+            "FAKE_PACKAGE_DIR": str(package_dir),
+        }
+    )
+    return env
+
+
 def test_workflow_rejects_non_native_host_before_docker_build(tmp_path: Path) -> None:
     result = _run_workflow_shell(tmp_path, FAKE_UNAME_M="arm64")
 
@@ -368,6 +436,61 @@ def test_source_family_versions_reject_wrong_source(tmp_path: Path) -> None:
 
     assert result.returncode != 0
     assert "does not identify the candidate util-linux source" in result.stderr
+
+
+def test_install_uses_apt_for_every_local_package_with_offline_safety_guards(tmp_path: Path) -> None:
+    package_dir = tmp_path / "packages"
+    package_dir.mkdir()
+    evidence = tmp_path / "evidence"
+    for package in ("libblkid1", "mount", "util-linux"):
+        _write_package_control(
+            package_dir,
+            package,
+            "2.41.5-0+deb13u1+tldw1",
+            "util-linux (2.41.5-0+deb13u1+tldw1)",
+        )
+    env = _install_command_environment(tmp_path, package_dir)
+
+    result = _run_qualify("install-packages", str(package_dir), str(evidence), env=env)
+
+    assert result.returncode == 0, result.stderr
+    commands = (tmp_path / "install-commands.log").read_text().splitlines()
+    assert commands[0] == (
+        "apt-get install -y --no-download --no-remove --no-install-recommends "
+        + " ".join(str(package_dir / f"{package}.deb") for package in ("libblkid1", "mount", "util-linux"))
+    )
+    assert "apt-get check" in commands
+    assert "dpkg --audit" in commands
+    assert all(
+        any(line.startswith(f"{command} ") for line in commands)
+        for command in ("mount", "findmnt", "lsblk", "blkid", "uuidgen", "lastlog2")
+    )
+    assert (evidence / "status/install.exit").read_text() == "0\n"
+
+
+def test_apt_install_failure_stops_audit_smokes_and_success_marker(tmp_path: Path) -> None:
+    package_dir = tmp_path / "packages"
+    package_dir.mkdir()
+    evidence = tmp_path / "evidence"
+    _write_package_control(
+        package_dir,
+        "util-linux",
+        "2.41.5-0+deb13u1+tldw1",
+        "util-linux (2.41.5-0+deb13u1+tldw1)",
+    )
+    env = _install_command_environment(tmp_path, package_dir)
+    env["FAKE_APT_INSTALL_STATUS"] = "42"
+
+    result = _run_qualify("install-packages", str(package_dir), str(evidence), env=env)
+
+    assert result.returncode == 42
+    commands = (tmp_path / "install-commands.log").read_text().splitlines()
+    assert len(commands) == 1
+    assert commands[0].startswith("apt-get install -y --no-download --no-remove --no-install-recommends ")
+    assert (evidence / "install").is_dir()
+    assert not (evidence / "install/dpkg-audit.txt").exists()
+    assert not (evidence / "install/smoke-tests.log").exists()
+    assert not (evidence / "status/install.exit").exists()
 
 
 def _write_abi_fixture(root: Path, *, missing_symbol: bool = False, changed_soname: bool = False) -> None:
