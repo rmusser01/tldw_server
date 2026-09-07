@@ -48,3 +48,11 @@ model without synthesizing, and speech streams close inside their credential
 scope even when an error arrives after partial audio. Connected Live settings
 remain fixed for that connection; saving defaults requires reconnecting, and
 Live displays the active model override to make this visible.
+
+Kitten's cached runtime selection does not replace its configured default model
+or revision. Registry initialization makes the lazy adapter routable; public
+audio health separately reports an unprepared, failed, or loaded runtime. This
+keeps selected-model preparation independent of default-model assets without
+claiming that an untested runtime is healthy. Browser playback callbacks also
+belong to one utterance generation, invalidated before cancellation, so an old
+utterance cannot end replacement playback within the same voice turn.

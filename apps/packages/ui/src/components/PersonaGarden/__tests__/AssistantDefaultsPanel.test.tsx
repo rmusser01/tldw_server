@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   fetchWithAuth: vi.fn(),
-  fetchTtsProviders: vi.fn(),
+  bgRequestClient: vi.fn(),
   resolvedDefaults: {
     sttLanguage: "en-US",
     sttModel: "parakeet",
@@ -23,8 +23,8 @@ const mocks = vi.hoisted(() => ({
   }
 }))
 
-vi.mock("@/services/tldw/audio-providers", () => ({
-  fetchTtsProviders: mocks.fetchTtsProviders
+vi.mock("@/services/background-proxy", () => ({
+  bgRequestClient: mocks.bgRequestClient
 }))
 
 vi.mock("react-i18next", () => ({
@@ -213,7 +213,7 @@ describe("AssistantDefaultsPanel", () => {
       configurable: true,
       value: vi.fn()
     })
-    mocks.fetchTtsProviders.mockResolvedValue({ providers: { piper: {} } })
+    mocks.bgRequestClient.mockReset().mockResolvedValue({ providers: { piper: {} } })
     mocks.fetchWithAuth.mockReset()
     mocks.resolvedDefaults = {
       sttLanguage: "en-US",
@@ -279,6 +279,64 @@ describe("AssistantDefaultsPanel", () => {
       })
     })
   })
+
+  it.each(["empty catalog", "request error"])(
+    "recovers from %s without resetting saved or edited defaults",
+    async (failure) => {
+      if (failure === "request error") {
+        mocks.bgRequestClient.mockRejectedValueOnce(new Error("network unavailable"))
+      } else {
+        mocks.bgRequestClient.mockResolvedValueOnce(null)
+      }
+      let resolveRetry!: (value: unknown) => void
+      mocks.bgRequestClient.mockImplementationOnce(() => new Promise((resolve) => {
+        resolveRetry = resolve
+      }))
+      mocks.fetchWithAuth.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          id: "persona-1",
+          voice_defaults: { tts_provider: "custom-server", tts_model: "saved-model" }
+        })
+      })
+      render(<AssistantDefaultsPanel selectedPersonaId="persona-1" selectedPersonaName="Helper" isActive />)
+      await waitFor(() => expect(screen.getByLabelText("TTS provider")).toHaveValue("custom-server"))
+      expect(screen.getByRole("alert")).toHaveTextContent(/unable to load.*speech providers/i)
+      fireEvent.change(screen.getByLabelText("TTS model"), { target: { value: "edited-model" } })
+      fireEvent.click(screen.getByRole("button", { name: /retry/i }))
+      expect(screen.getByRole("button", { name: /retry/i })).toBeDisabled()
+      await act(async () => resolveRetry({ providers: { piper: {} } }))
+      expect(screen.getByRole("option", { name: "piper" })).toBeInTheDocument()
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+      expect(screen.getByLabelText("TTS provider")).toHaveValue("custom-server")
+      expect(screen.getByLabelText("TTS model")).toHaveValue("edited-model")
+    }
+  )
+
+  it.each(["success", "failure"])(
+    "ignores a stale catalog %s after the panel reopens",
+    async (completion) => {
+      let resolveOld!: (value: unknown) => void
+      let rejectOld!: (error: Error) => void
+      mocks.bgRequestClient.mockImplementationOnce(() => new Promise((resolve, reject) => {
+        resolveOld = resolve
+        rejectOld = reject
+      }))
+      const { rerender } = render(
+        <AssistantDefaultsPanel selectedPersonaId="persona-1" selectedPersonaName="Helper" isActive />
+      )
+      rerender(<AssistantDefaultsPanel selectedPersonaId="persona-1" selectedPersonaName="Helper" isActive={false} />)
+      rerender(<AssistantDefaultsPanel selectedPersonaId="persona-1" selectedPersonaName="Helper" isActive />)
+      await waitFor(() => expect(screen.getByRole("option", { name: "piper" })).toBeInTheDocument())
+      await act(async () => {
+        if (completion === "success") resolveOld({ providers: { "stale-provider": {} } })
+        else rejectOld(new Error("old request failed"))
+      })
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+      expect(screen.queryByRole("option", { name: "stale-provider" })).not.toBeInTheDocument()
+      expect(screen.getByRole("option", { name: "piper" })).toBeInTheDocument()
+    }
+  )
 
   it("offers server providers and preserves a saved provider absent from the catalog", async () => {
     mocks.fetchWithAuth.mockResolvedValueOnce({

@@ -115,3 +115,53 @@ Logs: `/private/tmp/persona-review-fixes-final-python.log`,
 `/private/tmp/persona-review-fixes-bandit.json`, and
 `/private/tmp/persona-review-fixes-docs-build.log`. The restarted isolated backend's
 source manifest is under `/private/tmp/persona-review-fixes-20260907/`.
+
+## PR #2928 review and CI corrections
+
+Qodo identified six issues that were corrected:
+
+- Kitten model loads no longer overwrite the cached adapter's configured default
+  model or revision. Later model-less requests retain the configured selection.
+- Public audio health distinguishes an unprepared or failed Kitten runtime from
+  one loaded successfully, while lazy registry initialization remains routable
+  for selected-model preparation without requiring default-model assets.
+- Native browser callbacks carry an utterance generation invalidated before
+  cancellation. Synchronous and delayed callbacks from replaced utterances
+  cannot cancel their replacement or finish its turn.
+- Provider catalog failures are visible and retryable, preserving the selected
+  provider and unsaved form edits. Stale requests cannot replace newer results.
+- The normalization helper and endpoint wrappers have docstrings.
+- Kitten preparation fixtures and tests have explicit parameter and return types.
+
+The seventh finding claimed missing test category markers. The existing
+module-level `pytestmark = pytest.mark.unit` already classifies the file;
+`pytest --collect-only -m unit` selected all 14 current preparation cases.
+
+CI also exposed two integration omissions. The documentation checker treated
+external Chatbook URL paths as local server paths; URL exclusion now preserves
+missing-local-path detection, including repeated local slash separators. The
+OpenAPI fingerprint was regenerated and frontend types rebuilt. Removing only
+the optional `PersonaVoiceDefaults.tts_model` property from the export reproduces
+the old fingerprint, confirming that it is the sole schema change.
+
+Failure-first evidence reproduced six backend and five frontend review failures,
+five initial documentation failures, and one additional repeated-slash local-path
+failure found during independent review. That review found no remaining
+actionable issues after the correction. These tests use controlled runtime/model
+I/O and native speech API doubles; physical microphone/playback UAT was not
+repeated for this review pass.
+
+Final combined checks passed 284 Persona/TTS Python tests and 124 frontend tests.
+Additional scoped adapter/health coverage passed 66 tests (overlapping the
+combined run), and the corrected documentation checker passed all six cases.
+The wider Docs run passed 210 cases; its strict-build subprocess encountered the
+existing local macOS semaphore limit. A separate strict MkDocs build passed using
+the date plugin's supported serial mode. CI remains the check of the unmodified
+parallel build path. Bandit found zero issues across all five production Python
+files changed in this review pass. Scoped lint checks found no new diagnostics.
+OpenAPI drift validation and frontend schema generation passed.
+
+Logs: `/private/tmp/pr2928-final-python.log`,
+`/private/tmp/pr2928-final-frontend.log`, `/private/tmp/pr2928-final-bandit.json`,
+`/private/tmp/pr2928-docs-edge-green.log`, `/private/tmp/pr2928-docs-build.log`,
+and `/private/tmp/pr2928-openapi-check.log`.

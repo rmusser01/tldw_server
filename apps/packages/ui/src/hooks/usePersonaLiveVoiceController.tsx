@@ -279,6 +279,7 @@ export const usePersonaLiveVoiceController = ({
   const pendingBinaryFinishRef = React.useRef(false)
   const pendingResumeRef = React.useRef(false)
   const browserUtteranceActiveRef = React.useRef(false)
+  const browserUtteranceGenerationRef = React.useRef(0)
   const listeningRecoveryTimeoutRef = React.useRef<number | null>(null)
   const thinkingRecoveryTimeoutRef = React.useRef<number | null>(null)
   const wakeDetectorRef = React.useRef<WakeDetector | null>(null)
@@ -469,6 +470,9 @@ export const usePersonaLiveVoiceController = ({
   } = useStreamingAudioPlayer()
 
   const stopBrowserSpeech = React.useCallback(() => {
+    // Native cancel may synchronously invoke callbacks from the old utterance.
+    browserUtteranceGenerationRef.current += 1
+    browserUtteranceActiveRef.current = false
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       try {
         window.speechSynthesis.cancel()
@@ -476,7 +480,6 @@ export const usePersonaLiveVoiceController = ({
         console.error("stopBrowserSpeech: speechSynthesis.cancel failed", error)
       }
     }
-    browserUtteranceActiveRef.current = false
   }, [])
 
   const stopCurrentPlayback = React.useCallback(() => {
@@ -1178,6 +1181,7 @@ export const usePersonaLiveVoiceController = ({
       }
 
       stopBrowserSpeech()
+      const utteranceGeneration = browserUtteranceGenerationRef.current
       const owner = voiceOwnerRef.current
       let completed = false
       const handleSpeechFailure = (
@@ -1185,6 +1189,7 @@ export const usePersonaLiveVoiceController = ({
       ) => {
         if (
           completed ||
+          utteranceGeneration !== browserUtteranceGenerationRef.current ||
           !owner ||
           voiceOwnerRef.current !== owner ||
           !voiceEnabledRef.current
@@ -1223,6 +1228,7 @@ export const usePersonaLiveVoiceController = ({
         utterance.onend = () => {
           if (
             completed ||
+            utteranceGeneration !== browserUtteranceGenerationRef.current ||
             !owner ||
             voiceOwnerRef.current !== owner ||
             !voiceEnabledRef.current

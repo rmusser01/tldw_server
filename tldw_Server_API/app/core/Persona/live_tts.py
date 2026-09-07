@@ -12,6 +12,7 @@ from tldw_Server_API.app.core.TTS.adapter_registry import TTSAdapterRegistry
 
 
 def _text(value: Any) -> str:
+    """Trim string settings; treat missing or non-string values as unset."""
     return value.strip() if isinstance(value, str) else ""
 
 

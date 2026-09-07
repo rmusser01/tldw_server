@@ -183,16 +183,34 @@ export const AssistantDefaultsPanel: React.FC<AssistantDefaultsPanelProps> = ({
   const lastHandledHandoffTokenRef = React.useRef<number | null>(null)
 
   const [serverProviders, setServerProviders] = React.useState<string[]>([])
+  const [providerCatalogFailed, setProviderCatalogFailed] = React.useState(false)
+  const [providerCatalogLoading, setProviderCatalogLoading] = React.useState(false)
+  const [providerCatalogRetry, setProviderCatalogRetry] = React.useState(0)
   React.useEffect(() => {
     if (!isActive || !selectedPersonaId) return
     let cancelled = false
-    void fetchTtsProviders().then((catalog) => {
-      if (!cancelled) setServerProviders(Object.keys(catalog?.providers || {}))
-    })
+    setProviderCatalogLoading(true)
+    const loadProviders = async () => {
+      try {
+        const catalog = await fetchTtsProviders({ throwOnError: true })
+        if (cancelled) return
+        if (!catalog) {
+          setProviderCatalogFailed(true)
+          return
+        }
+        setServerProviders(Object.keys(catalog.providers))
+        setProviderCatalogFailed(false)
+      } catch {
+        if (!cancelled) setProviderCatalogFailed(true)
+      } finally {
+        if (!cancelled) setProviderCatalogLoading(false)
+      }
+    }
+    void loadProviders()
     return () => {
       cancelled = true
     }
-  }, [isActive, selectedPersonaId])
+  }, [isActive, selectedPersonaId, providerCatalogRetry])
   const ttsProviderOptions = Array.from(
     new Set([
       "browser",
@@ -412,6 +430,24 @@ export const AssistantDefaultsPanel: React.FC<AssistantDefaultsPanelProps> = ({
       {success ? (
         <div className="mt-3 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
           {success}
+        </div>
+      ) : null}
+
+      {isActive && selectedPersonaId && providerCatalogFailed ? (
+        <div role="alert" className="mt-3 rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-text">
+          <p>
+            {t("sidepanel:personaGarden.profile.assistantDefaults.providerCatalogError", {
+              defaultValue: "Unable to load server speech providers. Available options may be incomplete. Your selected provider is preserved."
+            })}
+          </p>
+          <button
+            type="button"
+            className="mt-2 rounded-md border border-border px-3 py-1 disabled:opacity-60"
+            disabled={providerCatalogLoading}
+            onClick={() => setProviderCatalogRetry((current) => current + 1)}
+          >
+            {t("common:retry", { defaultValue: "Retry" })}
+          </button>
         </div>
       ) : null}
 

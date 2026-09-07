@@ -69,6 +69,7 @@ class KittenTTSAdapter(TTSAdapter):
         self._audio_normalizer = AudioNormalizer()
         self._runtime: Optional[KittenRuntime] = None
         self._runtime_assets = None
+        self._runtime_load_failed = False
         self._runtime_lock = asyncio.Lock()
         self._voice_infos = self._build_voice_infos()
 
@@ -93,6 +94,7 @@ class KittenTTSAdapter(TTSAdapter):
         async with self._runtime_lock:
             active_repo = getattr(self._runtime_assets, "repo_id", None)
             if self._runtime is not None and active_repo == model_name:
+                self._runtime_load_failed = False
                 return self._runtime
 
             try:
@@ -107,6 +109,7 @@ class KittenTTSAdapter(TTSAdapter):
                 )
                 runtime = await asyncio.to_thread(KittenRuntime, assets)
             except Exception as exc:
+                self._runtime_load_failed = True
                 raise TTSProviderInitializationError(
                     "Failed to initialize KittenTTS runtime",
                     provider=self.PROVIDER_KEY,
@@ -115,13 +118,23 @@ class KittenTTSAdapter(TTSAdapter):
 
             self._runtime_assets = assets
             self._runtime = runtime
-            self.model_name = assets.repo_id
-            self.model_revision = assets.revision
+            self._runtime_load_failed = False
             self.sample_rate = int(getattr(runtime, "sample_rate", self.sample_rate))
             return runtime
 
+    def get_runtime_readiness(self) -> dict[str, Any]:
+        """Report loaded-model readiness without loading assets or exposing errors."""
+        reason = (
+            "model_load_failed" if self._runtime_load_failed else "model_not_loaded" if self._runtime is None else None
+        )
+        return {
+            "runtime_ready": reason is None,
+            "runtime_reason": reason,
+            "runtime_model": getattr(self._runtime_assets, "repo_id", None),
+        }
+
     async def initialize(self) -> bool:
-        """Initialize capabilities; load the request-selected model on demand."""
+        """Make the lazy adapter routable; runtime readiness requires a model load."""
         logger.info("KittenTTS adapter initialized; model assets load on demand")
         return True
 
@@ -238,3 +251,4 @@ class KittenTTSAdapter(TTSAdapter):
     async def _cleanup_resources(self) -> None:
         self._runtime = None
         self._runtime_assets = None
+        self._runtime_load_failed = False

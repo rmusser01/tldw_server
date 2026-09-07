@@ -312,6 +312,76 @@ describe("usePersonaLiveVoiceController", () => {
     }
   )
 
+  it.each([
+    ["synchronous", "onerror"],
+    ["synchronous", "onend"],
+    ["delayed", "onerror"],
+    ["delayed", "onend"]
+  ] as const)(
+    "ignores %s stale %s callbacks when replacing speech in the same turn",
+    async (timing, callback) => {
+      let activeUtterance: SpeechSynthesisUtterance | undefined
+      let staleCallback: (() => void) | undefined
+      const synthesis = {
+        cancel: vi.fn(() => {
+          const cancelled = activeUtterance
+          activeUtterance = undefined
+          if (!cancelled) return
+          const notify = () => cancelled[callback]?.call(cancelled, {} as SpeechSynthesisErrorEvent)
+          if (timing === "synchronous") notify()
+          else staleCallback = notify
+        }),
+        getVoices: vi.fn(() => []),
+        speak: vi.fn((utterance: SpeechSynthesisUtterance) => {
+          activeUtterance = utterance
+        })
+      }
+      vi.stubGlobal("speechSynthesis", synthesis)
+      vi.stubGlobal("SpeechSynthesisUtterance", class {})
+      try {
+        const ws = { readyState: WebSocket.OPEN, send: vi.fn() } as unknown as WebSocket
+        const { result } = renderHook(() =>
+          usePersonaLiveVoiceController({
+            ws,
+            connected: true,
+            sessionId: "sess-voice",
+            personaId: "persona-1",
+            resolvedDefaults: {
+              ...resolvedDefaults,
+              ttsProvider: "browser",
+              ttsVoice: "",
+              autoResume: false
+            },
+            canUseServerStt: true
+          })
+        )
+        await act(async () => { await startPreparedVoice(result, ws) })
+        act(() => deliverPayload(result, ws, { event: "assistant_delta", text_delta: "First" }))
+        expect(result.current.state).toBe("speaking")
+        act(() => deliverPayload(result, ws, { event: "assistant_delta", text_delta: "Replacement" }))
+        const replacement = activeUtterance
+        act(() => staleCallback?.())
+        expect(result.current.textOnlyDueToTtsFailure).toBe(false)
+        expect(result.current.warning).toBeNull()
+        expect(result.current.state).toBe("speaking")
+        expect(activeUtterance).toBe(replacement)
+        expect(replacement).toBeDefined()
+        act(() => replacement?.onend?.({} as SpeechSynthesisEvent))
+        expect(result.current.state).toBe("idle")
+        await act(async () => { await startPreparedVoice(result, ws) })
+        act(() => deliverPayload(result, ws, { event: "assistant_delta", text_delta: "Stop this speech" }))
+        expect(result.current.state).toBe("speaking")
+        act(() => result.current.stopListening())
+        expect(activeUtterance).toBeUndefined()
+        act(() => staleCallback?.())
+        expect(result.current.state).toBe("idle")
+        expect(result.current.textOnlyDueToTtsFailure).toBe(false)
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    }
+  )
+
   it.each(["missing-voice", "voice-uri", "Known voice", ""])(
     "honors browser voice selection %s without hidden substitution",
     async (ttsVoice) => {

@@ -3533,6 +3533,7 @@ async def _send_persona_live_audio_pair(
 
 
 async def _prepare_persona_live_tts(voice_runtime: dict[str, Any], *, user_id: int | None = None, auth_request: Any = None) -> None:
+    """Validate the authenticated Live speech selection before recording begins."""
     from tldw_Server_API.app.core.Persona.live_tts import prepare_persona_speech
 
     await prepare_persona_speech(voice_runtime, user_id=user_id, auth_request=auth_request)
@@ -3542,6 +3543,7 @@ async def _generate_persona_live_tts_audio(
     text: str, *, provider: str | None, voice: str | None, model: str | None = None,
     response_format: str = "mp3", user_id: int | None = None, auth_request: Any = None,
 ) -> tuple[bytes, str]:
+    """Return Live audio bytes and format through the selected authenticated provider."""
     from tldw_Server_API.app.core.Persona.live_tts import generate_persona_speech
 
     return await generate_persona_speech(

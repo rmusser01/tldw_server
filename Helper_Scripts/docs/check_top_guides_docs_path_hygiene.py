@@ -30,9 +30,11 @@ GUIDE_FILES = (
     REPO_ROOT / "Docs/STT-TTS/QWEN3_TTS_SETUP.md",
 )
 DOC_PATH_PATTERN = re.compile(r"Docs/[A-Za-z0-9_./-]+")
+EXTERNAL_URL_PATTERN = re.compile(r"(?<![A-Za-z0-9_./-])(?:https?:)?//[^\s<>\[\]()`\"']+", re.IGNORECASE)
 
 
 def _collect_missing_paths() -> list[tuple[str, str]]:
+    """Collect missing local paths without treating remote URL paths as local."""
     missing: list[tuple[str, str]] = []
     markdown_files: list[Path] = []
     for root in GUIDE_DIRS:
@@ -44,7 +46,7 @@ def _collect_missing_paths() -> list[tuple[str, str]]:
             markdown_files.append(guide_file)
 
     for guide_file in markdown_files:
-        text = guide_file.read_text(encoding="utf-8")
+        text = EXTERNAL_URL_PATTERN.sub("", guide_file.read_text(encoding="utf-8"))
         for match in DOC_PATH_PATTERN.finditer(text):
             raw_path = match.group(0).rstrip("`),.:;")
             candidate = REPO_ROOT / raw_path
@@ -54,6 +56,7 @@ def _collect_missing_paths() -> list[tuple[str, str]]:
 
 
 def main() -> int:
+    """Report broken repository paths and return a failing exit code if any exist."""
     missing = _collect_missing_paths()
     if missing:
         print("Top guide docs reference missing paths:")
