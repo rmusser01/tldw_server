@@ -35,7 +35,7 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 
 **Tests:** Contract immutability/minimization, package import boundary, HTTP/batch/WS scope projection, API-key/JWT/cookie/single-user paths, spoofed metadata isolation, integrity tamper rejection.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 1.1: Define the minimized completion contracts
 
