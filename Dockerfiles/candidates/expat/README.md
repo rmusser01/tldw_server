@@ -219,3 +219,26 @@ Local evidence directories are
 `/private/tmp/task-13013-7-expat-python-qualified-34160485207`.
 These are separate qualified builds, not a combined application image, a clean
 vulnerability scan, or approval for production adoption.
+
+## Combined-input handoff
+
+The workflow's `combined-inputs` job depends on successful system and Python jobs
+and downloads only their artifacts from the same workflow run. It checks the
+checkout SHA against both producer identities, reruns the seven existing phase
+gates, checks container statuses, rejects links/special files, and verifies the
+complete expected artifact inventories and SHA-256 hashes. A damaged or mixed
+input fails before a success inventory is emitted.
+
+`combined-inputs.py` is read-only: it does not extract or install packages, build
+an image, or execute files from the downloaded artifacts. It runs only the
+checked-out repository's evidence gates. Its `qualified-inputs-only` report is
+an integrity handoff, not a cryptographic attestation, combined-image test, scan
+decision, or production approval. The caller must preserve input immutability
+between this verification and any future installation.
+
+The next integration step still needs a native FFmpeg/application candidate with
+an explicitly recorded new image identity. The saved FFmpeg snapshot archive is
+not itself an application image. Preserve the locked Python 3.12 application
+environment, prove that its interpreter resolves to the qualified runtime, and
+retain the old FFmpeg package inventory as baseline evidence without reinstalling
+its superseded Expat 2.8.3 requirement.
