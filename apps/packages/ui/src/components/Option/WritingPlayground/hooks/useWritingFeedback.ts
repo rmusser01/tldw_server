@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useStorage } from "@plasmohq/storage/hook"
 import { bgRequest } from "@/services/background-proxy"
 import type { AllowedPath } from "@/services/tldw/openapi-guard"
+import { loadServicePromptSnapshot, subscribeToServicePromptConfigChanges, type ServicePromptSnapshot } from "@/services/service-prompts"
+import { requestScopeFields } from "@/services/tldw/domains/service-prompts"
+import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 
 export type Mood = "tense" | "romantic" | "melancholic" | "action" | "calm" | "mysterious" | "humorous" | null
 
@@ -12,14 +15,12 @@ export type EchoReaction = {
   timestamp: number
 }
 
-const MOOD_PROMPT = `Classify the emotional mood of this text. Respond with ONLY one word from: tense, romantic, melancholic, action, calm, mysterious, humorous\n\nText: `
-
 const ECHO_PERSONAS = [
-  { name: "Alex", emoji: "🧐", role: "The Analyst", prompt: "You are Alex, a sharp literary analyst. In 1-2 sentences, comment on the structure, foreshadowing, or plot mechanics. Be concise." },
-  { name: "Sam", emoji: "😍", role: "The Shipper", prompt: "You are Sam, obsessed with character relationships. In 1-2 sentences, react to relationship dynamics or romantic tension." },
-  { name: "Max", emoji: "🤨", role: "The Skeptic", prompt: "You are Max, a skeptical reader. In 1-2 sentences, point out anything contrived or unmotivated." },
-  { name: "Riley", emoji: "🎉", role: "The Hype", prompt: "You are Riley, an enthusiastic reader. In 1-2 sentences, react with energy to the most exciting element." },
-  { name: "Jordan", emoji: "📚", role: "The Lore Keeper", prompt: "You are Jordan, a world-building enthusiast. In 1-2 sentences, comment on world-building details or consistency." },
+  { name: "Alex", emoji: "🧐", part: "alex_system" },
+  { name: "Sam", emoji: "😍", part: "sam_system" },
+  { name: "Max", emoji: "🤨", part: "max_system" },
+  { name: "Riley", emoji: "🎉", part: "riley_system" },
+  { name: "Jordan", emoji: "📚", part: "jordan_system" },
 ] as const
 
 const VALID_MOODS = new Set(["tense", "romantic", "melancholic", "action", "calm", "mysterious", "humorous"])
@@ -57,29 +58,27 @@ type ChatCompletionResponse = {
 async function callChat(
   systemPrompt: string,
   userText: string,
-  model?: string,
-  abortSignal?: AbortSignal,
+  model: string | undefined,
+  snapshot: ServicePromptSnapshot,
 ): Promise<string> {
-  try {
-    const data = await bgRequest<ChatCompletionResponse>({
-      path: "/api/v1/chat/completions" as AllowedPath,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      abortSignal,
-      body: {
-        model: model || "default",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userText },
-        ],
-        temperature: 0.7,
-        max_tokens: 100,
-      },
-    })
-    return data.choices?.[0]?.message?.content?.trim() || ""
-  } catch {
-    return ""
-  }
+  const scopeFields = requestScopeFields(snapshot.requestScope)
+  const data = await bgRequest<ChatCompletionResponse>({
+    path: "/api/v1/chat/completions" as AllowedPath,
+    method: "POST",
+    ...scopeFields,
+    headers: { "Content-Type": "application/json", ...scopeFields.headers },
+    abortSignal: snapshot.scopeSignal,
+    body: {
+      model: model || "default",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userText },
+      ],
+      temperature: 0.7,
+      max_tokens: 100,
+    },
+  })
+  return data.choices?.[0]?.message?.content?.trim() || ""
 }
 
 export function useWritingFeedback({
@@ -103,6 +102,91 @@ export function useWritingFeedback({
   const echoIndexRef = useRef(0)
   const prevTextLenRef = useRef(editorText.length)
   const moodTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const controllersRef = useRef<Partial<Record<"mood" | "echo", AbortController>>>({})
+  const leasesRef = useRef<Partial<Record<"mood" | "echo", { scopeKey: string; release: () => void }>>>({})
+  const textLengthRef = useRef(editorText.length)
+  textLengthRef.current = editorText.length
+
+  const cancelFeedback = useCallback(() => {
+    moodReqIdRef.current += 1
+    for (const controller of Object.values(controllersRef.current)) controller.abort()
+    controllersRef.current = {}
+    for (const lease of Object.values(leasesRef.current)) lease.release()
+    leasesRef.current = {}
+    if (moodTimerRef.current) clearTimeout(moodTimerRef.current)
+    echoInFlightRef.current = false
+  }, [])
+
+  const resetFeedback = useCallback(() => {
+    cancelFeedback()
+    setCurrentMood(null)
+    setEchoReactions([])
+    setMoodAnalyzing(false)
+    setEchoAnalyzing(false)
+    setCharsSinceLastEcho(0)
+    prevTextLenRef.current = textLengthRef.current
+    lastMoodCallRef.current = 0
+    lastEchoCallRef.current = 0
+    echoIndexRef.current = 0
+  }, [cancelFeedback])
+
+  useEffect(() => {
+    // Pending first lookups have no retained scope lease yet.
+    const clearUnboundState = () => {
+      if (!leasesRef.current.mood && !leasesRef.current.echo) resetFeedback()
+    }
+    const unsubscribe = subscribeToServicePromptConfigChanges(clearUnboundState)
+    window.addEventListener("tldw:auth-credentials-changed", resetFeedback)
+    return () => {
+      unsubscribe()
+      window.removeEventListener("tldw:auth-credentials-changed", resetFeedback)
+      cancelFeedback()
+    }
+  }, [resetFeedback, cancelFeedback])
+
+  const requestFeedback = useCallback(async (
+    kind: "mood" | "echo", text: string, model: string | undefined,
+    controller: AbortController, personaPart?: typeof ECHO_PERSONAS[number]["part"],
+  ): Promise<string> => {
+    try {
+      const id = kind === "mood" ? "writing.feedback.mood" : "writing.feedback.echo"
+      const snapshot = await loadServicePromptSnapshot([id], { signal: controller.signal })
+      if (controller.signal.aborted || snapshot.scopeSignal.aborted || snapshot.scopeInvalidatedSignal.aborted) {
+        snapshot.release()
+        return ""
+      }
+      if (Object.values(leasesRef.current).some((lease) => lease.scopeKey !== snapshot.scopeKey)) {
+        snapshot.release()
+        resetFeedback()
+        return ""
+      }
+      leasesRef.current[kind]?.release()
+      snapshot.scopeInvalidatedSignal.addEventListener("abort", resetFeedback, { once: true })
+      leasesRef.current[kind] = {
+        scopeKey: snapshot.scopeKey,
+        release: () => {
+          snapshot.scopeInvalidatedSignal.removeEventListener("abort", resetFeedback)
+          snapshot.release()
+        },
+      }
+      const parts = snapshot.definitions[id]?.parts
+      const system = parts?.[kind === "mood" ? "system_semantics" : (personaPart ?? "")]
+      const classification = parts?.classification_semantics
+      if (!system?.trim() || (kind === "mood" && !classification?.trim())) return ""
+      const result = await callChat(
+        kind === "mood" ? `${system} Respond with exactly one word.` : system,
+        kind === "mood"
+          ? `${classification} Respond with ONLY one word from: tense, romantic, melancholic, action, calm, mysterious, humorous\n\nText: ${text.slice(-500)}`
+          : `React to this passage:\n\n${text.slice(-1000)}`,
+        model, snapshot,
+      )
+      return controller.signal.aborted || snapshot.scopeSignal.aborted || snapshot.scopeInvalidatedSignal.aborted ? "" : result
+    } catch (error) {
+      if (!controller.signal.aborted && isRequestConfigScopeChangedError(error)) resetFeedback()
+      // Feedback remains best-effort, but failed lookups never dispatch defaults.
+      return ""
+    }
+  }, [resetFeedback])
 
   // Track chars typed since last echo
   useEffect(() => {
@@ -128,14 +212,9 @@ export function useWritingFeedback({
 
       const reqId = ++moodReqIdRef.current
       controller = new AbortController()
+      controllersRef.current.mood = controller
       setMoodAnalyzing(true)
-      const textSlice = editorText.slice(-500)
-      const result = await callChat(
-        "You are a mood classifier. Respond with exactly one word.",
-        MOOD_PROMPT + textSlice,
-        selectedModel,
-        controller.signal,
-      )
+      const result = await requestFeedback("mood", editorText, selectedModel, controller)
       if (cancelled) return
       if (reqId !== moodReqIdRef.current) return
       const word = result.toLowerCase().trim().replace(/[^a-z]/g, "")
@@ -151,7 +230,7 @@ export function useWritingFeedback({
       controller?.abort()
       setMoodAnalyzing(false)
     }
-  }, [editorText, moodEnabled, isOnline, isGenerating, selectedModel])
+  }, [editorText, moodEnabled, isOnline, isGenerating, selectedModel, requestFeedback])
 
   // Echo Chamber
   useEffect(() => {
@@ -169,17 +248,12 @@ export function useWritingFeedback({
 
     let cancelled = false
     const controller = new AbortController()
+    controllersRef.current.echo = controller
     setEchoAnalyzing(true)
-    const textSlice = editorText.slice(-1000)
 
-    void callChat(
-      persona.prompt,
-      `React to this passage:\n\n${textSlice}`,
-      selectedModel,
-      controller.signal,
-    ).then(
+    void requestFeedback("echo", editorText, selectedModel, controller, persona.part).then(
       (message) => {
-        if (cancelled) return
+        if (cancelled || controller.signal.aborted) return
         if (message) {
           setCharsSinceLastEcho(0)
           setEchoReactions((prev) => [
@@ -190,16 +264,16 @@ export function useWritingFeedback({
         setEchoAnalyzing(false)
       },
     ).finally(() => {
-      echoInFlightRef.current = false
+      if (controllersRef.current.echo === controller) echoInFlightRef.current = false
     })
 
     return () => {
       cancelled = true
       controller.abort()
       setEchoAnalyzing(false)
-      echoInFlightRef.current = false
+      if (controllersRef.current.echo === controller) echoInFlightRef.current = false
     }
-  }, [charsSinceLastEcho, echoEnabled, isOnline, isGenerating, editorText, selectedModel])
+  }, [charsSinceLastEcho, echoEnabled, isOnline, isGenerating, editorText, selectedModel, requestFeedback])
 
   return {
     moodEnabled: moodEnabled ?? false,

@@ -1,4 +1,40 @@
 {
+  "servicePrompts_definitions_writingFeedbackMood_label": {
+    "message": "Writing feedback: Mood"
+  },
+  "servicePrompts_definitions_writingFeedbackMood_description": {
+    "message": "Controls mood classification guidance. The seven allowed moods, one-word response, passage and provider settings remain fixed."
+  },
+  "servicePrompts_definitions_writingFeedbackEcho_label": {
+    "message": "Writing feedback: Echo"
+  },
+  "servicePrompts_definitions_writingFeedbackEcho_description": {
+    "message": "Controls the five reader reactions. Persona identities, rotation, passage and provider settings remain fixed."
+  },
+  "servicePrompts_workflows_writingFeedback": {
+    "message": "Writing Playground feedback"
+  },
+  "servicePrompts_parts_classifierGuidance": {
+    "message": "Classifier guidance"
+  },
+  "servicePrompts_parts_classificationSemantics": {
+    "message": "Classification instructions"
+  },
+  "servicePrompts_parts_alexSystem": {
+    "message": "Alex instructions"
+  },
+  "servicePrompts_parts_samSystem": {
+    "message": "Sam instructions"
+  },
+  "servicePrompts_parts_maxSystem": {
+    "message": "Max instructions"
+  },
+  "servicePrompts_parts_rileySystem": {
+    "message": "Riley instructions"
+  },
+  "servicePrompts_parts_jordanSystem": {
+    "message": "Jordan instructions"
+  },
   "navigation_serverAndAuth": {
     "message": "Server & Auth"
   },

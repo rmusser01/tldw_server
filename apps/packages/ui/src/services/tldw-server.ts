@@ -485,6 +485,17 @@ Generate a response that is informative and relevant to the user's query based o
 `
 
 export const LEGACY_SERVICE_PROMPT_DEFAULTS = Object.freeze({
+  "writing.feedback.mood": Object.freeze({
+    "system_semantics": "You are a mood classifier.",
+    "classification_semantics": "Classify the emotional mood of this text."
+  }),
+  "writing.feedback.echo": Object.freeze({
+    "alex_system": "You are Alex, a sharp literary analyst. In 1-2 sentences, comment on the structure, foreshadowing, or plot mechanics. Be concise.",
+    "sam_system": "You are Sam, obsessed with character relationships. In 1-2 sentences, react to relationship dynamics or romantic tension.",
+    "max_system": "You are Max, a skeptical reader. In 1-2 sentences, point out anything contrived or unmotivated.",
+    "riley_system": "You are Riley, an enthusiastic reader. In 1-2 sentences, react with energy to the most exciting element.",
+    "jordan_system": "You are Jordan, a world-building enthusiast. In 1-2 sentences, comment on world-building details or consistency."
+  }),
   "chat.rag.answer": Object.freeze({ template: DEFAULT_RAG_SYSTEM_PROMPT }),
   "chat.rag.question_rewrite": Object.freeze({
     template: DEFAULT_RAG_QUESTION_PROMPT

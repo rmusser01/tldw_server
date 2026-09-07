@@ -5,6 +5,8 @@ import type {
 } from "@/services/tldw/TldwApiClient"
 
 export type KnownServicePromptId =
+  | "writing.feedback.mood"
+  | "writing.feedback.echo"
   | "writing.agent.quick"
   | "writing.agent.planning"
   | "writing.agent.brainstorm"

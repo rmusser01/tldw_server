@@ -156,6 +156,40 @@ Based on the content between backticks create comprehensive bulleted notes.
 - Do not reference these instructions in your response."""
 
 _DEFINITION_SEQUENCE = (
+    ServicePromptDefinition(
+        id="writing.feedback.mood",
+        label="Writing feedback: Mood",
+        description="Controls mood classification guidance. The seven allowed moods, one-word response, passage and provider settings remain fixed.",
+        parts=(
+            ServicePromptPart(key="system_semantics", label="Classifier guidance", mode="literal", required_variables=()),
+            ServicePromptPart(key="classification_semantics", label="Classification instructions", mode="literal", required_variables=()),
+        ),
+        default_parts=MappingProxyType({
+            "system_semantics": "You are a mood classifier.",
+            "classification_semantics": "Classify the emotional mood of this text.",
+        }),
+        affected_workflows=(ServicePromptWorkflow(id="writing.feedback", label="Writing Playground feedback"),),
+    ),
+    ServicePromptDefinition(
+        id="writing.feedback.echo",
+        label="Writing feedback: Echo",
+        description="Controls the five reader reactions. Persona identities, rotation, passage and provider settings remain fixed.",
+        parts=(
+            ServicePromptPart(key="alex_system", label="Alex instructions", mode="literal", required_variables=()),
+            ServicePromptPart(key="sam_system", label="Sam instructions", mode="literal", required_variables=()),
+            ServicePromptPart(key="max_system", label="Max instructions", mode="literal", required_variables=()),
+            ServicePromptPart(key="riley_system", label="Riley instructions", mode="literal", required_variables=()),
+            ServicePromptPart(key="jordan_system", label="Jordan instructions", mode="literal", required_variables=()),
+        ),
+        default_parts=MappingProxyType({
+            "alex_system": "You are Alex, a sharp literary analyst. In 1-2 sentences, comment on the structure, foreshadowing, or plot mechanics. Be concise.",
+            "sam_system": "You are Sam, obsessed with character relationships. In 1-2 sentences, react to relationship dynamics or romantic tension.",
+            "max_system": "You are Max, a skeptical reader. In 1-2 sentences, point out anything contrived or unmotivated.",
+            "riley_system": "You are Riley, an enthusiastic reader. In 1-2 sentences, react with energy to the most exciting element.",
+            "jordan_system": "You are Jordan, a world-building enthusiast. In 1-2 sentences, comment on world-building details or consistency.",
+        }),
+        affected_workflows=(ServicePromptWorkflow(id="writing.feedback", label="Writing Playground feedback"),),
+    ),
     *(
         ServicePromptDefinition(
             id=f"writing.agent.{mode}",

@@ -88,6 +88,74 @@ def test_service_prompt_catalog_returns_exact_metadata_without_prompt_bodies(
     assert response.headers["cache-control"] == "no-store"
     assert response.json() == [
         {
+            "id": "writing.feedback.mood",
+            "label": "Writing feedback: Mood",
+            "description": "Controls mood classification guidance. The seven allowed moods, one-word response, passage and provider settings remain fixed.",
+            "parts": [
+                {
+                    "key": "system_semantics",
+                    "label": "Classifier guidance",
+                    "mode": "literal",
+                    "required_variables": []
+                },
+                {
+                    "key": "classification_semantics",
+                    "label": "Classification instructions",
+                    "mode": "literal",
+                    "required_variables": []
+                }
+            ],
+            "affected_workflows": [
+                {
+                    "id": "writing.feedback",
+                    "label": "Writing Playground feedback"
+                }
+            ]
+        },
+        {
+            "id": "writing.feedback.echo",
+            "label": "Writing feedback: Echo",
+            "description": "Controls the five reader reactions. Persona identities, rotation, passage and provider settings remain fixed.",
+            "parts": [
+                {
+                    "key": "alex_system",
+                    "label": "Alex instructions",
+                    "mode": "literal",
+                    "required_variables": []
+                },
+                {
+                    "key": "sam_system",
+                    "label": "Sam instructions",
+                    "mode": "literal",
+                    "required_variables": []
+                },
+                {
+                    "key": "max_system",
+                    "label": "Max instructions",
+                    "mode": "literal",
+                    "required_variables": []
+                },
+                {
+                    "key": "riley_system",
+                    "label": "Riley instructions",
+                    "mode": "literal",
+                    "required_variables": []
+                },
+                {
+                    "key": "jordan_system",
+                    "label": "Jordan instructions",
+                    "mode": "literal",
+                    "required_variables": []
+                }
+            ],
+            "affected_workflows": [
+                {
+                    "id": "writing.feedback",
+                    "label": "Writing Playground feedback"
+                }
+            ]
+        },
+        {
             "id": "writing.agent.quick",
             "label": "Writing Agent: Quick",
             "description": "Controls writing assistance instructions. Manuscript context and provider settings remain fixed.",
@@ -519,6 +587,29 @@ def test_writing_agent_prompt_save_reset_and_mode_isolation(api_context: SimpleN
     reset = api_context.client.delete(path, params={"expected_revision": saved.json()["revision"]})
     assert reset.status_code == 200
     assert reset.json()["effective_parts"] == defaults
+
+
+@pytest.mark.parametrize(
+    "kind,keys",
+    [
+        ("mood", ["system_semantics", "classification_semantics"]),
+        ("echo", ["alex_system", "sam_system", "max_system", "riley_system", "jordan_system"]),
+    ],
+)
+def test_writing_feedback_prompt_atomic_save_and_reset(api_context: SimpleNamespace, kind: str, keys: list[str]) -> None:
+    """Feedback parts save atomically and reset through the existing generic API."""
+    path = f"/api/v1/service-prompts/writing.feedback.{kind}"
+    before = api_context.client.get(path)
+    assert before.status_code == 200
+    custom = {key: f"Custom {key} {{literal}}" for key in keys}
+    incomplete = api_context.client.put(path, json={"parts": {keys[0]: "Partial"}, "expected_revision": None})
+    assert incomplete.status_code == 422
+    saved = api_context.client.put(path, json={"parts": custom, "expected_revision": None})
+    assert saved.status_code == 200
+    assert api_context.client.get(path).json()["effective_parts"] == custom
+    reset = api_context.client.delete(path, params={"expected_revision": saved.json()["revision"]})
+    assert reset.status_code == 200
+    assert reset.json()["effective_parts"] == before.json()["default_parts"]
 
 
 def test_title_prompt_can_be_saved_and_reset_through_generic_api(api_context) -> None:
