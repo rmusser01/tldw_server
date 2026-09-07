@@ -132,7 +132,7 @@ def evidence_fixture(root, phase):
 
 
 def test_offline_install_supplies_absolute_local_package_paths(tmp_path):
-    """APT's no-download path requires absolute local .deb filenames."""
+    """Install exact local packages directly; APT still checks dependencies."""
     candidate = tmp_path / "candidate"
     candidate.mkdir()
     (candidate / "libexpat1-dev_fixture.deb").write_bytes(b"package fixture")
@@ -143,14 +143,15 @@ def test_offline_install_supplies_absolute_local_package_paths(tmp_path):
     probe = r"""
 sha256sum() { test "$*" = '-c SHA256SUMS'; }
 dpkg-deb() { printf '%s\n' "$VERSION"; }
-apt-get() {
-    [[ "$*" == *--no-download* ]] || return 65
+dpkg() {
+    [[ "$1" == --install ]] || return 65
     for argument in "$@"; do
         case "$argument" in *.deb) [[ "$argument" == /* ]] || return 100;; esac
     done
     printf 'PASS: offline install uses absolute package paths\n'
     return 73  # Stop at the external installation boundary.
 }
+apt-get() { return 100; }  # Must not replace the local package installation.
 install_candidate
 """
     result = subprocess.run(  # nosec B603
