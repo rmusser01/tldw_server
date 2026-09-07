@@ -2,7 +2,7 @@
 
 Backlog design task: `TASK-13112`
 
-Backlog implementation task: `TASK-13113`
+Backlog implementation task: `TASK-13215`
 
 ## Purpose
 
@@ -18,9 +18,13 @@ first, with narrowly reproduced corrections allowed under the gate defined below
 
 ## Baseline
 
-The design is based on refreshed `origin/dev` commit
-`4958cfed65d3c6e9baa43ea47e2b155fed204e13`. The local `dev` branch is divergent
-and dirty, so implementation must use an isolated worktree based on refreshed
+The implementation baseline was reconciled on 2026-09-07 against refreshed
+`origin/dev` commit `01b516d4805ddf5eb7cddac35a11ef0e062facc5`. The required
+scoped diff from the design baseline
+`4958cfed65d3c6e9baa43ea47e2b155fed204e13` through current `origin/dev` was
+empty, so no hierarchy or `process_text` contract changed in the reviewed
+Chunking source and test paths. The local `dev` branch is divergent and dirty,
+so implementation must use the isolated worktree based on refreshed
 `origin/dev` and must not modify or reset the local checkout.
 
 Immediately before implementation begins, fetch `origin/dev` and compare it with
@@ -31,16 +35,20 @@ rebase the isolated branch onto the new `origin/dev`, update the baseline hash i
 this spec and the Backlog task, and rerun the focused characterization suite before
 editing production code. Any resulting contract change returns to design review.
 
-Focused baseline verification on the isolated worktree passed:
+Focused baseline verification on the rebased isolated worktree passed on
+2026-09-07:
 
 - 92 tests collected
 - 91 passed
 - 1 skipped
 - 0 failures
+- 196 warnings
 
 The run covered hierarchy rewrite offsets, additional offsets, template
 classification, Thai/table spans, hierarchical template options, `process_text`
-components, and `process_text` output equivalence.
+components, and `process_text` output equivalence. Environmental output noted
+the existing no-`.env` fallback to `config.txt`, legacy single-user API-key
+warning, isolated test database fallback, and emitted OpenTelemetry spans.
 
 ## Goals
 
@@ -85,16 +93,16 @@ require caller migrations.
 
 ## Delivery Tracking And PR Ownership
 
-`TASK-13112` remains design-only. `TASK-13113` owns the implementation plan,
+`TASK-13112` remains design-only. `TASK-13215` owns the implementation plan,
 production code, tests, verification results, and PR links, and depends on the
 completed design task. No production file is edited until this spec is approved,
-`TASK-13112` is finalized, `TASK-13113` is moved to `In Progress`, and the isolated
+`TASK-13112` is finalized, `TASK-13215` is moved to `In Progress`, and the isolated
 implementation branch passes the baseline reconciliation gate.
 
-The implementation plan is linked from `TASK-13113` and references both tasks and
+The implementation plan is linked from `TASK-13215` and references both tasks and
 this spec. Design-review history remains on `TASK-13112`; implementation findings,
 correction-gate evidence, touched files, and verification results belong on
-`TASK-13113`.
+`TASK-13215`.
 
 The implementation PR is not merge-ready until the human requester writes the
 required `Change summary` in their own words. The agent may prepare factual inputs,
@@ -530,7 +538,7 @@ silently excluded.
 
 ## Implementation Staging
 
-1. Confirm `TASK-13112` is complete, move `TASK-13113` to `In Progress`, link the
+1. Confirm `TASK-13112` is complete, move `TASK-13215` to `In Progress`, link the
    approved implementation plan, and reconcile `origin/dev` against the recorded
    baseline. If it advanced,
    update the baseline and rerun the focused suite before production edits.
@@ -582,7 +590,7 @@ stage begins.
   boundaries, and integration behavior.
 - The implementation baseline is explicitly reconciled with current `origin/dev`;
   an advanced baseline is recorded and re-characterized before production edits.
-- `TASK-13113` owns implementation tracking and links the approved spec, plan,
+- `TASK-13215` owns implementation tracking and links the approved spec, plan,
   verification evidence, commits, and PR.
 - Any included correction satisfies and records the correction gate.
 - The complete focused verification gate passes, including Bandit.
