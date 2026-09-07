@@ -209,7 +209,7 @@ install_candidate() {
     sha256sum -c SHA256SUMS
     local package
     for package in ./*.deb; do test "$(dpkg-deb -f "$package" Version)" = "$VERSION"; done
-    run_step apt-install apt-get install -y --no-download --no-install-recommends ./*.deb
+    run_step apt-install apt-get install -y --no-download --no-install-recommends /candidate/*.deb
     run_step apt-check apt-get check
     dpkg --audit > "$EVIDENCE/dpkg-audit.txt"
     test ! -s "$EVIDENCE/dpkg-audit.txt"
