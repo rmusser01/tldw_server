@@ -131,6 +131,39 @@ def evidence_fixture(root, phase):
         (root / "dpkg-audit.txt").write_text("")
 
 
+def test_offline_install_supplies_absolute_local_package_paths(tmp_path):
+    """APT's no-download path requires absolute local .deb filenames."""
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    (candidate / "libexpat1-dev_fixture.deb").write_bytes(b"package fixture")
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    definitions = SCRIPT.read_text().split('case "${1:-}" in', 1)[0]
+    definitions = definitions.replace("/candidate", str(candidate))
+    probe = r"""
+sha256sum() { test "$*" = '-c SHA256SUMS'; }
+dpkg-deb() { printf '%s\n' "$VERSION"; }
+apt-get() {
+    [[ "$*" == *--no-download* ]] || return 65
+    for argument in "$@"; do
+        case "$argument" in *.deb) [[ "$argument" == /* ]] || return 100;; esac
+    done
+    printf 'PASS: offline install uses absolute package paths\n'
+    return 73  # Stop at the external installation boundary.
+}
+install_candidate
+"""
+    result = subprocess.run(  # nosec B603
+        ["/bin/bash", "-c", definitions + probe],
+        env={**os.environ, "EVIDENCE": str(evidence)},
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 73, result.stdout + result.stderr
+    assert "PASS: offline install uses absolute package paths" in result.stdout
+
+
 @pytest.mark.parametrize("phase", ["prepare", "build", "sanitize", "install"])
 def test_evidence_accepts_completed_phase(tmp_path, phase):
     evidence_fixture(tmp_path / phase, phase)
