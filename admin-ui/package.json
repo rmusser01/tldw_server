@@ -23,6 +23,7 @@
   "author": "",
   "license": "SEE LICENSE IN LICENSE",
   "overrides": {
+    "@opentelemetry/core": "2.11.0",
     "baseline-browser-mapping": "2.9.19",
     "eslint-plugin-react-hooks": "7.0.1"
   },
