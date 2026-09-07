@@ -109,6 +109,7 @@ def test_public_flat_method_composes_overridable_public_methods(
     )
 
     assert result is sentinel_rows
+    assert len(calls) == 2
     assert calls[0] == (
         "tree",
         {
@@ -231,17 +232,25 @@ def test_metadata_leaf_methods_call_metadata_once_on_success(
     assert tree["root"]["children"][0]["children"][0]["chunks"][0]["text"] == "raw"
 
 
+@pytest.mark.parametrize("method", ["words", "sentences", "tokens"])
 @pytest.mark.parametrize(
     "metadata",
-    [SimpleNamespace(), SimpleNamespace(start_char="0", end_char=3)],
+    [
+        SimpleNamespace(end_char=3),
+        SimpleNamespace(start_char="0", end_char=3),
+        SimpleNamespace(start_char=0),
+        SimpleNamespace(start_char=0, end_char="3"),
+    ],
+    ids=["missing-start", "invalid-start", "missing-end", "invalid-end"],
 )
 def test_invalid_metadata_offsets_emit_nothing_without_plain_fallback(
     monkeypatch: pytest.MonkeyPatch,
+    method: str,
     metadata: SimpleNamespace,
 ) -> None:
     chunker = Chunker()
     trace: list[str] = []
-    _patch_single_block(monkeypatch, chunker, resolved_method="words")
+    _patch_single_block(monkeypatch, chunker, resolved_method=method)
 
     def fake_metadata(*_args: Any, **_kwargs: Any) -> list[SimpleNamespace]:
         trace.append("metadata")
@@ -254,18 +263,20 @@ def test_invalid_metadata_offsets_emit_nothing_without_plain_fallback(
     monkeypatch.setattr(chunker, "chunk_text_with_metadata", fake_metadata)
     monkeypatch.setattr(chunker, "chunk_text", fake_plain)
 
-    tree = chunker.chunk_text_hierarchical_tree("raw", method="words", max_size=10)
+    tree = chunker.chunk_text_hierarchical_tree("raw", method=method, max_size=10)
 
     assert trace == ["metadata"]
     assert tree["root"]["children"][0]["children"][0]["chunks"] == []
 
 
+@pytest.mark.parametrize("method", ["words", "sentences", "tokens"])
 def test_metadata_failure_calls_plain_fallback_once(
     monkeypatch: pytest.MonkeyPatch,
+    method: str,
 ) -> None:
     chunker = Chunker()
     trace: list[str] = []
-    _patch_single_block(monkeypatch, chunker, resolved_method="words")
+    _patch_single_block(monkeypatch, chunker, resolved_method=method)
 
     def fake_metadata(*_args: Any, **_kwargs: Any) -> list[SimpleNamespace]:
         trace.append("metadata")
@@ -278,18 +289,20 @@ def test_metadata_failure_calls_plain_fallback_once(
     monkeypatch.setattr(chunker, "chunk_text_with_metadata", fake_metadata)
     monkeypatch.setattr(chunker, "chunk_text", fake_plain)
 
-    chunker.chunk_text_hierarchical_tree("raw", method="words", max_size=10)
+    chunker.chunk_text_hierarchical_tree("raw", method=method, max_size=10)
 
     assert trace == ["metadata", "plain"]
 
 
+@pytest.mark.parametrize("method", ["words", "sentences", "tokens"])
 def test_outer_fallback_retries_plain_call_once(
     monkeypatch: pytest.MonkeyPatch,
+    method: str,
 ) -> None:
     chunker = Chunker()
     trace: list[str] = []
     plain_calls = 0
-    _patch_single_block(monkeypatch, chunker, resolved_method="words")
+    _patch_single_block(monkeypatch, chunker, resolved_method=method)
 
     def fake_metadata(*_args: Any, **_kwargs: Any) -> list[SimpleNamespace]:
         trace.append("metadata")
@@ -306,7 +319,7 @@ def test_outer_fallback_retries_plain_call_once(
     monkeypatch.setattr(chunker, "chunk_text_with_metadata", fake_metadata)
     monkeypatch.setattr(chunker, "chunk_text", fake_plain)
 
-    tree = chunker.chunk_text_hierarchical_tree("raw", method="words", max_size=10)
+    tree = chunker.chunk_text_hierarchical_tree("raw", method=method, max_size=10)
     chunks = tree["root"]["children"][0]["children"][0]["chunks"]
 
     assert trace == ["metadata", "plain", "plain"]
@@ -390,19 +403,26 @@ def test_word_and_sentence_metadata_failures_have_stable_debug_log(
 ) -> None:
     chunker = Chunker()
     _patch_single_block(monkeypatch, chunker, resolved_method=method)
+
+    error_text = f"{method} metadata sentinel"
+
+    def fail_metadata(*_args: Any, **_kwargs: Any) -> list[SimpleNamespace]:
+        raise RuntimeError(error_text)
+
     monkeypatch.setattr(
         chunker,
         "chunk_text_with_metadata",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("metadata failure")),
+        fail_metadata,
     )
     monkeypatch.setattr(chunker, "chunk_text", lambda *_args, **_kwargs: ["raw"])
 
     records = _capture_log_records(lambda: chunker.chunk_text_hierarchical_tree("raw", method=method, max_size=10))
 
-    assert any(
-        record["level"].name == "DEBUG" and f"{method} metadata mapping failed, using fallback:" in record["message"]
-        for record in records
-    )
+    expected_message = f"{method} metadata mapping failed, using fallback: {error_text}"
+    matching_records = [
+        record for record in records if record["level"].name == "DEBUG" and record["message"] == expected_message
+    ]
+    assert len(matching_records) == 1
 
 
 def test_token_metadata_failure_has_stable_debug_log(
@@ -410,19 +430,26 @@ def test_token_metadata_failure_has_stable_debug_log(
 ) -> None:
     chunker = Chunker()
     _patch_single_block(monkeypatch, chunker, resolved_method="tokens")
+
+    error_text = "token metadata sentinel"
+
+    def fail_metadata(*_args: Any, **_kwargs: Any) -> list[SimpleNamespace]:
+        raise RuntimeError(error_text)
+
     monkeypatch.setattr(
         chunker,
         "chunk_text_with_metadata",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("metadata failure")),
+        fail_metadata,
     )
     monkeypatch.setattr(chunker, "chunk_text", lambda *_args, **_kwargs: ["raw"])
 
     records = _capture_log_records(lambda: chunker.chunk_text_hierarchical_tree("raw", method="tokens", max_size=10))
 
-    assert any(
-        record["level"].name == "DEBUG" and "Token metadata mapping failed, using fallback:" in record["message"]
-        for record in records
-    )
+    expected_message = f"Token metadata mapping failed, using fallback: {error_text}"
+    matching_records = [
+        record for record in records if record["level"].name == "DEBUG" and record["message"] == expected_message
+    ]
+    assert len(matching_records) == 1
 
 
 def test_outer_offset_failure_has_stable_warning_log(
@@ -431,26 +458,29 @@ def test_outer_offset_failure_has_stable_warning_log(
     chunker = Chunker()
     plain_calls = 0
     _patch_single_block(monkeypatch, chunker, resolved_method="words")
+
+    def fail_metadata(*_args: Any, **_kwargs: Any) -> list[SimpleNamespace]:
+        raise RuntimeError("outer metadata sentinel")
+
     monkeypatch.setattr(
         chunker,
         "chunk_text_with_metadata",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("metadata failure")),
+        fail_metadata,
     )
 
     def fake_plain(*_args: Any, **_kwargs: Any) -> list[str]:
         nonlocal plain_calls
         plain_calls += 1
         if plain_calls == 1:
-            raise RuntimeError("first plain failure")
+            raise RuntimeError("outer plain sentinel")
         return ["raw"]
 
     monkeypatch.setattr(chunker, "chunk_text", fake_plain)
 
     records = _capture_log_records(lambda: chunker.chunk_text_hierarchical_tree("raw", method="words", max_size=10))
 
-    assert any(
-        record["level"].name == "WARNING"
-        and "Offset mapping failed for method=words:" in record["message"]
-        and "using naive offsets" in record["message"]
-        for record in records
-    )
+    expected_message = "Offset mapping failed for method=words: outer plain sentinel; " "using naive offsets"
+    matching_records = [
+        record for record in records if record["level"].name == "WARNING" and record["message"] == expected_message
+    ]
+    assert len(matching_records) == 1

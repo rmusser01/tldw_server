@@ -125,6 +125,7 @@ def test_safe_search_lookup_failure_uses_direct_pattern_search(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     original_import = builtins.__import__
+    guarded_interceptions: list[str] = []
 
     def guarded_import(
         name: str,
@@ -138,6 +139,7 @@ def test_safe_search_lookup_failure_uses_direct_pattern_search(
             name == "regex_safety" and level == 1 and package == "tldw_Server_API.app.core.Chunking"
         )
         if chunking_regex_import and "safe_search" in fromlist:
+            guarded_interceptions.append("Chunking.regex_safety.safe_search")
             raise ImportError("safe_search unavailable")
         return original_import(name, globals, locals, fromlist, level)
 
@@ -147,6 +149,7 @@ def test_safe_search_lookup_failure_uses_direct_pattern_search(
         "CUSTOM\n",
         {"boundaries": [{"kind": "direct", "pattern": "^CUSTOM"}]},
     ) == [(0, 7, "direct")]
+    assert guarded_interceptions == ["Chunking.regex_safety.safe_search"]
 
 
 def test_safe_search_invocation_failure_skips_pattern_without_direct_retry(
