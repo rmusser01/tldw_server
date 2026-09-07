@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +11,7 @@ import pytest
 
 from tldw_Server_API.app.core.AuthNZ import orgs_teams as orgs_teams_facade
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    DatabaseLockError,
     DuplicateOrganizationError,
     RollbackSignal,
     TransactionError,
@@ -87,6 +89,23 @@ def test_sqlite_authnz_relation_literals_are_not_public_qualified() -> None:
         and "public." in node.value.lower()
     ]
     assert violations == []
+
+
+def test_membership_reads_do_not_interpolate_sql_identifiers() -> None:
+    source_path = Path(repo_module.__file__ or "").parent.parent / "membership_writer.py"
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    read_membership = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "_read_membership"
+    )
+
+    interpolated_lines = [
+        node.lineno
+        for node in ast.walk(read_membership)
+        if isinstance(node, ast.JoinedStr)
+    ]
+    assert interpolated_lines == []
 
 
 class _Tx:
@@ -185,6 +204,43 @@ class _PostgresConnWithSqliteTrap:
             raise AssertionError("Postgres backend path should not use SQLite placeholders")
         self.fetchrow_calls.append((str(query), tuple(params)))
         return {"team_id": 2, "user_id": 7, "role": "member", "org_id": 11}
+
+
+class _ManualPostgresSavepoint:
+    def __init__(self, rollback_failure: BaseException | None = None) -> None:
+        self.rollback_failure = rollback_failure
+        self.started = False
+        self.rolled_back = False
+        self.committed = False
+
+    async def start(self) -> None:
+        self.started = True
+
+    async def rollback(self) -> None:
+        self.rolled_back = True
+        if self.rollback_failure is not None:
+            raise self.rollback_failure
+
+    async def commit(self) -> None:
+        self.committed = True
+
+
+class _PostgresProvisioningConn:
+    def __init__(self, rollback_failure: BaseException | None = None) -> None:
+        self.savepoint = _ManualPostgresSavepoint(rollback_failure)
+
+    def transaction(self) -> _ManualPostgresSavepoint:
+        return self.savepoint
+
+
+class _FailingCleanupSqliteConn(_SqliteConnWithPgTrap):
+    def __init__(self, rollback_failure: BaseException) -> None:
+        super().__init__()
+        self.rollback_failure = rollback_failure
+
+    async def rollback_savepoint(self, name: str) -> None:
+        await super().rollback_savepoint(name)
+        raise self.rollback_failure
 
 
 class _Acquire:
@@ -606,7 +662,7 @@ async def test_explicit_team_best_effort_rolls_back_full_plan_before_base_retry(
         mutations = kwargs["mutations"]
         observed.append(mutations)
         if len(mutations) == 3:
-            raise RuntimeError("explicit team write failed")
+            raise MembershipParentRequired()
         floor = datetime.now(timezone.utc)
         return MembershipWriteResult(
             mutation_results=tuple(
@@ -647,6 +703,125 @@ async def test_explicit_team_best_effort_rolls_back_full_plan_before_base_retry(
     assert result.team_membership_failed is True
     assert result.team_membership is None
     assert len(result.write_results) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("postgres", [False, True], ids=["sqlite", "postgres"])
+@pytest.mark.parametrize(
+    "failure_type",
+    [TimeoutError, DatabaseLockError, RuntimeError, asyncio.CancelledError],
+    ids=["timeout", "database-lock", "unexpected", "control-flow"],
+)
+async def test_explicit_team_best_effort_reraises_non_domain_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    postgres: bool,
+    failure_type: type[BaseException],
+) -> None:
+    conn = _PostgresProvisioningConn() if postgres else _SqliteConnWithPgTrap()
+    repo = AuthnzOrgsTeamsRepo(db_pool=_PoolStub(conn, postgres=postgres))
+    apply_calls = 0
+
+    async def _default_team(*_args, **_kwargs) -> int:
+        return 55
+
+    async def _team_parent(*_args, **_kwargs) -> int:
+        return 11
+
+    async def _apply(_writer, **_kwargs):
+        nonlocal apply_calls
+        apply_calls += 1
+        raise failure_type()
+
+    monkeypatch.setattr(repo, "_get_or_create_default_team_id", _default_team)
+    monkeypatch.setattr(repo, "_get_team_parent_organization_id", _team_parent)
+    monkeypatch.setattr(MembershipWriter, "apply_membership_mutations", _apply)
+
+    with pytest.raises(failure_type):
+        await repo.provision_org_membership_on_connection(
+            conn=conn,
+            org_id=11,
+            user_id=7,
+            org_role="member",
+            team_id=77,
+            team_role="member",
+            team_failure_is_best_effort=True,
+            context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
+            anchor_ownership=AnchorOwnership.CALLER_OWNS_ANCHOR,
+            operation_time=datetime.now(timezone.utc),
+        )
+
+    assert apply_calls == 1
+    if postgres:
+        assert conn.savepoint.started is True
+        assert conn.savepoint.rolled_back is True
+        assert conn.savepoint.committed is False
+    else:
+        assert conn.savepoints_rolled_back == ["explicit_team_companion"]
+        assert conn.savepoints_released == ["explicit_team_companion"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("postgres", [False, True], ids=["sqlite", "postgres"])
+@pytest.mark.parametrize(
+    ("primary_type", "cleanup_type"),
+    (
+        (RuntimeError, RuntimeError),
+        (asyncio.CancelledError, asyncio.CancelledError),
+    ),
+    ids=["ordinary-cleanup-failure", "repeated-cancellation"],
+)
+async def test_explicit_team_savepoint_cleanup_preserves_primary_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    postgres: bool,
+    primary_type: type[BaseException],
+    cleanup_type: type[BaseException],
+) -> None:
+    primary_failure = primary_type()
+    cleanup_failure = cleanup_type()
+    conn = (
+        _PostgresProvisioningConn(cleanup_failure)
+        if postgres
+        else _FailingCleanupSqliteConn(cleanup_failure)
+    )
+    repo = AuthnzOrgsTeamsRepo(db_pool=_PoolStub(conn, postgres=postgres))
+    apply_calls = 0
+
+    async def _default_team(*_args, **_kwargs) -> int:
+        return 55
+
+    async def _team_parent(*_args, **_kwargs) -> int:
+        return 11
+
+    async def _apply(_writer, **_kwargs):
+        nonlocal apply_calls
+        apply_calls += 1
+        raise primary_failure
+
+    monkeypatch.setattr(repo, "_get_or_create_default_team_id", _default_team)
+    monkeypatch.setattr(repo, "_get_team_parent_organization_id", _team_parent)
+    monkeypatch.setattr(MembershipWriter, "apply_membership_mutations", _apply)
+
+    with pytest.raises(primary_type) as exc_info:
+        await repo.provision_org_membership_on_connection(
+            conn=conn,
+            org_id=11,
+            user_id=7,
+            org_role="member",
+            team_id=77,
+            team_role="member",
+            team_failure_is_best_effort=True,
+            context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
+            anchor_ownership=AnchorOwnership.CALLER_OWNS_ANCHOR,
+            operation_time=datetime.now(timezone.utc),
+        )
+
+    assert exc_info.value is primary_failure
+    assert apply_calls == 1
+    if postgres:
+        assert conn.savepoint.rolled_back is True
+    else:
+        assert conn.savepoints_rolled_back == ["explicit_team_companion"]
+        assert conn.savepoints_released == ["explicit_team_companion"]
 
 
 @pytest.mark.asyncio

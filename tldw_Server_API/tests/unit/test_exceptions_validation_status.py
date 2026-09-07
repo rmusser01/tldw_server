@@ -8,7 +8,7 @@ import pytest
 from fastapi import status
 
 from tldw_Server_API.app.core import exceptions as core_exceptions
-
+from tldw_Server_API.app.core.AuthNZ import membership_writer, user_provider_secrets
 
 pytestmark = pytest.mark.unit
 
@@ -38,3 +38,32 @@ def test_api_validation_error_uses_resolved_default_status() -> None:
     )
     exc = core_exceptions.APIValidationError(detail="bad input")
     assert exc.status_code == expected
+
+
+def test_user_profile_exceptions_are_centrally_owned_and_compatibly_reexported() -> None:
+    membership_exception_names = (
+        "MembershipWriterContractError",
+        "OfflineMigrationContextRejected",
+        "MembershipWriteError",
+        "MembershipReadError",
+        "MembershipAuthorizationError",
+        "MembershipScopeNotFound",
+        "MembershipTargetNotFound",
+        "MembershipParentRequired",
+        "MembershipPreflightChanged",
+        "_MembershipScopeDeletionRetry",
+    )
+
+    for name in membership_exception_names:
+        central_exception = getattr(core_exceptions, name)
+        assert getattr(membership_writer, name) is central_exception
+        assert central_exception.__module__ == core_exceptions.__name__
+
+    assert (
+        user_provider_secrets.ProviderCredentialAliasConflictError
+        is core_exceptions.ProviderCredentialAliasConflictError
+    )
+    assert (
+        core_exceptions.ProviderCredentialAliasConflictError.__module__
+        == core_exceptions.__name__
+    )
