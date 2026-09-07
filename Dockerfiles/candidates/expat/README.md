@@ -4,7 +4,7 @@ Tracking: TASK-13013.7.9. Execution plan:
 `IMPLEMENTATION_PLAN_task_13013_7_9_expat_dual_copy.md`.
 
 This directory does **not** supply a production replacement or a qualified image.
-Source preparation is implemented; native builds, parser/ABI tests, combined
+Source preparation and automated source authentication are implemented; native builds, parser/ABI tests, combined
 application compatibility, source-aware scans and final security review remain
 required. No vulnerability waiver follows from this evidence.
 
@@ -51,6 +51,52 @@ Local evidence is in
 `/private/tmp/task-13013-7-expat-sources.uuqxOa/source-signature-verification.log`.
 Verifier image: `sha256:9803426ce3cc2b0b9938db476ed1b296088ad85fed8419b02dcf3aef5a94186d`.
 This was a lightweight emulated signature check, **not native binary qualification**.
+
+### Automated authentication gate
+
+On a Linux verifier with `/usr/bin/gpg`, run the separate authentication command
+before extraction or source execution:
+
+```sh
+python Helper_Scripts/Supply_Chain/expat_candidate.py authenticate-sources /sources \
+  --public-keys /public-keys --evidence /evidence/new-authentication-run
+```
+
+`/sources` must contain the five pinned archives plus
+`expat-2.8.4.tar.gz.asc` and `Python-3.12.14.tar.xz.asc`. `/public-keys` must contain
+`expat-key.asc`, `python-key.asc` and `debian-maintainer-full-key.asc` (the complete
+public certificates corresponding to the fingerprints above). Key-file hashes
+are recorded, but do not replace checking the verified signer's identity.
+
+Use read-only input mounts, no network, an unprivileged user, and a new writable
+evidence directory. The helper creates its own temporary private keyring and
+disables user configuration, automatic key retrieval/import and agent startup.
+It does not import into the operator's keyring, extract source or run build code.
+The eventual build controller must preserve input immutability through use;
+this standalone gate is not yet connected to a native build workflow.
+
+All five source hashes must match before GnuPG starts. Each verification must
+exit successfully and emit exactly one valid signature matching **both** approved
+fingerprints and the expected binary/text signature class. Expired/revoked keys,
+bad or additional signatures, missing output and process errors fail closed.
+`TRUST_UNDEFINED` is allowed because identity is anchored by the independently
+approved fingerprints, not a local web of trust. This follows the separate
+cryptographic-validity and key-status fields in
+[GnuPG's status protocol](https://github.com/gpg/gnupg/blob/master/doc/DETAILS).
+Offline certificates cannot prove that no newer revocation has been published.
+
+Fresh machine status, human diagnostics, command arguments, process outcomes and
+input identities are retained. A success record is written only after all three
+signatures pass; an existing evidence directory is rejected to prevent stale
+success records from being reused. Timeout and executable failures retain their
+available diagnostics. No archived status log is accepted as authentication.
+
+The automated helper was exercised against the real pinned inputs in the same
+networkless verifier image above; all three signatures passed. Substituting the
+Python signature for the Expat archive, or removing the Expat public certificate
+by substituting the Python certificate, each failed without a success record.
+Evidence: `/private/tmp/task-13013-7-expat-auth-real.jMY6Yy`. These bounded checks
+still establish **source authentication only**, not Expat remediation.
 
 ## CPython preparation contract
 
