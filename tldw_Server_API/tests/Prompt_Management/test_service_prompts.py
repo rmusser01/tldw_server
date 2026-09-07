@@ -59,6 +59,18 @@ EXPECTED_REGISTRY = {
         "parts": (("system", "System instructions", "literal", ()),),
         "workflows": (("writing.agent", "Writing Playground AI Agent"),),
     },
+    "writing.continuation.predict": {
+        "label": "Writing continuation: Predict",
+        "description": "Controls non-chat continuation instructions. Context, fill templates, stopping rules and provider settings remain fixed.",
+        "parts": (("system", "System instructions", "literal", ()),),
+        "workflows": (("writing.continuation", "Writing Playground continuation"),),
+    },
+    "writing.continuation.fill": {
+        "label": "Writing continuation: Fill",
+        "description": "Controls non-chat continuation instructions. Context, fill templates, stopping rules and provider settings remain fixed.",
+        "parts": (("system", "System instructions", "literal", ()),),
+        "workflows": (("writing.continuation", "Writing Playground continuation"),),
+    },
     "study.assistant.explain": {
         "label": "Study explanation",
         "description": "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed.",
@@ -278,6 +290,18 @@ def test_registry_contains_exact_locked_metadata_and_workflows() -> None:
         assert (
             tuple((workflow.id, workflow.label) for workflow in definition.affected_workflows) == expected["workflows"]
         )
+
+
+@pytest.mark.parametrize("mode,default", [
+    ("predict", "Continue the text from the prompt. Respond with only the continuation."),
+    ("fill", "Fill in the missing text between the prefix and suffix. Respond with only the missing text."),
+])
+def test_continuation_defaults_are_literal(mode: str, default: str) -> None:
+    """Keep existing continuation instructions and literal authored braces."""
+    definition = get_service_prompt_definition(f"writing.continuation.{mode}")
+    assert dict(definition.default_parts) == {"system": default}
+    assert definition.parts[0].mode == "literal"
+    assert definition.parts[0].required_variables == ()
 
 
 @pytest.mark.parametrize("definition_id", ["writing.feedback.mood", "writing.feedback.echo"])
