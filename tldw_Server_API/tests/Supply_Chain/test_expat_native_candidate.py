@@ -70,6 +70,43 @@ def run_script(*args, env=None):
     )
 
 
+def test_prepare_leaves_source_archive_destination_to_dpkg_source(tmp_path):
+    """Read-only authenticated downloads must not preoccupy dpkg's copy target."""
+    work = tmp_path / "work"
+    downloads = work / "downloads"
+    downloads.mkdir(parents=True)
+    archive = downloads / "expat_2.8.4.orig.tar.gz"
+    archive.write_bytes(b"authenticated archive fixture")
+    archive.chmod(0o444)
+    evidence = work / "evidence/prepare"
+    evidence.mkdir(parents=True)
+    install = tmp_path / "opt"
+    (install / "apt").mkdir(parents=True)
+    # Rebase only absolute container paths, keeping the real prepare body and cp.
+    definitions = SCRIPT.read_text().split('case "${1:-}" in', 1)[0]
+    definitions = definitions.replace("/work", str(work)).replace("/opt/expat", str(install))
+    probe = r"""
+python() { mkdir "$EVIDENCE/authentication"; printf '{}' > "$EVIDENCE/authentication/authentication.json"; }
+dpkg-source() {
+    test ! -e "${2%/downloads/*}/expat_2.8.4.orig.tar.gz" || return 13
+    printf 'PASS: source archive destination is fresh\n'
+    return 73  # Stop at the external extraction boundary; no source execution.
+}
+prepare
+"""
+    result = subprocess.run(  # nosec B603
+        ["/bin/bash", "-c", definitions + probe],
+        env={**os.environ, "EVIDENCE": str(evidence)},
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 73, result.stdout + result.stderr
+    assert "PASS: source archive destination is fresh" in result.stdout
+    assert archive.read_bytes() == b"authenticated archive fixture"
+    assert archive.stat().st_mode & 0o222 == 0
+
+
 def evidence_fixture(root, phase):
     """Hand-authored success evidence at the container/controller boundary."""
     root.mkdir(parents=True)
