@@ -3,7 +3,7 @@ FROM python:3.12.14-slim-trixie@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c
 SHELL ["/bin/bash", "-euxo", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
 RUN rm -f /etc/apt/sources.list /etc/apt/sources.list.d/*
-COPY Dockerfiles/candidates/ffmpeg/debian.sources /etc/apt/sources.list.d/debian.sources
+COPY Dockerfiles/candidates/expat/debian.sources /etc/apt/sources.list.d/debian.sources
 COPY Dockerfiles/candidates/expat/apt-acquisition.conf /etc/apt/apt.conf.d/80candidate-acquisition
 COPY Dockerfiles/candidates/expat/test-apt-acquisition.py /opt/expat/test-apt-acquisition.py
 USER 65534:65534
