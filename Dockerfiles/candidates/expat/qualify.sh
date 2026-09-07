@@ -32,6 +32,12 @@ verify_evidence() {
 
 controller() {
     local evidence="$1" phase container status image arch prepared base
+    local profile="${2:-system}" phases
+    case "$profile" in
+        system) phases=(prepare build sanitize install) ;;
+        python) phases=(prepare build install) ;;
+        *) die 'unknown qualification profile' ;;
+    esac
     mkdir "$evidence"
     mkdir "$evidence/identity"
     printf 'commit=%s\nkernel=%s\narch=%s\n' "$(git rev-parse HEAD)" "$(uname -s)" "$(uname -m)" > "$evidence/identity/runner.txt"
@@ -42,14 +48,14 @@ controller() {
     if [[ -n "${GITHUB_SHA:-}" ]]; then
         [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]] || die 'checkout differs from requested commit'
     fi
-    docker build --platform linux/amd64 --file Dockerfiles/candidates/expat/Dockerfile \
-        --tag "tldw-expat-system-base:${GITHUB_RUN_ID}" . 2>&1 | tee "$evidence/image-build.log"
-    base="$(docker image inspect --format '{{.Id}}' "tldw-expat-system-base:${GITHUB_RUN_ID}")"
+    docker build --platform linux/amd64 --target "$profile" --file Dockerfiles/candidates/expat/Dockerfile \
+        --tag "tldw-expat-${profile}-base:${GITHUB_RUN_ID}" . 2>&1 | tee "$evidence/image-build.log"
+    base="$(docker image inspect --format '{{.Id}}' "tldw-expat-${profile}-base:${GITHUB_RUN_ID}")"
     arch="$(docker image inspect --format '{{.Architecture}}' "$base")"
     printf 'base=%s\nbase_arch=%s\n' "$base" "$arch" >> "$evidence/identity/runner.txt"
     [[ "$arch" == amd64 ]] || die 'image is not native amd64'
     prepared="$base"
-    for phase in prepare build sanitize install; do
+    for phase in "${phases[@]}"; do
         image="$prepared"
         local user=1000:1000
         local security=(--security-opt no-new-privileges:true --cap-drop ALL)
@@ -59,7 +65,7 @@ controller() {
             # never privileged mode, host mounts or a host Docker socket.
             security=(--security-opt no-new-privileges:true)
         fi
-        container="$(docker create --name "tldw-expat-${phase}-${GITHUB_RUN_ID}" \
+        container="$(docker create --name "tldw-expat-${profile}-${phase}-${GITHUB_RUN_ID}" \
             --network none "${security[@]}" \
             --user "$user" --cpus 4 --memory 5g --pids-limit 512 "$image" "$phase")"
         if [[ "$phase" == install ]]; then
@@ -75,14 +81,18 @@ controller() {
         if (( status != 0 )); then exit "$status"; fi
         verify_evidence "$evidence/$phase" "$phase"
         if [[ "$phase" == prepare ]]; then
-            docker commit "$container" "tldw-expat-prepared:${GITHUB_RUN_ID}" > /dev/null
-            prepared="$(docker image inspect --format '{{.Id}}' "tldw-expat-prepared:${GITHUB_RUN_ID}")"
+            docker commit "$container" "tldw-expat-${profile}-prepared:${GITHUB_RUN_ID}" > /dev/null
+            prepared="$(docker image inspect --format '{{.Id}}' "tldw-expat-${profile}-prepared:${GITHUB_RUN_ID}")"
             [[ "$(docker image inspect --format '{{.Architecture}}' "$prepared")" == amd64 ]] || die 'prepared image is not native amd64'
             printf 'prepared=%s\n' "$prepared" >> "$evidence/identity/runner.txt"
         fi
         docker rm "$container" > /dev/null
     done
-    printf 'System-only qualification; Python bundled parser remains unqualified.\n' > "$evidence/system-qualified.txt"
+    if [[ "$profile" == system ]]; then
+        printf 'System-only qualification; Python bundled parser remains unqualified.\n' > "$evidence/system-qualified.txt"
+    else
+        printf 'Python bundled parser qualified separately; combined candidate admission remains outstanding.\n' > "$evidence/python-qualified.txt"
+    fi
 }
 
 fetch() {
@@ -180,7 +190,7 @@ build() {
         LC_ALL=C comm -23 "/work/baseline/$stem/symbols" "$EVIDENCE/abi/$stem/symbols" > "$EVIDENCE/abi/$stem/missing"
         test ! -s "$EVIDENCE/abi/$stem/missing"
         ldd "$library" > "$EVIDENCE/abi/$stem/ldd"
-        ! grep -Fq 'not found' "$EVIDENCE/abi/$stem/ldd"
+        if grep -Fq 'not found' "$EVIDENCE/abi/$stem/ldd"; then die "unresolved system dependency: $stem"; fi
     done
     printf 'compatible\n' > "$EVIDENCE/abi.txt"
     run_step wide-compile cc -std=c99 -Wall -Wextra -Werror -DXML_UNICODE \
@@ -227,6 +237,10 @@ for name in ("libexpat.so.1", "libexpatw.so.1"):
     run_step wide-controls /work/wide-installed expat_2.8.4
     python -c 'import pyexpat; print("Unmodified bundled Python parser:", pyexpat.EXPAT_VERSION)' > "$EVIDENCE/python-not-qualified.txt"
 }
+
+# The Python profile reuses only the controller/process boundaries, then supplies
+# its own workers and evidence gate. Direct system invocations remain unchanged.
+if [[ "${BASH_SOURCE[0]:-$0}" != "$0" ]]; then return 0; fi
 
 case "${1:-}" in
     controller) controller "$2" ;;
