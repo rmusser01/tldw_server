@@ -262,3 +262,17 @@ downloads retain them. No packages are installed by the controls.
 
 References: [APT retry defaults](https://github.com/Debian/apt/blob/3.0.3/apt-pkg/acquire-item.cc#L753-L755)
 and [transport timeouts](https://manpages.debian.org/trixie/apt/apt-transport-http.1.en.html).
+
+Run `34164863475` passed the offline controls but again exhausted snapshot
+downloads with HTTP 503s. The approved Expat-local `debian.sources` now uses
+`https://snapshot-cloudflare.debian.org` for the same archives and timestamp.
+Compared with the shared FFmpeg source definition, only the hostname changes;
+the shared file and production recipes are untouched. There is no fallback to
+moving repositories or relaxation of signature, TLS or hash verification.
+
+Before this substitution, all three signed InRelease records from the alternate
+endpoint matched the retained successful native run `34160485207` byte for byte.
+A fourth offline real-APT control verifies the complete planned index requests
+use that endpoint, fixed timestamp and exactly the expected suites/indexes.
+Those checks do not prove availability from GitHub runners; native build and
+combined-image qualification are still required.

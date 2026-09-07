@@ -4,14 +4,15 @@ Run with the pinned Debian interpreter in a networkless container. Only its
 loopback server is used; no package is installed or repository trust changed.
 """
 
-from collections import Counter
 import hashlib
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
+import shlex
 import subprocess  # nosec B404
 import tempfile
 import threading
 import unittest
+from collections import Counter
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 CONFIG = Path("/etc/apt/apt.conf.d/80candidate-acquisition")
 PAYLOAD = b"candidate acquisition regression fixture\n"
@@ -28,6 +29,39 @@ class AcquisitionTests(unittest.TestCase):
 
     def test_corrupt_success_response_fails_hash_verification(self):
         self.acquire("corrupt", expected_exit=100, expected_requests=1)
+
+    def test_repository_requests_use_alternate_endpoint_for_same_snapshot(self):
+        """Catch wrong Dockerfile source wiring, suite drift, or extra repositories."""
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(  # nosec B603
+                [
+                    "/usr/bin/apt-get",
+                    "-o",
+                    f"Dir::State::lists={directory}/lists",
+                    "--print-uris",
+                    "update",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        requests = [shlex.split(line)[0] for line in result.stdout.splitlines() if line.strip()]
+        expected = [
+            f"https://snapshot-cloudflare.debian.org/archive/{archive}/20260906T000000Z/dists/{suite}/{index}"
+            for archive, suite in (
+                ("debian", "trixie"),
+                ("debian", "trixie-updates"),
+                ("debian-security", "trixie-security"),
+            )
+            for index in (
+                "InRelease",
+                "main/source/Sources.xz",
+                "main/binary-amd64/Packages.xz",
+                "main/binary-all/Packages.xz",
+            )
+        ]
+        self.assertCountEqual(requests, expected)
 
     def acquire(self, scenario: str, expected_exit: int, expected_requests: int) -> None:
         self.assertTrue(CONFIG.is_file(), "candidate acquisition configuration is missing")

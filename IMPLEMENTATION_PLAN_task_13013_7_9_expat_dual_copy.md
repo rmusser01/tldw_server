@@ -14,7 +14,7 @@
 
 - Only this isolated worktree and task-owned temporary artifacts may change. Do not run heavyweight local Docker builds or alter other tasks' containers/environments.
 - Pin the approved base to `python:3.12.14-slim-trixie@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea`.
-- Reuse `Dockerfiles/candidates/ffmpeg/debian.sources` at snapshot `20260906T000000Z`; retain APT signature verification. Do not add unstable binary repositories.
+- Use the same `20260906T000000Z` snapshot and trust settings as `Dockerfiles/candidates/ffmpeg/debian.sources`. Approved 2026-09-07 endpoint amendment: the Expat-local `debian.sources` changes only the host to `snapshot-cloudflare.debian.org`; shared FFmpeg sources remain unchanged. Retain APT signature verification. Do not add unstable binary repositories.
 - No production Dockerfile, dependency lock, runtime admission, scanner thresholds, allowlists, release publishing or PR Change summary changes.
 - Complete upstream 2.8.4 includes the attribute-index fix and `dtdCopy` follow-up; the first two CVE-2026-66046 commits alone are not sufficient.
 - Keep CPython's `expat_config.h` and `pyexpatns.h`. Do not switch Python to system Expat or replace just a shared object without rebuilding/testing its owning interpreter.
@@ -180,6 +180,17 @@ versions or trust checks. Networkless real-APT regression controls reproduce
 failure with the default three retries, then verify recovery beyond that budget,
 bounded exhaustion and rejection of corrupted bytes. Native validation remains
 required; a sustained external outage must still fail rather than admit inputs.
+
+Run `34164863475` passed the three offline APT controls but still exhausted
+snapshot downloads with HTTP 503 responses. Its Python runner also received a
+shutdown signal (exit 143; evidence upload skipped). The requester approved an
+Expat-only endpoint substitution, not another identical retry. All three signed
+InRelease files from `snapshot-cloudflare.debian.org` were byte-identical to the
+retained successful run `34160485207`; a representative failed package URL also
+responded there. This local probe does not establish CI availability. The new
+offline control asks real APT for its complete planned index requests and checks
+the alternate host, fixed date, three suites, source and amd64/all indexes, and
+absence of extra repositories. Native validation remains required.
 
 - [ ] Integrate the qualified artifacts into a separately named candidate image, without changing production recipes. Run `tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py` and Chunking tests `test_xml_allows_url_text.py`, `test_json_xml_offsets.py`, `test_xml_tail_preservation.py` against that image.
 - [ ] Run fontconfig discovery and FFmpeg drawtext/subtitle controls; compare the previously accepted FFmpeg capability inventory without broadening accepted retirements.
