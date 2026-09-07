@@ -172,6 +172,15 @@ Inputs are not extracted or installed, and the output scope is explicitly
 run before the handoff job runs. This checkpoint does not complete any combined
 application, rendering or scanner qualification below.
 
+Native handoff validation run `34162807603` hit snapshot HTTP 503 failures during
+dependency acquisition on both attempts, before compilation; the dependent job
+correctly stayed skipped. Approved reliability correction uses APT's native
+five-retry budget and 30-second transport timeouts without changing sources,
+versions or trust checks. Networkless real-APT regression controls reproduce
+failure with the default three retries, then verify recovery beyond that budget,
+bounded exhaustion and rejection of corrupted bytes. Native validation remains
+required; a sustained external outage must still fail rather than admit inputs.
+
 - [ ] Integrate the qualified artifacts into a separately named candidate image, without changing production recipes. Run `tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py` and Chunking tests `test_xml_allows_url_text.py`, `test_json_xml_offsets.py`, `test_xml_tail_preservation.py` against that image.
 - [ ] Run fontconfig discovery and FFmpeg drawtext/subtitle controls; compare the previously accepted FFmpeg capability inventory without broadening accepted retirements.
 - [ ] Save source packages, Python source/SBOM, build/configuration logs, binary hashes, package controls, test statuses and candidate OCI identity. Run existing pinned Syft/Trivy/Grype tooling; explicitly account for bundled Expat even if automatic catalogers omit it. Do not rewrite findings into passes.
