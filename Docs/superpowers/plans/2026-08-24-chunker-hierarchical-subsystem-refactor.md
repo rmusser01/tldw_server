@@ -14,7 +14,7 @@
 
 - Approved spec: `Docs/superpowers/specs/2026-08-23-chunker-hierarchical-subsystem-refactor-design.md`
 - Completed design task: `TASK-13112`
-- Implementation task: `TASK-13113`
+- Implementation task: `TASK-13215`
 - Current implementation: `tldw_Server_API/app/core/Chunking/chunker.py`
 - Existing process pipeline: `tldw_Server_API/app/core/Chunking/process_text/`
 
@@ -30,9 +30,9 @@ source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
 
 - Follow red-green-refactor within each task. A characterization test is expected to pass before extraction; a new component test is expected to fail with `ModuleNotFoundError`, `ImportError`, or a missing symbol before its component is created.
 - Keep tests behavioral. Do not assert implementation-local helper call graphs except where the approved call multiplicity, public composition, or dependency boundaries are compatibility contracts.
-- Use `apply_patch` for manual edits. Use Backlog MCP to update `TASK-13113` after each task with the commit, touched files, test evidence, and any correction-gate finding.
+- Use `apply_patch` for manual edits. Use Backlog MCP to update `TASK-13215` after each task with the commit, touched files, test evidence, and any correction-gate finding.
 - Do not broaden exception handling, validation, copying, or normalization while moving code.
-- A behavior correction is out of the structural commits. If a candidate appears, apply the gate in the approved spec and use a separate red-green commit only after recording the baseline evidence in `TASK-13113`.
+- A behavior correction is out of the structural commits. If a candidate appears, apply the gate in the approved spec and use a separate red-green commit only after recording the baseline evidence in `TASK-13215`.
 - Do not use `--no-verify` on any commit.
 
 ## Stage Map
@@ -85,7 +85,7 @@ Modify:
   - Remove the private helper from the protocol assertion and patch the dispatch dependency in multi-level tests.
 - `Docs/superpowers/specs/2026-08-23-chunker-hierarchical-subsystem-refactor-design.md`
   - Update only the reconciled baseline hash/counts if Task 1 requires it.
-- `backlog/tasks/task-13113 - Implement-Chunker-hierarchical-subsystem-refactor.md`
+- `backlog/tasks/task-13215 - Implement-Chunker-hierarchical-subsystem-refactor.md`
   - Maintain implementation status, evidence, commits, files, and PR link through Backlog MCP.
 
 ## Required Internal Interfaces
@@ -188,9 +188,9 @@ def flatten_tree(
 **Files:**
 
 - Modify `Docs/superpowers/specs/2026-08-23-chunker-hierarchical-subsystem-refactor-design.md` only when the current baseline differs.
-- Update `TASK-13113` through Backlog MCP.
+- Update `TASK-13215` through Backlog MCP.
 
-- [ ] **Step 1: Refresh and inspect the baseline**
+- [x] **Step 1: Refresh and inspect the baseline**
 
 Run:
 
@@ -202,7 +202,7 @@ git diff --name-status 4958cfed65d3c6e9baa43ea47e2b155fed204e13 origin/dev -- tl
 
 Expected: record the current `origin/dev` hash. As of plan creation, local `origin/dev` is `b1d0aed671dcf45bbe4211a9690022c083c99feb` and the scoped diff is empty. If the scoped diff is no longer empty, inspect every listed change and stop for design review if any approved contract is affected.
 
-- [ ] **Step 2: Rebase the isolated branch**
+- [x] **Step 2: Rebase the isolated branch**
 
 Run:
 
@@ -213,7 +213,7 @@ git status --short --branch
 
 Expected: the branch is based on current `origin/dev`, contains only this workstream's design/planning commits, and has no unresolved changes. Resolve only conflicts in this workstream's documentation or Backlog records; do not discard upstream work.
 
-- [ ] **Step 3: Rerun the focused baseline suite**
+- [x] **Step 3: Rerun the focused baseline suite**
 
 Run:
 
@@ -232,14 +232,14 @@ python -m pytest \
 
 Expected from the approved baseline: `91 passed, 1 skipped`. Record the fresh counts and any environmental warning. A failure must be investigated before production edits.
 
-- [ ] **Step 4: Record the reconciled evidence**
+- [x] **Step 4: Record the reconciled evidence**
 
-Update the spec's baseline hash and counts with `apply_patch`. Through Backlog MCP, append the same hash, scoped-diff result, test counts, and reconciliation date to `TASK-13113`.
+Update the spec's baseline hash and counts with `apply_patch`. Through Backlog MCP, append the same hash, scoped-diff result, test counts, and reconciliation date to `TASK-13215`.
 
-- [ ] **Step 5: Commit the baseline update**
+- [x] **Step 5: Commit the baseline update**
 
 ```bash
-git add Docs/superpowers/specs/2026-08-23-chunker-hierarchical-subsystem-refactor-design.md Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md "backlog/tasks/task-13113 - Implement-Chunker-hierarchical-subsystem-refactor.md"
+git add Docs/superpowers/specs/2026-08-23-chunker-hierarchical-subsystem-refactor-design.md Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md "backlog/tasks/task-13215 - Implement-Chunker-hierarchical-subsystem-refactor.md"
 git commit -m "docs: reconcile hierarchical refactor baseline"
 ```
 
@@ -424,12 +424,12 @@ python -m pytest \
   -q
 ```
 
-Expected: all tests pass before any hierarchy production logic moves. If an expectation fails, update it to the observed baseline behavior and record the discrepancy in `TASK-13113`; do not change production code to satisfy the draft expectation.
+Expected: all tests pass before any hierarchy production logic moves. If an expectation fails, update it to the observed baseline behavior and record the discrepancy in `TASK-13215`; do not change production code to satisfy the draft expectation.
 
 - [ ] **Step 8: Commit the frozen contracts**
 
 ```bash
-git add Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md tldw_Server_API/tests/Chunking/test_hierarchy_refactor_contracts.py tldw_Server_API/tests/Chunking/test_hierarchy_malformed_contracts.py tldw_Server_API/tests/Chunking/test_hierarchical_spans.py "backlog/tasks/task-13113 - Implement-Chunker-hierarchical-subsystem-refactor.md"
+git add Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md tldw_Server_API/tests/Chunking/test_hierarchy_refactor_contracts.py tldw_Server_API/tests/Chunking/test_hierarchy_malformed_contracts.py tldw_Server_API/tests/Chunking/test_hierarchical_spans.py "backlog/tasks/task-13215 - Implement-Chunker-hierarchical-subsystem-refactor.md"
 git commit -m "test: characterize hierarchical chunking contracts"
 ```
 
@@ -542,7 +542,7 @@ Expected: all pass with the same existing skip status.
 - [ ] **Step 6: Commit the shared models and spans**
 
 ```bash
-git add Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md tldw_Server_API/app/core/Chunking/hierarchical tldw_Server_API/app/core/Chunking/chunker.py tldw_Server_API/app/core/Chunking/process_text/models.py tldw_Server_API/app/core/Chunking/process_text/dispatch.py tldw_Server_API/tests/Chunking/test_hierarchical_spans.py tldw_Server_API/tests/Chunking/test_hierarchy_refactor_contracts.py tldw_Server_API/tests/Chunking/test_process_text_components.py "backlog/tasks/task-13113 - Implement-Chunker-hierarchical-subsystem-refactor.md"
+git add Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md tldw_Server_API/app/core/Chunking/hierarchical tldw_Server_API/app/core/Chunking/chunker.py tldw_Server_API/app/core/Chunking/process_text/models.py tldw_Server_API/app/core/Chunking/process_text/dispatch.py tldw_Server_API/tests/Chunking/test_hierarchical_spans.py tldw_Server_API/tests/Chunking/test_hierarchy_refactor_contracts.py tldw_Server_API/tests/Chunking/test_process_text_components.py "backlog/tasks/task-13215 - Implement-Chunker-hierarchical-subsystem-refactor.md"
 git commit -m "refactor: share hierarchical paragraph spans"
 ```
 
@@ -632,7 +632,7 @@ Expected: all pass, including exact call traces and logs.
 - [ ] **Step 5: Commit the leaf extraction**
 
 ```bash
-git add Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md tldw_Server_API/app/core/Chunking/hierarchical/leaves.py tldw_Server_API/app/core/Chunking/chunker.py tldw_Server_API/tests/Chunking/test_hierarchical_leaves.py tldw_Server_API/tests/Chunking/test_hierarchy_refactor_contracts.py "backlog/tasks/task-13113 - Implement-Chunker-hierarchical-subsystem-refactor.md"
+git add Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md tldw_Server_API/app/core/Chunking/hierarchical/leaves.py tldw_Server_API/app/core/Chunking/chunker.py tldw_Server_API/tests/Chunking/test_hierarchical_leaves.py tldw_Server_API/tests/Chunking/test_hierarchy_refactor_contracts.py "backlog/tasks/task-13215 - Implement-Chunker-hierarchical-subsystem-refactor.md"
 git commit -m "refactor: extract hierarchical leaf construction"
 ```
 
@@ -757,7 +757,7 @@ Expected: all pass with public signature and option/call-trace tests unchanged.
 - [ ] **Step 6: Commit the tree extraction**
 
 ```bash
-git add Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md tldw_Server_API/app/core/Chunking/hierarchical/builder.py tldw_Server_API/app/core/Chunking/hierarchical/service.py tldw_Server_API/app/core/Chunking/chunker.py tldw_Server_API/tests/Chunking/test_hierarchical_builder.py tldw_Server_API/tests/Chunking/test_hierarchy_refactor_contracts.py "backlog/tasks/task-13113 - Implement-Chunker-hierarchical-subsystem-refactor.md"
+git add Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md tldw_Server_API/app/core/Chunking/hierarchical/builder.py tldw_Server_API/app/core/Chunking/hierarchical/service.py tldw_Server_API/app/core/Chunking/chunker.py tldw_Server_API/tests/Chunking/test_hierarchical_builder.py tldw_Server_API/tests/Chunking/test_hierarchy_refactor_contracts.py "backlog/tasks/task-13215 - Implement-Chunker-hierarchical-subsystem-refactor.md"
 git commit -m "refactor: extract hierarchical tree builder"
 ```
 
@@ -849,7 +849,7 @@ Expected: all pass. In particular, no-space joins, invalid weights, and malforme
 - [ ] **Step 5: Commit the grouping extraction**
 
 ```bash
-git add Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md tldw_Server_API/app/core/Chunking/hierarchical/grouping.py tldw_Server_API/app/core/Chunking/chunker.py tldw_Server_API/tests/Chunking/test_hierarchical_grouping.py "backlog/tasks/task-13113 - Implement-Chunker-hierarchical-subsystem-refactor.md"
+git add Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md tldw_Server_API/app/core/Chunking/hierarchical/grouping.py tldw_Server_API/app/core/Chunking/chunker.py tldw_Server_API/tests/Chunking/test_hierarchical_grouping.py "backlog/tasks/task-13215 - Implement-Chunker-hierarchical-subsystem-refactor.md"
 git commit -m "refactor: extract hierarchical grouping"
 ```
 
@@ -963,7 +963,7 @@ Expected: all pass with the established skips only.
 - [ ] **Step 6: Commit the flatten extraction**
 
 ```bash
-git add Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md tldw_Server_API/app/core/Chunking/hierarchical/flatten.py tldw_Server_API/app/core/Chunking/hierarchical/service.py tldw_Server_API/app/core/Chunking/chunker.py tldw_Server_API/tests/Chunking/test_hierarchical_flatten.py tldw_Server_API/tests/Chunking/test_hierarchy_refactor_contracts.py tldw_Server_API/tests/Chunking/test_hierarchy_malformed_contracts.py "backlog/tasks/task-13113 - Implement-Chunker-hierarchical-subsystem-refactor.md"
+git add Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md tldw_Server_API/app/core/Chunking/hierarchical/flatten.py tldw_Server_API/app/core/Chunking/hierarchical/service.py tldw_Server_API/app/core/Chunking/chunker.py tldw_Server_API/tests/Chunking/test_hierarchical_flatten.py tldw_Server_API/tests/Chunking/test_hierarchy_refactor_contracts.py tldw_Server_API/tests/Chunking/test_hierarchy_malformed_contracts.py "backlog/tasks/task-13215 - Implement-Chunker-hierarchical-subsystem-refactor.md"
 git commit -m "refactor: extract hierarchical flattening"
 ```
 
@@ -972,7 +972,7 @@ git commit -m "refactor: extract hierarchical flattening"
 **Files:**
 
 - Modify touched files only for verified cleanup.
-- Update `TASK-13113` through Backlog MCP.
+- Update `TASK-13215` through Backlog MCP.
 - Update this plan's checkboxes as tasks complete.
 
 - [ ] **Step 1: Remove stale imports and verify ownership mechanically**
@@ -1063,7 +1063,7 @@ source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
 python -m mypy tldw_Server_API/app/core/Chunking/hierarchical
 ```
 
-Fix hierarchy-local type errors that can be corrected without changing runtime behavior. Record exact residual output in `TASK-13113`; do not add broad suppressions and do not treat the five known `process_text` baseline errors as part of this scope.
+Fix hierarchy-local type errors that can be corrected without changing runtime behavior. Record exact residual output in `TASK-13215`; do not add broad suppressions and do not treat the five known `process_text` baseline errors as part of this scope.
 
 - [ ] **Step 7: Run Bandit on touched production code**
 
@@ -1074,10 +1074,10 @@ python -m bandit -r \
   tldw_Server_API/app/core/Chunking/chunker.py \
   tldw_Server_API/app/core/Chunking/process_text/models.py \
   tldw_Server_API/app/core/Chunking/process_text/dispatch.py \
-  -f json -o /tmp/bandit_task_13113.json
+  -f json -o /tmp/bandit_task_13215.json
 ```
 
-Expected: no new findings in touched code. Inspect `/tmp/bandit_task_13113.json` and record the issue count and severity summary in `TASK-13113`.
+Expected: no new findings in touched code. Inspect `/tmp/bandit_task_13215.json` and record the issue count and severity summary in `TASK-13215`.
 
 - [ ] **Step 8: Review the final diff and repository checks**
 
@@ -1102,10 +1102,10 @@ Use `superpowers:requesting-code-review` for a final code review. Validate every
 
 - [ ] **Step 9: Final verification commit**
 
-Update `TASK-13113` with all commit hashes, touched files, focused/full test counts, compile/Ruff/Black/mypy/Bandit results, known skips, and the absence or evidence of gated corrections. Then commit any final verified cleanup and task evidence:
+Update `TASK-13215` with all commit hashes, touched files, focused/full test counts, compile/Ruff/Black/mypy/Bandit results, known skips, and the absence or evidence of gated corrections. Then commit any final verified cleanup and task evidence:
 
 ```bash
-git add tldw_Server_API/app/core/Chunking tldw_Server_API/tests/Chunking "backlog/tasks/task-13113 - Implement-Chunker-hierarchical-subsystem-refactor.md" Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md
+git add tldw_Server_API/app/core/Chunking tldw_Server_API/tests/Chunking "backlog/tasks/task-13215 - Implement-Chunker-hierarchical-subsystem-refactor.md" Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md
 git commit -m "test: verify hierarchical subsystem refactor"
 ```
 
@@ -1120,10 +1120,10 @@ Use `superpowers:finishing-a-development-branch`. Push the implementation branch
 - focused and full test counts;
 - Ruff, Black, compileall, mypy, and Bandit evidence;
 - any separately gated correction commit and rationale;
-- `TASK-13113` and spec/plan links;
+- `TASK-13215` and spec/plan links;
 - an explicit merge blocker stating that the human requester must write the required `Change summary` in their own words, explaining both what changed and why these boundaries and compatibility choices were selected.
 
-Do not mark `TASK-13113` Done or the PR merge-ready until that human-written summary exists and all acceptance criteria are checked.
+Do not mark `TASK-13215` Done or the PR merge-ready until that human-written summary exists and all acceptance criteria are checked.
 
 ## Behavior-Correction Stop Rule
 
@@ -1132,7 +1132,7 @@ No corrections are pre-approved. When a test exposes a possible pre-existing def
 1. Reproduce it against the reconciled pre-refactor baseline in a clean state.
 2. Cite the exact violated invariant or preserve it as compatibility behavior.
 3. If it qualifies, add a focused failing regression test first.
-4. Record evidence and rationale in `TASK-13113` before implementation.
+4. Record evidence and rationale in `TASK-13215` before implementation.
 5. Implement the smallest local correction.
 6. Commit it separately with a `fix:` message.
 7. Rerun all focused and complete Chunking gates.
@@ -1141,7 +1141,7 @@ If any step cannot be satisfied, document the finding and defer it without chang
 
 ## Completion Checklist
 
-- [ ] Reconciled current `origin/dev` baseline recorded before production edits.
+- [x] Reconciled current `origin/dev` baseline recorded before production edits.
 - [ ] Frozen public/malformed/identity/call/log/span characterizations pass.
 - [ ] Shared models and spans extracted; process protocol/private span seam removed.
 - [ ] Leaves extracted with exact call multiplicity and offset fallback behavior.
