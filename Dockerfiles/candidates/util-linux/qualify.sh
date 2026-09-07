@@ -223,10 +223,11 @@ prepare() {
 }
 
 verify_package_versions() {
-    local output="$1"
+    local package_dir="$1"
+    local output="$2"
     local deb package version source expected
     : > "$output"
-    for deb in "$EVIDENCE"/artifacts/binary/*.deb; do
+    for deb in "$package_dir"/*.deb; do
         package="$(dpkg-deb -f "$deb" Package)"
         version="$(dpkg-deb -f "$deb" Version)"
         source="$(dpkg-deb -f "$deb" Source 2>/dev/null || true)"
@@ -234,8 +235,8 @@ verify_package_versions() {
             source=util-linux
         fi
         case "$package" in
-            bsdutils) expected="1:$CANDIDATE_VERSION" ;;
-            login) expected="1:4.16.0-2+really$CANDIDATE_VERSION" ;;
+            bsdutils|bsdutils-dbgsym) expected="1:$CANDIDATE_VERSION" ;;
+            login|login-dbgsym) expected="1:4.16.0-2+really$CANDIDATE_VERSION" ;;
             *) expected="$CANDIDATE_VERSION" ;;
         esac
         test "$version" = "$expected" || die "$package has version $version, expected $expected"
@@ -285,7 +286,9 @@ build_candidate() {
     find "$EVIDENCE/artifacts/binary" -maxdepth 1 -type f \( -name '*.deb' -o -name '*.udeb' \) \
         -exec dpkg-deb -f '{}' Package Version Architecture Depends Pre-Depends ';' \
         > "$EVIDENCE/artifacts/binary/package-control-summary.txt"
-    verify_package_versions "$EVIDENCE/artifacts/binary/source-family-versions.txt"
+    verify_package_versions \
+        "$EVIDENCE/artifacts/binary" \
+        "$EVIDENCE/artifacts/binary/source-family-versions.txt"
     dpkg-parsechangelog -l"$SOURCE_TREE/debian/changelog" \
         > "$EVIDENCE/artifacts/source/candidate-changelog-fields.txt"
 
@@ -401,5 +404,9 @@ case "${1:-}" in
         test "$#" -eq 2 || die "usage: $0 write-sums ARTIFACT_DIRECTORY"
         write_sums "$2"
         ;;
-    *) die "usage: $0 {prepare|build|install|verify-sources|compare-abi|verify-evidence|verify-install-evidence|write-sums}" ;;
+    verify-package-versions)
+        test "$#" -eq 3 || die "usage: $0 verify-package-versions PACKAGE_DIRECTORY OUTPUT"
+        verify_package_versions "$2" "$3"
+        ;;
+    *) die "usage: $0 {prepare|build|install|verify-sources|compare-abi|verify-evidence|verify-install-evidence|write-sums|verify-package-versions}" ;;
 esac

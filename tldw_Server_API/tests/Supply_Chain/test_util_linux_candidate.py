@@ -154,8 +154,33 @@ def _run_workflow_shell(tmp_path: Path, **overrides: str) -> subprocess.Complete
     )
 
 
-def _run_qualify(*arguments: str) -> subprocess.CompletedProcess[str]:
-    return _run_bash([str(QUALIFY), *arguments])
+def _run_qualify(*arguments: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    return _run_bash([str(QUALIFY), *arguments], env=env)
+
+
+def _package_metadata_environment(tmp_path: Path) -> tuple[Path, dict[str, str]]:
+    package_dir = tmp_path / "packages"
+    package_dir.mkdir()
+    fake_bin = tmp_path / "package-tools"
+    fake_bin.mkdir()
+    _write_executable(
+        fake_bin / "dpkg-deb",
+        """#!/bin/sh
+set -eu
+test "$1" = -f
+sed -n "s/^$3: //p" "$2"
+""",
+    )
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    return package_dir, env
+
+
+def _write_package_control(package_dir: Path, package: str, version: str, source: str) -> None:
+    (package_dir / f"{package}.deb").write_text(
+        f"Package: {package}\nVersion: {version}\nSource: {source}\n",
+        encoding="utf-8",
+    )
 
 
 def test_workflow_rejects_non_native_host_before_docker_build(tmp_path: Path) -> None:
@@ -258,6 +283,91 @@ def test_checksum_manifest_verifies_after_artifact_directory_is_relocated(tmp_pa
     verified = _run_bash(["-c", 'cd "$1" && sha256sum -c SHA256SUMS', "verify-manifest", str(downloaded)])
     assert verified.returncode == 0, verified.stderr
     assert verified.stdout == "./candidate.deb: OK\n"
+
+
+def test_source_family_versions_accept_exact_runtime_and_debug_package_mappings(tmp_path: Path) -> None:
+    package_dir, env = _package_metadata_environment(tmp_path)
+    candidate = "2.41.5-0+deb13u1+tldw1"
+    source = f"util-linux ({candidate})"
+    expected = {
+        "bsdutils": f"1:{candidate}",
+        "bsdutils-dbgsym": f"1:{candidate}",
+        "login": f"1:4.16.0-2+really{candidate}",
+        "login-dbgsym": f"1:4.16.0-2+really{candidate}",
+    }
+    for package, version in expected.items():
+        _write_package_control(package_dir, package, version, source)
+    output = tmp_path / "source-family-versions.txt"
+
+    result = _run_qualify("verify-package-versions", str(package_dir), str(output), env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert output.read_text().splitlines() == [
+        f"{package}\t{expected[package]}\t{source}" for package in sorted(expected)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("package", "wrong_version", "expected_version"),
+    [
+        (
+            "bsdutils-dbgsym",
+            "2.41.5-0+deb13u1+tldw1",
+            "1:2.41.5-0+deb13u1+tldw1",
+        ),
+        (
+            "bsdutils-dbgsym-extra",
+            "1:2.41.5-0+deb13u1+tldw1",
+            "2.41.5-0+deb13u1+tldw1",
+        ),
+        (
+            "login-dbgsym",
+            "2.41.5-0+deb13u1+tldw1",
+            "1:4.16.0-2+really2.41.5-0+deb13u1+tldw1",
+        ),
+        (
+            "login-dbgsym-extra",
+            "1:4.16.0-2+really2.41.5-0+deb13u1+tldw1",
+            "2.41.5-0+deb13u1+tldw1",
+        ),
+    ],
+)
+def test_source_family_versions_reject_wrong_or_glob_like_versions(
+    tmp_path: Path, package: str, wrong_version: str, expected_version: str
+) -> None:
+    package_dir, env = _package_metadata_environment(tmp_path)
+    source = "util-linux (2.41.5-0+deb13u1+tldw1)"
+    _write_package_control(package_dir, package, wrong_version, source)
+
+    result = _run_qualify(
+        "verify-package-versions",
+        str(package_dir),
+        str(tmp_path / "versions.txt"),
+        env=env,
+    )
+
+    assert result.returncode != 0
+    assert f"{package} has version {wrong_version}, expected {expected_version}" in result.stderr
+
+
+def test_source_family_versions_reject_wrong_source(tmp_path: Path) -> None:
+    package_dir, env = _package_metadata_environment(tmp_path)
+    _write_package_control(
+        package_dir,
+        "login-dbgsym",
+        "1:4.16.0-2+really2.41.5-0+deb13u1+tldw1",
+        "not-util-linux (2.41.5-0+deb13u1+tldw1)",
+    )
+
+    result = _run_qualify(
+        "verify-package-versions",
+        str(package_dir),
+        str(tmp_path / "versions.txt"),
+        env=env,
+    )
+
+    assert result.returncode != 0
+    assert "does not identify the candidate util-linux source" in result.stderr
 
 
 def _write_abi_fixture(root: Path, *, missing_symbol: bool = False, changed_soname: bool = False) -> None:
