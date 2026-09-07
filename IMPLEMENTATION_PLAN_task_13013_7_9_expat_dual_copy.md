@@ -72,6 +72,14 @@ destination. Removed only that copy; the regression failed with exit 13 before
 the fix and passes afterward. Local supply-chain verification: 323 passed,
 one existing opt-in skip; native re-execution remains required.
 
+Second native run `34156111173` passed preparation, Debian source/binary builds,
+all 4,884 verbose parser checks, both system ABIs, wide controls, bounded
+whole/incremental scaling, and the ASan/UBSan suite. The 16,000-attribute control
+took about 0.061 seconds on 2.8.3 versus 0.014 seconds on 2.8.4. All 13 retained
+source/binary artifact checksums verified locally. Installation stopped because
+APT's `--no-download` path rejected relative package filenames; use absolute
+`/candidate/*.deb`, retaining offline installation and all evidence gates.
+
 - [ ] Test that controller preparation/build/test/install failures propagate and evidence upload still runs; reject non-native hosts/images, missing status files and missing parser-test output.
 - [ ] Use native `ubuntu-24.04`; pin checkout/upload actions to the same verified commits as util-linux qualification. Preserve read-only repository permissions, exact checkout SHA, image identities and logs. No registry push, privileged mode, Docker socket bind, host secrets or production deploy.
 - [ ] Authenticate Debian `.dsc` and upstream/Python detached signatures in an isolated keyring, retaining full signer fingerprints and status output; never present GitHub's tag verification as local archive-signature verification. Abort before source execution if authentication fails.
