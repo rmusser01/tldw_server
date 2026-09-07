@@ -4,6 +4,11 @@ SHELL ["/bin/bash", "-euxo", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
 RUN rm -f /etc/apt/sources.list /etc/apt/sources.list.d/*
 COPY Dockerfiles/candidates/ffmpeg/debian.sources /etc/apt/sources.list.d/debian.sources
+COPY Dockerfiles/candidates/expat/apt-acquisition.conf /etc/apt/apt.conf.d/80candidate-acquisition
+COPY Dockerfiles/candidates/expat/test-apt-acquisition.py /opt/expat/test-apt-acquisition.py
+USER 65534:65534
+RUN --network=none python /opt/expat/test-apt-acquisition.py
+USER 0:0
 RUN mkdir -p /opt/expat/apt /work /candidate \
     && apt-get -o Debug::Acquire::gpgv=true update > /opt/expat/apt/authentication.log 2>&1 \
     && apt-get build-dep -y --no-install-recommends expat=2.8.3-1~deb13u1 \
@@ -11,6 +16,7 @@ RUN mkdir -p /opt/expat/apt /work /candidate \
        build-essential autoconf automake libtool pkg-config cmake \
        curl ca-certificates gnupg git fakeroot binutils libexpat1-dev \
     && cp /etc/apt/sources.list.d/debian.sources /opt/expat/apt/ \
+    && cp /etc/apt/apt.conf.d/80candidate-acquisition /opt/expat/apt/ \
     && cp /usr/share/keyrings/debian-archive-keyring.gpg /opt/expat/apt/ \
     && find /var/lib/apt/lists -maxdepth 1 -name '*InRelease' -exec cp '{}' /opt/expat/apt/ ';' \
     && groupadd --gid 1000 builder \

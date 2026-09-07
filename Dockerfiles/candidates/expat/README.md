@@ -242,3 +242,23 @@ not itself an application image. Preserve the locked Python 3.12 application
 environment, prove that its interpreter resolves to the qualified runtime, and
 retain the old FFmpeg package inventory as baseline evidence without reinstalling
 its superseded Expat 2.8.3 requirement.
+
+## Snapshot acquisition failures
+
+Run `34162807603` failed twice before compilation because the pinned Debian
+snapshot returned HTTP 503 responses. Candidate builds now use APT's built-in
+five-retry budget (six total attempts per failed file), up from APT 3.0.3's
+default three retries, with 30-second HTTP/HTTPS connection and data timeouts.
+APT's normal backoff and `Retry-After` handling remain enabled. This tolerates
+short disruptions; a persistent outage still fails the build.
+
+The configuration is retained with APT evidence. Snapshot timestamps, package
+versions, TLS verification, archive signatures and package hashes are unchanged.
+The image build runs `test-apt-acquisition.py` with `--network=none` before any
+dependency downloads. Against a loopback fixture, real APT must recover after
+four 503s, stop after its five-retry budget, and reject a corrupt HTTP-200 payload.
+Only that test command disables retry delays to keep the controls fast; build
+downloads retain them. No packages are installed by the controls.
+
+References: [APT retry defaults](https://github.com/Debian/apt/blob/3.0.3/apt-pkg/acquire-item.cc#L753-L755)
+and [transport timeouts](https://manpages.debian.org/trixie/apt/apt-transport-http.1.en.html).
