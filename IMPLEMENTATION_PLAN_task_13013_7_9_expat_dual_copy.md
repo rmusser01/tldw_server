@@ -102,6 +102,14 @@ not `test_xml_dom_minidom`. Source, ELF, installed-binary hashes, actual runtime
 mapping, legitimate controls and bounded parser scaling are separate gates.
 Native Python execution remains required before claiming qualification.
 
+Native run `34159837991` passed the system job and all five baseline Python XML
+suites (806 tests, 13 existing skips), but CPython's in-process JUnit aggregation
+failed after ElementTree module reloads. An offline bounded probe reproduced the
+failure and verified `-j1` produces the report with identical counts and skips.
+Approved correction: use isolated workers for both baseline and candidate suites,
+with regression coverage for worker isolation, all five suites, timeout and report
+arguments. No test omissions or admission changes; native re-execution required.
+
 The independent Python-harness review found that bare Bash `!` commands did
 not enforce negative ELF checks under `set -e`. Reproduced all three cases
 (missing dependency, dynamic system Expat linkage, unprefixed dynamic symbols)
