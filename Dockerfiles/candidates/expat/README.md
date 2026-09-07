@@ -168,3 +168,36 @@ Debian's packaging rules do not explicitly invoke the parser test suite. The
 native qualification must separately run upstream tests, including the
 `test_default_attr_index_after_dtd_copy` regression, and preserve their actual
 exit statuses. A successful package build alone is insufficient.
+
+## Native bundled Python qualification
+
+The workflow's separate Python job uses the Dockerfile's `python` target; the
+system job explicitly selects `system`. Both remain candidate-only and retain
+networkless, resource-bounded execution after authenticated downloads.
+
+The Python job performs three stages:
+
+1. Authenticate the exact inputs, extract a fresh Python 3.12.14 tree, run the
+   unchanged upstream refresh procedure (only its three release assignments
+   differ), and regenerate its source SBOM. The offline download adapter accepts
+   only the exact approved release URL. Independently verify both preserved
+   headers, the namespace include, package identities, file hashes and source
+   relationships. Preserve a pre-build source archive.
+2. Rebuild the full interpreter with the official image's PGO/LTO/shared-library
+   flags. Run `test_pyexpat`, `test_xml_etree`, `test_xml_etree_c`, `test_minidom`
+   and `test_sax` against both baseline and candidate, rejecting lost tests or new
+   skips. Require explicit ElementTree import, actual loaded-runtime paths,
+   non-null-context child-parser controls, bounded CPU-scaling improvement and
+   ELF checks excluding system Expat linkage or unnamespaced dynamic exports.
+3. Install the complete staged interpreter into a fresh container, verify its
+   exact executable/library/extension hashes and repeat installed-runtime
+   controls without a build-tree library path. Dependency/audit checks remain
+   mandatory. No image is published or promoted.
+
+Artifacts are `expat-python-candidate-<run-id>`. A `python-qualified.txt` marker
+qualifies only that bundled parser build. System and Python qualification still
+do not establish combined application compatibility, source-aware scanner
+admission, or production readiness.
+
+The successful system-only run is [34157012667](https://github.com/rmusser01/tldw_server/actions/runs/34157012667),
+at commit `82c78368d4`. Python native qualification is still pending.
