@@ -239,9 +239,11 @@ Update the spec's baseline hash and counts with `apply_patch`. Through Backlog M
 - [x] **Step 5: Commit the baseline update**
 
 ```bash
-git add Docs/superpowers/specs/2026-08-23-chunker-hierarchical-subsystem-refactor-design.md Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md "backlog/tasks/task-13215 - Implement-Chunker-hierarchical-subsystem-refactor.md"
+git add Docs/superpowers/specs/2026-08-23-chunker-hierarchical-subsystem-refactor-design.md Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md "backlog/completed/task-13112 - Design-Chunker-hierarchical-subsystem-refactor.md" "backlog/archive/tasks/task-13113 - Implement-Chunker-hierarchical-subsystem-refactor.md" "backlog/tasks/task-13215 - Implement-Chunker-hierarchical-subsystem-refactor.md"
 git commit -m "docs: reconcile hierarchical refactor baseline"
 ```
+
+The three task-record paths are required only when baseline reconciliation performs an ID-collision migration.
 
 If the spec hash was already current after rebase, include only the Backlog evidence and do not manufacture a spec change.
 
