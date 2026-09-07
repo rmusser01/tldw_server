@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 from dataclasses import FrozenInstanceError
 from datetime import datetime, timedelta, timezone
-from typing import get_type_hints
+from typing import Any, get_type_hints
 
 import pytest
 
@@ -37,6 +37,80 @@ from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
 )
 
 BASE = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+
+class _MembershipReadCursor:
+    async def fetchone(self) -> tuple[str, str]:
+        return ("member", "active")
+
+
+class _MembershipReadConnection:
+    def __init__(self, *, postgres: bool) -> None:
+        self.postgres = postgres
+        self.calls: list[tuple[str, tuple[int, ...]]] = []
+
+    async def fetchrow(self, query: str, *params: int) -> dict[str, str]:
+        assert self.postgres is True
+        self.calls.append((query, params))
+        return {"role": "member", "status": "active"}
+
+    async def execute(
+        self,
+        query: str,
+        params: tuple[int, ...],
+    ) -> _MembershipReadCursor:
+        assert self.postgres is False
+        self.calls.append((query, params))
+        return _MembershipReadCursor()
+
+
+class _MembershipReadPool:
+    def __init__(self, *, postgres: bool) -> None:
+        self.pool: Any = object() if postgres else None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("postgres", "scope_type", "expected_sql"),
+    (
+        (
+            True,
+            MembershipScopeType.ORGANIZATION,
+            "SELECT role, status FROM public.org_members "
+            "WHERE org_id = $1 AND user_id = $2",
+        ),
+        (
+            True,
+            MembershipScopeType.TEAM,
+            "SELECT role, status FROM public.team_members "
+            "WHERE team_id = $1 AND user_id = $2",
+        ),
+        (
+            False,
+            MembershipScopeType.ORGANIZATION,
+            "SELECT role, status FROM main.org_members "
+            "WHERE org_id = ? AND user_id = ?",
+        ),
+        (
+            False,
+            MembershipScopeType.TEAM,
+            "SELECT role, status FROM main.team_members "
+            "WHERE team_id = ? AND user_id = ?",
+        ),
+    ),
+)
+async def test_read_membership_uses_static_sql_and_bound_values(
+    postgres: bool,
+    scope_type: MembershipScopeType,
+    expected_sql: str,
+) -> None:
+    conn = _MembershipReadConnection(postgres=postgres)
+    writer = MembershipWriter(_MembershipReadPool(postgres=postgres))
+
+    result = await writer._read_membership(conn, scope_type, 3, 7)
+
+    assert result == {"role": "member", "status": "active"}
+    assert conn.calls == [(expected_sql, (3, 7))]
 
 
 def _mutation(

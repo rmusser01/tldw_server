@@ -98,6 +98,7 @@ def _is_admin_principal(principal: AuthPrincipal) -> bool:
 def _manager_write_context(
     principal: AuthPrincipal,
 ) -> ActorMembershipWriteContext:
+    """Build the persisted-authority context for a scoped manager write."""
     return ActorMembershipWriteContext(
         actor_user_id=_principal_user_id(principal),
         required_authority=(

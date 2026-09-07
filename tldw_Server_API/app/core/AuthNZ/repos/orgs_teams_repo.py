@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.database import (
+    DatabasePool,
+    await_cancellation_safe_cleanup,
+    select_transaction_cleanup_failure,
+)
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     DuplicateOrganizationError,
     DuplicateTeamError,
@@ -45,6 +50,33 @@ DEFAULT_BASE_TEAM_DESCRIPTION = (
     "Automatically managed base team for organization-wide membership."
 )
 _SCOPE_DELETION_MAX_ATTEMPTS = 3
+
+
+async def _cleanup_failed_savepoint(
+    *,
+    primary: BaseException,
+    operations: tuple[tuple[str, Callable[[], Awaitable[Any]]], ...],
+) -> None:
+    """Complete ordered savepoint cleanup without replacing the primary failure."""
+
+    selected_failure = primary
+    cleanup_failed = False
+    for operation, cleanup in operations:
+        try:
+            await await_cancellation_safe_cleanup(cleanup())
+        except BaseException as cleanup_exc:
+            cleanup_failed = True
+            selected_failure, should_log = select_transaction_cleanup_failure(
+                selected_failure,
+                cleanup_exc,
+            )
+            if should_log:
+                logger.bind(
+                    operation=operation,
+                    error_type=type(cleanup_exc).__name__,
+                ).error("Membership savepoint cleanup failed")
+    if cleanup_failed:
+        raise selected_failure from None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1732,25 +1764,74 @@ class AuthnzOrgsTeamsRepo:
                 await savepoint.start()
                 try:
                     write_result = await _apply(tuple(mutations))
-                except Exception:
-                    await savepoint.rollback()
+                except (
+                    MembershipParentRequired,
+                    MembershipScopeNotFound,
+                ) as exc:
+                    await _cleanup_failed_savepoint(
+                        primary=exc,
+                        operations=(("rollback", savepoint.rollback),),
+                    )
                     logger.warning("Explicit invite team enrollment failed")
                     team_membership_failed = True
                     explicit_index = None
                     write_result = await _apply(tuple(base_mutations))
+                except BaseException as exc:
+                    await _cleanup_failed_savepoint(
+                        primary=exc,
+                        operations=(("rollback", savepoint.rollback),),
+                    )
+                    raise
                 else:
                     await savepoint.commit()
             else:
                 await conn.create_savepoint("explicit_team_companion")
                 try:
                     write_result = await _apply(tuple(mutations))
-                except Exception:
-                    await conn.rollback_savepoint("explicit_team_companion")
-                    await conn.release_savepoint("explicit_team_companion")
+                except (
+                    MembershipParentRequired,
+                    MembershipScopeNotFound,
+                ) as exc:
+                    await _cleanup_failed_savepoint(
+                        primary=exc,
+                        operations=(
+                            (
+                                "rollback",
+                                lambda: conn.rollback_savepoint(
+                                    "explicit_team_companion"
+                                ),
+                            ),
+                            (
+                                "release",
+                                lambda: conn.release_savepoint(
+                                    "explicit_team_companion"
+                                ),
+                            ),
+                        ),
+                    )
                     logger.warning("Explicit invite team enrollment failed")
                     team_membership_failed = True
                     explicit_index = None
                     write_result = await _apply(tuple(base_mutations))
+                except BaseException as exc:
+                    await _cleanup_failed_savepoint(
+                        primary=exc,
+                        operations=(
+                            (
+                                "rollback",
+                                lambda: conn.rollback_savepoint(
+                                    "explicit_team_companion"
+                                ),
+                            ),
+                            (
+                                "release",
+                                lambda: conn.release_savepoint(
+                                    "explicit_team_companion"
+                                ),
+                            ),
+                        ),
+                    )
+                    raise
                 else:
                     await conn.release_savepoint("explicit_team_companion")
         else:
