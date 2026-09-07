@@ -4,7 +4,7 @@ title: Implement Chunker hierarchical subsystem refactor
 status: In Progress
 assignee: []
 created_date: 2026-09-07 19:26
-updated_date: 2026-09-07 20:37
+updated_date: 2026-09-07 20:57
 labels:
 - chunking
 - refactor
@@ -39,7 +39,7 @@ Implement the approved Chunker hierarchical subsystem design in an isolated work
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 The implementation branch is reconciled with current origin/dev and focused baseline characterization is rerun before production edits
-- [x] #2 Frozen characterization tests cover option handling, leaf call traces, spans, malformed trees, flatten aliasing, logging, signatures, and import boundaries
+- [ ] #2 Frozen characterization tests cover option handling, leaf call traces, spans, malformed trees, flatten aliasing, logging, signatures, and import boundaries
 - [ ] #3 The hierarchical package is extracted with the approved component interfaces and dependency direction while public hierarchy behavior remains compatible
 - [ ] #4 The approved private span and header-title helpers are removed and process_text imports the shared span function directly
 - [ ] #5 Focused and complete Chunking tests, compileall, Ruff, scoped Black, Bandit, and git diff --check pass with results recorded
@@ -74,4 +74,6 @@ This record supersedes the colliding active TASK-13113 after rebasing onto origi
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-09-07 Task 2 contract freeze completed. Added tldw_Server_API/tests/Chunking/test_hierarchy_refactor_contracts.py, tldw_Server_API/tests/Chunking/test_hierarchy_malformed_contracts.py, and tldw_Server_API/tests/Chunking/test_hierarchical_spans.py (29 test functions, 54 collected cases) and updated only Task 2 in Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md. Focused pytest: 54 passed, 0 failed, 119 warnings in 1.35s. Ruff: All checks passed. Black --check: 3 files would be left unchanged. git diff --check: exit 0 with no output. Bandit on the three pytest files reported only the expected B101 assert-use rule (57 low-severity findings, 0 medium/high); rerun excluding B101 completed with 0 findings and 0 errors. Self-review confirmed deterministic instance fakes prevent leaf, rewrite, LLM, or external calls; every temporary Loguru sink is removed in finally; metadata fixtures are read-only and preserve the identities under test; malformed/span expectations match the observed unextracted baseline. No baseline discrepancy was found and no production code was changed.
+2026-09-07 Task 2 specification-review correction: acceptance criterion #2 remains unchanged in wording but is now unchecked because it also includes import boundaries, which belong to Task 3 and have not been implemented. Task 2's characterization portion is complete and its implementation-plan checkboxes remain accurately checked; this tracking correction does not start Task 3. Strengthened the Task 2 tests to record sanitize_output truthiness before method resolution, cover sanitize_output removal on the semantic rewrite branch as well as metadata and ordinary branches, and assert identity for template and method_options forwarded by the public flat wrapper.
+Task 2 specification-review verification: focused three-file suite collected 56 cases and completed with 56 passed, 0 failed, and 123 warnings in 1.17s. Ruff reported All checks passed. Black --check reported all 3 files would be left unchanged. Bandit excluding the expected pytest B101 assertion rule completed with 0 findings and 0 errors. git diff --check exited 0 with no output. The change scope contains only tldw_Server_API/tests/Chunking/test_hierarchy_refactor_contracts.py and this official TASK-13215 record; no production file or Task 3 file changed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
