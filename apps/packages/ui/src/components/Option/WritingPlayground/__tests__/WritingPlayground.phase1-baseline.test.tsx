@@ -616,6 +616,76 @@ afterEach(() => {
 describe("WritingPlayground phase1 baseline", () => {
   describe("scoped continuation", () => {
     it.each([
+      ["preset", "partial"], ["reject", "partial"], ["apply", "partial"],
+      ["preset", "admission"], ["reject", "admission"], ["apply", "admission"]
+    ])("prevents %s from persisting provisional continuation text at %s and resumes idle mutations", async (mutation, timing) => {
+      const original = "Intro. The old sentence. Outro."
+      const rewritten = "Intro. The sharper sentence. Outro."
+      const persistedPayloads: Record<string, unknown>[] = []
+      mockState.executeMutations = true
+      mockState.storageValues.set("selectedModel", "mock-model")
+      seedWritingSession({ prompt: original })
+      vi.mocked(updateWritingSession).mockImplementation(async (sessionId, patch, expectedVersion) => {
+        const payload = patch.payload ?? {}
+        persistedPayloads.push(payload)
+        return {
+          id: sessionId, name: "Auto Session", payload,
+          schema_version: patch.schema_version ?? 1, version_parent_id: null,
+          created_at: "2026-03-16T12:00:00Z", last_modified: "2026-03-16T12:00:01Z",
+          deleted: false, client_id: "test-client", version: expectedVersion + 1
+        } as Awaited<ReturnType<typeof updateWritingSession>>
+      })
+      mockState.sendResponses.push(structuredReplacement("The sharper sentence."))
+      render(<WritingPlayground />)
+      selectEditorText(getEditor(), "The old sentence.")
+      fireEvent.click(screen.getByRole("button", { name: /^rewrite$/i }))
+      await waitFor(() => expect(screen.getByText("The sharper sentence.")).toBeInTheDocument())
+      await waitFor(() => {
+        expect(persistedPayloads.map((payload) => payload.prompt)).toEqual([original])
+      }, { timeout: 2000 })
+
+      const tail = deferred<string>()
+      mockState.streamResults.push((async function* () { yield " provisional"; yield await tail.promise })())
+      const { snapshot, scope } = continuationSnapshot()
+      mockState.loadSnapshot.mockResolvedValue(snapshot)
+      const mutateRevision = () => {
+        fireEvent.click(mutation === "preset"
+          ? screen.getByRole("radio", { name: /make concise/i })
+          : screen.getByRole("button", { name: new RegExp(`^${mutation}$`, "i") }))
+      }
+      vi.useFakeTimers()
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+        if (timing === "admission") mutateRevision()
+      })
+      expect(getEditor()).toHaveValue(`${original} provisional`)
+      if (timing === "partial") mutateRevision()
+      act(() => scope.abort())
+      await act(async () => { tail.resolve(" stale"); await vi.advanceTimersByTimeAsync(800) })
+      vi.useRealTimers()
+      // Observe the real session-save boundary after the debounce, not merely
+      // whether the control looked disabled during generation.
+      expect(persistedPayloads.map((payload) => payload.prompt)).toEqual([original])
+      expect(getEditor()).toHaveValue(original)
+
+      vi.useFakeTimers()
+      mutateRevision()
+      expect(getEditor()).toHaveValue(mutation === "apply" ? rewritten : original)
+      await act(async () => { await vi.advanceTimersByTimeAsync(800) })
+      vi.useRealTimers()
+      expect(persistedPayloads).toHaveLength(2)
+      expect(persistedPayloads[1]?.prompt).not.toContain("provisional")
+      if (mutation !== "apply") expect(persistedPayloads[1]?.prompt).toBe(original)
+      if (mutation === "preset") {
+        expect(persistedPayloads[1]?.revision_preset_id).toBe("make_concise")
+      } else {
+        expect(JSON.stringify(persistedPayloads[1]?.revisions)).toContain(
+          mutation === "apply" ? '"applied"' : '"rejected"'
+        )
+      }
+    })
+
+    it.each([
       ["predict", false, "Continue in {my style}."],
       ["predict", true, "Continue in {my style}."],
       ["fill", false, "Fill in {my style}."],

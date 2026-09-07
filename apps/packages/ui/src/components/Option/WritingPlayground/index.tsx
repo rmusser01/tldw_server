@@ -1662,7 +1662,7 @@ export const WritingPlayground = () => {
 
   const persistRevisionPreset = React.useCallback(
     (presetId: WritingRevisionPresetId | null | undefined) => {
-      if (!presetId) return
+      if (!presetId || generationOperationRef.current) return
       setSelectedRevisionPresetId(presetId)
       applySessionPayloadPatch((payload) => ({
         ...payload,
@@ -1790,7 +1790,7 @@ export const WritingPlayground = () => {
 
   const handleRevisionRequest = React.useCallback(
     async (request: WritingActionBarRequest) => {
-      if (isGenerating || isRevisionGenerating || isSceneEditorPending) return
+      if (generationOperationRef.current || isGenerating || isRevisionGenerating || isSceneEditorPending) return
       const target = resolveFreshRevisionTarget(request)
       if (!target) return
 
@@ -1834,7 +1834,7 @@ export const WritingPlayground = () => {
 
   const handleRegenerateRevision = React.useCallback(
     async (proposal: WritingRevisionProposal) => {
-      if (isGenerating || isRevisionGenerating || isSceneEditorPending) return
+      if (generationOperationRef.current || isGenerating || isRevisionGenerating || isSceneEditorPending) return
       setIsRevisionGenerating(true)
       try {
         await revisionState.regenerateRevision(proposal.id, async (source) => {
@@ -3435,6 +3435,7 @@ export const WritingPlayground = () => {
                       target={displayedRevisionTarget}
                       selectedPresetId={selectedRevisionPresetId}
                       isGenerating={isRevisionGenerating}
+                      presetDisabled={isGenerating}
                       onPresetChange={persistRevisionPreset}
                       onRequest={(request) => {
                         void handleRevisionRequest(request)
@@ -3535,13 +3536,13 @@ export const WritingPlayground = () => {
                     )}
                     <WritingRevisionQueue
                       proposals={revisionState.revisions}
-                      actionsDisabled={isSceneEditorPending}
+                      actionsDisabled={isSceneEditorPending || isGenerating}
                       onApply={(proposal) => {
-                        if (isSceneEditorPending) return
+                        if (generationOperationRef.current || isSceneEditorPending) return
                         revisionState.applyRevision(proposal.id)
                       }}
                       onReject={(proposal) => {
-                        if (isSceneEditorPending) return
+                        if (generationOperationRef.current || isSceneEditorPending) return
                         revisionState.rejectRevision(proposal.id)
                       }}
                       onCopy={(proposal) => {
