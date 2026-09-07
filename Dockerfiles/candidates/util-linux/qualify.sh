@@ -317,21 +317,23 @@ build_candidate() {
     exit "$abi_status"
 }
 
-install_candidate() {
-    test "$(id -u)" -eq 0 || die "install mode requires container root"
-    test "$(uname -s)" = Linux || die "install mode requires Linux"
-    test "$(uname -m)" = x86_64 || die "install mode requires native x86_64"
-    mkdir -p "$EVIDENCE/install" "$EVIDENCE/status"
-    exec > >(tee -a "$EVIDENCE/install/install.log") 2>&1
-    mapfile -t packages < <(find /candidate -maxdepth 1 -type f -name '*.deb' -print | LC_ALL=C sort)
+install_packages() {
+    local package_dir="$1"
+    local evidence="$2"
+    local package_file
+    local packages=()
+    mkdir -p "$evidence/install" "$evidence/status"
+    while IFS= read -r package_file; do
+        packages+=("$package_file")
+    done < <(find "$package_dir" -maxdepth 1 -type f -name '*.deb' -print | LC_ALL=C sort)
     test "${#packages[@]}" -gt 0 || die "no candidate packages were supplied"
-    dpkg -i "${packages[@]}"
-    apt-get check > "$EVIDENCE/install/apt-get-check.log" 2>&1
-    dpkg --audit > "$EVIDENCE/install/dpkg-audit.txt"
-    test ! -s "$EVIDENCE/install/dpkg-audit.txt"
+    apt-get install -y --no-download --no-remove --no-install-recommends "${packages[@]}"
+    apt-get check > "$evidence/install/apt-get-check.log" 2>&1
+    dpkg --audit > "$evidence/install/dpkg-audit.txt"
+    test ! -s "$evidence/install/dpkg-audit.txt"
     dpkg-query -W -f='${binary:Package}\t${Version}\t${source:Package}\t${source:Version}\n' \
-        > "$EVIDENCE/install/package-versions.txt"
-    local package_file package version
+        > "$evidence/install/package-versions.txt"
+    local package version
     for package_file in "${packages[@]}"; do
         package="$(dpkg-deb -f "$package_file" Package)"
         version="$(dpkg-deb -f "$package_file" Version)"
@@ -344,8 +346,17 @@ install_candidate() {
         blkid -V
         uuidgen --version
         lastlog2 --version
-    } > "$EVIDENCE/install/smoke-tests.log" 2>&1
-    printf '0\n' > "$EVIDENCE/status/install.exit"
+    } > "$evidence/install/smoke-tests.log" 2>&1
+    printf '0\n' > "$evidence/status/install.exit"
+}
+
+install_candidate() {
+    test "$(id -u)" -eq 0 || die "install mode requires container root"
+    test "$(uname -s)" = Linux || die "install mode requires Linux"
+    test "$(uname -m)" = x86_64 || die "install mode requires native x86_64"
+    mkdir -p "$EVIDENCE/install"
+    exec > >(tee -a "$EVIDENCE/install/install.log") 2>&1
+    install_packages /candidate "$EVIDENCE"
 }
 
 verify_evidence() {
@@ -408,5 +419,9 @@ case "${1:-}" in
         test "$#" -eq 3 || die "usage: $0 verify-package-versions PACKAGE_DIRECTORY OUTPUT"
         verify_package_versions "$2" "$3"
         ;;
-    *) die "usage: $0 {prepare|build|install|verify-sources|compare-abi|verify-evidence|verify-install-evidence|write-sums|verify-package-versions}" ;;
+    install-packages)
+        test "$#" -eq 3 || die "usage: $0 install-packages PACKAGE_DIRECTORY EVIDENCE"
+        install_packages "$2" "$3"
+        ;;
+    *) die "usage: $0 {prepare|build|install|verify-sources|compare-abi|verify-evidence|verify-install-evidence|write-sums|verify-package-versions|install-packages}" ;;
 esac
