@@ -80,6 +80,34 @@ source/binary artifact checksums verified locally. Installation stopped because
 APT's `--no-download` path rejected relative package filenames; use absolute
 `/candidate/*.deb`, retaining offline installation and all evidence gates.
 
+Third native run `34156564948` showed that absolute paths alone do not repair
+APT's acquisition failure. A bounded fresh-container control reproduced APT's
+exit 100 and independently passed direct `dpkg --install /candidate/*.deb`,
+`apt-get check` and empty `dpkg --audit`. Use that direct local installation,
+without force flags; keep the container network disabled and all dependency,
+version and installed-parser checks. The earlier path-only diagnosis was
+insufficient. Local installation is a control, not native qualification.
+
+Fresh CPython boundary investigation (before its implementation) confirmed:
+
+- Rebuild `_elementtree` with pyexpat: its capsule check includes Expat's micro
+  version, so replacing pyexpat alone breaks the original extension.
+- Run build-tree tests with the build root in `LD_LIBRARY_PATH`, as CPython's
+  `RUNSHARED` does. Record executable, libpython and extension paths so the base
+  image's existing shared interpreter cannot accidentally supply test results.
+- Preserve `pyexpatns.h` byte-for-byte. It already lacks an alias for
+  `XML_SetHashSalt16Bytes`; Linux `-fvisibility=hidden` is expected to keep that
+  symbol local. Verify ELF visibility and absence of unprefixed dynamic Expat
+  exports/undefined references, not an overbroad ban on local symbol names.
+- Initialize a fresh Git repository only in the extracted CPython source, unset
+  `CI`, and run its SBOM generator offline before compilation. Independently
+  verify the resulting Expat package, normalized file hashes and CONTAINS
+  relationships; preserve unrelated source and Windows external identities.
+- The offline refresh download adapter may accept only the exact upstream
+  `curl --location <approved-release-URL>` invocation and authenticated archive.
+- Explicitly import `_elementtree` and require the non-null-context child-parser
+  regression. A successful suite with the C extension skipped is insufficient.
+
 - [ ] Test that controller preparation/build/test/install failures propagate and evidence upload still runs; reject non-native hosts/images, missing status files and missing parser-test output.
 - [ ] Use native `ubuntu-24.04`; pin checkout/upload actions to the same verified commits as util-linux qualification. Preserve read-only repository permissions, exact checkout SHA, image identities and logs. No registry push, privileged mode, Docker socket bind, host secrets or production deploy.
 - [ ] Authenticate Debian `.dsc` and upstream/Python detached signatures in an isolated keyring, retaining full signer fingerprints and status output; never present GitHub's tag verification as local archive-signature verification. Abort before source execution if authentication fails.
