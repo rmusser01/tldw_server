@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "Helper_Scripts/Supply_Chain/expat_candidate.py"
 

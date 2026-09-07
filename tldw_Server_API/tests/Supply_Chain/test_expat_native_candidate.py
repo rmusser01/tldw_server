@@ -10,6 +10,8 @@ import subprocess  # nosec B404
 import pytest
 import yaml
 
+pytestmark = pytest.mark.unit
+
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "Dockerfiles/candidates/expat/qualify.sh"
 WORKFLOW = ROOT / ".github/workflows/expat-candidate.yml"
