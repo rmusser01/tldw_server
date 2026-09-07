@@ -209,7 +209,9 @@ install_candidate() {
     sha256sum -c SHA256SUMS
     local package
     for package in ./*.deb; do test "$(dpkg-deb -f "$package" Version)" = "$VERSION"; done
-    run_step apt-install apt-get install -y --no-download --no-install-recommends /candidate/*.deb
+    # Install only the verified local files; dpkg enforces dependencies without
+    # APT's failing --no-download local-file acquisition path. No force options.
+    run_step package-install dpkg --install /candidate/*.deb
     run_step apt-check apt-get check
     dpkg --audit > "$EVIDENCE/dpkg-audit.txt"
     test ! -s "$EVIDENCE/dpkg-audit.txt"
