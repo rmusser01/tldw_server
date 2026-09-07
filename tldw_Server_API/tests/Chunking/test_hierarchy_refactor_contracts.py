@@ -8,7 +8,7 @@ import inspect
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, NamedTuple
 
 import pytest
 from loguru import logger
@@ -35,6 +35,11 @@ _FORBIDDEN_LOWER_LAYER_IMPORTS = {
     f"{_HIERARCHICAL_PACKAGE_NAME}.flatten",
     f"{_HIERARCHICAL_PACKAGE_NAME}.service",
 }
+
+
+class _ResolvedImport(NamedTuple):
+    module: str
+    imported_name: str | None = None
 
 
 class BrokenBool:
@@ -74,12 +79,12 @@ def _patch_single_block(
     )
 
 
-def _resolved_imports(module_path: Path) -> list[str]:
+def _resolved_imports(module_path: Path) -> list[_ResolvedImport]:
     tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
-    imports: list[str] = []
+    imports: list[_ResolvedImport] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            imports.extend(alias.name for alias in node.names)
+            imports.extend(_ResolvedImport(alias.name) for alias in node.names)
             continue
         if not isinstance(node, ast.ImportFrom):
             continue
@@ -90,15 +95,26 @@ def _resolved_imports(module_path: Path) -> list[str]:
         else:
             resolved_module = node.module or ""
         if resolved_module:
-            imports.append(resolved_module)
-            imports.extend(f"{resolved_module}.{alias.name}" for alias in node.names if alias.name != "*")
+            imports.extend(_ResolvedImport(resolved_module, alias.name) for alias in node.names)
     return imports
 
 
-def _assert_no_resolved_imports_containing(module_path: Path, forbidden: set[str]) -> None:
-    offenders = [
-        resolved for resolved in _resolved_imports(module_path) if any(blocked in resolved for blocked in forbidden)
-    ]
+def _is_exact_or_descendant(module: str, blocked: str) -> bool:
+    return module == blocked or module.startswith(f"{blocked}.")
+
+
+def _is_forbidden_import(resolved: _ResolvedImport, forbidden: set[str]) -> bool:
+    if resolved.module == _CHUNKING_PACKAGE_NAME and resolved.imported_name in {"Chunker", "*"}:
+        return True
+
+    candidates = [resolved.module]
+    if resolved.imported_name not in {None, "*"}:
+        candidates.append(f"{resolved.module}.{resolved.imported_name}")
+    return any(_is_exact_or_descendant(candidate, blocked) for candidate in candidates for blocked in forbidden)
+
+
+def _assert_no_forbidden_resolved_imports(module_path: Path, forbidden: set[str]) -> None:
+    offenders = [resolved for resolved in _resolved_imports(module_path) if _is_forbidden_import(resolved, forbidden)]
     assert offenders == [], f"{module_path.name} imports forbidden modules: {offenders}"
 
 
@@ -188,22 +204,29 @@ def test_process_text_context_no_longer_exposes_private_paragraph_spans() -> Non
 
 def test_hierarchical_modules_do_not_import_outer_owners() -> None:
     for module_path in sorted(_HIERARCHICAL_PACKAGE.glob("*.py")):
-        _assert_no_resolved_imports_containing(module_path, _FORBIDDEN_HIERARCHICAL_IMPORTS)
+        _assert_no_forbidden_resolved_imports(module_path, _FORBIDDEN_HIERARCHICAL_IMPORTS)
 
 
 def test_hierarchical_lower_layers_do_not_import_upper_layers() -> None:
     for module_name in ("leaves.py", "grouping.py"):
         module_path = _HIERARCHICAL_PACKAGE / module_name
         if module_path.exists():
-            _assert_no_resolved_imports_containing(module_path, _FORBIDDEN_LOWER_LAYER_IMPORTS)
+            _assert_no_forbidden_resolved_imports(module_path, _FORBIDDEN_LOWER_LAYER_IMPORTS)
 
 
 @pytest.mark.parametrize(
     "source",
     [
         "import tldw_Server_API.app.core.Chunking.chunker\n",
+        "import tldw_Server_API.app.core.Chunking.chunker.internal\n",
         "from .. import chunker\n",
         "from ..process_text import dispatch\n",
+        "from ..process_text.dispatch import dispatch_chunks\n",
+        "from .. import Chunker\n",
+        "from .. import Chunker as PublicChunker\n",
+        "from tldw_Server_API.app.core.Chunking import Chunker\n",
+        "from tldw_Server_API.app.core.Chunking import Chunker as PublicChunker\n",
+        "from .. import *\n",
     ],
 )
 def test_hierarchical_import_boundary_resolves_absolute_and_relative_imports(
@@ -214,7 +237,48 @@ def test_hierarchical_import_boundary_resolves_absolute_and_relative_imports(
     module_path.write_text(source, encoding="utf-8")
 
     with pytest.raises(AssertionError):
-        _assert_no_resolved_imports_containing(module_path, _FORBIDDEN_HIERARCHICAL_IMPORTS)
+        _assert_no_forbidden_resolved_imports(module_path, _FORBIDDEN_HIERARCHICAL_IMPORTS)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from . import service\n",
+        "from .builder import build_hierarchy_tree\n",
+        "import tldw_Server_API.app.core.Chunking.hierarchical.flatten.helpers\n",
+    ],
+)
+def test_hierarchical_lower_layer_boundary_rejects_upper_layers(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    module_path = tmp_path / "candidate.py"
+    module_path.write_text(source, encoding="utf-8")
+
+    with pytest.raises(AssertionError):
+        _assert_no_forbidden_resolved_imports(module_path, _FORBIDDEN_LOWER_LAYER_IMPORTS)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import tldw_Server_API.app.core.Chunking.chunker_tools\n",
+        "from .. import chunker_tools\n",
+        "from tldw_Server_API.app.core.Chunking import chunker_tools as tools\n",
+        "import tldw_Server_API.app.core.Chunking.process_text_helpers\n",
+        "from .. import process_text_helpers\n",
+        "from tldw_Server_API.app.core.Chunking import process_text_helpers as helpers\n",
+        "from ..base import ChunkerConfig\n",
+    ],
+)
+def test_hierarchical_import_boundary_allows_similarly_named_modules(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    module_path = tmp_path / "candidate.py"
+    module_path.write_text(source, encoding="utf-8")
+
+    _assert_no_forbidden_resolved_imports(module_path, _FORBIDDEN_HIERARCHICAL_IMPORTS)
 
 
 def test_public_flat_method_composes_overridable_public_methods(
