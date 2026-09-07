@@ -4,7 +4,7 @@ title: Implement Chunker hierarchical subsystem refactor
 status: In Progress
 assignee: []
 created_date: 2026-09-07 19:26
-updated_date: 2026-09-07 19:49
+updated_date: 2026-09-07 20:37
 labels:
 - chunking
 - refactor
@@ -39,7 +39,7 @@ Implement the approved Chunker hierarchical subsystem design in an isolated work
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 The implementation branch is reconciled with current origin/dev and focused baseline characterization is rerun before production edits
-- [ ] #2 Frozen characterization tests cover option handling, leaf call traces, spans, malformed trees, flatten aliasing, logging, signatures, and import boundaries
+- [x] #2 Frozen characterization tests cover option handling, leaf call traces, spans, malformed trees, flatten aliasing, logging, signatures, and import boundaries
 - [ ] #3 The hierarchical package is extracted with the approved component interfaces and dependency direction while public hierarchy behavior remains compatible
 - [ ] #4 The approved private span and header-title helpers are removed and process_text imports the shared span function directly
 - [ ] #5 Focused and complete Chunking tests, compileall, Ruff, scoped Black, Bandit, and git diff --check pass with results recorded
@@ -69,3 +69,9 @@ This record supersedes the colliding active TASK-13113 after rebasing onto origi
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+2026-09-07 Task 2 contract freeze completed. Added tldw_Server_API/tests/Chunking/test_hierarchy_refactor_contracts.py, tldw_Server_API/tests/Chunking/test_hierarchy_malformed_contracts.py, and tldw_Server_API/tests/Chunking/test_hierarchical_spans.py (29 test functions, 54 collected cases) and updated only Task 2 in Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md. Focused pytest: 54 passed, 0 failed, 119 warnings in 1.35s. Ruff: All checks passed. Black --check: 3 files would be left unchanged. git diff --check: exit 0 with no output. Bandit on the three pytest files reported only the expected B101 assert-use rule (57 low-severity findings, 0 medium/high); rerun excluding B101 completed with 0 findings and 0 errors. Self-review confirmed deterministic instance fakes prevent leaf, rewrite, LLM, or external calls; every temporary Loguru sink is removed in finally; metadata fixtures are read-only and preserve the identities under test; malformed/span expectations match the observed unextracted baseline. No baseline discrepancy was found and no production code was changed.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
