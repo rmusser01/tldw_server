@@ -320,20 +320,56 @@ build_candidate() {
 install_packages() {
     local package_dir="$1"
     local evidence="$2"
-    local package_file
+    local cache_dir="$3"
+    local cache_name digest existing_cache_name index package package_file version architecture
+    local cache_names=()
     local packages=()
     mkdir -p "$evidence/install" "$evidence/status"
     while IFS= read -r package_file; do
         packages+=("$package_file")
     done < <(find "$package_dir" -maxdepth 1 -type f -name '*.deb' -print | LC_ALL=C sort)
     test "${#packages[@]}" -gt 0 || die "no candidate packages were supplied"
-    apt-get install -y --no-download --no-remove --no-install-recommends "${packages[@]}"
+    test "${cache_dir:0:1}" = / || die "APT archive cache path must be absolute"
+    verify_package_versions "$package_dir" "$evidence/install/source-family-versions.txt"
+    for package_file in "${packages[@]}"; do
+        package="$(dpkg-deb -f "$package_file" Package)"
+        version="$(dpkg-deb -f "$package_file" Version)"
+        architecture="$(dpkg-deb -f "$package_file" Architecture)"
+        [[ "$package" =~ ^[a-z0-9][a-z0-9+.-]*$ ]] \
+            || die "unsafe package metadata for APT cache: $package"
+        case "$architecture" in
+            amd64|all) ;;
+            *) die "unsupported package architecture for APT cache: $architecture" ;;
+        esac
+        cache_name="${package}_${version//:/%3a}_${architecture}.deb"
+        if (( ${#cache_names[@]} > 0 )); then
+            for existing_cache_name in "${cache_names[@]}"; do
+                test "$existing_cache_name" != "$cache_name" \
+                    || die "duplicate APT cache metadata: $cache_name"
+            done
+        fi
+        cache_names+=("$cache_name")
+    done
+    test ! -e "$cache_dir" || die "APT archive cache already exists: $cache_dir"
+    mkdir "$cache_dir"
+    mkdir "$cache_dir/partial"
+    : > "$evidence/install/apt-cache-staging.sha256"
+    for index in "${!packages[@]}"; do
+        package_file="${packages[$index]}"
+        cache_name="${cache_names[$index]}"
+        cp -- "$package_file" "$cache_dir/$cache_name"
+        cmp -- "$package_file" "$cache_dir/$cache_name"
+        digest="$(sha256sum "$package_file")"
+        printf '%s  %s\n' "${digest%% *}" "$cache_name" \
+            >> "$evidence/install/apt-cache-staging.sha256"
+    done
+    apt-get -o "Dir::Cache::archives=$cache_dir/" \
+        install -y --no-download --no-remove --no-install-recommends "${packages[@]}"
     apt-get check > "$evidence/install/apt-get-check.log" 2>&1
     dpkg --audit > "$evidence/install/dpkg-audit.txt"
     test ! -s "$evidence/install/dpkg-audit.txt"
     dpkg-query -W -f='${binary:Package}\t${Version}\t${source:Package}\t${source:Version}\n' \
         > "$evidence/install/package-versions.txt"
-    local package version
     for package_file in "${packages[@]}"; do
         package="$(dpkg-deb -f "$package_file" Package)"
         version="$(dpkg-deb -f "$package_file" Version)"
@@ -356,7 +392,7 @@ install_candidate() {
     test "$(uname -m)" = x86_64 || die "install mode requires native x86_64"
     mkdir -p "$EVIDENCE/install"
     exec > >(tee -a "$EVIDENCE/install/install.log") 2>&1
-    install_packages /candidate "$EVIDENCE"
+    install_packages /candidate "$EVIDENCE" /work/apt-archives
 }
 
 verify_evidence() {
@@ -420,8 +456,8 @@ case "${1:-}" in
         verify_package_versions "$2" "$3"
         ;;
     install-packages)
-        test "$#" -eq 3 || die "usage: $0 install-packages PACKAGE_DIRECTORY EVIDENCE"
-        install_packages "$2" "$3"
+        test "$#" -eq 4 || die "usage: $0 install-packages PACKAGE_DIRECTORY EVIDENCE APT_ARCHIVE_CACHE"
+        install_packages "$2" "$3" "$4"
         ;;
     *) die "usage: $0 {prepare|build|install|verify-sources|compare-abi|verify-evidence|verify-install-evidence|write-sums|verify-package-versions|install-packages}" ;;
 esac
