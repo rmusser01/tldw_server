@@ -63,6 +63,39 @@ def test_auth_request_client_ip_uses_unknown_for_invalid_physical_peer(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_org_bootstrap_uses_atomic_owner_creation(monkeypatch):
+    import tldw_Server_API.app.api.v1.endpoints.auth as auth
+    import tldw_Server_API.app.core.AuthNZ.database as database_module
+    import tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo as repo_module
+
+    observed = {}
+
+    async def _no_memberships(_user_id):
+        return []
+
+    async def _pool():
+        return object()
+
+    class _Repo:
+        def __init__(self, *, db_pool):
+            observed["pool"] = db_pool
+
+        async def create_organization_with_owner_membership(self, **kwargs):
+            observed["kwargs"] = kwargs
+            return {"id": 11}
+
+    monkeypatch.setattr(auth, "list_memberships_for_user", _no_memberships)
+    monkeypatch.setattr(database_module, "get_db_pool", _pool)
+    monkeypatch.setattr(repo_module, "AuthnzOrgsTeamsRepo", _Repo)
+
+    await auth._ensure_user_org_membership(7, "alice")
+
+    assert observed["kwargs"]["name"] == "alice Workspace"
+    assert observed["kwargs"]["owner_user_id"] == 7
+    assert observed["kwargs"]["context"].trusted_reason.value == "bootstrap"
+
+
+@pytest.mark.asyncio
 async def test_is_mfa_backend_supported_prefers_mfa_service_capability(monkeypatch):
     reset_settings()
     import tldw_Server_API.app.api.v1.endpoints.auth as auth

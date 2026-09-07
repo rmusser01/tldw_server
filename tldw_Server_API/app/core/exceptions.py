@@ -13,7 +13,13 @@ from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from .AuthNZ.exceptions import DatabaseError as AuthNZDatabaseError
+from .AuthNZ.exceptions import (
+    DatabaseError as AuthNZDatabaseError,
+)
+from .AuthNZ.exceptions import (
+    RollbackSignal,
+    UserRegistrationException,
+)
 from .exception_types import PromptCatalogError  # noqa: F401 - re-exported for compatibility.
 
 if TYPE_CHECKING:
@@ -96,6 +102,77 @@ class SnapshotStorageUnavailableError(SnapshotStoreError):
 
 class TransactionPassthroughError(Exception):
     """Sanitized domain failure that may cross a rolled-back DB transaction."""
+
+
+class MembershipWriterContractError(ValueError):
+    """Raised when membership planning input violates the closed contract."""
+
+    def __init__(self) -> None:
+        super().__init__("Invalid membership writer contract.")
+
+
+class OfflineMigrationContextRejected(MembershipWriterContractError):
+    """Raised when an offline-only context reaches a serving boundary."""
+
+    def __init__(self) -> None:
+        ValueError.__init__(
+            self,
+            "Offline migration membership context is unavailable while serving.",
+        )
+
+
+class MembershipWriteError(UserRegistrationException):
+    """Base class for sanitized runtime membership-write failures."""
+
+
+class MembershipReadError(UserRegistrationException):
+    """A membership-state read failed without exposing backend details."""
+
+    def __init__(self) -> None:
+        super().__init__("Membership state could not be read.")
+
+
+class MembershipAuthorizationError(MembershipWriteError):
+    """The persisted actor authority is insufficient for the locked scopes."""
+
+    def __init__(self) -> None:
+        super().__init__("Membership write is not authorized.")
+
+
+class MembershipScopeNotFound(MembershipWriteError):
+    """A requested organization or team is absent or inactive."""
+
+    def __init__(self) -> None:
+        super().__init__("Membership scope was not found.")
+
+
+class MembershipTargetNotFound(MembershipWriteError):
+    """A requested target user is absent."""
+
+    def __init__(self) -> None:
+        super().__init__("Membership target was not found.")
+
+
+class MembershipParentRequired(MembershipWriteError):
+    """A team-add target lacks an active parent-organization membership."""
+
+    def __init__(self) -> None:
+        super().__init__("Active parent organization membership is required.")
+
+
+class MembershipPreflightChanged(MembershipWriteError):
+    """Database-derived lock inputs changed before all locks were held."""
+
+    def __init__(self) -> None:
+        super().__init__("Membership write preconditions changed.")
+
+
+class _MembershipScopeDeletionRetry(RollbackSignal):
+    """Private signal forcing scope-deletion retry after transaction rollback."""
+
+
+class ProviderCredentialAliasConflictError(ValueError, UserRegistrationException):
+    """Raised when more than one legacy alias row exists for one provider."""
 
 
 class BuiltinCharacterSeedError(TransactionPassthroughError):

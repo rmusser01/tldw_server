@@ -109,6 +109,85 @@ def test_raw_protected_users_writes_fail_closed(
 @pytest.mark.parametrize(
     ("backend", "statement"),
     [
+        ("sqlite", "DELETE FROM org_members WHERE org_id = ?"),
+        ("sqlite", "UPDATE team_members SET role = ? WHERE team_id = ?"),
+        (
+            "postgres",
+            "INSERT INTO public.org_members (org_id, user_id, role) "
+            "VALUES ($1, $2, $3)",
+        ),
+        ("postgres", "DELETE FROM public.team_members WHERE team_id = $1"),
+        ("sqlite", "DELETE FROM organizations WHERE id = ?"),
+        ("postgres", "DELETE FROM public.teams WHERE id = $1"),
+        (
+            "postgres",
+            "COPY public.org_members (org_id, user_id, role) FROM STDIN",
+        ),
+        (
+            "postgres",
+            "COPY public.team_members (team_id, user_id, role) FROM STDIN",
+        ),
+    ],
+)
+def test_raw_membership_and_scope_deletion_writes_fail_closed(
+    backend: str,
+    statement: str,
+) -> None:
+    with pytest.raises(ProfileUserWriteRejected):
+        _guard_sql(
+            statement,
+            backend=backend,
+            connection_identity=object(),
+            operation="execute",
+        )
+
+
+@pytest.mark.parametrize(
+    ("backend", "statement"),
+    [
+        ("sqlite", "DELETE FROM main.org_members WHERE org_id = ?"),
+        ("postgres", "DELETE FROM public.team_members WHERE team_id = $1"),
+        ("sqlite", "DELETE FROM main.organizations WHERE id = ?"),
+        ("postgres", "DELETE FROM public.teams WHERE id = $1"),
+    ],
+)
+def test_membership_scope_capability_is_connection_bound_and_consumed_once(
+    backend: str,
+    statement: str,
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+        _mint_membership_scope_sql,
+    )
+
+    connection = object()
+    capability = _mint_membership_scope_sql(
+        statement,
+        backend=backend,
+        connection_identity=connection,
+        execution_mode="execute",
+    )
+
+    assert (
+        _guard_sql(
+            capability,
+            backend=backend,
+            connection_identity=connection,
+            operation="execute",
+        )
+        == statement
+    )
+    with pytest.raises(ProfileUserWriteRejected):
+        _guard_sql(
+            capability,
+            backend=backend,
+            connection_identity=connection,
+            operation="execute",
+        )
+
+
+@pytest.mark.parametrize(
+    ("backend", "statement"),
+    [
         ("sqlite", "SELECT id, email FROM users WHERE id = ?"),
         ("sqlite", "UPDATE users SET password_hash = ? WHERE id = ?"),
         ("sqlite", "UPDATE users SET totp_secret = ? WHERE id = ?"),
@@ -120,7 +199,12 @@ def test_raw_protected_users_writes_fail_closed(
         ),
         ("postgres", "ALTER TABLE users ADD COLUMN nickname TEXT"),
         ("postgres", "COPY users TO STDOUT"),
+        ("postgres", "COPY public.org_members TO STDOUT"),
+        ("postgres", "COPY team_members TO STDOUT"),
         ("postgres", "UPDATE api_keys SET status = $1 WHERE id = $2"),
+        ("postgres", "SAVEPOINT __asyncpg_savepoint_a1__;"),
+        ("postgres", "RELEASE SAVEPOINT __asyncpg_savepoint_a1__;"),
+        ("postgres", "ROLLBACK TO __asyncpg_savepoint_a1__;"),
     ],
 )
 def test_unprotected_concrete_sql_is_returned_unchanged(
@@ -136,6 +220,26 @@ def test_unprotected_concrete_sql_is_returned_unchanged(
         )
         == statement
     )
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "SAVEPOINT arbitrary_name;",
+        "SAVEPOINT __asyncpg_savepoint_a1__",
+        "SAVEPOINT __asyncpg_savepoint_a1__; DELETE FROM public.org_members;",
+        "RELEASE SAVEPOINT __asyncpg_savepoint_not_hex__;",
+        "ROLLBACK TO __asyncpg_savepoint_a1__; UPDATE public.team_members SET role = 'owner';",
+    ],
+)
+def test_noncanonical_postgres_savepoint_commands_fail_closed(statement: str) -> None:
+    with pytest.raises(ProfileUserWriteRejected):
+        _guard_sql(
+            statement,
+            backend="postgres",
+            connection_identity=object(),
+            operation="execute",
+        )
 
 
 def test_unknown_users_update_column_fails_closed() -> None:

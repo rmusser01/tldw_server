@@ -1,17 +1,26 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    ActorMembershipWriteContext,
+    MembershipAuthority,
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
+from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGateway
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import (
-    AuthnzOrgsTeamsRepo,
     DEFAULT_BASE_TEAM_NAME,
+    AuthnzOrgsTeamsRepo,
 )
 
-
 pytestmark = pytest.mark.integration
+_BOOTSTRAP_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+)
 
 
 @pytest.mark.asyncio
@@ -21,33 +30,24 @@ async def test_authnz_orgs_teams_repo_membership_postgres(test_db_pool):
 
     # Create two users
     now = datetime.utcnow().replace(microsecond=0)
-    async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (uuid, username, email, password_hash, role,
-                               is_active, is_verified, storage_quota_mb, storage_used_mb, created_at)
-            VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, 5120, 0.0, $6)
-            """,
-            str(uuid.uuid4()),
-            "owner_pg",
-            "owner_pg@example.com",
-            "x",
-            "user",
-            now,
-        )
-        await conn.execute(
-            """
-            INSERT INTO users (uuid, username, email, password_hash, role,
-                               is_active, is_verified, storage_quota_mb, storage_used_mb, created_at)
-            VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, 5120, 0.0, $6)
-            """,
-            str(uuid.uuid4()),
-            "member_pg",
-            "member_pg@example.com",
-            "x",
-            "user",
-            now,
-        )
+    async with pool.transaction() as conn:
+        gateway = VersionedUserWriteGateway("postgres")
+        for username in ("owner_pg", "member_pg"):
+            await gateway.insert_user(
+                conn,
+                values={
+                    "uuid": str(uuid.uuid4()),
+                    "username": username,
+                    "email": f"{username}@example.com",
+                    "password_hash": "x",
+                    "role": "user",
+                    "is_active": True,
+                    "is_verified": True,
+                    "storage_quota_mb": 5120,
+                    "storage_used_mb": 0.0,
+                    "created_at": now,
+                },
+            )
 
     owner_id = await pool.fetchval(
         "SELECT id FROM users WHERE username = $1", "owner_pg"
@@ -57,16 +57,30 @@ async def test_authnz_orgs_teams_repo_membership_postgres(test_db_pool):
     )
 
     repo = AuthnzOrgsTeamsRepo(pool)
+    owner_context = ActorMembershipWriteContext(
+        actor_user_id=owner_id,
+        required_authority=MembershipAuthority.SCOPED_MEMBERSHIP,
+    )
 
     # Create organization and add members (owner + member)
-    org = await repo.create_organization(name="PG Acme Corp", owner_user_id=owner_id)
+    org = await repo.create_organization_with_owner_membership(
+        name="PG Acme Corp",
+        owner_user_id=owner_id,
+        context=owner_context,
+    )
     org_id = org["id"]
 
     owner_membership = await repo.add_org_member(
-        org_id=org_id, user_id=owner_id, role="owner"
+        org_id=org_id,
+        user_id=owner_id,
+        role="owner",
+        context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
     )
     member_membership = await repo.add_org_member(
-        org_id=org_id, user_id=member_id, role="member"
+        org_id=org_id,
+        user_id=member_id,
+        role="member",
+        context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
     )
 
     assert owner_membership["org_id"] == org_id
@@ -115,6 +129,7 @@ async def test_authnz_orgs_teams_repo_membership_postgres(test_db_pool):
         org_id=org_id,
         user_id=member_id,
         role="admin",
+        context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
     )
     assert updated_member is not None
     assert updated_member["role"].lower() == "admin"
@@ -124,13 +139,18 @@ async def test_authnz_orgs_teams_repo_membership_postgres(test_db_pool):
         org_id=org_id,
         user_id=owner_id,
         role="member",
+        context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
     )
     assert demote_owner is not None
     assert demote_owner["role"].lower() == "owner"
     assert demote_owner.get("error") == "owner_required"
 
     # Removing a non-owner should also remove them from the default team
-    remove_member = await repo.remove_org_member(org_id=org_id, user_id=member_id)
+    remove_member = await repo.remove_org_member(
+        org_id=org_id,
+        user_id=member_id,
+        context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
+    )
     assert remove_member["removed"] is True
 
     remaining_members = await repo.list_org_members(org_id=org_id)
@@ -150,7 +170,11 @@ async def test_authnz_orgs_teams_repo_membership_postgres(test_db_pool):
     assert owner_team_count_after == 1
 
     # Removing the last owner should be blocked with owner_required
-    remove_owner = await repo.remove_org_member(org_id=org_id, user_id=owner_id)
+    remove_owner = await repo.remove_org_member(
+        org_id=org_id,
+        user_id=owner_id,
+        context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
+    )
     assert remove_owner["removed"] is False
     assert remove_owner.get("error") == "owner_required"
 
@@ -172,24 +196,27 @@ async def test_authnz_orgs_teams_repo_list_organizations_for_user_variants_postg
     now = datetime.utcnow().replace(microsecond=0)
 
     # Create 3 users: org owner, multi-org member, and a user with no memberships.
-    async with pool.acquire() as conn:
+    async with pool.transaction() as conn:
+        gateway = VersionedUserWriteGateway("postgres")
         for username, email in (
             ("owner_list_pg", "owner_list_pg@example.com"),
             ("member_list_pg", "member_list_pg@example.com"),
             ("no_orgs_pg", "no_orgs_pg@example.com"),
         ):
-            await conn.execute(
-                """
-                INSERT INTO users (uuid, username, email, password_hash, role,
-                                   is_active, is_verified, storage_quota_mb, storage_used_mb, created_at)
-                VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, 5120, 0.0, $6)
-                """,
-                str(uuid.uuid4()),
-                username,
-                email,
-                "x",
-                "user",
-                now,
+            await gateway.insert_user(
+                conn,
+                values={
+                    "uuid": str(uuid.uuid4()),
+                    "username": username,
+                    "email": email,
+                    "password_hash": "x",
+                    "role": "user",
+                    "is_active": True,
+                    "is_verified": True,
+                    "storage_quota_mb": 5120,
+                    "storage_used_mb": 0.0,
+                    "created_at": now,
+                },
             )
 
     owner_id = await pool.fetchval(
@@ -207,12 +234,21 @@ async def test_authnz_orgs_teams_repo_list_organizations_for_user_variants_postg
     # Create 3 orgs and enroll the owner in all, member in 2.
     org_ids: list[int] = []
     for name in ("PG Org One", "PG Org Two", "PG Org Three"):
-        org = await repo.create_organization(name=name, owner_user_id=owner_id)
+        org = await repo.create_organization_with_owner_membership(
+            name=name,
+            owner_user_id=owner_id,
+            context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
+        )
         org_ids.append(org["id"])
-        await repo.add_org_member(org_id=org["id"], user_id=owner_id, role="owner")
+        await repo.add_org_member(
+            org_id=org["id"],
+            user_id=owner_id,
+            role="owner",
+            context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
+        )
 
-    await repo.add_org_member(org_id=org_ids[0], user_id=member_id, role="member")
-    await repo.add_org_member(org_id=org_ids[1], user_id=member_id, role="member")
+    await repo.add_org_member(org_id=org_ids[0], user_id=member_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+    await repo.add_org_member(org_id=org_ids[1], user_id=member_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
     # Pagination: first page + second page should cover all orgs exactly once.
     page_1, total_1 = await repo.list_organizations_for_user(

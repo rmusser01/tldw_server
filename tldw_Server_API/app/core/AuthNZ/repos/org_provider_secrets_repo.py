@@ -9,6 +9,17 @@ from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    ActorMembershipWriteContext,
+    MembershipAuthority,
+    MembershipAuthorizationError,
+    MembershipScopeNotFound,
+    MembershipWriter,
+    validate_membership_write_context,
+)
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+    get_authnz_transaction_policy,
+)
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     ProviderCredentialAliasConflictError,
     fold_provider_credential_rows,
@@ -26,6 +37,16 @@ def _normalize_scope_type(scope_type: str) -> str:
     if st in {"team", "teams"}:
         return "team"
     raise ValueError(f"Invalid scope_type: {scope_type}")
+
+
+def _is_active_value(value: Any) -> bool:
+    if type(value) is bool:
+        return value
+    if type(value) is int:
+        return value == 1
+    if type(value) is str:
+        return value.strip().lower() in {"1", "true", "active"}
+    return False
 
 
 @dataclass
@@ -102,6 +123,212 @@ class AuthnzOrgProviderSecretsRepo:
             )
         return rows[0] if rows else None
 
+    async def _lock_active_parent_scope(
+        self,
+        conn: Any,
+        *,
+        scope_type: str,
+        scope_id: int,
+        postgres: bool,
+    ) -> int:
+        if scope_type == "org":
+            if postgres:
+                row = await conn.fetchrow(
+                    "SELECT id, is_active FROM public.organizations "
+                    "WHERE id = $1 FOR UPDATE",
+                    scope_id,
+                )
+            else:
+                cursor = await conn.execute(
+                    "SELECT id, is_active FROM main.organizations WHERE id = ?",
+                    (scope_id,),
+                )
+                row = await cursor.fetchone()
+            if row is None or not bool(self._row_to_dict(row).get("is_active")):
+                raise MembershipScopeNotFound()
+            return scope_id
+
+        if postgres:
+            parent = await conn.fetchrow(
+                "SELECT org_id FROM public.teams WHERE id = $1",
+                scope_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT org_id FROM main.teams WHERE id = ?",
+                (scope_id,),
+            )
+            parent = await cursor.fetchone()
+        if parent is None:
+            raise MembershipScopeNotFound()
+        organization_id = int(self._row_to_dict(parent)["org_id"])
+
+        if postgres:
+            organization = await conn.fetchrow(
+                "SELECT id, is_active FROM public.organizations "
+                "WHERE id = $1 FOR UPDATE",
+                organization_id,
+            )
+            team = await conn.fetchrow(
+                "SELECT id, org_id, is_active FROM public.teams "
+                "WHERE id = $1 FOR UPDATE",
+                scope_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT id, is_active FROM main.organizations WHERE id = ?",
+                (organization_id,),
+            )
+            organization = await cursor.fetchone()
+            cursor = await conn.execute(
+                "SELECT id, org_id, is_active FROM main.teams WHERE id = ?",
+                (scope_id,),
+            )
+            team = await cursor.fetchone()
+        if organization is None or team is None:
+            raise MembershipScopeNotFound()
+        organization_row = self._row_to_dict(organization)
+        team_row = self._row_to_dict(team)
+        if (
+            not bool(organization_row.get("is_active"))
+            or not bool(team_row.get("is_active"))
+            or int(team_row.get("org_id") or 0) != organization_id
+        ):
+            raise MembershipScopeNotFound()
+        return organization_id
+
+    async def _lock_authorized_active_parent_scope(
+        self,
+        conn: Any,
+        *,
+        scope_type: str,
+        scope_id: int,
+        postgres: bool,
+        authorization_context: ActorMembershipWriteContext | None,
+    ) -> None:
+        if authorization_context is None:
+            await self._lock_active_parent_scope(
+                conn,
+                scope_type=scope_type,
+                scope_id=scope_id,
+                postgres=postgres,
+            )
+            return
+
+        validate_membership_write_context(authorization_context, serving=True)
+        actor_user_id = authorization_context.actor_user_id
+        if postgres:
+            actor = await conn.fetchrow(
+                "SELECT id, is_active, is_superuser, role FROM public.users "
+                "WHERE id = $1 FOR UPDATE",
+                actor_user_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT id, is_active, is_superuser, role FROM main.users "
+                "WHERE id = ?",
+                (actor_user_id,),
+            )
+            actor = await cursor.fetchone()
+        if actor is None:
+            raise MembershipAuthorizationError()
+        actor_row = self._row_to_dict(actor)
+        if not _is_active_value(actor_row.get("is_active")):
+            raise MembershipAuthorizationError()
+
+        organization_id = await self._lock_active_parent_scope(
+            conn,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            postgres=postgres,
+        )
+        if authorization_context.required_authority is MembershipAuthority.PLATFORM_ADMIN:
+            membership_writer = MembershipWriter(self.db_pool)
+            await membership_writer.lock_platform_admin_authority_rows(
+                conn=conn,
+                context=authorization_context,
+            )
+            role = str(actor_row.get("role") or "").strip().lower()
+            if bool(actor_row.get("is_superuser")) or role in {
+                "owner",
+                "super_admin",
+                "admin",
+            }:
+                return
+            if await membership_writer.has_persisted_platform_admin(
+                conn,
+                actor_user_id,
+            ):
+                return
+            raise MembershipAuthorizationError()
+
+        membership_scopes = [("org_members", "org_id", organization_id, False)]
+        if scope_type == "team":
+            membership_scopes.append(("team_members", "team_id", scope_id, True))
+        else:
+            membership_scopes[0] = (
+                "org_members",
+                "org_id",
+                organization_id,
+                True,
+            )
+
+        for table, scope_column, membership_scope_id, require_manager in membership_scopes:
+            if postgres:
+                membership = await conn.fetchrow(
+                    f"SELECT role, status FROM public.{table} "  # nosec B608
+                    f"WHERE {scope_column} = $1 AND user_id = $2 FOR UPDATE",
+                    membership_scope_id,
+                    actor_user_id,
+                )
+            else:
+                cursor = await conn.execute(
+                    f"SELECT role, status FROM main.{table} "  # nosec B608
+                    f"WHERE {scope_column} = ? AND user_id = ?",
+                    (membership_scope_id, actor_user_id),
+                )
+                membership = await cursor.fetchone()
+            if membership is None:
+                raise MembershipAuthorizationError()
+            membership_row = self._row_to_dict(membership)
+            if str(membership_row.get("status") or "").strip().lower() != "active":
+                raise MembershipAuthorizationError()
+            if require_manager and (
+                str(membership_row.get("role") or "").strip().lower()
+                not in {"owner", "admin", "lead"}
+            ):
+                raise MembershipAuthorizationError()
+
+    async def authorize_scope_write(
+        self,
+        *,
+        scope_type: str,
+        scope_id: int,
+        authorization_context: ActorMembershipWriteContext,
+    ) -> None:
+        """Revalidate persisted authority before non-database mutation work."""
+
+        scope_norm = _normalize_scope_type(scope_type)
+        postgres = getattr(self.db_pool, "pool", None) is not None
+        try:
+            async with self.db_pool.transaction(
+                acquire_timeout_seconds=(
+                    get_authnz_transaction_policy().db_pool_acquire_timeout_seconds
+                ),
+            ) as conn:
+                await self._lock_authorized_active_parent_scope(
+                    conn,
+                    scope_type=scope_norm,
+                    scope_id=int(scope_id),
+                    postgres=postgres,
+                    authorization_context=authorization_context,
+                )
+        except Exception as exc:
+            logger.bind(error_type=type(exc).__name__).error(
+                "AuthnzOrgProviderSecretsRepo.authorize_scope_write failed"
+            )
+            raise
+
     async def _canonicalize_provider_identity(
         self,
         conn: Any,
@@ -125,7 +352,7 @@ class AuthnzOrgProviderSecretsRepo:
             rows = await conn.fetch(
                 """
                 SELECT provider, revoked_at
-                FROM org_provider_secrets
+                FROM public.org_provider_secrets
                 WHERE scope_type = $1 AND scope_id = $2
                   AND provider = ANY($3::text[])
                 ORDER BY provider
@@ -166,7 +393,7 @@ class AuthnzOrgProviderSecretsRepo:
             if postgres:
                 await conn.execute(
                     """
-                    DELETE FROM org_provider_secrets
+                    DELETE FROM public.org_provider_secrets
                     WHERE scope_type = $1 AND scope_id = $2
                       AND provider = ANY($3::text[])
                     """,
@@ -193,7 +420,7 @@ class AuthnzOrgProviderSecretsRepo:
         if postgres:
             await conn.execute(
                 """
-                UPDATE org_provider_secrets
+                UPDATE public.org_provider_secrets
                 SET provider = $1
                 WHERE scope_type = $2 AND scope_id = $3 AND provider = $4
                 """,
@@ -224,13 +451,25 @@ class AuthnzOrgProviderSecretsRepo:
         updated_at: datetime,
         created_by: int | None = None,
         updated_by: int | None = None,
+        authorization_context: ActorMembershipWriteContext | None = None,
     ) -> dict[str, Any]:
         scope_norm = _normalize_scope_type(scope_type)
         provider_norm = canonical_provider_name(provider)
         metadata_json = json.dumps(metadata) if metadata is not None else None
         try:
             postgres = getattr(self.db_pool, "pool", None) is not None
-            async with self.db_pool.transaction() as conn:
+            async with self.db_pool.transaction(
+                acquire_timeout_seconds=(
+                    get_authnz_transaction_policy().db_pool_acquire_timeout_seconds
+                ),
+            ) as conn:
+                await self._lock_authorized_active_parent_scope(
+                    conn,
+                    scope_type=scope_norm,
+                    scope_id=int(scope_id),
+                    postgres=postgres,
+                    authorization_context=authorization_context,
+                )
                 await self._canonicalize_provider_identity(
                     conn,
                     scope_norm,
@@ -243,7 +482,7 @@ class AuthnzOrgProviderSecretsRepo:
                     ts = self._normalize_datetime_for_postgres(updated_at)
                     row = await conn.fetchrow(
                         """
-                        INSERT INTO org_provider_secrets (
+                        INSERT INTO public.org_provider_secrets (
                             scope_type, scope_id, provider, encrypted_blob, key_hint, metadata,
                             created_by, updated_by, created_at, updated_at
                         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
@@ -346,6 +585,137 @@ class AuthnzOrgProviderSecretsRepo:
             )
             raise
 
+    async def fetch_secret_for_manager(
+        self,
+        *,
+        scope_type: str,
+        scope_id: int,
+        provider: str,
+        authorization_context: ActorMembershipWriteContext,
+        include_revoked: bool = False,
+    ) -> dict[str, Any] | None:
+        """Read one secret after manager authority is locked and revalidated."""
+
+        scope_norm = _normalize_scope_type(scope_type)
+        canonical, *legacy_names = provider_lookup_names(provider)
+        providers = (canonical, *legacy_names)
+        postgres = getattr(self.db_pool, "pool", None) is not None
+        try:
+            async with self.db_pool.transaction(
+                acquire_timeout_seconds=(
+                    get_authnz_transaction_policy().db_pool_acquire_timeout_seconds
+                ),
+            ) as conn:
+                await self._lock_authorized_active_parent_scope(
+                    conn,
+                    scope_type=scope_norm,
+                    scope_id=int(scope_id),
+                    postgres=postgres,
+                    authorization_context=authorization_context,
+                )
+                if postgres:
+                    rows = await conn.fetch(
+                        """
+                        SELECT id, scope_type, scope_id, provider, encrypted_blob,
+                               key_hint, metadata, created_at, updated_at,
+                               last_used_at, created_by, updated_by, revoked_by,
+                               revoked_at
+                        FROM public.org_provider_secrets
+                        WHERE scope_type = $1 AND scope_id = $2
+                          AND provider = ANY($3::text[])
+                        """,
+                        scope_norm,
+                        int(scope_id),
+                        list(providers),
+                    )
+                else:
+                    placeholders = ", ".join("?" for _provider in providers)
+                    cursor = await conn.execute(
+                        f"""
+                        SELECT id, scope_type, scope_id, provider, encrypted_blob,
+                               key_hint, metadata, created_at, updated_at,
+                               last_used_at, created_by, updated_by, revoked_by,
+                               revoked_at
+                        FROM org_provider_secrets
+                        WHERE scope_type = ? AND scope_id = ?
+                          AND provider IN ({placeholders})
+                        """,  # nosec B608
+                        (scope_norm, int(scope_id), *providers),
+                    )
+                    rows = await cursor.fetchall()
+                row = self._select_authoritative_row(
+                    [self._row_to_dict(item) for item in rows],
+                    canonical,
+                )
+                if row is None or (not include_revoked and row.get("revoked_at") is not None):
+                    return None
+                return row
+        except TransactionError as exc:
+            if isinstance(exc.__cause__, ProviderCredentialAliasConflictError):
+                raise exc.__cause__ from None
+            raise
+
+    async def list_secrets_for_manager(
+        self,
+        *,
+        scope_type: str,
+        scope_id: int,
+        authorization_context: ActorMembershipWriteContext,
+        include_revoked: bool = False,
+    ) -> list[dict[str, Any]]:
+        """List scope metadata after manager authority is locked and revalidated."""
+
+        scope_norm = _normalize_scope_type(scope_type)
+        postgres = getattr(self.db_pool, "pool", None) is not None
+        try:
+            async with self.db_pool.transaction(
+                acquire_timeout_seconds=(
+                    get_authnz_transaction_policy().db_pool_acquire_timeout_seconds
+                ),
+            ) as conn:
+                await self._lock_authorized_active_parent_scope(
+                    conn,
+                    scope_type=scope_norm,
+                    scope_id=int(scope_id),
+                    postgres=postgres,
+                    authorization_context=authorization_context,
+                )
+                if postgres:
+                    rows = await conn.fetch(
+                        """
+                        SELECT id, scope_type, scope_id, provider, key_hint,
+                               metadata, created_at, updated_at, last_used_at,
+                               created_by, updated_by, revoked_by, revoked_at
+                        FROM public.org_provider_secrets
+                        WHERE scope_type = $1 AND scope_id = $2
+                        ORDER BY provider
+                        """,
+                        scope_norm,
+                        int(scope_id),
+                    )
+                else:
+                    cursor = await conn.execute(
+                        """
+                        SELECT id, scope_type, scope_id, provider, key_hint,
+                               metadata, created_at, updated_at, last_used_at,
+                               created_by, updated_by, revoked_by, revoked_at
+                        FROM org_provider_secrets
+                        WHERE scope_type = ? AND scope_id = ?
+                        ORDER BY provider
+                        """,
+                        (scope_norm, int(scope_id)),
+                    )
+                    rows = await cursor.fetchall()
+                return fold_provider_credential_rows(
+                    [self._row_to_dict(row) for row in rows],
+                    identity_fields=("scope_type", "scope_id"),
+                    include_revoked=include_revoked,
+                )
+        except TransactionError as exc:
+            if isinstance(exc.__cause__, ProviderCredentialAliasConflictError):
+                raise exc.__cause__ from None
+            raise
+
     async def fetch_authorized_secret_for_user(
         self,
         scope_type: str,
@@ -383,18 +753,25 @@ class AuthnzOrgProviderSecretsRepo:
         providers: tuple[str, ...],
     ) -> list[dict[str, Any]]:
         """Read every provider alias through one authorized database snapshot."""
-        select_fields = """
-            SELECT s.id, s.scope_type, s.scope_id, s.provider, s.encrypted_blob,
-                   s.key_hint, s.metadata, s.created_at, s.updated_at,
-                   s.last_used_at, s.created_by, s.updated_by, s.revoked_by,
-                   s.revoked_at
-            FROM org_provider_secrets s
-        """
         is_postgres = getattr(self.db_pool, "pool", None) is not None
         if is_postgres:
+            select_fields = """
+                SELECT s.id, s.scope_type, s.scope_id, s.provider, s.encrypted_blob,
+                       s.key_hint, s.metadata, s.created_at, s.updated_at,
+                       s.last_used_at, s.created_by, s.updated_by, s.revoked_by,
+                       s.revoked_at
+                FROM public.org_provider_secrets s
+            """
             provider_placeholders = ", ".join(f"${index}" for index in range(3, 3 + len(providers)))
             user_placeholder = f"${3 + len(providers)}"
         else:
+            select_fields = """
+                SELECT s.id, s.scope_type, s.scope_id, s.provider, s.encrypted_blob,
+                       s.key_hint, s.metadata, s.created_at, s.updated_at,
+                       s.last_used_at, s.created_by, s.updated_by, s.revoked_by,
+                       s.revoked_at
+                FROM org_provider_secrets s
+            """
             provider_placeholders = ", ".join("?" for _provider in providers)
             user_placeholder = "?"
 
@@ -403,17 +780,21 @@ class AuthnzOrgProviderSecretsRepo:
             if is_postgres:
                 sql = select_fields + (
                     f"""
-                    JOIN team_members tm
+                    JOIN public.team_members tm
                       ON tm.team_id = s.scope_id
                      AND tm.user_id = {user_placeholder}
                      AND tm.status = 'active'
-                    JOIN teams t
+                    JOIN public.teams t
                       ON t.id = s.scope_id
                      AND t.is_active = TRUE
-                    JOIN organizations o
+                    JOIN public.org_members om
+                      ON om.org_id = t.org_id
+                     AND om.user_id = {user_placeholder}
+                     AND om.status = 'active'
+                    JOIN public.organizations o
                       ON o.id = t.org_id
                      AND o.is_active = TRUE
-                    JOIN users u
+                    JOIN public.users u
                       ON u.id = {user_placeholder}
                      AND u.is_active = TRUE
                     WHERE s.scope_type = $1
@@ -431,6 +812,10 @@ class AuthnzOrgProviderSecretsRepo:
                     JOIN teams t
                       ON t.id = s.scope_id
                      AND t.is_active = 1
+                    JOIN org_members om
+                      ON om.org_id = t.org_id
+                     AND om.user_id = {user_placeholder}
+                     AND om.status = 'active'
                     JOIN organizations o
                       ON o.id = t.org_id
                      AND o.is_active = 1
@@ -446,14 +831,14 @@ class AuthnzOrgProviderSecretsRepo:
             if is_postgres:
                 sql = select_fields + (
                     f"""
-                    JOIN org_members om
+                    JOIN public.org_members om
                       ON om.org_id = s.scope_id
                      AND om.user_id = {user_placeholder}
                      AND om.status = 'active'
-                    JOIN organizations o
+                    JOIN public.organizations o
                       ON o.id = s.scope_id
                      AND o.is_active = TRUE
-                    JOIN users u
+                    JOIN public.users u
                       ON u.id = {user_placeholder}
                      AND u.is_active = TRUE
                     WHERE s.scope_type = $1
@@ -489,11 +874,15 @@ class AuthnzOrgProviderSecretsRepo:
                 int(user_id),
             )
         else:
+            user_parameters = (
+                (int(user_id), int(user_id), int(user_id))
+                if scope_type == "team"
+                else (int(user_id), int(user_id))
+            )
             rows = await self.db_pool.fetchall(
                 sql,
                 (
-                    int(user_id),
-                    int(user_id),
+                    *user_parameters,
                     scope_type,
                     int(scope_id),
                     *providers,
@@ -513,7 +902,7 @@ class AuthnzOrgProviderSecretsRepo:
                 """
                 SELECT id, scope_type, scope_id, provider, encrypted_blob, key_hint, metadata,
                        created_at, updated_at, last_used_at, created_by, updated_by, revoked_by, revoked_at
-                FROM org_provider_secrets
+                FROM public.org_provider_secrets
                 WHERE scope_type = $1 AND scope_id = $2
                   AND provider = ANY($3::text[])
                 """,
@@ -567,7 +956,7 @@ class AuthnzOrgProviderSecretsRepo:
                 list_secrets_sql_template = """
                     SELECT id, scope_type, scope_id, provider, key_hint, metadata, created_at, updated_at, last_used_at,
                            created_by, updated_by, revoked_by, revoked_at
-                    FROM org_provider_secrets
+                    FROM public.org_provider_secrets
                     {where}
                     ORDER BY scope_type, scope_id, provider
                     """
@@ -621,13 +1010,25 @@ class AuthnzOrgProviderSecretsRepo:
         *,
         revoked_by: int | None = None,
         revoked_at: datetime | None = None,
+        authorization_context: ActorMembershipWriteContext | None = None,
     ) -> bool:
         scope_norm = _normalize_scope_type(scope_type)
         revoked_ts = revoked_at or datetime.now(timezone.utc)
         try:
             provider_norm = canonical_provider_name(provider)
             postgres = getattr(self.db_pool, "pool", None) is not None
-            async with self.db_pool.transaction() as conn:
+            async with self.db_pool.transaction(
+                acquire_timeout_seconds=(
+                    get_authnz_transaction_policy().db_pool_acquire_timeout_seconds
+                ),
+            ) as conn:
+                await self._lock_authorized_active_parent_scope(
+                    conn,
+                    scope_type=scope_norm,
+                    scope_id=int(scope_id),
+                    postgres=postgres,
+                    authorization_context=authorization_context,
+                )
                 await self._canonicalize_provider_identity(
                     conn,
                     scope_norm,
@@ -639,7 +1040,7 @@ class AuthnzOrgProviderSecretsRepo:
                     ts = self._normalize_datetime_for_postgres(revoked_ts)
                     result = await conn.execute(
                         """
-                        UPDATE org_provider_secrets
+                        UPDATE public.org_provider_secrets
                         SET revoked_at = $1, revoked_by = $2, updated_at = $1, updated_by = $3
                         WHERE scope_type = $4 AND scope_id = $5 AND provider = $6
                           AND revoked_at IS NULL
@@ -700,7 +1101,7 @@ class AuthnzOrgProviderSecretsRepo:
                 ts = self._normalize_datetime_for_postgres(used_at)
                 await self.db_pool.execute(
                     """
-                    UPDATE org_provider_secrets
+                    UPDATE public.org_provider_secrets
                     SET last_used_at = $1, updated_at = $1
                     WHERE scope_type = $2 AND scope_id = $3 AND provider = $4 AND revoked_at IS NULL
                     """,

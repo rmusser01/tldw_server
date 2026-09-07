@@ -7,6 +7,15 @@ from tldw_Server_API.app.api.v1.schemas.user_keys import (
     SharedProviderKeyTestRequest,
     SharedProviderKeyUpsertRequest,
 )
+from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseLockError,
+)
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    MembershipAuthority,
+    MembershipAuthorizationError,
+    MembershipScopeNotFound,
+)
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     ProviderCredentialAliasConflictError,
@@ -27,6 +36,9 @@ class _SharedRepo:
     async def fetch_secret(self, *_args):
         return {"encrypted_blob": "encrypted-provider-secret"}
 
+    async def authorize_scope_write(self, **_kwargs):
+        return None
+
     async def list_secrets(self, **_kwargs):
         if self.list_error is not None:
             raise self.list_error
@@ -42,6 +54,9 @@ class _ExplodingUserRepo:
 
 
 class _ExplodingSharedRepo:
+    async def authorize_scope_write(self, **_kwargs):
+        return None
+
     async def upsert_secret(self, **_kwargs):
         raise RuntimeError("shared BYOK upsert failed at /private/byok-shared.db")
 
@@ -69,6 +84,7 @@ def _principal() -> AuthPrincipal:
 def _allow_byok(monkeypatch) -> None:
     monkeypatch.setattr(service, "require_byok_enabled", lambda: None)
     monkeypatch.setattr(service, "is_provider_allowlisted", lambda _provider: True)
+    monkeypatch.setattr(service, "get_shared_byok_repo", _repo)
 
 
 def _assert_detached_validation_error(exc: HTTPException, sentinel: str) -> None:
@@ -235,6 +251,52 @@ async def test_upsert_shared_key_sanitizes_provider_validation_failures(monkeypa
     _assert_detached_validation_error(
         exc_info.value,
         "shared provider token at /private/shared-provider.json",
+    )
+
+
+@pytest.mark.asyncio
+async def test_upsert_shared_key_authorizes_before_provider_validation(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _UnauthorizedRepo:
+        async def authorize_scope_write(self, **kwargs):
+            captured.update(kwargs)
+            raise MembershipAuthorizationError()
+
+        async def upsert_secret(self, **_kwargs):
+            pytest.fail("storage must not run after failed authorization")
+
+    async def get_shared_repo():
+        return _UnauthorizedRepo()
+
+    async def fail_if_provider_called(**_kwargs):
+        pytest.fail("provider validation must not run before persisted authorization")
+
+    _allow_byok(monkeypatch)
+    monkeypatch.setattr(service, "get_shared_byok_repo", get_shared_repo)
+    monkeypatch.setattr(service, "normalize_credential_fields", lambda *_args: {})
+    monkeypatch.setattr(service, "test_provider_credentials", fail_if_provider_called)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await service.upsert_shared_key(
+            _principal(),
+            SharedProviderKeyUpsertRequest(
+                scope_type="org",
+                scope_id=42,
+                provider="openai",
+                api_key="sk-test",
+            ),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Not authorized to manage shared BYOK keys"
+    assert captured["scope_type"] == "org"
+    assert captured["scope_id"] == 42
+    authorization_context = captured["authorization_context"]
+    assert authorization_context.actor_user_id == 7
+    assert (
+        authorization_context.required_authority
+        is MembershipAuthority.PLATFORM_ADMIN
     )
 
 
@@ -506,11 +568,48 @@ async def test_revoke_user_key_sanitizes_backend_failure_log(monkeypatch):
     monkeypatch.setattr(service.admin_scope_service, "enforce_admin_user_scope", allow_scope)
 
     await _assert_byok_operation_log_sanitized(
-        lambda: service.revoke_user_key(_principal(), 42, "openai"),
+        lambda: service.revoke_user_key(_principal(), 42, "anthropic"),
         expected_detail="Failed to revoke user BYOK key",
         expected_log="Failed to revoke user BYOK key",
         raw_marker="user BYOK revoke failed",
     )
+
+
+@pytest.mark.asyncio
+async def test_upsert_shared_key_maps_alias_conflict_to_409(monkeypatch):
+    class _AliasConflictRepo:
+        async def authorize_scope_write(self, **_kwargs):
+            return None
+
+        async def upsert_secret(self, **_kwargs):
+            raise ProviderCredentialAliasConflictError("sensitive alias detail")
+
+    async def get_shared_repo():
+        return _AliasConflictRepo()
+
+    async def pass_provider_test(**_kwargs):
+        return "gpt-test"
+
+    _allow_byok(monkeypatch)
+    monkeypatch.setattr(service, "get_shared_byok_repo", get_shared_repo)
+    monkeypatch.setattr(service, "normalize_credential_fields", lambda _provider, _fields: {})
+    monkeypatch.setattr(service, "test_provider_credentials", pass_provider_test)
+    monkeypatch.setattr(service, "encrypt_byok_payload", lambda _payload: {"ciphertext": "sealed"})
+    monkeypatch.setattr(service, "dumps_envelope", lambda _envelope: "sealed-envelope")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await service.upsert_shared_key(
+            _principal(),
+            SharedProviderKeyUpsertRequest(
+                scope_type="org",
+                scope_id=42,
+                provider="openai",
+                api_key="sk-test",
+            ),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "Conflicting provider credential aliases"
 
 
 @pytest.mark.asyncio
@@ -586,6 +685,9 @@ async def test_upsert_shared_key_canonicalizes_registered_alias(monkeypatch):
     captured: dict = {}
 
     class CapturingRepo:
+        async def authorize_scope_write(self, **kwargs):
+            captured.update(kwargs)
+
         async def upsert_secret(self, **kwargs):
             captured.update(kwargs)
             return {"provider": kwargs["provider"], "key_hint": "test"}
@@ -614,7 +716,159 @@ async def test_upsert_shared_key_canonicalizes_registered_alias(monkeypatch):
     )
 
     assert captured["provider"] == "openai"
+    assert captured["authorization_context"].actor_user_id == 7
+    assert (
+        captured["authorization_context"].required_authority
+        is MembershipAuthority.PLATFORM_ADMIN
+    )
     assert response.provider == "openai"
+
+
+@pytest.mark.asyncio
+async def test_delete_shared_key_supplies_platform_admin_authorization_context(
+    monkeypatch,
+) -> None:
+    captured: dict = {}
+
+    class CapturingRepo:
+        async def delete_secret(self, *_args, **kwargs):
+            captured.update(kwargs)
+            return True
+
+    async def get_shared_repo():
+        return CapturingRepo()
+
+    _allow_byok(monkeypatch)
+    monkeypatch.setattr(service, "get_shared_byok_repo", get_shared_repo)
+
+    await service.delete_shared_key(_principal(), "org", 42, "openai")
+
+    assert captured["authorization_context"].actor_user_id == 7
+    assert (
+        captured["authorization_context"].required_authority
+        is MembershipAuthority.PLATFORM_ADMIN
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_shared_key_preserves_invalid_actor_as_forbidden(
+    monkeypatch,
+) -> None:
+    class UnusedRepo:
+        async def delete_secret(self, *_args, **_kwargs):
+            pytest.fail("storage must not run for an invalid actor")
+
+    async def get_shared_repo():
+        return UnusedRepo()
+
+    _allow_byok(monkeypatch)
+    monkeypatch.setattr(service, "get_shared_byok_repo", get_shared_repo)
+
+    invalid_principal = AuthPrincipal(
+        kind="user",
+        user_id=0,
+        roles=["admin"],
+        permissions=["*"],
+        is_admin=True,
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        await service.delete_shared_key(
+            invalid_principal,
+            "org",
+            42,
+            "openai",
+        )
+
+    assert exc_info.value.status_code == 403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure_type", "expected_status", "expected_detail"),
+    (
+        (
+            MembershipAuthorizationError,
+            403,
+            "Not authorized to manage shared BYOK keys",
+        ),
+        (MembershipScopeNotFound, 404, "Shared BYOK scope not found"),
+        (
+            DatabaseLockError,
+            503,
+            "Authentication database is busy. Please retry shortly.",
+        ),
+        (
+            ConnectionPoolExhaustedError,
+            503,
+            "Authentication database is busy. Please retry shortly.",
+        ),
+        (
+            TimeoutError,
+            503,
+            "Authentication database is busy. Please retry shortly.",
+        ),
+    ),
+)
+async def test_shared_key_mutations_preserve_bounded_control_failures(
+    monkeypatch,
+    failure_type: type[Exception],
+    expected_status: int,
+    expected_detail: str,
+) -> None:
+    class FailingRepo:
+        async def authorize_scope_write(self, **_kwargs):
+            raise failure_type()
+
+        async def upsert_secret(self, **_kwargs):
+            raise failure_type()
+
+        async def delete_secret(self, *_args, **_kwargs):
+            raise failure_type()
+
+    async def get_shared_repo():
+        return FailingRepo()
+
+    async def pass_provider_test(**_kwargs):
+        return "gpt-test"
+
+    _allow_byok(monkeypatch)
+    monkeypatch.setattr(service, "get_shared_byok_repo", get_shared_repo)
+    monkeypatch.setattr(service, "normalize_credential_fields", lambda *_args: {})
+    monkeypatch.setattr(service, "test_provider_credentials", pass_provider_test)
+    monkeypatch.setattr(
+        service,
+        "encrypt_byok_payload",
+        lambda _payload: {"ciphertext": "sealed"},
+    )
+    monkeypatch.setattr(service, "dumps_envelope", lambda _envelope: "sealed")
+
+    operations = (
+        lambda: service.upsert_shared_key(
+            _principal(),
+            SharedProviderKeyUpsertRequest(
+                scope_type="org",
+                scope_id=42,
+                provider="openai",
+                api_key="sk-test",
+            ),
+        ),
+        lambda: service.delete_shared_key(_principal(), "org", 42, "openai"),
+    )
+    for operation in operations:
+        with pytest.raises(HTTPException) as exc_info:
+            await operation()
+        assert exc_info.value.status_code == expected_status
+        assert exc_info.value.detail == expected_detail
+        if expected_status == 503:
+            from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+                get_authnz_transaction_policy,
+            )
+
+            assert exc_info.value.headers == {
+                "Retry-After": str(
+                    get_authnz_transaction_policy().busy_retry_after_seconds
+                ),
+            }
 
 
 @pytest.mark.asyncio

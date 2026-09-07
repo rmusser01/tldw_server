@@ -37,6 +37,9 @@ from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, is_single_user_principal
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+    get_authnz_transaction_policy,
+)
 from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.UserProfiles.bulk_command_service import ProfileBulkCommandService
 from tldw_Server_API.app.core.UserProfiles.command_service import ProfileCommandService
@@ -890,6 +893,14 @@ async def bulk_update_user_profiles(
     user_repo = await AuthnzUsersRepo.from_pool()
     roles = _derive_profile_update_roles(principal)
     updates = [(entry.key, entry.value) for entry in payload.updates]
+    contains_membership_updates = any(
+        entry.key.startswith("memberships.") for entry in payload.updates
+    )
+    transaction_acquire_timeout_seconds = (
+        None
+        if payload.dry_run
+        else get_authnz_transaction_policy().db_pool_acquire_timeout_seconds
+    )
     results: list[UserProfileBulkUpdateUserResult] = []
     updated_count = 0
     skipped_count = 0
@@ -936,12 +947,22 @@ async def bulk_update_user_profiles(
                     ),
                 )
             else:
-                async with db_pool.transaction() as conn:
-                    await profile_service.get_profile_version(
-                        user_id=int(user_id),
-                        db_conn=conn,
-                        lock_user=True,
-                    )
+                async with db_pool.transaction(
+                    acquire_timeout_seconds=transaction_acquire_timeout_seconds,
+                ) as conn:
+                    if contains_membership_updates:
+                        await profile_service.lock_profile_users(
+                            user_ids=tuple(
+                                sorted({int(principal.user_id), int(user_id)})
+                            ),
+                            db_conn=conn,
+                        )
+                    else:
+                        await profile_service.get_profile_version(
+                            user_id=int(user_id),
+                            db_conn=conn,
+                            lock_user=True,
+                        )
                     result = await update_service.apply_updates(
                         user_id=int(user_id),
                         updates=updates,

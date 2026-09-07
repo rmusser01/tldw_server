@@ -5,18 +5,34 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+async def _execute_membership_fixture_sql(pool, query: str, *args) -> None:
+    from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+        _execute_membership_scope_sql,
+    )
+
+    async with pool.transaction() as conn:
+        await _execute_membership_scope_sql(
+            conn,
+            query,
+            *args,
+            backend="postgres",
+        )
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_admin_endpoints_pg(test_db_pool):
     # App and overrides
-    from tldw_Server_API.app.main import app
+    from starlette.requests import Request
+
     from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
-    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, AuthContext
-    from starlette.requests import Request
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 
     # Disable CSRF for test client
     from tldw_Server_API.app.core.config import settings as app_settings
+    from tldw_Server_API.app.main import app
+
     app_settings['CSRF_ENABLED'] = False
 
     # Ensure Postgres pool from fixture
@@ -250,10 +266,10 @@ async def test_admin_endpoints_pg(test_db_pool):
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_org_member_list_pagination_filters_pg(test_db_pool):
-    from tldw_Server_API.app.main import app
     from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
-    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, AuthContext
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
     from tldw_Server_API.app.core.config import settings as app_settings
+    from tldw_Server_API.app.main import app
 
     pool = test_db_pool
     app_settings['CSRF_ENABLED'] = False
@@ -364,9 +380,12 @@ async def test_org_member_list_pagination_filters_pg(test_db_pool):
                 lead_invited_ids.add(user_id)
 
             added_at = base_ts + timedelta(seconds=idx)
-            await pool.execute(
+            await _execute_membership_fixture_sql(
+                pool,
                 """
-                INSERT INTO org_members (org_id, user_id, role, status, added_at)
+                INSERT INTO public.org_members (
+                    org_id, user_id, role, status, added_at
+                )
                 VALUES ($1, $2, $3, $4, $5)
                 """,
                 org_id, user_id, role, status, added_at,

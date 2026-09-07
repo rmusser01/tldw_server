@@ -17,9 +17,9 @@ async def test_admin_endpoints_basic_sqlite(tmp_path):
     os.environ['DATABASE_URL'] = f'sqlite:///{db_path}'
 
     # Reset singletons
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     reset_settings()
     await reset_db_pool()
 
@@ -36,9 +36,9 @@ async def test_admin_endpoints_basic_sqlite(tmp_path):
     )
 
     # Create TestClient and override admin/principal dependencies to bypass auth
-    from tldw_Server_API.app.main import app
     from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
-    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, AuthContext
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+    from tldw_Server_API.app.main import app
 
     async def _principal_override(request=None):  # type: ignore[override]
         principal = AuthPrincipal(
@@ -197,9 +197,9 @@ async def test_org_member_list_pagination_filters_sqlite(tmp_path):
     db_path = tmp_path / 'users_members.db'
     os.environ['DATABASE_URL'] = f'sqlite:///{db_path}'
 
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     reset_settings()
     await reset_db_pool()
 
@@ -211,10 +211,11 @@ async def test_org_member_list_pagination_filters_sqlite(tmp_path):
         pool, username="rootadmin", email="rootadmin@example.com"
     )
 
-    from tldw_Server_API.app.main import app
-    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
-    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, AuthContext
     from starlette.requests import Request
+
+    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+    from tldw_Server_API.app.main import app
 
     async def _principal_override(request: Request):  # type: ignore[override]
         principal = AuthPrincipal(
@@ -259,6 +260,10 @@ async def test_org_member_list_pagination_filters_sqlite(tmp_path):
             )
         )
 
+    from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+        _execute_membership_scope_sql,
+    )
+
     async with pool.transaction() as conn:
         org_cursor = await conn.execute(
             "INSERT INTO organizations (name, slug, owner_user_id) VALUES (?, ?, ?)",
@@ -281,12 +286,14 @@ async def test_org_member_list_pagination_filters_sqlite(tmp_path):
             if role == 'lead' and status == 'invited':
                 lead_invited_ids.add(user_id)
             added_at = base_ts + timedelta(seconds=idx)
-            await conn.execute(
+            await _execute_membership_scope_sql(
+                conn,
                 """
                 INSERT INTO org_members (org_id, user_id, role, status, added_at)
                 VALUES (?, ?, ?, ?, ?)
                 """,
                 (org_id, user_id, role, status, added_at.isoformat()),
+                backend="sqlite",
             )
 
     expected_order = list(reversed(user_ids))

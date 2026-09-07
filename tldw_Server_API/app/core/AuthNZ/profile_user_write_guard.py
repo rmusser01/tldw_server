@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from inspect import getattr_static
@@ -22,6 +23,25 @@ _MAX_SQL_BYTES = 16 * 1024
 _GUARD_IDENTITY_ATTRIBUTE = "_authnz_profile_user_guard_identity"
 _BACKEND_ATTRIBUTE = "_authnz_profile_user_backend"
 _SUPPORTED_BACKENDS = frozenset({"sqlite", "postgres"})
+_MEMBERSHIP_TABLES = frozenset({"org_members", "team_members"})
+_PARENT_SCOPE_TABLES = frozenset({"organizations", "teams"})
+_POSTGRES_MEMBERSHIP_TIMESTAMP_REPAIR_SQL = {
+    "org_members": (
+        "UPDATE public.org_members SET added_at = "
+        "COALESCE(added_at, CURRENT_TIMESTAMP) WHERE added_at IS NULL"
+    ),
+    "team_members": (
+        "UPDATE public.team_members SET added_at = "
+        "COALESCE(added_at, CURRENT_TIMESTAMP) WHERE added_at IS NULL"
+    ),
+}
+_POSTGRES_ASYNCPG_SAVEPOINT_COMMAND_RE = re.compile(
+    r"(?:SAVEPOINT|RELEASE SAVEPOINT|ROLLBACK TO) "
+    r"__asyncpg_savepoint_[0-9a-f]+__;",
+    re.ASCII,
+)
+_PROFILE_USER_DOMAIN = "profile_users"
+_MEMBERSHIP_SCOPE_DOMAIN = "membership_scope"
 _REJECTED_CREATE_KINDS = frozenset(
     {"FUNCTION", "PROCEDURE", "RULE", "TRIGGER", "VIEW"}
 )
@@ -181,6 +201,7 @@ class _SqlClassification:
     protected: bool
     operation: str
     columns: tuple[str, ...]
+    domain: str | None = None
 
 
 _CAPABILITY_CONSTRUCTION_TOKEN = object()
@@ -214,9 +235,30 @@ class _ProfileUserSql:
         )
 
 
+@dataclass(frozen=True, slots=True, eq=False, init=False)
+class _MembershipScopeSql:
+    text: str
+    backend: str
+    operation: str
+    columns: tuple[str, ...]
+    execution_mode: str
+    _nonce: object
+
+    def __new__(cls, construction_token: object = None) -> _MembershipScopeSql:
+        if (
+            cls is not _MembershipScopeSql
+            or construction_token is not _CAPABILITY_CONSTRUCTION_TOKEN
+        ):
+            raise TypeError("Membership scope SQL capabilities are writer-owned")
+        return object.__new__(cls)
+
+    def __init__(self, construction_token: object = None) -> None:
+        del construction_token
+
+
 @dataclass(frozen=True, slots=True)
 class _CapabilityRecord:
-    capability: _ProfileUserSql
+    capability: _ProfileUserSql | _MembershipScopeSql
     connection_identity: object
     text: str
     backend: str
@@ -240,6 +282,13 @@ def _guard_sql(
     """Return concrete unprotected SQL or reject before managed DB I/O."""
     if type(query) is _ProfileUserSql:
         return _consume_profile_user_sql(
+            query,
+            backend=backend,
+            connection_identity=connection_identity,
+            execution_mode=operation,
+        )
+    if type(query) is _MembershipScopeSql:
+        return _consume_membership_scope_sql(
             query,
             backend=backend,
             connection_identity=connection_identity,
@@ -370,6 +419,7 @@ def _mint_profile_user_sql(
         raise ProfileUserWriteRejected()
     if (
         not classification.protected
+        or classification.domain != _PROFILE_USER_DOMAIN
         or classification.operation != operation
         or classification.columns != normalized_columns
     ):
@@ -399,6 +449,62 @@ def _mint_profile_user_sql(
     return capability
 
 
+def _mint_membership_scope_sql(
+    query: str,
+    *,
+    backend: str,
+    connection_identity: object,
+    execution_mode: str,
+) -> _MembershipScopeSql:
+    """Mint one exact membership/scope-deletion statement execution."""
+    if (
+        type(query) is not str
+        or type(backend) is not str
+        or backend not in _SUPPORTED_BACKENDS
+        or connection_identity is None
+        or type(execution_mode) is not str
+        or not execution_mode
+    ):
+        raise ProfileUserWriteRejected()
+    if not query or len(query) > _MAX_SQL_BYTES:
+        raise ProfileUserWriteRejected()
+    try:
+        encoded_size = len(query.encode("utf-8"))
+    except (UnicodeError, AttributeError):
+        raise ProfileUserWriteRejected() from None
+    if not query.strip() or encoded_size > _MAX_SQL_BYTES:
+        raise ProfileUserWriteRejected()
+
+    classification = _classify_sql(query, backend)
+    if (
+        not classification.protected
+        or classification.domain != _MEMBERSHIP_SCOPE_DOMAIN
+    ):
+        raise ProfileUserWriteRejected()
+    nonce = object()
+    capability = _construct_membership_scope_sql(
+        text=query,
+        backend=backend,
+        operation=classification.operation,
+        columns=classification.columns,
+        execution_mode=execution_mode,
+        nonce=nonce,
+    )
+    record = _CapabilityRecord(
+        capability=capability,
+        connection_identity=connection_identity,
+        text=query,
+        backend=backend,
+        operation=classification.operation,
+        columns=classification.columns,
+        execution_mode=execution_mode,
+        nonce=nonce,
+    )
+    with _capability_lock:
+        _active_capabilities[id(capability)] = record
+    return capability
+
+
 def _construct_profile_user_sql(
     *,
     text: str,
@@ -409,6 +515,25 @@ def _construct_profile_user_sql(
     nonce: object,
 ) -> _ProfileUserSql:
     capability = _ProfileUserSql(_CAPABILITY_CONSTRUCTION_TOKEN)
+    object.__setattr__(capability, "text", text)
+    object.__setattr__(capability, "backend", backend)
+    object.__setattr__(capability, "operation", operation)
+    object.__setattr__(capability, "columns", columns)
+    object.__setattr__(capability, "execution_mode", execution_mode)
+    object.__setattr__(capability, "_nonce", nonce)
+    return capability
+
+
+def _construct_membership_scope_sql(
+    *,
+    text: str,
+    backend: str,
+    operation: str,
+    columns: tuple[str, ...],
+    execution_mode: str,
+    nonce: object,
+) -> _MembershipScopeSql:
+    capability = _MembershipScopeSql(_CAPABILITY_CONSTRUCTION_TOKEN)
     object.__setattr__(capability, "text", text)
     object.__setattr__(capability, "backend", backend)
     object.__setattr__(capability, "operation", operation)
@@ -444,8 +569,43 @@ def _consume_profile_user_sql(
     return record.text
 
 
+def _consume_membership_scope_sql(
+    capability: _MembershipScopeSql,
+    *,
+    backend: str,
+    connection_identity: object,
+    execution_mode: str,
+) -> str:
+    with _capability_lock:
+        record = _active_capabilities.pop(id(capability), None)
+    if (
+        record is None
+        or record.capability is not capability
+        or capability.text != record.text
+        or capability.backend != record.backend
+        or capability.operation != record.operation
+        or capability.columns != record.columns
+        or capability.execution_mode != record.execution_mode
+        or capability._nonce is not record.nonce
+        or backend != record.backend
+        or connection_identity is not record.connection_identity
+        or execution_mode != record.execution_mode
+    ):
+        raise ProfileUserWriteRejected()
+    return record.text
+
+
 def _revoke_profile_user_sql(capability: object) -> None:
     if type(capability) is not _ProfileUserSql:
+        return
+    with _capability_lock:
+        record = _active_capabilities.get(id(capability))
+        if record is not None and record.capability is capability:
+            del _active_capabilities[id(capability)]
+
+
+def _revoke_membership_scope_sql(capability: object) -> None:
+    if type(capability) is not _MembershipScopeSql:
         return
     with _capability_lock:
         record = _active_capabilities.get(id(capability))
@@ -466,6 +626,12 @@ def _classify_sql(query: str, backend: str) -> _SqlClassification:
         'create extension if not exists "uuid-ossp"',
     }:
         return _SqlClassification(False, "trusted_extension_bootstrap", ())
+    if (
+        backend == "postgres"
+        and _POSTGRES_ASYNCPG_SAVEPOINT_COMMAND_RE.fullmatch(query)
+    ):
+        return _SqlClassification(False, "asyncpg_savepoint", ())
+
     # sqlglot treats PostgreSQL VALIDATE CONSTRAINT as an opaque Command.
     if (
         backend == "postgres"
@@ -503,24 +669,28 @@ def _classify_sql(query: str, backend: str) -> _SqlClassification:
     ):
         raise ProfileUserWriteRejected()
     if isinstance(statement, exp.Create) and _create_derives_from_users(statement):
-        return _SqlClassification(True, "create", ())
+        return _SqlClassification(True, "create", (), _PROFILE_USER_DOMAIN)
     if isinstance(statement, (exp.Drop, exp.TruncateTable)):
-        return _SqlClassification(True, statement.key.lower(), ())
+        return _SqlClassification(True, statement.key.lower(), (), "global_ddl")
     if isinstance(statement, exp.Create) and _targets_users(statement.this):
-        return _SqlClassification(True, "create", ())
+        return _SqlClassification(True, "create", (), _PROFILE_USER_DOMAIN)
     if backend == "sqlite" and isinstance(statement, exp.Pragma):
         if _pragma_name(statement) == "writable_schema":
             raise ProfileUserWriteRejected()
 
-    users_classification: _SqlClassification | None = None
+    unprotected_classification: _SqlClassification | None = None
+    protected_classification: _SqlClassification | None = None
     for mutation in statement.walk():
         classification = _classify_mutation(mutation, backend=backend)
         if classification is None:
             continue
         if classification.protected:
-            return classification
-        users_classification = classification
-    return users_classification or _SqlClassification(
+            if protected_classification is not None:
+                return _SqlClassification(True, "compound", (), "compound")
+            protected_classification = classification
+        else:
+            unprotected_classification = classification
+    return protected_classification or unprotected_classification or _SqlClassification(
         False,
         "read_or_unprotected_write",
         (),
@@ -538,7 +708,30 @@ def _classify_mutation(
         (exp.Update, exp.Insert, exp.Delete, exp.Merge),
     ):
         if _target_table_name(target) in _SQLITE_SCHEMA_CATALOGS:
-            return _SqlClassification(True, "schema_catalog_write", ())
+            return _SqlClassification(True, "schema_catalog_write", (), "schema_catalog")
+
+    target_table = _target_table_name(target)
+    if isinstance(node, (exp.Update, exp.Insert, exp.Delete, exp.Merge)):
+        if target_table in _MEMBERSHIP_TABLES:
+            if isinstance(node, exp.Update):
+                columns = tuple(sorted(_update_columns(node) or {"<ambiguous>"}))
+            elif isinstance(node, exp.Insert):
+                columns = _insert_columns(node) or ("<ambiguous>",)
+            else:
+                columns = ()
+            return _SqlClassification(
+                True,
+                node.key.lower(),
+                columns,
+                _MEMBERSHIP_SCOPE_DOMAIN,
+            )
+        if isinstance(node, exp.Delete) and target_table in _PARENT_SCOPE_TABLES:
+            return _SqlClassification(
+                True,
+                "delete",
+                (),
+                _MEMBERSHIP_SCOPE_DOMAIN,
+            )
 
     if isinstance(node, exp.Alter):
         actions = tuple(node.args.get("actions") or ())
@@ -548,13 +741,18 @@ def _classify_mutation(
             for action in actions
         )
         if renames_to_users and not source_is_users:
-            return _SqlClassification(True, "alter", ())
+            return _SqlClassification(True, "alter", (), _PROFILE_USER_DOMAIN)
         if not source_is_users:
             return None
         protected = not actions or not all(
             _is_safe_users_alter_action(action) for action in actions
         )
-        return _SqlClassification(protected, "alter", ())
+        return _SqlClassification(
+            protected,
+            "alter",
+            (),
+            _PROFILE_USER_DOMAIN,
+        )
 
     if isinstance(node, exp.Update):
         if not _targets_users(node.this):
@@ -569,6 +767,7 @@ def _classify_mutation(
             protected,
             "update",
             tuple(sorted(columns or {"<ambiguous>"})),
+            _PROFILE_USER_DOMAIN,
         )
 
     if isinstance(node, exp.Insert):
@@ -578,30 +777,43 @@ def _classify_mutation(
                 True,
                 "insert",
                 columns or ("<ambiguous>",),
+                _PROFILE_USER_DOMAIN,
             )
         return None
 
     if isinstance(node, exp.Merge):
         if _targets_users(node.this):
-            return _SqlClassification(True, node.key.lower(), ())
+            return _SqlClassification(
+                True,
+                node.key.lower(),
+                (),
+                _PROFILE_USER_DOMAIN,
+            )
         return None
 
-    if isinstance(node, exp.Copy) and node.args.get("kind") and any(
-        table.name.lower() == "users" for table in node.find_all(exp.Table)
-    ):
-        return _SqlClassification(True, "copy", ())
+    if isinstance(node, exp.Copy) and node.args.get("kind"):
+        copy_target = _target_table_name(node.this)
+        if copy_target == "users":
+            return _SqlClassification(True, "copy", (), _PROFILE_USER_DOMAIN)
+        if copy_target in _MEMBERSHIP_TABLES:
+            return _SqlClassification(
+                True,
+                "copy",
+                (),
+                _MEMBERSHIP_SCOPE_DOMAIN,
+            )
     if isinstance(node, exp.Delete) and _targets_users(node.this):
-        return _SqlClassification(True, "delete", ())
+        return _SqlClassification(True, "delete", (), _PROFILE_USER_DOMAIN)
     if isinstance(node, exp.TruncateTable) and any(
         _targets_users(target) for target in node.expressions
     ):
-        return _SqlClassification(True, "truncate", ())
+        return _SqlClassification(True, "truncate", (), _PROFILE_USER_DOMAIN)
     if (
         isinstance(node, exp.Drop)
         and str(node.args.get("kind") or "").upper() == "TABLE"
         and _targets_users(node.this)
     ):
-        return _SqlClassification(True, "drop", ())
+        return _SqlClassification(True, "drop", (), _PROFILE_USER_DOMAIN)
     return None
 
 
@@ -994,6 +1206,54 @@ async def _execute_profile_users_bootstrap(
         return await connection.execute(capability)
     finally:
         _revoke_profile_user_sql(capability)
+
+
+async def _execute_membership_scope_sql(
+    connection: Any,
+    query: str,
+    *parameters: Any,
+    backend: str,
+) -> Any:
+    """Execute one protected writer-owned statement on a managed connection."""
+    managed_backend = _profile_user_backend(connection)
+    if managed_backend is None:
+        classification = _classify_sql(query, backend)
+        if (
+            not classification.protected
+            or classification.domain != _MEMBERSHIP_SCOPE_DOMAIN
+        ):
+            raise ProfileUserWriteRejected()
+        return await connection.execute(query, *parameters)
+    if managed_backend != backend:
+        raise ProfileUserWriteRejected()
+    capability = _mint_membership_scope_sql(
+        query,
+        backend=backend,
+        connection_identity=_profile_user_connection_identity(connection),
+        execution_mode="execute",
+    )
+    try:
+        return await connection.execute(capability, *parameters)
+    finally:
+        _revoke_membership_scope_sql(capability)
+
+
+async def _execute_postgres_membership_timestamp_repair(
+    connection: Any,
+    *,
+    table_name: str,
+) -> Any:
+    """Backfill one canonical membership timestamp during schema readiness."""
+    if type(table_name) is not str:
+        raise ProfileUserWriteRejected()
+    query = _POSTGRES_MEMBERSHIP_TIMESTAMP_REPAIR_SQL.get(table_name)
+    if query is None:
+        raise ProfileUserWriteRejected()
+    return await _execute_membership_scope_sql(
+        connection,
+        query,
+        backend="postgres",
+    )
 
 
 def _pragma_name(statement: exp.Pragma) -> str | None:
