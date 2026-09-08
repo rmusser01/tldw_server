@@ -1049,7 +1049,7 @@ index ac878f2..45a0be1 100644
 +        C extension does its own open, so containment is the check that can be
 +        applied; a symlink swapped in after it is not covered.
 +        """
-+        validate_tool_path(model_file, context="CRFTagger.set_model_file")
++        model_file = validate_tool_path(model_file, context="CRFTagger.set_model_file")
          self._model_file = model_file
          self._tagger.open(self._model_file)
  
@@ -1069,7 +1069,7 @@ index ac878f2..45a0be1 100644
 +        # Caller-supplied destination that pycrfsuite writes natively, so refuse
 +        # an outside-root path up front rather than after the model is built.
 +        # It normally does not exist yet, so existence is not required.
-+        validate_tool_path(model_file, context="CRFTagger.train", must_exist=False)
++        model_file = validate_tool_path(model_file, context="CRFTagger.train", must_exist=False)
 +
          trainer = pycrfsuite.Trainer(verbose=self._verbose)
          trainer.set_params(self._training_options)
@@ -1235,7 +1235,7 @@ index 640839b..2181426 100644
 +        builtin ``open`` that made this an arbitrary-file write
 +        (GHSA-8mgp-746c-j5xp).
 +        """
-+        validate_tool_path(path, context="AveragedPerceptron.save", must_exist=False)
++        path = validate_tool_path(path, context="AveragedPerceptron.save", must_exist=False)
 +        with pathsec_open(path, "w", context="AveragedPerceptron.save") as fout:
              return json.dump(self.weights, fout)
  
@@ -1249,7 +1249,7 @@ index 640839b..2181426 100644
 +        (GHSA-8mgp-746c-j5xp).
 +        """
 +        # Refuse a planted FIFO/socket/device before pathsec.open blocks on it.
-+        validate_tool_path(path, context="AveragedPerceptron.load")
++        path = validate_tool_path(path, context="AveragedPerceptron.load")
 +        with pathsec_open(path, context="AveragedPerceptron.load") as fin:
              self.weights = json.load(fin)
  
@@ -1318,7 +1318,7 @@ index 640839b..2181426 100644
 -        # local attacker can pre-plant or race a symlink at ``loc``. A plain
 +        # A caller-supplied destination is an unbounded write primitive otherwise:
 +        # the helper below happily os.makedirs() a whole chain anywhere writable.
-+        validate_tool_dir(loc, context="PerceptronTagger.save_to_json")
++        loc = validate_tool_dir(loc, context="PerceptronTagger.save_to_json")
 +        # The default loc (save_dir) is an unpredictable 0700 dir inside a data
 +        # root, but a caller may still pass any in-sandbox path here, so the
 +        # atomic checks below stay: a local attacker could pre-plant or race a

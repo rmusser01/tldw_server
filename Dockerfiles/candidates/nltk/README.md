@@ -33,3 +33,18 @@ the adapted patch, and the ten changed-file pre/post hashes. Its scope is
 `nltk-candidate-source-not-release-admission`. The exact selected and omitted
 hunk map is recorded in
 `Docs/Design/TASK-13013.7.17-nltk-candidate-backport.md`.
+
+## Current review status
+
+The dependency-isolated prepared-source import closure passed in the pinned
+no-network Linux/amd64 Python 3.11.16 container. Review controls also found that
+a stateful path-like value made `PerceptronTagger.save_to_json` create a
+forbidden sibling directory before its later descriptor check rejected the
+operation; no model or canary bytes changed. After that concrete result, the
+requester approved a minimal five-caller correction to consume the exact strings
+returned by `validate_tool_path`/`validate_tool_dir`. The local correction is
+documented separately from the exact upstream hunks in the design. The current
+patch SHA256 is
+`d5071d450b140c5d37ad5db59c05aa2b9542c62e92ff885739d425baf878c251`.
+Stage 1 remains candidate-only and awaits scoped re-review; nothing here admits
+the candidate or changes a production dependency.

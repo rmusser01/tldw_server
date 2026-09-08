@@ -32,7 +32,7 @@
         "path": "nltk/picklesec.py"
       },
       {
-        "afterSha256": "8aa16791bfe9b224116d27120cacf4f1db518fd729bf595d2204072d2c4759a4",
+        "afterSha256": "c8197a293f1f8c211b678b07641ef4068bd07a104c5634e16d31468ddc0d4f0a",
         "beforeSha256": "e8f8e0b67943f6190c81bd22cf140a3a1730369d90117153c61e98c2810bcb54",
         "path": "nltk/tag/crf.py"
       },
@@ -42,7 +42,7 @@
         "path": "nltk/tag/hunpos.py"
       },
       {
-        "afterSha256": "3f10a584f9c6982702bc49e467732942b5c89cd1e593d6d728fe94cbbe5b42ce",
+        "afterSha256": "f4a159fd631858c41d9246c9bfa66bbcbe46fdc0d3637b81e1a3d58275d9e4f9",
         "beforeSha256": "9d619a5ce7533c7eb388a70fedca8dcf0fb78279e1744e2abfdfcca9abd459ea",
         "path": "nltk/tag/perceptron.py"
       },
@@ -53,7 +53,7 @@
       }
     ],
     "filename": "backport.patch",
-    "sha256": "16ec0091e5bd045d5f80704feca54ae233dbc076cfe1415c72762342f8681cce"
+    "sha256": "d5071d450b140c5d37ad5db59c05aa2b9542c62e92ff885739d425baf878c251"
   },
   "packageRoot": "nltk-3.10.3",
   "preparationInputs": [
