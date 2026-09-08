@@ -137,7 +137,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          export CANDIDATE_CONFIG="$(docker image inspect "tldw-combined-expat:$GITHUB_SHA" --format '{{.Id}}')"
+          CANDIDATE_CONFIG="$(docker image inspect "tldw-combined-expat:$GITHUB_SHA" --format '{{.Id}}')"
           python3 Dockerfiles/candidates/combined-expat/image-identity.py \
             "$RUNNER_TEMP/combined-evidence/candidate.oci.tar" \
             --config "$CANDIDATE_CONFIG" --commit "$GITHUB_SHA" \
