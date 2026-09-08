@@ -129,6 +129,7 @@ assert.equal(metadata.height,3);
 **Files:**
 - Update `.github/workflows/frontend-runtime-candidate.yml`.
 - Create `Dockerfiles/candidates/frontend/compare.py` and `tldw_Server_API/tests/Supply_Chain/test_frontend_candidate_comparison.py`.
+- Correct only the inherited workflow command guard in `test_frontend_candidate_qualification.py` and add targeted positive/negative regressions: allow Docker option strings while still rejecting actual deletion/publication commands; do not contort production-independent scanner invocations around substring false positives.
 - Update candidate README and Backlog task evidence links.
 
 **Interfaces:**
