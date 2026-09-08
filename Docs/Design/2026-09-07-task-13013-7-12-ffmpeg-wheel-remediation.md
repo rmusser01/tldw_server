@@ -1,7 +1,7 @@
 # Candidate-only FFmpeg wheel remediation
 
 Task: TASK-13013.7.12, child of TASK-13013.7. Related evidence: TASK-13013.7.9.
-Status: approach approved; written design awaiting review. No rebuild implemented.
+Status: written design approved; implementation planning in progress. No rebuild implemented.
 
 ## Decision and boundaries
 
