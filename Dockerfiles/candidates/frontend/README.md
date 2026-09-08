@@ -126,3 +126,46 @@ certifies only this exact artifact pair against the controlled health stub;
 it is neither real-backend certification nor a vulnerability waiver.
 `CVE-2026-85091` remains unresolved. Vulnerability comparison and production
 adoption are separate stages.
+
+## Frozen-database inventory and vulnerability comparison
+
+After exact OCI binding succeeds, the workflow also records Syft 1.51.1
+inventories and complete Trivy 0.74.0 and Grype 0.118.0 findings. All three
+scanner containers are digest-pinned. Each application pair gets new Trivy and
+Grype database directories; the databases are downloaded once, must be valid
+and no older than 24 hours (with five minutes of clock skew), and are then used
+offline for both baseline and candidate. Before/after database hashes prove that
+the pair did not update between scans. Scanner versions, pinned-image
+inspections, download logs, database metadata/status, hashes, scan logs and raw
+JSON reports remain in the always-uploaded evidence directory.
+
+All three scanners read the validated OCI layouts; Trivy additionally addresses
+the exact build subject within its read-only layout mount rather than a tag.
+Every report is checked against its baseline or candidate config digest. Syft must
+inventory Node 24.20.0 in both images and the reviewed zlib/libc versions in the
+candidate. Scanning and comparison run after a failed native qualification when
+OCI loading was successful, without changing or replacing the qualification
+result; no scan runs when exact binding/loading failed.
+
+The comparison CLI is intentionally fail-closed:
+
+```bash
+python Dockerfiles/candidates/frontend/compare.py \
+  --baseline-trivy /path/baseline-trivy.json \
+  --candidate-trivy /path/candidate-trivy.json \
+  --baseline-grype /path/baseline-grype.json \
+  --candidate-grype /path/candidate-grype.json \
+  --baseline-config sha256:BASELINE_CONFIG \
+  --candidate-config sha256:CANDIDATE_CONFIG \
+  --output /path/vulnerability-comparison.json
+```
+
+Its schema retains Trivy and Grype separately, includes all severities and full
+original rows (including duplicate package versions, paths and ecosystems), and
+retains Grype ignored matches rather than hiding them. A baseline-only row is
+classified `baseline-only-unproven`, never fixed merely because another feed or
+distribution does not report it. The report always contains `admitted: false`
+and no fixed claims. In particular, absence of the old zlib CVE-2023-27171 row
+and Ubuntu vendor evidence for glibc require external corroboration; they are not
+release admission. CVE-2026-85091 remains unresolved at its reported vendor
+severity.
