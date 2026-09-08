@@ -1,0 +1,49 @@
+CI, Deployment, Operations, and Release Surfaces candidate evidence
+Review date: 2026-06-27
+
+Context
+- Scope inventory: Docs/superpowers/reviews/2026-06-27-repo-audit/evidence/ci-deploy-ops-inventory.txt listed 201 files under .github, Dockerfiles, Docs/Operations, Docs/Deployment, and Helper_Scripts/Samples.
+- Dependency manifest inventory listed 14 package/dependency roots:
+  admin-ui/package.json; apps/extension/package.json; apps/mcp-unified/pyproject.toml; apps/package.json; apps/packages/ui/package.json; apps/packages/voice-assistant-sdk/package.json; apps/tldw-frontend/package.json; mock_openai_server/pyproject.toml; mock_openai_server/requirements.txt; pyproject.toml; sdks/python/pyproject.toml; tools/backlog-py/pyproject.toml; tools/tldw-agent/go.mod; tools/tldw-agent/go.sum.
+- Bandit app baseline was reviewed from Docs/superpowers/reviews/2026-06-27-repo-audit/evidence/bandit-app-summary.txt: 4,818 results, LOW=4,792, MEDIUM=26, HIGH=0.
+
+CANDIDATE-ci-deployment-operations-release-001 evidence
+- .github/workflows/publish-docker.yml publishes app, worker, and audio-worker images:
+  lines 31-42 include Dockerfiles/Dockerfile.prod, Dockerfiles/Dockerfile.worker, and Dockerfiles/Dockerfile.audio_gpu_worker.
+- .github/workflows/container-build-check.yml validates only app, webui, and admin-ui:
+  lines 26-45 include Dockerfiles/Dockerfile.prod, Dockerfiles/Dockerfile.webui, and Dockerfiles/Dockerfile.admin-ui, with no worker or audio-worker matrix entries.
+
+CANDIDATE-ci-deployment-operations-release-002 evidence
+- Dockerfiles/Dockerfile.worker installs gcc, g++, make, curl, git, ffmpeg, portaudio19-dev, and python3-dev in the final image at lines 7-16, installs the package editable at line 27, and has no USER directive before CMD at line 51.
+- Dockerfiles/Dockerfile.audio_gpu_worker installs build-essential, portaudio19-dev, and python3-dev in the final image at lines 4-10, installs the package editable at line 19, and has no USER directive before CMD at line 25.
+- Dockerfiles/Dockerfile.prod provides the hardened comparison: creates appuser at line 47, copies app content with appuser ownership at lines 50-54, and switches to USER appuser at line 60.
+
+CANDIDATE-ci-deployment-operations-release-003 evidence
+- find .github/workflows -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) | wc -l returned 38 workflow files.
+- .github/workflows/actionlint.yml triggers on all workflow/action changes at lines 4-14 but the actionlint command at lines 37-45 lists only 8 workflow files:
+  actionlint.yml, codeql.yml, container-build-check.yml, frontend-ux-gates.yml, publish-ghcr-main.yml, publish-docker.yml, sbom.yml, and vz-linux-host-gated.yml.
+- Untargeted workflows include required and release surfaces such as backend-required.yml, security-required.yml, frontend-required.yml, e2e-required.yml, publish-pypi.yml, mcp-unified-publish.yml, mcp-unified-rc.yml, pypi-package.yml, jobs-suite.yml, and ci.yml.
+- command -v actionlint returned no local binary, so no offline actionlint execution was performed.
+
+CANDIDATE-ci-deployment-operations-release-004 evidence
+- find . -name 'package-lock.json' -o -name 'bun.lock' -o -name 'bun.lockb' -o -name 'pnpm-lock.yaml' -o -name 'yarn.lock' returned only:
+  ./admin-ui/bun.lock
+  ./apps/bun.lock
+- .github/workflows/sbom.yml checks only apps/package-lock.json and apps/tldw-frontend/package-lock.json at lines 151-156, then emits "No package-lock.json found; skipping Node SBOM".
+- .github/workflows/sbom.yml merges and uploads a Python-only SBOM if only sbom-python.cdx.json exists at lines 186-205.
+- .github/workflows/sbom.yml validates only when both sbom-python.cdx.json and sbom-node.cdx.json exist, and validation is continue-on-error at lines 207-212.
+
+CANDIDATE-ci-deployment-operations-release-005 evidence
+- .github/dependabot.yml has only two update entries: package-ecosystem "pip" directory "/" at lines 5-7 and package-ecosystem "github-actions" directory "/" at lines 35-37.
+- The dependency manifest inventory lists release-relevant roots not covered by those two entries, including admin-ui/package.json, apps/package.json, apps/tldw-frontend/package.json, apps/packages/ui/package.json, apps/packages/voice-assistant-sdk/package.json, apps/mcp-unified/pyproject.toml, sdks/python/pyproject.toml, tools/backlog-py/pyproject.toml, and tools/tldw-agent/go.mod.
+
+CANDIDATE-ci-deployment-operations-release-006 evidence
+- Helper_Scripts/Samples/Kubernetes/app-secret.yaml stores JWT_SECRET_KEY as "replace-with-strong-32ch", DATABASE_URL as "postgresql://tldw_user:${POSTGRES_PASSWORD}@postgres:5432/tldw_users", and POSTGRES_PASSWORD as "TestPassword123!" at lines 10-12.
+- Helper_Scripts/Samples/Kubernetes/tldw-app-deployment.yaml imports that Secret into the app container via envFrom at lines 35-39.
+- Helper_Scripts/Samples/Kubernetes/postgres-statefulset.yaml reads POSTGRES_PASSWORD from the same Secret at lines 40-44.
+- Kubernetes Secret stringData does not interpolate ${POSTGRES_PASSWORD}, so applying this sample as-is gives the app a literal DATABASE_URL password that does not match the database password.
+
+Commands with notable local limitations
+- command -v actionlint: no output, exit 1. actionlint was not installed locally and was not downloaded.
+- python - <<'PY' ...: failed with "zsh:1: command not found: python" because this worktree did not have an active Python on PATH. Follow-up evidence used shell-only commands.
+- wc -l .github/workflows/*.yml .github/workflows/*.yaml: failed because zsh reported no matches for *.yaml. Follow-up evidence used find with yml/yaml predicates.

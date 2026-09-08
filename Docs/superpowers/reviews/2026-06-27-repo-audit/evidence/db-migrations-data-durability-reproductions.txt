@@ -1,0 +1,82 @@
+# DB, Migrations, and Data Durability Reproduction Evidence
+
+Date: 2026-06-27
+Worktree: /Users/appledev/Documents/GitHub/tldw_server/.worktrees/comprehensive-repo-audit-2026-06-27
+Interpreter: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python
+
+## CANDIDATE-db-migrations-data-durability-001
+
+Command:
+
+LOGURU_LEVEL=ERROR /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python - <<'PY'
+import sqlite3
+import tempfile
+from pathlib import Path
+from tldw_Server_API.app.core.DB_Management.db_migration import DatabaseMigrator
+root = Path(tempfile.mkdtemp(prefix='tldw-audit-media-upgrade-'))
+db_path = root / 'Media_DB_v2.db'
+with sqlite3.connect(db_path) as conn:
+    conn.execute('CREATE TABLE schema_version (version INTEGER)')
+    conn.execute('INSERT INTO schema_version VALUES (8)')
+    conn.commit()
+migrator = DatabaseMigrator(str(db_path))
+try:
+    migrator.migrate_to_version(23, create_backup=False)
+except Exception as exc:
+    print(type(exc).__name__, str(exc))
+print('migrations_dir=', migrator.migrations_dir)
+print('loaded_versions=', [(m.version, m.name) for m in migrator.load_migrations()])
+PY
+
+Observed output:
+
+MigrationError Missing migration versions: [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+migrations_dir= /Users/appledev/Documents/GitHub/tldw_server/.worktrees/comprehensive-repo-audit-2026-06-27/tldw_Server_API/app/core/DB_Management/migrations
+loaded_versions= [(1, 'prompt_studio_schema'), (2, 'prompt_studio_indexes'), (3, 'prompt_studio_iterations'), (4, 'prompt_studio_fts'), (5, 'add_chunking_templates'), (6, 'prompt_studio_structured_prompts'), (23, 'transcript_run_history')]
+
+Interpretation:
+
+The package default migration directory is not a contiguous Media DB migration chain. An existing SQLite Media DB at version 8 cannot be upgraded to the current Media DB schema version 23 because versions 9 through 22 are absent from the loaded migration plan.
+
+## CANDIDATE-db-migrations-data-durability-002
+
+Command:
+
+LOGURU_LEVEL=ERROR /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python - <<'PY'
+import sqlite3
+import tempfile
+from pathlib import Path
+from tldw_Server_API.app.core.DB_Management.db_migration import DatabaseMigrator, Migration
+root = Path(tempfile.mkdtemp(prefix='tldw-audit-nonatomic-'))
+db_path = root / 'app.db'
+with sqlite3.connect(db_path) as conn:
+    conn.execute('CREATE TABLE schema_version (version INTEGER)')
+    conn.execute('INSERT INTO schema_version VALUES (0)')
+    conn.commit()
+migrator = DatabaseMigrator(str(db_path), str(root / 'migrations'))
+migrator.initialize_migration_table()
+migration = Migration(
+    version=1,
+    name='partial_failure_demo',
+    up_sql='CREATE TABLE kept_after_failure (id INTEGER); INSERT INTO missing_table VALUES (1);',
+)
+try:
+    migrator.execute_migration(migration)
+except Exception as exc:
+    print(type(exc).__name__, str(exc))
+with sqlite3.connect(db_path) as conn:
+    tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
+    rows = conn.execute('SELECT version, success, error_message FROM schema_migrations ORDER BY version').fetchall()
+print('tables=', tables)
+print('migration_rows=', rows)
+PY
+
+Observed output:
+
+MigrationError Migration partial_failure_demo (up) failed: no such table: missing_table
+tables= ['kept_after_failure', 'schema_migrations', 'schema_version']
+migration_rows= [(1, 0, 'no such table: missing_table')]
+
+Interpretation:
+
+The first DDL statement survived after the second statement failed. The migration is marked failed, but the database has already been partially mutated.
