@@ -252,6 +252,18 @@ def test_unsafe_source_paths_fail(source_case, helper, value):
         helper.verify_sources(lock, root, matches)
 
 
+@pytest.mark.parametrize("section", ["patch", "coverage"])
+def test_dot_logical_source_paths_fail(source_case, helper, section):
+    lock, root, matches = source_case
+    if section == "patch":
+        lock["patches"][0]["source_paths"] = ["."]
+        lock["coverage"][0]["source_paths"] = ["."]
+    else:
+        lock["coverage"][1]["source_paths"] = ["."]
+    with pytest.raises(ValueError, match="path"):
+        helper.verify_sources(lock, root, matches)
+
+
 def test_wrong_file_hash_fails(source_case, helper):
     lock, root, matches = source_case
     (root / lock["inputs"][0]["path"]).write_bytes(b"substituted source\n")
@@ -411,6 +423,16 @@ def test_duplicate_patch_application_fails(source_case, helper, field):
     lock, root, matches = source_case
     lock["patches"][1][field] = lock["patches"][0][field]
     with pytest.raises(ValueError, match="duplicate"):
+        helper.verify_sources(lock, root, matches)
+
+
+def test_duplicate_patch_bytes_under_distinct_commits_and_paths_fail(source_case, helper):
+    lock, root, matches = source_case
+    first = lock["patches"][0]
+    second = lock["patches"][1]
+    (root / second["path"]).write_bytes((root / first["path"]).read_bytes())
+    second["sha256"] = first["sha256"]
+    with pytest.raises(ValueError, match="duplicate patch SHA-256"):
         helper.verify_sources(lock, root, matches)
 
 
