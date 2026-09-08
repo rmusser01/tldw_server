@@ -94,8 +94,12 @@ The qualifier rejects non-native host/daemon facts, mutable or ambiguous image
 references, wrong loaded identities/platforms, and drift in canonical application
 configuration. It checks actual Node version/ABI/executable hash, UID/GID/home,
 workdir and ownership, embedded root count/hash, system CA bundle presence/hash,
-and a real sharp PNG encode/resize/decode operation. Candidate dpkg versions are
-checked against the reviewed Ubuntu versions; glibc versions are not compared
+and a real sharp PNG encode/resize/decode operation. The sharp probe uses Node's
+normal resolver from the installed Next image optimizer context, matching Next's
+own dependency lookup even when Bun nests sharp outside the application root.
+It does not install dependencies or change the image's working directory.
+Candidate dpkg versions are checked against the reviewed Ubuntu versions;
+glibc versions are not compared
 for equality between distributions.
 
 Each invocation owns an internal network and uniquely named containers. The
@@ -104,6 +108,15 @@ controlled backend has the network alias `backend` and serves only
 credentials are used. Every container has a read-only root filesystem, dropped
 capabilities, no-new-privileges, 128 PID/1 GiB/2 CPU limits, the image's non-root
 USER, and owned tmpfs mounts only at `/tmp` and the application's `.next/cache`.
+
+Admin application containers receive one random, test-only `JWT_SECRET_KEY` per
+qualification invocation, shared between its baseline and candidate. The key is
+not supplied to diagnostics or the stub, saved in an image, or taken from real
+credentials. Production `NODE_ENV` and normal runtime/auth validation remain
+enabled. The qualifier verifies the effective nonempty signing fixture and
+redacts its value from persisted command argv, output, inspections, logs,
+errors, timeout partial output, and the final report. In-memory command results
+remain available for validation.
 
 WebUI must serve its root and pass its configured check. Admin must return
 liveness/readiness 200 with the stub running, then readiness 503, liveness 200
@@ -116,8 +129,8 @@ cleanup of invocation-owned IDs, after failure evidence has been retained.
 
 `qualification.json` has schema version 1 and explicit scope
 `native-frontend-compatibility-not-release-admission`. All command argv, stdout,
-stderr, timeouts, exit statuses, raw inspections, diagnostic observations and
-cleanup outcomes remain under `commands/`, including failed controls. A failed
+stderr, timeouts, exit statuses, inspections (with the fixture key redacted),
+diagnostic observations and cleanup outcomes remain under `commands/`, including failed controls. A failed
 control returns a nonzero CLI status; cleanup failure also prevents success.
 
 Local mocked tests are validation of the controls, not native application
@@ -138,6 +151,13 @@ offline for both baseline and candidate. Before/after database hashes prove that
 the pair did not update between scans. Scanner versions, pinned-image
 inspections, download logs, database metadata/status, hashes, scan logs and raw
 JSON reports remain in the always-uploaded evidence directory.
+
+All Grype commands run as the current runner UID/GID so the host can inspect
+and hash Grype's owner-only database cache without relaxing its permissions.
+They also receive a private `/tmp` tmpfs (`rw,nosuid,nodev,noexec,mode=1777`),
+because the pinned scanner image's existing `/tmp` is not writable by that
+identity. Database acquisition, freshness validation, offline scans and
+before/after hash checks remain unchanged.
 
 All three scanners read the validated OCI layouts; Trivy additionally addresses
 the exact build subject within its read-only layout mount rather than a tag.
