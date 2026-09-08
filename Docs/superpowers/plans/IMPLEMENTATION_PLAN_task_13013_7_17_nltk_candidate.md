@@ -16,6 +16,7 @@
 - Associated Backlog task: TASK-13013.7.17. Keep its notes current through the official CLI.
 - Do not modify production Dockerfiles, pyproject.toml, uv.lock, Bun locks, application source, exception records, release workflows or another task's artifacts. No publication or merge.
 - The user approved the three official fixes plus the concrete prerequisite expansion in the spec. No unrelated ZIP, network, tokenizer or package-resource behavior changes.
+- After the focused review reproduced an out-of-root directory creation, the user approved the minimal five-caller adaptation to consume validated returned paths. Record this as a local correction, not verbatim upstream code.
 - Preserve upstream version `3.10.3`; candidate wheel build tag is `1tldw1`. No official fixed-release claim. Every qualification result retains `admitted:false`.
 - Real security controls use synthetic files only under a unique owned temporary directory, with an allowed data root and sibling forbidden canaries. No real secrets, user files or external exploit targets.
 - Do not mutate shared virtual environments. Activate `/private/tmp/task-13013-7-pyjwt-verification-venv/bin/activate` before local Python tooling; it inherits NLTK 3.9.1 and is only suitable for repository helper tests. Create new isolated environments for wheel qualification.
@@ -36,6 +37,7 @@
 **Files:**
 - Create `Dockerfiles/candidates/nltk/source-inputs.json`, `backport.patch`, `prepare.py`, `README.md`.
 - Create `tldw_Server_API/tests/Supply_Chain/test_nltk_candidate_sources.py`.
+- Introduce `Dockerfiles/candidates/nltk/controls.py` with focused changing-path and legitimate PathLike regressions for the review correction; Task 2 extends this same harness.
 - Update the design with final immutable source identities and precise selected/omitted hunk mappings.
 
 **Interfaces:**
@@ -83,7 +85,7 @@ with tarfile.open(archive, "r:gz") as source:
 ### Task 2: Build and exercise separate baseline/candidate wheels
 
 **Files:**
-- Create `Dockerfiles/candidates/nltk/controls.py`, `wheel-provenance.py`, `requirements-qualification.txt`.
+- Extend `Dockerfiles/candidates/nltk/controls.py`; create `wheel-provenance.py`, `requirements-qualification.txt`.
 - Create `tldw_Server_API/tests/Supply_Chain/test_nltk_wheel_provenance.py`.
 - Update `Dockerfiles/candidates/nltk/README.md`.
 
