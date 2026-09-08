@@ -205,11 +205,31 @@ subject/index/config identity. The older local archive is not substituted or
 claimed as this new build. No registry publishing occurs. Expat/Python artifacts
 from the successful fixed run can be consumed separately after checking their
 producer run/commit and hashes; they need not be recompiled for this prerequisite.
+Native FFmpeg run `34172954787` at `d19bdf2734350f3b8c4f839b6b9150ee8b3a1afe`
+now succeeds. Parent verified artifact metadata, both checksums, all 15 OCI blobs
+and eight compressed/uncompressed layer hash pairs. Retained input directory:
+`/private/tmp/task-13013-7-ffmpeg-native-34172954787.tiJdU8`; subject is
+`sha256:de2b316796fd39f58cc76617e66ce400933e9a63ab3f7a261cac66fa461f2cb4`.
+This is still an unqualified input, not an assembled or scanner-cleared image.
 Application test tooling will use the eight exact universal wheels identified in
 the current lock (pytest, asyncio/timeout plugins and their dependency closure),
 installed outside `/opt/tldw-venv` and appended after runtime import paths. The
 combined image must run all eight named application tests without skips. Assembly,
-test-tool implementation and same-image compatibility/scanner execution remain open.
+native test-tool installation and same-image compatibility/scanner execution remain open.
+
+Test-tool helper checkpoint: `combined-expat/test-tools.py` emits only the eight
+reviewed lockfile wheel identities, failing before partial output on drift.
+`combined-expat/run-tests.py` appends isolated tooling without `.pth` execution,
+retains normal conftests, and requires exactly eight application identities with
+successful setup/call/teardown and no skips or expected-failure dispositions.
+Both helpers were developed with failing executable regression tests first.
+The real eight application tests pass locally through the launcher; this proves
+launcher compatibility only, not native wheel installation or image remediation.
+Native install/runtime-hash checks, assembly and same-image gates remain open.
+Independent helper review exposed an existing-import-path alias bypass. Three
+new controls reproduced it before correction; canonicalized comparison now rejects
+symlink, relative and `/.` aliases before pytest imports. Normal runtime-first
+imports and all eight test-outcome controls still pass.
 
 - [ ] Integrate the qualified artifacts into a separately named candidate image, without changing production recipes. Run `tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py` and Chunking tests `test_xml_allows_url_text.py`, `test_json_xml_offsets.py`, `test_xml_tail_preservation.py` against that image.
 - [ ] Run fontconfig discovery and FFmpeg drawtext/subtitle controls; compare the previously accepted FFmpeg capability inventory without broadening accepted retirements.
