@@ -19,6 +19,7 @@ class LLMResponse:
     """Response from an LLM call."""
     text: str | None = None
     tool_calls: list[LLMToolCall] = field(default_factory=list)
+    usage: dict[str, int | float] | None = None
 
 
 class LLMCaller(ABC):

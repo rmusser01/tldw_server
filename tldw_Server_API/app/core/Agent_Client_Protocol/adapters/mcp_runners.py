@@ -11,7 +11,10 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
+from copy import deepcopy
 from typing import Any
+
+from loguru import logger
 
 from tldw_Server_API.app.core.Agent_Client_Protocol import metrics as acp_metrics
 from tldw_Server_API.app.core.Agent_Client_Protocol.adapters.mcp_llm_caller import (
@@ -19,8 +22,12 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.adapters.mcp_llm_caller impo
     LLMToolCall,
     mcp_tools_to_openai_format,
 )
-from loguru import logger
-
+from tldw_Server_API.app.core.Agent_Client_Protocol.adapters.mcp_result_context import (
+    READ_RESULT_SCHEMA,
+    READ_RESULT_TOOL,
+    ToolResultContext,
+    ToolResultPolicy,
+)
 from tldw_Server_API.app.core.Agent_Client_Protocol.adapters.mcp_transport import MCPTransport
 from tldw_Server_API.app.core.Agent_Client_Protocol.events import AgentEvent, AgentEventKind
 from tldw_Server_API.app.core.Agent_Client_Protocol.tool_gate import ToolGate
@@ -232,6 +239,8 @@ class LLMDrivenRunner:
         llm_tools: list[dict[str, Any]] | None = None,
         prompt_fragment: str | None = None,
         run_first_metrics_context: dict[str, Any] | None = None,
+        result_policy: ToolResultPolicy | None = None,
+        result_worker: LLMCaller | None = None,
     ) -> None:
         self._transport = transport
         self._emit = event_callback
@@ -247,6 +256,16 @@ class LLMDrivenRunner:
             run_first_metrics_context
         )
         self._seq = 0
+
+        self._result_policy = result_policy or ToolResultPolicy()
+        self._result_worker = result_worker
+        if self._result_policy.mode != "off":
+            names = {tool.get("name") for tool in tools}
+            names.update(tool.get("function", {}).get("name") for tool in (llm_tools or []))
+            if READ_RESULT_TOOL in names:
+                raise ValueError(f"Tool name {READ_RESULT_TOOL} is reserved for result context reads")
+            if self._result_policy.mode == "worker" and result_worker is None:
+                raise ValueError("Worker result mode requires an explicitly configured worker caller")
 
     # -- helpers --
 
@@ -350,7 +369,24 @@ class LLMDrivenRunner:
 
     async def run(self, messages: list[dict]) -> None:
         """Run the ReAct loop until completion or max iterations."""
+        # This store belongs to this invocation, never to the adapter/session.
+        result_context = (
+            ToolResultContext(self._result_policy, self._result_worker)
+            if self._result_policy.mode != "off" else None
+        )
+        try:
+            await self._run_loop(messages, result_context)
+        finally:
+            if result_context is not None:
+                result_context.clear()
+
+    async def _run_loop(self, messages: list[dict], result_context: ToolResultContext | None) -> None:
+        """Execute tool/model turns within the run-owned context lifetime."""
         self._record_run_first_rollout()
+        question = next((
+            message["content"] for message in reversed(messages)
+            if message.get("role") == "user" and isinstance(message.get("content"), str)
+        ), "")
         history = list(messages)
         first_tool_name: str | None = None
         fallback_recorded = False
@@ -374,6 +410,8 @@ class LLMDrivenRunner:
             if self._llm_tools is not None
             else mcp_tools_to_openai_format(self._tools)
         )
+        if result_context is not None:
+            openai_tools.append(deepcopy(READ_RESULT_SCHEMA))
 
         for _i in range(self._max_iterations):
             if self._cancel.is_set():
@@ -421,11 +459,22 @@ class LLMDrivenRunner:
                         fallback_recorded = True
                         self._record_run_first_fallback_after_run(tc.name)
 
+                    is_result_read = result_context is not None and tc.name == READ_RESULT_TOOL
+                    approval_name, approval_arguments = tc.name, tc.arguments
+                    if is_result_read:
+                        try:
+                            approval_name, approval_arguments = result_context.source_call(
+                                tc.arguments.get("source_id")
+                            )
+                        except ValueError as exc:
+                            await self._deliver_result(tc, str(exc), True, history)
+                            continue
+
                     try:
                         gate_result = await self._gate.request_approval(
                             self._session_id,
-                            tc.name,
-                            tc.arguments,
+                            approval_name,
+                            approval_arguments,
                             cancel_event=self._cancel,
                         )
                     except asyncio.CancelledError:
@@ -462,23 +511,31 @@ class LLMDrivenRunner:
                         metadata={"_already_approved": True},
                     )
 
-                    try:
-                        result = await self._transport.call_tool(tc.name, tc.arguments)
-                        output = _extract_text_content(result)
-                        is_error = result.get("isError", False)
-                    except Exception as exc:
-                        output = str(exc)
-                        is_error = True
-
-                    await self._emit_event(
-                        AgentEventKind.TOOL_RESULT,
-                        {"tool_name": tc.name, "output": output, "is_error": is_error},
+                    prepared = None
+                    if is_result_read:
+                        try:
+                            prepared = result_context.read(**tc.arguments)
+                            output, is_error = prepared.output, False
+                        except (TypeError, ValueError):
+                            output, is_error = "Invalid result read arguments", True
+                    else:
+                        try:
+                            result = await self._transport.call_tool(tc.name, tc.arguments)
+                            output = _extract_text_content(result)
+                            is_error = result.get("isError", False)
+                        except Exception as exc:
+                            output = str(exc)
+                            is_error = True
+                        if result_context is not None and isinstance(output, str):
+                            prepared = await result_context.prepare(
+                                tool_name=tc.name, arguments=tc.arguments, text=output,
+                                question=question, is_error=is_error, cancel_event=self._cancel,
+                            )
+                    await self._deliver_result(
+                        tc, output, is_error, history,
+                        model_output=prepared.output if prepared is not None else None,
+                        metadata={"result_context": prepared.metadata} if prepared is not None else None,
                     )
-                    history.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": output,
-                    })
 
             if response.text and not response.tool_calls:
                 self._record_run_first_completion_proxy("end_turn")
@@ -498,3 +555,18 @@ class LLMDrivenRunner:
 
         if self._cancel.is_set():
             self._record_run_first_completion_proxy("cancelled")
+
+    async def _deliver_result(
+        self, call: LLMToolCall, output: str, is_error: bool, history: list[dict],
+        *, model_output: str | None = None, metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Keep source events intact while admitting selected text to model history."""
+        await self._emit_event(
+            AgentEventKind.TOOL_RESULT,
+            {"tool_name": call.name, "output": output, "is_error": is_error},
+            metadata=metadata,
+        )
+        history.append({
+            "role": "tool", "tool_call_id": call.id,
+            "content": output if model_output is None else model_output,
+        })

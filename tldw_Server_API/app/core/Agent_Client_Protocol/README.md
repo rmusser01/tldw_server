@@ -88,6 +88,75 @@ Agent_Client_Protocol is the server-side integration layer for ACP-compatible co
 
 ## Testing
 
+### Optional MCP result-context experiment
+
+`MCPAdapter` accepts an experimental `mcp_tool_result_policy` in
+`AdapterConfig.protocol_config` for **LLM-driven MCP orchestration**. It defaults
+to `{"mode": "off"}`. This is an embedding interface: the project currently
+defines `LLMCaller` but does not supply a concrete production caller here.
+These options are not new REST agent-profile fields and do not intercept native
+Claude/Codex ACP sessions.
+
+```python
+# Add to an existing llm_driven protocol_config with llm_caller and tool_gate.
+protocol_config["mcp_tool_result_policy"] = {
+    "mode": "excerpt",          # off | excerpt | worker
+    "min_input_bytes": 8192,
+    "max_output_bytes": 4096,
+    "max_retained_bytes": 4_194_304,
+    "max_worker_input_bytes": 32_768,
+    "worker_timeout_seconds": 10.0,
+}
+```
+
+`excerpt` ranks fixed source segments using the current question. `worker`
+requires an explicit `mcp_result_worker` implementing `LLMCaller` and
+`mcp_result_worker_provider` equal to `mcp_llm_provider`. The embedding caller
+must bind the approved credentials, provider/model and egress policy; declaring
+provider names does not authenticate arbitrary caller code. No provider or
+model is automatically selected or contacted. Configure the worker's generation
+token limit in its caller implementation. The worker receives no tools and only
+the question plus numbered source segments, and returns JSON segment IDs. Only
+server-held text is admitted to context. Optional numeric `LLMResponse.usage`
+is recorded in comparison metadata; absent usage remains unknown.
+
+Enabled runs expose `tldw_read_tool_result(source_id, offset=0, limit=512)` for
+exact follow-up reads. Offsets and limits count characters; every excerpt/read
+is additionally bounded by UTF-8 output bytes. Reads reauthorize the original
+tool and arguments through `ToolGate`. Sources expire at the end of each run.
+The reserved tool name must not collide with a server tool. Failed tool results
+and small results pass through; when the retained-source budget is exhausted,
+the original result passes through with `storage_limit` metadata. Thus this is
+an evidence-selection experiment, not a hard total-context or memory quota.
+
+Original `TOOL_RESULT` event payloads remain available to existing consumers.
+The accompanying `metadata.result_context` records sizes, exact source ranges,
+the selection outcome, and available worker measurements without source text.
+Worker error, timeout, invalid selection and oversized input use deterministic
+excerpts; cancellation propagates and cancels outstanding worker work. Cleanup
+waits at most 100 ms beyond the worker deadline, then cancels again. Injected
+callers must cooperate with asyncio cancellation; arbitrary caller code cannot
+be forcibly terminated by an asyncio task. The source store is explicitly
+cleared in a run-level `finally`, including callback failure/cancellation.
+
+Run the no-network fixture replay from the repository root:
+
+```bash
+source .venv/bin/activate
+python -m Helper_Scripts.benchmarks.acp_tool_result_experiment > /tmp/acp-result-comparison.json
+```
+
+The default worker is labeled `fixture_oracle` and knows the expected evidence.
+It verifies policy/recovery mechanics, **not model quality or total cost savings**.
+Use `--dataset cases.jsonl` for rows containing `id`, `question`, `text`, and an
+exact `expected_quote`. `--worker-factory module:factory` explicitly loads a
+trusted local factory returning a configured `LLMCaller` for real extraction
+replays. There is no main-model call in this replay. Before rollout, compare
+full agent tasks across the three arms, including both models' billed and cached
+tokens, p50/p95 latency, task success, valid citations and additional reads.
+
+Design and rollout details: `Docs/Design/ACP_Tool_Result_Context_Experiment.md`.
+
 - Unit and API coverage lives under `tldw_Server_API/tests/Agent_Client_Protocol/`.
 - The test suite includes endpoint, WebSocket, session store, run handler, sandbox runner, governance filter, tool gate, MCP adapter, MCP runner, MCP transport, event bus, audit, metrics, and trigger tests.
 - When changing endpoint contracts, also inspect `test_acp_endpoints.py` and `test_acp_websocket.py`.
