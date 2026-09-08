@@ -27,7 +27,7 @@
 **Goal:** Fail-closed candidate generation with canonical recipe preservation.
 **Success Criteria:** Both canonical inputs render; altered/ambiguous markers fail; tests prove preservation and fixed inputs.
 **Tests:** Focused renderer tests and existing Supply_Chain suite.
-**Status:** Not Started
+**Status:** Complete —1f23962f09, independent spec/quality review approved;23 focused and610 Supply_Chain tests pass.
 
 ### Task 1: Candidate recipe renderer
 
@@ -75,7 +75,7 @@ return prefix + CANDIDATE_RUNTIME_BLOCK + remainder
 **Goal:** Exercise both exact standalone application artifacts with baseline controls.
 **Success Criteria:** Correct native identity, non-root application behavior, real GNU sharp transform, configured healthcheck and bounded shutdown.
 **Tests:** Probe unit tests for parsing/validation/failure paths, real native job controls.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 2: Native runtime controls and workflow
 
