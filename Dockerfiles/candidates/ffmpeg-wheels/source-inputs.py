@@ -92,6 +92,7 @@ def _relative_path(value: object, label: str) -> str:
         "\\" in path
         or "\x00" in path
         or pure.is_absolute()
+        or not pure.parts
         or any(part in {"", ".", ".."} for part in pure.parts)
         or pure.as_posix() != path
     ):
@@ -243,6 +244,7 @@ def _validate_inputs(
 def _validate_patches(lock: dict, files: dict[str, str]) -> tuple[dict[str, dict], dict[str, int]]:
     patches: dict[str, dict] = {}
     positions: dict[str, int] = {}
+    digests: set[str] = set()
     for index, value in enumerate(_records(lock["patches"], "patches")):
         record = _record(value, PATCH_FIELDS, f"patch[{index}]")
         commit = _string(record["commit"], f"patch[{index}].commit", COMMIT_RE)
@@ -250,6 +252,9 @@ def _validate_patches(lock: dict, files: dict[str, str]) -> tuple[dict[str, dict
             raise ValueError(f"duplicate patch commit: {commit}")
         path = _relative_path(record["path"], f"patch[{index}].path")
         digest = _digest(record["sha256"], f"patch[{index}].sha256")
+        if digest in digests:
+            raise ValueError(f"duplicate patch SHA-256: {digest}")
+        digests.add(digest)
         requires = _strings(record["requires"], f"patch[{index}].requires", pattern=COMMIT_RE)
         missing = set(requires) - patches.keys()
         if missing:
