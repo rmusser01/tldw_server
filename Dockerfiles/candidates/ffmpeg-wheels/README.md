@@ -5,6 +5,79 @@ source lock, replacement wheel, derivative image or vulnerability clearance.
 Production recipes, dependency locks, scanner policy and the existing standalone
 FFmpeg 9 candidate recipe remain unchanged.
 
+## Deterministic source-input gate
+
+[source-inputs.py](source-inputs.py) implements the candidate-only
+**ffmpeg-wheel-source/v1** metadata and byte-binding gate. It is a pure local
+validator: it does not fetch sources, invoke signature tools, apply patches,
+build wheels or execute any input. A trusted acquisition step must provide both
+the source root and the normalized original-match records. The production
+adapter that derives the complete 43-record **{input_id, cve, owner}** set
+remains pending; the validator neither reads nor interprets retained scanner
+output.
+
+Version 1 uses these exact object shapes. Unknown or missing fields fail closed:
+
+- The lock has **schema_version**, **inputs**, **patches**, **coverage**,
+  **builds** and **evidence**.
+- An input has **name**, HTTPS **url**, **sha256**, **path** and
+  **authentication**. Authentication has exactly **method** and a non-empty
+  **evidence_paths** list.
+- An ordered patch has full **commit**, **sha256**, **path**, **requires** and
+  **source_paths**. Every prerequisite must occur earlier in the patch array.
+- A coverage record has **input_id**, **cve**, **owner**, **source_paths**,
+  **disposition**, **repair_commits**, **evidence_paths** and
+  **regression_id**. Disposition is one of **repaired**, **already_fixed** or
+  **absent_condition**.
+- A build has **owner**, **version**, **abi**, **platform**, **tools**,
+  **assets** and **configuration**. Platform is exactly native
+  Linux/amd64/Python 3.12. Configuration has a unique **environment** and
+  **evidence_paths**.
+- An evidence record has only **path** and **sha256**. Original-match records
+  have only **input_id**, **cve** and **owner**.
+
+All identifiers and paths are unique where they declare identities. Paths are
+canonical relative POSIX paths; absolute paths, traversal, backslashes, symlinks
+in the root or a declared path, and non-regular files are rejected. The complete
+set of regular files below the root must equal the input, patch and evidence
+paths in the lock, so an extra unreviewed file also fails. Every evidence file
+is hash-bound and referenced by authentication, coverage or build
+configuration. Every input is referenced by one of the two build records.
+
+Coverage must equal the normalized original-match set by the full
+**{input_id, cve, owner}** identity, not by input ID alone. A **repaired**
+record must list known commits in declared order, include their prerequisites
+and bind its source paths to those patches. The other dispositions must have no
+repair commits. All dispositions require hashed evidence and a unique
+regression ID. Build records are fixed to **av 18.1.0 / cp311-abi3** and
+**opencv-python 5.0.0.93 / cp37-abi3**, with distinct environments and declared
+input, configuration and asset references.
+
+An authentication record only binds a descriptive method to hashed evidence.
+The parser does **not** establish cryptographic authenticity, validate a signer
+or promote signer text into trust. Signature/key/registry verification belongs
+to trusted acquisition, and its machine-readable result must be retained as a
+hashed evidence file.
+
+On success, **verify_sources()** returns the schema version, sorted coverage
+IDs, the declared input hashes, and **source_lock_sha256**. The last value is
+the SHA-256 of UTF-8 JSON serialized with sorted object keys, compact separators
+and arrays in their declared order. It is the semantic identity of the v1 lock
+(whitespace and object-key order do not affect it); it is separate from every
+raw artifact SHA-256. Array order is part of the v1 lock semantics.
+
+The CLI prints JSON to stdout only after validation succeeds:
+
+    python Dockerfiles/candidates/ffmpeg-wheels/source-inputs.py \
+      --lock /path/to/source-lock.json \
+      --root /path/to/source-root \
+      --original-matches /path/to/normalized-original-matches.json
+
+Malformed or incomplete input exits nonzero without a success document. No real
+**source-lock.json** is supplied by this checkpoint. Actual upstream patch
+application, regression execution, complete source-ledger review and owning
+wheel builds remain separate qualification work.
+
 The approved design is
 [`Docs/Design/2026-09-07-task-13013-7-12-ffmpeg-wheel-remediation.md`](../../../Docs/Design/2026-09-07-task-13013-7-12-ffmpeg-wheel-remediation.md).
 It preserves PyAV 18.1.0 and OpenCV 5.0.0.93 while rebuilding their private

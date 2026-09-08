@@ -76,6 +76,12 @@ All candidate-local paths above are relative to `Dockerfiles/candidates/` when a
 
 ### Task 2: Fail-closed source gate
 
+**Execution note:** The deterministic validator and synthetic fixture tests are
+being implemented independently while Task 1's real input ledger remains
+incomplete. This does not authorize a build or replace the real source
+integration and independent evidence review below. No real `source-lock.json`
+is emitted by this implementation slice.
+
 **Files:** Create `source-inputs.py` and `test_ffmpeg_wheel_sources.py`; extend README.
 **Interfaces:** `verify_sources(lock: dict, root: Path, original_matches: list[dict]) -> dict` raises `ValueError` on malformed or incomplete evidence and returns `{schema_version, source_lock_sha256, input_sha256, coverage_ids}` only after all checks. CLI takes `--lock`, `--root`, `--original-matches`; emits JSON only on success.
 
