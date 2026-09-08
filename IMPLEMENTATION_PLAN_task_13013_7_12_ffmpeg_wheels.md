@@ -59,7 +59,7 @@ All candidate-local paths above are relative to `Dockerfiles/candidates/` when a
 **Goal:** Establish complete, reproducible repair inputs before any compilation.
 **Success Criteria:** All 43 input identities accounted for; actual fixes and prerequisites verified; authenticated baseline, owning sources and build closure pinned; no unresolved source-gate entries.
 **Tests:** Tampered input, duplicate/missing coverage, partial patch series, wrong source identity, unsafe archive paths and unauthenticated claims are rejected.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 1: Resolve and retain the exact repair inputs
 
@@ -226,4 +226,4 @@ artifacts and retry with fresh run identities rather than overwriting evidence.
 - Owning versions, private-library ABI, native build closure, capability/license preservation: Stage 2.
 - Restricted replacement, unrelated-runtime equality, new immutable identity, real consumers and original controls: Stage 3.
 - Source-aware raw scans, individual reconciliation, independent review, unchanged admission and recovery: Stage 4.
-- Execution mode awaits user choice; no implementation has started.
+- User selected subagent-driven execution. Stage 1 investigation is active; no candidate build has started.
