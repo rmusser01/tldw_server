@@ -1029,6 +1029,7 @@ export default function UserDetailPage() {
                       <div className="mt-2 space-y-2">
                         <div className="flex gap-2">
                           <Input
+                            aria-label="Filter permissions"
                             placeholder="Search permissions..."
                             value={permSearchQuery}
                             onChange={(e) => setPermSearchQuery(e.target.value)}
