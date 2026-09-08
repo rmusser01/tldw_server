@@ -276,7 +276,25 @@ accepted retirements and scanner policy remain unchanged. Native comparison is
 still required before completing the following capability item.
 
 - [x] Integrate the qualified artifacts into a separately named candidate image, without changing production recipes. Run `tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py` and Chunking tests `test_xml_allows_url_text.py`, `test_json_xml_offsets.py`, `test_xml_tail_preservation.py` against that image.
-- [ ] Run fontconfig discovery and FFmpeg drawtext/subtitle controls; compare the previously accepted FFmpeg capability inventory without broadening accepted retirements.
+Native retained-image FFmpeg run `34181121924` at `82feb58c4a8571b54e59f58f6d6456f85dbd6107`
+passed. Parent independently reverified producer/consumer identities, all seven
+raw inventories and deltas, no unapproved removals, and software media probes.
+Evidence is retained in `/private/tmp/task-13013-7-compatibility-native-34181121924.R31SVa`.
+Only the original approved category-specific retirements occurred; GPU/device
+capability and scanner clearance are not inferred from this result.
+
+The import-provenance checkpoint extends the retained-image workflow without
+rebuilding: a read-only observer wraps the hash-pinned original application
+launcher, preserving all eight identities and 24 phase requirements. It records
+17 collection/before-call/after-call snapshots of actual modules, callable source
+files, parser/test/package aliases and hashes. Missing modules/observations,
+checker errors or changed identities fail. Defusedxml's generated closures and
+pure-Python parser shim remain legitimate; only the named error-path test's
+after-call processing mock is tolerated. Native interpreter/parser binary pins
+remain mandatory. Local fixtures explicitly model macOS built-in-parser metadata;
+native verification is still required before claiming this checkpoint complete.
+
+- [x] Run fontconfig discovery and FFmpeg drawtext/subtitle controls; compare the previously accepted FFmpeg capability inventory without broadening accepted retirements.
 - [ ] Save source packages, Python source/SBOM, build/configuration logs, binary hashes, package controls, test statuses and candidate OCI identity. Run existing pinned Syft/Trivy/Grype tooling; explicitly account for bundled Expat even if automatic catalogers omit it. Do not rewrite findings into passes.
 - [ ] Perform the security-fix skill's single fresh read-only candidate review after focused gates, confirm any concrete findings, rerun affected checks, and update TASK-13013.7.9 with exact evidence and remaining blockers.
 

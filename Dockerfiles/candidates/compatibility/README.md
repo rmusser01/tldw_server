@@ -52,3 +52,43 @@ or production admission. Source-aware Syft/Trivy/Grype reports and final securit
 review remain separate gates. Prior successful drawtext/subtitles controls also
 reported a nonfatal fontconfig cache warning under a read-only root; this workflow
 neither suppresses that warning nor claims to fix it.
+
+## Same-process application import provenance
+
+The additional application step uses the same retained OCI subject and an
+external read-only `application-provenance.py` observer. It hashes the original
+image-supplied `/opt/combined/run-tests.py` before loading it, adds an `Evidence`
+subclass, and invokes its unchanged main function. The original eight test
+identities, 24 successful phases, tooling order and no-skip rules remain required.
+No host application, tests or dependency tree is mounted into the container.
+
+The observer records file/spec origins, SHA-256 hashes, relevant callable source
+files and retained aliases at collection and before/after every test call (17
+required observations). Missing modules, checker errors, wrong paths, detached
+aliases, changed module identities or missing observations fail the final result.
+It does not import missing application/parser modules to create evidence. The
+lazy `xml.parsers.expat` facade may be absent initially but must be observed later.
+The candidate interpreter/prefix, Expat version and both parser extension hashes
+are required; the workflow also rechecks all four qualified Python binary hashes.
+
+Defusedxml's generated functions legitimately originate in `common.py`, and its
+retained pure-Python XMLParser legitimately differs from accelerated ElementTree.
+Both source paths and the parser inheritance/aliases are checked without rejecting
+that design. Generated functions must also capture the canonical parser,
+tree-builder and delegated parse functions; source filenames alone are not
+sufficient. `ParserCreate` must be the native built-in bound to the loaded
+pyexpat module, not merely equal through two potentially replaced aliases.
+The ingestion error-path test's deliberate processing mock is allowed
+only in that test's after-call observation; its before-call and other observations
+must retain the canonical processing alias. Database collaborator mocks remain
+outside this parser/application provenance scope.
+
+These are boundary observations, not a trace of every executed instruction or a
+defense against arbitrary malicious code forging Python object metadata. Their
+evidentiary value depends on the trusted, immutable image, hash-bound launcher,
+reviewed observer and restricted mounts. The local verification environment uses
+shared dependencies and built-in macOS parser modules; unit fixtures explicitly
+model Linux file metadata, and a real eight-test launcher integration checks
+observer compatibility. Only the native run can qualify actual candidate paths,
+parser binaries and application behavior together. Scanner clearance and release
+admission remain separate.

@@ -7,6 +7,7 @@ on:
       - '.github/workflows/candidate-compatibility.yml'
       - 'Dockerfiles/candidates/compatibility/**'
       - 'tldw_Server_API/tests/Supply_Chain/test_candidate_compatibility.py'
+      - 'tldw_Server_API/tests/Supply_Chain/test_candidate_provenance.py'
   workflow_dispatch:
 
 permissions:
@@ -111,6 +112,33 @@ jobs:
           test "$status" -eq 0
           jq -e --arg config "$config" '.compatible == true and .candidate_image == $config' \
             "$evidence/ffmpeg/candidate-evaluation.json"
+      - name: Observe application imports in the exact candidate test process
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/compatibility-evidence"
+          mkdir "$evidence/application"
+          chmod 0777 "$evidence/application"
+          subject="$(jq -r .loaded_subject "$evidence/loaded-identity.json")"
+          sha256sum Dockerfiles/candidates/compatibility/application-provenance.py \
+            > "$evidence/application-observer.sha256"
+          set +e
+          docker run --rm --pull never --platform linux/amd64 --network none --read-only \
+            --user 10001:10001 --cap-drop ALL --security-opt no-new-privileges \
+            --pids-limit 256 --memory 8g --cpus 4 \
+            --tmpfs /tmp:rw,nosuid,nodev,size=1g,mode=1777 \
+            --tmpfs /app/Databases:rw,nosuid,nodev,size=256m,uid=10001,gid=10001 \
+            --mount "type=bind,src=$GITHUB_WORKSPACE/Dockerfiles/candidates/compatibility/application-provenance.py,dst=/provenance.py,readonly" \
+            --mount "type=bind,src=$evidence/application,dst=/evidence" \
+            --entrypoint /bin/bash "$subject" -c \
+            'set -euo pipefail; cd /; sha256sum --check --strict /opt/combined-evidence/installed-binaries.sha256 > /evidence/python-binaries.log; exec /opt/tldw-venv/bin/python /provenance.py --report /evidence/application-tests.json' \
+            > "$evidence/application.log" 2>&1
+          status=$?
+          set -e
+          printf '%s\n' "$status" > "$evidence/application.exit"
+          test "$status" -eq 0
+          jq -e '.passed == true and .scope == "application-tests-with-import-provenance-not-admitted"' \
+            "$evidence/application/application-tests.json"
       - name: Retain compatibility evidence including failures
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
