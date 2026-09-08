@@ -40,6 +40,9 @@ jobs:
               NEXT_PUBLIC_BILLING_ENABLED=false
     env:
       APPLICATION: ${{ matrix.application }}
+      TRIVY_IMAGE: ghcr.io/aquasecurity/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+      SYFT_IMAGE: anchore/syft:v1.51.1@sha256:95fe0835e5bebc6f8b1f8acef68d47d63d594ef4c0f25c097ff853b23cbac74c
+      GRYPE_IMAGE: anchore/grype:v0.118.0@sha256:8a93fc48da96bd6ec5981279d099b69de11541dc68fdf222fb9161f8ff284af7
     steps:
       - name: Checkout exact source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -175,6 +178,159 @@ jobs:
           python Dockerfiles/candidates/frontend/qualify.py --application "$APPLICATION" \
             --baseline "$BASELINE_SUBJECT" --candidate "$CANDIDATE_SUBJECT" \
             --evidence "$ARTIFACTS/evidence"
+
+      - name: Acquire one fresh vulnerability database set for the pair
+        id: scanner_db
+        if: ${{ always() && steps.load.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e "$ARTIFACTS/scanner"
+          mkdir -p "$ARTIFACTS/scanner/trivy-cache" "$ARTIFACTS/scanner/grype-db"
+          docker run --volume "$ARTIFACTS:/evidence:rw" "$TRIVY_IMAGE" --version \
+            > "$ARTIFACTS/evidence/trivy-version.txt" 2>&1
+          docker run --volume "$ARTIFACTS:/evidence:rw" "$SYFT_IMAGE" version \
+            > "$ARTIFACTS/evidence/syft-version.txt" 2>&1
+          docker run --volume "$ARTIFACTS:/evidence:rw" \
+            --env GRYPE_DB_CACHE_DIR=/evidence/scanner/grype-db \
+            "$GRYPE_IMAGE" version > "$ARTIFACTS/evidence/grype-version.txt" 2>&1
+          grep -F "0.74.0" "$ARTIFACTS/evidence/trivy-version.txt"
+          grep -F "1.51.1" "$ARTIFACTS/evidence/syft-version.txt"
+          grep -F "0.118.0" "$ARTIFACTS/evidence/grype-version.txt"
+          docker image inspect "$TRIVY_IMAGE" > "$ARTIFACTS/evidence/trivy-image.json"
+          docker image inspect "$SYFT_IMAGE" > "$ARTIFACTS/evidence/syft-image.json"
+          docker image inspect "$GRYPE_IMAGE" > "$ARTIFACTS/evidence/grype-image.json"
+
+          docker run --volume "$ARTIFACTS:/evidence:rw" "$TRIVY_IMAGE" image \
+            --download-db-only --cache-dir /evidence/scanner/trivy-cache \
+            > "$ARTIFACTS/evidence/trivy-db-download.log" 2>&1
+          cp "$ARTIFACTS/scanner/trivy-cache/db/metadata.json" \
+            "$ARTIFACTS/evidence/trivy-db-metadata.json"
+          docker run --volume "$ARTIFACTS:/evidence:rw" \
+            --env GRYPE_DB_CACHE_DIR=/evidence/scanner/grype-db \
+            "$GRYPE_IMAGE" db update > "$ARTIFACTS/evidence/grype-db-download.log" 2>&1
+          docker run --network none --volume "$ARTIFACTS:/evidence:rw" \
+            --env GRYPE_DB_CACHE_DIR=/evidence/scanner/grype-db \
+            --env GRYPE_DB_AUTO_UPDATE=false --env GRYPE_CHECK_FOR_APP_UPDATE=false \
+            "$GRYPE_IMAGE" db status -o json > "$ARTIFACTS/evidence/grype-db-status.json" 2>&1
+
+          test -s "$ARTIFACTS/scanner/trivy-cache/db/trivy.db"
+          test -s "$ARTIFACTS/scanner/grype-db/6/vulnerability.db"
+          sha256sum "$ARTIFACTS/scanner/trivy-cache/db/trivy.db" \
+            > "$ARTIFACTS/evidence/trivy-db-sha256-before.txt"
+          sha256sum "$ARTIFACTS/scanner/grype-db/6/vulnerability.db" \
+            > "$ARTIFACTS/evidence/grype-db-sha256-before.txt"
+          python - <<'PY'
+          import datetime
+          import json
+          import os
+          from pathlib import Path
+
+          evidence = Path(os.environ["ARTIFACTS"]) / "evidence"
+          now = datetime.datetime.now(datetime.timezone.utc)
+
+          def timestamp(value):
+              return datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+          trivy = json.loads((evidence / "trivy-db-metadata.json").read_text())
+          grype = json.loads((evidence / "grype-db-status.json").read_text())
+          observed = {
+              "trivyUpdatedAt": trivy["UpdatedAt"],
+              "grypeBuilt": grype["built"],
+              "grypeValid": grype["valid"],
+              "grypeSchemaVersion": grype["schemaVersion"],
+          }
+          if observed["grypeValid"] is not True:
+              raise SystemExit("Grype database is not valid")
+          for name in ("trivyUpdatedAt", "grypeBuilt"):
+              age = now - timestamp(observed[name])
+              if age > datetime.timedelta(hours=24) or age < -datetime.timedelta(minutes=5):
+                  raise SystemExit(f"{name} is outside the 24-hour freshness window: {observed[name]}")
+          (evidence / "scanner-db-validation.json").write_text(json.dumps(observed, indent=2) + "\n")
+          PY
+
+      - name: Scan both validated OCI artifacts with the frozen database set
+        id: scans
+        if: ${{ always() && steps.load.outcome == 'success' && steps.scanner_db.outcome == 'success' }}
+        shell: bash
+        env:
+          BASELINE_SUBJECT: ${{ steps.baseline.outputs.digest }}
+          CANDIDATE_SUBJECT: ${{ steps.candidate.outputs.digest }}
+        run: |
+          set -euo pipefail
+          platform_flag=--platform
+          for role in baseline candidate; do
+            if [[ "$role" == baseline ]]; then
+              subject="$BASELINE_SUBJECT"
+            else
+              subject="$CANDIDATE_SUBJECT"
+            fi
+            docker run --network none --volume "$ARTIFACTS:/evidence:rw" \
+              "$SYFT_IMAGE" scan "oci-dir:/evidence/$role-layout" "$platform_flag" linux/amd64 \
+              --output "json=/evidence/evidence/$role-syft.json" \
+              > "$ARTIFACTS/evidence/$role-syft.log" 2>&1
+            docker run --network none --volume "$ARTIFACTS:/evidence:rw" \
+              --volume "$ARTIFACTS/$role-layout:/input:ro" \
+              "$TRIVY_IMAGE" image --input "/input@$subject" "$platform_flag" linux/amd64 \
+              --cache-dir /evidence/scanner/trivy-cache --skip-db-update --skip-java-db-update \
+              --format json \
+              --output "/evidence/evidence/$role-trivy.json" \
+              > "$ARTIFACTS/evidence/$role-trivy.log" 2>&1
+            docker run --network none --volume "$ARTIFACTS:/evidence:rw" \
+              --env GRYPE_DB_CACHE_DIR=/evidence/scanner/grype-db \
+              --env GRYPE_DB_AUTO_UPDATE=false --env GRYPE_CHECK_FOR_APP_UPDATE=false \
+              "$GRYPE_IMAGE" "oci-dir:/evidence/$role-layout" "$platform_flag" linux/amd64 \
+              --output json --file "/evidence/evidence/$role-grype.json" \
+              > "$ARTIFACTS/evidence/$role-grype.log" 2>&1
+          done
+          sha256sum "$ARTIFACTS/scanner/trivy-cache/db/trivy.db" \
+            > "$ARTIFACTS/evidence/trivy-db-sha256-after.txt"
+          sha256sum "$ARTIFACTS/scanner/grype-db/6/vulnerability.db" \
+            > "$ARTIFACTS/evidence/grype-db-sha256-after.txt"
+          cmp "$ARTIFACTS/evidence/trivy-db-sha256-before.txt" \
+            "$ARTIFACTS/evidence/trivy-db-sha256-after.txt"
+          cmp "$ARTIFACTS/evidence/grype-db-sha256-before.txt" \
+            "$ARTIFACTS/evidence/grype-db-sha256-after.txt"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          evidence = Path(os.environ["ARTIFACTS"]) / "evidence"
+          expected = {
+              role: (evidence / f"{role}-config-digest.txt").read_text().strip()
+              for role in ("baseline", "candidate")
+          }
+          for role in ("baseline", "candidate"):
+              report = json.loads((evidence / f"{role}-syft.json").read_text())
+              actual = report["source"]["metadata"]["imageID"]
+              if actual != expected[role]:
+                  raise SystemExit(f"{role} Syft identity {actual!r} != {expected[role]!r}")
+              packages = {(item["name"], item["version"], item["type"]) for item in report["artifacts"]}
+              if ("node", "24.20.0", "binary") not in packages:
+                  raise SystemExit(f"{role} Syft inventory does not contain Node 24.20.0")
+              if role == "candidate":
+                  required = {
+                      ("zlib1g", "1:1.3.dfsg-3.1ubuntu2.2", "deb"),
+                      ("libc6", "2.39-0ubuntu8.8", "deb"),
+                  }
+                  if not required.issubset(packages):
+                      raise SystemExit("candidate Syft inventory lacks reviewed zlib/libc versions")
+          PY
+
+      - name: Compare complete scanner findings without admission
+        if: ${{ always() && steps.load.outcome == 'success' && steps.scans.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python Dockerfiles/candidates/frontend/compare.py \
+            --baseline-trivy "$ARTIFACTS/evidence/baseline-trivy.json" \
+            --candidate-trivy "$ARTIFACTS/evidence/candidate-trivy.json" \
+            --baseline-grype "$ARTIFACTS/evidence/baseline-grype.json" \
+            --candidate-grype "$ARTIFACTS/evidence/candidate-grype.json" \
+            --baseline-config "$(cat "$ARTIFACTS/evidence/baseline-config-digest.txt")" \
+            --candidate-config "$(cat "$ARTIFACTS/evidence/candidate-config-digest.txt")" \
+            --output "$ARTIFACTS/evidence/vulnerability-comparison.json"
 
       - name: Retain evidence and both exact archives
         if: ${{ always() }}
