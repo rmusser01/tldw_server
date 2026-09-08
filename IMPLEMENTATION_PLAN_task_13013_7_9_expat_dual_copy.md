@@ -231,6 +231,24 @@ new controls reproduced it before correction; canonicalized comparison now rejec
 symlink, relative and `/.` aliases before pytest imports. Normal runtime-first
 imports and all eight test-outcome controls still pass.
 
+Native assembly wiring checkpoint: `combined-expat-candidate.yml` authenticates
+the fixed cross-run handoff with fresh GitHub metadata and reviewed payload pins,
+then uses the retained FFmpeg subject as a named OCI build context. The candidate
+Dockerfile restores the complete Python installation, preserves locked production
+dependency semantics, installs test wheels outside the runtime with before/after
+file-and-link checks, and replaces only the system runtime Expat package after
+APT. Tracked tests enter through a separate immutable context. One build retains
+attested OCI evidence and loads a separate cached, config-bound execution export for non-root/networkless
+parser/application/rendering controls. Local metadata/hash handoff and 33 new
+negative/legitimate controls pass; native execution remains required. Full FFmpeg
+capability comparison, application import provenance and source-aware scanner
+reports remain open and cannot be inferred from this workflow's success.
+Review identified Buildx's rejection of explicit attestations with the classic
+Docker exporter. The corrected sequence retains attested OCI first, loads only
+an unattested execution representation from the same cache, and requires identical
+config bytes. A tiny native exporter preflight gates the heavy build; no canonical
+attestation or release gate is removed. Native verification remains outstanding.
+
 - [ ] Integrate the qualified artifacts into a separately named candidate image, without changing production recipes. Run `tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py` and Chunking tests `test_xml_allows_url_text.py`, `test_json_xml_offsets.py`, `test_xml_tail_preservation.py` against that image.
 - [ ] Run fontconfig discovery and FFmpeg drawtext/subtitle controls; compare the previously accepted FFmpeg capability inventory without broadening accepted retirements.
 - [ ] Save source packages, Python source/SBOM, build/configuration logs, binary hashes, package controls, test statuses and candidate OCI identity. Run existing pinned Syft/Trivy/Grype tooling; explicitly account for bundled Expat even if automatic catalogers omit it. Do not rewrite findings into passes.
