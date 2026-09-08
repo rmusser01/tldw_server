@@ -1,0 +1,106 @@
+name: FFmpeg Native Candidate Artifact
+
+on:
+  push:
+    branches: [codex/task-13013-7-supply-chain-design]
+    paths:
+      - '.github/workflows/ffmpeg-candidate.yml'
+      - 'Dockerfiles/candidates/ffmpeg/**'
+      - 'tldw_Server_API/tests/Supply_Chain/test_ffmpeg_native_workflow.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ffmpeg-native-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build native FFmpeg input (not combined qualification)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Require native checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+          daemon_arch="$(docker info --format '{{.Architecture}}')"
+          if [[ "$daemon_arch" != x86_64 && "$daemon_arch" != amd64 ]]; then
+            printf 'Requires native amd64 Docker, observed %s\n' "$daemon_arch" >&2
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/ffmpeg-native-evidence"
+          printf 'commit=%s\nkernel=Linux\narch=x86_64\ndaemon_arch=%s\n' \
+            "$GITHUB_SHA" "$daemon_arch" > "$RUNNER_TEMP/ffmpeg-native-evidence/runner.txt"
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
+      - name: Build unchanged candidate recipe
+        id: build
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf
+        with:
+          context: .
+          file: Dockerfiles/candidates/ffmpeg/Dockerfile
+          platforms: linux/amd64
+          push: false
+          provenance: mode=max
+          sbom: true
+          outputs: type=oci,dest=${{ runner.temp }}/ffmpeg.oci.tar
+      - name: Bind retained OCI artifact
+        shell: bash
+        env:
+          CANDIDATE_SUBJECT: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/ffmpeg-layout" "$RUNNER_TEMP/ffmpeg-native-evidence"
+          mv "$RUNNER_TEMP/ffmpeg.oci.tar" "$RUNNER_TEMP/ffmpeg-native-evidence/ffmpeg.oci.tar"
+          tar -xf "$RUNNER_TEMP/ffmpeg-native-evidence/ffmpeg.oci.tar" -C "$RUNNER_TEMP/ffmpeg-layout"
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          from Helper_Scripts.Supply_Chain.runtime_probe import candidate_config
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          layout = root / "ffmpeg-layout"
+          evidence = root / "ffmpeg-native-evidence"
+          subject = os.environ["CANDIDATE_SUBJECT"]
+          config = candidate_config(layout, subject)
+          index_raw = (layout / "index.json").read_bytes()
+          index_digest = "sha256:" + hashlib.sha256(index_raw).hexdigest()
+          index = json.loads(index_raw)
+          if subject != index_digest and subject not in {entry["digest"] for entry in index["manifests"]}:
+              raise ValueError("build subject is not bound to exported OCI index")
+          identity = {
+              "scope": "unqualified-ffmpeg-input",
+              "commit": os.environ["GITHUB_SHA"],
+              "subject_digest": subject,
+              "index_digest": index_digest,
+              "config_digest": config,
+              "platform": "linux/amd64",
+          }
+          (evidence / "oci-subject.json").write_text(json.dumps(identity, indent=2, sort_keys=True) + "\n")
+          with (evidence / "SHA256SUMS").open("w") as checksums:
+              for name in ("ffmpeg.oci.tar", "oci-subject.json"):
+                  with (evidence / name).open("rb") as artifact:
+                      digest = hashlib.file_digest(artifact, "sha256").hexdigest()
+                  checksums.write(f"{digest}  ./{name}\n")
+          print(json.dumps(identity, sort_keys=True))
+          PY
+      - name: Retain candidate and evidence including failures
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ffmpeg-native-candidate-${{ github.run_id }}
+          path: ${{ runner.temp }}/ffmpeg-native-evidence/**
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

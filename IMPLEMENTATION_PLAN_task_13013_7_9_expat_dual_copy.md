@@ -192,6 +192,25 @@ offline control asks real APT for its complete planned index requests and checks
 the alternate host, fixed date, three suites, source and amd64/all indexes, and
 absence of extra repositories. Native validation remains required.
 
+Native endpoint validation is now complete: run `34170600664` at
+`aa93e0058978248e5be8311fb8e4c0db2d05aacb` passed system, Python and combined-input
+jobs. Parent reverified seven phase gates, all 16 artifact hashes, four archived
+Python binaries, identical signed snapshot records and the 806-test XML identity
+comparison. Evidence is retained at
+`/private/tmp/task-13013-7-expat-native-34170600664.C3dvFx`.
+
+Combined-image prerequisite: `ffmpeg-candidate.yml` builds the existing FFmpeg
+recipe unchanged on native amd64 and retains a checksummed OCI archive with a new
+subject/index/config identity. The older local archive is not substituted or
+claimed as this new build. No registry publishing occurs. Expat/Python artifacts
+from the successful fixed run can be consumed separately after checking their
+producer run/commit and hashes; they need not be recompiled for this prerequisite.
+Application test tooling will use the eight exact universal wheels identified in
+the current lock (pytest, asyncio/timeout plugins and their dependency closure),
+installed outside `/opt/tldw-venv` and appended after runtime import paths. The
+combined image must run all eight named application tests without skips. Assembly,
+test-tool implementation and same-image compatibility/scanner execution remain open.
+
 - [ ] Integrate the qualified artifacts into a separately named candidate image, without changing production recipes. Run `tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py` and Chunking tests `test_xml_allows_url_text.py`, `test_json_xml_offsets.py`, `test_xml_tail_preservation.py` against that image.
 - [ ] Run fontconfig discovery and FFmpeg drawtext/subtitle controls; compare the previously accepted FFmpeg capability inventory without broadening accepted retirements.
 - [ ] Save source packages, Python source/SBOM, build/configuration logs, binary hashes, package controls, test statuses and candidate OCI identity. Run existing pinned Syft/Trivy/Grype tooling; explicitly account for bundled Expat even if automatic catalogers omit it. Do not rewrite findings into passes.

@@ -44,6 +44,20 @@ This makes Debian dependency selection reproducible for the fixed snapshot. It d
 
 ## Build and evaluate
 
+For native input transport into TASK-13013.7.9's combined candidate, the
+`FFmpeg Native Candidate Artifact` workflow builds this unchanged recipe on
+`ubuntu-24.04` and retains a new OCI archive for 14 days. It does not push an
+image to a registry. Native host/daemon and checkout guards run before the build;
+the exported subject is bound to its OCI index and integrity-checked amd64 config.
+The archive and identity report are checksummed in the same artifact. Failed runs
+remain failures even when evidence upload succeeds.
+
+This is a fresh build, not transport of the previously retained local image.
+Its identity report deliberately says `unqualified-ffmpeg-input`: downstream
+assembly must verify the exact run, archive and identity, then run compatibility
+and scanner qualification on the resulting combined image. BuildKit's generated
+SBOM does not resolve the documented source-built component coverage gaps.
+
 Build this candidate from the repository root:
 
 ```bash
