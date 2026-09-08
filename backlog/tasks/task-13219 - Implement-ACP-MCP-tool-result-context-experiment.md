@@ -4,9 +4,11 @@ title: Implement ACP MCP tool-result context experiment
 status: Done
 assignee: []
 created_date: '2026-09-08 04:46'
-updated_date: '2026-09-08 05:39'
+updated_date: '2026-09-08 05:52'
 labels: []
 dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/pull/2932'
 documentation:
   - Docs/Design/ACP_Tool_Result_Context_Experiment.md
 ---
@@ -48,6 +50,8 @@ Final verification: 114 targeted ACP tests passed (4 warnings), covering the new
 User approved all four reproduced review findings for remediation. Continue in the existing isolated worktree. Baseline commit c45caf4520; 47 feature tests passed during read-only review. Scope: cancellation result delivery, cooperative ranking, benchmark source evidence scoring, and run-first metrics. Add regression tests before each fix, then run focused ACP, Ruff, Bandit, and independent review.
 
 Review remediation complete. Tests were added before implementation: 6 cancellation/metrics failures (off baseline passed), 3 ranking responsiveness failures, and 2 benchmark header-collision failures. All fixes passed independently: 18 runner integration cases, 53 policy+integration cases, and 6 benchmark cases. Final focused ACP regression suite: 126 passed, 4 warnings in 10.98s. Ruff check on six touched Python files and format check on five formatted files passed. Bandit on three touched runtime/script files: zero findings and zero scan errors. Fixture replay: all 9 rows recovered expected evidence. Original 4 MiB/200-term probe delayed a scheduled 20 ms cancellation for 1.184s; updated excerpt cancellation completed in 23.9ms locally. Independent review reproduced successful cancellation/result preservation, correct real-tool fallback metrics, correct header-collision scoring, and cooperative cancellation (~22ms excerpt/~32ms worker fallback). No actionable issues remain in the reviewed fixes. Only documentation and task tracking changed after final runtime validation. Temporary implementation plan removed on completion per AGENTS.md.
+
+PR #2932 opened against dev: https://github.com/rmusser01/tldw_server/pull/2932. The original local dev checkout diverged from origin/dev, so only the two task commits were rebased onto current origin/dev; git range-diff confirms identical patches. Published implementation commits are 446fdd5fe6 and 317eb8f63a. The resulting PR contains only the 11 task files. Post-rebase validation: 132 targeted ACP tests passed (including current WebSocket broadcaster coverage), Ruff passed, scoped Bandit reported zero findings. PR description includes all four reproduced findings and fixes, validation, rollout limits, and a pending requester-authored Change summary required before merge. Continuing CI/review checks.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
