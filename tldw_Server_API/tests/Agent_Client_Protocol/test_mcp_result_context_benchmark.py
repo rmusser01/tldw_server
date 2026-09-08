@@ -6,11 +6,14 @@ import json
 
 import pytest
 
+from tldw_Server_API.app.core.Agent_Client_Protocol.adapters.mcp_result_context import PreparedResult, ToolResultContext
+
 pytestmark = pytest.mark.unit
 
 
 @pytest.mark.asyncio
-async def test_comparison_preserves_baseline_and_recovers_expected_evidence():
+async def test_comparison_preserves_baseline_and_recovers_expected_evidence() -> None:
+    """All comparison modes must retain recoverable evidence and label oracle measurements."""
     from Helper_Scripts.benchmarks.acp_tool_result_experiment import compare_case
 
     text = "Background detail. " * 700 + "The launch code is amber."
@@ -32,14 +35,16 @@ async def test_comparison_preserves_baseline_and_recovers_expected_evidence():
 
 
 @pytest.mark.asyncio
-async def test_invalid_ground_truth_is_rejected():
+async def test_invalid_ground_truth_is_rejected() -> None:
+    """A comparison must reject expected evidence that is absent from its source."""
     from Helper_Scripts.benchmarks.acp_tool_result_experiment import compare_case
 
     with pytest.raises(ValueError, match="expected_quote"):
         await compare_case({"id": "invalid", "question": "q", "text": "source", "expected_quote": "invented"})
 
 
-def test_cli_emits_parseable_report_and_labels_simulated_worker(capsys):
+def test_cli_emits_parseable_report_and_labels_simulated_worker(capsys: pytest.CaptureFixture[str]) -> None:
+    """The CLI report must identify fixture-oracle scope and remain valid JSON."""
     from Helper_Scripts.benchmarks.acp_tool_result_experiment import main
 
     main([])
@@ -51,18 +56,15 @@ def test_cli_emits_parseable_report_and_labels_simulated_worker(capsys):
 
 
 @pytest.mark.asyncio
-async def test_recovery_metric_requires_actual_returned_evidence(monkeypatch):
+async def test_recovery_metric_requires_actual_returned_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Recovery credit must depend on delivered source text, including rereads."""
     from Helper_Scripts.benchmarks.acp_tool_result_experiment import compare_case
-
-    from tldw_Server_API.app.core.Agent_Client_Protocol.adapters.mcp_result_context import (
-        PreparedResult,
-        ToolResultContext,
-    )
 
     original_read = ToolResultContext.read
 
-    def broken_read(self, *args, **kwargs):
-        result = original_read(self, *args, **kwargs)
+    def broken_read(self: ToolResultContext, source_id: str, offset: int = 0, limit: int = 512) -> PreparedResult:
+        """Preserve range metadata while simulating a source-delivery failure."""
+        result = original_read(self, source_id, offset, limit)
         return PreparedResult("No source evidence was returned.", result.metadata)
 
     monkeypatch.setattr(ToolResultContext, "read", broken_read)
@@ -82,7 +84,8 @@ async def test_recovery_metric_requires_actual_returned_evidence(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("expected_quote", ["Excerpts only.", "characters."])
-async def test_generated_header_cannot_satisfy_expected_source_evidence(expected_quote):
+async def test_generated_header_cannot_satisfy_expected_source_evidence(expected_quote: str) -> None:
+    """Generated wrapper text must never substitute for the expected source quote."""
     from Helper_Scripts.benchmarks.acp_tool_result_experiment import compare_case
 
     reports = await compare_case(

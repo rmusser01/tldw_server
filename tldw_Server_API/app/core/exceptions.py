@@ -43,6 +43,14 @@ class PersonaConversationError(RuntimeError):
     """Safe Persona Chat admission/completion failure without provider details."""
 
 
+class MCPResultSourceNotFoundError(ValueError):
+    """A retained MCP result handle is invalid, expired, or belongs to another run."""
+
+
+class MCPResultWorkerCancelledError(RuntimeError):
+    """An optional result worker cancelled itself without cancellation of the run."""
+
+
 class PersonaVoiceRecognitionError(RuntimeError):
     """Expected recognition failure with a safe message and classifiable code.
 

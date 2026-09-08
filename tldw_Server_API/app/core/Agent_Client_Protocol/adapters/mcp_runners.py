@@ -31,6 +31,7 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.adapters.mcp_result_context 
 from tldw_Server_API.app.core.Agent_Client_Protocol.adapters.mcp_transport import MCPTransport
 from tldw_Server_API.app.core.Agent_Client_Protocol.events import AgentEvent, AgentEventKind
 from tldw_Server_API.app.core.Agent_Client_Protocol.tool_gate import ToolGate
+from tldw_Server_API.app.core.exceptions import MCPResultSourceNotFoundError
 
 _RUN_FIRST_METRIC_EXCEPTIONS: tuple[type[Exception], ...] = (
     AttributeError,
@@ -467,7 +468,7 @@ class LLMDrivenRunner:
                             approval_name, approval_arguments = result_context.source_call(
                                 tc.arguments.get("source_id")
                             )
-                        except ValueError as exc:
+                        except MCPResultSourceNotFoundError as exc:
                             await self._deliver_result(tc, str(exc), True, history)
                             continue
 

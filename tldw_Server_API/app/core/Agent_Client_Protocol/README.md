@@ -138,8 +138,12 @@ counters, so a reread cannot replace a later real fallback in those metrics.
 Original `TOOL_RESULT` event payloads remain available to existing consumers.
 The accompanying `metadata.result_context` records sizes, exact source ranges,
 the selection outcome, and available worker measurements without source text.
-Worker error, timeout, invalid selection and oversized input use deterministic
-excerpts; cancellation propagates and cancels outstanding worker work. Cleanup
+Worker error, independent worker cancellation, timeout, invalid selection and
+oversized input use deterministic excerpts. Cancellation of the run or caller
+task propagates and cancels outstanding worker work. Request construction checks
+the encoded byte budget incrementally and yields while encoding. A request
+rejected before encoding finishes has unknown `worker_request_bytes`; dispatched
+requests report the exact encoded messages size, including nested JSON escapes. Cleanup
 waits at most 100 ms beyond the worker deadline, then cancels again. Injected
 callers must cooperate with asyncio cancellation; arbitrary caller code cannot
 be forcibly terminated by an asyncio task. The source store is explicitly

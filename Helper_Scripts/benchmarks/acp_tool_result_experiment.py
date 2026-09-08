@@ -26,9 +26,23 @@ class FixtureOracle(LLMCaller):
     """Select ground-truth segments to exercise machinery, not simulate quality."""
 
     def __init__(self, expected_quote: str) -> None:
+        """Set the exact ground-truth quote this fixture worker should select."""
         self.expected_quote = expected_quote
 
-    async def call(self, messages: list[dict], tools: list[dict]) -> LLMResponse:
+    async def call(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> LLMResponse:
+        """Select source segments overlapping the fixture's known answer.
+
+        Args:
+            messages: Result-policy request containing numbered source segments.
+            tools: Unused tool definitions; the policy supplies an empty list.
+
+        Returns:
+            JSON segment IDs for server-side reconstruction, with unknown usage.
+
+        Raises:
+            ValueError: The expected quote is absent or the request is not JSON.
+            KeyError: The fixture request does not contain the expected fields.
+        """
         payload = json.loads(messages[-1]["content"])
         segments = payload["segments"]
         text = "".join(segment["text"] for segment in segments)
@@ -79,7 +93,20 @@ def _has_source_evidence(result: PreparedResult, source: str, expected: str) -> 
 
 
 async def compare_case(case: dict[str, str], worker: LLMCaller | None = None) -> list[dict[str, Any]]:
-    """Compare all three policies, reporting actual sizes and scripted recovery."""
+    """Compare all three policies, reporting actual sizes and scripted recovery.
+
+    Args:
+        case: Fixture with id, question, source text, and exact expected_quote.
+        worker: Trusted caller to measure; None uses a labeled fixture oracle.
+
+    Returns:
+        One measurement record per mode, with unknown model usage left as None.
+
+    Raises:
+        ValueError: The expected quote is empty or absent from the source.
+        KeyError: A required fixture field is missing.
+        asyncio.CancelledError: The comparison's caller task is cancelled.
+    """
     text, question, expected = case["text"], case["question"], case["expected_quote"]
     if not expected or expected not in text:
         raise ValueError("expected_quote must be a nonempty exact quote from the source")
@@ -145,6 +172,7 @@ async def compare_case(case: dict[str, str], worker: LLMCaller | None = None) ->
 
 
 async def _run(cases: list[dict[str, str]], worker: LLMCaller | None) -> dict[str, Any]:
+    """Replay fixtures sequentially and label the report's measurement limits."""
     results = []
     for case in cases:
         results.extend(await compare_case(case, worker))
