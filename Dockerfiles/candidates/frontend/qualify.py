@@ -8,6 +8,7 @@ import hashlib
 import json
 import platform
 import re
+import secrets
 
 # Fixed diagnostic argv, no shell execution.
 import subprocess  # nosec B404
@@ -44,7 +45,9 @@ console.log(JSON.stringify({
 """
 SHARP_JS = r"""
 const assert = require('node:assert/strict');
-const sharp = require('sharp');
+const { createRequire } = require('node:module');
+const nextRequire = createRequire(require.resolve('next/dist/server/image-optimizer'));
+const sharp = nextRequire('sharp');
 (async () => {
 const input = await sharp({create:{width:2,height:2,channels:3,background:'#123456'}}).png().toBuffer();
 const output = await sharp(input).resize(3,3).png().toBuffer();
@@ -76,11 +79,16 @@ def require(condition: bool, message: str) -> None:
 class Commands:
     """Bound every subprocess and retain its result before validating it."""
 
-    def __init__(self, evidence: Path, execute: Callable):
+    def __init__(self, evidence: Path, execute: Callable, signing_key: str = ""):
         self.directory = evidence / "commands"
         self.directory.mkdir(parents=True, exist_ok=False)
         self.execute = execute
         self.count = 0
+        self.signing_key = signing_key
+
+    def redact(self, text: str) -> str:
+        """Remove only this invocation's ephemeral fixture from persisted text."""
+        return text.replace(self.signing_key, "[REDACTED]") if self.signing_key else text
 
     def run(self, argv: list[str], *, timeout: int = 30, checked: bool = True) -> dict:
         """Execute fixed argv with no shell; persist failures and partial output."""
@@ -98,7 +106,7 @@ class Commands:
                 result[stream] = result[stream].decode("utf-8", errors="replace")
         result["elapsedSeconds"] = time.monotonic() - started
         self.count += 1
-        (self.directory / f"{self.count:04d}.json").write_text(json.dumps(result, indent=2) + "\n")
+        (self.directory / f"{self.count:04d}.json").write_text(self.redact(json.dumps(result, indent=2)) + "\n")
         if checked:
             require(result["returncode"] == 0, f"command failed: {argv[:3]} (see commands/{self.count:04d}.json)")
         return result
@@ -208,6 +216,10 @@ class Containers:
         ]
         if self.application == "webui":
             argv += ["--env", "TLDW_INTERNAL_API_ORIGIN=http://backend:8000"]
+        admin_app = self.application == "admin-ui" and command is None and not backend
+        if admin_app:
+            require(bool(self.commands.signing_key), "missing Admin signing fixture")
+            argv += ["--env", f"JWT_SECRET_KEY={self.commands.signing_key}"]
         if backend:
             argv += ["--network-alias", "backend"]
         if command is not None:
@@ -233,6 +245,9 @@ class Containers:
             "unexpected writable mount",
         )
         require(observed["Config"]["User"] == APPS[self.application][1], "container must use image non-root USER")
+        if admin_app:
+            signing_env = [value for value in observed["Config"].get("Env", []) if value.startswith("JWT_SECRET_KEY=")]
+            require(signing_env == [f"JWT_SECRET_KEY={self.commands.signing_key}"], "Admin signing fixture mismatch")
         return cid
 
     def diagnostic(self, subject: str, role: str, command: list[str], record: dict, *, entrypoint: str = "node") -> str:
@@ -306,7 +321,7 @@ def qualify(
 ) -> dict:
     """Retain a failure-closed compatibility report; never grant release admission."""
     evidence.mkdir(parents=True, exist_ok=True)
-    commands = Commands(evidence, execute)
+    commands = Commands(evidence, execute, secrets.token_hex(32) if application == "admin-ui" else "")
     containers = Containers(commands, application, "frontend-" + uuid.uuid4().hex)
     report = {
         "schemaVersion": 1,
@@ -432,12 +447,14 @@ def qualify(
         )
         report["passed"] = True
     except (ValueError, KeyError, TypeError, IndexError, OSError) as exc:
-        report["error"] = str(exc)
+        report["error"] = commands.redact(str(exc))
     finally:
         report["cleanupErrors"] = containers.cleanup()
         if report["cleanupErrors"]:
             report["passed"] = False
-        (evidence / "qualification.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+        (evidence / "qualification.json").write_text(
+            commands.redact(json.dumps(report, indent=2, sort_keys=True)) + "\n"
+        )
     return report
 
 
