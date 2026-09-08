@@ -58,10 +58,11 @@ console.log(JSON.stringify({width: metadata.width, height: metadata.height}));
 })().catch(error => { console.error(error); process.exitCode = 1; });
 """
 BACKEND_JS = r"""
-require('node:http').createServer((req, res) => {
+const server = require('node:http').createServer((req, res) => {
   res.writeHead(req.url === '/api/v1/health' ? 200 : 404, {'content-type': 'application/json'});
   res.end(JSON.stringify({status: req.url === '/api/v1/health' ? 'ok' : 'not_found'}));
 }).listen(8000, '0.0.0.0');
+process.once('SIGTERM', () => server.close(() => process.exit(0)));
 """
 HTTP_JS = r"""
 fetch(process.argv[1], {signal: AbortSignal.timeout(3000)}).then(async response => {

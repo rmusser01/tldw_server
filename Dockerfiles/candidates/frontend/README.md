@@ -126,6 +126,24 @@ five-second timeout; this avoids shell interpolation and does not claim to test
 Docker's periodic health scheduler. Both applications and the stub must complete
 SIGTERM within ten seconds with exit 0 or 143. Force removal is reserved for
 cleanup of invocation-owned IDs, after failure evidence has been retained.
+The controlled health stub explicitly handles SIGTERM by closing its HTTP
+server and exiting cleanly, including when Node is Linux container PID1.
+
+The focused PID1 regression uses the existing pinned Node 24.20.0 image without
+pulling, building, publishing ports or changing shared resources. To run it:
+
+```bash
+TLDW_FRONTEND_PID1_DOCKER=1 python -m pytest \
+  tldw_Server_API/tests/Supply_Chain/test_frontend_candidate_qualification.py \
+  -k backend_pid1
+```
+
+It checks health and negative routes, TERM-only shutdown within the unchanged
+ten-second bound, and restarting the same container for the second cycle.
+Set `TLDW_FRONTEND_PID1_EVIDENCE` to a new task-owned directory to retain command
+records outside pytest's temporary directory. This test is explicitly opt-in;
+ordinary candidate tests skip it. Local Docker emulation can establish this
+PID1 fixture behavior, but cannot qualify native frontend compatibility.
 
 `qualification.json` has schema version 1 and explicit scope
 `native-frontend-compatibility-not-release-admission`. All command argv, stdout,
