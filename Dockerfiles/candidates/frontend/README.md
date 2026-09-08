@@ -47,3 +47,82 @@ start with `node`, and their complete application `ENV`, `COPY`, `USER`,
 `WORKDIR`, `EXPOSE`, `HEALTHCHECK`, and `CMD` remainder stays byte-for-byte
 unchanged. This is not a bit-identical operating system and does not imply that
 findings absent from another distribution's feed were fixed.
+
+## Native compatibility qualification
+
+The candidate workflow is `.github/workflows/frontend-runtime-candidate.yml`.
+Its WebUI/Admin matrix runs on native `ubuntu-24.04`, with containerd OCI loading
+and no QEMU setup. Both artifacts are built from the same checkout and arguments,
+with maximum provenance and SBOM attestations. The workflow resolves their
+hash-addressed configurations using `runtime_probe.py config` before loading.
+It retains both OCI archives, generated recipe, source commit/status, build
+metadata, archive hashes, subject/config identities and qualification evidence
+for 14 days, including failed runs. It neither publishes images nor changes any
+release admission policy. A scoped push on the design branch or manual dispatch
+runs this candidate experiment; this implementation task does not trigger it.
+
+For a local run, use a native Linux/x86_64 host and native Linux/amd64 Docker
+server with the containerd image store. From the repository root, build/export
+both recipes as local `linux/amd64` OCI archives. Keep the same arguments for
+each pair: Admin uses `NEXT_PUBLIC_API_URL=http://backend:8000` in ordinary
+standalone mode; WebUI uses quickstart and
+`TLDW_INTERNAL_API_ORIGIN=http://backend:8000`. Other arguments match the
+workflow. Resolve the build output subject digests (not tags or config IDs),
+extract each archive to a separate layout, then bind and load each artifact:
+
+```bash
+# Set these to your actual retained layout/archive paths and build output digest.
+python Helper_Scripts/Supply_Chain/runtime_probe.py config \
+  --layout "$BASELINE_LAYOUT" --subject "$BASELINE_SUBJECT"
+python Helper_Scripts/Supply_Chain/runtime_probe.py config \
+  --layout "$CANDIDATE_LAYOUT" --subject "$CANDIDATE_SUBJECT"
+docker load --input "$BASELINE_ARCHIVE"
+docker load --input "$CANDIDATE_ARCHIVE"
+python Dockerfiles/candidates/frontend/qualify.py \
+  --application webui \
+  --baseline "$BASELINE_SUBJECT" --candidate "$CANDIDATE_SUBJECT" \
+  --evidence /tmp/frontend-webui-qualification
+```
+
+Use a new evidence directory for each invocation. Repeat with `--application
+admin-ui` for the Admin pair. CI additionally supplies `evidence/inputs.json`
+with the verified OCI/config/archive identities; local runs without that file
+retain loaded subject identities and checkout input hashes but lack that
+workflow binding. Retain the config command outputs and archives separately.
+
+The qualifier rejects non-native host/daemon facts, mutable or ambiguous image
+references, wrong loaded identities/platforms, and drift in canonical application
+configuration. It checks actual Node version/ABI/executable hash, UID/GID/home,
+workdir and ownership, embedded root count/hash, system CA bundle presence/hash,
+and a real sharp PNG encode/resize/decode operation. Candidate dpkg versions are
+checked against the reviewed Ubuntu versions; glibc versions are not compared
+for equality between distributions.
+
+Each invocation owns an internal network and uniquely named containers. The
+controlled backend has the network alias `backend` and serves only
+`/api/v1/health`; it uses the exact candidate Node image. No host ports or real
+credentials are used. Every container has a read-only root filesystem, dropped
+capabilities, no-new-privileges, 128 PID/1 GiB/2 CPU limits, the image's non-root
+USER, and owned tmpfs mounts only at `/tmp` and the application's `.next/cache`.
+
+WebUI must serve its root and pass its configured check. Admin must return
+liveness/readiness 200 with the stub running, then readiness 503, liveness 200
+and a failing configured check after the stub exits. The configured healthcheck
+is validated byte-for-byte and its exact Node body is executed directly with a
+five-second timeout; this avoids shell interpolation and does not claim to test
+Docker's periodic health scheduler. Both applications and the stub must complete
+SIGTERM within ten seconds with exit 0 or 143. Force removal is reserved for
+cleanup of invocation-owned IDs, after failure evidence has been retained.
+
+`qualification.json` has schema version 1 and explicit scope
+`native-frontend-compatibility-not-release-admission`. All command argv, stdout,
+stderr, timeouts, exit statuses, raw inspections, diagnostic observations and
+cleanup outcomes remain under `commands/`, including failed controls. A failed
+control returns a nonzero CLI status; cleanup failure also prevents success.
+
+Local mocked tests are validation of the controls, not native application
+qualification. ARM/emulated runs cannot pass. Even a native passing result
+certifies only this exact artifact pair against the controlled health stub;
+it is neither real-backend certification nor a vulnerability waiver.
+`CVE-2026-85091` remains unresolved. Vulnerability comparison and production
+adoption are separate stages.

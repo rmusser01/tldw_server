@@ -1,0 +1,189 @@
+name: frontend-runtime-candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/task-13013-7-supply-chain-design]
+    paths:
+      - .github/workflows/frontend-runtime-candidate.yml
+      - Dockerfiles/candidates/frontend/**
+      - tldw_Server_API/tests/Supply_Chain/test_frontend_candidate_*.py
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    name: native candidate (${{ matrix.application }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - application: webui
+            dockerfile: Dockerfiles/Dockerfile.webui
+            build_args: |
+              NEXT_PUBLIC_API_URL=
+              NEXT_PUBLIC_API_BASE_URL=
+              NEXT_PUBLIC_API_VERSION=v1
+              NEXT_PUBLIC_X_API_KEY=
+              NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=quickstart
+              TLDW_INTERNAL_API_ORIGIN=http://backend:8000
+          - application: admin-ui
+            dockerfile: Dockerfiles/Dockerfile.admin-ui
+            build_args: |
+              NEXT_PUBLIC_API_URL=http://backend:8000
+              NEXT_PUBLIC_API_VERSION=v1
+              NEXT_PUBLIC_DEFAULT_AUTH_MODE=multi_user
+              NEXT_PUBLIC_ALLOW_ADMIN_API_KEY_LOGIN=false
+              NEXT_PUBLIC_BILLING_ENABLED=false
+    env:
+      APPLICATION: ${{ matrix.application }}
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set invocation artifact directory
+        shell: bash
+        run: echo "ARTIFACTS=$RUNNER_TEMP/frontend-$APPLICATION" >> "$GITHUB_ENV"
+
+      - name: Enable native OCI image loading
+        uses: docker/setup-docker-action@e43656e248c0bd0647d3f5c195d116aacf6fcaf4
+        with:
+          daemon-config: |
+            {"features": {"containerd-snapshotter": true}}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
+
+      - name: Retain source and render temporary candidate recipe
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$ARTIFACTS/evidence"
+          git rev-parse HEAD > "$ARTIFACTS/evidence/source-commit.txt"
+          git status --porcelain > "$ARTIFACTS/evidence/source-status.txt"
+          uname -a > "$ARTIFACTS/evidence/host.txt"
+          docker version > "$ARTIFACTS/evidence/docker-version.txt"
+          python Dockerfiles/candidates/frontend/render.py \
+            --application "$APPLICATION" --output "$ARTIFACTS/Dockerfile.candidate"
+
+      - name: Build exact baseline OCI archive
+        id: baseline
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          build-args: ${{ matrix.build_args }}
+          platforms: linux/amd64
+          push: false
+          provenance: mode=max
+          sbom: true
+          outputs: type=oci,dest=${{ runner.temp }}/frontend-${{ matrix.application }}/baseline.oci.tar
+          cache-from: type=gha,scope=check-${{ matrix.application }}
+
+      - name: Build exact candidate OCI archive
+        id: candidate
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf
+        with:
+          context: .
+          file: ${{ runner.temp }}/frontend-${{ matrix.application }}/Dockerfile.candidate
+          build-args: ${{ matrix.build_args }}
+          platforms: linux/amd64
+          push: false
+          provenance: mode=max
+          sbom: true
+          outputs: type=oci,dest=${{ runner.temp }}/frontend-${{ matrix.application }}/candidate.oci.tar
+          cache-from: type=gha,scope=check-${{ matrix.application }}
+
+      - name: Retain build metadata even on failure
+        if: ${{ always() }}
+        shell: bash
+        env:
+          BASELINE_METADATA: ${{ steps.baseline.outputs.metadata }}
+          CANDIDATE_METADATA: ${{ steps.candidate.outputs.metadata }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$ARTIFACTS/evidence"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          evidence = Path(os.environ["ARTIFACTS"]) / "evidence"
+          for role in ("baseline", "candidate"):
+              raw = os.environ[f"{role.upper()}_METADATA"]
+              (evidence / f"{role}-build-metadata.json").write_text(raw or json.dumps({"unavailable": True}))
+          PY
+
+      - name: Bind OCI subjects and configurations before loading
+        id: load
+        shell: bash
+        env:
+          BASELINE_SUBJECT: ${{ steps.baseline.outputs.digest }}
+          CANDIDATE_SUBJECT: ${{ steps.candidate.outputs.digest }}
+        run: |
+          set -euo pipefail
+          for role in baseline candidate; do
+            mkdir -p "$ARTIFACTS/$role-layout"
+            tar -xf "$ARTIFACTS/$role.oci.tar" -C "$ARTIFACTS/$role-layout"
+          done
+          python Helper_Scripts/Supply_Chain/runtime_probe.py config \
+            --layout "$ARTIFACTS/baseline-layout" --subject "$BASELINE_SUBJECT" \
+            > "$ARTIFACTS/evidence/baseline-config-digest.txt"
+          python Helper_Scripts/Supply_Chain/runtime_probe.py config \
+            --layout "$ARTIFACTS/candidate-layout" --subject "$CANDIDATE_SUBJECT" \
+            > "$ARTIFACTS/evidence/candidate-config-digest.txt"
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          artifacts = Path(os.environ["ARTIFACTS"])
+          evidence = artifacts / "evidence"
+          inputs = {"sourceCommit": (evidence / "source-commit.txt").read_text().strip()}
+          for role in ("baseline", "candidate"):
+              with (artifacts / f"{role}.oci.tar").open("rb") as archive:
+                  archive_hash = hashlib.file_digest(archive, "sha256").hexdigest()
+              index = (artifacts / f"{role}-layout/index.json").read_bytes()
+              inputs[role] = {
+                  "subject": os.environ[f"{role.upper()}_SUBJECT"],
+                  "configDigest": (evidence / f"{role}-config-digest.txt").read_text().strip(),
+                  "archiveSHA256": archive_hash,
+                  "indexDigest": "sha256:" + hashlib.sha256(index).hexdigest(),
+                  "descriptors": json.loads(index)["manifests"],
+              }
+          (evidence / "inputs.json").write_text(json.dumps(inputs, indent=2) + "\n")
+          PY
+          docker load --input "$ARTIFACTS/baseline.oci.tar" \
+            > "$ARTIFACTS/evidence/baseline-load.txt" 2>&1
+          docker load --input "$ARTIFACTS/candidate.oci.tar" \
+            > "$ARTIFACTS/evidence/candidate-load.txt" 2>&1
+          docker image inspect "$BASELINE_SUBJECT" > "$ARTIFACTS/evidence/baseline-loaded.json"
+          docker image inspect "$CANDIDATE_SUBJECT" > "$ARTIFACTS/evidence/candidate-loaded.json"
+
+      - name: Qualify exact artifacts on the native runner
+        shell: bash
+        env:
+          BASELINE_SUBJECT: ${{ steps.baseline.outputs.digest }}
+          CANDIDATE_SUBJECT: ${{ steps.candidate.outputs.digest }}
+        run: |
+          set -euo pipefail
+          python Dockerfiles/candidates/frontend/qualify.py --application "$APPLICATION" \
+            --baseline "$BASELINE_SUBJECT" --candidate "$CANDIDATE_SUBJECT" \
+            --evidence "$ARTIFACTS/evidence"
+
+      - name: Retain evidence and both exact archives
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: frontend-native-${{ matrix.application }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/frontend-${{ matrix.application }}/evidence/
+            ${{ runner.temp }}/frontend-${{ matrix.application }}/*.oci.tar
+            ${{ runner.temp }}/frontend-${{ matrix.application }}/Dockerfile.candidate
+          retention-days: 14
+          if-no-files-found: warn
