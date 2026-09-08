@@ -75,7 +75,7 @@ return prefix + CANDIDATE_RUNTIME_BLOCK + remainder
 **Goal:** Exercise both exact standalone application artifacts with baseline controls.
 **Success Criteria:** Correct native identity, non-root application behavior, real GNU sharp transform, configured healthcheck and bounded shutdown.
 **Tests:** Probe unit tests for parsing/validation/failure paths, real native job controls.
-**Status:** In Progress
+**Status:** In Progress —implementationb879c8232e independently approved;28 focused tests pass. Actual native qualification remains pending Task3 execution.
 
 ### Task 2: Native runtime controls and workflow
 
@@ -122,7 +122,7 @@ assert.equal(metadata.height,3);
 **Goal:** Retain honest native before/after security evidence and run the pipeline.
 **Success Criteria:** Same fresh DB per baseline/candidate, complete scan outputs and known fix/status checks; no admission or suppression changes.
 **Tests:** Workflow contract tests, comparison validation tests, actual native CI evidence.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 3: Frozen-database scans and native execution
 
