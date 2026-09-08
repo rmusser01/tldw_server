@@ -77,15 +77,15 @@ All candidate-local paths above are relative to `Dockerfiles/candidates/` when a
 ### Task 2: Fail-closed source gate
 
 **Execution note:** The deterministic validator and synthetic fixture tests are
-being implemented independently while Task 1's real input ledger remains
-incomplete. This does not authorize a build or replace the real source
+implemented and independently reviewed (65 focused tests pass), while Task 1's
+real input ledger remains incomplete. This does not authorize a build or replace the real source
 integration and independent evidence review below. No real `source-lock.json`
 is emitted by this implementation slice.
 
 **Files:** Create `source-inputs.py` and `test_ffmpeg_wheel_sources.py`; extend README.
 **Interfaces:** `verify_sources(lock: dict, root: Path, original_matches: list[dict]) -> dict` raises `ValueError` on malformed or incomplete evidence and returns `{schema_version, source_lock_sha256, input_sha256, coverage_ids}` only after all checks. CLI takes `--lock`, `--root`, `--original-matches`; emits JSON only on success.
 
-- [ ] Write tests first using small real hashed fixture files. Load the helper with importlib as in `test_candidate_compatibility.py`. Include this behavioral assertion (fixture `source_case` holds a valid lock/root/original-match set):
+- [x] Write tests first using small real hashed fixture files. Load the helper with importlib as in `test_candidate_compatibility.py`. Include this behavioral assertion (fixture `source_case` holds a valid lock/root/original-match set):
 
 ```python
 def test_missing_component_coverage_fails(source_case, helper):
@@ -95,8 +95,8 @@ def test_missing_component_coverage_fails(source_case, helper):
         helper.verify_sources(lock, root, matches)
 ```
 
-- [ ] Run `python -m pytest -q tldw_Server_API/tests/Supply_Chain/test_ffmpeg_wheel_sources.py` in the activated task venv. Confirm failure is missing helper/behavior, not unrelated fixture setup.
-- [ ] Implement strict schema/types, unique identity and exact coverage-set checks; SHA-256 verification of regular non-symlink inputs; containment checks; ordered prerequisite validation; exact versions/ABI; authentication-evidence requirements. Reject unknown dispositions, missing regression IDs, absolute/traversing paths, duplicate patch application and extra unreviewed files. Do not fetch or execute external programs in this validator.
+- [x] Run `python -m pytest -q tldw_Server_API/tests/Supply_Chain/test_ffmpeg_wheel_sources.py` in the activated task venv. Confirm failure is missing helper/behavior, not unrelated fixture setup.
+- [x] Implement strict schema/types, unique identity and exact coverage-set checks; SHA-256 verification of regular non-symlink inputs; containment checks; ordered prerequisite validation; exact versions/ABI; authentication-evidence requirements. Reject unknown dispositions, missing regression IDs, absolute/traversing paths, duplicate patch application and extra unreviewed files. Do not fetch or execute external programs in this validator.
 - [ ] Add parametrized negative tests for each rejection and positive tests for all three source dispositions. Confirm forged signer text without evidence is rejected; the trusted acquisition step owns authenticity, the validator owns byte/metadata binding. Verify patch application in an isolated upstream source integration test, not only synthetic records.
 - [ ] Run focused tests, full Supply_Chain tests, Ruff/Black and Bandit on the touched implementation/tests; classify existing pytest B101 assertions separately. Review the source ledger independently, then commit `feat(supply-chain): gate wheel source inputs (TASK-13013.7.12)`.
 
