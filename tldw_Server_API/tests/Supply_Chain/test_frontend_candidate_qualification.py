@@ -6,6 +6,8 @@ import os
 import re
 import shutil
 import subprocess  # nosec B404
+import time
+import uuid
 from pathlib import Path
 
 import pytest
@@ -530,3 +532,88 @@ docker() { printf '%s\0' "$@" >> "$CALLS"; printf '\0' >> "$CALLS"; }
         # Container-private memory mount option, not host temporary-file creation.
         assert argv[argv.index("--tmpfs") + 1] == "/tmp:rw,nosuid,nodev,noexec,mode=1777"  # nosec B108
         assert pin in argv
+
+
+@pytest.mark.skipif(
+    os.environ.get("TLDW_FRONTEND_PID1_DOCKER") != "1",
+    reason="opt in with TLDW_FRONTEND_PID1_DOCKER=1 for the real Linux-container PID1 regression",
+)
+def test_backend_pid1_serves_only_health_and_terminates_cleanly_across_restart(tmp_path):
+    """Real container PID1 behavior; emulation is allowed here, not qualification."""
+    module = qualifier()
+    evidence = Path(os.environ.get("TLDW_FRONTEND_PID1_EVIDENCE", str(tmp_path)))
+    commands = module.Commands(evidence, subprocess.run)
+    name = "frontend-pid1-" + uuid.uuid4().hex
+    image = "node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e"
+    commands.run(["docker", "info", "--format", "{{json .}}"])
+    commands.run(["docker", "image", "inspect", image])
+    # Report the actual server process, not a docker-exec child masquerading as PID1.
+    script = (
+        "console.log(JSON.stringify({pid:process.pid,node:process.version,arch:process.arch}));\n" + module.BACKEND_JS
+    )
+    cid = commands.run(
+        [
+            "docker",
+            "create",
+            "--name",
+            name,
+            "--label",
+            f"tldw.frontend-pid1={name}",
+            "--pull",
+            "never",
+            "--platform",
+            "linux/amd64",
+            "--network",
+            "none",
+            "--user",
+            "1000:1000",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges:true",
+            "--pids-limit",
+            "128",
+            "--memory",
+            "1g",
+            "--cpus",
+            "2",
+            "--entrypoint",
+            "node",
+            image,
+            "-e",
+            script,
+        ]
+    )["stdout"].strip()
+    assert re.fullmatch(r"[0-9a-f]{64}", cid)
+    try:
+        for _ in range(2):
+            commands.run(["docker", "start", cid])
+            module.http_status(commands, cid, "http://127.0.0.1:8000/api/v1/health", time.sleep, expected=200)
+            facts = json.loads(commands.run(["docker", "logs", cid])["stdout"].splitlines()[-1])
+            assert facts == {"pid": 1, "node": "v24.20.0", "arch": "x64"}
+            for path, status, body in (
+                ("/api/v1/health", 200, "ok"),
+                ("/", 404, "not_found"),
+                ("/api/v1/health?other=1", 404, "not_found"),
+            ):
+                response = commands.data(
+                    [
+                        "docker",
+                        "exec",
+                        cid,
+                        "node",
+                        "-e",
+                        module.HTTP_JS,
+                        "http://127.0.0.1:8000" + path,
+                    ]
+                )
+                assert response["status"] == status and json.loads(response["body"]) == {"status": body}
+            # Exercise the same ten-second TERM-only acceptance control as qualification.
+            termination = module.Containers(commands, "webui", name).terminate(cid)
+            assert termination["exitCode"] in (0, 143) and termination["elapsedSeconds"] <= 10
+    finally:
+        # Retain pre-cleanup state; force removal never counts as successful termination.
+        commands.run(["docker", "logs", cid], checked=False)
+        commands.run(["docker", "container", "inspect", cid], checked=False)
+        commands.run(["docker", "rm", "--force", cid])
