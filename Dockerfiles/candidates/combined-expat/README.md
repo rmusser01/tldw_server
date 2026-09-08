@@ -102,6 +102,22 @@ eight application tests, font discovery, drawtext/subtitles, and unresolved or
 retired FFmpeg libraries. All failures remain fatal and available evidence is
 uploaded even on failure.
 
+The candidate's Expat installation re-includes only `/usr/share/doc/libexpat1/*`
+for that dpkg invocation. The inherited slim image otherwise omits AUTHORS and
+two changelogs, causing the unchanged strict package-verification gate to fail.
+No global exclusion setting or verification result is overridden. The offline
+regression executes the actual Dockerfile install command as UID 0 in a disposable,
+networkless, capability-dropped container, then checks complete installation and
+rejection of missing documentation or an altered library. Supply the retained
+FFmpeg input image, before Expat's replacement, to reproduce the slim-base gap:
+
+```sh
+# Explicit existing image config digest and verified native Expat DEB; no build/pull.
+TLDW_COMBINED_PACKAGE_TEST_IMAGE='sha256:<retained-ffmpeg-input-config>' \
+TLDW_COMBINED_PACKAGE_TEST_DEB=/absolute/path/to/qualified-libexpat1.deb \
+python -m pytest -q tldw_Server_API/tests/Supply_Chain/test_combined_assembly_package.py
+```
+
 Still outstanding after this assembly checkpoint: native results, full existing
 FFmpeg baseline/capability/synthetic-media comparison, application import-path
 and hash evidence, source-aware Syft/Trivy/Grype reports, final security review
