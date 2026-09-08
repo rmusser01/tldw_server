@@ -12,6 +12,7 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.adapters.base import (
     PromptOptions,
     ProtocolAdapter,
 )
+from tldw_Server_API.app.core.Agent_Client_Protocol.adapters.mcp_result_context import ToolResultPolicy
 from tldw_Server_API.app.core.Agent_Client_Protocol.adapters.mcp_runners import (
     AgentDrivenRunner,
     LLMDrivenRunner,
@@ -24,13 +25,13 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.adapters.mcp_transport impor
     create_transport,
 )
 from tldw_Server_API.app.core.Agent_Client_Protocol.events import AgentEvent, AgentEventKind
-from tldw_Server_API.app.core.exceptions import ValidationError
 from tldw_Server_API.app.core.config import (
     resolve_acp_run_first_presentation_variant,
     resolve_acp_run_first_provider_allowlist,
     resolve_acp_run_first_rollout_mode,
     resolve_run_first_cohort_label,
 )
+from tldw_Server_API.app.core.exceptions import ValidationError
 
 
 class MCPAdapter(ProtocolAdapter):
@@ -118,6 +119,14 @@ class MCPAdapter(ProtocolAdapter):
                     )
                 provider = str(pc.get("mcp_llm_provider") or "").strip()
                 model = str(pc.get("mcp_llm_model") or "").strip()
+                result_policy = ToolResultPolicy.model_validate(pc.get("mcp_tool_result_policy", {}))
+                result_worker = pc.get("mcp_result_worker")
+                if result_policy.mode == "worker":
+                    worker_provider = str(pc.get("mcp_result_worker_provider") or "").strip()
+                    if not provider or worker_provider.casefold() != provider.casefold():
+                        raise ValueError("Result worker must explicitly use the same provider as the main caller")
+                    if result_worker is None:
+                        raise ValueError("Worker result mode requires an explicitly configured worker caller")
                 rollout_mode = resolve_acp_run_first_rollout_mode()
                 presented_tools = present_acp_tools(
                     session_id=self._config.session_id,
@@ -152,6 +161,8 @@ class MCPAdapter(ProtocolAdapter):
                     llm_tools=presented_tools.openai_tools,
                     prompt_fragment=presented_tools.prompt_fragment,
                     run_first_metrics_context=run_first_metrics_context,
+                    result_policy=result_policy,
+                    result_worker=result_worker,
                 )
             elif orchestration == "agent_driven":
                 runner = AgentDrivenRunner(
