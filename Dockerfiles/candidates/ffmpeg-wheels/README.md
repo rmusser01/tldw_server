@@ -120,3 +120,70 @@ explicitly because GPL configuration can enable additional components; this is
 not legal clearance or permission to change repository licenses. The current
 root `LICENSE` and `pyproject.toml` identify server code as GPL-3.0-only; older
 overview text is not the authoritative license map.
+
+## Compiler-image metadata checkpoint
+
+Registry manifest bytes, registry digest headers, configuration hashes and declared
+platforms were independently compared for these candidate build inputs:
+
+| Role | Manifest reference | Configuration SHA-256 |
+| --- | --- | --- |
+| OpenCV dated recipe tag `20260531` | `quay.io/opencv-ci/opencv-python-manylinux_2_28-x86-64@sha256:26c8159d923fbaa3c893aa53cdf67d5b2da7f858daf388a494a282ca118b83c9` | `ae0e52e7f6964b35505af87ff3329ac86ddd6a56bd4f47580107d6b978588e37` |
+| cibuildwheel 4.2.0 native x86_64 default, candidate for PyAV | `quay.io/pypa/manylinux_2_28_x86_64@sha256:012f4a50472412f18bb2b450c1cce7158434cfae4ae878591c2748a13a30c2be` | `e0669ff0af3896498da5f503bfa032499f1ddb127109956b95db45856a28b7a1` |
+
+Both are single-image schema-2 manifests declaring `linux/amd64`, not indexes.
+Only metadata was fetched; layers, compiler execution and package inventories
+were not verified. Digest identity is not a signature or build attestation.
+OpenCV's [packaging workflow](https://github.com/opencv/opencv-python/blob/b83046cda41133f1bf2e73e99dba16a1248f103a/.github/workflows/build_wheels_manylinux.yml)
+selects the dated tag; the digest records its observed resolution, not proof the
+tag has never moved. The PyAV candidate comes from cibuildwheel's
+[pinned image map](https://github.com/pypa/cibuildwheel/blob/1828c10ab37f080699c7b81cea34097c684a7074/cibuildwheel/resources/pinned_docker_images.cfg).
+PyAV's original release workflow did not pin cibuildwheel, so original-run image
+attribution remains unresolved. Do not label this candidate as that proven image
+or substitute today's `latest` tag. Metadata is retained beside the owning-source
+archives in the packaging scratch directory above.
+
+## Offline OpenCV asset checkpoint
+
+These checks use the exact OpenCV source distribution, not a changed build
+configuration. They do not turn off supported capabilities.
+
+- **IPPICV:** the Linux x86_64 branch of `opencv/3rdparty/ippicv/ippicv.cmake`
+  selects [this archive](https://raw.githubusercontent.com/opencv/opencv_3rdparty/406d398c436d0465c8e53dd432d9ecd9301d5f4a/ippicv/ippicv_2026.0.0_lnx_intel64_20260327_general.tgz).
+  Downloaded SHA-256 is `5198d6f76e61d5aa0fa5dde72cc22947af1a86efbf49d08b90d374699c811fd0`;
+  its MD5 matches upstream `9a3ee0c5c3c02102faa422d60bfd1f4a`. The latter is a
+  compatibility check for OpenCV's existing cache, not the new cryptographic
+  identity. The archive includes `ippicv_lnx/EULA.txt`, whose SHA-256 is
+  `c1bf7165226036081d5cbe4baca565eb5e817fe56b9cf1ac7247688feb32b3e4`.
+  Preserve that notice; hashing it is not legal clearance. With
+  `OPENCV_DOWNLOAD_PATH` pointing to an isolated pre-populated cache, the existing
+  cache key is `ippicv/9a3ee0c5c3c02102faa422d60bfd1f4a-ippicv_2026.0.0_lnx_intel64_20260327_general.tgz`.
+  A future controller must verify SHA-256 before placing bytes in that cache and
+  enforce offline configuration/build; this checkpoint does not implement it.
+- **ITT:** `cmake/OpenCVDetectTrace.cmake` adds the source distribution's
+  `3rdparty/ittnotify` directory when `WITH_ITT` and `BUILD_ITT` are enabled.
+  Its source/header/license files are already covered by the verified sdist.
+  No separate ITT download is required by that branch.
+- **Orbbec:** the original wheel's embedded build information says `Orbbec: YES`,
+  not `Orbbec SDK: YES`. The source emits distinct labels for those branches.
+  `WITH_OBSENSOR` defaults on while `OBSENSOR_USE_ORBBEC_SDK` defaults off; the
+  Linux non-SDK branch checks `linux/videodev2.h` and uses V4L2. Preserve that
+  branch and its native compatibility checks. The separately selectable SDK
+  download is not required merely to reproduce this observed baseline.
+- **libyuv:** the compiler-image recipe builds libavif 1.4.2 with
+  `AVIF_LIBYUV=LOCAL`. The release tag resolves to commit
+  `c5240fc79fe5c2407e10afd35f5505ef6333ea49`; its
+  [LocalLibyuv.cmake](https://github.com/AOMediaCodec/libavif/blob/c5240fc79fe5c2407e10afd35f5505ef6333ea49/cmake/Modules/LocalLibyuv.cmake)
+  pins `644251f252a84bf8ce91ff0aca86a9b16b069ab8`. The downloaded
+  [exact source archive](https://chromium.googlesource.com/libyuv/libyuv/+archive/644251f252a84bf8ce91ff0aca86a9b16b069ab8.tar.gz)
+  has SHA-256 `037ac232b25d7cc56dee6a948ddfbb4450465395b029debea65e4b88a214881e`
+  and declares `LIBYUV_VERSION 1924`. This is source-input evidence for the image's
+  dependency, not proof of the bytes compiled into its uninspected layers. The
+  existing libavif code accepts pre-acquired source at `ext/libyuv`; its fallback
+  network fetch must not occur during a future offline build.
+
+Downloaded asset bytes and inspected libavif metadata are retained at
+`/private/tmp/task-13013-7-12-assets.DJcuFZ`. Full build closure, durable artifact
+retention, native execution and the separately restricted security review remain
+incomplete. No image layers were pulled and no asset or package code was executed
+by this metadata checkpoint.
