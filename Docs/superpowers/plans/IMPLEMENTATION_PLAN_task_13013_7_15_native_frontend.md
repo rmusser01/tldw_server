@@ -97,7 +97,9 @@ return prefix + CANDIDATE_RUNTIME_BLOCK + remainder
 
 ```javascript
 const assert = require('node:assert/strict');
-const sharp = require('sharp');
+const { createRequire } = require('node:module');
+const nextRequire = createRequire(require.resolve('next/dist/server/image-optimizer'));
+const sharp = nextRequire('sharp');
 (async () => {
 const input = await sharp({create:{width:2,height:2,channels:3,background:'#123456'}}).png().toBuffer();
 const output = await sharp(input).resize(3,3).png().toBuffer();
@@ -123,6 +125,8 @@ assert.equal(metadata.height,3);
 **Success Criteria:** Same fresh DB per baseline/candidate, complete scan outputs and known fix/status checks; no admission or suppression changes.
 **Tests:** Workflow contract tests, comparison validation tests, actual native CI evidence.
 **Status:** In Progress
+
+Native execution correction (first run34256114036): supply per-invocation redacted Admin signing-key fixture without bypassing production validation; resolve existing sharp from Next's dependency context rather than app cwd; run Grype as runner UID/GID to preserve private cache permissions while enabling host integrity checks. These candidate-harness-only corrections remain in Stage3, with failure-first tests and scoped review before rerun. No production recipe, dependency or admission change.
 
 ### Task 3: Frozen-database scans and native execution
 
