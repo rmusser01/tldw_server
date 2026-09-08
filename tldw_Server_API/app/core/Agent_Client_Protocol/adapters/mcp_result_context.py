@@ -19,6 +19,8 @@ from typing import Any, Literal
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
+from tldw_Server_API.app.core.exceptions import MCPResultSourceNotFoundError, MCPResultWorkerCancelledError
+
 from .mcp_llm_caller import LLMCaller, LLMResponse
 
 READ_RESULT_TOOL = "tldw_read_tool_result"
@@ -80,6 +82,8 @@ class PreparedResult:
 
 @dataclass
 class _Source:
+    """Exact retained text and an isolated copy of its original authorized call."""
+
     text: str
     tool_name: str
     arguments: dict[str, Any]
@@ -124,6 +128,15 @@ class ToolResultContext:
     """Retain authorized sources and prepare bounded, source-backed excerpts."""
 
     def __init__(self, policy: ToolResultPolicy, worker: LLMCaller | None = None) -> None:
+        """Create an empty run-local store.
+
+        Args:
+            policy: Validated output, retention, and worker limits for this run.
+            worker: Explicitly authorized caller required for worker mode.
+
+        Raises:
+            ValueError: Worker mode was requested without a worker caller.
+        """
         self.policy = policy
         self.worker = worker
         self._sources: dict[str, _Source] = {}
@@ -132,7 +145,17 @@ class ToolResultContext:
             raise ValueError("Worker result mode requires an explicitly configured worker caller")
 
     def source_call(self, source_id: str) -> tuple[str, dict[str, Any]]:
-        """Return the original call for reauthorization without exposing its text."""
+        """Return an isolated original call for reauthorization, without its text.
+
+        Args:
+            source_id: Opaque handle returned by this context's prepare method.
+
+        Returns:
+            Tool name and a deep copy of the arguments to check with ToolGate.
+
+        Raises:
+            MCPResultSourceNotFoundError: The handle is unknown to this run.
+        """
         source = self._source(source_id)
         return source.tool_name, deepcopy(source.arguments)
 
@@ -142,12 +165,26 @@ class ToolResultContext:
         self._retained_bytes = 0
 
     def _source(self, source_id: str) -> _Source:
+        """Resolve a run-local handle or raise MCPResultSourceNotFoundError."""
         if not isinstance(source_id, str) or source_id not in self._sources:
-            raise ValueError("Unknown result source in this run")
+            raise MCPResultSourceNotFoundError("Unknown result source in this run")
         return self._sources[source_id]
 
     def read(self, source_id: str, offset: int = 0, limit: int = 512) -> PreparedResult:
-        """Read exact source text; callers must first reauthorize source_call()."""
+        """Read exact source text after the caller reauthorizes source_call().
+
+        Args:
+            source_id: Handle retained in this run and authorized for rereading.
+            offset: Starting character offset, including the end of the source.
+            limit: Positive character count, further bounded by output bytes.
+
+        Returns:
+            Byte-bounded text with source labels and exact character ranges.
+
+        Raises:
+            MCPResultSourceNotFoundError: The handle is unknown to this run.
+            ValueError: Offset or limit has an invalid type or range.
+        """
         source = self._source(source_id)
         if type(offset) is not int or offset < 0 or offset > len(source.text):
             raise ValueError("offset must be an integer within the source")
@@ -157,6 +194,7 @@ class ToolResultContext:
         return self._render(source_id, [(offset, end)], "reread")
 
     def _render(self, source_id: str, ranges: list[tuple[int, int]], outcome: str) -> PreparedResult:
+        """Render trusted character ranges with labels inside the output byte budget."""
         source = self._source(source_id)
         output = (
             f"Source {source_id}: {len(source.text)} characters. Excerpts only. "
@@ -195,7 +233,23 @@ class ToolResultContext:
         cancel_event: asyncio.Event,
         is_error: bool = False,
     ) -> PreparedResult:
-        """Select evidence from one successful result, retaining exact text for reads."""
+        """Select evidence from a successful result and retain exact text for reads.
+
+        Args:
+            tool_name: Name of the tool whose call was already authorized.
+            arguments: Original call arguments to retain for reauthorization.
+            text: Original decoded tool output; never replaced in raw events.
+            question: Current user question used to rank or select evidence.
+            cancel_event: Run cancellation signal, checked between work batches.
+            is_error: Whether this output is an error that must pass through.
+
+        Returns:
+            Original text for ineligible results, or byte-bounded exact excerpts
+            with source handles and measurements. Worker failures use excerpts.
+
+        Raises:
+            asyncio.CancelledError: The run or caller task is cancelled.
+        """
         try:
             input_bytes = len(text.encode("utf-8"))
         except UnicodeEncodeError:
@@ -255,6 +309,18 @@ class ToolResultContext:
         segments: list[dict[str, Any]],
         cancel_event: asyncio.Event,
     ) -> tuple[list[int] | None, str, dict[str, Any]]:
+        """Build a bounded request cooperatively and validate worker segment IDs.
+
+        Request bytes count the encoded messages, including nested JSON escapes.
+        An early budget rejection leaves the complete request size unknown.
+        """
+        metadata: dict[str, Any] = {"worker_usage": None, "worker_called": False, "worker_request_bytes": None}
+        budget = self.policy.max_worker_input_bytes
+        # A JSON string cannot encode to fewer bytes than its character count.
+        # Bound the encoder's largest scalar before it can allocate an escape-
+        # expanded copy of an arbitrarily large question.
+        if len(question) > budget:
+            return None, "worker_input_limit", metadata
         messages = [
             {
                 "role": "system",
@@ -264,16 +330,27 @@ class ToolResultContext:
                     "most relevant first. Select adjacent segments when needed. Use no tools and invent no facts."
                 ),
             },
-            {"role": "user", "content": json.dumps({"question": question, "segments": segments}, ensure_ascii=False)},
+            {"role": "user", "content": ""},
         ]
-        metadata: dict[str, Any] = {"worker_usage": None, "worker_called": False}
+        request_bytes = len(json.dumps(messages, ensure_ascii=False).encode("utf-8"))
+        parts = []
         try:
-            request_bytes = len(json.dumps(messages, ensure_ascii=False).encode("utf-8"))
+            chunks = json.JSONEncoder(ensure_ascii=False).iterencode({"question": question, "segments": segments})
+            for index, chunk in enumerate(chunks):
+                if index % 64 == 0:
+                    await asyncio.sleep(0)
+                    if cancel_event.is_set():
+                        raise asyncio.CancelledError
+                # String escaping is additive. Subtract the surrounding quotes
+                # already counted for the empty content field in messages.
+                request_bytes += len(json.dumps(chunk, ensure_ascii=False).encode("utf-8")) - 2
+                if request_bytes > budget:
+                    return None, "worker_input_limit", metadata
+                parts.append(chunk)
         except UnicodeEncodeError:
             return None, "worker_input_invalid", metadata
+        messages[-1]["content"] = "".join(parts)
         metadata["worker_request_bytes"] = request_bytes
-        if request_bytes > self.policy.max_worker_input_bytes:
-            return None, "worker_input_limit", metadata
         started = time.perf_counter()
         metadata["worker_called"] = True
         try:
@@ -314,8 +391,13 @@ class ToolResultContext:
             return None, "worker_invalid", metadata
         return ids, "worker", metadata
 
-    async def _call_worker(self, messages: list[dict], cancel_event: asyncio.Event) -> LLMResponse:
-        """Bound worker time and tie its lifecycle to the caller's cancellation."""
+    async def _call_worker(self, messages: list[dict[str, Any]], cancel_event: asyncio.Event) -> LLMResponse:
+        """Bound worker time and keep child cancellation distinct from run cancellation.
+
+        Raises TimeoutError on deadline expiry, MCPResultWorkerCancelledError
+        for independent child cancellation, and CancelledError for the run or
+        caller task. Other provider exceptions propagate to the fallback path.
+        """
         if cancel_event.is_set():
             raise asyncio.CancelledError
         if self.worker is None:
@@ -332,6 +414,8 @@ class ToolResultContext:
                 raise asyncio.CancelledError
             if call not in done:
                 raise TimeoutError("Result worker exceeded its time budget")
+            if call.cancelled():
+                raise MCPResultWorkerCancelledError("Result worker cancelled independently")
             return call.result()
         finally:
             for task in (call, cancellation):
