@@ -30,7 +30,7 @@
 **Goal:** Produce an explicit, reviewable patch that applies exactly to authenticated released source.
 **Success Criteria:** Required helper closure is present; unchanged files are unchanged; source/patch substitutions and unsafe archives are rejected.
 **Tests:** Source-preparation rejection cases plus actual-source compile/import smoke checks in a fresh environment.
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 1: Prepare the pinned source and adapted patch
 
@@ -80,7 +80,16 @@ with tarfile.open(archive, "r:gz") as source:
 **Goal:** Build the exact candidate and demonstrate the corrected model boundaries without breaking legitimate model operations.
 **Success Criteria:** All selected security controls reject safely and all legitimate controls pass against installed wheels; baseline failures are retained.
 **Tests:** Actual TransitionParser, maxent/named entity, perceptron and shared guard controls; installed RECORD/module identity checks.
-**Status:** Not Started
+**Status:** In Progress
+
+Blocked checkpoint: the platform rejected the next security-test step before
+an installed environment or candidate wheel was built. Provenance drafts are
+preserved but unreviewed; qualification is incomplete. Do not retry the rejected
+test via another agent, tool, or phrasing. Production and admission remain unchanged.
+
+Static-only checkpoint: the artifact verifier and pinned qualification-input
+record are implemented against synthetic wheel fixtures and await independent
+review. This does not satisfy the installed-wheel controls or complete Task 2.
 
 ### Task 2: Build and exercise separate baseline/candidate wheels
 

@@ -46,5 +46,12 @@ returned by `validate_tool_path`/`validate_tool_dir`. The local correction is
 documented separately from the exact upstream hunks in the design. The current
 patch SHA256 is
 `d5071d450b140c5d37ad5db59c05aa2b9542c62e92ff885739d425baf878c251`.
-Stage 1 remains candidate-only and awaits scoped re-review; nothing here admits
-the candidate or changes a production dependency.
+Stage 1 is independently reviewed and remains candidate-only; nothing here
+admits the candidate or changes a production dependency.
+
+The partial Task 2 artifact verifier statically checks candidate wheel ZIP
+members, top-level metadata, RECORD hashes, and byte identity against the
+caller-supplied prepared source. It records the caller-supplied provenance hash
+but does not independently authenticate upstream source. Its tests use
+synthetic archives only. No candidate wheel has been built or validated, and no
+installed-environment or runtime-closure claim follows.
