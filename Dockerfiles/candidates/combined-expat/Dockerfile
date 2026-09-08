@@ -52,7 +52,8 @@ RUN uv --version | tee /opt/combined-evidence/uv-version.txt \
 
 FROM patched-python AS candidate
 COPY --from=qualified /libexpat1_2.8.4-1~deb13u1+tldw1_amd64.deb /tmp/qualified-libexpat1.deb
-RUN dpkg --install /tmp/qualified-libexpat1.deb \
+# Keep this package complete despite the slim base's documentation exclusions.
+RUN dpkg --path-include='/usr/share/doc/libexpat1/*' --install /tmp/qualified-libexpat1.deb \
     && ldconfig && apt-get check \
     && dpkg --audit > /opt/combined-evidence/dpkg-audit.txt \
     && test ! -s /opt/combined-evidence/dpkg-audit.txt \

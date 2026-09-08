@@ -249,6 +249,18 @@ an unattested execution representation from the same cache, and requires identic
 config bytes. A tiny native exporter preflight gates the heavy build; no canonical
 attestation or release gate is removed. Native verification remains outstanding.
 
+Native assembly run `34175875480` at `b3384f5ec9` passed input verification,
+exporter preflight, attested OCI build, execution export and config binding.
+All four qualified Python binaries pass their runtime hash checks. The next
+gate rejected three missing Expat documentation files excluded by Debian slim's
+dpkg configuration; parser/application/rendering controls did not run. An offline
+reproduction confirms the same missing AUTHORS and changelogs. The user approved
+re-including only `/usr/share/doc/libexpat1/*` during this package installation,
+without changing global exclusions or weakening strict package verification.
+The executable regression runs the checked-in install command and requires a
+complete package before testing missing-doc and altered-library rejection.
+Native re-execution is still required; this is not Expat or release clearance.
+
 - [ ] Integrate the qualified artifacts into a separately named candidate image, without changing production recipes. Run `tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py` and Chunking tests `test_xml_allows_url_text.py`, `test_json_xml_offsets.py`, `test_xml_tail_preservation.py` against that image.
 - [ ] Run fontconfig discovery and FFmpeg drawtext/subtitle controls; compare the previously accepted FFmpeg capability inventory without broadening accepted retirements.
 - [ ] Save source packages, Python source/SBOM, build/configuration logs, binary hashes, package controls, test statuses and candidate OCI identity. Run existing pinned Syft/Trivy/Grype tooling; explicitly account for bundled Expat even if automatic catalogers omit it. Do not rewrite findings into passes.
