@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import re
 import subprocess  # nosec B404
 from pathlib import Path
 
@@ -15,6 +16,12 @@ WORKFLOW = ROOT / ".github/workflows/frontend-runtime-candidate.yml"
 BASELINE = "sha256:" + "a" * 64
 CANDIDATE = "sha256:" + "b" * 64
 HEALTH = "fetch('http://localhost:3000').then((r)=>process.exit(r.ok ? 0 : 1)).catch(()=>process.exit(1))"
+FORBIDDEN_WORKFLOW_COMMAND = re.compile(r"(?:^|[\n;]|&&?|\|\|?)\s*(?:rm(?:\s|$)|docker\s+push(?:\s|$))")
+
+
+def _has_forbidden_workflow_command(script):
+    """Detect only executable deletion/publication commands at shell boundaries."""
+    return FORBIDDEN_WORKFLOW_COMMAND.search(script) is not None
 
 
 def qualifier():
@@ -308,7 +315,8 @@ def test_workflow_uses_native_local_exact_oci_artifacts_and_always_retains_evide
     assert "*.oci.tar" in upload["with"]["path"]
     runs = "\n".join(step.get("run", "") for step in steps)
     assert "runtime_probe.py config" in runs and "docker load" in runs and "qualify.py" in runs
-    assert "rm " not in runs and "docker push" not in runs
+    assert "docker run --rm" in runs and "--platform linux/amd64" in runs
+    assert not _has_forbidden_workflow_command(runs)
 
 
 def test_diagnostic_failure_still_retains_bound_container_exit_state(tmp_path):
@@ -328,6 +336,32 @@ def test_command_timeout_preserves_partial_bytes_and_bounded_call(tmp_path):
     assert result["stdout"] == "partial" and result["stderr"] == "stalled"
     assert result["timedOut"] and result["returncode"] is None
     assert json.loads((tmp_path / "commands/0001.json").read_text()) == result
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        "docker run --rm --network none scanner:fixed",
+        "scanner image --platform linux/amd64 --output report.json",
+        "docker run --rm scanner:fixed image --platform linux/amd64",
+    ],
+)
+def test_workflow_command_guard_allows_rm_and_platform_options(script):
+    assert not _has_forbidden_workflow_command(script)
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        "rm evidence/baseline.oci.tar",
+        "docker push ghcr.io/example/frontend:latest",
+        'echo "built" && rm -f evidence/candidate.oci.tar',
+        "docker inspect frontend; docker push ghcr.io/example/frontend:latest",
+        "test -s report.json || rm report.json",
+    ],
+)
+def test_workflow_command_guard_rejects_deletion_and_publication_commands(script):
+    assert _has_forbidden_workflow_command(script)
 
 
 def test_source_identity_is_bound_to_script_repository_from_another_cwd(tmp_path, monkeypatch):

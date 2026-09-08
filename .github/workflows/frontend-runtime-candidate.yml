@@ -187,11 +187,11 @@ jobs:
           set -euo pipefail
           test ! -e "$ARTIFACTS/scanner"
           mkdir -p "$ARTIFACTS/scanner/trivy-cache" "$ARTIFACTS/scanner/grype-db"
-          docker run --volume "$ARTIFACTS:/evidence:rw" "$TRIVY_IMAGE" --version \
+          docker run --rm --volume "$ARTIFACTS:/evidence:rw" "$TRIVY_IMAGE" --version \
             > "$ARTIFACTS/evidence/trivy-version.txt" 2>&1
-          docker run --volume "$ARTIFACTS:/evidence:rw" "$SYFT_IMAGE" version \
+          docker run --rm --volume "$ARTIFACTS:/evidence:rw" "$SYFT_IMAGE" version \
             > "$ARTIFACTS/evidence/syft-version.txt" 2>&1
-          docker run --volume "$ARTIFACTS:/evidence:rw" \
+          docker run --rm --volume "$ARTIFACTS:/evidence:rw" \
             --env GRYPE_DB_CACHE_DIR=/evidence/scanner/grype-db \
             "$GRYPE_IMAGE" version > "$ARTIFACTS/evidence/grype-version.txt" 2>&1
           grep -F "0.74.0" "$ARTIFACTS/evidence/trivy-version.txt"
@@ -201,15 +201,15 @@ jobs:
           docker image inspect "$SYFT_IMAGE" > "$ARTIFACTS/evidence/syft-image.json"
           docker image inspect "$GRYPE_IMAGE" > "$ARTIFACTS/evidence/grype-image.json"
 
-          docker run --volume "$ARTIFACTS:/evidence:rw" "$TRIVY_IMAGE" image \
+          docker run --rm --volume "$ARTIFACTS:/evidence:rw" "$TRIVY_IMAGE" image \
             --download-db-only --cache-dir /evidence/scanner/trivy-cache \
             > "$ARTIFACTS/evidence/trivy-db-download.log" 2>&1
           cp "$ARTIFACTS/scanner/trivy-cache/db/metadata.json" \
             "$ARTIFACTS/evidence/trivy-db-metadata.json"
-          docker run --volume "$ARTIFACTS:/evidence:rw" \
+          docker run --rm --volume "$ARTIFACTS:/evidence:rw" \
             --env GRYPE_DB_CACHE_DIR=/evidence/scanner/grype-db \
             "$GRYPE_IMAGE" db update > "$ARTIFACTS/evidence/grype-db-download.log" 2>&1
-          docker run --network none --volume "$ARTIFACTS:/evidence:rw" \
+          docker run --rm --network none --volume "$ARTIFACTS:/evidence:rw" \
             --env GRYPE_DB_CACHE_DIR=/evidence/scanner/grype-db \
             --env GRYPE_DB_AUTO_UPDATE=false --env GRYPE_CHECK_FOR_APP_UPDATE=false \
             "$GRYPE_IMAGE" db status -o json > "$ARTIFACTS/evidence/grype-db-status.json" 2>&1
@@ -258,28 +258,27 @@ jobs:
           CANDIDATE_SUBJECT: ${{ steps.candidate.outputs.digest }}
         run: |
           set -euo pipefail
-          platform_flag=--platform
           for role in baseline candidate; do
             if [[ "$role" == baseline ]]; then
               subject="$BASELINE_SUBJECT"
             else
               subject="$CANDIDATE_SUBJECT"
             fi
-            docker run --network none --volume "$ARTIFACTS:/evidence:rw" \
-              "$SYFT_IMAGE" scan "oci-dir:/evidence/$role-layout" "$platform_flag" linux/amd64 \
+            docker run --rm --network none --volume "$ARTIFACTS:/evidence:rw" \
+              "$SYFT_IMAGE" scan "oci-dir:/evidence/$role-layout" --platform linux/amd64 \
               --output "json=/evidence/evidence/$role-syft.json" \
               > "$ARTIFACTS/evidence/$role-syft.log" 2>&1
-            docker run --network none --volume "$ARTIFACTS:/evidence:rw" \
+            docker run --rm --network none --volume "$ARTIFACTS:/evidence:rw" \
               --volume "$ARTIFACTS/$role-layout:/input:ro" \
-              "$TRIVY_IMAGE" image --input "/input@$subject" "$platform_flag" linux/amd64 \
+              "$TRIVY_IMAGE" image --input "/input@$subject" --platform linux/amd64 \
               --cache-dir /evidence/scanner/trivy-cache --skip-db-update --skip-java-db-update \
               --format json \
               --output "/evidence/evidence/$role-trivy.json" \
               > "$ARTIFACTS/evidence/$role-trivy.log" 2>&1
-            docker run --network none --volume "$ARTIFACTS:/evidence:rw" \
+            docker run --rm --network none --volume "$ARTIFACTS:/evidence:rw" \
               --env GRYPE_DB_CACHE_DIR=/evidence/scanner/grype-db \
               --env GRYPE_DB_AUTO_UPDATE=false --env GRYPE_CHECK_FOR_APP_UPDATE=false \
-              "$GRYPE_IMAGE" "oci-dir:/evidence/$role-layout" "$platform_flag" linux/amd64 \
+              "$GRYPE_IMAGE" "oci-dir:/evidence/$role-layout" --platform linux/amd64 \
               --output json --file "/evidence/evidence/$role-grype.json" \
               > "$ARTIFACTS/evidence/$role-grype.log" 2>&1
           done
