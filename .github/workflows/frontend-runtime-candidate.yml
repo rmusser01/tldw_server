@@ -191,7 +191,8 @@ jobs:
             > "$ARTIFACTS/evidence/trivy-version.txt" 2>&1
           docker run --rm --volume "$ARTIFACTS:/evidence:rw" "$SYFT_IMAGE" version \
             > "$ARTIFACTS/evidence/syft-version.txt" 2>&1
-          docker run --rm --volume "$ARTIFACTS:/evidence:rw" \
+          docker run --rm --user "$(id -u):$(id -g)" --volume "$ARTIFACTS:/evidence:rw" \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,mode=1777 \
             --env GRYPE_DB_CACHE_DIR=/evidence/scanner/grype-db \
             "$GRYPE_IMAGE" version > "$ARTIFACTS/evidence/grype-version.txt" 2>&1
           grep -F "0.74.0" "$ARTIFACTS/evidence/trivy-version.txt"
@@ -206,10 +207,12 @@ jobs:
             > "$ARTIFACTS/evidence/trivy-db-download.log" 2>&1
           cp "$ARTIFACTS/scanner/trivy-cache/db/metadata.json" \
             "$ARTIFACTS/evidence/trivy-db-metadata.json"
-          docker run --rm --volume "$ARTIFACTS:/evidence:rw" \
+          docker run --rm --user "$(id -u):$(id -g)" --volume "$ARTIFACTS:/evidence:rw" \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,mode=1777 \
             --env GRYPE_DB_CACHE_DIR=/evidence/scanner/grype-db \
             "$GRYPE_IMAGE" db update > "$ARTIFACTS/evidence/grype-db-download.log" 2>&1
-          docker run --rm --network none --volume "$ARTIFACTS:/evidence:rw" \
+          docker run --rm --user "$(id -u):$(id -g)" --network none --volume "$ARTIFACTS:/evidence:rw" \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,mode=1777 \
             --env GRYPE_DB_CACHE_DIR=/evidence/scanner/grype-db \
             --env GRYPE_DB_AUTO_UPDATE=false --env GRYPE_CHECK_FOR_APP_UPDATE=false \
             "$GRYPE_IMAGE" db status -o json > "$ARTIFACTS/evidence/grype-db-status.json" 2>&1
@@ -275,7 +278,8 @@ jobs:
               --format json \
               --output "/evidence/evidence/$role-trivy.json" \
               > "$ARTIFACTS/evidence/$role-trivy.log" 2>&1
-            docker run --rm --network none --volume "$ARTIFACTS:/evidence:rw" \
+            docker run --rm --user "$(id -u):$(id -g)" --network none --volume "$ARTIFACTS:/evidence:rw" \
+              --tmpfs /tmp:rw,nosuid,nodev,noexec,mode=1777 \
               --env GRYPE_DB_CACHE_DIR=/evidence/scanner/grype-db \
               --env GRYPE_DB_AUTO_UPDATE=false --env GRYPE_CHECK_FOR_APP_UPDATE=false \
               "$GRYPE_IMAGE" "oci-dir:/evidence/$role-layout" --platform linux/amd64 \

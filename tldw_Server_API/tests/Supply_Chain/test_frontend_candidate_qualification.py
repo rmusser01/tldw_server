@@ -2,7 +2,9 @@
 
 import importlib.util
 import json
+import os
 import re
+import shutil
 import subprocess  # nosec B404
 from pathlib import Path
 
@@ -113,12 +115,18 @@ class DockerBoundary:
             args = container["argv"]
             uid = 10003 if self.application == "admin-ui" else 10002
             workdir = image_config(self.application)["WorkingDir"]
+            config = image_config(self.application)
+            config["Env"] += [args[i + 1] for i, value in enumerate(args) if value == "--env"]
+            if self.fault in {"missing_signing_key", "empty_signing_key"}:
+                config["Env"] = [value for value in config["Env"] if not value.startswith("JWT_SECRET_KEY=")]
+                if self.fault == "empty_signing_key":
+                    config["Env"].append("JWT_SECRET_KEY=")
             out = json.dumps(
                 [
                     {
                         "Id": argv[3],
                         "Image": container["subject"],
-                        "Config": image_config(self.application),
+                        "Config": config,
                         "State": {
                             "Running": False,
                             "ExitCode": (
@@ -383,3 +391,142 @@ def test_workflow_actions_match_existing_trusted_pins_and_health_build_args():
     assert "NEXT_PUBLIC_API_URL=http://backend:8000" in rows["admin-ui"]["build_args"].splitlines()
     assert "NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=quickstart" in rows["webui"]["build_args"].splitlines()
     assert "TLDW_INTERNAL_API_ORIGIN=http://backend:8000" in rows["webui"]["build_args"].splitlines()
+
+
+def test_admin_signing_fixture_is_nonempty_shared_only_by_apps_and_fresh_per_invocation(tmp_path):
+    keys = []
+    for invocation in ("first", "second"):
+        report, boundary = run_probe(tmp_path / invocation, "admin-ui")
+        assert report["passed"]
+        app_keys = []
+        for container in boundary.containers.values():
+            env = [value for value in container["argv"] if value.startswith("JWT_SECRET_KEY=")]
+            if not container["command"]:
+                assert len(env) == 1 and len(env[0].partition("=")[2]) >= 32
+                app_keys.append(env[0].partition("=")[2])
+            else:
+                assert env == []
+        assert len(app_keys) == 2 and app_keys[0] == app_keys[1]
+        keys.append(app_keys[0])
+        assert all(keys[-1] not in path.read_text() for path in (tmp_path / invocation).rglob("*.json"))
+    assert keys[0] != keys[1]
+
+
+@pytest.mark.parametrize("fault", ["missing_signing_key", "empty_signing_key"])
+def test_admin_missing_effective_signing_fixture_fails_closed(tmp_path, fault):
+    report, _ = run_probe(tmp_path, "admin-ui", fault=fault)
+    assert not report["passed"] and "signing" in report["error"]
+
+
+@pytest.mark.parametrize("outcome", ["success", "failure", "timeout", "oserror", "validation_error"])
+def test_admin_generated_key_never_reaches_retained_commands_or_final_error(tmp_path, outcome):
+    boundary = DockerBoundary("admin-ui")
+    seen_keys = []
+
+    def execute(argv, **kwargs):
+        env = [value for value in argv if value.startswith("JWT_SECRET_KEY=")]
+        if env:
+            seen_keys.append(env[0].partition("=")[2])
+        if seen_keys and argv[:2] == ["docker", "start"]:
+            key = seen_keys[0]
+            if outcome == "timeout":
+                raise subprocess.TimeoutExpired(argv, kwargs["timeout"], output=key.encode(), stderr=key.encode())
+            if outcome == "oserror":
+                raise OSError(key)
+            if outcome == "validation_error":
+                raise ValueError(key)
+            if outcome == "failure":
+                return subprocess.CompletedProcess(argv, 1, key, key)
+        result = boundary(argv, **kwargs)
+        if seen_keys and argv[:2] == ["docker", "logs"]:
+            result.stdout = result.stderr = seen_keys[0]
+        # Inspection remains unredacted in memory for the qualifier's effective-ENV validation.
+        if seen_keys and outcome == "success" and argv[:3] == ["docker", "container", "inspect"]:
+            assert seen_keys[0] in result.stdout or boundary.containers[argv[3]]["command"]
+        return result
+
+    report = qualifier().qualify(
+        "admin-ui",
+        BASELINE,
+        CANDIDATE,
+        tmp_path,
+        execute=execute,
+        host={"system": "Linux", "machine": "x86_64"},
+        sleep=lambda _: None,
+    )
+    assert seen_keys
+    assert report["passed"] is (outcome == "success")
+    assert seen_keys[0] not in json.dumps(report)
+    retained = "\n".join(path.read_text() for path in tmp_path.rglob("*.json"))
+    assert seen_keys[0] not in retained and "[REDACTED]" in retained
+
+
+@pytest.mark.parametrize("nested_sharp", [True, False])
+def test_sharp_probe_resolves_next_dependency_not_application_root(tmp_path, nested_sharp):
+    node = shutil.which("node")
+    assert node, "Node is required for the dependency-resolution regression"
+    next_package = tmp_path / "node_modules/.bun/next-fixture/node_modules/next"
+    (next_package / "dist/server").mkdir(parents=True)
+    (next_package / "dist/server/image-optimizer.js").write_text("throw Error('must only resolve Next');\n")
+    (tmp_path / "node_modules/next").symlink_to(next_package, target_is_directory=True)
+    if nested_sharp:
+        sharp = next_package.parent / "sharp"
+        sharp.mkdir()
+        # Resolution sentinel: this is deliberately not an implementation of native sharp.
+        (sharp / "index.js").write_text("throw Error('resolved nested sharp fixture');\n")
+    environment = {key: value for key, value in os.environ.items() if key not in {"NODE_PATH", "NODE_OPTIONS"}}
+    result = subprocess.run(  # nosec B603
+        [node, "-e", qualifier().SHARP_JS],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode != 0  # Neither sentinel nor absent module may pass the PNG operation.
+    if nested_sharp:
+        assert "resolved nested sharp fixture" in result.stderr
+    else:
+        assert "Cannot find module 'sharp'" in result.stderr
+
+
+def test_grype_workflow_commands_use_runner_identity_and_immutable_image(tmp_path):
+    workflow = yaml.safe_load(WORKFLOW.read_text())
+    job = workflow["jobs"]["qualify"]
+    calls = tmp_path / "calls"
+    (tmp_path / "evidence").mkdir()
+    shell = shutil.which("bash")
+    assert shell, "Bash is required for the workflow command regression"
+    # Run the actual multiline Grype docker commands; replace only external Docker/id.
+    docker_commands = [
+        line.strip()
+        for step in job["steps"]
+        for line in step.get("run", "").replace("\\\n", " ").splitlines()
+        if line.strip().startswith("docker run ") and '"$GRYPE_IMAGE"' in line
+    ]
+    assert len(docker_commands) == 4  # version, one acquisition, offline status, pair scan
+    environment = {
+        **os.environ,
+        "ARTIFACTS": str(tmp_path),
+        "CALLS": str(calls),
+        "role": "baseline",
+        "GRYPE_IMAGE": job["env"]["GRYPE_IMAGE"],
+    }
+    script = r"""
+set -euo pipefail
+id() { case "$1" in -u) printf '1234';; -g) printf '5678';; *) return 1;; esac; }
+docker() { printf '%s\0' "$@" >> "$CALLS"; printf '\0' >> "$CALLS"; }
+""" + "\n".join(
+        docker_commands
+    )
+    subprocess.run([shell, "-c", script], env=environment, check=True, timeout=10)  # nosec B603
+    observed = [record.decode().split("\0") for record in calls.read_bytes().split(b"\0\0") if record]
+    pin = "anchore/grype:v0.118.0@sha256:8a93fc48da96bd6ec5981279d099b69de11541dc68fdf222fb9161f8ff284af7"
+    for argv in observed:
+        assert argv.count("--user") == 1, "Grype must not create a root-only cache"
+        assert argv[argv.index("--user") + 1] == "1234:5678"
+        assert argv.count("--tmpfs") == 1, "Pinned Grype needs private writable temporary space"
+        # Container-private memory mount option, not host temporary-file creation.
+        assert argv[argv.index("--tmpfs") + 1] == "/tmp:rw,nosuid,nodev,noexec,mode=1777"  # nosec B108
+        assert pin in argv
