@@ -25,16 +25,16 @@ def comparator():
     return module
 
 
-def trivy(config, findings=()):
+def trivy(config, findings=(), *, distro="debian", target=None):
     """Create the smallest valid Trivy image report used by these controls."""
     return {
         "SchemaVersion": 2,
         "Metadata": {"ImageID": config},
         "Results": [
             {
-                "Target": "image (debian 12)",
+                "Target": target or f"image ({distro})",
                 "Class": "os-pkgs",
-                "Type": "debian",
+                "Type": distro,
                 "Vulnerabilities": list(findings),
             }
         ],
@@ -77,12 +77,21 @@ def grype(config, matches=(), ignored=()):
     }
 
 
-def grype_match(cve, package, version, severity, *, package_type="deb", path="/var/lib/dpkg/status"):
+def grype_match(
+    cve,
+    package,
+    version,
+    severity,
+    *,
+    package_type="deb",
+    path="/var/lib/dpkg/status",
+    namespace="debian:distro:debian:12",
+):
     """Create one Grype match with a concrete package occurrence."""
     return {
         "vulnerability": {
             "id": cve,
-            "namespace": "debian:distro:debian:12",
+            "namespace": namespace,
             "severity": severity,
             "fix": {"versions": [], "state": "unknown"},
         },
@@ -138,15 +147,165 @@ def test_below_threshold_finding_persists_and_severity_change_is_explicit(tmp_pa
     assert match["candidate"][0]["vulnerability"]["Severity"] == "UNKNOWN"
 
 
+@pytest.mark.parametrize(
+    "candidate_severity, expected_classification",
+    [
+        ("CRITICAL", "still-reported-version-changed"),
+        ("LOW", "still-reported-severity-changed"),
+    ],
+)
+def test_trivy_debian_to_ubuntu_os_match_remains_persistent(tmp_path, candidate_severity, expected_classification):
+    baseline = trivy(
+        BASELINE,
+        [trivy_finding("CVE-2026-85091", "zlib1g", "1:1.2.13.dfsg-1", "CRITICAL")],
+        distro="debian",
+        target="image (debian 12)",
+    )
+    candidate = trivy(
+        CANDIDATE,
+        [
+            trivy_finding(
+                "CVE-2026-85091",
+                "zlib1g",
+                "1:1.3.dfsg-3.1ubuntu2.2",
+                candidate_severity,
+            )
+        ],
+        distro="ubuntu",
+        target="image (ubuntu 24.04)",
+    )
+
+    comparison = compare(tmp_path, baseline, candidate)
+
+    matches = comparison["scanners"]["trivy"]["matches"]
+    assert len(matches) == 1
+    assert matches[0]["classification"] == expected_classification
+    assert matches[0]["baseline"][0]["type"] == "debian"
+    assert matches[0]["candidate"][0]["type"] == "ubuntu"
+
+
+@pytest.mark.parametrize(
+    "candidate_severity, expected_classification",
+    [
+        ("Critical", "still-reported-version-changed"),
+        ("Low", "still-reported-severity-changed"),
+    ],
+)
+def test_grype_debian_to_ubuntu_deb_match_remains_persistent(tmp_path, candidate_severity, expected_classification):
+    baseline = grype_match("CVE-2026-85091", "zlib1g", "1:1.2.13.dfsg-1", "Critical")
+    candidate = grype_match(
+        "CVE-2026-85091",
+        "zlib1g",
+        "1:1.3.dfsg-3.1ubuntu2.2",
+        candidate_severity,
+        namespace="ubuntu:distro:ubuntu:24.04",
+    )
+
+    comparison = compare(
+        tmp_path,
+        trivy(BASELINE),
+        trivy(CANDIDATE),
+        grype(BASELINE, [baseline]),
+        grype(CANDIDATE, [candidate]),
+    )
+
+    matches = comparison["scanners"]["grype"]["matches"]
+    assert len(matches) == 1
+    assert matches[0]["classification"] == expected_classification
+    assert matches[0]["baseline"][0]["vulnerability"]["namespace"] == "debian:distro:debian:12"
+    assert matches[0]["candidate"][0]["vulnerability"]["namespace"] == "ubuntu:distro:ubuntu:24.04"
+
+
+def test_os_and_language_package_ecosystems_remain_separate(tmp_path):
+    baseline_trivy = trivy(
+        BASELINE,
+        [trivy_finding("CVE-shared", "shared-name", "1", "HIGH")],
+    )
+    candidate_trivy = trivy(
+        CANDIDATE,
+        [trivy_finding("CVE-shared", "shared-name", "1", "HIGH")],
+        distro="ubuntu",
+    )
+    candidate_trivy["Results"].append(
+        {
+            "Target": "app/node_modules/shared-name/package.json",
+            "Class": "lang-pkgs",
+            "Type": "npm",
+            "Vulnerabilities": [trivy_finding("CVE-shared", "shared-name", "1", "HIGH")],
+        }
+    )
+    candidate_trivy["Results"].append(
+        {
+            "Target": "image (alpine 3.22)",
+            "Class": "os-pkgs",
+            "Type": "alpine",
+            "Vulnerabilities": [trivy_finding("CVE-shared", "shared-name", "1", "HIGH")],
+        }
+    )
+    baseline_grype = grype_match("CVE-shared", "shared-name", "1", "High")
+    candidate_grype_os = grype_match(
+        "CVE-shared",
+        "shared-name",
+        "1",
+        "High",
+        namespace="ubuntu:distro:ubuntu:24.04",
+    )
+    candidate_grype_language = grype_match(
+        "CVE-shared",
+        "shared-name",
+        "1",
+        "High",
+        package_type="npm",
+        path="/app/node_modules/shared-name/package.json",
+        namespace="npm",
+    )
+    candidate_grype_other_feed = grype_match(
+        "CVE-shared",
+        "shared-name",
+        "1",
+        "High",
+        namespace="nvd:cpe",
+    )
+
+    comparison = compare(
+        tmp_path,
+        baseline_trivy,
+        candidate_trivy,
+        grype(BASELINE, [baseline_grype]),
+        grype(
+            CANDIDATE,
+            [candidate_grype_os, candidate_grype_language, candidate_grype_other_feed],
+        ),
+    )
+
+    assert {tuple(row["key"][2:]): row["classification"] for row in comparison["scanners"]["trivy"]["matches"]} == {
+        ("alpine", "os-pkgs"): "introduced",
+        ("deb", "os-pkgs"): "still-reported",
+        ("npm", "lang-pkgs"): "introduced",
+    }
+    assert {tuple(row["key"][2:]): row["classification"] for row in comparison["scanners"]["grype"]["matches"]} == {
+        ("deb", "deb:distro"): "still-reported",
+        ("deb", "nvd:cpe"): "introduced",
+        ("npm", "npm"): "introduced",
+    }
+
+
 def test_package_rename_is_ambiguous_and_never_claimed_fixed(tmp_path):
     baseline = trivy(BASELINE, [trivy_finding("CVE-z", "zlib1g", "1.2.13", "HIGH")])
     candidate = trivy(CANDIDATE, [trivy_finding("CVE-z", "zlib-ng", "2.2.5", "HIGH")])
 
-    comparison = compare(tmp_path, baseline, candidate)
+    comparison = compare(
+        tmp_path,
+        baseline,
+        candidate,
+        grype(BASELINE, [grype_match("CVE-z", "zlib1g", "1.2.13", "High")]),
+        grype(CANDIDATE, [grype_match("CVE-z", "zlib-ng", "2.2.5", "High")]),
+    )
 
-    classes = [item["classification"] for item in comparison["scanners"]["trivy"]["matches"]]
-    assert classes == ["introduced", "baseline-only-unproven"]
-    assert all("fixed" not in classification for classification in classes)
+    for scanner in ("trivy", "grype"):
+        classes = [item["classification"] for item in comparison["scanners"][scanner]["matches"]]
+        assert classes == ["introduced", "baseline-only-unproven"]
+        assert all("fixed" not in classification for classification in classes)
 
 
 def test_introduced_grype_match_is_reported_separately(tmp_path):

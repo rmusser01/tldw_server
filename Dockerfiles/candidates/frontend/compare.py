@@ -132,20 +132,27 @@ def _grype_rows(
 
 def _trivy_match_key(row: dict[str, Any]) -> tuple[str, str, str, str]:
     finding = row["vulnerability"]
+    package_type = str(row.get("type") or "")
+    if row.get("class") == "os-pkgs" and package_type in {"debian", "ubuntu"}:
+        package_type = "deb"
     return (
         finding["VulnerabilityID"],
         finding["PkgName"],
-        str(row.get("type") or ""),
+        package_type,
         str(row.get("class") or ""),
     )
 
 
 def _grype_match_key(row: dict[str, Any]) -> tuple[str, str, str, str]:
+    package_type = row["artifact"]["type"]
+    namespace = str(row["vulnerability"].get("namespace") or "")
+    if package_type == "deb" and namespace.startswith(("debian:distro:debian:", "ubuntu:distro:ubuntu:")):
+        namespace = "deb:distro"
     return (
         row["vulnerability"]["id"],
         row["artifact"]["name"],
-        row["artifact"]["type"],
-        str(row["vulnerability"].get("namespace") or ""),
+        package_type,
+        namespace,
     )
 
 
