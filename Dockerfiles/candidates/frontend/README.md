@@ -165,7 +165,7 @@ original rows (including duplicate package versions, paths and ecosystems), and
 retains Grype ignored matches rather than hiding them. A baseline-only row is
 classified `baseline-only-unproven`, never fixed merely because another feed or
 distribution does not report it. The report always contains `admitted: false`
-and no fixed claims. In particular, absence of the old zlib CVE-2023-27171 row
+and no fixed claims. In particular, absence of the old zlib CVE-2026-27171 row
 and Ubuntu vendor evidence for glibc require external corroboration; they are not
 release admission. CVE-2026-85091 remains unresolved at its reported vendor
 severity.
