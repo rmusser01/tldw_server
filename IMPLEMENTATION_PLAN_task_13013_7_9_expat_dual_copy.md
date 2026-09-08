@@ -261,7 +261,21 @@ The executable regression runs the checked-in install command and requires a
 complete package before testing missing-doc and altered-library rejection.
 Native re-execution is still required; this is not Expat or release clearance.
 
-- [ ] Integrate the qualified artifacts into a separately named candidate image, without changing production recipes. Run `tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py` and Chunking tests `test_xml_allows_url_text.py`, `test_json_xml_offsets.py`, `test_xml_tail_preservation.py` against that image.
+Native assembly re-execution `34177651966` at `20fbadd2dc23ff3c186153f581a9b1dbd2731b24`
+passed strict package verification, all parser/application controls and both
+rendering probes. Parent reverified the retained archive hash and OCI metadata,
+all eight application identities (24 successful phases), and unchanged runtime
+file/link inventories. The fontconfig cache warning is nonfatal but retained.
+This establishes initial combined runtime evidence, not full Stage 3 admission.
+
+The next bounded checkpoint is `candidate-compatibility.yml`: consume this exact
+retained OCI without rebuilding, verify fixed producer/archive/baseline/evaluator
+identities, and run the unchanged FFmpeg capability and synthetic evaluator on
+native amd64. New files are outside assembly push filters. Production recipes,
+accepted retirements and scanner policy remain unchanged. Native comparison is
+still required before completing the following capability item.
+
+- [x] Integrate the qualified artifacts into a separately named candidate image, without changing production recipes. Run `tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py` and Chunking tests `test_xml_allows_url_text.py`, `test_json_xml_offsets.py`, `test_xml_tail_preservation.py` against that image.
 - [ ] Run fontconfig discovery and FFmpeg drawtext/subtitle controls; compare the previously accepted FFmpeg capability inventory without broadening accepted retirements.
 - [ ] Save source packages, Python source/SBOM, build/configuration logs, binary hashes, package controls, test statuses and candidate OCI identity. Run existing pinned Syft/Trivy/Grype tooling; explicitly account for bundled Expat even if automatic catalogers omit it. Do not rewrite findings into passes.
 - [ ] Perform the security-fix skill's single fresh read-only candidate review after focused gates, confirm any concrete findings, rerun affected checks, and update TASK-13013.7.9 with exact evidence and remaining blockers.
