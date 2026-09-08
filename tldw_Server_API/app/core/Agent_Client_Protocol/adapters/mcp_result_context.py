@@ -40,6 +40,9 @@ READ_RESULT_SCHEMA = {
     },
 }
 _SEGMENT_CHARS = 256
+_RANK_BATCH_SEGMENTS = 64
+_MAX_QUERY_CHARS = 8192
+_MAX_QUERY_TERMS = 128
 _USAGE_KEYS = frozenset(
     {
         "input_tokens",
@@ -99,6 +102,24 @@ def _usage(response: LLMResponse) -> dict[str, int | float] | None:
     } or None
 
 
+async def _rank_segments(segments: list[dict[str, Any]], question: str, cancel_event: asyncio.Event) -> list[int]:
+    """Score bounded query terms cooperatively, preserving source order for ties."""
+    terms = set()
+    for match in re.finditer(r"\w{2,}", question[:_MAX_QUERY_CHARS].casefold()):
+        terms.add(match.group())
+        if len(terms) == _MAX_QUERY_TERMS:
+            break
+    scored = []
+    for index, segment in enumerate(segments):
+        if index % _RANK_BATCH_SEGMENTS == 0:
+            await asyncio.sleep(0)
+            if cancel_event.is_set():
+                raise asyncio.CancelledError
+        folded = segment["text"].casefold()
+        scored.append((-sum(term in folded for term in terms), index))
+    return [index for _score, index in sorted(scored)]
+
+
 class ToolResultContext:
     """Retain authorized sources and prepare bounded, source-backed excerpts."""
 
@@ -148,7 +169,7 @@ class ToolResultContext:
             remaining = self.policy.max_output_bytes - len((output + label).encode("utf-8"))
             snippet = _prefix(source.text[start:end], remaining)
             if not snippet:
-                continue
+                break
             actual_end = start + len(snippet)
             output += f"\n[{start}:{actual_end}]\n{snippet}"
             selected.append((start, actual_end))
@@ -216,17 +237,13 @@ class ToolResultContext:
             {"id": index, "text": text[start : start + _SEGMENT_CHARS]}
             for index, start in enumerate(range(0, len(text), _SEGMENT_CHARS))
         ]
-        terms = set(re.findall(r"\w{2,}", question.casefold()))
-        ranked = sorted(
-            range(len(segments)),
-            key=lambda index: -sum(term in segments[index]["text"].casefold() for term in terms),
-        )
+        ranked = None
         outcome = "excerpt"
         worker_metadata: dict[str, Any] = {}
         if self.policy.mode == "worker":
-            chosen, outcome, worker_metadata = await self._select(question, segments, cancel_event)
-            if chosen is not None:
-                ranked = chosen
+            ranked, outcome, worker_metadata = await self._select(question, segments, cancel_event)
+        if ranked is None:
+            ranked = await _rank_segments(segments, question, cancel_event)
         ranges = [(index * _SEGMENT_CHARS, min(len(text), (index + 1) * _SEGMENT_CHARS)) for index in ranked]
         result = self._render(source_id, ranges, outcome)
         result.metadata.update(worker_metadata)

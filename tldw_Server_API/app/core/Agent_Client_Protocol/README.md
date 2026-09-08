@@ -109,7 +109,11 @@ protocol_config["mcp_tool_result_policy"] = {
 }
 ```
 
-`excerpt` ranks fixed source segments using the current question. `worker`
+`excerpt` ranks fixed source segments using up to 128 unique terms from the
+first 8192 characters of the current question. It case-folds each segment once
+and yields/checks cancellation every 64 segments. Evidence missed by these
+scoring limits remains available through exact source reads.
+Successful worker selection skips deterministic ranking. `worker`
 requires an explicit `mcp_result_worker` implementing `LLMCaller` and
 `mcp_result_worker_provider` equal to `mcp_llm_provider`. The embedding caller
 must bind the approved credentials, provider/model and egress policy; declaring
@@ -128,6 +132,8 @@ The reserved tool name must not collide with a server tool. Failed tool results
 and small results pass through; when the retained-source budget is exhausted,
 the original result passes through with `storage_limit` metadata. Thus this is
 an evidence-selection experiment, not a hard total-context or memory quota.
+Internal reads are excluded from run-first first-tool and typed-tool fallback
+counters, so a reread cannot replace a later real fallback in those metrics.
 
 Original `TOOL_RESULT` event payloads remain available to existing consumers.
 The accompanying `metadata.result_context` records sizes, exact source ranges,
@@ -138,6 +144,9 @@ waits at most 100 ms beyond the worker deadline, then cancels again. Injected
 callers must cooperate with asyncio cancellation; arbitrary caller code cannot
 be forcibly terminated by an asyncio task. The source store is explicitly
 cleared in a run-level `finally`, including callback failure/cancellation.
+If selection is cancelled after a tool has completed, the runner emits that
+tool's raw result exactly once before propagating cancellation. That event has
+no selection metadata because preparation did not finish.
 
 Run the no-network fixture replay from the repository root:
 
@@ -148,6 +157,8 @@ python -m Helper_Scripts.benchmarks.acp_tool_result_experiment > /tmp/acp-result
 
 The default worker is labeled `fixture_oracle` and knows the expected evidence.
 It verifies policy/recovery mechanics, **not model quality or total cost savings**.
+Evidence scoring checks actual returned source excerpts; generated headers and
+read instructions cannot satisfy an expected source quote.
 Use `--dataset cases.jsonl` for rows containing `id`, `question`, `text`, and an
 exact `expected_quote`. `--worker-factory module:factory` explicitly loads a
 trusted local factory returning a configured `LLMCaller` for real extraction
