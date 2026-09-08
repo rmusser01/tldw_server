@@ -57,7 +57,7 @@ class RecordingCaller:
         return LLMResponse(text="Done")
 
 
-def make_runner(caller=None, mode="excerpt", deny_reread=False, tools=None):
+def make_runner(caller=None, mode="excerpt", deny_reread=False, tools=None, worker=None, metrics_context=None):
     from tldw_Server_API.app.core.Agent_Client_Protocol.adapters.mcp_runners import LLMDrivenRunner
 
     events, approvals = [], []
@@ -83,6 +83,8 @@ def make_runner(caller=None, mode="excerpt", deny_reread=False, tools=None):
         gate,
         tools or TOOLS,
         result_policy=ToolResultPolicy(mode=mode, min_input_bytes=1024, max_output_bytes=768),
+        result_worker=worker,
+        run_first_metrics_context=metrics_context,
     )
     return runner, caller, events, approvals, transport
 
@@ -237,3 +239,99 @@ async def test_source_store_is_cleared_even_when_traceback_retains_run(monkeypat
     assert retained_error.value.__traceback__ is not None
     with pytest.raises(ValueError, match="Unknown"):
         contexts[0].read(source_ids[0])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["off", "excerpt", "worker"])
+async def test_completed_result_survives_cancellation_at_transport_return(mode):
+    runner, _, events, _, transport = make_runner(mode=mode, worker=AsyncMock())
+
+    async def complete_then_cancel(*args):
+        runner._cancel.set()
+        return {"content": [{"type": "text", "text": TEXT}]}
+
+    transport.call_tool.side_effect = complete_then_cancel
+    if mode == "off":
+        await runner.run([{"role": "user", "content": "needle"}])
+    else:
+        with pytest.raises(asyncio.CancelledError):
+            await runner.run([{"role": "user", "content": "needle"}])
+    assert [event.kind for event in events] == [AgentEventKind.TOOL_CALL, AgentEventKind.TOOL_RESULT]
+    assert events[-1].payload == {"tool_name": "search", "output": TEXT, "is_error": False}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_method", ["event", "task"])
+async def test_completed_result_survives_cancellation_during_worker(cancel_method):
+    started, cancelled = asyncio.Event(), asyncio.Event()
+
+    class WaitingWorker:
+        async def call(self, messages, tools):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+    runner, _, events, _, _ = make_runner(mode="worker", worker=WaitingWorker())
+    job = asyncio.create_task(runner.run([{"role": "user", "content": "needle"}]))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=1)
+        if cancel_method == "event":
+            runner._cancel.set()
+        else:
+            job.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(job, timeout=1)
+    finally:
+        job.cancel()
+        await asyncio.gather(job, return_exceptions=True)
+    assert cancelled.is_set()
+    assert [event.kind for event in events] == [AgentEventKind.TOOL_CALL, AgentEventKind.TOOL_RESULT]
+    assert events[-1].payload == {"tool_name": "search", "output": TEXT, "is_error": False}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("leading_unknown_read", [False, True])
+async def test_internal_reads_do_not_replace_real_tool_selection_metrics(monkeypatch, leading_unknown_read):
+    from tldw_Server_API.app.core.Agent_Client_Protocol.adapters import mcp_runners
+
+    first_tools, fallbacks = [], []
+    monkeypatch.setattr(mcp_runners.acp_metrics, "record_run_first_rollout", lambda **kwargs: None)
+    monkeypatch.setattr(mcp_runners.acp_metrics, "record_run_first_completion_proxy", lambda **kwargs: None)
+    monkeypatch.setattr(
+        mcp_runners.acp_metrics,
+        "record_run_first_first_tool",
+        lambda **kwargs: first_tools.append(kwargs["first_tool"]),
+    )
+    monkeypatch.setattr(
+        mcp_runners.acp_metrics,
+        "record_run_first_fallback_after_run",
+        lambda **kwargs: fallbacks.append(kwargs["fallback_tool"]),
+    )
+
+    class ToolSequenceCaller:
+        def __init__(self):
+            self.names = ([READ_RESULT_TOOL] if leading_unknown_read else []) + ["run", READ_RESULT_TOOL, "search"]
+            self.index = 0
+
+        async def call(self, messages, tools):
+            if self.index == len(self.names):
+                return LLMResponse(text="Done")
+            name = self.names[self.index]
+            self.index += 1
+            arguments = {"query": "needle"}
+            if name == READ_RESULT_TOOL:
+                match = re.search(r"r_[a-f0-9]{32}", str(messages[-1]))
+                arguments = {"source_id": match.group() if match else "unknown", "offset": 0, "limit": 19}
+            return LLMResponse(tool_calls=[LLMToolCall(f"call-{self.index}", name, arguments)])
+
+    runner, _, events, _, _ = make_runner(
+        caller=ToolSequenceCaller(),
+        tools=[{"name": "run", "inputSchema": {"type": "object"}}, *TOOLS],
+        metrics_context={"presentation_variant": "compact"},
+    )
+    await runner.run([{"role": "user", "content": "needle"}])
+    assert first_tools == ["run"]
+    assert fallbacks == ["search"]
+    assert events[-1].kind == AgentEventKind.COMPLETION

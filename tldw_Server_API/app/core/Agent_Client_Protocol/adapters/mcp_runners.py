@@ -448,18 +448,19 @@ class LLMDrivenRunner:
                     if self._cancel.is_set():
                         break
 
-                    if first_tool_name is None:
-                        first_tool_name = tc.name
-                        self._record_run_first_first_tool(first_tool_name)
-                    elif (
-                        first_tool_name == "run"
-                        and not fallback_recorded
-                        and tc.name != "run"
-                    ):
-                        fallback_recorded = True
-                        self._record_run_first_fallback_after_run(tc.name)
-
                     is_result_read = result_context is not None and tc.name == READ_RESULT_TOOL
+                    if not is_result_read:
+                        if first_tool_name is None:
+                            first_tool_name = tc.name
+                            self._record_run_first_first_tool(first_tool_name)
+                        elif (
+                            first_tool_name == "run"
+                            and not fallback_recorded
+                            and tc.name != "run"
+                        ):
+                            fallback_recorded = True
+                            self._record_run_first_fallback_after_run(tc.name)
+
                     approval_name, approval_arguments = tc.name, tc.arguments
                     if is_result_read:
                         try:
@@ -527,10 +528,16 @@ class LLMDrivenRunner:
                             output = str(exc)
                             is_error = True
                         if result_context is not None and isinstance(output, str):
-                            prepared = await result_context.prepare(
-                                tool_name=tc.name, arguments=tc.arguments, text=output,
-                                question=question, is_error=is_error, cancel_event=self._cancel,
-                            )
+                            try:
+                                prepared = await result_context.prepare(
+                                    tool_name=tc.name, arguments=tc.arguments, text=output,
+                                    question=question, is_error=is_error, cancel_event=self._cancel,
+                                )
+                            except asyncio.CancelledError:
+                                # Execution has completed; cancellation of optional
+                                # selection must not discard its raw result event.
+                                await self._deliver_result(tc, output, is_error, history)
+                                raise
                     await self._deliver_result(
                         tc, output, is_error, history,
                         model_output=prepared.output if prepared is not None else None,

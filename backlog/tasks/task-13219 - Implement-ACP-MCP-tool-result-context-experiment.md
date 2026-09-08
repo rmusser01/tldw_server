@@ -4,7 +4,7 @@ title: Implement ACP MCP tool-result context experiment
 status: Done
 assignee: []
 created_date: '2026-09-08 04:46'
-updated_date: '2026-09-08 05:15'
+updated_date: '2026-09-08 05:39'
 labels: []
 dependencies: []
 documentation:
@@ -24,12 +24,16 @@ Approved ACP/MCP experiment: compare unchanged output, deterministic excerpts, a
 - [x] #3 Worker extraction verifies source ranges and handles failure, timeout, and cancellation.
 - [x] #4 Comparison harness reports context, latency, worker usage, and evidence recovery without invented cost or quality claims.
 - [x] #5 Regression and property tests, documentation, review, lint, and Bandit pass.
+- [x] #6 Cancellation during result preparation preserves exactly one raw event for an already completed tool, then propagates cancellation.
+- [x] #7 Large-result ranking yields for cancellation and bounds query scoring work without losing exact source offsets.
+- [x] #8 Benchmark evidence presence excludes generated wrapper text and verifies returned source excerpts.
+- [x] #9 Internal result reads do not count as first tools or suppress real typed-tool fallback metrics.
 <!-- AC:END -->
 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Completed all four stages: exact result policy; runner/adapter integration; reproducible comparison harness; independent review and delivery. The task-specific temporary implementation plan was removed on completion per AGENTS.md. Persistent design: Docs/Design/ACP_Tool_Result_Context_Experiment.md.
+Completed four remediation stages: cancellation result delivery and metrics; cooperative ranking; source-only benchmark scoring; review and delivery. The temporary Docs/Plans/IMPLEMENTATION_PLAN_acp_result_review_fixes.md was removed on completion. Persistent design: Docs/Design/ACP_Tool_Result_Context_Experiment.md.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -40,12 +44,16 @@ Isolated worktree on codex/acp-tool-result-experiment. Baseline: 40 ACP runner/a
 Implemented result policy, runner/adapter integration, and replay harness. Initial focused suite: 70 passed; harness: 3 passed. Independent review identified malformed worker output, unbounded cancellation cleanup, and retained store after callback failure; all reproduced with failing tests and fixed (6 malformed-output tests and 4 lifecycle tests pass). Bandit on five touched runtime/script files reports zero findings. Final verification in progress.
 
 Final verification: 114 targeted ACP tests passed (4 warnings), covering the new policy, integration and benchmark plus existing LLM/agent runners, adapter, caller, tool presentation, ToolGate and governance. Ruff check passed on all eight touched Python files; new files passed format check. Scoped Bandit on five runtime/script files: zero findings and zero scan errors. git diff --check passed. Independent review findings were reproduced with failing tests and all resolved, including preserving usage on invalid worker text and checking actual returned recovery text. Fixture replay exercised all three modes on three sources; all expected evidence was present or recovered, including one deterministic-excerpt reread. Raw inputs 12029/10852/15421 bytes; deterministic outputs 4096/4095/4096 bytes; fixture-oracle outputs 457/305/265 bytes. These are decoded UTF-8 byte measurements, not token or cost claims.
+
+User approved all four reproduced review findings for remediation. Continue in the existing isolated worktree. Baseline commit c45caf4520; 47 feature tests passed during read-only review. Scope: cancellation result delivery, cooperative ranking, benchmark source evidence scoring, and run-first metrics. Add regression tests before each fix, then run focused ACP, Ruff, Bandit, and independent review.
+
+Review remediation complete. Tests were added before implementation: 6 cancellation/metrics failures (off baseline passed), 3 ranking responsiveness failures, and 2 benchmark header-collision failures. All fixes passed independently: 18 runner integration cases, 53 policy+integration cases, and 6 benchmark cases. Final focused ACP regression suite: 126 passed, 4 warnings in 10.98s. Ruff check on six touched Python files and format check on five formatted files passed. Bandit on three touched runtime/script files: zero findings and zero scan errors. Fixture replay: all 9 rows recovered expected evidence. Original 4 MiB/200-term probe delayed a scheduled 20 ms cancellation for 1.184s; updated excerpt cancellation completed in 23.9ms locally. Independent review reproduced successful cancellation/result preservation, correct real-tool fallback metrics, correct header-collision scoring, and cooperative cancellation (~22ms excerpt/~32ms worker fallback). No actionable issues remain in the reviewed fixes. Only documentation and task tracking changed after final runtime validation. Temporary implementation plan removed on completion per AGENTS.md.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented opt-in off/excerpt/worker policies for the LLM-driven MCP embedding interface. Exact source segments and authorized run-local reads preserve recoverability; default behavior remains unchanged. Worker selection is bounded and validated, with deterministic fallbacks, cancellation handling, explicit source cleanup and truthful optional usage metadata. Added documented configuration and a labeled fixture replay with an optional real-worker factory. Verified by 114 targeted tests, Ruff, Bandit and independent review. No full-repository test run or paid/real-model run was performed; task success, total cost and real-model quality remain rollout measurements. No concrete production LLMCaller, public REST configuration, or native external ACP interception is introduced. No implementation blockers remain. Branch: codex/acp-tool-result-experiment.
+Implemented the default-off ACP/MCP result-context experiment and resolved all four follow-up review findings. Completed tool results are emitted exactly once before optional-selection cancellation propagates. Deterministic ranking uses bounded query scoring, casefolds each segment once, and yields between batches; successful worker selection skips ranking. Benchmark evidence must occur in exact returned source excerpts, excluding generated wrappers. Internal rereads no longer replace real first-tool/fallback metrics. Added 12 regression cases, updated README/design, and passed 126 targeted tests, Ruff, Bandit and independent review. Real-model cost, full-task quality and whole-repository tests remain outside this scoped experiment; fixture replay is explicitly labeled and makes no real-model savings claim. Branch: codex/acp-tool-result-experiment.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

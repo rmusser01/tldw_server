@@ -16,6 +16,7 @@ from typing import Any
 
 from tldw_Server_API.app.core.Agent_Client_Protocol.adapters.mcp_llm_caller import LLMCaller, LLMResponse
 from tldw_Server_API.app.core.Agent_Client_Protocol.adapters.mcp_result_context import (
+    PreparedResult,
     ToolResultContext,
     ToolResultPolicy,
 )
@@ -66,6 +67,17 @@ def sample_cases() -> list[dict[str, str]]:
     ]
 
 
+def _has_source_evidence(result: PreparedResult, source: str, expected: str) -> bool:
+    """Match evidence only in exact returned source text, excluding wrapper text."""
+    if "source_id" not in result.metadata:
+        return result.output == source and expected in source
+    for start, end in result.metadata.get("ranges", []):
+        snippet = source[start:end]
+        if expected in snippet and f"\n[{start}:{end}]\n{snippet}" in result.output:
+            return True
+    return False
+
+
 async def compare_case(case: dict[str, str], worker: LLMCaller | None = None) -> list[dict[str, Any]]:
     """Compare all three policies, reporting actual sizes and scripted recovery."""
     text, question, expected = case["text"], case["question"], case["expected_quote"]
@@ -84,7 +96,7 @@ async def compare_case(case: dict[str, str], worker: LLMCaller | None = None) ->
             cancel_event=asyncio.Event(),
         )
         elapsed_ms = (time.perf_counter() - started) * 1000
-        evidence_present = expected in result.output
+        evidence_present = _has_source_evidence(result, text, expected)
         recovered = evidence_present
         reread_count, reread_bytes = 0, 0
         source_id = result.metadata.get("source_id")

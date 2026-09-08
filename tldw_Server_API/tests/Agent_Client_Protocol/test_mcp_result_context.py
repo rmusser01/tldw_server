@@ -329,3 +329,38 @@ async def test_invalid_worker_text_keeps_reported_billing_usage(invalid_text):
     result = await prepare(context("worker", SelectingWorker(response)), "needle " * 400)
     assert result.metadata["outcome"] == "worker_invalid"
     assert result.metadata["worker_usage"] == {"input_tokens": 100, "output_tokens": 15}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["excerpt", "worker"])
+async def test_large_result_ranking_observes_scheduled_cancellation(mode):
+    stop = asyncio.Event()
+    asyncio.get_running_loop().call_soon(stop.set)
+    worker = SelectingWorker(error=AssertionError("oversized input must not reach the worker"))
+    ctx = context(mode, worker, max_worker_input_bytes=1024)
+    with pytest.raises(asyncio.CancelledError):
+        await ctx.prepare(
+            tool_name="search",
+            arguments={},
+            text="x" * (1024 * 1024),
+            question=" ".join(f"word{index}" for index in range(200)),
+            cancel_event=stop,
+        )
+
+
+@pytest.mark.asyncio
+async def test_large_result_ranking_allows_other_event_loop_work():
+    heartbeat = asyncio.Event()
+
+    async def tick():
+        await asyncio.sleep(0)
+        heartbeat.set()
+
+    task = asyncio.create_task(tick())
+    try:
+        result = await prepare(context(), "x" * (1024 * 1024) + "needle is blue.")
+        assert heartbeat.is_set()
+        assert "needle is blue." in result.output
+        assert len(result.output.encode("utf-8")) <= 768
+    finally:
+        await task

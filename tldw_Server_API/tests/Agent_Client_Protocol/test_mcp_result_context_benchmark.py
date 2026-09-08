@@ -78,3 +78,22 @@ async def test_recovery_metric_requires_actual_returned_evidence(monkeypatch):
     assert excerpt["evidence_present"] is False
     assert excerpt["scripted_reread_count"] > 0
     assert excerpt["evidence_recovered"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("expected_quote", ["Excerpts only.", "characters."])
+async def test_generated_header_cannot_satisfy_expected_source_evidence(expected_quote):
+    from Helper_Scripts.benchmarks.acp_tool_result_experiment import compare_case
+
+    reports = await compare_case(
+        {
+            "id": "header-collision",
+            "question": "Describe zephyr.",
+            "text": "Unrelated background. " * 700 + expected_quote,
+            "expected_quote": expected_quote,
+        }
+    )
+    excerpt = next(row for row in reports if row["mode"] == "excerpt")
+    assert excerpt["evidence_present"] is False
+    assert excerpt["scripted_reread_count"] == 1
+    assert excerpt["evidence_recovered"] is True
