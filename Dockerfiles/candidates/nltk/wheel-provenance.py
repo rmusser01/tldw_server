@@ -37,24 +37,28 @@ def _record_hash(content: bytes) -> str:
 
 
 def _safe_member(name: str) -> PurePosixPath:
-    member = PurePosixPath(name)
     if (
         not name
         or "\\" in name
         or "\x00" in name
-        or member.is_absolute()
-        or any(part in {"", ".", ".."} for part in member.parts)
+        or name.startswith("/")
+        or any(part in {"", ".", ".."} for part in name.split("/"))
     ):
         raise ValueError(f"unsafe wheel member: {name!r}")
-    return member
+    return PurePosixPath(name)
 
 
 def _validate_members(archive: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
     members: dict[str, zipfile.ZipInfo] = {}
+    aliases: set[str] = set()
     for info in archive.infolist():
-        _safe_member(info.filename.rstrip("/"))
         if info.filename in members:
             raise ValueError(f"duplicate wheel member: {info.filename}")
+        member_name = info.filename[:-1] if info.is_dir() else info.filename
+        _safe_member(member_name)
+        if member_name in aliases:
+            raise ValueError(f"wheel member file/directory alias: {info.filename}")
+        aliases.add(member_name)
         mode = info.external_attr >> 16
         file_type = stat.S_IFMT(mode)
         if file_type and file_type not in {stat.S_IFREG, stat.S_IFDIR}:
@@ -168,15 +172,19 @@ def verify_wheel(wheel: Path, source: Path, source_provenance: Path, output: Pat
             raise ValueError(f"unexpected wheel payload members: {unexpected_payload!r}")
 
         metadata = BytesParser().parsebytes(archive.read(metadata_name))
-        if metadata.get("Name") != EXPECTED_NAME or metadata.get("Version") != EXPECTED_VERSION:
+        if metadata.get_all("Name", []) != [EXPECTED_NAME] or metadata.get_all("Version", []) != [EXPECTED_VERSION]:
             raise ValueError("wheel METADATA has wrong name or version")
         wheel_metadata = BytesParser().parsebytes(archive.read(wheel_metadata_name))
-        build = wheel_metadata.get("Build")
+        wheel_versions = wheel_metadata.get_all("Wheel-Version", [])
+        builds = wheel_metadata.get_all("Build", [])
         tags = wheel_metadata.get_all("Tag", [])
-        if build != EXPECTED_BUILD:
-            raise ValueError("wheel WHEEL metadata has wrong build tag")
+        if wheel_versions != ["1.0"]:
+            raise ValueError(f"wheel WHEEL metadata has wrong Wheel-Version: {wheel_versions}")
+        if builds != [EXPECTED_BUILD]:
+            raise ValueError(f"wheel WHEEL metadata has wrong Build: {builds}")
         if tags != [EXPECTED_TAG]:
             raise ValueError(f"wheel WHEEL metadata has wrong compatibility tags: {tags}")
+        build = builds[0]
 
         wheel_package_files = {name for name in files if name.startswith("nltk/")}
         expected_source_files = _expected_source_files(source)
