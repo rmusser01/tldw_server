@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next"
 import { useServerDictation } from "@/hooks/useServerDictation"
 import { useSttSettings } from "@/hooks/useSttSettings"
 import { useTTS } from "@/hooks/useTTS"
+import { decodeChatErrorPayload } from "@/utils/chat-error-message"
 import {
   acceptBuddyTurn,
   acknowledgeBuddyResult,
@@ -26,6 +27,16 @@ import type {
 } from "@/services/tldw/TldwApiClient"
 type ResultActivity = BuddyActivity & {
   result: NonNullable<BuddyActivity["result"]>
+}
+
+const presentBuddyMessage = (message: ServerChatMessage): string => {
+  const error =
+    message.role === "assistant"
+      ? decodeChatErrorPayload(message.content)
+      : null
+  return error
+    ? [error.summary, error.hint].filter(Boolean).join("\n\n")
+    : message.content
 }
 
 export const BuddyInteraction = ({
@@ -284,7 +295,7 @@ export const BuddyInteraction = ({
       )
         return
       await speech.current.speak({
-        utterance: `${result.conversation.title}. ${message.content}`,
+        utterance: `${result.conversation.title}. ${presentBuddyMessage(message)}`,
         saveClip: false
       })
     })()
@@ -483,7 +494,7 @@ export const BuddyInteraction = ({
                         label("assistant", "Assistant")}
                   </p>
                   <p className="whitespace-pre-wrap break-words leading-6">
-                    {message.content}
+                    {presentBuddyMessage(message)}
                   </p>
                 </div>
               ))}

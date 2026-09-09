@@ -82,6 +82,49 @@ beforeEach(() => {
   })
 })
 afterEach(cleanup)
+it("preserves an encoded error quoted in a user message verbatim", async () => {
+  const content =
+    '__tldw_error__:{"summary":"Quoted summary","hint":"Quoted hint","detail":"Quoted diagnostic"}'
+  mocks.readBuddyConversation.mockResolvedValue({
+    conversation: first,
+    messages: [
+      { id: "quoted-error", role: "user", content, created_at: "2026-09-08" }
+    ]
+  })
+  render(<BuddyInteraction {...props} />)
+  expect(await screen.findByText(content)).toHaveTextContent(content)
+})
+it("presents a saved chat failure without its encoded envelope or diagnostic details", async () => {
+  mocks.readBuddyConversation.mockResolvedValue({
+    conversation: first,
+    messages: [
+      {
+        id: "failure",
+        role: "assistant",
+        content:
+          '__tldw_error__:{"summary":"The reply timed out.","hint":"Try again in a moment.","detail":"Internal upstream timeout diagnostic"}',
+        created_at: "2026-09-08"
+      },
+      {
+        id: "ordinary",
+        role: "user",
+        content: "Keep this ordinary message.\nIncluding its second line.",
+        created_at: "2026-09-08"
+      }
+    ]
+  })
+  render(<BuddyInteraction {...props} />)
+  await screen.findByText("The reply timed out. Try again in a moment.")
+  const history = screen.getByRole("log", {
+    name: "Conversation history: Research one"
+  })
+  expect(history).not.toHaveTextContent("__tldw_error__:")
+  expect(history).not.toHaveTextContent("Internal upstream timeout diagnostic")
+  expect(
+    screen.getByText("Keep this ordinary message. Including its second line.")
+      .textContent
+  ).toBe("Keep this ordinary message.\nIncluding its second line.")
+})
 it("never relabels old transcript content as a newly selected conversation", async () => {
   const { rerender } = render(<BuddyInteraction {...props} />)
   await screen.findByText("Only belongs to one")
@@ -127,6 +170,49 @@ it("hides stale content on access failure and clears the fetch error after recov
   rerender(<BuddyInteraction {...props} conversations={[first, second]} />)
   await screen.findByText("Only belongs to one")
   expect(screen.queryByText("Access unavailable")).not.toBeInTheDocument()
+})
+
+it("reads a newly arrived assistant failure with its conversation title and friendly text only", async () => {
+  const { rerender } = render(<BuddyInteraction {...props} visible={false} />)
+  await waitFor(() => expect(mocks.listBuddyActivity).toHaveBeenCalled())
+  fireEvent.click(
+    screen.getByRole("checkbox", { name: "Read new responses aloud" })
+  )
+  await waitFor(() => expect(mocks.listBuddyActivity).toHaveBeenCalledTimes(2))
+  const content =
+    '__tldw_error__:{"summary":"The reply timed out.","hint":"Try again in a moment.","detail":"Internal upstream timeout diagnostic"}'
+  mocks.readBuddyConversation.mockResolvedValue({
+    conversation: first,
+    messages: [
+      { id: "late-error", role: "assistant", content, created_at: "2026-09-08" }
+    ]
+  })
+  mocks.listBuddyActivity.mockResolvedValue({
+    items: [
+      {
+        conversation_id: "one",
+        title: "Research one",
+        result: { id: "late-error", content },
+        acknowledged: false
+      }
+    ]
+  })
+  rerender(
+    <BuddyInteraction
+      {...props}
+      visible={false}
+      conversations={[first, second]}
+    />
+  )
+  await waitFor(() =>
+    expect(mocks.speak).toHaveBeenCalledWith({
+      utterance: "Research one. The reply timed out.\n\nTry again in a moment.",
+      saveClip: false
+    })
+  )
+  const { utterance } = mocks.speak.mock.calls[0][0]
+  expect(utterance).not.toContain("__tldw_error__:")
+  expect(utterance).not.toContain("Internal upstream timeout diagnostic")
 })
 
 it("does not start speech after unmount while its authorized transcript read is pending", async () => {

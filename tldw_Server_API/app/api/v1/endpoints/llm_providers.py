@@ -2031,7 +2031,13 @@ def get_configured_providers(
 
             tokens_field = f'{provider_name}_max_tokens'
             if config_parser.has_option(section_name, tokens_field):
-                provider_data['max_tokens'] = int(config_parser.get(section_name, tokens_field, fallback='4096'))
+                max_tokens = config_parser.get(
+                    section_name,
+                    tokens_field,
+                    fallback='',
+                ).strip()
+                if max_tokens:
+                    provider_data['max_tokens'] = int(max_tokens)
 
             streaming_field = f'{provider_name}_streaming'
             if config_parser.has_option(section_name, streaming_field):
