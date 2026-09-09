@@ -12,7 +12,7 @@ references:
 - TASK-13202
 documentation:
 - Docs/superpowers/plans/2026-09-09-buddy-v1-live-qualification.md
-updated_date: 2026-09-09 05:37
+updated_date: 2026-09-09 05:41
 ---
 
 ## Description
@@ -46,6 +46,7 @@ Fresh WebUI selected Pixel Migu without Persona, attached New Research workspace
 Qualification reconciled in Docs/Reviews/2026-09-09-buddy-v1-qualification.md with curated receipts/source hashes. Fresh WebUI: independent Pixel Migu, None/Research Assistant workspace defaults and inheritance, Static/Dynamic artwork, exact conversation Buddy reply completed after Watchlists-to-Workspace navigation, selected workspace conversation increased from 5 to 7 messages while sibling stayed at 5, and one acknowledged result left the sibling unread. Original blank-config catalog defect repaired with 5 focused/adjacent tests; assistant-only readable error rendering repaired with 8 component/decoder tests and quoted-user-envelope preservation. Backend 51 passed/1 unavailable-PostgreSQL skip; frontend artwork/lifecycle 81 passed. Bandit and touched regression formatting passed; unchanged source lint debt recorded. Final Chrome production build, shared-token sync, manifest targets and ZIP integrity passed. TASK-13211 investigation reconciled without speculative repair. AC2 covers typed reply and result receipt/acknowledgement semantics; real audible queue playback remains unqualified. AC1 remains open: native Chrome permissions unavailable, Terminal explicitly prohibited by Computer Use, upgraded-profile WebUI journey and native Chatbook interaction incomplete. No full suite or human-voice pass claimed. ADR-005 remains the governing contract.
 Before finalization, independent review identified that a newly arriving saved assistant error would still be read aloud as its internal JSON envelope. AC6 reopened until transcript and speech share the assistant-only presentation and the activity-to-speech regression passes. Previously retained Chrome artifact qualifies the visual-only fix; a new build is required for this final correction.
 Final review correction complete: private assistant-only formatter is shared by visual history and read-aloud after its authorized transcript read, preserving the conversation-name prefix. Activity-to-speech regression failed first with raw JSON/detail, then final component/decoder gate passed9/9; independent re-review has no remaining findings. Final Chrome build includes this source and passed in43s; ZIP SHA2561375a51f13cb851ca3e12c277b0da2b7e6da19f510038382fe3c6d6c778048e8. Final catalog gate passed5/5 and Bandit reported no findings; raw final logs and curated manifest retained. Original catalog RED and81-test artwork raw logs were not separately retained, so their worker summaries are labeled accordingly. Owned disposable WebUI/backend/mock processes stopped; profiles and artifacts retained. AC1/native acceptance remains open.
+Published draft PR https://github.com/rmusser01/tldw_server/pull/2934 against dev with the reviewed fixes and qualified evidence. Native/upgrade acceptance and the human-written summary gate for any future merge remain open; no merge performed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
