@@ -16,17 +16,16 @@ import httpx
 from tldw_Server_API.app.api.v1.schemas.buddy_turns import BuddyTurnCreate
 from tldw_Server_API.app.core.Buddy.publication import BuddyPublication, current_buddy_publication
 from tldw_Server_API.app.core.Buddy.service import BuddyService
-from tldw_Server_API.app.core.DB_Management.Buddy_DB import BuddyConflictError, BuddyNotFoundError
-from tldw_Server_API.app.core.DB_Management.Buddy_Turns_DB import (
-    BuddyPublicationRevokedError,
-    BuddyRuntimeBusyError,
-    BuddyTurnRepository,
-)
+from tldw_Server_API.app.core.DB_Management.Buddy_Turns_DB import BuddyTurnRepository
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
-
-
-class BuddyQueueFullError(RuntimeError):
-    """The bounded process queue cannot accept another turn."""
+from tldw_Server_API.app.core.exceptions import (
+    BuddyConfigurationError,
+    BuddyConflictError,
+    BuddyNotFoundError,
+    BuddyPublicationRevokedError,
+    BuddyQueueFullError,
+    BuddyRuntimeBusyError,
+)
 
 
 @dataclass
@@ -47,7 +46,7 @@ def _resolve_payload(service: BuddyService, request: BuddyTurnCreate) -> dict[st
     provider = request.provider or effective.get("provider") or settings.get("provider")
     model = request.model or effective.get("model") or settings.get("model")
     if not isinstance(provider, str) or not provider.strip() or not isinstance(model, str) or not model.strip():
-        raise ValueError("Choose a Chat provider and model before sending")
+        raise BuddyConfigurationError("Choose a Chat provider and model before sending")
     payload = {
         "api_provider": provider.strip(),
         "model": model.strip(),
@@ -62,6 +61,30 @@ def _resolve_payload(service: BuddyService, request: BuddyTurnCreate) -> dict[st
         if key in sampling:
             payload[key] = sampling[key]
     return payload
+
+
+async def list_turns(
+    service: BuddyService, client_slot: str, limit: int, offset: int, *, active_only: bool = False
+) -> list[dict[str, Any]]:
+    """Reconcile interrupted work before reading the principal's bounded ledger."""
+    repository = BuddyTurnRepository(service.db, service.user_id)
+    await asyncio.to_thread(repository.expire_interrupted)
+    return await asyncio.to_thread(repository.list_turns, client_slot, limit, offset, active_only=active_only)
+
+
+async def get_turn(service: BuddyService, turn_id: str) -> dict[str, Any]:
+    """Read one owned turn after expiry reconciliation, or raise BuddyNotFoundError."""
+    repository = BuddyTurnRepository(service.db, service.user_id)
+    await asyncio.to_thread(repository.expire_interrupted)
+    return await asyncio.to_thread(repository.get, turn_id)
+
+
+async def stop_turn(service: BuddyService, turn_id: str, runtime: BuddyTurnRuntime | None = None) -> dict[str, Any]:
+    """Revoke SQL publication before canceling local dispatch, including cross-worker Stop."""
+    result = await asyncio.to_thread(BuddyTurnRepository(service.db, service.user_id).stop, turn_id)
+    if runtime is not None and result["status"] == "stopped":
+        runtime.cancel_dispatch(turn_id)
+    return result
 
 
 class BuddyTurnRuntime:

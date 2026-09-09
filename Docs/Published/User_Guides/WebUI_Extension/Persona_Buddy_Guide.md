@@ -1,5 +1,9 @@
 # Persona Buddy — setup, live voice, approvals, and troubleshooting
 
+For the independent Buddy opened from the composer or workspace's **Buddy &
+Persona** control, see [Buddy and Persona management](../WebUI/Buddy_And_Persona_Management.md).
+This guide covers the Persona-backed shell and its separate full Live session.
+
 Persona Buddy is the floating companion on supported Persona-aware WebUI and
 extension surfaces. It displays a Persona's active visual pack and provides a
 small entry point for text sessions, feedback, and navigation to the full Live

@@ -11,9 +11,10 @@ from pathlib import Path
 from typing import Any
 
 from tldw_Server_API.app.api.v1.schemas.buddies import BuddyCreate
-from tldw_Server_API.app.core.DB_Management.Buddy_DB import BuddyNotFoundError, BuddyRepository
+from tldw_Server_API.app.core.DB_Management.Buddy_DB import BuddyRepository
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.exceptions import BuddyNotFoundError
 from tldw_Server_API.app.core.Persona.visual_asset_constraints import VISUAL_MIME_EXTENSIONS
 from tldw_Server_API.app.core.Persona.visual_manifest_assets import remap_visual_manifest_assets
 from tldw_Server_API.app.core.Persona.visual_service import MAX_VISUAL_UPLOAD_BYTES, PersonaVisualService
@@ -231,7 +232,7 @@ class BuddyService:
         """Resolve existing private targets; never open a shared owner's DB."""
         if scope_type == "workspace":
             workspace = self.db.get_workspace(scope_id)
-            if workspace is None or workspace.get("deleted"):
+            if workspace is None or workspace.get("deleted") or str(workspace.get("client_id")) != self.user_id:
                 raise BuddyNotFoundError("Target unavailable")
             return {"title": workspace.get("name") or "Workspace", "workspace_id": scope_id}
         conversation = self._conversation(scope_id)

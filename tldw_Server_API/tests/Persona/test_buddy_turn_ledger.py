@@ -14,6 +14,8 @@ from tldw_Server_API.app.core.DB_Management.Buddy_Turns_DB import (
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def ledger(tmp_path):

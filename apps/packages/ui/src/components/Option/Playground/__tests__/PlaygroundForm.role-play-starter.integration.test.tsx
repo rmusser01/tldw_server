@@ -56,6 +56,7 @@ const playgroundFormConnectionState = vi.hoisted(() => ({
   isConnected: true
 }))
 const selectedAssistantMock = vi.hoisted(() => ({
+  initialSelection: null as any,
   setSelectedAssistant: vi.fn(async (_next: unknown) => undefined)
 }))
 const selectedCharacterState = vi.hoisted(() => ({
@@ -621,7 +622,7 @@ vi.mock("@/hooks/useSelectedCharacter", () => ({
 
 vi.mock("@/hooks/useSelectedAssistant", () => ({
   useSelectedAssistant: (initialValue: any = null) => {
-    const [selectedAssistant, setSelectedAssistant] = React.useState(initialValue)
+    const [selectedAssistant, setSelectedAssistant] = React.useState(selectedAssistantMock.initialSelection ?? initialValue)
     const setSelectedAssistantWithBroadcast = async (next: any) => {
       await selectedAssistantMock.setSelectedAssistant(next)
       setSelectedAssistant(next)
@@ -730,12 +731,13 @@ vi.mock("../CompareToggle", () => ({
 }))
 
 vi.mock("../RolePlaySetupDrawer", () => ({
-  RolePlaySetupDrawer: ({ onApply, onClose, returnFocusRef }: { onApply: (payload: unknown) => Promise<void>; onClose: () => void; returnFocusRef?: React.RefObject<HTMLElement> }) => {
+  RolePlaySetupDrawer: ({ characterId, onApply, onClose, returnFocusRef }: { characterId?: string | null; onApply: (payload: unknown) => Promise<void>; onClose: () => void; returnFocusRef?: React.RefObject<HTMLElement> }) => {
     const [result, setResult] = React.useState("")
     const apply = (payload: unknown) => {
       void onApply(payload).then(() => setResult("Applied"), () => setResult("Apply failed"))
     }
     return <section aria-label="Role-play setup">
+      <span data-testid="setup-character">{characterId ?? "None"}</span>
       <button onClick={() => { onClose(); returnFocusRef?.current?.focus() }}>Cancel setup</button>
       <button onClick={() => apply({
         identitySelection: { kind: "persona", id: "persona-guide", name: "Guide", metadata: { selectionMode: "tracked" } },
@@ -1035,6 +1037,7 @@ beforeEach(() => {
   useBuddyManagementStore.getState().close()
   onSubmitMock.mockClear()
   createChatCompletionMock.mockClear()
+  selectedAssistantMock.initialSelection = null
   selectedAssistantMock.setSelectedAssistant.mockReset().mockResolvedValue(undefined)
   selectedCharacterState.value = null
   selectedCharacterState.setSelectedCharacter.mockClear()
@@ -1126,11 +1129,14 @@ describe("PlaygroundForm role-play starter", () => {
 
   it("clears identity with one awaited canonical selection write", async () => {
     const user = userEvent.setup()
+    selectedAssistantMock.initialSelection = { kind: "character", id: "ada", name: "Ada Lovelace" }
     render(<PlaygroundForm droppedFiles={[]} />)
     await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
+    expect(screen.getByTestId("setup-character")).toHaveTextContent("ada")
     await user.click(await screen.findByRole("button", { name: "Apply clear identity" }))
     await screen.findByText("Applied")
     expect(selectedAssistantMock.setSelectedAssistant).toHaveBeenCalledExactlyOnceWith(null)
+    expect(screen.getByTestId("setup-character")).toHaveTextContent("None")
   })
 
   it("clears a custom override only when the selected system template identity changes", async () => {

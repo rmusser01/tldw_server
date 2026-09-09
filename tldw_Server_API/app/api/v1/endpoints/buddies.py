@@ -24,8 +24,8 @@ from tldw_Server_API.app.api.v1.schemas.buddies import (
     BuddyUpdate,
 )
 from tldw_Server_API.app.core.Buddy.service import BuddyService
-from tldw_Server_API.app.core.DB_Management.Buddy_DB import BuddyConflictError, BuddyNotFoundError
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.exceptions import BuddyConflictError, BuddyNotFoundError
 from tldw_Server_API.app.core.Persona.visual_service import PersonaVisualServiceError
 from tldw_Server_API.app.core.Persona.visual_starter_catalog import PersonaVisualStarterCatalogError
 

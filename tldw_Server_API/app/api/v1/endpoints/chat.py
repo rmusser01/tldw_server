@@ -3025,7 +3025,7 @@ async def _save_message_turn_to_db(
     - Can optionally use transactions for atomic operations.
     """
     from tldw_Server_API.app.core.Buddy.publication import current_buddy_publication
-    from tldw_Server_API.app.core.DB_Management.Buddy_Turns_DB import BuddyPublicationRevokedError
+    from tldw_Server_API.app.core.exceptions import BuddyPublicationRevokedError
 
     # Capture before run_in_executor: executor threads do not inherit ContextVars.
     publication = current_buddy_publication.get()

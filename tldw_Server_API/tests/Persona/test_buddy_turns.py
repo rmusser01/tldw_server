@@ -155,13 +155,16 @@ def test_idempotency_and_stop_prevent_duplicate_dispatch_and_late_reply(persona_
     db = persona_chat_db
     conversation_id = db.add_conversation({"title": "Stop", "client_id": "1"})
     _attach(client, headers, conversation_id)
-    entered, release = threading.Event(), threading.Event()
+    entered, release, provider_finished = threading.Event(), threading.Event(), threading.Event()
     normal = provider.return_value
 
     def blocked(**kwargs):
         entered.set()
-        assert release.wait(8)
-        return normal
+        try:
+            assert release.wait(8)
+            return normal
+        finally:
+            provider_finished.set()
 
     provider.side_effect = blocked
     try:
@@ -169,6 +172,7 @@ def test_idempotency_and_stop_prevent_duplicate_dispatch_and_late_reply(persona_
         assert response.status_code == 202, response.text
         turn_id = response.json()["id"]
         assert entered.wait(5)
+        worker = app.state.buddy_turn_runtime._workers[("1", conversation_id)]
         duplicate = _send(client, headers, conversation_id, key="same-turn")
         assert duplicate.json()["id"] == turn_id
         assert _send(client, headers, conversation_id, key="same-turn", text="different").status_code == 409
@@ -177,9 +181,58 @@ def test_idempotency_and_stop_prevent_duplicate_dispatch_and_late_reply(persona_
     finally:
         release.set()
     assert _terminal(client, headers, turn_id)["status"] == "stopped"
-    time.sleep(0.1)
+    assert provider_finished.wait(5)
+
+    async def wait_for_publication_owner() -> None:
+        await asyncio.wait_for(asyncio.shield(worker), timeout=5)
+
+    client.portal.call(wait_for_publication_owner)
     assert provider.call_count == 1
     assert not any(row["sender"] == "assistant" for row in db.get_messages_for_conversation(conversation_id))
+
+
+def test_starter_artwork_content_is_authenticated_and_private(persona_chat_client, monkeypatch):
+    client, headers, _ = persona_chat_client
+    detail = client.get("/api/v1/persona/visual-starter-packs/pixel-migu", headers=headers)
+    assert detail.status_code == 200, detail.text
+    asset = detail.json()["assets"][0]
+    url = f"/api/v1/persona/visual-starter-packs/pixel-migu/assets/{asset['asset_key']}/content"
+    response = client.get(url, headers=headers)
+    assert response.status_code == 200
+    assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
+    assert len(response.content) == asset["byte_size"]
+    assert response.headers["content-type"] == "image/png"
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    missing = client.get("/api/v1/persona/visual-starter-packs/pixel-migu/assets/missing/content", headers=headers)
+    assert missing.status_code == 404
+    assert missing.json()["detail"]["code"] == "starter_asset_not_found"
+    assert client.get(url.replace("pixel-migu", "missing-starter"), headers=headers).status_code == 404
+
+    async def unauthenticated() -> None:
+        raise HTTPException(401, "Authentication required")
+
+    monkeypatch.setitem(app.dependency_overrides, get_request_user, unauthenticated)
+    rejected = client.get(url)
+    assert rejected.status_code == 401
+    assert rejected.content != response.content
+
+
+def test_unexpected_configuration_value_error_is_not_a_client_validation_error(
+    persona_chat_client, persona_chat_db, monkeypatch
+):
+    client, headers, _ = persona_chat_client
+    conversation_id = persona_chat_db.add_conversation({"title": "Configuration failure", "client_id": "1"})
+    _attach(client, headers, conversation_id)
+
+    def broken_settings(*_args, **_kwargs):
+        raise ValueError("unexpected implementation failure")
+
+    monkeypatch.setattr(persona_chat_db, "get_conversation_settings", broken_settings)
+    # TestClient re-raises unhandled server exceptions. The endpoint must not
+    # turn unexpected implementation errors into a client configuration 422.
+    with pytest.raises(ValueError, match="unexpected implementation failure"):
+        _send(client, headers, conversation_id)
 
 
 def test_owned_workspace_scope_and_missing_model_fail_closed(persona_chat_client, persona_chat_db):

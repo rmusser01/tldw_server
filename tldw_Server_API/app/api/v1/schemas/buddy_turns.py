@@ -8,6 +8,12 @@ from tldw_Server_API.app.api.v1.schemas.buddies import BuddyModel, ResourceId
 
 
 class BuddyTurnCreate(BuddyModel):
+    """Accept one plain-text turn for an exact authorized conversation.
+
+    Text is limited to 12,000 characters and excludes blank input and slash
+    commands. The request key is bounded and idempotent; attachment version must
+    be positive. Optional provider/model overrides have bounded nonempty values."""
+
     conversation_id: ResourceId
     text: str = Field(min_length=1, max_length=12000)
     client_request_id: ResourceId
@@ -18,6 +24,17 @@ class BuddyTurnCreate(BuddyModel):
     @field_validator("text")
     @classmethod
     def validate_text(cls, value: str) -> str:
+        """Validate plain chat text while preserving the submitted content.
+
+        Args:
+            value: Length-validated message text.
+
+        Returns:
+            The original text, including intentional whitespace.
+
+        Raises:
+            ValueError: The message is blank or requests a slash command.
+        """
         if not value.strip():
             raise ValueError("Enter a message")
         if value.lstrip().startswith("/"):
@@ -26,6 +43,11 @@ class BuddyTurnCreate(BuddyModel):
 
 
 class BuddyTurn(BuddyModel):
+    """Return metadata-only lifecycle status for one principal-owned accepted turn.
+
+    No message body or credentials are returned. A completed result references
+    its exact persisted message; stopped/failed turns may carry a safe error code."""
+
     id: str
     client_slot: str
     client_request_id: str
@@ -41,6 +63,8 @@ class BuddyTurn(BuddyModel):
 
 
 class BuddyTurnList(BuddyModel):
+    """Return a bounded turn ledger page with the applied limit and offset."""
+
     turns: list[BuddyTurn]
     limit: int
     offset: int

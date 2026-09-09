@@ -83,14 +83,21 @@ export const BuddyManagementModal = ({
   const label = (key: string, text: string) =>
     t(`buddyManagement.${key}`, { defaultValue: text })
   const mounted = React.useRef(true)
+  const targetGeneration = React.useRef(0)
+  React.useLayoutEffect(() => {
+    targetGeneration.current += 1
+  }, [target?.scope_type, target?.scope_id])
   React.useEffect(() => {
     mounted.current = true
     return () => {
       mounted.current = false
     }
   }, [])
-  const [createdProfile, setCreatedProfile] =
-    React.useState<BuddyProfile | null>(null)
+  const [createdArtwork, setCreatedArtwork] = React.useState<{
+    starterId: string
+    profile: BuddyProfile
+  } | null>(null)
+  const createdProfile = createdArtwork?.profile
   const availableProfiles =
     createdProfile && !profiles.some((p) => p.id === createdProfile.id)
       ? [...profiles, createdProfile]
@@ -134,8 +141,19 @@ export const BuddyManagementModal = ({
   const [busy, setBusy] = React.useState(false)
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
+  const [notice, setNotice] = React.useState<string | null>(null)
   React.useEffect(() => {
-    if (target?.scope_type !== "conversation") return
+    if (!target) return
+    setScope(target.scope_type)
+    setScopeId(target.scope_id)
+    setResolvedTarget(null)
+    setLocation(target.scope_type === "workspace" ? target.scope_id : "")
+    setChatOffset(0)
+    setSearch("")
+    setError(null)
+    setNotice(null)
+    setResolvingTarget(target.scope_type === "conversation")
+    if (target.scope_type !== "conversation") return
     let active = true
     setResolvingTarget(true)
     void resolveBuddyConversationTarget(target.scope_id)
@@ -269,18 +287,40 @@ export const BuddyManagementModal = ({
       return
     setBusy(true)
     setError(null)
+    setNotice(null)
+    const generation = targetGeneration.current
+    let artworkSaved = false
     let defaultSaved = false
+    let attachmentSaved = false
+    const stopForRetarget = (failure?: unknown) => {
+      if (!mounted.current) return true
+      if (generation === targetGeneration.current) return false
+      setNotice(
+        [
+          artworkSaved && label("artworkSaved", "Buddy artwork saved to Your Buddies."),
+          defaultSaved && label("previousDefaultSaved", "The previous workspace default was saved."),
+          attachmentSaved && label("previousAttachmentSaved", "The previous Buddy attachment was saved."),
+          failure && label("earlierApplyFailed", "The earlier Apply could not finish."),
+          label("targetChanged", "Target changed. Your new selection is retained; review it before applying.")
+        ].filter(Boolean).join(" ")
+      )
+      return true
+    }
     try {
       let buddyId = selected
       if (starter) {
-        const created = await createBuddy({
-          name: starter.title,
-          source: { kind: "starter", starter_id: starter.id },
-          optional_persona_id: null
-        })
+        const created = createdArtwork?.starterId === starter.id
+          ? createdArtwork.profile
+          : await createBuddy({
+              name: starter.title,
+              source: { kind: "starter", starter_id: starter.id },
+              optional_persona_id: null
+            })
         if (!mounted.current) return
+        artworkSaved = true
+        setCreatedArtwork({ starterId: starter.id, profile: created })
+        if (stopForRetarget()) return
         buddyId = created.id
-        setCreatedProfile(created)
         // Retain the created profile on retry rather than creating duplicates.
         setSelected(created.id)
         setStarter(null)
@@ -296,10 +336,10 @@ export const BuddyManagementModal = ({
               }
             : null
         })
-        if (!mounted.current) return
+        defaultSaved = true
+        if (stopForRetarget()) return
         setWorkspace(updated)
         setDefaultDirty(false)
-        defaultSaved = true
       }
       await putBuddyAttachment({
         expected_version: attachment.version,
@@ -307,14 +347,25 @@ export const BuddyManagementModal = ({
         scope_type: scope,
         scope_id: scopeId
       })
-      if (!mounted.current) return
+      attachmentSaved = true
+      if (stopForRetarget()) {
+        // The write already committed. Refresh its version without replacing
+        // the new draft or closing the editor for the new target.
+        if (mounted.current) await onApplied()
+        return
+      }
       await onApplied()
-      if (!mounted.current) return
+      if (stopForRetarget()) return
       onClose()
     } catch (e) {
-      if (!mounted.current) return
+      if (stopForRetarget(e)) return
+      const savedMessage = attachmentSaved
+        ? label("attachmentSaved", "Buddy attachment saved. Refresh failed: ")
+        : defaultSaved
+          ? label("defaultSaved", "Workspace default saved. Buddy attachment was not confirmed: ")
+          : ""
       setError(
-        `${defaultSaved ? label("defaultSaved", "Workspace default saved. Buddy attachment was not confirmed: ") : ""}${e instanceof Error ? e.message : label("saveFailed", "Could not apply. Your selection is retained; refresh and retry.")}`
+        `${savedMessage}${e instanceof Error ? e.message : label("saveFailed", "Could not apply. Your selection is retained; refresh and retry.")}`
       )
     } finally {
       if (mounted.current) setBusy(false)
@@ -426,6 +477,11 @@ export const BuddyManagementModal = ({
         {error ? (
           <p role="alert" className="text-sm text-danger">
             {error}
+          </p>
+        ) : null}
+        {notice ? (
+          <p role="status" className="text-sm text-text-muted">
+            {notice}
           </p>
         ) : null}
         {loading ? (

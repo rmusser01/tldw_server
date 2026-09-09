@@ -2841,10 +2841,11 @@ describe("SidepanelPersona", () => {
       ]
       if (path === "/api/v1/persona/profiles/research_assistant") data = {
         id: "research_assistant", version: 1,
+        buddy_summary: { has_buddy: true, persona_name: "Research Buddy" },
         setup: { status: ++researchReads === 1 ? "completed" : "not_started", current_step: "persona" }
       }
       if (path === "/api/v1/persona/profiles/garden-helper") data = {
-        id: "garden-helper", version: 2, setup: { status: "completed", current_step: "test" }
+        id: "garden-helper", version: 2, buddy_summary: { has_buddy: true, persona_name: "Garden Buddy" }, setup: { status: "completed", current_step: "test" }
       }
       if (path === "/api/v1/persona/session") {
         connections.push(init?.body || {})
@@ -2856,6 +2857,7 @@ describe("SidepanelPersona", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Connect", exact: true }))
     await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1))
     act(() => { MockWebSocket.instances[0].emitOpen() })
+    await waitFor(() => expect(readBuddyShellContext().buddy_summary?.persona_name).toBe("Research Buddy"))
     fireEvent.click(await screen.findByRole("button", { name: "Use Garden Helper persona" }))
     await waitFor(() => expect(screen.queryByTestId("assistant-setup-overlay")).not.toBeInTheDocument())
     expect(screen.getByRole("button", { name: /Disconnect/ })).toBeInTheDocument()
@@ -2863,6 +2865,9 @@ describe("SidepanelPersona", () => {
       event: "assistant_delta", session_id: "old-persona-session", text_delta: "Late former Persona reply"
     })) })
     expect(screen.getByText("Late former Persona reply")).toBeVisible()
+    expect(readBuddyShellContext()).toMatchObject({
+      active_persona_id: "research_assistant", buddy_summary: { persona_name: "Research Buddy" }
+    })
     expect(MockWebSocket.instances[0].close).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole("button", { name: /Disconnect/ }))
     fireEvent.click(screen.getByRole("button", { name: "Connect", exact: true }))
@@ -2870,6 +2875,14 @@ describe("SidepanelPersona", () => {
     expect(connections[1].persona_id).toBe("garden-helper")
     expect(connections[1].resume_session_id).toBeUndefined()
     expect(screen.queryByText("session: old-pers")).not.toBeInTheDocument()
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2))
+    act(() => { MockWebSocket.instances[1].emitOpen() })
+    await waitFor(() => expect(readBuddyShellContext()).toMatchObject({
+      active_persona_id: "garden-helper", buddy_summary: { persona_name: "Garden Buddy" }
+    }))
+    expect(mocks.buddyShellContextSnapshots.some((snapshot) =>
+      snapshot?.active_persona_id === "garden-helper" && snapshot?.buddy_summary?.persona_name === "Research Buddy"
+    )).toBe(false)
   })
 
   it("clears the setup live detour when setup is reset", async () => {

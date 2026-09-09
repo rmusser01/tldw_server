@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from typing import Annotated, Any, Literal
 
@@ -11,15 +11,22 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.schemas.buddy_turns import BuddyTurn, BuddyTurnCreate, BuddyTurnList
+from tldw_Server_API.app.core.Buddy import turns
 from tldw_Server_API.app.core.Buddy.service import BuddyService
-from tldw_Server_API.app.core.Buddy.turns import BuddyQueueFullError, BuddyTurnRuntime
-from tldw_Server_API.app.core.DB_Management.Buddy_DB import BuddyConflictError, BuddyNotFoundError
-from tldw_Server_API.app.core.DB_Management.Buddy_Turns_DB import BuddyRuntimeBusyError, BuddyTurnRepository
+from tldw_Server_API.app.core.Buddy.turns import BuddyTurnRuntime
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.exceptions import (
+    BuddyConfigurationError,
+    BuddyConflictError,
+    BuddyNotFoundError,
+    BuddyQueueFullError,
+    BuddyRuntimeBusyError,
+)
 
 
 @asynccontextmanager
-async def _lifespan(app: Any):
+async def _lifespan(app: Any) -> AsyncIterator[None]:
+    """Close process-owned work when the composed router shuts down."""
     yield
     runtime = getattr(app.state, "buddy_turn_runtime", None)
     if runtime is not None:
@@ -39,7 +46,8 @@ def _service(
 
 
 @contextmanager
-def _errors():
+def _errors() -> Iterator[None]:
+    """Map expected Buddy domain failures without hiding implementation errors."""
     try:
         yield
     except BuddyNotFoundError as exc:
@@ -50,7 +58,7 @@ def _errors():
         raise HTTPException(429, str(exc)) from exc
     except BuddyRuntimeBusyError as exc:
         raise HTTPException(503, str(exc), headers={"Retry-After": "5"}) from exc
-    except ValueError as exc:
+    except BuddyConfigurationError as exc:
         raise HTTPException(422, str(exc)) from exc
 
 
@@ -105,26 +113,21 @@ async def list_turns(
     service: BuddyService = Depends(_service),
 ) -> dict[str, Any]:
     """Read the principal's ledger even after a routing preference is detached."""
-    repository = BuddyTurnRepository(service.db, service.user_id)
-    await asyncio.to_thread(repository.expire_interrupted)
-    rows = await asyncio.to_thread(repository.list_turns, client_slot, limit, offset, active_only=status == "active")
-    return {"turns": [_response(row) for row in rows], "limit": limit, "offset": offset}
+    with _errors():
+        rows = await turns.list_turns(service, client_slot, limit, offset, active_only=status == "active")
+        return {"turns": [_response(row) for row in rows], "limit": limit, "offset": offset}
 
 
 @router.get("/{turn_id}", response_model=BuddyTurn)
 async def get_turn(turn_id: str, service: BuddyService = Depends(_service)) -> dict[str, Any]:
-    repository = BuddyTurnRepository(service.db, service.user_id)
+    """Return one turn's safe status fields for the authenticated principal."""
     with _errors():
-        await asyncio.to_thread(repository.expire_interrupted)
-        return _response(await asyncio.to_thread(repository.get, turn_id))
+        return _response(await turns.get_turn(service, turn_id))
 
 
 @router.post("/{turn_id}/stop", response_model=BuddyTurn)
 async def stop_turn(turn_id: str, request: Request, service: BuddyService = Depends(_service)) -> dict[str, Any]:
     """Revoke publication without retrying or claiming to undo provider effects."""
     with _errors():
-        result = await asyncio.to_thread(BuddyTurnRepository(service.db, service.user_id).stop, turn_id)
         runtime = getattr(request.app.state, "buddy_turn_runtime", None)
-        if runtime is not None and result["status"] == "stopped":
-            runtime.cancel_dispatch(turn_id)
-        return _response(result)
+        return _response(await turns.stop_turn(service, turn_id, runtime))

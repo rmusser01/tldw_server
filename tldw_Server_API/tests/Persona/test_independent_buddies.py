@@ -5,15 +5,14 @@ from __future__ import annotations
 import importlib
 import sqlite3
 from contextlib import contextmanager
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Persona.visual_starter_catalog import PersonaVisualStarterCatalogService
@@ -451,6 +450,23 @@ def test_untrusted_creation_fields_are_bounded_and_rejected(db, payload):
         assert client.post("/api/v1/buddies", json=payload).status_code == 422
 
 
+def test_workspace_attachment_rejects_other_owner_without_disclosing_title(db):
+    workspace = db.upsert_workspace("private-workspace", "Private research title")
+    with _client(db, user_id=2) as client:
+        buddy = _create(client)
+        payload = {
+            "expected_version": 0,
+            "buddy_id": buddy["id"],
+            "scope_type": "workspace",
+            "scope_id": workspace["id"],
+        }
+        denied = client.put("/api/v1/buddies/attachment", json=payload)
+        missing = client.put("/api/v1/buddies/attachment", json={**payload, "scope_id": "missing"})
+        assert denied.status_code == missing.status_code == 404
+        assert denied.json() == missing.json()
+        assert client.get("/api/v1/buddies/attachment").json()["attachment"] is None
+
+
 def test_workspace_attachment_projects_only_owned_conversations_with_scope(db):
     db.upsert_workspace("ws", "My workspace")
     owned_id = db.add_conversation(
@@ -497,6 +513,7 @@ def test_starter_preview_resolves_bundled_content_and_dimensions_without_copy(db
 
 def test_starter_preview_route_requires_auth_and_never_creates_a_profile(db, monkeypatch):
     from fastapi import HTTPException
+
     from tldw_Server_API.app.api.v1.endpoints import persona
 
     app = FastAPI()

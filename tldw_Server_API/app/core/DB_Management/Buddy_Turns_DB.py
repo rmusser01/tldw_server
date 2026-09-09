@@ -5,7 +5,12 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from tldw_Server_API.app.core.DB_Management.Buddy_DB import BuddyConflictError, BuddyNotFoundError
+from tldw_Server_API.app.core.exceptions import (
+    BuddyConflictError,
+    BuddyNotFoundError,
+    BuddyPublicationRevokedError,
+    BuddyRuntimeBusyError,
+)
 
 BUDDY_TURNS_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS buddy_turn_owners (
@@ -37,14 +42,6 @@ CREATE INDEX IF NOT EXISTS idx_buddy_turns_owner_slot
 """
 
 BUDDY_TURNS_TABLES = ("buddy_turn_owners", "buddy_turns")
-
-
-class BuddyPublicationRevokedError(RuntimeError):
-    """The accepted turn no longer has permission to publish messages."""
-
-
-class BuddyRuntimeBusyError(RuntimeError):
-    """Another process currently owns this principal's in-memory queue."""
 
 
 class BuddyTurnRepository:

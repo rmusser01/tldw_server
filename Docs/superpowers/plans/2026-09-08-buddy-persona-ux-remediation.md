@@ -69,3 +69,9 @@ Operations: `Docs/Operations/Buddy_Turns.md`.
 ## PR verification
 
 On the unchanged dev base `6cd2745f69`, the fresh PR run passed 437 shared-UI tests in 26 files and 57 targeted backend tests, with one PostgreSQL-environment skip. Earlier real PostgreSQL 18 verification remains recorded above. No full suite was run.
+
+## PR review follow-up
+
+Verified all 13 automated review comments and corrected ownership disclosure, target/save races, domain exception mapping, endpoint coverage, test synchronization and endpoint/core placement. Two redundant identity-reset suggestions were disproven against the canonical selection and connected-session models and received stronger regressions; the cross-feature integration test relocation was declined with explicit rationale. The independent review caught and prompted the asynchronous retarget fence.
+
+The complete dispositions, focused regression/static results, generated docs/API checks and remaining CI limits are recorded in `Docs/Reviews/BUDDY_PERSONA_PR_FOLLOWUP_2026_09_08.md`. Follow-up directly implements ADR-005; no new architecture decision or schema change.

@@ -9,6 +9,8 @@ if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
+from tldw_Server_API.app.core.exceptions import BuddyConflictError, BuddyNotFoundError
+
 BUDDY_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS buddy_profiles (
     id TEXT PRIMARY KEY,
@@ -58,14 +60,6 @@ CREATE TABLE IF NOT EXISTS buddy_result_acknowledgements (
     PRIMARY KEY(user_id, client_slot, conversation_id, result_message_id)
 );
 """
-
-
-class BuddyNotFoundError(LookupError):
-    """The authenticated owner cannot access the requested resource."""
-
-
-class BuddyConflictError(ValueError):
-    """An optimistic version no longer matches the stored resource."""
 
 
 class BuddyRepository:
