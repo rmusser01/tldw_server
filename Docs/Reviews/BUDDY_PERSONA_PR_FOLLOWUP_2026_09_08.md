@@ -64,3 +64,13 @@ After the six-file repair, CI exposed one timing-sensitive ChatPane diagnostics-
 The final affected file passes3tests; the related6-file ChatPane gate passes70tests. Pinned ESLint adds no errors or warnings, and no formatter changes intersect the edited ranges. No production code, timeout, retry, sleep, dependency or schema change was needed.
 
 Independent review approved the final synchronization correction with no actionable findings, confirming actual loading-to-rendered-result synchronization, the stronger eight-of120 bound, and unchanged forbidden-response coverage.
+
+## Shard 5 mock and conflict-reload corrections
+
+CI on `9d3c76a62e` exposed two remaining test failures. The cockpit suite failed during import because its full service mock omitted `LEGACY_SERVICE_PROMPT_DEFAULTS`, which the real title service consumes. The same failure occurred in the exact-base replay. An asynchronous partial mock now preserves the actual service exports and overrides only the test-controlled model fetch.
+
+The ReviewTab conflict-reload test passed the exact-base replay but failed on the PR head under CI timing. Its existing eventual Retry-absence assertion was correct; the earlier click could occur while automatic conflict recovery was still loading. Ant Design suppresses that click, so no manual reload starts. A deferred automatic response reproduced the ignored click and retained Retry deterministically. The repaired test explicitly checks that early click is ignored, waits for the loading guard to clear, then starts a separately deferred manual reload. It requires a second refetch, retains Retry while the manual response is pending, and removes Retry only after completion. The exact one-mutation assertion and neighboring conflict coverage remain.
+
+Focused verification passed all **53 affected tests**, **72 tests including the direct title-service consumer**, and a final **42 cockpit tests** after a formatting adjustment. These counts overlap. Pinned ESLint adds no errors or warnings; edited ranges conform to the pinned formatter while unrelated whole-file debt remains. Whitespace checks pass. The two corrections change only existing test files, with no production, dependency, timeout, retry or Flashcards feature change.
+
+Independent review approved both corrections with no actionable findings. The reviewer checked the installed Ant Design implementation and confirmed that its loading class and click guard share the same state. Existing ADR-005 remains applicable; no new architectural decision was needed. Published checks on the final head remain the merge gate.

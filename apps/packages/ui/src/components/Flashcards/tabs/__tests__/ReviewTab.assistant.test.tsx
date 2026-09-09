@@ -44,6 +44,14 @@ const speechRecognitionState = {
   resetTranscript: vi.fn()
 }
 
+const createDeferred = <T,>() => {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (
@@ -516,18 +524,41 @@ describe("ReviewTab study assistant panel", () => {
     assistantMutateAsync.mockRejectedValueOnce(
       Object.assign(new Error("Version mismatch"), { response: { status: 409 } })
     )
+    const automaticReload = createDeferred<unknown>()
+    assistantRefetchMock.mockImplementationOnce(() => automaticReload.promise)
     renderReviewTab()
 
     openAssistantPanel()
     fireEvent.click(screen.getByRole("button", { name: "Explain" }))
 
     await waitFor(() => {
+      expect(assistantRefetchMock).toHaveBeenCalledTimes(1)
       expect(screen.getByRole("button", { name: /Reload latest/i })).toBeInTheDocument()
       expect(screen.getByRole("button", { name: "Retry my message" })).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByRole("button", { name: /Reload latest/i }))
+    const reloadButton = screen.getByRole("button", { name: /Reload latest/i })
+    expect(reloadButton).toHaveClass("ant-btn-loading")
+    fireEvent.click(reloadButton)
+    expect(assistantRefetchMock).toHaveBeenCalledTimes(1)
+    expect(
+      screen.getByRole("button", { name: "Retry my message" })
+    ).toBeInTheDocument()
 
+    automaticReload.resolve(assistantQueryState)
+    await waitFor(() => expect(reloadButton).not.toHaveClass("ant-btn-loading"))
+
+    const manualReload = createDeferred<unknown>()
+    assistantRefetchMock.mockImplementationOnce(() => manualReload.promise)
+    fireEvent.click(reloadButton)
+
+    await waitFor(() => expect(assistantRefetchMock).toHaveBeenCalledTimes(2))
+    expect(reloadButton).toHaveClass("ant-btn-loading")
+    expect(
+      screen.getByRole("button", { name: "Retry my message" })
+    ).toBeInTheDocument()
+
+    manualReload.resolve(assistantQueryState)
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: "Retry my message" })).not.toBeInTheDocument()
     })

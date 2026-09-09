@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-08 22:15'
-updated_date: '2026-09-09 03:16'
+updated_date: '2026-09-09 03:43'
 labels: []
 dependencies: []
 priority: high
@@ -26,12 +26,13 @@ Address the approved Buddy and Persona usability findings in tldw_server and its
 - [x] #5 Verified PR review findings are fixed or explained with source evidence, and affected behavior has focused regression coverage.
 - [x] #6 The current frontend shard failures are reproduced and repaired without weakening assertions, and focused checks plus review verify the fixes before merge.
 - [x] #7 The newly reported diagnostics-card cap test verifies asynchronous publication and the eight-card bound deterministically; affected tests and independent review pass.
+- [x] #8 The newly exposed cockpit mock import and assistant reload synchronization failures are corrected without changing product behavior or weakening assertions; focused verification and independent review pass.
 <!-- AC:END -->
 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-ADR required: no new ADR. ADR path: backlog/decisions/005-independent-buddy-bindings-and-work-ownership.md. Reason: test synchronization correction within existing behavior; follow Task2 in Docs/superpowers/plans/2026-09-09-buddy-pr-review-and-merge.md before publishing and checking CI again.
+ADR required: no new ADR. ADR path: backlog/decisions/005-independent-buddy-bindings-and-work-ownership.md. Reason: existing frontend test harness corrections only. Follow Task3 in Docs/superpowers/plans/2026-09-09-buddy-pr-review-and-merge.md; preserve Buddy scope and do not change Flashcards features.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -46,6 +47,8 @@ Completed all 13 PR comment dispositions in Docs/Reviews/BUDDY_PERSONA_PR_FOLLOW
 September 9 CI repair complete under existing ADR-005; latest dev6cd2745f69 required no rebase changes. Reproduced all remaining frontend shard failures and repaired6existing test files with current router/provider/MCP/service-prompt/remediation mocks, documented Research publication/failure ordering and deterministic polling, and distinct route-only locale expectations. No production/dependency changes or weakened assertions. Final combined58tests pass12.86s; fresh backend60passed1PostgreSQL-environment skip. Pinned ESLint0errors, no introduced warnings; no formatter changes intersect edited ranges. Independent review approved with no findings. Docs/Reviews/BUDDY_PERSONA_PR_FOLLOWUP_2026_09_08.md records contracts, evidence and environment limits. Bandit N/A for this test-only TypeScript delta; previous backend Bandit evidence unchanged. Remote CI and merge remain integration steps.
 
 Final shard7 correction: deterministic deferred diagnostics response reproduces the premature DOM query. The test now verifies loading, waits for actual response publication and asserts exactly8of120cards plus summary; success and forbidden-response coverage are unchanged. Only one test file changed. Final3test file and70related ChatPane tests pass; no new pinned ESLint/formatter findings, diffcheckclean. Independent review approved with no findings. ExistingADR005unchanged; no production/runtime change. Evidence appended to Docs/Reviews/BUDDY_PERSONA_PR_FOLLOWUP_2026_09_08.md.
+
+Shard 5 repair complete: the cockpit partial mock preserves real service exports; the ReviewTab test deterministically covers the loading-guarded early click and a separately accepted manual reload, retaining Retry until completion. No product behavior or assertion was weakened. Focused runs passed 53 affected tests, 72 including the direct title consumer, and 42 cockpit tests after formatting (overlapping counts). Pinned ESLint/formatter delta and whitespace checks introduce no findings. Independent review approved both repairs. Existing ADR-005 applies; no new ADR or Python security scan is needed for this TypeScript test-only delta. Evidence is recorded in Docs/Reviews/BUDDY_PERSONA_PR_FOLLOWUP_2026_09_08.md. Final published CI and merge remain root integration steps.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
