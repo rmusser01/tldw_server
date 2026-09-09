@@ -6,6 +6,10 @@ import type {
   PersonaVisualManifest
 } from "@/types/persona-visuals"
 
+export type BuddyConversationSummary = Omit<ServerChatSummary, "created_at"> & {
+  created_at?: string | null
+}
+
 export type BuddyProfile = {
   id: string
   name: string
@@ -100,11 +104,11 @@ export const detachBuddy = (version: number) =>
     "DELETE"
   )
 export const listBuddyConversations = (page?: BuddyPage) =>
-  buddyRequest<{ conversations: ServerChatSummary[] }>(
+  buddyRequest<{ conversations: BuddyConversationSummary[] }>(
     `/attachment/conversations?client_slot=default&${pageQuery(page)}`
   )
 export const resolveBuddyConversationTarget = (id: string) =>
-  buddyRequest<ServerChatSummary>(
+  buddyRequest<BuddyConversationSummary>(
     `/conversation-targets/${encodeURIComponent(id)}`
   )
 export type BuddyTurn = {
@@ -200,11 +204,19 @@ export const buddyAssets = (
     ])
   )
 
+export type BuddyReplySettings = {
+  model: string | null
+  provider: string | null
+}
+
 export async function readBuddyConversation(
   attachment: BuddyAttachment,
   conversationId: string,
   workspaceId?: string | null,
-  { isCurrent = () => true }: { isCurrent?: () => boolean } = {}
+  {
+    isCurrent = () => true,
+    includeReplySettings = false
+  }: { isCurrent?: () => boolean; includeReplySettings?: boolean } = {}
 ) {
   if (
     attachment.scope_type === "conversation" &&
@@ -217,9 +229,10 @@ export async function readBuddyConversation(
   const scope = scopedWorkspace
     ? { type: "workspace" as const, workspaceId: scopedWorkspace }
     : undefined
-  const connectionIdentity = async () => {
-    const config = await tldwClient.getConfig()
-    return JSON.stringify([
+  const connectionIdentity = (
+    config: Awaited<ReturnType<typeof tldwClient.getConfig>>
+  ) =>
+    JSON.stringify([
       config?.serverUrl,
       config?.authMode,
       config?.apiKey,
@@ -227,14 +240,13 @@ export async function readBuddyConversation(
       config?.authSource,
       config?.orgId
     ])
-  }
   if (!isCurrent())
     throw new Error("Interaction changed before reading conversation.")
-  const connection = await connectionIdentity()
+  const connection = connectionIdentity(await tldwClient.getConfig())
   const assertCurrent = async () => {
     if (!isCurrent())
       throw new Error("Interaction changed before reading conversation.")
-    if (connection !== (await connectionIdentity()))
+    if (connection !== connectionIdentity(await tldwClient.getConfig()))
       throw new Error("Connection changed before reading conversation.")
     if (!isCurrent())
       throw new Error("Interaction changed before reading conversation.")
@@ -259,8 +271,32 @@ export async function readBuddyConversation(
     { scope }
   )
   await assertCurrent()
+  const replySettings = includeReplySettings
+    ? await tldwClient.requestWithCurrentConfig<BuddyReplySettings>(
+        (
+          config: NonNullable<Awaited<ReturnType<typeof tldwClient.getConfig>>>
+        ) => {
+          if (!isCurrent())
+            throw new Error(
+              "Interaction changed before reading reply settings."
+            )
+          if (connection !== connectionIdentity(config))
+            throw new Error("Connection changed before reading reply settings.")
+          // A factory pins this checked config through the extension background
+          // handoff as well as direct WebUI transport.
+          return {
+            path: toAllowedPath(
+              `/api/v1/buddies/conversation-targets/${encodeURIComponent(conversationId)}/reply-settings?client_slot=default`
+            ),
+            method: "GET"
+          }
+        }
+      )
+    : null
+  await assertCurrent()
   return {
     conversation,
+    replySettings,
     messages: [...messages].sort((a, b) =>
       a.created_at.localeCompare(b.created_at)
     )

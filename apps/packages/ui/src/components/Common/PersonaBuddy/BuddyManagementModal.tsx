@@ -1,10 +1,7 @@
 import React from "react"
 import { Button, Modal } from "antd"
 import { useTranslation } from "react-i18next"
-import {
-  tldwClient,
-  type ServerChatSummary
-} from "@/services/tldw/TldwApiClient"
+import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { WorkspaceApiResponse } from "@/services/tldw/domains/workspace-api"
 import { listPersonaVisualStarterPacks } from "@/services/persona-visuals"
 import {
@@ -13,12 +10,14 @@ import {
   putBuddyAttachment,
   resolveBuddyConversationTarget,
   type BuddyAttachmentState,
-  type BuddyProfile
+  type BuddyProfile,
+  type BuddyConversationSummary
 } from "@/services/buddies"
 import type { BuddyManagementTarget } from "@/store/buddy-management"
 import type { PersonaVisualStarterPackSummary } from "@/types/persona-visuals"
 import { BuddyStarterArtwork } from "@/components/PersonaGarden/BuddyStarterArtwork"
 import { SpriteFrameRenderer } from "./SpriteFrameRenderer"
+import { buddyConversationLabels } from "./buddy-conversation-labels"
 
 const fieldClass =
   "block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
@@ -79,7 +78,7 @@ export const BuddyManagementModal = ({
   collectionError?: string | null
   onRetryCollections?: () => void
 }) => {
-  const { t } = useTranslation("sidepanel")
+  const { t, i18n } = useTranslation("sidepanel")
   const label = (key: string, text: string) =>
     t(`buddyManagement.${key}`, { defaultValue: text })
   const mounted = React.useRef(true)
@@ -119,12 +118,16 @@ export const BuddyManagementModal = ({
   const [location, setLocation] = React.useState(
     attachment.target?.workspace_id ?? ""
   )
-  const [chats, setChats] = React.useState<ServerChatSummary[]>([])
+  const [chats, setChats] = React.useState<BuddyConversationSummary[]>([])
+  const conversationLabels = React.useMemo(
+    () => buddyConversationLabels(chats, i18n.resolvedLanguage),
+    [chats, i18n.resolvedLanguage]
+  )
   const [chatOffset, setChatOffset] = React.useState(0)
   const [hasMoreChats, setHasMoreChats] = React.useState(false)
   const [loadingChats, setLoadingChats] = React.useState(true)
   const [resolvedTarget, setResolvedTarget] =
-    React.useState<ServerChatSummary | null>(null)
+    React.useState<BuddyConversationSummary | null>(null)
   const [resolvingTarget, setResolvingTarget] = React.useState(
     target?.scope_type === "conversation"
   )
@@ -142,21 +145,23 @@ export const BuddyManagementModal = ({
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
   const [notice, setNotice] = React.useState<string | null>(null)
+  const targetScope = target?.scope_type
+  const targetId = target?.scope_id
   React.useEffect(() => {
-    if (!target) return
-    setScope(target.scope_type)
-    setScopeId(target.scope_id)
+    if (targetScope === undefined || targetId === undefined) return
+    setScope(targetScope)
+    setScopeId(targetId)
     setResolvedTarget(null)
-    setLocation(target.scope_type === "workspace" ? target.scope_id : "")
+    setLocation(targetScope === "workspace" ? targetId : "")
     setChatOffset(0)
     setSearch("")
     setError(null)
     setNotice(null)
-    setResolvingTarget(target.scope_type === "conversation")
-    if (target.scope_type !== "conversation") return
+    setResolvingTarget(targetScope === "conversation")
+    if (targetScope !== "conversation") return
     let active = true
     setResolvingTarget(true)
-    void resolveBuddyConversationTarget(target.scope_id)
+    void resolveBuddyConversationTarget(targetId)
       .then((result) => {
         if (!active) return
         setResolvedTarget(result)
@@ -175,7 +180,7 @@ export const BuddyManagementModal = ({
     return () => {
       active = false
     }
-  }, [target?.scope_type, target?.scope_id])
+  }, [targetScope, targetId])
   React.useEffect(() => {
     let active = true
     setLoading(true)
@@ -297,25 +302,41 @@ export const BuddyManagementModal = ({
       if (generation === targetGeneration.current) return false
       setNotice(
         [
-          artworkSaved && label("artworkSaved", "Buddy artwork saved to Your Buddies."),
-          defaultSaved && label("previousDefaultSaved", "The previous workspace default was saved."),
-          attachmentSaved && label("previousAttachmentSaved", "The previous Buddy attachment was saved."),
-          failure && label("earlierApplyFailed", "The earlier Apply could not finish."),
-          label("targetChanged", "Target changed. Your new selection is retained; review it before applying.")
-        ].filter(Boolean).join(" ")
+          artworkSaved &&
+            label("artworkSaved", "Buddy artwork saved to Your Buddies."),
+          defaultSaved &&
+            label(
+              "previousDefaultSaved",
+              "The previous workspace default was saved."
+            ),
+          attachmentSaved &&
+            label(
+              "previousAttachmentSaved",
+              "The previous Buddy attachment was saved."
+            ),
+          failure &&
+            label("earlierApplyFailed", "The earlier Apply could not finish."),
+          label(
+            "targetChanged",
+            "Target changed. Your new selection is retained; review it before applying."
+          )
+        ]
+          .filter(Boolean)
+          .join(" ")
       )
       return true
     }
     try {
       let buddyId = selected
       if (starter) {
-        const created = createdArtwork?.starterId === starter.id
-          ? createdArtwork.profile
-          : await createBuddy({
-              name: starter.title,
-              source: { kind: "starter", starter_id: starter.id },
-              optional_persona_id: null
-            })
+        const created =
+          createdArtwork?.starterId === starter.id
+            ? createdArtwork.profile
+            : await createBuddy({
+                name: starter.title,
+                source: { kind: "starter", starter_id: starter.id },
+                optional_persona_id: null
+              })
         if (!mounted.current) return
         artworkSaved = true
         setCreatedArtwork({ starterId: starter.id, profile: created })
@@ -362,7 +383,10 @@ export const BuddyManagementModal = ({
       const savedMessage = attachmentSaved
         ? label("attachmentSaved", "Buddy attachment saved. Refresh failed: ")
         : defaultSaved
-          ? label("defaultSaved", "Workspace default saved. Buddy attachment was not confirmed: ")
+          ? label(
+              "defaultSaved",
+              "Workspace default saved. Buddy attachment was not confirmed: "
+            )
           : ""
       setError(
         `${savedMessage}${e instanceof Error ? e.message : label("saveFailed", "Could not apply. Your selection is retained; refresh and retry.")}`
@@ -626,7 +650,7 @@ export const BuddyManagementModal = ({
                   </option>
                   {chats.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.title}
+                      {conversationLabels.get(c.id) ?? c.title}
                     </option>
                   ))}
                 </select>

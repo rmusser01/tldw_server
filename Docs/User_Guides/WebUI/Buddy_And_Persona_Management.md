@@ -19,9 +19,9 @@ For a workspace, **Default Persona for new conversations** applies only when a n
 
 One active Buddy stays in the application shell while you move between pages. Its label identifies the attached conversation or workspace; navigation does not silently switch its target. The saved attachment is restored from the server when you return. Unsaved reply drafts and speech controls belong to the current application session.
 
-Select the Buddy to open its interaction panel. Read the conversation history and check **Reply to [conversation name]** before pressing **Send**. In workspace mode, choose a conversation first, or select a named **New response** entry. **Mark read** acknowledges that exact result; it cannot clear a newer response.
+Select the Buddy to open its interaction panel. Read the conversation history and check **Reply to [conversation name]** before pressing **Send**. In workspace mode, choose a conversation first, or select a named **New response** entry. **Mark read** acknowledges that exact result; it cannot clear a newer response. Conversations with the same title show their creation time first; a short identifier distinguishes missing or matching timestamps. The same label appears in the picker, results, reply context, and speech introductions. Saved titles stay unchanged.
 
-Replies use the conversation's configured provider and model. **Reply model settings** offers optional overrides when needed. Queued and Working describe accepted Buddy replies. Approvals remain in the originating workflow's existing controls.
+Replies use the conversation's configured provider and model, shown above Send after the target is checked. An explicit model selection in an ordinary workspace Chat is saved for later Buddy replies. If either setting is missing, **Reply model settings** opens with the required fields and Send stays unavailable until both are supplied. Your draft stays in place. You can also set optional overrides for one Buddy reply; those overrides do not replace the conversation's saved defaults. Queued and Working describe accepted Buddy replies. Approvals remain in the originating workflow's existing controls.
 
 ## Stop And Detach Mean Different Things
 
@@ -35,7 +35,7 @@ If a target is deleted or becomes unavailable, the attachment needs attention. O
 
 Open **Buddy options** and choose **Expressions → Static** or **Dynamic**. Your system's reduced-motion preference keeps expressions static even when Dynamic is selected.
 
-Drag the movement handle below the Buddy with your pointer, or focus it and use the arrow keys. Hold **Shift** for larger keyboard steps. **Home**, or **Reset position** in Buddy options, returns it to its starting position. The position stays within the application viewport.
+Drag the movement handle below the Buddy with your pointer, or focus it and use the arrow keys. Hold **Shift** for larger keyboard steps. **Home**, or **Reset position** in Buddy options, returns it to the upper-right starting position below the navigation, clear of the bottom composer. Previously saved placements are preserved. The position stays within the application viewport.
 
 ## Optional Speech And Dictation
 

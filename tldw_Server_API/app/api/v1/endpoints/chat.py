@@ -146,6 +146,7 @@ from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_selector i
 from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_telemetry import (
     compute_persona_exemplar_telemetry,
 )
+from tldw_Server_API.app.core.Chat.persistence_service import save_workspace_chat_model_selection
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
     ChatAuthenticationError,
@@ -4475,6 +4476,18 @@ async def create_chat_completion(
                     invalid_patterns = ("invalid-", "test-invalid-", "bad-key-", "dummy-invalid-")
                     if any(str(provider_api_key).lower().startswith(p) for p in invalid_patterns):
                         raise _provider_credential_http_exception_for_code("provider_authentication_failed")
+
+                await asyncio.to_thread(
+                    save_workspace_chat_model_selection,
+                    chat_db=chat_db,
+                    conversation_id=final_conversation_id,
+                    owner_client_id=user_id,
+                    provider=target_api_provider,
+                    model=model,
+                    save_to_db=request_data.save_to_db,
+                    explicit_provider_requested=explicit_provider_requested,
+                    explicit_model_requested=explicit_model_requested,
+                )
 
                 # --- Character/Conversation Context, History, and Current Turn ---
                 continuation_runtime: dict[str, Any] = {}

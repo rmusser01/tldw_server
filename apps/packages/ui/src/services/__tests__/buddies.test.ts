@@ -11,6 +11,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   fetchWithAuth: vi.fn(),
+  requestWithCurrentConfig: vi.fn(),
   getChat: vi.fn(),
   listChatMessages: vi.fn(),
   getConfig: vi.fn(),
@@ -154,4 +155,104 @@ describe("independent Buddy authority", () => {
     ).rejects.toThrow("Interaction changed")
     expect(mocks.listChatMessages).not.toHaveBeenCalled()
   })
+})
+
+it("loads effective Buddy reply settings only after the authorized transcript read", async () => {
+  mocks.getChat.mockResolvedValue({
+    id: "conversation",
+    scope_type: "workspace",
+    workspace_id: "research"
+  })
+  mocks.listChatMessages.mockResolvedValue([])
+  const dispatched = vi.fn()
+  mocks.requestWithCurrentConfig.mockImplementation(async (createRequest) => {
+    dispatched(createRequest(await mocks.getConfig()))
+    return { provider: "custom-openai-api", model: "saved-model" }
+  })
+  const result = await readBuddyConversation(
+    { buddy_id: "duck", scope_type: "workspace", scope_id: "research" },
+    "conversation",
+    "research",
+    { includeReplySettings: true }
+  )
+  expect(dispatched).toHaveBeenCalledWith({
+    path: "/api/v1/buddies/conversation-targets/conversation/reply-settings?client_slot=default",
+    method: "GET"
+  })
+  expect(result.replySettings).toEqual({
+    provider: "custom-openai-api",
+    model: "saved-model"
+  })
+})
+
+it("does not read reply settings after a connection change during the transcript request", async () => {
+  mocks.getChat.mockResolvedValue({
+    id: "conversation",
+    scope_type: "workspace",
+    workspace_id: "research"
+  })
+  mocks.listChatMessages.mockImplementation(async () => {
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "https://second.invalid",
+      accessToken: "second"
+    })
+    return []
+  })
+  await expect(
+    readBuddyConversation(
+      { buddy_id: "duck", scope_type: "workspace", scope_id: "research" },
+      "conversation",
+      "research",
+      { includeReplySettings: true }
+    )
+  ).rejects.toThrow("Connection changed")
+  expect(mocks.fetchWithAuth).not.toHaveBeenCalled()
+})
+
+it("does not dispatch reply settings to a connection changed during transport configuration", async () => {
+  mocks.getChat.mockResolvedValue({
+    id: "conversation",
+    scope_type: "workspace",
+    workspace_id: "research"
+  })
+  mocks.listChatMessages.mockResolvedValue([])
+  let release: (config: { serverUrl: string; accessToken: string }) => void
+  const configRead = new Promise<{ serverUrl: string; accessToken: string }>(
+    (resolve) => {
+      release = resolve
+    }
+  )
+  const dispatch = vi.fn()
+  mocks.fetchWithAuth.mockImplementation(async () => {
+    const config = await configRead
+    dispatch(config)
+    return {
+      ok: true,
+      json: async () => ({ model: "wrong", provider: "wrong" })
+    }
+  })
+  mocks.requestWithCurrentConfig.mockImplementation(async (createRequest) => {
+    const config = await configRead
+    const request = createRequest(config)
+    dispatch(config, request)
+    return { model: "wrong", provider: "wrong" }
+  })
+  const pending = readBuddyConversation(
+    { buddy_id: "duck", scope_type: "workspace", scope_id: "research" },
+    "conversation",
+    "research",
+    { includeReplySettings: true }
+  )
+  const rejection = expect(pending).rejects.toThrow("Connection changed")
+  await vi.waitFor(() =>
+    expect(
+      mocks.fetchWithAuth.mock.calls.length +
+        mocks.requestWithCurrentConfig.mock.calls.length
+    ).toBe(1)
+  )
+  const changed = { serverUrl: "https://second.invalid", accessToken: "second" }
+  mocks.getConfig.mockResolvedValue(changed)
+  release!(changed)
+  await rejection
+  expect(dispatch).not.toHaveBeenCalled()
 })

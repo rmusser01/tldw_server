@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
@@ -151,6 +152,7 @@ class BuddyConversationSummary(BuddyModel):
 
     id: str
     title: str
+    created_at: datetime | None = None
     scope_type: Literal["global", "workspace"]
     workspace_id: str | None
     version: int
@@ -165,6 +167,13 @@ class BuddyConversationList(BuddyModel):
     conversations: list[BuddyConversationSummary]
     limit: int
     offset: int
+
+
+class BuddyReplySettings(BuddyModel):
+    """Project configured reply identifiers without credentials or conversation content."""
+
+    provider: str | None
+    model: str | None
 
 
 class BuddyResult(BuddyModel):

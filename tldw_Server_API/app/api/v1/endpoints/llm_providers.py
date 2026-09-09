@@ -44,6 +44,7 @@ from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
     discover_openrouter_models as _discover_openrouter_models_shared,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import (
+    configured_provider_generation_metadata,
     has_custom_openai_env_configuration,
     resolve_provider_api_key_value,
     resolve_provider_endpoint_url,
@@ -2024,18 +2025,7 @@ def get_configured_providers(
                     ):
                         provider_data['endpoint'] = config_parser.get(section_name, endpoint_field, fallback='')
 
-            # Add other useful config fields
-            temp_field = f'{provider_name}_temperature'
-            if config_parser.has_option(section_name, temp_field):
-                provider_data['default_temperature'] = float(config_parser.get(section_name, temp_field, fallback='0.7'))
-
-            tokens_field = f'{provider_name}_max_tokens'
-            if config_parser.has_option(section_name, tokens_field):
-                provider_data['max_tokens'] = int(config_parser.get(section_name, tokens_field, fallback='4096'))
-
-            streaming_field = f'{provider_name}_streaming'
-            if config_parser.has_option(section_name, streaming_field):
-                provider_data['supports_streaming'] = config_parser.get(section_name, streaming_field, fallback='False').lower() == 'true'
+            provider_data.update(configured_provider_generation_metadata(config_parser, section_name, provider_name))
 
             # Centralized capability diagnostics
             try:

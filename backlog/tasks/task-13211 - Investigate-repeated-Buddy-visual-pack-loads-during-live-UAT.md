@@ -5,7 +5,7 @@ status: In Progress
 created_date: 2026-09-06 16:57
 references:
 - Docs/Reviews/MIGU_VOICE_FOLLOWUP_2026_09_06.md
-updated_date: 2026-09-06 17:06
+updated_date: 2026-09-09 05:26
 ---
 
 ## Description
@@ -35,6 +35,7 @@ ADR required: no. Reason: investigation and routine lifecycle repair within exis
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-09-06 physical visual check: repeated authenticated pack list/detail and live-session list requests every ~250 ms, ending in HTTP 429 and a visible 'Visual pack did not load — rate_limited' error. Source review could not establish the initiating trigger. Pack effect dependencies are persona identity, target availability and refresh nonce; local sprite frame cycling alone cannot explain the session-list requests. After rebase/HMR reload and reconnect, screenshot sampling and one real text provider reply did not reproduce the request loop. No speculative repair applied. Targeted BuddyShellHost + Persona route suites passed 129 tests. Remaining work: instrument host mount/dependency/event counts during an actual reproduced failure, then add a failing regression and repair. Bandit not applicable: this task changes only investigation documentation.
 Voice follow-up PR created against dev: https://github.com/rmusser01/tldw_server/pull/2927 . This task remains open; PR creation does not qualify the outstanding floating visual acceptance. UAT session disconnected and temporary browser viewport restored.
+2026-09-09 qualification on pinned merged dev 1fc19c7: independent Buddy artwork remained visible through fresh setup, Static/Dynamic changes, Watchlists/Research Workspace navigation and scoped replies. A current-process aggregate recorded no HTTP 429; detailed receipts and analysis are retained in Docs/Reviews/2026-09-09-buddy-v1-qualification.md and artifacts/buddy-v1-13227. Source investigation confirms no 250 ms loader retry; paired legacy pack/session reloads require host remount or normalized Persona/surface change. IndependentBuddyHost landed after the 2026-09-06 incident and is excluded as its original cause. Existing BuddyShellHost/usePersonaLiveControl/IndependentBuddyHost checks passed 81 tests. The legacy initiating trigger remains unreproduced; integrated legacy lifecycle instrumentation during the real failure is still needed. No speculative repair; all original AC remain open. Bandit not applicable to this investigation-only update.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 

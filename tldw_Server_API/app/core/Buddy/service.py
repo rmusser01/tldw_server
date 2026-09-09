@@ -12,7 +12,7 @@ from typing import Any
 
 from tldw_Server_API.app.api.v1.schemas.buddies import BuddyCreate
 from tldw_Server_API.app.core.DB_Management.Buddy_DB import BuddyRepository
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, NotFoundError
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.exceptions import BuddyNotFoundError
 from tldw_Server_API.app.core.Persona.visual_asset_constraints import VISUAL_MIME_EXTENSIONS
@@ -261,6 +261,7 @@ class BuddyService:
         return {
             "id": conversation["id"],
             "title": conversation.get("title") or "Conversation",
+            "created_at": conversation.get("created_at"),
             "scope_type": conversation.get("scope_type") or "global",
             "workspace_id": conversation.get("workspace_id") if conversation.get("scope_type") == "workspace" else None,
             "version": conversation["version"],
@@ -268,6 +269,61 @@ class BuddyService:
             "assistant_id": conversation.get("assistant_id"),
             "assistant_name": persona.get("name") if persona else None,
         }
+
+    def resolve_reply_completion(self, conversation_id: str) -> dict[str, Any]:
+        """Resolve saved completion settings from the principal's exact conversation.
+
+        Args:
+            conversation_id: Existing conversation owned by this service's user.
+
+        Returns:
+            Provider and model identifiers, trimmed or None, plus effective
+            sampling settings. Each identifier prefers the roleplay resume
+            completion over raw conversation settings; no server defaults apply.
+
+        Raises:
+            BuddyNotFoundError: If the conversation is missing, deleted or foreign.
+            CharactersRAGDBError: If reading the conversation state fails.
+        """
+        try:
+            resume = self.db.get_roleplay_resume_state(conversation_id, owner_client_id=self.user_id)
+        except NotFoundError as exc:
+            raise BuddyNotFoundError("Target unavailable") from exc
+        settings = resume.get("settings") or {}
+        effective = resume.get("effective_completion") or {}
+        completion = {"sampling": effective.get("sampling") or {}}
+        for key in ("provider", "model"):
+            value = effective.get(key) or settings.get(key)
+            completion[key] = value.strip() if isinstance(value, str) and value.strip() else None
+        return completion
+
+    def conversation_reply_settings(self, client_slot: str, conversation_id: str) -> dict[str, str | None]:
+        """Read reply identifiers for a currently attached and authorized target.
+
+        Args:
+            client_slot: Principal-local preference slot containing the attachment.
+            conversation_id: Exact conversation to check against that attachment.
+
+        Returns:
+            Only provider and model, each a trimmed identifier or None, using the
+            same effective-completion fallback as Buddy turn acceptance.
+
+        Raises:
+            BuddyNotFoundError: If the Buddy, attachment or target is unavailable,
+                or the conversation is outside the attached conversation/workspace.
+            CharactersRAGDBError: If reading attachment or conversation state fails.
+        """
+        with self.db.transaction():
+            attachment = self.attachment(client_slot)["attachment"]
+            if attachment is None:
+                raise BuddyNotFoundError("Attach a Buddy to an available target first")
+            resolved = self.resolve_target("conversation", conversation_id)
+            if (attachment["scope_type"] == "conversation" and attachment["scope_id"] != conversation_id) or (
+                attachment["scope_type"] == "workspace" and attachment["scope_id"] != resolved["workspace_id"]
+            ):
+                raise BuddyNotFoundError("Conversation is outside the attached target")
+            completion = self.resolve_reply_completion(conversation_id)
+            return {key: completion[key] for key in ("provider", "model")}
 
     def attachment(self, client_slot: str) -> dict[str, Any]:
         row = self.repository.attachment(client_slot)
