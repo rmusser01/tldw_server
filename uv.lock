@@ -5574,6 +5574,15 @@ wheels = [
 ]
 
 [[package]]
+name = "libpass"
+version = "1.9.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2a/f6/210563eef148773ef835d21c0fa1e8a43c5b10fceb1f63d5d650635b81da/libpass-1.9.3.tar.gz", hash = "sha256:7830b9323d9ba96a841ad698a8dec1d43a2b0b7f1c855c76772e7972c1c6d959", size = 692901, upload-time = "2025-10-09T14:26:28.363Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ed/a6/ff00d926a9f4ece9e0732bcea1c3e8e9280390f48cec53f237e21f220082/libpass-1.9.3-py3-none-any.whl", hash = "sha256:3cbeb14d22086660e92c30d787ea981973d67394e81c8c870e1a83cfe1c84353", size = 307118, upload-time = "2025-10-09T14:26:25.551Z" },
+]
+
+[[package]]
 name = "librosa"
 version = "0.11.0"
 source = { registry = "https://pypi.org/simple" }
@@ -8974,15 +8983,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/6a/6d/eed37d7ebc1e0bcd27b831c0cf1fe94881934316187c4b30d23f29ea0bd4/partial_json_parser-0.2.1.1.post7.tar.gz", hash = "sha256:86590e1ba6bcb6739a2dfc17d2323f028cb5884f4c6ce23db376999132c9a922", size = 10296, upload-time = "2025-11-17T07:27:41.202Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/42/32/658973117bf0fd82a24abbfb94fe73a5e86216e49342985e10acce54775a/partial_json_parser-0.2.1.1.post7-py3-none-any.whl", hash = "sha256:145119e5eabcf80cbb13844a6b50a85c68bf99d376f8ed771e2a3c3b03e653ae", size = 10877, upload-time = "2025-11-17T07:27:40.457Z" },
-]
-
-[[package]]
-name = "passlib"
-version = "1.7.4"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/b6/06/9da9ee59a67fae7761aab3ccc84fa4f3f33f125b370f1ccdb915bf967c11/passlib-1.7.4.tar.gz", hash = "sha256:defd50f72b65c5402ab2c573830a6978e5f202ad0d984793c8dde2c4152ebe04", size = 689844, upload-time = "2020-10-08T19:00:52.121Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3b/a4/ab6b7589382ca3df236e03faa71deac88cae040af60c071a78d254a62172/passlib-1.7.4-py2.py3-none-any.whl", hash = "sha256:aa6bca462b8d8bda89c70b382f0c298a20b5560af6cbfa2dce410c0a2fb669f1", size = 525554, upload-time = "2020-10-08T19:00:49.856Z" },
 ]
 
 [[package]]
@@ -13405,6 +13405,7 @@ dependencies = [
     { name = "jsonschema" },
     { name = "keyring" },
     { name = "langdetect" },
+    { name = "libpass" },
     { name = "loguru" },
     { name = "lxml" },
     { name = "lxml-html-clean" },
@@ -13420,7 +13421,6 @@ dependencies = [
     { name = "openpyxl" },
     { name = "optimum" },
     { name = "pandas" },
-    { name = "passlib" },
     { name = "pathspec" },
     { name = "pillow" },
     { name = "playwright" },
@@ -13843,6 +13843,7 @@ requires-dist = [
     { name = "kokoro-onnx", marker = "extra == 'tts-kokoro-onnx'", specifier = ">=0.1.0" },
     { name = "konlpy", marker = "extra == 'chunking-multilingual'", specifier = ">=0.6.0" },
     { name = "langdetect", specifier = ">=1.0.9" },
+    { name = "libpass", specifier = ">=1.9.3" },
     { name = "librosa", marker = "extra == 'stt-parakeet-mlx'" },
     { name = "librosa", marker = "extra == 'tts-neutts'", specifier = ">=0.10.0" },
     { name = "librosa", marker = "extra == 'tts-vibevoice'", specifier = ">=0.10.0" },
@@ -13893,7 +13894,6 @@ requires-dist = [
     { name = "optimum", specifier = ">=1.13.0" },
     { name = "pandas", specifier = ">=2.0.0" },
     { name = "parakeet-mlx", marker = "extra == 'stt-parakeet-mlx'" },
-    { name = "passlib", specifier = ">=1.7.0" },
     { name = "pathspec", specifier = ">=0.12.1" },
     { name = "phonemizer", marker = "extra == 'tts-kokoro'", specifier = ">=3.2.0" },
     { name = "phonemizer", marker = "extra == 'tts-neutts'", specifier = ">=3.2.1" },
