@@ -526,6 +526,28 @@ class TestJSONValidateAdapter:
     """Tests for run_json_validate_adapter."""
 
     @pytest.mark.asyncio
+    async def test_json_validate_uses_updated_model_schema(self):
+        """A Python schema update reaches the adapter under its public JSON key."""
+        from tldw_Server_API.app.core.Workflows.adapters.text import run_json_validate_adapter
+        from tldw_Server_API.app.core.Workflows.adapters.text._config import JSONValidateConfig
+
+        config = JSONValidateConfig(
+            data={"age": "thirty"},
+            schema={"type": "object", "properties": {"age": {"type": "integer"}}},
+        ).model_copy(
+            update={
+                "schema_definition": {
+                    "type": "object",
+                    "properties": {"age": {"type": "string"}},
+                }
+            }
+        )
+
+        result = await run_json_validate_adapter(config.model_dump(), {})
+
+        assert result == {"valid": True, "errors": []}
+
+    @pytest.mark.asyncio
     async def test_json_validate_valid(self):
         """Test JSON validation with valid data."""
         from tldw_Server_API.app.core.Workflows.adapters.text import run_json_validate_adapter
