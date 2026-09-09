@@ -1,0 +1,499 @@
+{
+  "bandit": {
+    "errors": 0,
+    "findings": 0
+  },
+  "finding_delta_from_run34265694779": {
+    "added": [
+      [
+        "admin-ui",
+        "baseline-browser-mapping",
+        "2.9.19",
+        "CVE-2026-45819"
+      ],
+      [
+        "python-root",
+        "accelerate",
+        "1.14.0",
+        "CVE-2026-69112"
+      ]
+    ],
+    "removed": []
+  },
+  "findings": [
+    {
+      "component": "python-root",
+      "fixed_version": null,
+      "id": "CVE-2026-69112",
+      "package": "accelerate",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2026-69112",
+      "severity": "MEDIUM",
+      "version": "1.14.0"
+    },
+    {
+      "component": "python-root",
+      "fixed_version": null,
+      "id": "CVE-2026-45829",
+      "package": "chromadb",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2026-45829",
+      "severity": "CRITICAL",
+      "version": "1.5.9"
+    },
+    {
+      "component": "python-root",
+      "fixed_version": null,
+      "id": "CVE-2026-45833",
+      "package": "chromadb",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2026-45833",
+      "severity": "CRITICAL",
+      "version": "1.5.9"
+    },
+    {
+      "component": "python-root",
+      "fixed_version": null,
+      "id": "CVE-2026-45830",
+      "package": "chromadb",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2026-45830",
+      "severity": "HIGH",
+      "version": "1.5.9"
+    },
+    {
+      "component": "python-root",
+      "fixed_version": null,
+      "id": "CVE-2026-45831",
+      "package": "chromadb",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2026-45831",
+      "severity": "HIGH",
+      "version": "1.5.9"
+    },
+    {
+      "component": "python-root",
+      "fixed_version": null,
+      "id": "CVE-2026-81726",
+      "package": "nltk",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2026-81726",
+      "severity": "HIGH",
+      "version": "3.10.3"
+    },
+    {
+      "component": "apps-workspace",
+      "fixed_version": "3.4.11",
+      "id": "CVE-2026-65898",
+      "package": "dompurify",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2026-65898",
+      "severity": "MEDIUM",
+      "version": "3.4.8"
+    },
+    {
+      "component": "apps-workspace",
+      "fixed_version": "3.4.13",
+      "id": "GHSA-55q2-fjhq-7xh7",
+      "package": "dompurify",
+      "primary_url": "https://github.com/advisories/GHSA-55q2-fjhq-7xh7",
+      "severity": "MEDIUM",
+      "version": "3.4.8"
+    },
+    {
+      "component": "apps-workspace",
+      "fixed_version": "3.4.9",
+      "id": "CVE-2026-65899",
+      "package": "dompurify",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2026-65899",
+      "severity": "LOW",
+      "version": "3.4.8"
+    },
+    {
+      "component": "apps-workspace",
+      "fixed_version": "3.4.12",
+      "id": "GHSA-c2j3-45gr-mqc4",
+      "package": "dompurify",
+      "primary_url": "https://github.com/advisories/GHSA-c2j3-45gr-mqc4",
+      "severity": "LOW",
+      "version": "3.4.8"
+    },
+    {
+      "component": "apps-workspace",
+      "fixed_version": "0.28.1",
+      "id": "GHSA-g7r4-m6w7-qqqr",
+      "package": "esbuild",
+      "primary_url": "https://github.com/advisories/GHSA-g7r4-m6w7-qqqr",
+      "severity": "LOW",
+      "version": "0.27.7"
+    },
+    {
+      "component": "apps-workspace",
+      "fixed_version": "7.18.0",
+      "id": "CVE-2026-53666",
+      "package": "react-router",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2026-53666",
+      "severity": "MEDIUM",
+      "version": "6.30.6"
+    },
+    {
+      "component": "apps-workspace",
+      "fixed_version": "7.18.0",
+      "id": "CVE-2026-53669",
+      "package": "react-router",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2026-53669",
+      "severity": "MEDIUM",
+      "version": "6.30.6"
+    },
+    {
+      "component": "apps-workspace",
+      "fixed_version": "11.1.1, 12.0.1, 13.0.1",
+      "id": "CVE-2026-41907",
+      "package": "uuid",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2026-41907",
+      "severity": "MEDIUM",
+      "version": "8.3.2"
+    },
+    {
+      "component": "admin-ui",
+      "fixed_version": "2.11.0",
+      "id": "CVE-2026-45819",
+      "package": "baseline-browser-mapping",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2026-45819",
+      "severity": "MEDIUM",
+      "version": "2.9.19"
+    }
+  ],
+  "independent_review": {
+    "checks": "23 raw hashes;13checksum entries;18repository inputs and policy/evaluator hashes;SBOM origins;database age/hash;all counts/deltas;in-memory policy reproduction.",
+    "result": "No actionable findings.",
+    "review_actions": "Read-only; no scanners,containers,application packages or restricted work executed."
+  },
+  "inputs": {
+    "commit": "0c303e8598b9557dbfcb68c3c6ba2fd7184f88f8",
+    "evaluator": {
+      "path": "Helper_Scripts/Supply_Chain/exception_policy.py",
+      "sha256": "9bf192fa6c8c4e48c22a816d82229de0177f9b3ae54711fe0596f1d43eb6ed96"
+    },
+    "policy": {
+      "path": ".github/supply-chain/vulnerability-exceptions.json",
+      "sha256": "81a515050e5d312ac4a453fa1bdaa999cfc11ad6a652659776bf5747c6b69168"
+    },
+    "repository_inputs": [
+      {
+        "path": ".github/workflows/sbom.yml",
+        "sha256": "5dad2bd88b20ee009412c9aed8ec25558bf52dc5f9ce0b7aa78d043cadd87634"
+      },
+      {
+        "path": "tldw_Server_API/tests/CI/test_sbom_workflow_contracts.py",
+        "sha256": "dbd369c3def5d6e2abdfcc9fe7c50b68d5be714cb25328697ae9268c200378e9"
+      },
+      {
+        "path": ".github/dependabot.yml",
+        "sha256": "88674b0d1f1d5965304e06bb92e845c2aba85b7975291ccf2e3ff3136c1f9d34"
+      },
+      {
+        "path": "apps/bun.lock",
+        "sha256": "196b07372dcf1ea5c0d88dc4dc117777e53b5524771105e8ec79547a9ffa9eb2"
+      },
+      {
+        "path": "admin-ui/bun.lock",
+        "sha256": "f7fb5bdbb6d5265ddc0ed248b13c0de7ba71e693c133a2b243e1a8617c558bc6"
+      },
+      {
+        "path": "apps/package.json",
+        "sha256": "ccccd4b4e801096cb47a77b51860b095aacd4efd96957ed19342f6ba28f3e150"
+      },
+      {
+        "path": "apps/tldw-frontend/package.json",
+        "sha256": "0c049fbd465815dc5cb93408bb941846349599a3a6e40164e940676dda55ddfa"
+      },
+      {
+        "path": "apps/extension/package.json",
+        "sha256": "fc21ded4282e6dd57aa4a5fe90146e32d446d0227a84acdf6d2f3ff9cbaa2dc0"
+      },
+      {
+        "path": "apps/packages/ui/package.json",
+        "sha256": "4ab92688af46a9e2555123aed2c25d1415cf334d7b256d6879ddf7d5099d51e8"
+      },
+      {
+        "path": "apps/packages/voice-assistant-sdk/package.json",
+        "sha256": "b5ebe51be544d4f24d63330b4c2883900c176b6faf27e92880ad30bd06761db8"
+      },
+      {
+        "path": "admin-ui/package.json",
+        "sha256": "61c9295eb067500a24dd2b9dc7e9c5fda18f6eb1a2683f7a2e0bb2700aa7f705"
+      },
+      {
+        "path": "Dockerfiles/Dockerfile.prod",
+        "sha256": "41b089583aea3d2133988dca751a0ab8c4f31d4e7be9510c02790d919058db74"
+      },
+      {
+        "path": "Dockerfiles/Dockerfile.worker",
+        "sha256": "ad33d289e1f0c7954e9aeeb36aeeb7c7b85138ed426185534bff218b9c126577"
+      },
+      {
+        "path": "Dockerfiles/Dockerfile.audio_gpu_worker",
+        "sha256": "164c292971453bd23c251b302e4e5b1c1f8921d31bdaf4af7eebd823786ed852"
+      },
+      {
+        "path": "Dockerfiles/Dockerfile.webui",
+        "sha256": "310aa64552ec6435edd4b7b6dbaef9aba42926bbc7e94fb4d9c96db7b8e64660"
+      },
+      {
+        "path": "Dockerfiles/Dockerfile.admin-ui",
+        "sha256": "80cd25e797acfd6c7e2bf710ed094ec9a56f0ac6be98f31eef5b8befedad0e08"
+      },
+      {
+        "path": "pyproject.toml",
+        "sha256": "dd92d6c67c28e1fec148cbc10a0fe83c45a19c0c460edd9e470234a86f4fbd4f"
+      },
+      {
+        "path": "uv.lock",
+        "sha256": "54a87906885483eac91ce27990f1a0be4035996d2040942b66c2920db83ae07a"
+      }
+    ],
+    "sboms": [
+      {
+        "component": "python-root",
+        "filename": "sbom-python-root.cdx.json",
+        "origin": "/private/tmp/task-13013-7-22-implementation.JijnQG/validation/python.cdx.json",
+        "sha256": "18d7b59dddf731d811ce7a760ff96a4344fac31a38ee422b48a7c98a398ee87c"
+      },
+      {
+        "component": "apps-workspace",
+        "filename": "sbom-apps-workspace.cdx.json",
+        "origin": "/private/tmp/task-13013-7-22-implementation.JijnQG/validation/apps-corrected.cdx.json",
+        "sha256": "37d0551e954d8ad8b4e56c0276ecb1aba32b75cbe15967b84ba04337e8fd486b"
+      },
+      {
+        "component": "admin-ui",
+        "filename": "sbom-admin-ui.cdx.json",
+        "origin": "/private/tmp/task-13013-7-22-implementation.JijnQG/validation/admin.cdx.json",
+        "sha256": "2328b1d3f61b6f00ee31c93e0ac22b9cd023a93cbfee3c1d28ce34337d500288"
+      }
+    ]
+  },
+  "limits": {
+    "image_admission_evaluated": false,
+    "new_package_code_executed": false,
+    "pushed_or_released": false,
+    "repository_runtime_or_policy_modified": false,
+    "restricted_work_resumed": false,
+    "source_admitted": false
+  },
+  "policy_results": {
+    "database_unchanged": true,
+    "decisions": {
+      "admin-ui": {
+        "blocking": [],
+        "component": "source-admin-ui",
+        "excepted": [],
+        "raw_severity_counts": {
+          "MEDIUM": 1
+        },
+        "unmatched_exception_ids": []
+      },
+      "apps-workspace": {
+        "blocking": [],
+        "component": "source-apps-workspace",
+        "excepted": [],
+        "raw_severity_counts": {
+          "LOW": 3,
+          "MEDIUM": 5
+        },
+        "unmatched_exception_ids": []
+      },
+      "python-root": {
+        "blocking": [
+          {
+            "installed_version": "1.5.9",
+            "purl": "pkg:pypi/chromadb@1.5.9",
+            "severity": "CRITICAL",
+            "target": "Python",
+            "vulnerability_id": "CVE-2026-45829"
+          },
+          {
+            "installed_version": "1.5.9",
+            "purl": "pkg:pypi/chromadb@1.5.9",
+            "severity": "CRITICAL",
+            "target": "Python",
+            "vulnerability_id": "CVE-2026-45833"
+          },
+          {
+            "installed_version": "1.5.9",
+            "purl": "pkg:pypi/chromadb@1.5.9",
+            "severity": "HIGH",
+            "target": "Python",
+            "vulnerability_id": "CVE-2026-45830"
+          },
+          {
+            "installed_version": "1.5.9",
+            "purl": "pkg:pypi/chromadb@1.5.9",
+            "severity": "HIGH",
+            "target": "Python",
+            "vulnerability_id": "CVE-2026-45831"
+          },
+          {
+            "installed_version": "3.10.3",
+            "purl": "pkg:pypi/nltk@3.10.3",
+            "severity": "HIGH",
+            "target": "Python",
+            "vulnerability_id": "CVE-2026-81726"
+          }
+        ],
+        "component": "source-python-root",
+        "excepted": [],
+        "raw_severity_counts": {
+          "CRITICAL": 2,
+          "HIGH": 3,
+          "MEDIUM": 1
+        },
+        "unmatched_exception_ids": []
+      }
+    },
+    "evaluated_at": "2026-09-09T14:06:54.614413+00:00",
+    "policy_exit_code": 1,
+    "policy_message": "vulnerability policy failed: source-python-root"
+  },
+  "raw_files": [
+    {
+      "path": "/private/tmp/task-13013-7-source-admission.KSjLnY/bandit.json",
+      "sha256": "a82d0e7ea91b091f566d4ddbebd461876414ce6b649d4f04c72d423edfa4fd77"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-source-admission.KSjLnY/bandit.log",
+      "sha256": "71fcdc193231f4a6b71a7b9b28662731568f2b42a44aeeceb370f119eb3f1c3a"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-source-admission.KSjLnY/database-check.json",
+      "sha256": "7031682a95e573d22e4322f9778537f094e186ff52182b4f7dd72ac1e0ba4931"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-source-admission.KSjLnY/db-download.log",
+      "sha256": "c265b9fc3c9d94dcc6f5256af9a9a7b6886aa4fc8de3ed2a56bfc0e39b10f764"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-source-admission.KSjLnY/inputs.json",
+      "sha256": "f61d807f09034b6d3de98360ba639014b9cf0e3655a0de6f541d4447c7c774c6"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-source-admission.KSjLnY/policy-block.py",
+      "sha256": "3ab2564736ad7c55f04ed9975e7d1798f345be18816b0599ad29ab68ef4a5bb3"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-source-admission.KSjLnY/policy-results.json",
+      "sha256": "5822127707e657b408a67802443cbb850d24e03027d28c80f74e58a3e41ab7c7"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-source-admission.KSjLnY/policy.log",
+      "sha256": "b3d549cc0063f1b1b46d586c1d420d7354180a54e1395354a3ef115b52dd9892"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-source-admission.KSjLnY/scan.log",
+      "sha256": "ccd9a4bdfa718ad60c3ac3912a80be57353b0684485b416aef9ed7bcbcbcea71"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-source-admission.KSjLnY/evidence/SHA256SUMS",
+      "sha256": "1a6a1b7655d1be7ae6fc52d5bba65bc1f058395e5bc7261b76578ccb796133f9"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-source-admission.KSjLnY/evidence/policy.json",
+      "sha256": "81a515050e5d312ac4a453fa1bdaa999cfc11ad6a652659776bf5747c6b69168"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-source-admission.KSjLnY/evidence/sbom-admin-ui.cdx.json",
+      "sha256": "2328b1d3f61b6f00ee31c93e0ac22b9cd023a93cbfee3c1d28ce34337d500288"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-source-admission.KSjLnY/evidence/sbom-apps-workspace.cdx.json",
+      "sha256": "37d0551e954d8ad8b4e56c0276ecb1aba32b75cbe15967b84ba04337e8fd486b"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-source-admission.KSjLnY/evidence/sbom-python-root.cdx.json",
+      "sha256": "18d7b59dddf731d811ce7a760ff96a4344fac31a38ee422b48a7c98a398ee87c"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-source-admission.KSjLnY/evidence/sbom-source-aggregate.cdx.json",
+      "sha256": "70536e093e24a54da54423ef5002ccaa5480e0df62809c64477dc2e33b93f165"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-source-admission.KSjLnY/evidence/scan-decision-source-admin-ui.json",
+      "sha256": "bc811ee0df123757a753cb6edb3e295cc49ec9f9f3172ecaf9ce89ddf430143b"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-source-admission.KSjLnY/evidence/scan-decision-source-apps-workspace.json",
+      "sha256": "06421ad684ab4f44362b64623ce891d8c1977d447324ed982fadb38d9d9a98bc"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-source-admission.KSjLnY/evidence/scan-decision-source-python-root.json",
+      "sha256": "6c1d40117214521a5c882ba66cdf393e27d6495bcc9195bb6ed34e7df180232f"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-source-admission.KSjLnY/evidence/trivy-db-metadata.json",
+      "sha256": "63400ad8fae9ea59196d015c9aa3a2fcd1520dd774f20ac57944df5329766031"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-source-admission.KSjLnY/evidence/trivy-source-admin-ui.json",
+      "sha256": "10967cfcc7a3545aad65170562f8f3fdb09b85d48d1eb3d1e67f5e70596744bc"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-source-admission.KSjLnY/evidence/trivy-source-apps-workspace.json",
+      "sha256": "e8d2163a698c72f5d5149e03af774ebf6ce58d29544b5fa521ed45d3bd14e320"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-source-admission.KSjLnY/evidence/trivy-source-python-root.json",
+      "sha256": "3bfcb9352ea872dad8a625ed7805e4fe184fb961d11f2d5ad88e83e8d9639f4b"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-source-admission.KSjLnY/evidence/trivy-version.txt",
+      "sha256": "41e22ed321a4c139a4fae57e92d8fa971cf7e91a8c1c4444d9a948c52a72c73a"
+    }
+  ],
+  "remote_pr": {
+    "base": "dev",
+    "branch": "codex/task-13013-7-supply-chain-design",
+    "head": "f2136ba63bb1d9c7109644aa7ca798af35e5e2e3",
+    "state": "OPEN",
+    "url": "https://github.com/rmusser01/tldw_server/pull/2869"
+  },
+  "scanner": {
+    "container_controls": {
+      "cap_drop": "ALL",
+      "cpus": 2,
+      "memory": "2g",
+      "network_during_scans": "none",
+      "pids_limit": 64,
+      "platform": "linux/amd64",
+      "pull": "never",
+      "root_filesystem": "read-only",
+      "security_opt": "no-new-privileges:true",
+      "user": "1000:1000",
+      "writable_host_mounts": "task-owned evidence and cache directories only"
+    },
+    "database": {
+      "after_scan_age_seconds": 3297.399588,
+      "after_scan_checked_at": "2026-09-09T14:06:54.614413+00:00",
+      "age_seconds": 3161.834843,
+      "checked_at": "2026-09-09T14:04:39.049668+00:00",
+      "database_bytes": 1371942912,
+      "database_sha256_after": "156b39d6acdbc6065c2864d1f68e3f81d355d47e7e18284b8588e0f161a06bf8",
+      "database_sha256_before": "156b39d6acdbc6065c2864d1f68e3f81d355d47e7e18284b8588e0f161a06bf8",
+      "metadata": {
+        "DownloadedAt": "2026-09-09T14:04:15.930284794Z",
+        "NextUpdate": "2026-09-10T13:11:57.2148255Z",
+        "UpdatedAt": "2026-09-09T13:11:57.214825711Z",
+        "Version": 2
+      }
+    },
+    "flags": [
+      "sbom",
+      "--cache-dir",
+      "/trivy-cache",
+      "--skip-db-update",
+      "--scanners",
+      "vuln",
+      "--ignore-unfixed=false",
+      "--format",
+      "json"
+    ],
+    "image": "ghcr.io/aquasecurity/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969",
+    "observed_amd64_config": "sha256:ee940acbf1f58ebadb42d01434ce4609530bf1b52536afbd1eee66cd7123c5c9",
+    "version": "Version: 0.74.0",
+    "warnings": "Trivy retains its standard warning that third-party SBOMs may yield inaccurate detection."
+  },
+  "verified_at": "2026-09-09T14:08:20.709688+00:00"
+}
