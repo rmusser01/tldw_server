@@ -951,6 +951,11 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
   )
 
   // ── loadSessionHistory ──
+  const clearResumeSelection = React.useCallback(() => {
+    setResumeSessionId("")
+    setSessionHistory([])
+  }, [])
+
   const loadSessionHistory = React.useCallback(async () => {
     if (!sessionId) return
     const resp = await tldwClient.fetchWithAuth(
@@ -1362,6 +1367,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
     sendUserMessage,
     sendSetupLiveTestMessage,
     loadSessionHistory,
+    clearResumeSelection,
     exportSelectedSessionTranscript,
     confirmPlanWithMap,
     cancelPlan,

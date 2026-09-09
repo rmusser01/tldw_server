@@ -2467,7 +2467,7 @@ def _persona_visual_library_service_error_to_http(exc: PersonaVisualLibraryServi
 
 def _persona_visual_starter_catalog_error_to_http(exc: PersonaVisualStarterCatalogError) -> HTTPException:
     status_code = status.HTTP_400_BAD_REQUEST
-    if exc.code in {"starter_pack_not_found", "target_persona_not_found"}:
+    if exc.code in {"starter_pack_not_found", "starter_asset_not_found", "target_persona_not_found"}:
         status_code = status.HTTP_404_NOT_FOUND
     elif exc.code in {"invalid_starter_fixture", "duplicate_starter_fixture"}:
         status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -4099,6 +4099,36 @@ async def get_persona_visual_starter_pack(
         return await _run_persona_db_call(starter_service.get_starter_pack, starter_pack_id)
     except PersonaVisualStarterCatalogError as exc:
         raise _persona_visual_starter_catalog_error_to_http(exc) from exc
+
+
+@router.get(
+    "/visual-starter-packs/{starter_pack_id}/assets/{asset_key}/content",
+    tags=["persona"],
+    dependencies=[Depends(check_rate_limit)],
+)
+async def get_persona_visual_starter_asset_content(
+    starter_pack_id: str,
+    asset_key: str,
+    _current_user: User = Depends(get_request_user),
+    starter_service: PersonaVisualStarterCatalogService = Depends(get_persona_visual_starter_catalog_service),
+) -> Response:
+    """Preview immutable bundled artwork without creating a Persona or draft."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    _require_current_user_id(_current_user)
+    try:
+        content, mime_type = await _run_persona_db_call(
+            starter_service.get_starter_asset_content,
+            starter_pack_id,
+            asset_key,
+        )
+    except PersonaVisualStarterCatalogError as exc:
+        raise _persona_visual_starter_catalog_error_to_http(exc) from exc
+    return Response(
+        content,
+        media_type=mime_type,
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.post(

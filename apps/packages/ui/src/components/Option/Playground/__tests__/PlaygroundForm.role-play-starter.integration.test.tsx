@@ -7,7 +7,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { AssistantSelect } from "@/components/Common/AssistantSelect"
 import { PlaygroundEmpty } from "../PlaygroundEmpty"
 import { PlaygroundForm } from "../PlaygroundForm"
+import { useBuddyManagementStore } from "@/store/buddy-management"
 
+const viewportState = vi.hoisted(() => ({ mobile: false }))
 const onSubmitMock = vi.hoisted(() => vi.fn(async (_payload: unknown) => null))
 const createChatCompletionMock = vi.hoisted(() =>
   vi.fn(async () => ({
@@ -62,7 +64,8 @@ const selectedCharacterState = vi.hoisted(() => ({
 }))
 const chatModelSettingsState = vi.hoisted(() => ({
   systemPrompt: "",
-  updateSetting: vi.fn()
+  updateSetting: vi.fn(),
+  updateSettings: vi.fn()
 }))
 
 const createMessageOptionState = () => ({
@@ -112,6 +115,17 @@ const createMessageOptionState = () => ({
   setQueuedMessages: vi.fn(),
   clearQueuedMessages: vi.fn(),
   serverChatId: null,
+  historyId: "history-1",
+  serverChatAssistantKind: "character",
+  serverChatAssistantId: "char-original",
+  serverChatCharacterId: "char-original",
+  setHistoryId: vi.fn(),
+  setMessages: vi.fn(),
+  setServerChatCharacterId: vi.fn(),
+  setServerChatAssistantKind: vi.fn(),
+  setServerChatAssistantId: vi.fn(),
+  setServerChatPersonaMemoryMode: vi.fn(),
+  setServerChatMetaLoaded: vi.fn(),
   setServerChatId: vi.fn(),
   serverChatState: "in-progress",
   setServerChatState: vi.fn(),
@@ -447,11 +461,12 @@ vi.mock("~/hooks/useMessageOption", () => ({
 }))
 
 vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (selector: (state: any) => unknown) =>
+  useStoreMessageOption: Object.assign((selector: (state: any) => unknown) =>
     selector({
+      ...playgroundFormMessageOptionState.value,
       setRagMediaIds: vi.fn(),
       setRagPinnedResults: vi.fn()
-    })
+    }), { getState: () => playgroundFormMessageOptionState.value })
 }))
 
 vi.mock("@/store/model", () => ({
@@ -476,7 +491,7 @@ vi.mock("@/store/model", () => ({
       jsonMode: false,
       numCtx: 8192,
       updateSetting: chatModelSettingsState.updateSetting,
-      updateSettings: vi.fn(),
+      updateSettings: chatModelSettingsState.updateSettings,
       setActiveSettingsScope: vi.fn(),
       updateScopedSetting: vi.fn(),
       getEffectiveSettings: vi.fn(() => ({}))
@@ -608,7 +623,7 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({
   useSelectedAssistant: (initialValue: any = null) => {
     const [selectedAssistant, setSelectedAssistant] = React.useState(initialValue)
     const setSelectedAssistantWithBroadcast = async (next: any) => {
-      selectedAssistantMock.setSelectedAssistant(next)
+      await selectedAssistantMock.setSelectedAssistant(next)
       setSelectedAssistant(next)
     }
     return [
@@ -680,12 +695,14 @@ vi.mock("../ComposerToolbar", () => ({
     researchLaunchButton,
     toolsButton,
     sendControl,
+    rolePlayActions,
     setSelectedSystemPrompt
   }: {
     modelSelectButton?: React.ReactNode
     researchLaunchButton?: React.ReactNode
     toolsButton?: React.ReactNode
     sendControl?: React.ReactNode
+    rolePlayActions?: { onOpenRolePlaySetup: () => void }
     setSelectedSystemPrompt?: (id: string | undefined) => void
   }) => (
     <div data-testid="composer-toolbar">
@@ -693,6 +710,7 @@ vi.mock("../ComposerToolbar", () => ({
       {researchLaunchButton}
       {toolsButton}
       {sendControl}
+      <button type="button" onClick={rolePlayActions?.onOpenRolePlaySetup}>Open role-play setup</button>
       <button
         type="button"
         onClick={() => setSelectedSystemPrompt?.("prompt-1")}>
@@ -709,6 +727,24 @@ vi.mock("../ComposerToolbar", () => ({
 
 vi.mock("../CompareToggle", () => ({
   CompareToggle: () => null
+}))
+
+vi.mock("../RolePlaySetupDrawer", () => ({
+  RolePlaySetupDrawer: ({ onApply, onClose, returnFocusRef }: { onApply: (payload: unknown) => Promise<void>; onClose: () => void; returnFocusRef?: React.RefObject<HTMLElement> }) => {
+    const [result, setResult] = React.useState("")
+    const apply = (payload: unknown) => {
+      void onApply(payload).then(() => setResult("Applied"), () => setResult("Apply failed"))
+    }
+    return <section aria-label="Role-play setup">
+      <button onClick={() => { onClose(); returnFocusRef?.current?.focus() }}>Cancel setup</button>
+      <button onClick={() => apply({
+        identitySelection: { kind: "persona", id: "persona-guide", name: "Guide", metadata: { selectionMode: "tracked" } },
+        generationPresetKey: "precise"
+      })}>Apply Persona setup</button>
+      <button onClick={() => apply({ clearIdentity: true })}>Apply clear identity</button>
+      <span role="status">{result}</span>
+    </section>
+  }
 }))
 
 vi.mock("../ParameterPresets", () => ({
@@ -805,7 +841,7 @@ vi.mock("../VoiceChatIndicator", () => ({
 }))
 
 vi.mock("@/hooks/useMediaQuery", () => ({
-  useMobile: () => false
+  useMobile: () => viewportState.mobile
 }))
 
 vi.mock("@/components/Common/Button", () => ({
@@ -995,13 +1031,16 @@ vi.mock("@/hooks/playground", () => ({
 }))
 
 beforeEach(() => {
+  viewportState.mobile = false
+  useBuddyManagementStore.getState().close()
   onSubmitMock.mockClear()
   createChatCompletionMock.mockClear()
-  selectedAssistantMock.setSelectedAssistant.mockClear()
+  selectedAssistantMock.setSelectedAssistant.mockReset().mockResolvedValue(undefined)
   selectedCharacterState.value = null
   selectedCharacterState.setSelectedCharacter.mockClear()
   chatModelSettingsState.systemPrompt = ""
   chatModelSettingsState.updateSetting.mockClear()
+  chatModelSettingsState.updateSettings.mockClear()
   playgroundFormMessageOptionState.value = createMessageOptionState()
   playgroundFormConnectionState.phase = "connected"
   playgroundFormConnectionState.isConnected = true
@@ -1027,6 +1066,73 @@ const renderRolePlayStarterHarness = () =>
   )
 
 describe("PlaygroundForm role-play starter", () => {
+  it("restores the opening control after the conditionally mounted setup drawer closes", async () => {
+    const user = userEvent.setup()
+    render(<PlaygroundForm droppedFiles={[]} />)
+    const trigger = screen.getByRole("button", { name: "Open role-play setup" })
+    await user.click(trigger)
+    await user.click(await screen.findByRole("button", { name: "Cancel setup" }))
+    expect(trigger).toHaveFocus()
+  })
+
+  it("keeps Buddy management reachable in mobile cockpit with the current conversation and setup action", async () => {
+    viewportState.mobile = true
+    playgroundFormMessageOptionState.value = { ...createMessageOptionState(), serverChatId: "mobile-chat" }
+    const user = userEvent.setup()
+    render(<>
+      <PlaygroundForm droppedFiles={[]} mobileCockpitModeActive />
+      <div role="dialog"><button onClick={() => useBuddyManagementStore.getState().conversationSettings?.()}>Edit conversation settings</button></div>
+    </>)
+    const trigger = screen.getByRole("button", { name: "Buddy & Persona" })
+    expect(trigger).toBeVisible()
+    await user.click(trigger)
+    expect(useBuddyManagementStore.getState()).toMatchObject({ open: true, target: { scope_type: "conversation", scope_id: "mobile-chat" } })
+    await user.click(screen.getByRole("button", { name: "Edit conversation settings" }))
+    await user.click(await screen.findByRole("button", { name: "Cancel setup" }))
+    expect(trigger).toHaveFocus()
+  })
+
+  it("commits the staged identity before clearing the previous tracked chat", async () => {
+    const user = userEvent.setup()
+    playgroundFormMessageOptionState.value.serverChatId = "chat-original"
+    let finishCommit: () => void = () => undefined
+    selectedAssistantMock.setSelectedAssistant.mockImplementationOnce(() => new Promise<void>((resolve) => { finishCommit = resolve }))
+    render(<PlaygroundForm droppedFiles={[]} />)
+    await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
+    await user.click(await screen.findByRole("button", { name: "Apply Persona setup" }))
+    expect(selectedAssistantMock.setSelectedAssistant).toHaveBeenCalledWith(expect.objectContaining({ kind: "persona", id: "persona-guide" }))
+    expect(playgroundFormMessageOptionState.value.setHistoryId).not.toHaveBeenCalled()
+    expect(chatModelSettingsState.updateSettings).not.toHaveBeenCalled()
+    finishCommit()
+    await screen.findByText("Applied")
+    expect(playgroundFormMessageOptionState.value.setHistoryId).toHaveBeenCalledWith(null, { preserveServerChatId: false })
+    expect(playgroundFormMessageOptionState.value.setMessages).toHaveBeenCalledWith([])
+    expect(playgroundFormMessageOptionState.value.setServerChatId).toHaveBeenCalledWith(null)
+    expect(chatModelSettingsState.updateSettings).toHaveBeenCalledOnce()
+  })
+
+  it("keeps the tracked chat and generation settings when identity persistence rejects", async () => {
+    const user = userEvent.setup()
+    playgroundFormMessageOptionState.value.serverChatId = "chat-original"
+    selectedAssistantMock.setSelectedAssistant.mockRejectedValueOnce(new Error("storage unavailable"))
+    render(<PlaygroundForm droppedFiles={[]} />)
+    await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
+    await user.click(await screen.findByRole("button", { name: "Apply Persona setup" }))
+    await screen.findByText("Apply failed")
+    expect(playgroundFormMessageOptionState.value.setHistoryId).not.toHaveBeenCalled()
+    expect(playgroundFormMessageOptionState.value.setMessages).not.toHaveBeenCalled()
+    expect(chatModelSettingsState.updateSettings).not.toHaveBeenCalled()
+  })
+
+  it("clears identity with one awaited canonical selection write", async () => {
+    const user = userEvent.setup()
+    render(<PlaygroundForm droppedFiles={[]} />)
+    await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
+    await user.click(await screen.findByRole("button", { name: "Apply clear identity" }))
+    await screen.findByText("Applied")
+    expect(selectedAssistantMock.setSelectedAssistant).toHaveBeenCalledExactlyOnceWith(null)
+  })
+
   it("clears a custom override only when the selected system template identity changes", async () => {
     const user = userEvent.setup()
     playgroundFormMessageOptionState.value = {

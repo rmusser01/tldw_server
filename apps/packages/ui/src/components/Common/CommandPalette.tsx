@@ -7,6 +7,7 @@ import React, {
   useMemo
 } from "react"
 import { createPortal } from "react-dom"
+import { useBuddyManagementStore } from "@/store/buddy-management"
 import { useLocation, useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import {
@@ -565,8 +566,26 @@ export function CommandPalette({
 
   // Combine all commands
   const allCommands = useMemo(() => {
-    return [...defaultCommands, ...additionalCommands, ...settingCommands]
-  }, [defaultCommands, additionalCommands, settingCommands])
+    const buddyCommand: CommandItem = {
+      id: "buddy-persona-management",
+      label: t("sidepanel:buddyManagement.title", {
+        defaultValue: "Buddy & Persona Management"
+      }),
+      icon: <MessageSquare size={18} />,
+      category: "action",
+      keywords: ["buddy", "persona", "companion", "workspace"],
+      action: () => {
+        setOpen(false)
+        useBuddyManagementStore.getState().show()
+      }
+    }
+    return [
+      buddyCommand,
+      ...defaultCommands,
+      ...additionalCommands,
+      ...settingCommands
+    ]
+  }, [defaultCommands, additionalCommands, settingCommands, t])
 
   const getCanonicalCommandTargetPath = useCallback((targetPath: string) => {
     if (targetPath === "/settings/mcp-hub") return "/mcp-hub"

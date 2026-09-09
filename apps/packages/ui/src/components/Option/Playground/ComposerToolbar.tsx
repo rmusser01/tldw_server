@@ -1,4 +1,5 @@
 import { AssistantSelect } from "@/components/Common/AssistantSelect"
+import { BuddyManagementButton } from "@/components/Common/PersonaBuddy/BuddyManagementButton"
 import { Button as TldwButton } from "@/components/Common/Button"
 import { PromptSelect } from "@/components/Common/PromptSelect"
 import {
@@ -936,6 +937,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           className="flex min-w-0 flex-wrap items-center justify-end gap-2">
           {modelUsageBadge}
           <ComposerToolbarOverflow
+            serverChatId={serverChatId}
             isProMode={isProMode}
             isConnectionReady={isConnectionReady}
             contextToolsOpen={contextToolsOpen}
@@ -982,6 +984,10 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           {promptSelectControl}
           {characterSelectControl}
           {rolePlaySetupButton}
+          <BuddyManagementButton
+            target={serverChatId ? { scope_type: "conversation", scope_id: serverChatId } : null}
+            onConversationSettings={providedRolePlayActions?.onOpenRolePlaySetup}
+          />
         </div>
         <div
           role="group"
@@ -1058,6 +1064,10 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
             {promptSelectControl}
             {characterSelectControl}
             {rolePlaySetupButton}
+            <BuddyManagementButton
+              target={serverChatId ? { scope_type: "conversation", scope_id: serverChatId } : null}
+              onConversationSettings={providedRolePlayActions?.onOpenRolePlaySetup}
+            />
           </div>
         </section>
         <section

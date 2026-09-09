@@ -41,7 +41,7 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({
   selectedPersonaName,
   personaCount,
   connected,
-  sessionId,
+  sessionId: _sessionId,
   setup = null,
   onStartSetup,
   onResumeSetup,
@@ -62,7 +62,7 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({
   return (
     <div className="space-y-3">
       <div className="rounded-lg border border-border bg-surface p-3">
-        <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+        <div className="text-base font-semibold text-text">
           {t("sidepanel:personaGarden.profile.heading", {
             defaultValue: "Persona Profile"
           })}
@@ -71,15 +71,8 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({
           <div>
             <div className="font-medium">
               {selectedPersonaName ||
-                selectedPersonaId ||
                 t("sidepanel:personaGarden.profile.noneSelected", {
                   defaultValue: "No persona selected"
-                })}
-            </div>
-            <div className="text-xs text-text-muted">
-              {selectedPersonaId ||
-                t("sidepanel:personaGarden.profile.noneId", {
-                  defaultValue: "No persona id"
                 })}
             </div>
           </div>
@@ -99,19 +92,12 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({
                     defaultValue: "Session disconnected"
                   })}
             </span>
-            {sessionId ? (
-              <span>
-                {t("sidepanel:personaGarden.profile.activeSession", {
-                  defaultValue: "Active session: {{sessionId}}",
-                  sessionId: sessionId.slice(0, 8)
-                })}
-              </span>
-            ) : null}
+
           </div>
           <p className="text-xs text-text-muted">
             {t("sidepanel:personaGarden.profile.description", {
               defaultValue:
-                "Profile management remains additive in this pass. Live selection and session controls stay on the Live Session tab."
+                "Edit this persona’s voice, behavior, and setup. Your connected conversation keeps its current persona."
             })}
           </p>
         </div>

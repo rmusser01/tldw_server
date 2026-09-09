@@ -699,8 +699,8 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 65  # Schema v65 adds character-conversation resume state
-    _POSTGRES_SCHEMA_VERSION = 65
+    _CURRENT_SCHEMA_VERSION = 66  # Schema v66 adds independent Buddy profiles and attachments
+    _POSTGRES_SCHEMA_VERSION = 66
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
     _NOTE_TASK_V60_TABLES = (
@@ -8380,6 +8380,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (62, "_migrate_from_v62_to_v63_sqlite"),
             (63, "_migrate_from_v63_to_v64_sqlite"),
             (64, "_migrate_from_v64_to_v65"),
+            (65, "_migrate_from_v65_to_v66"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -17419,6 +17420,47 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def _migration_v65_checkpoint(self, stage: str) -> None:
         """No-op failpoint used to verify atomic v65 migrations."""
 
+    def _migrate_from_v65_to_v66(self, conn: sqlite3.Connection) -> None:
+        """Create principal-owned Buddy snapshots without changing Persona rows."""
+        from tldw_Server_API.app.core.DB_Management.Buddy_DB import BUDDY_SCHEMA_SQL
+        from tldw_Server_API.app.core.DB_Management.Buddy_Turns_DB import BUDDY_TURNS_SCHEMA_SQL
+
+        for statement in split_sql_statements(BUDDY_SCHEMA_SQL + BUDDY_TURNS_SCHEMA_SQL):
+            conn.execute(statement)
+        conn.execute(
+            "UPDATE db_schema_version SET version = 66 WHERE schema_name = ? AND version = 65",
+            (self._SCHEMA_NAME,),
+        )
+
+    def _migrate_from_v65_to_v66_postgres(self, conn: Any) -> None:
+        """Create Buddy storage and its tenant policies in the caller transaction."""
+        from tldw_Server_API.app.core.DB_Management.Buddy_DB import BUDDY_SCHEMA_SQL
+        from tldw_Server_API.app.core.DB_Management.Buddy_Turns_DB import BUDDY_TURNS_SCHEMA_SQL
+
+        for statement in split_sql_statements(BUDDY_SCHEMA_SQL + BUDDY_TURNS_SCHEMA_SQL):
+            self.backend.execute(statement, connection=conn)
+        for table in (
+            "buddy_profiles",
+            "buddy_assets",
+            "buddy_attachments",
+            "buddy_result_acknowledgements",
+            "buddy_turn_owners",
+            "buddy_turns",
+        ):
+            self.backend.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY", connection=conn)
+            self.backend.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY", connection=conn)
+            self.backend.execute(
+                f"CREATE POLICY {table}_tenant_isolation ON {table} "
+                "USING (user_id = current_setting('app.current_user_id', true)) "
+                "WITH CHECK (user_id = current_setting('app.current_user_id', true))",
+                connection=conn,
+            )
+        self.backend.execute(
+            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = %s",
+            (66, self._SCHEMA_NAME, 65),
+            connection=conn,
+        )
+
     def _migrate_from_v64_to_v65(self, conn: sqlite3.Connection) -> None:
         """Migrate schema from V64 to V65 (character resume snapshot state)."""
         logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V64 to V65 for DB: {self.db_path_str}...")
@@ -20244,6 +20286,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 65 and current_db_version == 64:
                         self._migrate_from_v64_to_v65(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 66 and current_db_version == 65:
+                        self._migrate_from_v65_to_v66(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -20687,6 +20732,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 65 and current_db_version == 64:
                     self._migrate_from_v64_to_v65(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 66 and current_db_version == 65:
+                    self._migrate_from_v65_to_v66(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -24693,6 +24741,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if target_version >= 65 and current_version < 65:
                 self._migrate_from_v64_to_v65_postgres(conn)
                 current_version = 65
+            if target_version >= 66 and current_version < 66:
+                self._migrate_from_v65_to_v66_postgres(conn)
+                current_version = 66
             self._runtime_schema_version = current_version
 
             if current_version > target_version:

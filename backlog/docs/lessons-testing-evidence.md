@@ -1,5 +1,33 @@
 # Testing Evidence Lessons
 
+## Route continuity needs the real application layout
+
+**Incident (TASK-13226.4, 2026-09-08):** Buddy component tests passed with drafts
+owned by a shared Host, but actual Next Persona→Notes navigation unmounted that
+Host inside WebLayout. The attachment reloaded while its selected conversation
+and unsent draft disappeared. An authenticated app-level owner above replaceable
+route/readiness children preserved selection, draft and paused speech controls.
+
+**Evidence and rule:** Verify actual client-side navigation with a non-default
+conversation, an unsent draft and enabled controls. Reopening the same component
+or checking that a saved attachment reappears does not prove session continuity.
+Keep account-change and demo-state clearing checks alongside persistence checks.
+The final rendered route check also confirmed one Buddy and no legacy duplicate.
+
+## Shared SQL must match PostgreSQL query and parameter adaptation
+
+**Incident (TASK-13226.3, 2026-09-08):** Independent Buddy SQLite tests passed,
+but review found its shared migration declared `deleted INTEGER` while the ChaCha
+adapter rewrote `deleted = 0` to `deleted = FALSE`. Profile updates also bound an
+integer deletion value, which the adapter leaves unchanged. New schema and bound
+parameter regressions failed on both mismatches.
+
+**Evidence and rule:** A boolean column and bound Python booleans fixed the
+contract. The real PostgreSQL 18 migration and authenticated API CRUD, attachment,
+activity and acknowledgement test then passed. A schema-catalog check alone is
+insufficient: execute reads and writes through the production query adapter on
+each supported backend, including non-default values such as soft deletion.
+
 ## Background recognition changes the meaning of VAD completion
 
 **Incident (TASK-13208, 2026-09-06):** Moving Persona Whisper inference off the

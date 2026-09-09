@@ -35,6 +35,16 @@ const OptionLayout = dynamic(
   { ssr: false }
 )
 
+// Buddy interaction state belongs to the authenticated app, outside route
+// layouts and readiness/first-run transitions that can replace their children.
+const IndependentBuddyHost = dynamic(
+  () =>
+    import("@/components/Common/PersonaBuddy/IndependentBuddyHost").then(
+      (module) => module.IndependentBuddyHost
+    ),
+  { ssr: false }
+)
+
 // Ordered to match high-traffic navigation:
 // - Route-registry eager imports (chat/media/media-multi/research)
 // - Default sidebar shortcut selections (prompts/characters/dictionaries/world-books/knowledge)
@@ -416,6 +426,13 @@ export default function App({ Component, pageProps }: AppProps) {
   const enableNotifications =
     authResolved && isAuthenticated && !isPublicAuthRoute && !isSetupRoute
 
+  const enableIndependentBuddy =
+    authResolved &&
+    isAuthenticated &&
+    !isPublicAuthRoute &&
+    !isSetupRoute &&
+    !isSidepanelDebugRoute
+
   if (!authResolved) {
     return <PageAssistLoader label="Loading..." autoFocus={false} />
   }
@@ -442,6 +459,11 @@ export default function App({ Component, pageProps }: AppProps) {
     <AppProviders enableNotifications={enableNotifications}>
       <ConfigurationGuard>
         <BackendRecoveryUiProvider routeRecoveryEnabled>
+          {enableIndependentBuddy ? (
+            <ErrorBoundary>
+              <IndependentBuddyHost />
+            </ErrorBoundary>
+          ) : null}
           <ErrorBoundary>
             <ServerReadinessGate
               bypass={shouldBypassGates}

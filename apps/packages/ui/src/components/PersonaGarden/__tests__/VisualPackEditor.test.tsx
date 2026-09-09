@@ -32,6 +32,12 @@ const mocks = vi.hoisted(() => ({
   )
 }))
 
+// Artwork transport and image-load gating are exercised in BuddyStarterCatalogPicker.preview.test.tsx.
+vi.mock("../BuddyStarterArtwork", () => ({ BuddyStarterArtwork: ({ title, onReadyChange }: { title: string; onReadyChange: (ready: boolean) => void }) => {
+  React.useEffect(() => { onReadyChange(true) }, [onReadyChange])
+  return <div>{title} preview</div>
+} }))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (...args: Parameters<typeof mocks.translate>) => mocks.translate(...args)
@@ -81,6 +87,8 @@ const findGuidedBuilder = async () => {
 
 const selectBuddyBuilderSource = async (name: string) => {
   const sourcePicker = await screen.findByTestId("buddy-builder-source-picker")
+  const disclosure = sourcePicker.closest("details")
+  if (disclosure && !disclosure.open) fireEvent.click(disclosure.querySelector("summary")!)
   fireEvent.click(within(sourcePicker).getByRole("button", { name }))
 }
 
@@ -314,7 +322,7 @@ describe("VisualPackEditor", () => {
     )
 
     const builder = await findGuidedBuilder()
-    expect(builder).toHaveTextContent("Buddy builder")
+    expect(builder).toHaveTextContent("Choose a ready-made Buddy")
     expect(builder).toHaveTextContent("Search Lens Buddy")
   })
 
@@ -1754,33 +1762,10 @@ describe("VisualPackEditor", () => {
     const picker = await screen.findByTestId("buddy-builder-starter-alt-starter")
     expect(picker).toHaveTextContent("Alt Starter")
     expect(picker).toHaveTextContent("Alternate bundled starter")
-    expect(picker).toHaveTextContent("sprite_frames")
-    expect(picker).toHaveTextContent("alt")
-    expect(picker).toHaveTextContent("bundled-alt")
-    expect(picker).toHaveTextContent(/scaffold/i)
-    expect(picker).toHaveTextContent(/intermediate/i)
-    expect(picker).toHaveTextContent(/neutral anchor/i)
-    expect(picker).toHaveTextContent(/static talking reaction sheet/i)
-    expect(picker).toHaveTextContent("Scaffold fixture only")
-    expect(picker).toHaveTextContent("Secondary motion pass still needs review")
-    expect(mocks.translate).toHaveBeenCalledWith(
-      "sidepanel:personaGarden.visuals.metadata.productionStatus.scaffold",
-      expect.objectContaining({ defaultValue: "Scaffold" })
-    )
-    expect(mocks.translate).toHaveBeenCalledWith(
-      "sidepanel:personaGarden.visuals.metadata.complexityTier.intermediate",
-      expect.objectContaining({ defaultValue: "Intermediate" })
-    )
-    expect(mocks.translate).toHaveBeenCalledWith(
-      "sidepanel:personaGarden.visuals.setup.neutralAnchorRequired",
-      expect.objectContaining({ defaultValue: "Neutral anchor required" })
-    )
-    expect(mocks.translate).toHaveBeenCalledWith(
-      "sidepanel:personaGarden.visuals.setup.expectedAssetsLabel",
-      expect.objectContaining({ defaultValue: "Expected assets:" })
-    )
+    expect(picker).toHaveTextContent("Template only. Add artwork before activation.")
+    fireEvent.click(screen.getByText("Custom artwork templates"))
 
-    fireEvent.click(within(picker).getByRole("button", { name: "Copy production packet" }))
+    fireEvent.click(within(picker).getByRole("button", { name: "Copy template as draft" }))
 
     await waitFor(() =>
       expect(screen.getByTestId("persona-visual-pack-select")).toHaveValue(
@@ -2636,9 +2621,9 @@ describe("VisualPackEditor", () => {
     expect(emptyState).toHaveTextContent(
       "Garden Helper's Persona Buddy does not have a visual pack yet."
     )
-    expect(emptyState).toHaveTextContent("Create a draft visual pack first.")
+    expect(emptyState).toHaveTextContent("Choose a ready-made Buddy above, or create a custom draft here.")
     expect(emptyState).toHaveTextContent(
-      "After a draft exists, upload frames, map states, import or export packs, queue generation, review candidates, and activate a valid pack."
+      "Custom drafts support uploaded artwork, state animations, and generation. Review and activate when ready."
     )
     expect(emptyState).not.toHaveTextContent("VN")
     expect(emptyState).not.toHaveTextContent("CYOA")

@@ -444,6 +444,45 @@ describe("SidepanelPersona", () => {
     expect(screen.getByText("Persona unavailable")).toBeInTheDocument()
   })
 
+
+  it("keeps the live session and transcript while changing the persistent editing persona", async () => {
+    mocks.location.search = "?persona_id=research_assistant&tab=live"
+    mocks.getConfig.mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "single-user", apiKey: "test" })
+    mocks.fetchWithAuth.mockImplementation((path: string, options: any) => {
+      const data = path.includes("/catalog") ? [
+        { id: "research_assistant", name: "Research Assistant" },
+        { id: "writing-helper", name: "Writing Helper" }
+      ] : path.includes("/profiles/") ? { id: path.split("/").pop(), version: 1, voice_defaults: {}, setup: { status: "completed", version: 1, current_step: "test", completed_steps: ["persona", "voice", "commands", "safety", "test"] } }
+        : path.endsWith("/session") && options?.method === "POST" ? { session_id: "session-research", persona_id: "research_assistant" }
+        : path.includes("/sessions/session-research") ? { session_id: "session-research", persona_id: "research_assistant", turns: [] }
+        : []
+      return Promise.resolve({ ok: true, status: 200, json: async () => data })
+    })
+    render(<SidepanelPersona shell="options" />)
+    await waitForLiveSessionPanel()
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1))
+    const ws = MockWebSocket.instances[0]
+    act(() => ws.emitOpen())
+    await screen.findByRole("button", { name: /Disconnect/ })
+    act(() => ws.emitMessage(JSON.stringify({ event: "assistant_delta", text_delta: "Still here to help" })))
+    act(() => ws.emitMessage(JSON.stringify({ type: "tool_plan", plan_id: "plan-research", steps: [{ idx: 0, tool: "search_notes", description: "Search research notes" }] })))
+    const editor = screen.getByRole("combobox", { name: "Editing persona" })
+    fireEvent.change(editor, { target: { value: "writing-helper" } })
+    await waitFor(() => expect(editor).toHaveValue("writing-helper"))
+    expect(ws.close).not.toHaveBeenCalled()
+    expect(screen.getByText("Still here to help")).toBeVisible()
+    expect(screen.getByTestId("persona-live-identity")).toHaveTextContent("Research Assistant")
+    expect(readBuddyShellContext().active_persona_id).toBe("research_assistant")
+    expect(screen.getByText("Pending tool plan")).toBeVisible()
+    fireEvent.change(screen.getByRole("textbox", { name: "Message persona" }), { target: { value: "Continue the research" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    expect(getSentPayloads(ws)).toContainEqual(expect.objectContaining({ type: "user_message", session_id: "session-research", text: "Continue the research" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Profiles" }))
+    expect(screen.getByRole("combobox", { name: "Editing persona" })).toHaveValue("writing-helper")
+    expect(ws.close).not.toHaveBeenCalled()
+  })
+
   it("renders Persona Garden framing while keeping live session controls", async () => {
     render(<SidepanelPersona />)
 
@@ -2789,7 +2828,7 @@ describe("SidepanelPersona", () => {
     expect(profilePatches).toEqual([])
   })
 
-  it("retires the former live session when setup chooses a different Persona", async () => {
+  it("keeps the live session when setup edits another Persona and starts the next connection without the former resume target", async () => {
     mocks.location.search = "?persona_id=research_assistant&tab=live"
     mocks.getConfig.mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "single-user", apiKey: "" })
     let researchReads = 0
@@ -2819,11 +2858,13 @@ describe("SidepanelPersona", () => {
     act(() => { MockWebSocket.instances[0].emitOpen() })
     fireEvent.click(await screen.findByRole("button", { name: "Use Garden Helper persona" }))
     await waitFor(() => expect(screen.queryByTestId("assistant-setup-overlay")).not.toBeInTheDocument())
-    expect(screen.queryByRole("button", { name: "Disconnect", exact: true })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Disconnect/ })).toBeInTheDocument()
     act(() => { MockWebSocket.instances[0].emitMessage(JSON.stringify({
       event: "assistant_delta", session_id: "old-persona-session", text_delta: "Late former Persona reply"
     })) })
-    expect(screen.queryByText("Late former Persona reply")).not.toBeInTheDocument()
+    expect(screen.getByText("Late former Persona reply")).toBeVisible()
+    expect(MockWebSocket.instances[0].close).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: /Disconnect/ }))
     fireEvent.click(screen.getByRole("button", { name: "Connect", exact: true }))
     await waitFor(() => expect(connections).toHaveLength(2))
     expect(connections[1].persona_id).toBe("garden-helper")

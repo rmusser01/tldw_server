@@ -1,0 +1,130 @@
+"""Authenticated acceptance and observation of process-owned Buddy work."""
+
+from __future__ import annotations
+
+import asyncio
+from contextlib import asynccontextmanager, contextmanager
+from typing import Annotated, Any, Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.schemas.buddy_turns import BuddyTurn, BuddyTurnCreate, BuddyTurnList
+from tldw_Server_API.app.core.Buddy.service import BuddyService
+from tldw_Server_API.app.core.Buddy.turns import BuddyQueueFullError, BuddyTurnRuntime
+from tldw_Server_API.app.core.DB_Management.Buddy_DB import BuddyConflictError, BuddyNotFoundError
+from tldw_Server_API.app.core.DB_Management.Buddy_Turns_DB import BuddyRuntimeBusyError, BuddyTurnRepository
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+
+@asynccontextmanager
+async def _lifespan(app: Any):
+    yield
+    runtime = getattr(app.state, "buddy_turn_runtime", None)
+    if runtime is not None:
+        await runtime.close()
+
+
+router = APIRouter(prefix="/turns", lifespan=_lifespan)
+ClientSlot = Annotated[str, Query(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")]
+
+
+def _service(
+    user: User = Depends(get_request_user), db: CharactersRAGDB = Depends(get_chacha_db_for_user)
+) -> BuddyService:
+    if user.id is None:
+        raise HTTPException(401, "Authentication required")
+    return BuddyService(db, str(user.id))
+
+
+@contextmanager
+def _errors():
+    try:
+        yield
+    except BuddyNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except BuddyConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except BuddyQueueFullError as exc:
+        raise HTTPException(429, str(exc)) from exc
+    except BuddyRuntimeBusyError as exc:
+        raise HTTPException(503, str(exc), headers={"Retry-After": "5"}) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+def _response(row: dict[str, Any]) -> dict[str, Any]:
+    return {field: row[field] for field in BuddyTurn.model_fields}
+
+
+@router.post("", response_model=BuddyTurn, status_code=202)
+async def accept_turn(
+    body: BuddyTurnCreate,
+    request: Request,
+    client_slot: ClientSlot = "default",
+    service: BuddyService = Depends(_service),
+) -> dict[str, Any]:
+    """Retain work before returning; browser disconnect is never Stop."""
+    runtime = getattr(request.app.state, "buddy_turn_runtime", None)
+    if runtime is None or runtime.closed:
+        runtime = BuddyTurnRuntime(request.app)
+        request.app.state.buddy_turn_runtime = runtime
+    # Forward only admission context, retaining trusted-proxy handling and CSRF.
+    headers = {
+        name: ",".join(request.headers.getlist(name))
+        for name in (
+            "authorization",
+            "x-api-key",
+            "api-key",
+            "cookie",
+            "x-csrf-token",
+            "origin",
+            "host",
+            "user-agent",
+            "forwarded",
+            "x-forwarded-for",
+            "x-real-ip",
+            "x-forwarded-host",
+            "x-forwarded-proto",
+            "x-forwarded-port",
+        )
+        if request.headers.getlist(name)
+    }
+    client = (request.client.host, request.client.port) if request.client else None
+    with _errors():
+        return _response(await runtime.accept(service, client_slot, body, headers, client))
+
+
+@router.get("", response_model=BuddyTurnList)
+async def list_turns(
+    client_slot: ClientSlot = "default",
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    status: Literal["active"] | None = Query(None),
+    service: BuddyService = Depends(_service),
+) -> dict[str, Any]:
+    """Read the principal's ledger even after a routing preference is detached."""
+    repository = BuddyTurnRepository(service.db, service.user_id)
+    await asyncio.to_thread(repository.expire_interrupted)
+    rows = await asyncio.to_thread(repository.list_turns, client_slot, limit, offset, active_only=status == "active")
+    return {"turns": [_response(row) for row in rows], "limit": limit, "offset": offset}
+
+
+@router.get("/{turn_id}", response_model=BuddyTurn)
+async def get_turn(turn_id: str, service: BuddyService = Depends(_service)) -> dict[str, Any]:
+    repository = BuddyTurnRepository(service.db, service.user_id)
+    with _errors():
+        await asyncio.to_thread(repository.expire_interrupted)
+        return _response(await asyncio.to_thread(repository.get, turn_id))
+
+
+@router.post("/{turn_id}/stop", response_model=BuddyTurn)
+async def stop_turn(turn_id: str, request: Request, service: BuddyService = Depends(_service)) -> dict[str, Any]:
+    """Revoke publication without retrying or claiming to undo provider effects."""
+    with _errors():
+        result = await asyncio.to_thread(BuddyTurnRepository(service.db, service.user_id).stop, turn_id)
+        runtime = getattr(request.app.state, "buddy_turn_runtime", None)
+        if runtime is not None and result["status"] == "stopped":
+            runtime.cancel_dispatch(turn_id)
+        return _response(result)

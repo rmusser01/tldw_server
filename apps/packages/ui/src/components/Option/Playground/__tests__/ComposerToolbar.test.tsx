@@ -10,19 +10,15 @@ const promptAssistComposerMock = vi.hoisted(() => vi.fn())
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, fallback?: string) => fallback || key
+    t: (key: string, fallback?: string | { defaultValue?: string }) =>
+      (typeof fallback === "string" ? fallback : fallback?.defaultValue) || key
   })
 }))
 
 vi.mock("antd", () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  Modal: ({
-    open,
-    children
-  }: {
-    open?: boolean
-    children: React.ReactNode
-  }) => (open ? <div data-testid="toolbar-modal">{children}</div> : null)
+  Modal: ({ open, children }: { open?: boolean; children: React.ReactNode }) =>
+    open ? <div data-testid="toolbar-modal">{children}</div> : null
 }))
 
 vi.mock("@plasmohq/storage/hook", () => ({
@@ -73,7 +69,9 @@ vi.mock("@/components/Common/Button", () => ({
 
 vi.mock("../playground-features", () => ({
   ParameterPresets: () => <div data-testid="parameter-presets" />,
-  ParameterPresetsDropdown: () => <div data-testid="parameter-presets-dropdown" />,
+  ParameterPresetsDropdown: () => (
+    <div data-testid="parameter-presets-dropdown" />
+  ),
   SystemPromptTemplatesButton: () => <button type="button">Templates</button>,
   SystemPromptTemplatesModal: () => null,
   SessionCostEstimation: () => <div data-testid="session-cost" />
@@ -149,10 +147,30 @@ const createProps = (
 
 describe("ComposerToolbar web search", () => {
   it.each([
-    { label: "legacy casual", isProMode: false, isMobile: false, optionsExpanded: true },
-    { label: "desktop pro", isProMode: true, isMobile: false, optionsExpanded: true },
-    { label: "mobile", isProMode: false, isMobile: true, optionsExpanded: true },
-    { label: "collapsed mobile", isProMode: false, isMobile: true, optionsExpanded: false }
+    {
+      label: "legacy casual",
+      isProMode: false,
+      isMobile: false,
+      optionsExpanded: true
+    },
+    {
+      label: "desktop pro",
+      isProMode: true,
+      isMobile: false,
+      optionsExpanded: true
+    },
+    {
+      label: "mobile",
+      isProMode: false,
+      isMobile: true,
+      optionsExpanded: true
+    },
+    {
+      label: "collapsed mobile",
+      isProMode: false,
+      isMobile: true,
+      optionsExpanded: false
+    }
   ])("renders one composer prompt action for $label", (layout) => {
     const promptAssistComposer = {
       form: {
@@ -182,7 +200,9 @@ describe("ComposerToolbar web search", () => {
       />
     )
 
-    expect(screen.getAllByRole("button", { name: "Improve prompt" })).toHaveLength(1)
+    expect(
+      screen.getAllByRole("button", { name: "Improve prompt" })
+    ).toHaveLength(1)
     expect(promptAssistComposerMock).toHaveBeenCalledWith(
       expect.objectContaining({
         ...promptAssistComposer,
@@ -285,9 +305,7 @@ describe("ComposerToolbar web search", () => {
       />
     )
 
-    expect(
-      screen.getByRole("button", { name: "Attach image" })
-    ).toBeVisible()
+    expect(screen.getByRole("button", { name: "Attach image" })).toBeVisible()
     expect(screen.queryByText("Model selector")).toBeNull()
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull()
   })

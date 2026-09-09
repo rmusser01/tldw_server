@@ -574,6 +574,13 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
 
     for persona_notes_spec in (
         ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.buddies",
+            log_name="buddies",
+            prefix=f"{API_V1_PREFIX}/buddies",
+            tags=("buddies",),
+            skip_context=minimal_skip_context,
+        ),
+        ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.persona",
             log_name="persona",
             prefix=f"{API_V1_PREFIX}/persona",

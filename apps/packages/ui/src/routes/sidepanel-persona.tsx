@@ -177,8 +177,8 @@ const SidepanelPersona = ({
     : t("sidepanel:persona.title", "Persona Garden")
   const routeRootClassName =
     shell === "sidepanel"
-      ? "flex bg-bg flex-col min-h-screen mx-auto max-w-7xl"
-      : "flex bg-bg flex-col gap-3 mx-auto max-w-7xl"
+      ? "flex min-w-0 w-full bg-bg flex-col min-h-screen mx-auto max-w-7xl"
+      : "flex min-w-0 w-full bg-bg flex-col gap-3 mx-auto max-w-7xl"
 
   const wsRef = React.useRef<WebSocket | null>(null)
   const manuallyClosingRef = React.useRef(false)
@@ -203,6 +203,7 @@ const SidepanelPersona = ({
   >(null)
   const [savedPersonaBuddySummaryPersonaId, setSavedPersonaBuddySummaryPersonaId] =
     React.useState<string | null>(null)
+  const [liveSessionBuddySummary, setLiveSessionBuddySummary] = React.useState<PersonaInfo["buddy_summary"] | null>(null)
   const [savedPersonaProfileVersion, setSavedPersonaProfileVersion] = React.useState<
     number | null
   >(null)
@@ -270,7 +271,29 @@ const SidepanelPersona = ({
   }, [activeTab])
 
   React.useEffect(() => {
-    const activePersonaId = String(selectedPersonaId || "").trim() || null
+    if (!connected) setLiveSessionBuddySummary(null)
+    else if (savedPersonaBuddySummaryPersonaId === activeSessionPersonaId) {
+      setLiveSessionBuddySummary(savedPersonaBuddySummary)
+    }
+  }, [activeSessionPersonaId, connected, savedPersonaBuddySummary, savedPersonaBuddySummaryPersonaId])
+
+  React.useEffect(() => {
+    if (isCompanionMode || !isOnline || !capabilities?.hasPersona) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const response = await tldwClient.fetchWithAuth("/api/v1/persona/catalog", { method: "GET" })
+        if (!response?.ok) return
+        const personas = await response.json()
+        if (!cancelled && Array.isArray(personas)) setCatalog(personas)
+      } catch { /* Profile and connection surfaces provide recovery. */ }
+    })()
+    return () => { cancelled = true }
+  }, [capabilities?.hasPersona, isCompanionMode, isOnline])
+
+  React.useEffect(() => {
+    const activePersonaId = String((connected ? activeSessionPersonaId : selectedPersonaId) || "").trim() || null
+    const activeCatalogPersona = catalog.find((persona) => persona.id === activePersonaId)
     const personaSurfaceActive =
       !isCompanionMode &&
       !capsLoading &&
@@ -288,10 +311,11 @@ const SidepanelPersona = ({
         position_bucket:
           shell === "sidepanel" ? "sidepanel-desktop" : "web-desktop",
         buddy_summary:
+          (connected ? liveSessionBuddySummary : null) ??
           (savedPersonaBuddySummaryPersonaId === activePersonaId
             ? savedPersonaBuddySummary
             : null) ??
-          selectedCatalogPersona?.buddy_summary ??
+          activeCatalogPersona?.buddy_summary ??
           null,
         live_session_id: sessionId,
         live_voice_state: buddyShellLiveContext.live_voice_state,
@@ -315,9 +339,13 @@ const SidepanelPersona = ({
     isCompanionMode,
     isOnline,
     selectedPersonaId,
+    activeSessionPersonaId,
+    connected,
+    catalog,
     selectedCatalogPersona,
     savedPersonaBuddySummary,
     savedPersonaBuddySummaryPersonaId,
+    liveSessionBuddySummary,
     setBuddyShellRenderContext,
     shell,
     sessionId,
@@ -411,10 +439,10 @@ const SidepanelPersona = ({
   // ── State docs hook ──
   const stateDocsGetTargetPersonaId = React.useCallback(
     (override?: string) => {
-      const personaId = String(override || activeSessionPersonaId || selectedPersonaId || "").trim()
+      const personaId = String(override || selectedPersonaId || "").trim()
       return personaId || null
     },
-    [activeSessionPersonaId, selectedPersonaId]
+    [selectedPersonaId]
   )
   const stateDocs = usePersonaStateDocs({
     getTargetPersonaId: stateDocsGetTargetPersonaId,
@@ -566,7 +594,6 @@ const SidepanelPersona = ({
     capsLoading,
     routeBootstrapSessionId: routeBootstrap.sessionId,
   })
-  applySetupPersonaSelectionRef.current = liveSession.applyPersonaSelection
   const {
     sessionHistory,
     resumeSessionId,
@@ -599,6 +626,19 @@ const SidepanelPersona = ({
     getTargetPersonaId,
   } = liveSession
 
+  // Editing a profile never changes the authority of an established session.
+  const handleEditingPersonaSelectionChange = (personaId: string) => {
+    if (!personaId || personaId === selectedPersonaId) return
+    if (connected) {
+      if (!stateDocs.confirmDiscardUnsavedStateDrafts("persona_switch")) return
+      liveSession.clearResumeSelection()
+      setSelectedPersonaId(personaId)
+    } else {
+      handlePersonaSelectionChange(personaId)
+    }
+  }
+  applySetupPersonaSelectionRef.current = handleEditingPersonaSelectionChange
+
   // Wire triggerRecoveryReconnect into setupOrch via the ref
   triggerRecoveryReconnectRef.current = triggerRecoveryReconnect
 
@@ -617,9 +657,9 @@ const SidepanelPersona = ({
   const wakeTriggerPhrases = React.useMemo(
     () =>
       normalizeWakeTriggerPhrases(
-        savedPersonaVoiceDefaults?.voice_chat_trigger_phrases
+        (connected ? liveSessionVoiceDefaultsBaseline : savedPersonaVoiceDefaults)?.voice_chat_trigger_phrases
       ),
-    [savedPersonaVoiceDefaults]
+    [connected, liveSessionVoiceDefaultsBaseline, savedPersonaVoiceDefaults]
   )
   const livePersonaId = connected ? activeSessionPersonaId || selectedPersonaId : selectedPersonaId
 
@@ -678,7 +718,7 @@ const SidepanelPersona = ({
     consumeSetupHandoffAction: setupOrch.consumeSetupHandoffAction,
     emitSetupAnalyticsEvent,
     liveVoiceController,
-    personaId: String(selectedPersonaId || "").trim(),
+    personaId: String(livePersonaId || "").trim(),
     personaSetupWizardCurrentStep: setupOrch.personaSetupWizard.currentStep,
     personaSetupWizardIsSetupRequired: setupOrch.personaSetupWizard.isSetupRequired,
     resolvedApprovalSnapshot,
@@ -981,12 +1021,14 @@ const SidepanelPersona = ({
       (isCompanionMode && !capabilities.hasPersonalization))
 
   const selectedPersonaName =
-    selectedCatalogPersona?.name || selectedPersonaId
+    selectedCatalogPersona?.name || t("sidepanel:persona.unnamedPersona", "Unnamed persona")
+  const livePersonaName =
+    catalog.find((persona) => persona.id === livePersonaId)?.name || selectedPersonaName
 
   // ── Route header ──
   const routeHeader =
     shell === "sidepanel" ? (
-      <div className="sticky bg-surface top-0 z-10">
+      <div className="sticky min-h-14 bg-surface top-0 z-10">
         <SidepanelHeaderSimple activeTitle={routeTitle} />
       </div>
     ) : (
@@ -1014,7 +1056,7 @@ const SidepanelPersona = ({
     openSettings()
   }
   const selectedPersonaRuntimeMode = normalizePersonaRuntimeMode(
-    selectedCatalogPersona?.mode
+    catalog.find((persona) => persona.id === livePersonaId)?.mode
   )
   const personaStateContextModeAvailable =
     selectedPersonaRuntimeMode === "persistent_scoped"
@@ -1043,28 +1085,17 @@ const SidepanelPersona = ({
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
         {!isCompanionMode ? (
-          <Select
-            size="small"
-            className="min-w-[180px]"
-            value={selectedPersonaId}
-            disabled={connected}
-            aria-label={t("sidepanel:persona.select", "Select persona")}
-            onChange={(value) => {
-              void liveVoiceController.stopWakeListening("persona_switch")
-              handlePersonaSelectionChange(String(value))
-            }}
-            options={catalog.map((persona) => ({
-              label: persona.name || persona.id,
-              value: persona.id
-            }))}
-            placeholder={t("sidepanel:persona.select", "Select persona")}
-          />
+          <span data-testid="persona-live-identity" className="text-sm font-medium text-text">
+            {connected
+              ? t("sidepanel:persona.connectedWith", "Connected with")
+              : t("sidepanel:persona.startWith", "Start with")}{" "}{livePersonaName}
+          </span>
         ) : null}
         <Select
           data-testid="persona-resume-session-select"
           size="small"
           className="min-w-[180px]"
-          value={resumeSessionId || "__new__"}
+          value={connected ? "__connected__" : resumeSessionId || "__new__"}
           aria-label={t("sidepanel:persona.resume", "Resume session")}
           disabled={connected}
           onChange={(value) => {
@@ -1072,12 +1103,15 @@ const SidepanelPersona = ({
             handleResumeSessionSelectionChange(String(value))
           }}
           options={[
+            ...(connected ? [{ label: t("sidepanel:persona.currentConversation", "Current conversation"), value: "__connected__" }] : []),
             { label: t("sidepanel:persona.newSession", "New session"), value: "__new__" },
             ...(resumeSessionId && !sessionHistory.some((item) => item.session_id === resumeSessionId)
-              ? [{ label: resumeSessionId, value: resumeSessionId }]
+              ? [{ label: t("sidepanel:persona.selectedSession", "Selected conversation"), value: resumeSessionId }]
               : []),
-            ...sessionHistory.map((session) => ({
-              label: session.session_id,
+            ...sessionHistory.map((session, index) => ({
+              label: session.created_at
+                ? new Date(session.created_at).toLocaleString()
+                : `${t("sidepanel:persona.conversation", "Conversation")} ${index + 1}`,
               value: session.session_id
             }))
           ]}
@@ -1154,7 +1188,7 @@ const SidepanelPersona = ({
             {t("sidepanel:persona.disconnect", "Disconnect")}
           </Button>
         )}
-        {sessionId ? <Tag color="blue">{`session: ${sessionId.slice(0, 8)}`}</Tag> : null}
+        {sessionId ? <Tag>{connected ? t("sidepanel:persona.sessionConnected", "Connected") : t("sidepanel:persona.sessionDisconnected", "Disconnected")}</Tag> : null}
         {sessionId ? (
           <Button size="small" onClick={() => void loadSessionHistory()}>
             {t("sidepanel:persona.loadHistory", "Load history")}
@@ -1234,12 +1268,15 @@ const SidepanelPersona = ({
     : undefined
 
   const activeBuddySummary =
-    (savedPersonaBuddySummaryPersonaId === selectedPersonaId
+    (connected ? liveSessionBuddySummary : null) ??
+    (savedPersonaBuddySummaryPersonaId === livePersonaId
       ? savedPersonaBuddySummary
       : null) ??
-    selectedCatalogPersona?.buddy_summary ??
+    catalog.find((persona) => persona.id === livePersonaId)?.buddy_summary ??
     null
-  const personaProfileState: PersonaBuddyProfileState = personaProfileLoading
+  const personaProfileState: PersonaBuddyProfileState = connected && livePersonaId !== selectedPersonaId
+    ? "loaded"
+    : personaProfileLoading
     ? "loading"
     : personaProfileError
       ? "error"
@@ -1265,11 +1302,11 @@ const SidepanelPersona = ({
           : null
   const personaBuddyDiagnostics = buildPersonaBuddyDiagnostics({
     selectedPersona: {
-      id: selectedPersonaId,
-      name: selectedPersonaName
+      id: livePersonaId,
+      name: livePersonaName
     },
     profileState: personaProfileState,
-    profileError: personaProfileError,
+    profileError: livePersonaId === selectedPersonaId ? personaProfileError : null,
     buddySummary: activeBuddySummary,
     capabilities,
     capabilitiesLoading: capsLoading,
@@ -1518,7 +1555,7 @@ const SidepanelPersona = ({
   const liveSessionStatusPanels = (
     <>
       {setupOrch.setupLiveDetour ? (
-        <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-sm text-sky-100">
+        <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-sm text-text">
           <div>
             {t(
               "sidepanel:persona.setupLiveDetourNotice",
@@ -1527,7 +1564,7 @@ const SidepanelPersona = ({
           </div>
           <button
             type="button"
-            className="mt-2 rounded-md border border-sky-500/40 px-3 py-2 text-sm font-medium text-sky-100"
+            className="mt-2 rounded-md border border-sky-500/40 px-3 py-2 text-sm font-medium text-text"
             onClick={setupOrch.handleReturnToSetupFromLiveDetour}
           >
             {t("sidepanel:persona.returnToSetup", "Return to setup")}
@@ -1536,14 +1573,14 @@ const SidepanelPersona = ({
       ) : null}
       {errorBanner}
       {!isCompanionMode ? (
-        <PersonaPolicySummary personaId={selectedPersonaId || null} />
+        <PersonaPolicySummary personaId={livePersonaId || null} />
       ) : null}
       {runtimeApprovalCard}
     </>
   )
 
   const setupVisualDetourReturnPanel = setupOrch.setupVisualDetour ? (
-    <div className="mb-3 rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-sm text-sky-100">
+    <div className="mb-3 rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-sm text-text">
       <div>
         {t(
           "sidepanel:persona.setupVisualDetourNotice",
@@ -1552,7 +1589,7 @@ const SidepanelPersona = ({
       </div>
       <button
         type="button"
-        className="mt-2 rounded-md border border-sky-500/40 px-3 py-2 text-sm font-medium text-sky-100"
+        className="mt-2 rounded-md border border-sky-500/40 px-3 py-2 text-sm font-medium text-text"
         onClick={setupOrch.handleReturnToSetupFromVisualDetour}
       >
         {t("sidepanel:persona.returnToSetup", "Return to setup")}
@@ -1973,6 +2010,7 @@ const SidepanelPersona = ({
       ) : null}
       <div className="flex items-end gap-2">
         <Input.TextArea
+          aria-label={t("sidepanel:persona.messageLabel", "Message persona")}
           value={input}
           autoSize={{ minRows: 2, maxRows: 4 }}
           onChange={(event) => setInput(event.target.value)}
@@ -2095,8 +2133,8 @@ const SidepanelPersona = ({
           selectedPersonaId={selectedPersonaId}
           selectedPersonaName={selectedPersonaName}
           personaCount={catalog.length}
-          connected={connected}
-          sessionId={sessionId}
+          connected={connected && activeSessionPersonaId === selectedPersonaId}
+          sessionId={activeSessionPersonaId === selectedPersonaId ? sessionId : null}
           setup={savedPersonaSetup}
           onStartSetup={setupOrch.handleStartSetup}
           onResumeSetup={setupOrch.handleResumeSetup}
@@ -2371,7 +2409,7 @@ const SidepanelPersona = ({
     <div data-testid="persona-route-root" className={routeRootClassName}>
       {routeHeader}
       {isCompanionMode ? (
-        <div className="flex flex-1 flex-col gap-3 p-3">
+        <div className="flex min-w-0 flex-1 flex-col gap-3 p-3">
           {liveSessionControls}
           {liveSessionStatusPanels}
           {pendingPlanCard}
@@ -2379,10 +2417,27 @@ const SidepanelPersona = ({
           {composerPanel}
         </div>
       ) : (
-        <div className="flex flex-1 flex-col p-3">
+        <div className="flex flex-1 flex-col gap-3 p-3">
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex min-w-48 flex-col gap-1 text-sm text-text">
+              {t("sidepanel:persona.editingPersona", "Editing persona")}
+              <select
+                className="min-h-10 rounded-md border border-border bg-surface px-3 py-2 text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                value={selectedPersonaId}
+                disabled={connecting}
+                onChange={(event) => handleEditingPersonaSelectionChange(event.target.value)}
+              >
+                {!catalog.some((persona) => persona.id === selectedPersonaId) ? <option value={selectedPersonaId}>{selectedPersonaName}</option> : null}
+                {catalog.map((persona) => <option key={persona.id} value={persona.id}>{persona.name || t("sidepanel:persona.unnamedPersona", "Unnamed persona")}</option>)}
+              </select>
+            </label>
+            {connected ? <p className="mb-2 text-sm text-text-muted" role="status">
+              {t("sidepanel:persona.liveSessionContinues", "Your live conversation continues with")} {livePersonaName}.
+            </p> : null}
+          </div>
           {isBuddyReviewDetour ? (
             <div className="flex flex-col gap-3">
-              <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-sm text-sky-100">
+              <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-sm text-text">
                 <div>
                   {t(
                     "sidepanel:persona.buddyReviewSetupNotice",
@@ -2391,7 +2446,7 @@ const SidepanelPersona = ({
                 </div>
                 <button
                   type="button"
-                  className="mt-2 rounded-md border border-sky-500/40 px-3 py-2 text-sm font-medium text-sky-100"
+                  className="mt-2 rounded-md border border-sky-500/40 px-3 py-2 text-sm font-medium text-text"
                   onClick={() =>
                     setDismissedBuddyReviewLocator(buddyReviewLocator)
                   }
