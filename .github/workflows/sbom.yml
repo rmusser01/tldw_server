@@ -204,6 +204,7 @@ jobs:
               "apps/tldw-frontend",
               "apps/extension",
               "apps/packages/ui",
+              "apps/packages/voice-assistant-sdk",
           ):
               manifest = json.loads(Path(directory, "package.json").read_text(encoding="utf-8"))
               group, _, name = manifest["name"].rpartition("/")
@@ -221,6 +222,7 @@ jobs:
               ("", "tldw-frontend"),
               ("", "tldw-assistant"),
               ("@tldw", "ui"),
+              ("@tldw", "voice-assistant-sdk"),
           }
           payload["metadata"]["component"]["components"] = metadata_roots
           path.write_text(

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import re
 import shlex
+import subprocess  # nosec B404 - runs the checked-in workflow's Python block
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -273,6 +276,85 @@ def test_bun_sboms_use_pinned_required_only_cdxgen_profiles() -> None:
     assert "tldw-admin" in admin
     assert 'assert "@playwright/test" not in names' in admin
     assert "SENSITIVE_ENV_MARKERS" in admin
+
+
+@pytest.fixture
+def processed_apps_sbom(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any], list[tuple[str, str]]]:
+    """Run the real workflow metadata block with declared manifests and a synthetic SBOM."""
+    workspace = json.loads((ROOT / "apps/package.json").read_text())
+    manifests = sorted(
+        {
+            directory / "package.json"
+            for pattern in workspace["workspaces"]
+            for directory in (ROOT / "apps").glob(pattern)
+        }
+    )
+    expected = []
+    for manifest_path in manifests:
+        manifest = json.loads(manifest_path.read_text())
+        expected.append((manifest["name"], manifest["version"]))
+        destination = tmp_path / manifest_path.relative_to(ROOT)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(manifest_path.read_bytes())
+
+    payload = {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.6",
+        "serialNumber": "urn:uuid:00000000-0000-4000-8000-000000000001",
+        "version": 1,
+        "metadata": {"component": {"type": "application", "name": "tldw-monorepo", "bom-ref": "root"}},
+        "components": [
+            {
+                "type": "library",
+                "group": "@tldw",
+                "name": "ui",
+                "version": "0.1.0",
+                "purl": "pkg:npm/@tldw/ui@0.1.0",
+                "bom-ref": "ui",
+            },
+            {"type": "library", "name": "eventemitter3", "version": "5.0.4", "bom-ref": "dependency"},
+        ],
+        "dependencies": [{"ref": "root", "dependsOn": ["ui", "dependency"]}],
+    }
+    output = tmp_path / "artifacts/source-sbom/sbom-apps-workspace.cdx.json"
+    output.parent.mkdir(parents=True)
+    output.write_text(json.dumps(payload), encoding="utf-8")
+    blocks = re.findall(
+        r"^python - <<'PY'\n(.*?)^PY$",
+        _run_text(_load(), "generate-apps-workspace"),
+        re.MULTILINE | re.DOTALL,
+    )
+    assert len(blocks) == 1, "expected one workflow metadata-processing block"
+    subprocess.run(  # nosec B603 - trusted repository code, isolated cwd and empty environment
+        [sys.executable, "-c", blocks[0]],
+        cwd=tmp_path,
+        env={},
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return payload, json.loads(output.read_text()), expected
+
+
+def test_apps_sbom_metadata_covers_every_declared_workspace(
+    processed_apps_sbom: tuple[dict[str, Any], dict[str, Any], list[tuple[str, str]]],
+) -> None:
+    """Reject an omitted, duplicated or misidentified workspace, including newly declared ones."""
+    _, result, expected = processed_apps_sbom
+    identities = [
+        ("/".join(filter(None, (item.get("group"), item["name"]))), item["version"])
+        for item in result["metadata"]["component"]["components"]
+    ]
+    assert sorted(identities) == sorted(expected)
+
+
+def test_apps_sbom_metadata_preserves_canonical_inventory(
+    processed_apps_sbom: tuple[dict[str, Any], dict[str, Any], list[tuple[str, str]]],
+) -> None:
+    """Reject metadata processing that changes dependencies or any other generated evidence."""
+    original, result, _ = processed_apps_sbom
+    result["metadata"]["component"].pop("components")
+    assert result == original
 
 
 def test_containerized_source_tools_run_with_minimal_runtime_authority() -> None:
