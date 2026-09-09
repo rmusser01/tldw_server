@@ -200,7 +200,8 @@ def test_rejects_missing_or_incorrect_record(wheel_case, helper, record_mode):
 def test_rejects_duplicate_member(wheel_case, helper):
     wheel, source, provenance, output = wheel_case
     with zipfile.ZipFile(wheel, "a") as archive:
-        archive.writestr("nltk/__init__.py", b"duplicate\n")
+        with pytest.warns(UserWarning, match=r"^Duplicate name: 'nltk/__init__\.py'$"):
+            archive.writestr("nltk/__init__.py", b"duplicate\n")
 
     with pytest.raises(ValueError, match="duplicate wheel member"):
         helper.verify_wheel(wheel, source, provenance, output)
