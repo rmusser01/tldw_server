@@ -56,3 +56,11 @@ Fresh focused verification: voice **2 passed**, image refinement **15 passed** w
 After changed-range formatting and replacing three new broad test annotations, the combined six-file run passed all **58 tests in12.86s**. Pinned ESLint reports zero errors and zero introduced warnings compared with HEAD. The extension formatter has no remaining changes on edited ranges; existing whole-file formatting debt remains.
 
 Independent final source review approved the six-file CI repair with no Critical, Important or minor findings. The reviewer checked the actual consumer contracts and cited history, including Research publication/failure gates and polling generations, the refinement prompt/submit contracts, diagnostics navigation and separate locale copy. Review used the supplied test evidence without rerunning suites.
+
+## Final shard7 synchronization correction
+
+After the six-file repair, CI exposed one timing-sensitive ChatPane diagnostics-card test (1failed/140passed in its141-case shard). Both CI exact-base replays passed; this is not claimed as a baseline failure. A controlled deferred diagnostics response reproduced the same failure locally: observing request dispatch did not guarantee React had published the cards. The test now verifies loading and zero cards, releases the response, awaits rendered output, and requires exactly8cards plus the120-turn summary. Existing successful and forbidden-response checks remain unchanged.
+
+The final affected file passes3tests; the related6-file ChatPane gate passes70tests. Pinned ESLint adds no errors or warnings, and no formatter changes intersect the edited ranges. No production code, timeout, retry, sleep, dependency or schema change was needed.
+
+Independent review approved the final synchronization correction with no actionable findings, confirming actual loading-to-rendered-result synchronization, the stronger eight-of120 bound, and unchanged forbidden-response coverage.

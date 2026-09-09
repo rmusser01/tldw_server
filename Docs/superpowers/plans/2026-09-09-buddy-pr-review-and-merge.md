@@ -25,3 +25,7 @@ Reproduce and resolve the three failing shared frontend CI shards using faithful
 ## Root integration
 
 Confirm latest dev and rebase, retaining independent conflict additions. Run required derived checks after source is frozen, verify new PR head/checks/Qodo state, then merge only once the requested gates are met. The explicit user request authorizes rebase, lease-protected feature-branch updates and merge; no merge to a different base or administrative bypass.
+
+## Task 2 — diagnostics publication race in shard7
+
+The new CI run reports one failing cap-rendering test in ChatPane.stage4.lorebook-activity.test.tsx. It observes request invocation then performs a synchronous DOM read; investigate a response/publication race with a deferred response and verify actual behavior before changing the test. Preserve the bounded eight-card contract and existing authorization tests; do not add sleeps/retries or raise timeouts. Own this test file unless evidence establishes a production defect. Run focused ChatPane cases and changed-scope static checks, freeze, and independently review. No new ADR for test synchronization; existing ADR-005 remains applicable to this PR. Root owns docs/task/git.
