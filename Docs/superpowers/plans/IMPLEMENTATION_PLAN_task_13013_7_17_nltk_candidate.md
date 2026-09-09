@@ -122,6 +122,16 @@ suppression changes. The full Supply_Chain suite was not rerun at this checkpoin
 No candidate wheel, package installation/execution, runtime qualification or
 scanner evidence is produced by this static follow-up. AC2/AC3 remain open.
 
+Subsequent 2026-09-09 regression checkpoint at code commit `862078fcab`:
+the full default Supply_Chain suite passed 715 tests, with five explicit
+Docker/image opt-in skips and five warnings, in 31.67 seconds; process exit 0.
+Independent repository-path preflight found no execution of the restricted
+NLTK runtime controls or FFmpeg history investigation. This suite includes
+other local integration checks. The shared tool environment uses pytest 8.4.1,
+below the declared dev minimum 9.0.3, so supported-environment qualification
+remains open. Evidence, exact scope, warning ownership and live advisory status:
+`Docs/Evidence/TASK-13013.7-remaining-status-2026-09-09.md`.
+
 ### Task 2: Build and exercise separate baseline/candidate wheels
 
 **Files:**

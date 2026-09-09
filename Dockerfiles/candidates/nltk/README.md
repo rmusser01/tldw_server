@@ -71,5 +71,10 @@ This is an artifact identity audit, not dependency-closure verification.
 The existing implementation plan and TASK-13013.7.17 retain the evidence paths,
 review results and platform restriction. Installed-wheel qualification and
 application/scanner evidence remain incomplete; AC2/AC3 stay open and
-`admitted:false` is unchanged. The full Supply_Chain suite was not rerun for
-this static follow-up.
+`admitted:false` is unchanged. A subsequent full default Supply_Chain run at
+code commit `862078fcab` passed 715 tests with five opt-in skips and five
+warnings. Its shared tool environment has pytest 8.4.1, below the repository's
+declared development minimum of 9.0.3; this is regression evidence, not clean
+supported-environment qualification. See
+[`TASK-13013.7-remaining-status-2026-09-09.md`](../../../Docs/Evidence/TASK-13013.7-remaining-status-2026-09-09.md)
+for scope, warning ownership, evidence hashes, and current advisory status.
