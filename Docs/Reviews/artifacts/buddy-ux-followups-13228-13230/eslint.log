@@ -1,0 +1,24 @@
+Pages directory cannot be found at /private/tmp/tldw-server-buddy-persona-ux/pages or /private/tmp/tldw-server-buddy-persona-ux/src/pages. If using a custom path, please configure with the `no-html-link-for-pages` rule in your eslint config file.
+
+/private/tmp/tldw-server-buddy-persona-ux/apps/packages/ui/src/components/Common/PersonaBuddy/BuddyInteraction.tsx
+  169:24  warning  The ref value 'speechGeneration.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'speechGeneration.current' to a variable inside the effect, and use that variable in the cleanup function                       react-hooks/exhaustive-deps
+  280:6   warning  React Hook React.useEffect has missing dependencies: 'attachment', 'conversation', 'label', and 'onAttentionChange'. Either include them or remove the dependency array. If 'onAttentionChange' changes too often, find the parent component that defines it and wrap that definition in useCallback  react-hooks/exhaustive-deps
+  332:6   warning  React Hook React.useEffect has missing dependencies: 'attachment', 'attachmentVersion', 'conversationLabel', and 'conversations'. Either include them or remove the dependency array                                                                                                                  react-hooks/exhaustive-deps
+
+/private/tmp/tldw-server-buddy-persona-ux/apps/packages/ui/src/components/Common/PersonaBuddy/BuddyManagementModal.tsx
+  179:6  warning  React Hook React.useEffect has a missing dependency: 'target'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+/private/tmp/tldw-server-buddy-persona-ux/apps/packages/ui/src/components/Common/PersonaBuddy/__tests__/BuddyInteraction.test.tsx
+   46:6   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   52:6   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  290:25  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/private/tmp/tldw-server-buddy-persona-ux/apps/packages/ui/src/components/Common/PersonaBuddy/__tests__/IndependentBuddyHost.test.tsx
+   47:52  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   54:44  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   69:6   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   71:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  237:59  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  376:70  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+✖ 13 problems (0 errors, 13 warnings)
