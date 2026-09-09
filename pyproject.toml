@@ -657,28 +657,6 @@ testpaths = ["tldw_Server_API/tests", "tldw_Server_API/app/core/MCP_unified/test
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-# NOTE: `plugins` is NOT a recognized `[tool.pytest.ini_options]` key — pytest
-# silently ignores it. The suite's plugins are actually loaded via
-# `pytest_plugins` in conftest.py (repo root) and
-# tldw_Server_API/tests/conftest.py. This list is kept only as documentation of
-# the intended plugin set; DO NOT register a new plugin here expecting it to
-# load — add it to a `pytest_plugins` tuple instead.
-plugins = [
-    # Shared fixtures/plugins for the suite
-    "tldw_Server_API.tests._plugins.authnz_fixtures",
-    # Isolated Chat fixtures (unit_test_client, isolated_db, etc.)
-    "tldw_Server_API.tests.Chat.integration.conftest_isolated",
-    # Unified Postgres fixtures (temp DBs, reachability, DatabaseConfig)
-    "tldw_Server_API.tests._plugins.postgres",
-    # Optional pgvector fixtures (skipped gracefully if unavailable)
-    "tldw_Server_API.tests.helpers.pgvector",
-    # E2E suite fixtures/state shared across tests
-    "tldw_Server_API.tests._plugins.e2e_fixtures",
-    "tldw_Server_API.tests._plugins.e2e_state_fixtures",
-    "tldw_Server_API.tests._plugins.media_fixtures",
-    # AuthNZ fixtures used across Resource_Governance and other suites
-    "tldw_Server_API.tests._plugins.authnz_full_fixtures",
-]
 addopts = [
     "--import-mode=importlib",
     "--strict-markers",
