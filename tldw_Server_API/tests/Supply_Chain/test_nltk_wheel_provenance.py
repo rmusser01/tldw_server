@@ -51,7 +51,11 @@ def _wheel(
     module: bytes = b"VALUE = 2\n",
     version: str = "3.10.3",
     build: str = "1tldw1",
+    metadata: bytes | None = None,
+    wheel_metadata: bytes | None = None,
     record_mode: str = "valid",
+    record_member_replacements: dict[str, str] | None = None,
+    directory_members: list[str] | None = None,
     extra_members: list[tuple[str, bytes]] | None = None,
 ) -> None:
     dist_info = f"nltk-{version}.dist-info"
@@ -59,18 +63,23 @@ def _wheel(
     files = {
         "nltk/__init__.py": module,
         "nltk/VERSION": b"3.10.3\n",
-        f"{dist_info}/METADATA": (f"Metadata-Version: 2.4\nName: nltk\nVersion: {version}\n\n").encode(),
-        f"{dist_info}/WHEEL": (
+        f"{dist_info}/METADATA": metadata or (f"Metadata-Version: 2.4\nName: nltk\nVersion: {version}\n\n").encode(),
+        f"{dist_info}/WHEEL": wheel_metadata
+        or (
             "Wheel-Version: 1.0\nGenerator: fixture\nRoot-Is-Purelib: true\n" f"Build: {build}\nTag: py3-none-any\n"
         ).encode(),
     }
     if extra_members:
         files.update(extra_members)
-    record = _write_record(files, record_name)
+    replacements = record_member_replacements or {}
+    recorded_files = {replacements.get(name, name): content for name, content in files.items()}
+    record = _write_record(recorded_files, record_name)
     if record_mode == "incorrect":
         record = record.replace(b"sha256=", b"sha256=wrong", 1)
 
     with zipfile.ZipFile(path, "w") as archive:
+        for name in directory_members or []:
+            archive.writestr(name, b"")
         for name, content in files.items():
             archive.writestr(name, content)
         if record_mode != "missing":
@@ -114,6 +123,11 @@ def test_verifies_hand_derived_wheel_fixture(wheel_case, helper):
     wheel, source, provenance, output = wheel_case
     _wheel(
         wheel,
+        directory_members=[
+            "nltk/",
+            "nltk-3.10.3.dist-info/",
+            "nltk-3.10.3.dist-info/licenses/",
+        ],
         extra_members=[("nltk-3.10.3.dist-info/licenses/LICENSE.txt", b"fixture license\n")],
     )
 
@@ -199,6 +213,113 @@ def test_rejects_unsafe_member(wheel_case, helper, name):
 
     with pytest.raises(ValueError, match="unsafe wheel member"):
         helper.verify_wheel(wheel, source, provenance, output)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "nltk-3.10.3.dist-info/./METADATA",
+        "nltk-3.10.3.dist-info//METADATA",
+    ],
+)
+def test_rejects_noncanonical_archive_member(wheel_case, helper, name):
+    wheel, source, provenance, output = wheel_case
+    _wheel(wheel, extra_members=[(name, b"Name: other\nVersion: 0\n")])
+
+    with pytest.raises(ValueError, match="unsafe wheel member"):
+        helper.verify_wheel(wheel, source, provenance, output)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "nltk/./__init__.py",
+        "nltk//__init__.py",
+    ],
+)
+def test_rejects_noncanonical_record_member(wheel_case, helper, name):
+    wheel, source, provenance, output = wheel_case
+    _wheel(
+        wheel,
+        record_member_replacements={"nltk/__init__.py": name},
+    )
+
+    with pytest.raises(ValueError, match="unsafe wheel member"):
+        helper.verify_wheel(wheel, source, provenance, output)
+    assert not output.exists()
+
+
+def test_rejects_file_directory_alias(wheel_case, helper):
+    wheel, source, provenance, output = wheel_case
+    alias = "nltk-3.10.3.dist-info/licenses"
+    _wheel(
+        wheel,
+        directory_members=[f"{alias}/"],
+        extra_members=[(alias, b"not a directory\n")],
+    )
+
+    with pytest.raises(ValueError, match="alias"):
+        helper.verify_wheel(wheel, source, provenance, output)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    ("header", "duplicate"),
+    [
+        ("Name", "nltk"),
+        ("Name", "other"),
+        ("Version", "3.10.3"),
+        ("Version", "0"),
+    ],
+)
+def test_rejects_repeated_metadata_identity_header(wheel_case, helper, header, duplicate):
+    wheel, source, provenance, output = wheel_case
+    metadata = ("Metadata-Version: 2.4\n" "Name: nltk\n" "Version: 3.10.3\n" f"{header}: {duplicate}\n\n").encode()
+    _wheel(wheel, metadata=metadata)
+
+    with pytest.raises(ValueError, match="METADATA"):
+        helper.verify_wheel(wheel, source, provenance, output)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("duplicate", ["1tldw1", "other"])
+def test_rejects_repeated_wheel_build_header(wheel_case, helper, duplicate):
+    wheel, source, provenance, output = wheel_case
+    wheel_metadata = (
+        "Wheel-Version: 1.0\n"
+        "Generator: fixture\n"
+        "Root-Is-Purelib: true\n"
+        "Build: 1tldw1\n"
+        f"Build: {duplicate}\n"
+        "Tag: py3-none-any\n"
+    ).encode()
+    _wheel(wheel, wheel_metadata=wheel_metadata)
+
+    with pytest.raises(ValueError, match="Build"):
+        helper.verify_wheel(wheel, source, provenance, output)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    "version_headers",
+    [
+        "",
+        "Wheel-Version: malformed\n",
+        "Wheel-Version: 1.0\nWheel-Version: 1.0\n",
+        "Wheel-Version: 999.0\n",
+    ],
+)
+def test_rejects_missing_malformed_repeated_or_unsupported_wheel_version(wheel_case, helper, version_headers):
+    wheel, source, provenance, output = wheel_case
+    wheel_metadata = (
+        f"{version_headers}" "Generator: fixture\n" "Root-Is-Purelib: true\n" "Build: 1tldw1\n" "Tag: py3-none-any\n"
+    ).encode()
+    _wheel(wheel, wheel_metadata=wheel_metadata)
+
+    with pytest.raises(ValueError, match="Wheel-Version"):
+        helper.verify_wheel(wheel, source, provenance, output)
+    assert not output.exists()
 
 
 @pytest.mark.parametrize(
