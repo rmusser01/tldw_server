@@ -13916,7 +13916,7 @@ requires-dist = [
     { name = "pyaudio", specifier = ">=0.2.0" },
     { name = "pyaudiowpatch", marker = "extra == 'audio-recording-windows'", specifier = ">=0.2.12" },
     { name = "pycryptodomex", specifier = ">=3.18.0" },
-    { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "pydantic", specifier = ">=2.11.7" },
     { name = "pydantic-core", specifier = ">=2.0.0" },
     { name = "pydantic-settings", specifier = ">=2.2.1" },
     { name = "pydub", marker = "extra == 'tts-all'", specifier = ">=0.25.0" },

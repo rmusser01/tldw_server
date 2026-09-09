@@ -1,4 +1,6 @@
 # tldw_Server_API/tests/Chat/test_chat_request_schemas.py
+import json
+
 import pytest
 from pydantic import ValidationError
 
@@ -196,6 +198,20 @@ def test_chat_completion_request_accepts_json_schema_response_format():
     assert req.response_format.type == "json_schema"
     assert req.response_format.json_schema is not None
     assert req.response_format.json_schema.name == "answer_schema"
+    assert json.loads(req.model_dump_json(exclude_none=True))["response_format"] == {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "answer_schema",
+            "schema": {
+                "type": "object",
+                "properties": {"answer": {"type": "string"}},
+                "required": ["answer"],
+            },
+        },
+    }
+    metadata = req.model_json_schema()["$defs"]["ResponseFormatJsonSchemaSpec"]
+    assert set(metadata["properties"]) == {"name", "schema", "strict"}
+    assert set(metadata["required"]) == {"name", "schema"}
 
 
 @pytest.mark.unit
