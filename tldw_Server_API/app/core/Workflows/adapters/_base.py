@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AdapterContext(BaseModel):
@@ -29,8 +29,7 @@ class AdapterContext(BaseModel):
     workflow_metadata: dict[str, Any] = Field(default_factory=dict)
     workflow_mcp_policy: dict[str, Any] = Field(default_factory=dict)
 
-    class Config:
-        extra = "allow"  # Allow is_cancelled, add_artifact, etc.
+    model_config = ConfigDict(extra="allow")  # Allow is_cancelled, add_artifact, etc.
 
 
 class BaseAdapterConfig(BaseModel):
@@ -43,8 +42,7 @@ class BaseAdapterConfig(BaseModel):
     timeout_seconds: int | None = Field(None, description="Step timeout in seconds")
     save_artifact: bool | None = Field(False, description="Whether to save output as artifact")
 
-    class Config:
-        extra = "allow"  # Allow additional fields
+    model_config = ConfigDict(extra="allow")  # Allow additional fields
 
 
 # Type aliases for adapter signatures
