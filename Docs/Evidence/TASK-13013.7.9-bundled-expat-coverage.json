@@ -1,0 +1,1462 @@
+{
+  "binary_binding": {
+    "config_digest": "sha256:601019026e81c779df97656211f6a972a71a7a8b55a57e5a3588be8880dd9aee",
+    "limitations": [
+      "No image/package execution.",
+      "No whole-archive or attestation verification.",
+      "Source-to-build causality is based on the retained native producer records."
+    ],
+    "manifest_digest": "sha256:d04d00c713c9f743c3c46b7d523034f1f48b2df1d2220e866bb650bff3404a55",
+    "native_install_sha256": "d1c97c21e5f940509acccbbf971ea918ed8e1ce6a74916c7c20e758c283f9077",
+    "scope": "four-selected-runtime-files-only",
+    "selected_files": {
+      "usr/local/bin/python3.12": {
+        "layer_digest": "sha256:6a05e80753cdebfd711010789424e05d1e9613350c77f89588d7ce7c3e0f7f1d",
+        "sha256": "0e6475dfda68a9b2d93501449fc47593ca169010e8f4881577b97463fd0c1263",
+        "size": 14472
+      },
+      "usr/local/lib/libpython3.12.so.1.0": {
+        "layer_digest": "sha256:6a05e80753cdebfd711010789424e05d1e9613350c77f89588d7ce7c3e0f7f1d",
+        "sha256": "1e790589dae229f9eaca9a235029137c6bf0f58cffe69294aa4392d0ca997faf",
+        "size": 6630672
+      },
+      "usr/local/lib/python3.12/lib-dynload/_elementtree.cpython-312-x86_64-linux-gnu.so": {
+        "layer_digest": "sha256:6a05e80753cdebfd711010789424e05d1e9613350c77f89588d7ce7c3e0f7f1d",
+        "sha256": "38df3969aaedc9a64a1e9cbb5dad606524eb9b58d5e41cf1118369693b827685",
+        "size": 80624
+      },
+      "usr/local/lib/python3.12/lib-dynload/pyexpat.cpython-312-x86_64-linux-gnu.so": {
+        "layer_digest": "sha256:6a05e80753cdebfd711010789424e05d1e9613350c77f89588d7ce7c3e0f7f1d",
+        "sha256": "9b2373fe4f83cca3ece2e1dc12713580b439b897138c8405f93b7542980df4ad",
+        "size": 238664
+      }
+    },
+    "subject_digest": "sha256:08f4a090041b1d87d779e1436073910c0b6c4afc2ffcb9a6d957a94c307b45bb",
+    "verified_layers": [
+      {
+        "digest": "sha256:6310eb16bf4251731feab01e8f633bf5e2d75a657ccad97f420b1f83cce457be",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 29792658
+      },
+      {
+        "digest": "sha256:dbd0b7849e6c06b61e1fa6b7ffe053f246ce0075890620e3db64b47bb662433a",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 4265332
+      },
+      {
+        "digest": "sha256:1560cfed01dc4c72c07f789d860078d74466a1f9a26b33a2e35d887b5f90dd3f",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 12116924
+      },
+      {
+        "digest": "sha256:56235e4245636e401a28cf88944d543b29ee028ae3b6c27e03d6b43e7b4eac5f",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 249
+      },
+      {
+        "digest": "sha256:7b14164e0f7f626141f2d401ecbfcc2200b12def3c6fa1076ce8513acc249acd",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 181
+      },
+      {
+        "digest": "sha256:f73bc9d23e24d45051de322c6dab3698b45bba4ec13f1ca6ad40e27025f6065c",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 354
+      },
+      {
+        "digest": "sha256:f930bb2413f2b334de438cb89286a98d764c1d95870a1b33205046b5d013a138",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 169035228
+      },
+      {
+        "digest": "sha256:7424ad1bc324b311e075c3e6caab0a69e0d35483b8b7b62429f22708e3773790",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 150061452
+      },
+      {
+        "digest": "sha256:8eadbd2e07fc86a601c8fd114f2e875f4f8dab4cb8fe1e71a88b15a3a8f62286",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 905644
+      },
+      {
+        "digest": "sha256:5f021581a540b9fe321c6be8ef015f94b9a494d4165e54b426db1b493f7837d3",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 110729311
+      },
+      {
+        "digest": "sha256:e006dfac0f5a672309f3291d0dae5c6d91dbc9aaa8a030435b5d03b943383dd6",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 434
+      },
+      {
+        "digest": "sha256:6a05e80753cdebfd711010789424e05d1e9613350c77f89588d7ce7c3e0f7f1d",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 104695068
+      },
+      {
+        "digest": "sha256:c700cfd6224a8fa1b4b107098455600a1bca1ac77e865b48db89c462d0fe1653",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 125221
+      },
+      {
+        "digest": "sha256:e83f5db44dcf8863c2e2cc9c499d2d85e9416ea2cc4c729cc1e559df5453a2dc",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 350677
+      },
+      {
+        "digest": "sha256:472a0aeda2cf9436fa42b712e6909c65c3cadf3b0885902d2d92a7aabf0e7dcf",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 93
+      },
+      {
+        "digest": "sha256:a6704b721069bb84bb92da3e8611bf5e5eaf61ba18540ffecaa49be81ca228ef",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 3581988130
+      },
+      {
+        "digest": "sha256:0c5a6f6398a32947f33f0365a9dea2c46af00b9e8b58d0a8f8d3177993eb89fc",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 4335431
+      },
+      {
+        "digest": "sha256:95acc427c02928f405e53007b6b453c588878aae0180e5e3fa59492422f908ff",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 8148137
+      },
+      {
+        "digest": "sha256:11e805465029b6f01002d352d12dfc8daae71a8b71bd708c281681f044d523c9",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 1704
+      },
+      {
+        "digest": "sha256:d9db4e072d32d32c2acdc6b21964dd0c28ccece2172c61cb022e30a47eb55136",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 791432
+      },
+      {
+        "digest": "sha256:77856cf00e6a4eb1823e24647c04259aab9c55c8a8fe7f86b9359161cac5201f",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 19106704
+      },
+      {
+        "digest": "sha256:8d61c4b7f2441de570d9ccc5829d961a748c8750fcc07f0fa256b54cba073446",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 3454854
+      },
+      {
+        "digest": "sha256:ad77eb438ae23a578f06d7e75ed93eeb1ef175b761b8752ad8a5b8ad5255547a",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 84362075
+      },
+      {
+        "digest": "sha256:7dc95f5204bddb507e5c28a1a7466430f7bafa9cc92ba9afe374e8e102836304",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 2549
+      },
+      {
+        "digest": "sha256:fd2428a6df4939279e3c91d86c83923b4210ae446385f2a2732849b4190b4dae",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 29193
+      },
+      {
+        "digest": "sha256:7921015b7e5842ad6ad68c3a17ae6cf8903f4533a0e0b0504394fed826399176",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 55228305
+      },
+      {
+        "digest": "sha256:56fd84ffc62e59509fc730c5842ce4bb2df8ffc1f3c9689067171d22b111c21a",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 11610
+      },
+      {
+        "digest": "sha256:d8ce911fa7f56f4ab8c862ecf3019ae863aed644d1ef2c12f28b6a46e02b9c40",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 2295
+      },
+      {
+        "digest": "sha256:d7f5867846333bda2624938d53d497451909fb524e452ad170bfc454b8f1226a",
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "size": 3351
+      }
+    ]
+  },
+  "checked_at": "2026-09-09",
+  "code_commit": "3e2fcdf4c3",
+  "coverage_state": {
+    "automated_advisory_coverage_complete": false,
+    "image_runtime_bytes_verified": true,
+    "image_sbom_modified": false,
+    "scanner_ingestion_verified": true,
+    "source_inventory_verified": true
+  },
+  "decoded_expat": {
+    "cpes": [
+      {
+        "cpe": "cpe:2.3:a:libexpat_project:libexpat:2.8.4:*:*:*:*:*:*:*",
+        "source": "declared"
+      }
+    ],
+    "foundBy": "",
+    "id": "PACKAGE-expat",
+    "language": "",
+    "licenses": [],
+    "locations": [],
+    "name": "expat",
+    "purl": "",
+    "type": "",
+    "version": "2.8.4"
+  },
+  "evidence": [
+    {
+      "path": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/bandit.json",
+      "sha256": "bce1ced8efe96df50a91efa1c9cd87ae8929c367b487a0ce92ff140cd096de1a",
+      "size": 787
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/binary-binding.json",
+      "sha256": "bb55172bb3bcd421c99daff16afd5f2a285fd6284c6153ff829c42cc4004c5f0",
+      "size": 7310
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/binary-binding.log",
+      "sha256": "2b1a50d44445f2f9f2c03363cc7950022612bfeeeeeb928a0e3092151d1984ee",
+      "size": 755
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/bind-parser-binaries.py",
+      "sha256": "3ef5c5da4162ae3b89bce66245461767e7ea6a2d74a3a74f75fc1b0bd76f93b4",
+      "size": 5350
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/converted.syft.json",
+      "sha256": "3267d4df1e57c32e9087a8346c5e70fc8b9a54458a4f3d79c19f18526d62feff",
+      "size": 49992
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/database-after.sha256",
+      "sha256": "f7871b223a4ff23903540e90098486fd8f7efd40f19ff2c387ff2f096067d838",
+      "size": 145
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/database-before.sha256",
+      "sha256": "f7871b223a4ff23903540e90098486fd8f7efd40f19ff2c387ff2f096067d838",
+      "size": 145
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/database-expat-records.json",
+      "sha256": "76a9a76e9d3d92ba6ff7eacf421e9101e24f5e2c410893a4fa7184448bf8f74b",
+      "size": 280030
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/database-search.log",
+      "sha256": "d13bff28bd8b7a9f0872b80496b5540784f8791ef9c18880b5c970d698c08593",
+      "size": 107
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/database-selected-records.json",
+      "sha256": "905272c5029f299f68d837da6172bee74ed61acc3763e41bebe0bd908c01ba47",
+      "size": 9180
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/grype-control-2.7.3.json",
+      "sha256": "c18f316af74f327fc7ce28add9fa0ae67c26d435000738ee0e4ee0580a14f5b6",
+      "size": 42939
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/grype-control-2.7.3.log",
+      "sha256": "c225304297415e08a6003095ffdea1b51a84c48cba282e85b0acc3489755c889",
+      "size": 3851
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/grype-control-2.8.4.json",
+      "sha256": "17d5598ab128fe0a645f82fc72b59383026571d484eefda4520d90ccb35b1b63",
+      "size": 5600
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/grype-control-2.8.4.log",
+      "sha256": "26b71e29c510ad2f65e50f010c75c2c35418252351aab20c07ace9d54126896f",
+      "size": 3777
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/grype-db-help.txt",
+      "sha256": "2f81f6e9965cedd6d49cc0d5e8f36665f4f060dcb4a6e4573dc79b6c67b8724e",
+      "size": 1089
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/grype-image.json",
+      "sha256": "62df794f0bcdcdd6859cf65561e4afa284c70904e7a6e31ca8319b8b974a238d",
+      "size": 2731
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/grype-search-help.txt",
+      "sha256": "2ff8c7757534551979efb48f89a53f5f0552fba73d6cb61e4e80da0be90e7c0e",
+      "size": 2552
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/grype-source-repeat.json",
+      "sha256": "8d2c3db775baf3227257b66d00131a42ecd7fffcc9687cc9457646007e414450",
+      "size": 5606
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/grype-source-repeat.log",
+      "sha256": "c86f7f776a75e00ca63891c5c7ec4ed176a6c0accb1fb3f29a36a92eb0a97f2f",
+      "size": 3961
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/python-source.spdx.json",
+      "sha256": "5bf9515ee7fa3eb15cf17b7edf1d297b1a5f3d528cd2613757ed9b0cb9eac5b1",
+      "size": 73507
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/source-sbom-binding.json",
+      "sha256": "a1470ef14276ce0e19719e41dbe81d0919d4b0597fc1e968a69b0d2ceb7e03b3",
+      "size": 14618
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/syft-convert-help.txt",
+      "sha256": "d0b04f6464388853043d42a3364e4ff697cf9b57fa855d29dbd8dde81423d79b",
+      "size": 1380
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/syft-convert.log",
+      "sha256": "5c8929afe98946a6baf1442874d05a1d122b8a33052bc3c887ea70aa12dd9a9d",
+      "size": 80
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/syft-image.json",
+      "sha256": "739343a4dd16a5bd99613cb5bd4e460fce2fada120b7b422d32577296d2680b1",
+      "size": 2756
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/synthetic-2.7.3.spdx.json",
+      "sha256": "00aa910050c5c3110bea8dec2de98dfcc06d44b8bb133667fa5108a7ddef746b",
+      "size": 1185
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/synthetic-2.8.4.spdx.json",
+      "sha256": "f788df59119a43dc3ac0416892aa40f5c22e71d8facd6c973203e5f903cd77bd",
+      "size": 1185
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-native-34170600664.C3dvFx/python/build/artifacts/installed-binaries.sha256",
+      "sha256": "a186b998bd21a3c36ebfc1471b386af6ccd538a97a3590be60d2af64111a0b91",
+      "size": 483
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-native-34170600664.C3dvFx/python/build/artifacts/python-source.tar.xz",
+      "sha256": "df3d64b06dfe2202febe36ba6b9e61587d0f16dee108a72a078502097c0a7dc4",
+      "size": 21052748
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-native-34170600664.C3dvFx/python/build/artifacts/python-install.tar.gz",
+      "sha256": "d1c97c21e5f940509acccbbf971ea918ed8e1ce6a74916c7c20e758c283f9077",
+      "size": 111272288
+    },
+    {
+      "path": "/private/tmp/task-13013-7-combined-native-34177651966.fnWTcU/inputs.json",
+      "sha256": "b6278c0b4e28086ea302ba90d9b234bd7d293c2c326f7319049f568269b9fb61",
+      "size": 4370
+    },
+    {
+      "path": "/private/tmp/task-13013-7-combined-native-34177651966.fnWTcU/image-identity.json",
+      "sha256": "6d51f15915c12e1ad3665ba703418e2ffbb1915a4ec4e5033d616a2bc6a4bbaf",
+      "size": 475
+    },
+    {
+      "path": "/private/tmp/task-13013-7-combined-scans.vpkHOr/evidence/grype-python-source.json",
+      "sha256": "d4f41a1471a7543e9df7ff587ad30b80feb08fb862ec9fda7177aaa4227ff18d",
+      "size": 5606
+    }
+  ],
+  "frozen_advisory_records": [
+    {
+      "packages": [
+        {
+          "cpe": "cpe:2.3:a:libexpat_project:libexpat:*:*:*:*:*:*:*:*",
+          "detail": {
+            "cves": [
+              "CVE-2025-66382"
+            ],
+            "ranges": [
+              {
+                "version": {
+                  "constraint": "<= 2.7.3"
+                }
+              }
+            ]
+          },
+          "namespace": "nvd:cpe"
+        }
+      ],
+      "vulnerability": {
+        "assigner": [
+          "cve@mitre.org"
+        ],
+        "description": "In libexpat through 2.7.3, a crafted file with an approximate size of 2 MiB can lead to dozens of seconds of processing time.",
+        "epss": [
+          {
+            "cve": "CVE-2025-66382",
+            "date": "2026-09-06",
+            "epss": 0.00203,
+            "percentile": 0.10238
+          }
+        ],
+        "id": "CVE-2025-66382",
+        "modified_date": "2026-06-17T09:56:45.24Z",
+        "provider": "nvd",
+        "published_date": "2025-11-28T07:15:57.9Z",
+        "refs": [
+          {
+            "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-66382"
+          },
+          {
+            "tags": [
+              "issue-tracking"
+            ],
+            "url": "https://github.com/libexpat/libexpat/issues/1076"
+          },
+          {
+            "tags": [
+              "mailing-list"
+            ],
+            "url": "http://www.openwall.com/lists/oss-security/2025/12/02/1"
+          },
+          {
+            "url": "https://cert-portal.siemens.com/productcert/html/ssa-082556.html"
+          },
+          {
+            "url": "https://cert-portal.siemens.com/productcert/html/ssa-253495.html"
+          }
+        ],
+        "severities": [
+          {
+            "rank": 1,
+            "scheme": "CVSS",
+            "source": "nvd@nist.gov",
+            "value": {
+              "metrics": {
+                "baseScore": 5.5,
+                "exploitabilityScore": 1.9,
+                "impactScore": 3.6
+              },
+              "vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:N/I:N/A:H",
+              "version": "3.1"
+            }
+          },
+          {
+            "rank": 2,
+            "scheme": "CVSS",
+            "source": "cve@mitre.org",
+            "value": {
+              "metrics": {
+                "baseScore": 2.9,
+                "exploitabilityScore": 1.5,
+                "impactScore": 1.5
+              },
+              "vector": "CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:L",
+              "version": "3.1"
+            }
+          }
+        ],
+        "severity": "medium",
+        "status": "active"
+      }
+    },
+    {
+      "packages": [
+        {
+          "detail": {
+            "ranges": [
+              {
+                "fix": {
+                  "state": "wont-fix"
+                },
+                "version": {
+                  "type": "dpkg"
+                }
+              }
+            ]
+          },
+          "namespace": "debian:distro:debian:13",
+          "os": {
+            "name": "debian",
+            "version": "13"
+          },
+          "package": {
+            "ecosystem": "deb",
+            "name": "expat"
+          }
+        }
+      ],
+      "vulnerability": {
+        "description": "In libexpat through 2.7.3, a crafted file with an approximate size of 2 MiB can lead to dozens of seconds of processing time.",
+        "epss": [
+          {
+            "cve": "CVE-2025-66382",
+            "date": "2026-09-06",
+            "epss": 0.00203,
+            "percentile": 0.10238
+          }
+        ],
+        "id": "CVE-2025-66382",
+        "provider": "debian",
+        "refs": [
+          {
+            "url": "https://security-tracker.debian.org/tracker/CVE-2025-66382"
+          }
+        ],
+        "severities": [
+          {
+            "rank": 1,
+            "scheme": "CVSS",
+            "source": "nvd@nist.gov",
+            "value": {
+              "metrics": {
+                "baseScore": 5.5,
+                "exploitabilityScore": 1.9,
+                "impactScore": 3.6
+              },
+              "vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:N/I:N/A:H",
+              "version": "3.1"
+            }
+          }
+        ],
+        "severity": "medium",
+        "status": "active"
+      }
+    },
+    {
+      "packages": [
+        {
+          "detail": {
+            "ranges": [
+              {
+                "fix": {
+                  "state": "wont-fix"
+                },
+                "version": {
+                  "type": "dpkg"
+                }
+              }
+            ]
+          },
+          "namespace": "debian:distro:debian:13",
+          "os": {
+            "name": "debian",
+            "version": "13"
+          },
+          "package": {
+            "ecosystem": "deb",
+            "name": "expat"
+          }
+        }
+      ],
+      "vulnerability": {
+        "description": "Expat through 2.8.3 contains a denial of service vulnerability caused by quadratic algorithmic complexity in the storeAtts() function in xmlparse.c, where processing N specified attributes with non-normalized values triggers an O(N^2) linear scan of elementType->defaultAtts to determine CDATA status. A remote unauthenticated attacker can supply a single well-formed XML document of a few megabytes to an application parsing untrusted XML to cause excessive CPU consumption, resulting in denial of service without requiring authentication, external entity resolution, or non-default parser options.",
+        "epss": [
+          {
+            "cve": "CVE-2026-66046",
+            "date": "2026-09-06",
+            "epss": 0.00586,
+            "percentile": 0.45873
+          }
+        ],
+        "id": "CVE-2026-66046",
+        "provider": "debian",
+        "refs": [
+          {
+            "url": "https://security-tracker.debian.org/tracker/CVE-2026-66046"
+          }
+        ],
+        "severities": [
+          {
+            "rank": 2,
+            "scheme": "CVSS",
+            "source": "disclosure@vulncheck.com",
+            "value": {
+              "metrics": {
+                "baseScore": 8.7
+              },
+              "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N/E:X/CR:X/IR:X/AR:X/MAV:X/MAC:X/MAT:X/MPR:X/MUI:X/MVC:X/MVI:X/MVA:X/MSC:X/MSI:X/MSA:X/S:X/AU:X/R:X/V:X/RE:X/U:X",
+              "version": "4.0"
+            }
+          }
+        ],
+        "severity": "high",
+        "status": "active"
+      }
+    },
+    {
+      "packages": [
+        {
+          "detail": {
+            "ranges": [
+              {
+                "fix": {
+                  "state": "wont-fix"
+                },
+                "version": {
+                  "type": "dpkg"
+                }
+              }
+            ]
+          },
+          "namespace": "debian:distro:debian:13",
+          "os": {
+            "name": "debian",
+            "version": "13"
+          },
+          "package": {
+            "ecosystem": "deb",
+            "name": "expat"
+          }
+        }
+      ],
+      "vulnerability": {
+        "description": "In libexpat 2.8.2 and 2.8.3 before 2.8.4, misinterpretation of getentropy's return code leads to insufficient entropy, which results in being vulnerable to hash flooding attacks, causing a denial of service via crafted XML content.",
+        "epss": [
+          {
+            "cve": "CVE-2026-76956",
+            "date": "2026-09-06",
+            "epss": 0.00278,
+            "percentile": 0.2
+          }
+        ],
+        "id": "CVE-2026-76956",
+        "provider": "debian",
+        "refs": [
+          {
+            "url": "https://security-tracker.debian.org/tracker/CVE-2026-76956"
+          }
+        ],
+        "severities": [
+          {
+            "rank": 2,
+            "scheme": "CVSS",
+            "source": "cve@mitre.org",
+            "value": {
+              "metrics": {
+                "baseScore": 5.9,
+                "exploitabilityScore": 2.3,
+                "impactScore": 3.6
+              },
+              "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:H",
+              "version": "3.1"
+            }
+          }
+        ],
+        "severity": "medium",
+        "status": "active"
+      }
+    },
+    {
+      "packages": [
+        {
+          "detail": {
+            "ranges": [
+              {
+                "fix": {
+                  "state": "wont-fix"
+                },
+                "version": {
+                  "type": "dpkg"
+                }
+              }
+            ]
+          },
+          "namespace": "debian:distro:debian:13",
+          "os": {
+            "name": "debian",
+            "version": "13"
+          },
+          "package": {
+            "ecosystem": "deb",
+            "name": "expat"
+          }
+        }
+      ],
+      "vulnerability": {
+        "description": "libexpat before 2.8.4 lacks handler call depth tracking with custom encoding callbacks. Thus, a use-after-free can occur. NOTE: this is similar to CVE-2026-50219, CVE-2026-56131 and CVE-2026-56412.",
+        "epss": [
+          {
+            "cve": "CVE-2026-76957",
+            "date": "2026-09-06",
+            "epss": 0.00108,
+            "percentile": 0.01307
+          }
+        ],
+        "id": "CVE-2026-76957",
+        "provider": "debian",
+        "refs": [
+          {
+            "url": "https://security-tracker.debian.org/tracker/CVE-2026-76957"
+          }
+        ],
+        "severities": [
+          {
+            "rank": 2,
+            "scheme": "CVSS",
+            "source": "cve@mitre.org",
+            "value": {
+              "metrics": {
+                "baseScore": 4.9,
+                "exploitabilityScore": 1.5,
+                "impactScore": 3.4
+              },
+              "vector": "CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L",
+              "version": "3.1"
+            }
+          }
+        ],
+        "severity": "medium",
+        "status": "active"
+      }
+    }
+  ],
+  "frozen_database_sha256": "b1cc176fba1944294f1c609d9fc878215587b2dca38c372843bc079dd9dbdc89",
+  "release_admitted": false,
+  "reviewed_cves": [
+    "CVE-2025-66382",
+    "CVE-2026-66046",
+    "CVE-2026-76956",
+    "CVE-2026-76957"
+  ],
+  "scanner_results": {
+    "retained-source": {
+      "db": {
+        "built": "2026-09-07T06:38:20Z",
+        "from": "https://grype.anchore.io/databases/v6/vulnerability-db_v6.1.9_2026-09-07T00:35:55Z_1788763100.tar.zst?checksum=sha256%3A73fb33bdf73a355ff5d4e6d86cb3671ced44437d1579524d8d7874c93ba23a44",
+        "path": "/db/6/vulnerability.db",
+        "schemaVersion": "v6.1.9",
+        "valid": true
+      },
+      "match_count": 0,
+      "report": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/grype-source-repeat.json",
+      "target_cve_matches": []
+    },
+    "synthetic-2.7.3": {
+      "db": {
+        "built": "2026-09-07T06:38:20Z",
+        "from": "https://grype.anchore.io/databases/v6/vulnerability-db_v6.1.9_2026-09-07T00:35:55Z_1788763100.tar.zst?checksum=sha256%3A73fb33bdf73a355ff5d4e6d86cb3671ced44437d1579524d8d7874c93ba23a44",
+        "path": "/db/6/vulnerability.db",
+        "schemaVersion": "v6.1.9",
+        "valid": true
+      },
+      "match_count": 21,
+      "report": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/grype-control-2.7.3.json",
+      "target_cve_matches": [
+        {
+          "artifact": {
+            "cpes": [
+              "cpe:2.3:a:libexpat_project:libexpat:2.7.3:*:*:*:*:*:*:*"
+            ],
+            "id": "expat",
+            "language": "",
+            "licenses": [],
+            "locations": null,
+            "name": "expat",
+            "purl": "",
+            "type": "",
+            "upstreams": [],
+            "version": "2.7.3"
+          },
+          "matchDetails": [
+            {
+              "found": {
+                "cpes": [
+                  "cpe:2.3:a:libexpat_project:libexpat:*:*:*:*:*:*:*:*"
+                ],
+                "versionConstraint": "<= 2.7.3 (unknown)",
+                "vulnerabilityID": "CVE-2025-66382"
+              },
+              "matcher": "stock-matcher",
+              "searchedBy": {
+                "cpes": [
+                  "cpe:2.3:a:libexpat_project:libexpat:2.7.3:*:*:*:*:*:*:*"
+                ],
+                "namespace": "nvd:cpe",
+                "package": {
+                  "name": "expat",
+                  "version": "2.7.3"
+                }
+              },
+              "type": "cpe-match"
+            }
+          ],
+          "relatedVulnerabilities": [],
+          "vulnerability": {
+            "advisories": [],
+            "cvss": [
+              {
+                "metrics": {
+                  "baseScore": 5.5,
+                  "exploitabilityScore": 1.9,
+                  "impactScore": 3.6
+                },
+                "source": "nvd@nist.gov",
+                "type": "Primary",
+                "vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:N/I:N/A:H",
+                "vendorMetadata": {},
+                "version": "3.1"
+              },
+              {
+                "metrics": {
+                  "baseScore": 2.9,
+                  "exploitabilityScore": 1.5,
+                  "impactScore": 1.5
+                },
+                "source": "cve@mitre.org",
+                "type": "Secondary",
+                "vector": "CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:L",
+                "vendorMetadata": {},
+                "version": "3.1"
+              }
+            ],
+            "cwes": [
+              {
+                "cve": "CVE-2025-66382",
+                "cwe": "CWE-407",
+                "source": "cve@mitre.org",
+                "type": "Secondary"
+              }
+            ],
+            "dataSource": "https://nvd.nist.gov/vuln/detail/CVE-2025-66382",
+            "description": "In libexpat through 2.7.3, a crafted file with an approximate size of 2 MiB can lead to dozens of seconds of processing time.",
+            "epss": [
+              {
+                "cve": "CVE-2025-66382",
+                "date": "2026-09-06",
+                "epss": 0.00203,
+                "percentile": 0.10238
+              }
+            ],
+            "fix": {
+              "state": "",
+              "versions": []
+            },
+            "id": "CVE-2025-66382",
+            "namespace": "nvd:cpe",
+            "risk": 0.09338000000000002,
+            "severity": "Medium",
+            "urls": [
+              "https://github.com/libexpat/libexpat/issues/1076",
+              "http://www.openwall.com/lists/oss-security/2025/12/02/1",
+              "https://cert-portal.siemens.com/productcert/html/ssa-082556.html",
+              "https://cert-portal.siemens.com/productcert/html/ssa-253495.html"
+            ]
+          }
+        }
+      ]
+    },
+    "synthetic-2.8.4": {
+      "db": {
+        "built": "2026-09-07T06:38:20Z",
+        "from": "https://grype.anchore.io/databases/v6/vulnerability-db_v6.1.9_2026-09-07T00:35:55Z_1788763100.tar.zst?checksum=sha256%3A73fb33bdf73a355ff5d4e6d86cb3671ced44437d1579524d8d7874c93ba23a44",
+        "path": "/db/6/vulnerability.db",
+        "schemaVersion": "v6.1.9",
+        "valid": true
+      },
+      "match_count": 0,
+      "report": "/private/tmp/task-13013-7-9-bundled-expat.f4uwpumt/grype-control-2.8.4.json",
+      "target_cve_matches": []
+    }
+  },
+  "scope": "bundled-Expat-source-SBOM-ingestion-and-artifact-binding",
+  "source_binding": {
+    "excluded_cpython_owned_files": [
+      "expat_config.h",
+      "pyexpatns.h",
+      "refresh.sh"
+    ],
+    "limits": "Source SPDX covers 23 imported files; three CPython-owned files are separately covered by the preceding source reconciliation.",
+    "package": {
+      "SPDXID": "SPDXRef-PACKAGE-expat",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "b8ece2437692dad44d851c4532723390a5a330990007706be9c8d2b90d294f36"
+        }
+      ],
+      "downloadLocation": "https://github.com/libexpat/libexpat/releases/download/R_2_8_4/expat-2.8.4.tar.gz",
+      "externalRefs": [
+        {
+          "referenceCategory": "SECURITY",
+          "referenceLocator": "cpe:2.3:a:libexpat_project:libexpat:2.8.4:*:*:*:*:*:*:*",
+          "referenceType": "cpe23Type"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "name": "expat",
+      "originator": "Organization: Expat development team",
+      "primaryPackagePurpose": "SOURCE",
+      "versionInfo": "2.8.4"
+    },
+    "source_archive_sha256": "df3d64b06dfe2202febe36ba6b9e61587d0f16dee108a72a078502097c0a7dc4",
+    "source_sbom_sha256": "5bf9515ee7fa3eb15cf17b7edf1d297b1a5f3d528cd2613757ed9b0cb9eac5b1",
+    "verified_contains_relationships": [
+      {
+        "relatedSpdxElement": "SPDXRef-FILE-Modules-expat-COPYING",
+        "relationshipType": "CONTAINS",
+        "spdxElementId": "SPDXRef-PACKAGE-expat"
+      },
+      {
+        "relatedSpdxElement": "SPDXRef-FILE-Modules-expat-ascii.h",
+        "relationshipType": "CONTAINS",
+        "spdxElementId": "SPDXRef-PACKAGE-expat"
+      },
+      {
+        "relatedSpdxElement": "SPDXRef-FILE-Modules-expat-asciitab.h",
+        "relationshipType": "CONTAINS",
+        "spdxElementId": "SPDXRef-PACKAGE-expat"
+      },
+      {
+        "relatedSpdxElement": "SPDXRef-FILE-Modules-expat-expat.h",
+        "relationshipType": "CONTAINS",
+        "spdxElementId": "SPDXRef-PACKAGE-expat"
+      },
+      {
+        "relatedSpdxElement": "SPDXRef-FILE-Modules-expat-expat-external.h",
+        "relationshipType": "CONTAINS",
+        "spdxElementId": "SPDXRef-PACKAGE-expat"
+      },
+      {
+        "relatedSpdxElement": "SPDXRef-FILE-Modules-expat-fallthrough.h",
+        "relationshipType": "CONTAINS",
+        "spdxElementId": "SPDXRef-PACKAGE-expat"
+      },
+      {
+        "relatedSpdxElement": "SPDXRef-FILE-Modules-expat-iasciitab.h",
+        "relationshipType": "CONTAINS",
+        "spdxElementId": "SPDXRef-PACKAGE-expat"
+      },
+      {
+        "relatedSpdxElement": "SPDXRef-FILE-Modules-expat-internal.h",
+        "relationshipType": "CONTAINS",
+        "spdxElementId": "SPDXRef-PACKAGE-expat"
+      },
+      {
+        "relatedSpdxElement": "SPDXRef-FILE-Modules-expat-latin1tab.h",
+        "relationshipType": "CONTAINS",
+        "spdxElementId": "SPDXRef-PACKAGE-expat"
+      },
+      {
+        "relatedSpdxElement": "SPDXRef-FILE-Modules-expat-memory-sanitizer.h",
+        "relationshipType": "CONTAINS",
+        "spdxElementId": "SPDXRef-PACKAGE-expat"
+      },
+      {
+        "relatedSpdxElement": "SPDXRef-FILE-Modules-expat-nametab.h",
+        "relationshipType": "CONTAINS",
+        "spdxElementId": "SPDXRef-PACKAGE-expat"
+      },
+      {
+        "relatedSpdxElement": "SPDXRef-FILE-Modules-expat-siphash.h",
+        "relationshipType": "CONTAINS",
+        "spdxElementId": "SPDXRef-PACKAGE-expat"
+      },
+      {
+        "relatedSpdxElement": "SPDXRef-FILE-Modules-expat-utf8tab.h",
+        "relationshipType": "CONTAINS",
+        "spdxElementId": "SPDXRef-PACKAGE-expat"
+      },
+      {
+        "relatedSpdxElement": "SPDXRef-FILE-Modules-expat-winconfig.h",
+        "relationshipType": "CONTAINS",
+        "spdxElementId": "SPDXRef-PACKAGE-expat"
+      },
+      {
+        "relatedSpdxElement": "SPDXRef-FILE-Modules-expat-xcsinc.c",
+        "relationshipType": "CONTAINS",
+        "spdxElementId": "SPDXRef-PACKAGE-expat"
+      },
+      {
+        "relatedSpdxElement": "SPDXRef-FILE-Modules-expat-xmlparse.c",
+        "relationshipType": "CONTAINS",
+        "spdxElementId": "SPDXRef-PACKAGE-expat"
+      },
+      {
+        "relatedSpdxElement": "SPDXRef-FILE-Modules-expat-xmlrole.c",
+        "relationshipType": "CONTAINS",
+        "spdxElementId": "SPDXRef-PACKAGE-expat"
+      },
+      {
+        "relatedSpdxElement": "SPDXRef-FILE-Modules-expat-xmlrole.h",
+        "relationshipType": "CONTAINS",
+        "spdxElementId": "SPDXRef-PACKAGE-expat"
+      },
+      {
+        "relatedSpdxElement": "SPDXRef-FILE-Modules-expat-xmltok.c",
+        "relationshipType": "CONTAINS",
+        "spdxElementId": "SPDXRef-PACKAGE-expat"
+      },
+      {
+        "relatedSpdxElement": "SPDXRef-FILE-Modules-expat-xmltok.h",
+        "relationshipType": "CONTAINS",
+        "spdxElementId": "SPDXRef-PACKAGE-expat"
+      },
+      {
+        "relatedSpdxElement": "SPDXRef-FILE-Modules-expat-xmltok-impl.c",
+        "relationshipType": "CONTAINS",
+        "spdxElementId": "SPDXRef-PACKAGE-expat"
+      },
+      {
+        "relatedSpdxElement": "SPDXRef-FILE-Modules-expat-xmltok-impl.h",
+        "relationshipType": "CONTAINS",
+        "spdxElementId": "SPDXRef-PACKAGE-expat"
+      },
+      {
+        "relatedSpdxElement": "SPDXRef-FILE-Modules-expat-xmltok-ns.c",
+        "relationshipType": "CONTAINS",
+        "spdxElementId": "SPDXRef-PACKAGE-expat"
+      }
+    ],
+    "verified_source_files": [
+      {
+        "SPDXID": "SPDXRef-FILE-Modules-expat-COPYING",
+        "checksums": [
+          {
+            "algorithm": "SHA1",
+            "checksumValue": "f1b1126ed7da8f2068302e7a692b0600e6f94b07"
+          },
+          {
+            "algorithm": "SHA256",
+            "checksumValue": "31b15de82aa19a845156169a17a5488bf597e561b2c318d159ed583139b25e87"
+          }
+        ],
+        "fileName": "Modules/expat/COPYING"
+      },
+      {
+        "SPDXID": "SPDXRef-FILE-Modules-expat-ascii.h",
+        "checksums": [
+          {
+            "algorithm": "SHA1",
+            "checksumValue": "27529094aa9998963bbacdab4dd77f23691adc93"
+          },
+          {
+            "algorithm": "SHA256",
+            "checksumValue": "5ce49460794894b78f97060f634c129d13f2e9cc9b8dacd829f4be2dbc6e0649"
+          }
+        ],
+        "fileName": "Modules/expat/ascii.h"
+      },
+      {
+        "SPDXID": "SPDXRef-FILE-Modules-expat-asciitab.h",
+        "checksums": [
+          {
+            "algorithm": "SHA1",
+            "checksumValue": "f0c9b25759ccf57fd65eb4356c2762f25c0e9a6f"
+          },
+          {
+            "algorithm": "SHA256",
+            "checksumValue": "5792cb56f285c8876b988d875a70d49019bc7e6d5ebcd0f8224b24e695301832"
+          }
+        ],
+        "fileName": "Modules/expat/asciitab.h"
+      },
+      {
+        "SPDXID": "SPDXRef-FILE-Modules-expat-expat.h",
+        "checksums": [
+          {
+            "algorithm": "SHA1",
+            "checksumValue": "12dffaa4a67cbe308643dbec7ffc1b4fd38abbde"
+          },
+          {
+            "algorithm": "SHA256",
+            "checksumValue": "0e912e25375e213b6e4ff90d554e0a0e037e6f0c20dfa734d366e5bdff289f20"
+          }
+        ],
+        "fileName": "Modules/expat/expat.h"
+      },
+      {
+        "SPDXID": "SPDXRef-FILE-Modules-expat-expat-external.h",
+        "checksums": [
+          {
+            "algorithm": "SHA1",
+            "checksumValue": "288700b1dd47ec564d2159a0a519bbc2f273b9e9"
+          },
+          {
+            "algorithm": "SHA256",
+            "checksumValue": "d55e546603baf0b7085d6ff1d8f38d56d6de009a1731186509103c5d292c1a75"
+          }
+        ],
+        "fileName": "Modules/expat/expat_external.h"
+      },
+      {
+        "SPDXID": "SPDXRef-FILE-Modules-expat-fallthrough.h",
+        "checksums": [
+          {
+            "algorithm": "SHA1",
+            "checksumValue": "378f1dffca32e580be8fb445677950cd1c4c4ea8"
+          },
+          {
+            "algorithm": "SHA256",
+            "checksumValue": "5e42477487bca7e7caac6b832ab940f39a1a20b8765c945374e4f6c2670f55b6"
+          }
+        ],
+        "fileName": "Modules/expat/fallthrough.h"
+      },
+      {
+        "SPDXID": "SPDXRef-FILE-Modules-expat-iasciitab.h",
+        "checksums": [
+          {
+            "algorithm": "SHA1",
+            "checksumValue": "19b25ac4e504efa5e51ce639c83be053da587543"
+          },
+          {
+            "algorithm": "SHA256",
+            "checksumValue": "a9cd6f2cf5199ae3c29d22ee4913736fcd984f62132146a0352c88549700e83f"
+          }
+        ],
+        "fileName": "Modules/expat/iasciitab.h"
+      },
+      {
+        "SPDXID": "SPDXRef-FILE-Modules-expat-internal.h",
+        "checksums": [
+          {
+            "algorithm": "SHA1",
+            "checksumValue": "4afd563c90edd6b4aa5abedcd3df5df023668d26"
+          },
+          {
+            "algorithm": "SHA256",
+            "checksumValue": "beb7211c800d827743bd3d6ddb86538302d6c51180be6d3b61a1c315e061762d"
+          }
+        ],
+        "fileName": "Modules/expat/internal.h"
+      },
+      {
+        "SPDXID": "SPDXRef-FILE-Modules-expat-latin1tab.h",
+        "checksums": [
+          {
+            "algorithm": "SHA1",
+            "checksumValue": "8d31198775c89582e37cd0dcac4e87a718cc17cb"
+          },
+          {
+            "algorithm": "SHA256",
+            "checksumValue": "b0daf8a75c690e895421f765ddb2ae2fbc1ba14694e06a3215dba84f1ff3427d"
+          }
+        ],
+        "fileName": "Modules/expat/latin1tab.h"
+      },
+      {
+        "SPDXID": "SPDXRef-FILE-Modules-expat-memory-sanitizer.h",
+        "checksums": [
+          {
+            "algorithm": "SHA1",
+            "checksumValue": "19ff1e65b76536a4595c38d21a500cbc7b86c408"
+          },
+          {
+            "algorithm": "SHA256",
+            "checksumValue": "377ca054fdc531360f42a5cb7c522bcbf88b6c67aebc2e29544c37d14e836bde"
+          }
+        ],
+        "fileName": "Modules/expat/memory_sanitizer.h"
+      },
+      {
+        "SPDXID": "SPDXRef-FILE-Modules-expat-nametab.h",
+        "checksums": [
+          {
+            "algorithm": "SHA1",
+            "checksumValue": "19ecc1cf2a899fe1b80de263c8b09d6de451c6b8"
+          },
+          {
+            "algorithm": "SHA256",
+            "checksumValue": "8f78e64f11e2b23df8b32cb5528cfeda6215acd6abf6bcf1ad59fdc7b1ffd105"
+          }
+        ],
+        "fileName": "Modules/expat/nametab.h"
+      },
+      {
+        "SPDXID": "SPDXRef-FILE-Modules-expat-siphash.h",
+        "checksums": [
+          {
+            "algorithm": "SHA1",
+            "checksumValue": "bcde3e9100b62b87d2b2d628bdacddf415782bdb"
+          },
+          {
+            "algorithm": "SHA256",
+            "checksumValue": "12ecc9915bccb793ea8bb543cc7d002e226f4e4d6b97ec9839dca41cbe4e2e27"
+          }
+        ],
+        "fileName": "Modules/expat/siphash.h"
+      },
+      {
+        "SPDXID": "SPDXRef-FILE-Modules-expat-utf8tab.h",
+        "checksums": [
+          {
+            "algorithm": "SHA1",
+            "checksumValue": "30276d76d64af27de1d0de06160c5b58c884ee8b"
+          },
+          {
+            "algorithm": "SHA256",
+            "checksumValue": "3fa349a3a19143366e80a58d9aa950152ef9cd7903f557f971051410b47f335c"
+          }
+        ],
+        "fileName": "Modules/expat/utf8tab.h"
+      },
+      {
+        "SPDXID": "SPDXRef-FILE-Modules-expat-winconfig.h",
+        "checksums": [
+          {
+            "algorithm": "SHA1",
+            "checksumValue": "d296304ae595486ec094e341fed8a8450d4cedbe"
+          },
+          {
+            "algorithm": "SHA256",
+            "checksumValue": "0ab6446eb98abc492ae341ef7607b535e44dedf52633fdc7c6e1a1361aec3922"
+          }
+        ],
+        "fileName": "Modules/expat/winconfig.h"
+      },
+      {
+        "SPDXID": "SPDXRef-FILE-Modules-expat-xcsinc.c",
+        "checksums": [
+          {
+            "algorithm": "SHA1",
+            "checksumValue": "ecac5a698350e3c9e6c899bbcbfb62875ecf326e"
+          },
+          {
+            "algorithm": "SHA256",
+            "checksumValue": "1210979a688301412f46e058d0497fa3c1c63c296c2e015834cda0f0b314875d"
+          }
+        ],
+        "fileName": "Modules/expat/xcsinc.c"
+      },
+      {
+        "SPDXID": "SPDXRef-FILE-Modules-expat-xmlparse.c",
+        "checksums": [
+          {
+            "algorithm": "SHA1",
+            "checksumValue": "b9e4628f37353a7eec8a98c26ebb88d7e2d48971"
+          },
+          {
+            "algorithm": "SHA256",
+            "checksumValue": "9afa5cb812283750f1970e230ba392201bac46240abf51ab65e5090e93ca34a6"
+          }
+        ],
+        "fileName": "Modules/expat/xmlparse.c"
+      },
+      {
+        "SPDXID": "SPDXRef-FILE-Modules-expat-xmlrole.c",
+        "checksums": [
+          {
+            "algorithm": "SHA1",
+            "checksumValue": "6e046b576085df9bb8f6b18f60ccf0f7a40308b5"
+          },
+          {
+            "algorithm": "SHA256",
+            "checksumValue": "db4004fa2cabc811fc493b5b04b44cd336d19434bc653725f090131e43a89406"
+          }
+        ],
+        "fileName": "Modules/expat/xmlrole.c"
+      },
+      {
+        "SPDXID": "SPDXRef-FILE-Modules-expat-xmlrole.h",
+        "checksums": [
+          {
+            "algorithm": "SHA1",
+            "checksumValue": "4a3bf2554da3a7b02b0f2d4d07f446f7f6e34af5"
+          },
+          {
+            "algorithm": "SHA256",
+            "checksumValue": "486faffdfcd0c1668406648220c6638c98ddfe044d04d66551999ab8e02564fa"
+          }
+        ],
+        "fileName": "Modules/expat/xmlrole.h"
+      },
+      {
+        "SPDXID": "SPDXRef-FILE-Modules-expat-xmltok.c",
+        "checksums": [
+          {
+            "algorithm": "SHA1",
+            "checksumValue": "c3377af96ec7fef8b502967ac818e3bfea04f584"
+          },
+          {
+            "algorithm": "SHA256",
+            "checksumValue": "f2732a8e91fd901d75431d35edc421e1ff3893a275c4de1cc855b3d4deadfd37"
+          }
+        ],
+        "fileName": "Modules/expat/xmltok.c"
+      },
+      {
+        "SPDXID": "SPDXRef-FILE-Modules-expat-xmltok.h",
+        "checksums": [
+          {
+            "algorithm": "SHA1",
+            "checksumValue": "e9a5972f664c1c530443ddd8b7900e406e3ca02a"
+          },
+          {
+            "algorithm": "SHA256",
+            "checksumValue": "41a6cef659ef1da9ee732304332c4134afe4b63571442de77eaf9918abf9e5df"
+          }
+        ],
+        "fileName": "Modules/expat/xmltok.h"
+      },
+      {
+        "SPDXID": "SPDXRef-FILE-Modules-expat-xmltok-impl.c",
+        "checksums": [
+          {
+            "algorithm": "SHA1",
+            "checksumValue": "9f1c475da821ccf2763594c9b79175544af08d7a"
+          },
+          {
+            "algorithm": "SHA256",
+            "checksumValue": "c7b197b596192ad3f8c872ae9c0524e7dd85da10cb4bfdf29d630e12782dfbf7"
+          }
+        ],
+        "fileName": "Modules/expat/xmltok_impl.c"
+      },
+      {
+        "SPDXID": "SPDXRef-FILE-Modules-expat-xmltok-impl.h",
+        "checksums": [
+          {
+            "algorithm": "SHA1",
+            "checksumValue": "f862ff6393d47ac1ad9cd0f5f844b43e7c21a20e"
+          },
+          {
+            "algorithm": "SHA256",
+            "checksumValue": "a5053c69219d12788088de9bd670537e1c784302766c331afe6b253460d0417d"
+          }
+        ],
+        "fileName": "Modules/expat/xmltok_impl.h"
+      },
+      {
+        "SPDXID": "SPDXRef-FILE-Modules-expat-xmltok-ns.c",
+        "checksums": [
+          {
+            "algorithm": "SHA1",
+            "checksumValue": "974e4255236de201a718a1e5fc1c772356153415"
+          },
+          {
+            "algorithm": "SHA256",
+            "checksumValue": "3c0c930dfdd484f98c6a32bd397919f3d2ee3701e6023effb463512af1849499"
+          }
+        ],
+        "fileName": "Modules/expat/xmltok_ns.c"
+      }
+    ]
+  },
+  "source_repaired_cves": [
+    "CVE-2026-66046",
+    "CVE-2026-76956",
+    "CVE-2026-76957"
+  ],
+  "task": "TASK-13013.7.9",
+  "tool_execution": {
+    "commands": [
+      {
+        "args": [
+          "convert",
+          "/input/python-source.spdx.json",
+          "-o",
+          "syft-json"
+        ],
+        "exit_code": 0,
+        "input": "python-source.spdx.json",
+        "output": "converted.syft.json",
+        "tool": "syft"
+      },
+      {
+        "args": [
+          "db",
+          "search",
+          "--vuln",
+          "CVE-2025-66382",
+          "--vuln",
+          "CVE-2026-66046",
+          "--vuln",
+          "CVE-2026-76956",
+          "--vuln",
+          "CVE-2026-76957",
+          "--limit",
+          "0",
+          "-o",
+          "json"
+        ],
+        "exit_code": 0,
+        "output": "database-expat-records.json",
+        "tool": "grype"
+      },
+      {
+        "args": [
+          "sbom:/input/python-source.spdx.json",
+          "-o",
+          "json",
+          "-vv"
+        ],
+        "exit_code": 0,
+        "input": "python-source.spdx.json",
+        "output": "grype-source-repeat.json",
+        "tool": "grype"
+      },
+      {
+        "args": [
+          "sbom:/input/control.spdx.json",
+          "-o",
+          "json",
+          "-vv"
+        ],
+        "exit_code": 0,
+        "input": "synthetic-2.7.3.spdx.json",
+        "output": "grype-control-2.7.3.json",
+        "tool": "grype"
+      },
+      {
+        "args": [
+          "sbom:/input/control.spdx.json",
+          "-o",
+          "json",
+          "-vv"
+        ],
+        "exit_code": 0,
+        "input": "synthetic-2.8.4.spdx.json",
+        "output": "grype-control-2.8.4.json",
+        "tool": "grype"
+      }
+    ],
+    "common_docker_args": [
+      "--rm",
+      "--pull=never",
+      "--platform",
+      "linux/amd64",
+      "--network",
+      "none",
+      "--read-only",
+      "--user",
+      "1000:1000",
+      "--cap-drop",
+      "ALL",
+      "--security-opt",
+      "no-new-privileges",
+      "--pids-limit",
+      "64",
+      "--cpus",
+      "2",
+      "--tmpfs",
+      "/tmp:rw,noexec,nosuid,size=256m"
+    ],
+    "database_mount": {
+      "readonly": true,
+      "source": "/private/tmp/task-13013-7-combined-scans.vpkHOr/grype-cache",
+      "target": "/db"
+    },
+    "grype_environment": {
+      "GRYPE_CHECK_FOR_APP_UPDATE": "false",
+      "GRYPE_DB_AUTO_UPDATE": "false",
+      "GRYPE_DB_CACHE_DIR": "/db"
+    },
+    "grype_image": "anchore/grype:v0.118.0@sha256:8a93fc48da96bd6ec5981279d099b69de11541dc68fdf222fb9161f8ff284af7",
+    "input_mounts": "Each input was mounted individually read-only under /input; output captured on host.",
+    "memory_limits": {
+      "grype": "2g",
+      "syft": "1g"
+    },
+    "mode": "offline amd64 emulation; no candidate execution",
+    "syft_environment": {
+      "SYFT_CHECK_FOR_APP_UPDATE": "false"
+    },
+    "syft_image": "anchore/syft:v1.51.1@sha256:95fe0835e5bebc6f8b1f8acef68d47d63d594ef4c0f25c097ff853b23cbac74c"
+  },
+  "unresolved_upstream_cves": [
+    "CVE-2025-66382"
+  ]
+}
