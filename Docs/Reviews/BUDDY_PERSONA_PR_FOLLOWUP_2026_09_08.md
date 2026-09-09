@@ -36,8 +36,23 @@ An independent source review identified the asynchronous retarget race after the
 - Workspace creation test registered in all five applicable CI shard variants; coverage guard reports zero newly uncovered files.
 - Independent source review confirmed the async retarget fix with no remaining Important or Critical findings; the reviewer did not rerun tests. Whitespace verification passes. No full repository suite was run.
 
-## Remaining CI and environment limits
+## Prior-head CI and environment limits
 
 The older published head failed some frontend shards in addition to the generated docs/API and command-palette failures corrected here. Remaining failures involve Playground handoff mocks, Quiz export mocks, handoff locale expectations and Research stage3 job expectations. The affected tests and handoff hook are unchanged from dev; this is source comparison, not a pristine-dev test run, and does not prove every failure unrelated. The VisualPackEditor copied-draft case passes its exact isolated rerun (369ms) and previously passed in the full 65-case file; its CI timing/environment failure has no reproduced root cause. Follow the new PR checks for their current status.
 
 The follow-up used composed HTTP authentication dependencies and controlled provider responses. No real token/session browser smoke, model-provider round trip, microphone/audio, packaged extension launch, or new PostgreSQL service run was performed. Existing runtime limitations remain: process-owned accepted Buddy work ends on restart without replay or persisted credentials; multi-worker acceptance requires principal affinity. Legacy Persona Live remains connection-owned.
+
+## September 9 frontend CI repair
+
+Dev remains `6cd2745f696af04668a61c20b84ab8a9e69ca5e4`; rebasing the feature branch was a no-op. The remaining published frontend shard failures were reproduced and corrected in six existing test files. No production code or dependencies changed during this repair.
+
+- Playground tests now supply the router, provider, MCP and service-prompt contracts their real consumers use. The composer mock honors external send controls, the submit mock returns its discriminated result, and the diagnostics test clicks the recovery button and verifies its exact route. Existing refinement, invalidation, metadata and follow-up assertions remain.
+- Quiz export tests provide the currently required remediation hooks without changing export/filter expectations.
+- Research tests follow the documented parent-upsert publication boundary from `9ffb7f3f08`, keep projection closed on failed upsert, reset unused one-shot mock queues, and use deferred results to verify transient failure recovery versus repeated failure. Exact error-state and call-count assertions remain.
+- Sidepanel copy tests distinguish route-only navigation from explicit draft/context transfer, matching the intentional copy change in `a171773d665`.
+
+Fresh focused verification: voice **2 passed**, image refinement **15 passed** with no unhandled errors, and the four remaining affected files **41 passed**. These are 58 tests across six files; no skips or behavior assertion removals. A separate unchanged-backend run passed **60 tests with one PostgreSQL-environment skip** across independent Buddies, turn ledger, turn acceptance and workspace assistant creation. No full local suite or real provider/audio run was performed. Published CI on the new head remains the merge gate; these focused results do not substitute for it.
+
+After changed-range formatting and replacing three new broad test annotations, the combined six-file run passed all **58 tests in12.86s**. Pinned ESLint reports zero errors and zero introduced warnings compared with HEAD. The extension formatter has no remaining changes on edited ranges; existing whole-file formatting debt remains.
+
+Independent final source review approved the six-file CI repair with no Critical, Important or minor findings. The reviewer checked the actual consumer contracts and cited history, including Research publication/failure gates and polling generations, the refinement prompt/submit contracts, diagnostics navigation and separate locale copy. Review used the supplied test evidence without rerunning suites.

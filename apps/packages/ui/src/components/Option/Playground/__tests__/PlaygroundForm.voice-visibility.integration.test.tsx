@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import React from "react"
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+
+const navigateMock = vi.hoisted(() => vi.fn())
 
 const createMessageOptionState = () => ({
   onSubmit: vi.fn(async () => null),
@@ -368,6 +371,9 @@ vi.mock("@/hooks/useMcpTools", () => ({
     hasMcp: false,
     healthState: "unavailable",
     tools: [],
+    discoveredTools: [],
+    chatTools: [],
+    toolCounts: { total: 0, enabled: 0 },
     toolsLoading: false,
     catalogs: [],
     catalogsLoading: false,
@@ -380,7 +386,9 @@ vi.mock("@/hooks/useMcpTools", () => ({
     setToolCatalog: vi.fn(),
     setToolCatalogId: vi.fn(),
     setToolModules: vi.fn(),
-    setToolCatalogStrict: vi.fn()
+    setToolCatalogStrict: vi.fn(),
+    setToolEnabled: vi.fn(),
+    resetToolFilter: vi.fn()
   })
 }))
 
@@ -495,6 +503,7 @@ vi.mock("@/store/model", () => ({
       llamaGrammarOverride: "",
       jsonMode: false,
       numCtx: 4096,
+      setActiveSettingsScope: vi.fn(),
       updateSetting: vi.fn(),
       updateSettings: vi.fn()
     })
@@ -805,7 +814,14 @@ vi.mock("react-router-dom", () => ({
       {children}
     </a>
   ),
-  useNavigate: () => vi.fn()
+  useLocation: () => ({
+    pathname: "/chat",
+    search: "",
+    hash: "",
+    state: null,
+    key: "test"
+  }),
+  useNavigate: () => navigateMock
 }))
 
 import { PlaygroundForm } from "../PlaygroundForm"
@@ -813,6 +829,7 @@ import { PlaygroundForm } from "../PlaygroundForm"
 describe("PlaygroundForm voice visibility", () => {
   beforeEach(() => {
     messageOptionOverrides.value = {}
+    navigateMock.mockClear()
   })
 
   it("hides the main voice button but forwards the shared unavailable reason when voice transport is missing", () => {
@@ -825,7 +842,7 @@ describe("PlaygroundForm voice visibility", () => {
     )
   })
 
-  it("shows the most recent chat error above the composer with a diagnostics link", () => {
+  it("shows the most recent chat error above the composer with a diagnostics action", async () => {
     messageOptionOverrides.value = {
       messages: [
         {
@@ -854,8 +871,10 @@ describe("PlaygroundForm voice visibility", () => {
     expect(banner).toHaveTextContent(
       "Choose a different model or refresh the model list."
     )
-    expect(
-      screen.getByRole("link", { name: "View in Health & Diagnostics" })
-    ).toHaveAttribute("href", "/settings/health")
+    await userEvent.click(
+      screen.getByRole("button", { name: "View in Health & Diagnostics" })
+    )
+    expect(navigateMock).toHaveBeenCalledOnce()
+    expect(navigateMock).toHaveBeenCalledWith("/settings/health")
   })
 })
