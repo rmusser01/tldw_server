@@ -39,8 +39,9 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
   const { t } = useTranslation("common")
   const [draft, setDraft] = React.useState("")
   const draftRevisionRef = React.useRef(0)
-  const [draftClientMessageId, setDraftClientMessageId] =
-    React.useState<string | null>(null)
+  const [draftClientMessageId, setDraftClientMessageId] = React.useState<
+    string | null
+  >(null)
   const [sendError, setSendError] = React.useState<string | null>(null)
   const [sending, setSending] = React.useState(false)
   const normalizedPersonaId = String(personaId ?? "").trim()
@@ -58,28 +59,33 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
         sessionId: focusedSession?.sessionId
       })
     : buildPersonaGardenRoute({ tab: "live" })
-  const feedback = liveControl?.feedback && liveControl.feedback.sessionId === focusedSession?.sessionId &&
+  const feedback =
+    liveControl?.feedback &&
+    liveControl.feedback.sessionId === focusedSession?.sessionId &&
     liveControl?.feedback?.personaId === focusedSession?.personaId &&
     (!normalizedPersonaId || normalizedPersonaId === focusedSession?.personaId)
-    ? liveControl.feedback : null
-  const needsApproval = (focusedSession?.pendingApprovalCount ?? 0) > 0 || feedback?.status === "review"
+      ? liveControl.feedback
+      : null
+  const needsApproval =
+    (focusedSession?.pendingApprovalCount ?? 0) > 0 ||
+    feedback?.status === "review"
   const sessionOptions = liveControl?.sessions ?? []
   const voiceCapable = Boolean(
     focusedSession &&
-      (liveControl?.voiceAvailable || focusedSession.capabilities?.voice)
+    (liveControl?.voiceAvailable || focusedSession.capabilities?.voice)
   )
-  const voiceState = String(liveControl?.voiceState ?? "").trim().toLowerCase()
+  const voiceState = String(liveControl?.voiceState ?? "")
+    .trim()
+    .toLowerCase()
   const isListening =
     liveControl?.voiceIsListening === true || voiceState === "listening"
   const voiceActionLabel = !voiceCapable
     ? t("personaBuddy.voiceSetup", "Set up voice")
     : isListening
-    ? t("personaBuddy.voiceStop", "Stop listening")
-    : t("personaBuddy.voiceListen", "Listen")
+      ? t("personaBuddy.voiceStop", "Stop listening")
+      : t("personaBuddy.voiceListen", "Listen")
 
-  const handleDraftChange = (
-    event: React.ChangeEvent<HTMLTextAreaElement>
-  ) => {
+  const handleDraftChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     draftRevisionRef.current += 1
     setDraft(event.target.value)
     setDraftClientMessageId(null)
@@ -138,30 +144,35 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
           data-severity={visualDiagnostic.severity}
           className={`mt-3 rounded-lg border px-2.5 py-2 text-xs leading-5 ${getPersonaVisualDiagnosticToneClassName(visualDiagnostic.severity)}`}
         >
-          <div className="font-medium text-inherit">{visualDiagnostic.title}</div>
+          <div className="font-medium text-inherit">
+            {visualDiagnostic.title}
+          </div>
           <div>{visualDiagnostic.message}</div>
         </div>
       ) : null}
       {liveControl ? (
         <div className="mt-3 space-y-2 border-t border-border pt-3">
           {sessionOptions.length > 1 ? (
-            <select
-              data-testid="persona-buddy-session-select"
-              value={liveControl.focusedSessionId ?? ""}
-              onChange={(event) => {
-                const sessionId = event.target.value
-                if (sessionId) {
-                  void liveControl.focusSession(sessionId)
-                }
-              }}
-              className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-text"
-            >
-              {sessionOptions.map((session) => (
-                <option key={session.sessionId} value={session.sessionId}>
-                  {session.personaName}
-                </option>
-              ))}
-            </select>
+            <label className="block text-xs font-medium text-text">
+              Connected session
+              <select
+                data-testid="persona-buddy-session-select"
+                value={liveControl.focusedSessionId ?? ""}
+                onChange={(event) => {
+                  const sessionId = event.target.value
+                  if (sessionId) {
+                    void liveControl.focusSession(sessionId)
+                  }
+                }}
+                className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-text"
+              >
+                {sessionOptions.map((session) => (
+                  <option key={session.sessionId} value={session.sessionId}>
+                    {session.personaName}
+                  </option>
+                ))}
+              </select>
+            </label>
           ) : null}
 
           {needsApproval ? (
@@ -197,7 +208,9 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => void liveControl.stopSession(focusedSession?.sessionId)}
+              onClick={() =>
+                void liveControl.stopSession(focusedSession?.sessionId)
+              }
               disabled={!focusedSession}
               className="inline-flex flex-1 items-center justify-center gap-1 rounded-md border border-border bg-surface px-2 py-1.5 text-xs font-medium text-text hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -220,14 +233,17 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
             </Link>
           ) : null}
 
-          <textarea
-            data-testid="persona-buddy-text-input"
-            value={draft}
-            onChange={handleDraftChange}
-            rows={3}
-            className="w-full resize-none rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-text"
-            placeholder="Message your buddy"
-          />
+          <label className="block text-xs font-medium text-text">
+            Message your Buddy
+            <textarea
+              data-testid="persona-buddy-text-input"
+              value={draft}
+              onChange={handleDraftChange}
+              rows={3}
+              className="w-full resize-none rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-text"
+              placeholder="Message your buddy"
+            />
+          </label>
           {sendError ? (
             <div className="text-xs font-medium text-danger">{sendError}</div>
           ) : null}

@@ -720,6 +720,13 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
     # Persona endpoints are force-included in explicit pytest runtime for WS/unit coverage.
     for persona_spec in (
         ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.buddies",
+            log_name="buddies",
+            prefix=f"{API_V1_PREFIX}/buddies",
+            tags=("buddies",),
+            route_key="persona",
+        ),
+        ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.persona",
             log_name="persona",
             prefix=f"{API_V1_PREFIX}/persona",

@@ -39,6 +39,30 @@ _PROMPT_IMPROVEMENT_DISPATCH_MESSAGES = {
 _MAX_PROMPT_IMPROVEMENT_RETRY_AFTER_SECONDS = 86_400
 
 
+class BuddyNotFoundError(LookupError):
+    """The authenticated owner cannot access the requested Buddy resource."""
+
+
+class BuddyConflictError(ValueError):
+    """An optimistic Buddy resource version no longer matches stored state."""
+
+
+class BuddyPublicationRevokedError(RuntimeError):
+    """An accepted Buddy turn no longer has permission to publish messages."""
+
+
+class BuddyRuntimeBusyError(RuntimeError):
+    """Another process owns this principal's in-memory Buddy queue."""
+
+
+class BuddyQueueFullError(RuntimeError):
+    """The bounded process queue cannot accept another Buddy turn."""
+
+
+class BuddyConfigurationError(ValueError):
+    """A Buddy conversation has no configured Chat provider or model."""
+
+
 class PersonaConversationError(RuntimeError):
     """Safe Persona Chat admission/completion failure without provider details."""
 

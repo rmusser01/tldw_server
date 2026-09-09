@@ -22,12 +22,12 @@ export const LiveSessionPanel: React.FC<LiveSessionPanelProps> = ({
   return (
     <div className="flex flex-1 flex-col gap-3">
       {controls}
-      {assistantVoice}
-      {diagnostics}
       {error}
       {pendingPlan}
       {transcript}
       {composer}
+      {assistantVoice}
+      {diagnostics}
     </div>
   )
 }

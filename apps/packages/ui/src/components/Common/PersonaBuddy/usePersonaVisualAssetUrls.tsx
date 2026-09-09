@@ -6,7 +6,7 @@ import type { PersonaVisualAsset } from "@/types/persona-visuals";
 
 // Only server-owned relative paths use credential-bearing transport.
 const isProtectedAsset = (url: string) =>
-  /^\/api\/v1\/persona\/[^?#]+\/assets\/[^/]+\/content$/.test(url);
+  /^\/api\/v1\/(?:persona\/[^?#]+|buddies\/[^/?#]+)\/assets\/[^/?#]+\/content$/.test(url);
 
 const MAX_CACHED_FRAMES = 8;
 const MAX_CACHED_BYTES = 16 * 1024 * 1024;

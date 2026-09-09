@@ -3024,6 +3024,11 @@ async def _save_message_turn_to_db(
     - Logs only metadata, never raw content.
     - Can optionally use transactions for atomic operations.
     """
+    from tldw_Server_API.app.core.Buddy.publication import current_buddy_publication
+    from tldw_Server_API.app.core.exceptions import BuddyPublicationRevokedError
+
+    # Capture before run_in_executor: executor threads do not inherit ContextVars.
+    publication = current_buddy_publication.get()
     metrics = get_chat_metrics()
     current_loop = asyncio.get_running_loop()
     role = message_obj.get("role")
@@ -3165,22 +3170,24 @@ async def _save_message_turn_to_db(
 
     try:
         async with metrics.track_database_operation("save_message"):
-            if use_transaction:
+            if use_transaction or publication is not None:
                 def _persist_with_transaction() -> tuple[str | None, int]:
                     retries = 0
                     max_retries = 3
                     while True:
                         try:
-                            with db.transaction():
-                                return (
-                                    _persist_message_sync(
-                                        db,
-                                        db_payload,
-                                        serialized_tool_calls,
-                                        serialized_extra,
-                                    ),
-                                    retries,
+                            with db.transaction() as conn:
+                                if publication is not None:
+                                    publication.repository.assert_publication(conn, publication.turn, conversation_id)
+                                message_id = _persist_message_sync(
+                                    db,
+                                    db_payload,
+                                    serialized_tool_calls,
+                                    serialized_extra,
                                 )
+                                if publication is not None:
+                                    publication.repository.record_message(conn, publication.turn["id"], role, message_id)
+                                return message_id, retries
                         except ConflictError:
                             retries += 1
                             if retries >= max_retries:
@@ -3210,6 +3217,9 @@ async def _save_message_turn_to_db(
                 result = await current_loop.run_in_executor(None, saver)
                 metrics.track_message_saved(conversation_id, role)
                 return result
+    except BuddyPublicationRevokedError:
+        # Fail closed. Ordinary best-effort persistence must not swallow Stop.
+        raise
     except (InputError, ConflictError, CharactersRAGDBError) as e_db:
         error = ChatDatabaseError(
             message="Database error saving message",

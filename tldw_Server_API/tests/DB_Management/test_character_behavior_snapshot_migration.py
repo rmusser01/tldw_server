@@ -45,6 +45,13 @@ from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def _pin_v65_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep historical v65 migration checks independent of later migrations."""
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 65)
+    monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 65)
+
+
 def test_prompt_preset_and_world_book_authority_is_the_per_user_database(
     tmp_path: Path,
 ) -> None:

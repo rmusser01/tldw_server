@@ -1,8 +1,6 @@
 import React from "react"
 
-import type {
-  PersonaBuddyShellPosition
-} from "@/store/persona-buddy-shell"
+import type { PersonaBuddyShellPosition } from "@/store/persona-buddy-shell"
 import type {
   PersonaBuddyLiveControlView,
   PersonaBuddySummary
@@ -36,6 +34,7 @@ type BuddyShellDockProps = {
   position: PersonaBuddyShellPosition
   onToggle: () => void
   onDragHandlePointerDown: (event: React.PointerEvent<HTMLDivElement>) => void
+  onDragHandleKeyDown?: (event: React.KeyboardEvent<HTMLDivElement>) => void
   dockRef: React.RefObject<HTMLDivElement | null>
 }
 
@@ -52,6 +51,7 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
   position,
   onToggle,
   onDragHandlePointerDown,
+  onDragHandleKeyDown,
   dockRef
 }) => {
   const visualRenderer = visualPack
@@ -63,21 +63,26 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
     Boolean(visualDiagnostic) &&
     (isOpen || visualDiagnostic?.severity !== "info")
   const focusedLiveSession = liveControl?.focusedSession ?? null
-  const hasCurrentReview = liveControl?.feedback?.status === "review" &&
+  const hasCurrentReview =
+    liveControl?.feedback?.status === "review" &&
     liveControl.feedback.sessionId === focusedLiveSession?.sessionId &&
     liveControl.feedback.personaId === focusedLiveSession?.personaId &&
     (!personaId || personaId === focusedLiveSession?.personaId)
-  const urgentCount = Math.max(focusedLiveSession?.pendingApprovalCount ?? 0, hasCurrentReview ? 1 : 0)
-  const liveStatusLabel = urgentCount > 0
-    ? "Needs approval"
-    : focusedLiveSession?.lifecycle === "connected" ||
-        liveControl?.streamState === "open"
-      ? "Connected"
-      : focusedLiveSession?.lifecycle === "recovering"
-        ? "Recovering"
-        : focusedLiveSession
-          ? "Idle"
-          : null
+  const urgentCount = Math.max(
+    focusedLiveSession?.pendingApprovalCount ?? 0,
+    hasCurrentReview ? 1 : 0
+  )
+  const liveStatusLabel =
+    urgentCount > 0
+      ? "Needs approval"
+      : focusedLiveSession?.lifecycle === "connected" ||
+          liveControl?.streamState === "open"
+        ? "Connected"
+        : focusedLiveSession?.lifecycle === "recovering"
+          ? "Recovering"
+          : focusedLiveSession
+            ? "Idle"
+            : null
 
   return (
     <div
@@ -92,8 +97,12 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
     >
       <div
         data-testid="persona-buddy-drag-handle"
+        role="button"
+        tabIndex={0}
+        aria-label="Move Buddy with arrow keys; Home resets position"
         onPointerDown={onDragHandlePointerDown}
-        className="shrink-0 cursor-grab rounded-full border border-border bg-bg/95 px-3 py-1 text-[10px] font-medium uppercase tracking-[0.18em] text-text-muted shadow-sm backdrop-blur active:cursor-grabbing"
+        onKeyDown={onDragHandleKeyDown}
+        className="shrink-0 cursor-grab rounded-full border border-border bg-bg/95 px-3 py-1 text-xs font-medium text-text-muted shadow-sm backdrop-blur active:cursor-grabbing focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
       >
         Drag Buddy
       </div>
@@ -152,7 +161,9 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
           data-severity={visualDiagnostic.severity}
           className={`max-w-[220px] shrink-0 rounded-lg border px-3 py-2 text-xs leading-5 shadow-sm backdrop-blur ${getPersonaVisualDiagnosticToneClassName(visualDiagnostic.severity)}`}
         >
-          <div className="font-medium text-inherit">{visualDiagnostic.title}</div>
+          <div className="font-medium text-inherit">
+            {visualDiagnostic.title}
+          </div>
           <div>{visualDiagnostic.message}</div>
         </div>
       ) : null}

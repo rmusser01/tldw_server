@@ -1,4 +1,5 @@
 import React from "react"
+import { BuddyManagementButton } from "@/components/Common/PersonaBuddy/BuddyManagementButton"
 import { Archive, ArchiveRestore, ExternalLink, Pencil } from "lucide-react"
 import { Button } from "@/components/Common/Button"
 import { Badge, type BadgeVariant } from "@/components/ui/primitives"
@@ -167,6 +168,9 @@ export const WorkspaceList = ({
                   >
                     Edit
                   </Button>
+                  {!item.archived ? (
+                    <BuddyManagementButton target={{ scope_type: "workspace", scope_id: item.id }} />
+                  ) : null}
                   {item.archived ? (
                     <Button
                       size="sm"

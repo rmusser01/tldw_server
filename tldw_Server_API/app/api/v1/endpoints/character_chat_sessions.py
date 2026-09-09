@@ -4533,6 +4533,9 @@ async def create_chat_session(
     """
     try:
         scope = _resolve_chat_scope(session_data.scope_type, session_data.workspace_id)
+        from tldw_Server_API.app.core.Workspaces.assistant_defaults import resolve_new_conversation_assistant
+
+        session_data = resolve_new_conversation_assistant(db, user_id=str(current_user.id), request=session_data)
         # Check rate limits
         rate_limiter = get_character_rate_limiter()
         await rate_limiter.check_rate_limit(current_user.id, "chat_create")

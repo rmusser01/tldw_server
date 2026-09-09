@@ -69,9 +69,39 @@ vi.mock("next/router", () => ({
   useRouter: () => mockRouter
 }))
 
+const buddyLifetime = vi.hoisted(() => ({
+  mounted: vi.fn(),
+  unmounted: vi.fn()
+}))
 vi.mock("next/dynamic", () => ({
-  default: () =>
-    ({
+  default: (loader: () => unknown) => {
+    if (loader.toString().includes("IndependentBuddyHost"))
+      return function BuddyHostProbe() {
+        const [draft, setDraft] = React.useState("")
+        const [readAloud, setReadAloud] = React.useState(false)
+        React.useEffect(() => {
+          buddyLifetime.mounted()
+          return () => {
+            buddyLifetime.unmounted()
+          }
+        }, [])
+        return (
+          <div data-testid="persistent-buddy">
+            <input
+              aria-label="Buddy draft"
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+            />
+            <input
+              type="checkbox"
+              aria-label="Read Buddy aloud"
+              checked={readAloud}
+              onChange={(event) => setReadAloud(event.target.checked)}
+            />
+          </div>
+        )
+      }
+    return ({
       children,
       hideHeader,
       hideSidebar
@@ -87,6 +117,7 @@ vi.mock("next/dynamic", () => ({
         {children}
       </div>
     )
+  }
 }))
 
 vi.mock("@web/components/AppProviders", () => ({
@@ -183,6 +214,8 @@ const originalEnvBearer = process.env.NEXT_PUBLIC_API_BEARER
 const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
 
 beforeEach(() => {
+  buddyLifetime.mounted.mockClear()
+  buddyLifetime.unmounted.mockClear()
   localStorage.clear()
   sessionStorage.clear()
   mockRouter.push.mockClear()
@@ -850,4 +883,48 @@ describe("App layout routing", () => {
       ).cancelIdleCallback = originalCancelIdleCallback
     }
   })
+})
+
+describe("persistent authenticated Buddy placement", () => {
+  it("keeps one Buddy lifetime through page and gate changes and clears it on logout", async () => {
+    currentConfig = {
+      serverUrl: "http://server.invalid",
+      authMode: "single-user",
+      apiKey: "test-key"
+    }
+    const { rerender } = renderApp("/persona")
+    const draft = await screen.findByLabelText("Buddy draft")
+    fireEvent.change(draft, { target: { value: "Private unsent draft" } })
+    fireEvent.click(screen.getByLabelText("Read Buddy aloud"))
+    for (const path of ["/notes", "/settings", "/persona"]) {
+      mockRouter.pathname = path
+      mockRouter.asPath = path
+      rerender(<App Component={DummyPage} pageProps={{}} />)
+      expect(screen.getByLabelText("Buddy draft")).toBe(draft)
+      expect(screen.getByLabelText("Buddy draft")).toHaveValue(
+        "Private unsent draft"
+      )
+      expect(screen.getByLabelText("Read Buddy aloud")).toBeChecked()
+    }
+    expect(buddyLifetime.mounted).toHaveBeenCalledTimes(1)
+    currentConfig = null
+    fireEvent(window, new Event("tldw:config-updated"))
+    await waitFor(() =>
+      expect(screen.queryByTestId("persistent-buddy")).not.toBeInTheDocument()
+    )
+    expect(buddyLifetime.unmounted).toHaveBeenCalledTimes(1)
+  })
+  it.each(["/login", "/setup", "/__debug__/sidepanel-chat"])(
+    "does not mount the web Buddy on %s",
+    async (path) => {
+      currentConfig = {
+        serverUrl: "http://server.invalid",
+        authMode: "single-user",
+        apiKey: "test-key"
+      }
+      renderApp(path)
+      await screen.findByTestId("app-providers")
+      expect(screen.queryByTestId("persistent-buddy")).not.toBeInTheDocument()
+    }
+  )
 })

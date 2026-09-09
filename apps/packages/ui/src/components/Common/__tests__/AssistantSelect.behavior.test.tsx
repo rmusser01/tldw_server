@@ -222,6 +222,38 @@ describe("AssistantSelect behavior", () => {
     })
   })
 
+  it("stages a controlled selection without changing the active chat or stored assistant", async () => {
+    const user = userEvent.setup()
+    const onSelectionChange = vi.fn()
+    state.option.serverChatAssistantKind = "character"
+    state.option.serverChatCharacterId = "char-1"
+    mocks.selectedAssistant.value = { kind: "character", id: "char-1", name: "Alpha" }
+    const { rerenderAssistantSelect } = renderAssistantSelect({
+      selection: null,
+      onSelectionChange
+    })
+
+    await user.click(screen.getByRole("button", { name: "Select character or persona" }))
+    await user.click(await screen.findByRole("tab", { name: "Personas" }))
+    await user.click(await screen.findByRole("button", { name: "Guide Persona" }))
+
+    expect(onSelectionChange).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "persona",
+      id: "persona-1",
+      name: "Guide Persona",
+      metadata: { selectionMode: "tracked" }
+    }))
+    expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
+    expect(mocks.updateSettings).not.toHaveBeenCalled()
+    expect(state.option.setHistoryId).not.toHaveBeenCalled()
+    expect(state.option.setMessages).not.toHaveBeenCalled()
+    rerenderAssistantSelect({
+      selection: { kind: "persona", id: "persona-1", name: "Guide Persona" },
+      onSelectionChange
+    })
+    expect(screen.getByTestId("character-select")).toHaveAccessibleName("Guide Persona")
+  })
+
   it("does not load dropdown catalogs until the selector opens", async () => {
     const user = userEvent.setup()
     renderAssistantSelect()

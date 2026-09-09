@@ -301,6 +301,8 @@ class PersonaVisualStarterAssetResponse(BaseModel):
     mime_type: str
     asset_role: PersonaVisualAssetRole
     byte_size: int
+    width: int | None = None
+    height: int | None = None
 
 
 class PersonaVisualStarterProductionRecipeResponse(BaseModel):

@@ -34,6 +34,8 @@ type Props = {
   labelOverride?: string
   selectionModePreference?: "tracked" | "overlay"
   initialTab?: AssistantSelectTab
+  selection?: AssistantSelection | null
+  onSelectionChange?: (selection: AssistantSelection) => void | Promise<void>
   onSelectionComplete?: (
     selection: AssistantSelection
   ) => void | Promise<void>
@@ -120,11 +122,14 @@ export const AssistantSelect: React.FC<Props> = ({
   labelOverride,
   selectionModePreference = "tracked",
   initialTab,
+  selection,
+  onSelectionChange,
   onSelectionComplete
 }) => {
   const { t } = useTranslation(["option", "common"])
-  const [selectedAssistant, setSelectedAssistant] =
+  const [storedAssistant, setSelectedAssistant] =
     useSelectedAssistant(null)
+  const selectedAssistant = selection === undefined ? storedAssistant : selection
   const historyId = useStoreMessageOption((state) => state.historyId)
   const serverChatId = useStoreMessageOption((state) => state.serverChatId)
   const setHistoryId = useStoreMessageOption((state) => state.setHistoryId)
@@ -544,6 +549,10 @@ export const AssistantSelect: React.FC<Props> = ({
           selectionMode: nextMode
         }
       }
+      if (onSelectionChange) {
+        await onSelectionChange(nextEntry)
+        return
+      }
       if (
         nextMode === "tracked" &&
         serverChatId &&
@@ -579,6 +588,7 @@ export const AssistantSelect: React.FC<Props> = ({
     [
       effectiveAssistantState.mode,
       clearActiveServerChat,
+      onSelectionChange,
       onSelectionComplete,
       restoreReturnFocus,
       selectionModePreference,
@@ -812,7 +822,7 @@ export const AssistantSelect: React.FC<Props> = ({
   const content = (
     <div
       data-testid="assistant-select-panel"
-      className="w-[320px] rounded-lg border border-border bg-surface text-text shadow-lg"
+      className="w-[320px] max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-surface text-text shadow-lg"
     >
       <div className="border-b border-border p-2">
         <Input
@@ -824,7 +834,14 @@ export const AssistantSelect: React.FC<Props> = ({
           allowClear
           size="small"
           onChange={(event) => setSearchText(event.target.value)}
-          onKeyDown={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            event.stopPropagation()
+            if (event.key === "Escape" && !event.nativeEvent.isComposing) {
+              event.preventDefault()
+              setOpen(false)
+              restoreReturnFocus()
+            }
+          }}
         />
       </div>
       <div

@@ -3969,8 +3969,20 @@ async def build_context_and_messages(
         and assistant_context.get("assistant_kind") == "persona"
         and assistant_context.get("assistant_id")
     )
+    from tldw_Server_API.app.core.Buddy.publication import current_buddy_publication
+
+    publication = current_buddy_publication.get()
+    # A Buddy acceptance already captured one exact existing conversation. Its
+    # transaction fence rechecks owner/revision; default-character resolution
+    # must not fork a neutral conversation into a new target.
+    is_accepted_buddy_conversation = bool(
+        publication is not None
+        and existing_conversation
+        and conv_id == publication.turn["conversation_id"]
+        and str(client_id_from_db) == publication.repository.user_id
+    )
     # Ensure a valid assistant identity is present before attempting persistence
-    if should_persist and character_db_id is None and not is_existing_persona_conversation:
+    if should_persist and character_db_id is None and not (is_existing_persona_conversation or is_accepted_buddy_conversation):
         logger.warning(
             'Persistence requested but no compatible assistant identity is available; disabling persistence for conversation {}.',
             final_conversation_id or "<new>",
@@ -3978,7 +3990,7 @@ async def build_context_and_messages(
         should_persist = False
 
     if should_persist:
-        if is_existing_persona_conversation and conv_id:
+        if (is_existing_persona_conversation or is_accepted_buddy_conversation) and conv_id:
             conversation_created = False
         else:
             conv_id, conversation_created = await get_or_create_conversation(
