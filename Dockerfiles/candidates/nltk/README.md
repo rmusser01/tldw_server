@@ -55,3 +55,21 @@ caller-supplied prepared source. It records the caller-supplied provenance hash
 but does not independently authenticate upstream source. Its tests use
 synthetic archives only. No candidate wheel has been built or validated, and no
 installed-environment or runtime-closure claim follows.
+
+The 2026-09-09 independent static review and scoped re-review are complete.
+The verifier rejects noncanonical ZIP/RECORD paths and file/directory aliases,
+requires one expected Name, Version and Build header, and supports exactly one
+`Wheel-Version: 1.0` header. The corrections were demonstrated with failing
+synthetic fixtures before implementation. Final focused verification passed
+29 tests with five existing warnings; Black, Ruff and compile-only checks
+passed. Verifier Bandit reported zero findings. Test-only Bandit retained 13
+Low-severity B101 assertion findings without suppressions.
+
+All 22 pins in `requirements-qualification.txt` were rechecked against retained
+wheel SHA256 values and exactly one top-level METADATA name/version per wheel.
+This is an artifact identity audit, not dependency-closure verification.
+The existing implementation plan and TASK-13013.7.17 retain the evidence paths,
+review results and platform restriction. Installed-wheel qualification and
+application/scanner evidence remain incomplete; AC2/AC3 stay open and
+`admitted:false` is unchanged. The full Supply_Chain suite was not rerun for
+this static follow-up.

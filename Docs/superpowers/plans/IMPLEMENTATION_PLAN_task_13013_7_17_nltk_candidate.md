@@ -83,13 +83,44 @@ with tarfile.open(archive, "r:gz") as source:
 **Status:** In Progress
 
 Blocked checkpoint: the platform rejected the next security-test step before
-an installed environment or candidate wheel was built. Provenance drafts are
-preserved but unreviewed; qualification is incomplete. Do not retry the rejected
-test via another agent, tool, or phrasing. Production and admission remain unchanged.
+an installed environment or candidate wheel was built. Qualification remains
+incomplete. Do not retry the rejected test via another agent, tool, or phrasing.
+Production and admission remain unchanged.
 
-Static-only checkpoint: the artifact verifier and pinned qualification-input
-record are implemented against synthetic wheel fixtures and await independent
-review. This does not satisfy the installed-wheel controls or complete Task 2.
+Static-only checkpoint: commit `41ee97fd640e9d5df97baf201ab3619025e80e0e`
+contains the artifact verifier, pinned qualification inputs, and 14 synthetic
+tests. The receiving session independently reviewed the static commit on
+2026-09-09 and found three parsing gaps: normalized ZIP path aliases, repeated
+singleton identity headers, and missing/unsupported wheel format versions.
+These are ordinary static-verifier corrections within the handoff's scope.
+This work does not satisfy installed-wheel controls or complete Task 2.
+
+Static follow-up tracking:
+- [x] Independently review `648017aecb..41ee97fd64`; retain the review in this
+  plan's workspace as `task-2-static-review-2026-09-09.md`.
+- [x] Recheck all 22 requirements against retained wheel SHA256 and exactly one
+  top-level METADATA name/version, including joblib's cloudpickle requirement.
+  Audit JSON: `/private/tmp/task-13013-7-17-static-review-vd9bf6ls/requirements-audit.json`,
+  SHA256 `34767d214bd0b5f7debe7843d1ac99b486525d45c3b9044ab1402e52d0fef1a7`.
+- [x] Correct the three findings with failing synthetic fixtures, passing
+  controls, and independent scoped re-review. RED: 15 failed / 14 passed;
+  GREEN: 29 passed. Scoped review approved all three fixes with no new
+  significant breakage; reports are `task-2-static-fix-report-2026-09-09.md`
+  and `task-2-static-rereview-2026-09-09.md` in this plan's workspace.
+- [x] Run final focused provenance tests, Black/Ruff, compile-only and Bandit.
+  Controller: 29 tests passed with five existing warnings; Black/Ruff and two
+  compile-only checks passed. Bandit: verifier zero findings/errors; tests 13
+  Low-severity/high-confidence B101 assertion findings, no suppressions/errors.
+  Raw final logs: `/private/tmp/task-13013-7-17-static-review-vd9bf6ls/`
+  (`pytest-final.log`, `bandit-verifier.json`, `bandit-tests.json`).
+
+Warnings retained: Starlette/httpx deprecation, unknown pytest `plugins` option,
+the intentional duplicate ZIP fixture warning, passlib's `crypt` deprecation,
+and an existing Pydantic field shadow. No unrelated configuration or warning
+suppression changes. The full Supply_Chain suite was not rerun at this checkpoint.
+
+No candidate wheel, package installation/execution, runtime qualification or
+scanner evidence is produced by this static follow-up. AC2/AC3 remain open.
 
 ### Task 2: Build and exercise separate baseline/candidate wheels
 
