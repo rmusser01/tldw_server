@@ -1,0 +1,447 @@
+{
+  "schemaVersion": 1,
+  "task": "TASK-13013.7.21",
+  "checkedAt": "2026-09-09T06:05:12.872166+00:00",
+  "tool": {
+    "image": "sha256:9803426ce3cc2b0b9938db476ed1b296088ad85fed8419b02dcf3aef5a94186d",
+    "platform": "linux/amd64",
+    "hostExecution": "amd64 emulation on arm64; no native performance qualification",
+    "gnupg": "2.4.7",
+    "libgcrypt": "1.11.0",
+    "network": "none",
+    "rootfs": "read-only",
+    "uidGid": "1000:1000",
+    "capabilities": "none"
+  },
+  "signatures": {
+    "ubuntu": {
+      "fingerprint": "DBACA8CC694BBD8F0F2E64BD0BE76EF9F3A3884C",
+      "valid": true,
+      "signerAttribution": "Exact Launchpad source publication -> publisher profile -> registered fingerprint",
+      "webOfTrust": "undefined; no ownertrust was set"
+    },
+    "node": {
+      "fingerprint": "5BE8A3F6C8A5C01D106C0AD820B1A390B168D356",
+      "valid": true,
+      "keyringCommit": "5b7f55f4a7e35d1176d27a6b81b0c3c3b794216b",
+      "signerAttribution": "Official Node release README and project release-key repository",
+      "webOfTrust": "undefined; no ownertrust was set"
+    },
+    "alteredCopies": {
+      "ubuntuExit": 1,
+      "nodeExit": 1,
+      "badSignatureCount": 2
+    }
+  },
+  "nodeRelease": {
+    "version": "24.20.0",
+    "archiveSHA256": "2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2",
+    "executableSHA256": "89af8424dd53e560b1933f87ba650d8bf57c83ca5a04600eefb31f416aabbae7",
+    "buildConfiguration": {
+      "target_arch": "x64",
+      "node_shared_zlib": "false",
+      "node_shared": "false"
+    },
+    "zlibHeaderVersion": "1.3.2.1-motley",
+    "headerMatchesPinnedSource": true
+  },
+  "ubuntuBuild": {
+    "packageVersion": "1:1.3.dfsg-3.1ubuntu2.2",
+    "buildId": 33542758,
+    "architecture": "amd64",
+    "packageSHA256": "84b9cf5752b29c9f92c27cd4c4ba9bbcc70b5ccf9b1b515421a28ae23212e273",
+    "librarySHA256": "86200da370f20476a2507e9097a789b5ef97269b4ca8d5e164ad82dab9d99892",
+    "sourceSignatureVerified": true,
+    "buildRecordsFetchedVia": "official HTTPS",
+    "buildRecordsLocallySignatureVerified": false,
+    "reproducibleBuildPerformed": false
+  },
+  "retainedImages": [
+    {
+      "application": "admin-ui",
+      "archiveSHA256": "00a88382904345e72c1c574e1d28d01de8fad3c5c96706e3a53a65b7a73158f6",
+      "subject": "sha256:032ef1c16c6deb2fb59a46f6cf2431fab8365a751a1968bd12a7adc59454302f",
+      "configDigest": "sha256:e5f0cb7c15620724d0c5207cea443dfdbef8750240283a85f230ad5fa30925d7",
+      "verifiedLayers": [
+        "sha256:0926a8eb0e608a5c6888d1cd5594184bdf3ed3aa311dba5b42a547caefdc6f2e",
+        "sha256:fe78ed7a0e9f2508c38229abe50e7d7ba9d26fccab9dc537b998d3fb571e8668",
+        "sha256:93c8e806d6641a1d60f0fb4532980d5c57fbc95ae08f6dcfa1a5257254d11e4a",
+        "sha256:18dbacab88557d8adb11fb72480a2f31aefed6146f681445d6744356f089c2dd",
+        "sha256:3b289b9b2641a5b713258fd34a2f917e034bf45300fc6c0e77513f8be6fad791",
+        "sha256:7dff5fa9078d5087ccf07daf5eacc1a32f0972670f14235e8c04769571ea26f2",
+        "sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1",
+        "sha256:6d61c7eb5c855bd4ba839f8ae5a17c731b4b84400f7139126284206f449f1db0",
+        "sha256:f10810327bf05637342db88f69e24ba4f906d88ff024b0218ca9b1090ed2cd8d",
+        "sha256:336cd5cc8e765c5a4694b0c83e22e2462d9513c66645ff5ef0a0041c13b2db46",
+        "sha256:d92c64d4053bd4511baf6844bc6367fb4dc413ec49986293fdcb8529afa48e8c",
+        "sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1"
+      ],
+      "publishedPackageSHA256": "84b9cf5752b29c9f92c27cd4c4ba9bbcc70b5ccf9b1b515421a28ae23212e273",
+      "selectedFiles": {
+        "usr/lib/x86_64-linux-gnu/libz.so.1.3": {
+          "sha256": "86200da370f20476a2507e9097a789b5ef97269b4ca8d5e164ad82dab9d99892",
+          "size": 113000,
+          "layerDigest": "sha256:fe78ed7a0e9f2508c38229abe50e7d7ba9d26fccab9dc537b998d3fb571e8668",
+          "local": "/private/tmp/task-13013-7-zlib-auth.j3H30A/admin-ui-usr_lib_x86_64-linux-gnu_libz.so.1.3"
+        },
+        "usr/local/share/tldw-candidate-evidence/installed-versions.tsv": {
+          "sha256": "d73e7bb315069accf831ea8aad62702ee022638004298cf2efa914ec32df2c4d",
+          "size": 106,
+          "layerDigest": "sha256:fe78ed7a0e9f2508c38229abe50e7d7ba9d26fccab9dc537b998d3fb571e8668",
+          "local": "/private/tmp/task-13013-7-zlib-auth.j3H30A/admin-ui-usr_local_share_tldw-candidate-evidence_installed-versions.tsv"
+        },
+        "usr/local/share/tldw-candidate-evidence/zlib1g-download.sha256": {
+          "sha256": "12ac9463f880d95bfc548327e0c388d73d6a7f1990153891da9a13a18ec0ac28",
+          "size": 133,
+          "layerDigest": "sha256:fe78ed7a0e9f2508c38229abe50e7d7ba9d26fccab9dc537b998d3fb571e8668",
+          "local": "/private/tmp/task-13013-7-zlib-auth.j3H30A/admin-ui-usr_local_share_tldw-candidate-evidence_zlib1g-download.sha256"
+        },
+        "usr/local/bin/node": {
+          "sha256": "89af8424dd53e560b1933f87ba650d8bf57c83ca5a04600eefb31f416aabbae7",
+          "size": 126458664,
+          "layerDigest": "sha256:93c8e806d6641a1d60f0fb4532980d5c57fbc95ae08f6dcfa1a5257254d11e4a",
+          "local": "/private/tmp/task-13013-7-zlib-auth.j3H30A/admin-ui-usr_local_bin_node"
+        }
+      }
+    },
+    {
+      "application": "webui",
+      "archiveSHA256": "48e39cac5468db1e8a8389923e0f84d5f4e6d3d18e4c94e1dd43b6e7de7bf454",
+      "subject": "sha256:c15e7a1a28c8158313cc31a462470919c33a31366c31eb76e27e9e7a1af03dcd",
+      "configDigest": "sha256:d1fe62fc6072bd060dd434fb8a5fe3f415bc74b179f462efd3ba78c3bfc2c999",
+      "verifiedLayers": [
+        "sha256:0926a8eb0e608a5c6888d1cd5594184bdf3ed3aa311dba5b42a547caefdc6f2e",
+        "sha256:d8ac2028c9b279f9d981e6c2c3f43eb5c8de143df8a4c707b5101e9848a2de6b",
+        "sha256:a764f45f8dc8f717b5bf8c48edecad2813b93e1fee378a39300789bdc25416d4",
+        "sha256:c964a083f872888cab59eedbd316232357255b0581471c160a6f61c3c5338c84",
+        "sha256:d072fb5a45eed2b0be890e6a7762709cec07d325eccc0c8ab35a1d667916cf6b",
+        "sha256:cecae2d757339a7c0237c076a584b303f9851a9b0cf450bd0f599837d0ae1a69",
+        "sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1",
+        "sha256:f6b5574e3d70a690274e26b50ce89724aade36e3bf632ab9c534f280465259db",
+        "sha256:87a5b75f6647fd8727a2bf941d8d186ec8b10e17f4e027f55aff4678fd6cf173",
+        "sha256:8bed58e9dc69f686a99c56026a8c2aadfd96baa3e5333ce802b63b48d36e75dc",
+        "sha256:d346cd412bc0907257cdaeb744302c7399f039772e4dc07649afc02af36cec27",
+        "sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1"
+      ],
+      "publishedPackageSHA256": "84b9cf5752b29c9f92c27cd4c4ba9bbcc70b5ccf9b1b515421a28ae23212e273",
+      "selectedFiles": {
+        "usr/lib/x86_64-linux-gnu/libz.so.1.3": {
+          "sha256": "86200da370f20476a2507e9097a789b5ef97269b4ca8d5e164ad82dab9d99892",
+          "size": 113000,
+          "layerDigest": "sha256:d8ac2028c9b279f9d981e6c2c3f43eb5c8de143df8a4c707b5101e9848a2de6b",
+          "local": "/private/tmp/task-13013-7-zlib-auth.j3H30A/webui-usr_lib_x86_64-linux-gnu_libz.so.1.3"
+        },
+        "usr/local/share/tldw-candidate-evidence/installed-versions.tsv": {
+          "sha256": "d73e7bb315069accf831ea8aad62702ee022638004298cf2efa914ec32df2c4d",
+          "size": 106,
+          "layerDigest": "sha256:d8ac2028c9b279f9d981e6c2c3f43eb5c8de143df8a4c707b5101e9848a2de6b",
+          "local": "/private/tmp/task-13013-7-zlib-auth.j3H30A/webui-usr_local_share_tldw-candidate-evidence_installed-versions.tsv"
+        },
+        "usr/local/share/tldw-candidate-evidence/zlib1g-download.sha256": {
+          "sha256": "12ac9463f880d95bfc548327e0c388d73d6a7f1990153891da9a13a18ec0ac28",
+          "size": 133,
+          "layerDigest": "sha256:d8ac2028c9b279f9d981e6c2c3f43eb5c8de143df8a4c707b5101e9848a2de6b",
+          "local": "/private/tmp/task-13013-7-zlib-auth.j3H30A/webui-usr_local_share_tldw-candidate-evidence_zlib1g-download.sha256"
+        },
+        "usr/local/bin/node": {
+          "sha256": "89af8424dd53e560b1933f87ba650d8bf57c83ca5a04600eefb31f416aabbae7",
+          "size": 126458664,
+          "layerDigest": "sha256:a764f45f8dc8f717b5bf8c48edecad2813b93e1fee378a39300789bdc25416d4",
+          "local": "/private/tmp/task-13013-7-zlib-auth.j3H30A/webui-usr_local_bin_node"
+        }
+      }
+    }
+  ],
+  "vulnerabilityAdmission": {
+    "admitted": false,
+    "freshScanPerformed": false,
+    "candidateCodeExecuted": false,
+    "applicabilityDetermined": false
+  },
+  "rawEvidence": [
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/admin-ui-usr_lib_x86_64-linux-gnu_libz.so.1.3",
+      "sha256": "86200da370f20476a2507e9097a789b5ef97269b4ca8d5e164ad82dab9d99892",
+      "size": 113000
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/admin-ui-usr_local_bin_node",
+      "sha256": "89af8424dd53e560b1933f87ba650d8bf57c83ca5a04600eefb31f416aabbae7",
+      "size": 126458664
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/admin-ui-usr_local_share_tldw-candidate-evidence_installed-versions.tsv",
+      "sha256": "d73e7bb315069accf831ea8aad62702ee022638004298cf2efa914ec32df2c4d",
+      "size": 106
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/admin-ui-usr_local_share_tldw-candidate-evidence_zlib1g-download.sha256",
+      "sha256": "12ac9463f880d95bfc548327e0c388d73d6a7f1990153891da9a13a18ec0ac28",
+      "size": 133
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/altered-signature-status.txt",
+      "sha256": "70a57cf4b8d9c11ea55ef8874643ad61ff1c462d6679cd7bfd9bd2b560aea758",
+      "size": 477
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/altered-signature-stderr.txt",
+      "sha256": "4e788ed3086d503f7aba1c7e53138cd1ec7233e4e0b5d184ee87d538946e1029",
+      "size": 845
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/inspect-retained-images.py",
+      "sha256": "a43517bd323777888a2b7b9fb75ec8fc6c616bad35ce6436efefd83a91f62992",
+      "size": 5116
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/inspection-helper-bandit.json",
+      "sha256": "63291e767b032e554fb07876548d27ef710c3de0a8175f8d2594a17cc03c8d50",
+      "size": 782
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/node-SHASUMS256.altered.asc",
+      "sha256": "74d094363b46e87eb9d4f0f9aa6ba9fa854186550d0feb7ad599b80145e99d70",
+      "size": 3449
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/node-SHASUMS256.txt.asc",
+      "sha256": "8cc4c2dc94d07c7bfd4898ff1ca641d09e65e465becb50baecb4578ed93d95dc",
+      "size": 3449,
+      "url": "https://nodejs.org/dist/v24.20.0/SHASUMS256.txt.asc"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/node-keyring-commit.json",
+      "sha256": "6b6507e13a1de2bfac5df00fe0209b05ea4f671a95d669c894cef41a6acf7d05",
+      "size": 8792,
+      "url": "https://api.github.com/repos/nodejs/release-keys/commits/main"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/node-official-bin-node",
+      "sha256": "89af8424dd53e560b1933f87ba650d8bf57c83ca5a04600eefb31f416aabbae7",
+      "size": 126458664
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/node-official-include-node-config.gypi",
+      "sha256": "6df90af60cb6fa8a211029d089acc44288486a5cc930c355afbfbd75bb41056e",
+      "size": 20469
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/node-official-include-node-zlib.h",
+      "sha256": "0ff41598d145693759a8322bb90bc4f2c57dcdcb3635fdf5b2195bf13df15b54",
+      "size": 104484
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/node-pubring.kbx",
+      "sha256": "2733c3959ac2843194801dd7a17162439a996a1471e007624c27f2dda30206a6",
+      "size": 95960,
+      "url": "https://raw.githubusercontent.com/nodejs/release-keys/5b7f55f4a7e35d1176d27a6b81b0c3c3b794216b/gpg/pubring.kbx"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/node-release-README.md",
+      "sha256": "e0feabe136086b41c031ec82058c71ef8905bd8ceef687fda720b59eb736bc82",
+      "size": 41791,
+      "url": "https://raw.githubusercontent.com/nodejs/node/71b8b174857e25106d39b61a9e6f30d927da8b01/README.md"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/node-signature-status.txt",
+      "sha256": "986c7ef4c0a12b0a05a9946515d18427c5b1bb1e690990c5f78d2d17c4fb55a5",
+      "size": 402
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/node-signature-stderr.txt",
+      "sha256": "f9b7d8b660955958c80990d658f4f3fc32bea907c14f80d0cfa3c70a302edda7",
+      "size": 565
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/node-unverified-archive-inspection.json",
+      "sha256": "0d86d94510c705c9f456dd65964a5061f3488dbf1eb23cc49095ff88acefd3ff",
+      "size": 898
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/node-v24.20.0-linux-x64.tar.xz",
+      "sha256": "2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2",
+      "size": 31838904,
+      "url": "https://nodejs.org/dist/v24.20.0/node-v24.20.0-linux-x64.tar.xz"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/retained-binary-comparison.json",
+      "sha256": "51d9cad1dec9125c7939c446b944ef34c015f6355457f29ac71427c8384277c9",
+      "size": 5986
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/ubuntu-binary-publications.json",
+      "sha256": "4ef39404cebf4429ef90888e2f39c8556533d7da9a99605874a6114e4b5a1c12",
+      "size": 18773,
+      "url": "https://api.launchpad.net/1.0/ubuntu/+archive/primary?ws.op=getPublishedBinaries&binary_name=zlib1g&version=1%3A1.3.dfsg-3.1ubuntu2.2&exact_match=true"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/ubuntu-signature-status.txt",
+      "sha256": "6281cdcb8c6b3b446d851477b07d9193b08f1ebeb3970d7e307113a9664aa73f",
+      "size": 958
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/ubuntu-signature-stderr.txt",
+      "sha256": "f16bb9f40736e66072d47130071017a85578c7a576fb71bf4e3df3164efe8044",
+      "size": 861
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/ubuntu-signer-keys.json",
+      "sha256": "8fbd6123e3726d8b3ddeaca73b15bb8906a0d1689b2b1eb60352574e9274905a",
+      "size": 580,
+      "url": "https://api.launchpad.net/1.0/~yomonokio/gpg_keys"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/ubuntu-signer-person.json",
+      "sha256": "85e250c533044e2702a0f7d81e77ddf99c0fde218c51869a34787478c317cee9",
+      "size": 3012,
+      "url": "https://api.launchpad.net/1.0/~yomonokio"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/ubuntu-signer.asc",
+      "sha256": "f278aaef55c947af85021875b78c3c04f1d4d4e841c334676a20ae6bcf622fc0",
+      "size": 7460,
+      "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xDBACA8CC694BBD8F0F2E64BD0BE76EF9F3A3884C"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/ubuntu-source-publications.json",
+      "sha256": "0c9e9d646af6141c51fdd6d8e6223372fb867f9866e175a203ac2110116ead85",
+      "size": 2749,
+      "url": "https://api.launchpad.net/1.0/ubuntu/+archive/primary?ws.op=getPublishedSources&source_name=zlib&version=1%3A1.3.dfsg-3.1ubuntu2.2&exact_match=true"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/ubuntu-zlib-build.json",
+      "sha256": "d7c997144ec972df324f9d76ab807a43680a78ea0acd59bd8537cd6abcb2f971",
+      "size": 1692,
+      "url": "https://api.launchpad.net/1.0/~ubuntu-security/+archive/ubuntu/ppa/+build/33542758"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/ubuntu-zlib.altered.dsc",
+      "sha256": "31766bfbfd59b7aeb545217c354cc70590cfb4053853d03540e4a8991d6ee892",
+      "size": 2987
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/ubuntu-zlib.buildinfo",
+      "sha256": "4bad9caaa79dfa2956d147c977d504b97a0556c8439ef5004505d5f8129b4638",
+      "size": 11017,
+      "url": "https://launchpad.net/~ubuntu-security/+archive/ubuntu/ppa/+build/33542758/+files/zlib_1.3.dfsg-3.1ubuntu2.2_amd64.buildinfo"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/ubuntu-zlib.changes",
+      "sha256": "3f5b62f11440296e0301f05c058f2c45503556d453a99c825e9bf9dc8eba0bfb",
+      "size": 6010,
+      "url": "https://launchpad.net/~ubuntu-security/+archive/ubuntu/ppa/+build/33542758/+files/zlib_1.3.dfsg-3.1ubuntu2.2_amd64.changes"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/ubuntu-zlib.dsc",
+      "sha256": "56a7cd029863cbddafce831e4e63cccfa84017f93617929cb7c02f80bb5a122a",
+      "size": 2987,
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/z/zlib/zlib_1.3.dfsg-3.1ubuntu2.2.dsc"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/webui-usr_lib_x86_64-linux-gnu_libz.so.1.3",
+      "sha256": "86200da370f20476a2507e9097a789b5ef97269b4ca8d5e164ad82dab9d99892",
+      "size": 113000
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/webui-usr_local_bin_node",
+      "sha256": "89af8424dd53e560b1933f87ba650d8bf57c83ca5a04600eefb31f416aabbae7",
+      "size": 126458664
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/webui-usr_local_share_tldw-candidate-evidence_installed-versions.tsv",
+      "sha256": "d73e7bb315069accf831ea8aad62702ee022638004298cf2efa914ec32df2c4d",
+      "size": 106
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/webui-usr_local_share_tldw-candidate-evidence_zlib1g-download.sha256",
+      "sha256": "12ac9463f880d95bfc548327e0c388d73d6a7f1990153891da9a13a18ec0ac28",
+      "size": 133
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/zlib-deb-control.tar.zst",
+      "sha256": "8d55b4e024e97c728cb0f8b8fe9eb700d29d356f22779f3562c8ec7098b7c158",
+      "size": 1473
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/zlib-deb-data.tar.zst",
+      "sha256": "f26ae447287d471f7af6bc9a23610db54b234e21f5ee503eb87bd22ae8191585",
+      "size": 61321
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/zlib-official-libz.so.1.3",
+      "sha256": "86200da370f20476a2507e9097a789b5ef97269b4ca8d5e164ad82dab9d99892",
+      "size": 113000
+    },
+    {
+      "path": "/private/tmp/task-13013-7-zlib-auth.j3H30A/zlib1g_1.3.dfsg-3.1ubuntu2.2_amd64.deb",
+      "sha256": "84b9cf5752b29c9f92c27cd4c4ba9bbcc70b5ccf9b1b515421a28ae23212e273",
+      "size": 62988,
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/z/zlib/zlib1g_1.3.dfsg-3.1ubuntu2.2_amd64.deb"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-20-zlib-provenance.XAuc0T/zlib_1.3.dfsg.orig.tar.xz",
+      "sha256": "5eea0322c1c21c75cad3b607ac1c43ff5c71e014b8ac4a34300b5e2b80d02e70",
+      "size": 1128572
+    },
+    {
+      "path": "/private/tmp/task-13013-7-20-zlib-provenance.XAuc0T/zlib_1.3.dfsg-3.1ubuntu2.2.debian.tar.xz",
+      "sha256": "de1c2d532ecb7caf99ccb905fb03c37fe0c8117fbdc79d05be4474b71e6398c2",
+      "size": 61316
+    },
+    {
+      "path": "/private/tmp/task-13013-7-20-zlib-provenance.XAuc0T/node-commit-zlib.h",
+      "sha256": "0ff41598d145693759a8322bb90bc4f2c57dcdcb3635fdf5b2195bf13df15b54",
+      "size": 104484
+    }
+  ],
+  "inspectionHelperBandit": {
+    "findings": 0,
+    "errors": 0,
+    "report": "/private/tmp/task-13013-7-zlib-auth.j3H30A/inspection-helper-bandit.json"
+  },
+  "verificationCommands": {
+    "containerPrefix": [
+      "docker",
+      "run",
+      "--rm",
+      "--pull=never",
+      "--platform",
+      "linux/amd64",
+      "--network",
+      "none",
+      "--read-only",
+      "--user",
+      "1000:1000",
+      "--cap-drop",
+      "ALL",
+      "--security-opt",
+      "no-new-privileges",
+      "--pids-limit",
+      "64",
+      "--memory",
+      "256m",
+      "--cpus",
+      "1",
+      "--tmpfs",
+      "/tmp:rw,noexec,nosuid,size=16m",
+      "--mount",
+      "type=bind,src=/private/tmp/task-13013-7-zlib-auth.j3H30A,dst=/input,readonly",
+      "--entrypoint",
+      "/bin/sh",
+      "sha256:9803426ce3cc2b0b9938db476ed1b296088ad85fed8419b02dcf3aef5a94186d",
+      "-c"
+    ],
+    "ubuntuShell": "mkdir -m 700 /tmp/gnupg && gpg --batch --no-options --homedir /tmp/gnupg --with-colons --show-keys /input/ubuntu-signer.asc && gpg --batch --no-options --homedir /tmp/gnupg --import /input/ubuntu-signer.asc && gpg --batch --no-options --homedir /tmp/gnupg --no-auto-key-retrieve --status-fd 1 --verify /input/ubuntu-zlib.dsc",
+    "nodeShell": "mkdir -m 700 /tmp/gnupg && gpg --batch --no-options --homedir /tmp/gnupg --no-auto-key-retrieve --no-default-keyring --keyring /input/node-pubring.kbx --status-fd 1 --verify /input/node-SHASUMS256.txt.asc",
+    "originalSignatureExits": {
+      "ubuntu": 0,
+      "node": 0
+    },
+    "archiveInspection": [
+      "/private/tmp/task-13013-7-19-passlib-kqd0vzjm/proposal/.venv/bin/python",
+      "/private/tmp/task-13013-7-zlib-auth.j3H30A/inspect-retained-images.py"
+    ],
+    "archiveInspectionExit": 0
+  }
+}
