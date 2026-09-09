@@ -9,6 +9,12 @@ build and parser qualification have passed. Combined application compatibility,
 source-aware scans and final candidate security review remain required. No
 vulnerability waiver follows from this evidence.
 
+The [2026-09-09 source reconciliation](../../../Docs/Evidence/TASK-13013.7.9-expat-source-reconciliation.md)
+maps the retained Expat scanner rows to exact source inputs and native artifact
+records. Three have corresponding source repairs; CVE-2025-66382 remains
+unresolved. Scanner recognition and complete bundled-copy coverage are still
+required before final candidate review.
+
 ## Why both copies matter
 
 The saved FFmpeg candidate manifest

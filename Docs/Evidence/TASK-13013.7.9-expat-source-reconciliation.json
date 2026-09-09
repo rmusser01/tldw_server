@@ -1,0 +1,564 @@
+{
+  "authenticated_archive_hashes_rechecked": 5,
+  "evidence": [
+    {
+      "path": "/private/tmp/task-13013-7-combined-native-34177651966.fnWTcU/inputs.json",
+      "sha256": "b6278c0b4e28086ea302ba90d9b234bd7d293c2c326f7319049f568269b9fb61",
+      "size": 4370
+    },
+    {
+      "path": "/private/tmp/task-13013-7-combined-native-34177651966.fnWTcU/build/inputs.json",
+      "sha256": "b6278c0b4e28086ea302ba90d9b234bd7d293c2c326f7319049f568269b9fb61",
+      "size": 4370
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-native-34170600664.C3dvFx/system/build/artifacts/expat-dbgsym_2.8.4-1~deb13u1+tldw1_amd64.deb",
+      "sha256": "65d115902ab294fa640ab2b307530626b6361737e3aa23e0593654062b6bf2d7",
+      "size": 34076
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-native-34170600664.C3dvFx/system/build/artifacts/expat_2.8.4-1~deb13u1+tldw1.debian.tar.xz",
+      "sha256": "a0ad771679f2b9b6dedf675a335171949be42279fd9254f1a149c59267edaa89",
+      "size": 14232
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-native-34170600664.C3dvFx/system/build/artifacts/expat_2.8.4-1~deb13u1+tldw1.dsc",
+      "sha256": "a5a67ea8197182ed1e0b7e20f83e481c31af471763adc5cefa77731d1b06794a",
+      "size": 1124
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-native-34170600664.C3dvFx/system/build/artifacts/expat_2.8.4-1~deb13u1+tldw1_amd64.buildinfo",
+      "sha256": "4aac39fc2881604c746e0b701bdbfa0439ea53347416049c29e6e26092f042d7",
+      "size": 8031
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-native-34170600664.C3dvFx/system/build/artifacts/expat_2.8.4-1~deb13u1+tldw1_amd64.changes",
+      "sha256": "37e28ebdac6baaafdb72f5e1cd999b626440ea10194f8704af8704b0ef932169",
+      "size": 2953
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-native-34170600664.C3dvFx/system/build/artifacts/expat_2.8.4-1~deb13u1+tldw1_amd64.deb",
+      "sha256": "a475abe5a68182d782f59363b14934c551b933d0547586e65e014df43fa09c42",
+      "size": 56788
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-native-34170600664.C3dvFx/system/build/artifacts/expat_2.8.4-1~deb13u1+tldw1_source.buildinfo",
+      "sha256": "937b248f82e013095378d197899fa9f0705e722c6423d18513ffc70918dc0718",
+      "size": 6429
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-native-34170600664.C3dvFx/system/build/artifacts/expat_2.8.4-1~deb13u1+tldw1_source.changes",
+      "sha256": "e5cf4a8ab7192130cda7f39b679c9f4537ce4fa58b66d4657a5cb62d723d365d",
+      "size": 1319
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-native-34170600664.C3dvFx/system/build/artifacts/expat_2.8.4.orig.tar.gz",
+      "sha256": "a8a9c5cbba9110000b13cc9943f50fcd7e552a5cbad49cb191142c500a0a11b7",
+      "size": 8468126
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-native-34170600664.C3dvFx/system/build/artifacts/libexpat1-dbgsym_2.8.4-1~deb13u1+tldw1_amd64.deb",
+      "sha256": "c01345de60f5cc731f3a4ba925a34de6b8abb969e7071f1272a39c4b69bf111d",
+      "size": 360860
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-native-34170600664.C3dvFx/system/build/artifacts/libexpat1-dev_2.8.4-1~deb13u1+tldw1_amd64.deb",
+      "sha256": "a33b6a7242499065010ae7df729eee3e6f1704a01417fe7a1ab990f9f60429dc",
+      "size": 180668
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-native-34170600664.C3dvFx/system/build/artifacts/libexpat1-udeb_2.8.4-1~deb13u1+tldw1_amd64.udeb",
+      "sha256": "a4f34ac7b48c77d4b9734a257461f70b333564e17b3dec14dfd2396f0c57b91f",
+      "size": 62504
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-native-34170600664.C3dvFx/system/build/artifacts/libexpat1_2.8.4-1~deb13u1+tldw1_amd64.deb",
+      "sha256": "0f06b4b09147e9baf790ce6118a6b705b8c44edb780138af179c3f5600b580dd",
+      "size": 125088
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-native-34170600664.C3dvFx/python/build/artifacts/installed-binaries.sha256",
+      "sha256": "a186b998bd21a3c36ebfc1471b386af6ccd538a97a3590be60d2af64111a0b91",
+      "size": 483
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-native-34170600664.C3dvFx/python/build/artifacts/python-install.tar.gz",
+      "sha256": "d1c97c21e5f940509acccbbf971ea918ed8e1ce6a74916c7c20e758c283f9077",
+      "size": 111272288
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-native-34170600664.C3dvFx/python/build/artifacts/python-source.tar.xz",
+      "sha256": "df3d64b06dfe2202febe36ba6b9e61587d0f16dee108a72a078502097c0a7dc4",
+      "size": 21052748
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-native-34170600664.C3dvFx/python/prepare/authentication.json",
+      "sha256": "97e299a31bcbbefdc3e91ef4f4eeb7af0b5a35ae94064757062f509b49a7f786",
+      "size": 1514
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-sources.uuqxOa/Python-3.12.14.tar.xz",
+      "sha256": "5c8462af5790baf43a321a1559dbe0db06d1be4300fb85fb53c40060668e548a",
+      "size": 20820300
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-sources.uuqxOa/expat-2.8.4.tar.gz",
+      "sha256": "b8ece2437692dad44d851c4532723390a5a330990007706be9c8d2b90d294f36",
+      "size": 825689
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-sources.uuqxOa/expat_2.8.4-1.debian.tar.xz",
+      "sha256": "a90e0731e6ccdee5f4368a69ab12cf8cc9f5f29e7e61959e2e839d4ca00361fc",
+      "size": 14136
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-sources.uuqxOa/expat_2.8.4-1.dsc",
+      "sha256": "b3dc30ff68a32b95746899d2c8e03cfbb5350b982916d649fab179e56ef5ed3e",
+      "size": 1970
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-sources.uuqxOa/expat_2.8.4.orig.tar.gz",
+      "sha256": "a8a9c5cbba9110000b13cc9943f50fcd7e552a5cbad49cb191142c500a0a11b7",
+      "size": 8468126
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/release-tag.json",
+      "sha256": "740261bf4afd06b95ca468c73a33c51d10d896717b6504cd790efca7e77cd560",
+      "size": 2683
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/release-commit.json",
+      "sha256": "c2c1cc95f12dcdb4b0d88aaf8aeb3aaf021a4dc643dabdfdcdf7ac3cb5782068",
+      "size": 22161
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/release-xmlparse.c",
+      "sha256": "a0f45238a4f29fe188f38256edc04e8fd0eb3a43cc03de38cdb9640778089a92",
+      "size": 319854
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/release-random_getentropy.c",
+      "sha256": "ba99df7b694ff0b62d2871cc13b87e75d1a715af6045102ee7aff120ec1ae332",
+      "size": 2394
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/release-basic_tests.c",
+      "sha256": "b37059b33e308c1b33eeb8a1a73d8a020e3ac2fc62ab9f11b062eae5adbdf284",
+      "size": 268151
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/release-misc_tests.c",
+      "sha256": "67bbfb2a9e88219e2c3144f4d7b545686896bc4720155f7847146fbf674814fb",
+      "size": 34146
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/ancestry-127b7d4beb8fe7e5ce5cb021c2e56379c95863d0.json",
+      "sha256": "74edf7232e02a151add58380404c9ce000d346026897834ccce93b441aef8b7d",
+      "size": 84394
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/127b7d4beb8fe7e5ce5cb021c2e56379c95863d0.json",
+      "sha256": "1e4b956657a783531a28242ba5e9cd5ca11414b277bb1b600252a4802d581b12",
+      "size": 7742
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/ancestry-40daa9996d616e66a75dea41ed2b18f2c3901b9f.json",
+      "sha256": "58ec0b2a4239e15ef0bbd1b3e31fd4d4c22743be67793438c39fd4f16f154908",
+      "size": 89532
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/40daa9996d616e66a75dea41ed2b18f2c3901b9f.json",
+      "sha256": "d4757ab099833735b87c13f83b7bb0ac18838a3c2f1f2d2952cf8726cc93e32a",
+      "size": 4969
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/ancestry-98599f6dcc2b460410881fe420f5f55d6bec63bf.json",
+      "sha256": "a8b46d5199972cda5a7f8c137978e5891b1855375f97363b25d3d71579a72e81",
+      "size": 77436
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/98599f6dcc2b460410881fe420f5f55d6bec63bf.json",
+      "sha256": "6458763b8ddd89a17feb258d3eefacb19e28a77115a3e9d37d3d358475b2d923",
+      "size": 11169
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/ancestry-98f5acc146af76859cd7c345c0906e9e9e8ea656.json",
+      "sha256": "4600d8b4d4fc952cdf892d04df74d1271f3d7d9e8debef6c774c7494356eac82",
+      "size": 87555
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/98f5acc146af76859cd7c345c0906e9e9e8ea656.json",
+      "sha256": "06404598f80904eff41cfcd8a9c3a4972dcf5cafecadf666ecd2df2182312ac9",
+      "size": 8322
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/ancestry-acbd2e1179c04fe9a8c3f3837701904d05de71fc.json",
+      "sha256": "e1fa9b1c4cc3ea02e31d91bed6544bbb064926a920e7a7e962b426945cccefb1",
+      "size": 81669
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/acbd2e1179c04fe9a8c3f3837701904d05de71fc.json",
+      "sha256": "c2dff7cf55d625073b703edd4a0530ebdd10d5b7aa8cc3fe189c325dc8b72131",
+      "size": 6172
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/ancestry-f8f7c4ffd883e3c2c58f0ebb49416a6c1d248738.json",
+      "sha256": "2194fd478b52a75826859724ac13b86f5968713da14e0ee380fbc76275b10ba1",
+      "size": 84522
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/f8f7c4ffd883e3c2c58f0ebb49416a6c1d248738.json",
+      "sha256": "831782beb63e7a26febe4958b154b8deee60db6f46a3831217be76de0d8b23be",
+      "size": 7437
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/scanner-excerpts.json",
+      "sha256": "a33e7c42bc5bda0012bc7ce4b0a5fe7abb01011c530aa6fcbe3a4657e15d1a32",
+      "size": 35326
+    },
+    {
+      "path": "/private/tmp/task-13013-7-combined-native-34177651966.fnWTcU/image-identity.json",
+      "sha256": "6d51f15915c12e1ad3665ba703418e2ffbb1915a4ec4e5033d616a2bc6a4bbaf",
+      "size": 475
+    },
+    {
+      "path": "/private/tmp/task-13013-7-combined-scans.vpkHOr/evidence/trivy.json",
+      "sha256": "27137ad095a2657499a6678ca37c34c157bf606a23abab270019326213c4b17a",
+      "size": 1850899
+    },
+    {
+      "path": "/private/tmp/task-13013-7-combined-scans.vpkHOr/evidence/grype.json",
+      "sha256": "2bba9bbad78ea5f0cb3dc2c8d3e645185a83f8c4a18665e1bb323965913dd194",
+      "size": 1633865
+    },
+    {
+      "path": "/private/tmp/task-13013-7-combined-scans.vpkHOr/evidence/syft.json",
+      "sha256": "2a987ed7d69fc1a3239acc26825bc6246a48d1631024fc52973659624f037bf7",
+      "size": 14866660
+    },
+    {
+      "path": "/private/tmp/task-13013-7-combined-native-34177651966.fnWTcU/runtime/system-parsers.json",
+      "sha256": "208015f4f32a9b7d7d7b4614285b913fee8df87bbadb83b1dfcd1ced85612ac9",
+      "size": 361
+    },
+    {
+      "path": "/private/tmp/task-13013-7-combined-native-34177651966.fnWTcU/runtime/python-controls.json",
+      "sha256": "64311d2033c0b0b005d0f18495d36057ac22fcb04565ffe61312ea8c06b5f664",
+      "size": 478
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-native-34170600664.C3dvFx/system/build/abi/libexpat/sha256",
+      "sha256": "17154180e7e77ab8fed46604ead7cc6e4a0f95777d715b86334cda72414db248",
+      "size": 134
+    },
+    {
+      "path": "/private/tmp/task-13013-7-expat-native-34170600664.C3dvFx/system/build/abi/libexpatw/sha256",
+      "sha256": "fa5c59b18822e6c8c0732207d8d068963d755517d31a629d5d06353da1df6069",
+      "size": 135
+    },
+    {
+      "path": "/private/tmp/task-13013-7-combined-native-34177651966.fnWTcU/build/installed-binaries.sha256",
+      "sha256": "a186b998bd21a3c36ebfc1471b386af6ccd538a97a3590be60d2af64111a0b91",
+      "size": 483
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/CVE-2025-66382.html",
+      "sha256": "150b4cc416f3526a7e029994d5ca2c2b736105957f5ecba4ac8587a5a72e4abb",
+      "size": 4489
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/CVE-2026-66046.html",
+      "sha256": "4d2ac1df2f8d9dec58ac656e067eb4a1014f7281ed2e266e0f0e2a0866c3959c",
+      "size": 5423
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/CVE-2026-76956.html",
+      "sha256": "c1f37a510d35cf348dafa6eaead2487f50ab9eb166a9a7c4e2ac5a774abfd427",
+      "size": 5092
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/CVE-2026-76957.html",
+      "sha256": "2505b2ab14502e337df09e155edb47a8d0cf60e3d4c7d3160f0089bc853a8216",
+      "size": 4916
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/issue-1076.json",
+      "sha256": "e6f5aecc6cf7d17b6d47c4f853c780c840f625e84d229c7a6017782cb793a65b",
+      "size": 4557
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/release-latest.json",
+      "sha256": "d6b6f30b0b7a0acd5e8f816022e371b63ac668253a1a28336731061d819bd900",
+      "size": 23607
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/release-tag-ref.json",
+      "sha256": "4c17c2df157d5fe79080340e2ec280c33cd0c0da2c3994d0574262e0ffcb252f",
+      "size": 378
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/scanner-identities.json",
+      "sha256": "789f7e637deb9fa70c7d63430e46680da7308be2d08cdb7d1c01945ca7f2f11d",
+      "size": 102720
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/xmlparse.c.diff",
+      "sha256": "b5c9455eb515b9df541d2bfb17537c9db655f7dd489398ed268833df1c479296",
+      "size": 839
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/expat_external.h.diff",
+      "sha256": "87696eae6e0187516e9d8068c7f8f4a820a105d6dcc677c3faae7353cf11a5e7",
+      "size": 294
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/debian-fix-expat-cmake.patch",
+      "sha256": "f97b147be62c10bcd896085f4cdc6ee28c9dfc2fdb4c9a860eccb52855d5ae05",
+      "size": 567
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/debian-fix-expat-noconfig.patch",
+      "sha256": "860db1f508d6fab88757b5ea8061cb3591afbfc9061f8ebcbbcaccebf3cd96ec",
+      "size": 1349
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/debian-series",
+      "sha256": "0fab8cc4d45db554e372f5f142f088285add10d278e7624588e852e0701c41c0",
+      "size": 47
+    },
+    {
+      "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/verify-reconciliation.py",
+      "sha256": "716d60171f05d9649036960d5982ea9c9d36490413223d04e9cdf398c878f3f2",
+      "size": 9793
+    }
+  ],
+  "fix_ancestry_reported_by_github": [
+    {
+      "commit": "127b7d4beb8fe7e5ce5cb021c2e56379c95863d0",
+      "permalink_url": "https://github.com/libexpat/libexpat/compare/libexpat:127b7d4...libexpat:12cf0b1",
+      "status": "ahead"
+    },
+    {
+      "commit": "40daa9996d616e66a75dea41ed2b18f2c3901b9f",
+      "permalink_url": "https://github.com/libexpat/libexpat/compare/libexpat:40daa99...libexpat:12cf0b1",
+      "status": "ahead"
+    },
+    {
+      "commit": "98599f6dcc2b460410881fe420f5f55d6bec63bf",
+      "permalink_url": "https://github.com/libexpat/libexpat/compare/libexpat:98599f6...libexpat:12cf0b1",
+      "status": "ahead"
+    },
+    {
+      "commit": "98f5acc146af76859cd7c345c0906e9e9e8ea656",
+      "permalink_url": "https://github.com/libexpat/libexpat/compare/libexpat:98f5acc...libexpat:12cf0b1",
+      "status": "ahead"
+    },
+    {
+      "commit": "acbd2e1179c04fe9a8c3f3837701904d05de71fc",
+      "permalink_url": "https://github.com/libexpat/libexpat/compare/libexpat:acbd2e1...libexpat:12cf0b1",
+      "status": "ahead"
+    },
+    {
+      "commit": "f8f7c4ffd883e3c2c58f0ebb49416a6c1d248738",
+      "permalink_url": "https://github.com/libexpat/libexpat/compare/libexpat:f8f7c4f...libexpat:12cf0b1",
+      "status": "ahead"
+    }
+  ],
+  "image": {
+    "archive_sha256": "864b2e19887641bbe2f6505d0b28f44ccec3cb1cc3d1de4f65063f5211c1c478",
+    "commit": "20fbadd2dc23ff3c186153f581a9b1dbd2731b24",
+    "config_digest": "sha256:601019026e81c779df97656211f6a972a71a7a8b55a57e5a3588be8880dd9aee",
+    "index_digest": "sha256:082291ca3fe3822a557ece26776d3e7bebc6e7dbe1616a864ce487f6d3715f7c",
+    "scope": "combined-candidate-not-admitted",
+    "subject_digest": "sha256:08f4a090041b1d87d779e1436073910c0b6c4afc2ffcb9a6d957a94c307b45bb"
+  },
+  "limitations": [
+    "No fresh signature verification, build, parser execution or scanner run.",
+    "Retained native records were reconciled; whole OCI archive and layer files were not re-read.",
+    "CVE-2025-66382 remains unresolved; all raw scanner rows remain unchanged.",
+    "Static source fixes do not establish a release-policy disposition or image-wide coverage."
+  ],
+  "native_artifacts_verified": 16,
+  "native_producer": {
+    "artifact": 10035842132,
+    "commit": "aa93e0058978248e5be8311fb8e4c0db2d05aacb",
+    "name": "expat-python-candidate-34170600664",
+    "run": 34170600664,
+    "workflow": ".github/workflows/expat-candidate.yml"
+  },
+  "prepared_python_files": [
+    {
+      "comparison": "byte-identical upstream file",
+      "name": "Modules/expat/winconfig.h",
+      "sha256": "0ab6446eb98abc492ae341ef7607b535e44dedf52633fdc7c6e1a1361aec3922"
+    },
+    {
+      "comparison": "byte-identical upstream file",
+      "name": "Modules/expat/internal.h",
+      "sha256": "beb7211c800d827743bd3d6ddb86538302d6c51180be6d3b61a1c315e061762d"
+    },
+    {
+      "comparison": "byte-identical upstream file",
+      "name": "Modules/expat/fallthrough.h",
+      "sha256": "5e42477487bca7e7caac6b832ab940f39a1a20b8765c945374e4f6c2670f55b6"
+    },
+    {
+      "comparison": "byte-identical upstream file",
+      "name": "Modules/expat/ascii.h",
+      "sha256": "5ce49460794894b78f97060f634c129d13f2e9cc9b8dacd829f4be2dbc6e0649"
+    },
+    {
+      "comparison": "byte-identical upstream file",
+      "name": "Modules/expat/latin1tab.h",
+      "sha256": "b0daf8a75c690e895421f765ddb2ae2fbc1ba14694e06a3215dba84f1ff3427d"
+    },
+    {
+      "comparison": "unchanged CPython-owned header",
+      "name": "Modules/expat/pyexpatns.h",
+      "sha256": "c95154ba28b798023705319cd52711367ff5236b6b4b03c4cf8f1bd6ab350885"
+    },
+    {
+      "comparison": "byte-identical upstream file",
+      "name": "Modules/expat/xmlrole.h",
+      "sha256": "486faffdfcd0c1668406648220c6638c98ddfe044d04d66551999ab8e02564fa"
+    },
+    {
+      "comparison": "byte-identical upstream file",
+      "name": "Modules/expat/asciitab.h",
+      "sha256": "5792cb56f285c8876b988d875a70d49019bc7e6d5ebcd0f8224b24e695301832"
+    },
+    {
+      "comparison": "byte-identical upstream file",
+      "name": "Modules/expat/memory_sanitizer.h",
+      "sha256": "377ca054fdc531360f42a5cb7c522bcbf88b6c67aebc2e29544c37d14e836bde"
+    },
+    {
+      "comparison": "unchanged CPython-owned header",
+      "name": "Modules/expat/expat_config.h",
+      "sha256": "fc918070c65fa23613e4ba5a44b3407e5eb2a503ec42fbfeebee19d9e5eb5649"
+    },
+    {
+      "comparison": "upstream plus two approved Windows entropy guards",
+      "name": "Modules/expat/xmlparse.c",
+      "sha256": "9afa5cb812283750f1970e230ba392201bac46240abf51ab65e5090e93ca34a6"
+    },
+    {
+      "comparison": "byte-identical upstream file",
+      "name": "Modules/expat/xmltok_impl.c",
+      "sha256": "c7b197b596192ad3f8c872ae9c0524e7dd85da10cb4bfdf29d630e12782dfbf7"
+    },
+    {
+      "comparison": "byte-identical upstream file",
+      "name": "Modules/expat/siphash.h",
+      "sha256": "12ecc9915bccb793ea8bb543cc7d002e226f4e4d6b97ec9839dca41cbe4e2e27"
+    },
+    {
+      "comparison": "byte-identical upstream file",
+      "name": "Modules/expat/nametab.h",
+      "sha256": "8f78e64f11e2b23df8b32cb5528cfeda6215acd6abf6bcf1ad59fdc7b1ffd105"
+    },
+    {
+      "comparison": "byte-identical upstream file",
+      "name": "Modules/expat/xcsinc.c",
+      "sha256": "1210979a688301412f46e058d0497fa3c1c63c296c2e015834cda0f0b314875d"
+    },
+    {
+      "comparison": "upstream plus CPython namespace include",
+      "name": "Modules/expat/expat_external.h",
+      "sha256": "d55e546603baf0b7085d6ff1d8f38d56d6de009a1731186509103c5d292c1a75"
+    },
+    {
+      "comparison": "byte-identical upstream file",
+      "name": "Modules/expat/xmltok_impl.h",
+      "sha256": "a5053c69219d12788088de9bd670537e1c784302766c331afe6b253460d0417d"
+    },
+    {
+      "comparison": "byte-identical upstream file",
+      "name": "Modules/expat/xmlrole.c",
+      "sha256": "db4004fa2cabc811fc493b5b04b44cd336d19434bc653725f090131e43a89406"
+    },
+    {
+      "comparison": "byte-identical upstream file",
+      "name": "Modules/expat/COPYING",
+      "sha256": "31b15de82aa19a845156169a17a5488bf597e561b2c318d159ed583139b25e87"
+    },
+    {
+      "comparison": "byte-identical upstream file",
+      "name": "Modules/expat/expat.h",
+      "sha256": "0e912e25375e213b6e4ff90d554e0a0e037e6f0c20dfa734d366e5bdff289f20"
+    },
+    {
+      "comparison": "byte-identical upstream file",
+      "name": "Modules/expat/xmltok.c",
+      "sha256": "f2732a8e91fd901d75431d35edc421e1ff3893a275c4de1cc855b3d4deadfd37"
+    },
+    {
+      "comparison": "byte-identical upstream file",
+      "name": "Modules/expat/xmltok_ns.c",
+      "sha256": "3c0c930dfdd484f98c6a32bd397919f3d2ee3701e6023effb463512af1849499"
+    },
+    {
+      "comparison": "byte-identical upstream file",
+      "name": "Modules/expat/xmltok.h",
+      "sha256": "41a6cef659ef1da9ee732304332c4134afe4b63571442de77eaf9918abf9e5df"
+    },
+    {
+      "comparison": "byte-identical upstream file",
+      "name": "Modules/expat/utf8tab.h",
+      "sha256": "3fa349a3a19143366e80a58d9aa950152ef9cd7903f557f971051410b47f335c"
+    },
+    {
+      "comparison": "byte-identical upstream file",
+      "name": "Modules/expat/iasciitab.h",
+      "sha256": "a9cd6f2cf5199ae3c29d22ee4913736fcd984f62132146a0352c88549700e83f"
+    },
+    {
+      "comparison": "only three approved refresh identity values changed",
+      "name": "Modules/expat/refresh.sh",
+      "sha256": "7fef0e470889a9d8e7afada78fc1f3c3c2f515fba67ac6d69b6e29f8727e788c"
+    }
+  ],
+  "release_admitted": false,
+  "release_commit": "12cf0b1f25f026a022fe728ad8f7e3d017285b80",
+  "runtime_python_record": {
+    "controls": {
+      "child-dtd-copy": 3,
+      "default-precedence": 3,
+      "namespace": 3
+    },
+    "identity": {
+      "elementtree": "/usr/local/lib/python3.12/lib-dynload/_elementtree.cpython-312-x86_64-linux-gnu.so",
+      "elementtree_version": "Expat 2.8.4",
+      "executable": "/usr/local/bin/python3.12",
+      "expat_version": "expat_2.8.4",
+      "libpython": "/usr/local/lib/libpython3.12.so.1.0",
+      "pyexpat": "/usr/local/lib/python3.12/lib-dynload/pyexpat.cpython-312-x86_64-linux-gnu.so",
+      "python_version": "3.12.14"
+    }
+  },
+  "runtime_system_records": {
+    "libexpat.so.1": {
+      "path": "/usr/lib/x86_64-linux-gnu/libexpat.so.1.12.4",
+      "sha256": "ce38fb6299922c5fb3b3d59cd2ba047918f69e12846abf66960a3bd098db1c05",
+      "version": "expat_2.8.4"
+    },
+    "libexpatw.so.1": {
+      "path": "/usr/lib/x86_64-linux-gnu/libexpatw.so.1.12.4",
+      "sha256": "c771c5521ec06635c0a899abe23edca6fcc97ee8b7b2e1a9ac64c1ed765478f4",
+      "version": "expat_2.8.4"
+    }
+  },
+  "scanner_rows": {
+    "grype": 4,
+    "trivy": 4
+  },
+  "scope": "static-source-and-retained-evidence-reconciliation",
+  "task": "TASK-13013.7.9",
+  "upstream_debian_identical_library_files": 34,
+  "verification_helper_bandit": {
+    "errors": 0,
+    "findings": 0,
+    "path": "/private/tmp/task-13013-7-9-expat-reconcile.ghs_7t_2/bandit.json",
+    "sha256": "32cdcdd3c876a6355c5c7d2fc571e6566f6ea9a1791f8c2978ad63b1c4a2dd58"
+  }
+}
