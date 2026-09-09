@@ -16,15 +16,15 @@ import {
   stopBuddyTurn,
   type BuddyActivity,
   type BuddyAttachment,
+  type BuddyReplySettings,
+  type BuddyConversationSummary,
   type BuddyTurn
 } from "@/services/buddies"
 import type { BuddyDraftState } from "./buddy-drafts"
+import { buddyConversationLabels } from "./buddy-conversation-labels"
 import { useStoreMessageOption } from "@/store/option"
 import type { PersonaVisualStateId } from "@/types/persona-visuals"
-import type {
-  ServerChatMessage,
-  ServerChatSummary
-} from "@/services/tldw/TldwApiClient"
+import type { ServerChatMessage } from "@/services/tldw/TldwApiClient"
 type ResultActivity = BuddyActivity & {
   result: NonNullable<BuddyActivity["result"]>
 }
@@ -53,8 +53,8 @@ export const BuddyInteraction = ({
 }: {
   attachment: BuddyAttachment
   attachmentVersion: number
-  conversation: ServerChatSummary | null
-  conversations: ServerChatSummary[]
+  conversation: BuddyConversationSummary | null
+  conversations: BuddyConversationSummary[]
   visible: boolean
   onSelectConversation?: (id: string) => void
   onAttentionChange?: (count: number) => void
@@ -62,7 +62,7 @@ export const BuddyInteraction = ({
   draftState?: BuddyDraftState
   conversationPages?: number
 }) => {
-  const { t } = useTranslation("sidepanel")
+  const { t, i18n } = useTranslation("sidepanel")
   const label = (key: string, text: string) =>
     t(`buddyManagement.${key}`, { defaultValue: text })
   const [localDrafts, setLocalDrafts] = React.useState<Record<string, string>>(
@@ -73,6 +73,7 @@ export const BuddyInteraction = ({
   const [transcript, setTranscript] = React.useState<{
     conversationId: string
     messages: ServerChatMessage[]
+    replySettings?: BuddyReplySettings | null
   }>({ conversationId: "", messages: [] })
   const [turns, setTurns] = React.useState<BuddyTurn[]>([])
   const [activity, setActivity] = React.useState<ResultActivity[]>([])
@@ -99,8 +100,24 @@ export const BuddyInteraction = ({
   const firstLoad = React.useRef(true)
   const pendingSend = React.useRef(false)
   const selectedId = conversation?.id ?? ""
+  const conversationLabels = buddyConversationLabels(
+    conversations,
+    i18n.resolvedLanguage
+  )
+  const conversationLabel = (id: string, title: string) =>
+    conversationLabels.get(id) ?? title
   const messages =
     transcript.conversationId === selectedId ? transcript.messages : []
+  const replySettings =
+    transcript.conversationId === selectedId ? transcript.replySettings : null
+  const effectiveModel = model.trim() || replySettings?.model || ""
+  const effectiveProvider = provider.trim() || replySettings?.provider || ""
+  const modelReady = Boolean(
+    replySettings && effectiveModel && effectiveProvider
+  )
+  const needsSettings = Boolean(
+    replySettings && (!replySettings.model || !replySettings.provider)
+  )
   const currentTarget = React.useRef(selectedId)
   currentTarget.current = selectedId
   const draft = drafts[selectedId] ?? ""
@@ -206,12 +223,16 @@ export const BuddyInteraction = ({
             attachment,
             conversation.id,
             conversation.workspace_id,
-            { isCurrent: () => active && mounted.current }
+            {
+              isCurrent: () => active && mounted.current,
+              includeReplySettings: true
+            }
           )
           if (active)
             setTranscript({
               conversationId: conversation.id,
-              messages: result.messages
+              messages: result.messages,
+              replySettings: result.replySettings
             })
         }
         if (!active) return
@@ -295,7 +316,7 @@ export const BuddyInteraction = ({
       )
         return
       await speech.current.speak({
-        utterance: `${result.conversation.title}. ${presentBuddyMessage(message)}`,
+        utterance: `${conversationLabel(result.conversation.id, result.conversation.title)}. ${presentBuddyMessage(message)}`,
         saveClip: false
       })
     })()
@@ -315,7 +336,15 @@ export const BuddyInteraction = ({
     setPaused((value) => !value)
   }
   const send = async () => {
-    if (!conversation || !draft.trim() || pendingSend.current) return
+    if (
+      !conversation ||
+      !draft.trim() ||
+      pendingSend.current ||
+      !modelReady ||
+      loadError ||
+      !visible
+    )
+      return
     const target = conversation.id
     const text = draft.trim()
     let request = requestKeys.current.get(target)
@@ -401,7 +430,11 @@ export const BuddyInteraction = ({
               className="flex items-center justify-between gap-2"
             >
               <span>
-                {turn.conversation_title}:{" "}
+                {conversationLabel(
+                  turn.conversation_id,
+                  turn.conversation_title
+                )}
+                :{" "}
                 {turn.status === "queued"
                   ? label("queued", "Queued")
                   : label("working", "Working")}
@@ -437,7 +470,8 @@ export const BuddyInteraction = ({
                   className="min-w-0 flex-1 text-left font-medium text-primaryStrong underline"
                   onClick={() => onSelectConversation?.(item.conversation_id)}
                 >
-                  {item.title} — {label("newResult", "New response")}
+                  {conversationLabel(item.conversation_id, item.title)} —{" "}
+                  {label("newResult", "New response")}
                 </button>
                 <Button
                   size="small"
@@ -461,7 +495,7 @@ export const BuddyInteraction = ({
         .slice(0, 3)
         .map((turn) => (
           <p key={turn.id} role="status" className="text-danger">
-            {turn.conversation_title}:{" "}
+            {conversationLabel(turn.conversation_id, turn.conversation_title)}:{" "}
             {label(
               "turnFailed",
               "The reply did not complete. Check the conversation before retrying; earlier effects may already be saved."
@@ -481,7 +515,7 @@ export const BuddyInteraction = ({
           <div
             className="max-h-[35dvh] min-h-24 space-y-3 overflow-y-auto rounded-md border border-border p-3"
             role="log"
-            aria-label={`${label("transcript", "Conversation history")}: ${conversation.title}`}
+            aria-label={`${label("transcript", "Conversation history")}: ${conversationLabel(conversation.id, conversation.title)}`}
           >
             {messages
               .filter((m) => m.role !== "system")
@@ -512,7 +546,8 @@ export const BuddyInteraction = ({
             className="space-y-2"
           >
             <label className="block font-medium" htmlFor="buddy-reply">
-              {label("replyTo", "Reply to")} {conversation.title}
+              {label("replyTo", "Reply to")}{" "}
+              {conversationLabel(conversation.id, conversation.title)}
             </label>
             <textarea
               id="buddy-reply"
@@ -525,6 +560,16 @@ export const BuddyInteraction = ({
                 setDrafts((previous) => ({ ...previous, [selectedId]: value }))
               }}
             />
+            <p role="status" className="text-text-muted" aria-live="polite">
+              {!replySettings
+                ? label("checkingReplyModel", "Checking reply model…")
+                : !modelReady
+                  ? label(
+                      "replyModelRequired",
+                      "Choose a provider and model below before sending. Your draft stays here."
+                    )
+                  : `${label("replyModelUsed", "Replies use")} ${effectiveProvider} / ${effectiveModel}`}
+            </p>
             <div className="flex flex-wrap items-center justify-between gap-2">
               {attachment.scope_type === "conversation" ? (
                 <Button
@@ -551,38 +596,51 @@ export const BuddyInteraction = ({
                 type="primary"
                 icon={<Send size={16} />}
                 loading={sending}
-                disabled={!draft.trim() || Boolean(loadError)}
+                disabled={!draft.trim() || Boolean(loadError) || !modelReady}
               >
                 {label("send", "Send")}
               </Button>
             </div>
-            <details>
+            <details
+              key={selectedId + String(needsSettings)}
+              open={needsSettings || undefined}
+            >
               <summary className="cursor-pointer text-text-muted">
                 {label("replySettings", "Reply model settings")}
               </summary>
               <div className="mt-2 grid gap-2 sm:grid-cols-2">
                 <label>
-                  {label("modelOverride", "Model override (optional)")}
+                  {replySettings && !replySettings.model
+                    ? label("modelRequired", "Model (required)")
+                    : label("modelOverride", "Model override (optional)")}
                   <input
                     className="w-full rounded border border-border bg-surface p-2"
                     value={model}
                     onChange={(e) => setModel(e.target.value)}
-                    placeholder={label(
-                      "savedModel",
-                      "Use conversation setting"
-                    )}
+                    placeholder={
+                      replySettings?.model ||
+                      label(
+                        "modelExample",
+                        "Model ID from your configured provider"
+                      )
+                    }
                   />
                 </label>
                 <label>
-                  {label("providerOverride", "Provider override (optional)")}
+                  {replySettings && !replySettings.provider
+                    ? label("providerRequired", "Provider (required)")
+                    : label("providerOverride", "Provider override (optional)")}
                   <input
                     className="w-full rounded border border-border bg-surface p-2"
                     value={provider}
                     onChange={(e) => setProvider(e.target.value)}
-                    placeholder={label(
-                      "savedProvider",
-                      "Use conversation setting"
-                    )}
+                    placeholder={
+                      replySettings?.provider ||
+                      label(
+                        "providerExample",
+                        "Provider ID, e.g. custom-openai-api"
+                      )
+                    }
                   />
                 </label>
               </div>

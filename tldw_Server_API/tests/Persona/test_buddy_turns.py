@@ -228,7 +228,7 @@ def test_unexpected_configuration_value_error_is_not_a_client_validation_error(
     def broken_settings(*_args, **_kwargs):
         raise ValueError("unexpected implementation failure")
 
-    monkeypatch.setattr(persona_chat_db, "get_conversation_settings", broken_settings)
+    monkeypatch.setattr(persona_chat_db, "get_roleplay_resume_state", broken_settings)
     # TestClient re-raises unhandled server exceptions. The endpoint must not
     # turn unexpected implementation errors into a client configuration 422.
     with pytest.raises(ValueError, match="unexpected implementation failure"):

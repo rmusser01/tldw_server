@@ -12,7 +12,7 @@ references:
 - TASK-13202
 documentation:
 - Docs/superpowers/plans/2026-09-09-buddy-v1-live-qualification.md
-updated_date: 2026-09-09 05:41
+updated_date: 2026-09-09 06:41
 ---
 
 ## Description
@@ -47,6 +47,7 @@ Qualification reconciled in Docs/Reviews/2026-09-09-buddy-v1-qualification.md wi
 Before finalization, independent review identified that a newly arriving saved assistant error would still be read aloud as its internal JSON envelope. AC6 reopened until transcript and speech share the assistant-only presentation and the activity-to-speech regression passes. Previously retained Chrome artifact qualifies the visual-only fix; a new build is required for this final correction.
 Final review correction complete: private assistant-only formatter is shared by visual history and read-aloud after its authorized transcript read, preserving the conversation-name prefix. Activity-to-speech regression failed first with raw JSON/detail, then final component/decoder gate passed9/9; independent re-review has no remaining findings. Final Chrome build includes this source and passed in43s; ZIP SHA2561375a51f13cb851ca3e12c277b0da2b7e6da19f510038382fe3c6d6c778048e8. Final catalog gate passed5/5 and Bandit reported no findings; raw final logs and curated manifest retained. Original catalog RED and81-test artwork raw logs were not separately retained, so their worker summaries are labeled accordingly. Owned disposable WebUI/backend/mock processes stopped; profiles and artifacts retained. AC1/native acceptance remains open.
 Published draft PR https://github.com/rmusser01/tldw_server/pull/2934 against dev with the reviewed fixes and qualified evidence. Native/upgrade acceptance and the human-written summary gate for any future merge remain open; no merge performed.
+Follow-up PR #2934 now implements TASK-13228/13229/13230. Final evidence: 94 focused UI tests, 58 backend passes with one PostgreSQL availability skip, 12 Persona compatibility passes; reviewed Chrome build, manifest and ZIP checks passed. Live desktop composer hit-testing and explicit model recovery completed against copied disposable data. Final null-timestamp and pinned-transport review corrections have focused regressions and clean re-review. Native/voice/upgraded-profile coverage remains open; the further new-workspace browser handoff was limited by disposable connection reconfiguration. Qualification remains In Progress. Follow-up artifacts: Docs/Reviews/artifacts/buddy-ux-followups-13228-13230.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 

@@ -38,13 +38,10 @@ class _PendingTurn:
 
 
 def _resolve_payload(service: BuddyService, request: BuddyTurnCreate) -> dict[str, Any]:
-    wrapped = service.db.get_conversation_settings(request.conversation_id) or {}
-    settings = wrapped.get("settings") or {}
-    resume = service.db.get_roleplay_resume_state(request.conversation_id, owner_client_id=service.user_id)
-    effective = resume.get("effective_completion") or {}
+    effective = service.resolve_reply_completion(request.conversation_id)
     # This is a configured target, not a catalog or server-default guess.
-    provider = request.provider or effective.get("provider") or settings.get("provider")
-    model = request.model or effective.get("model") or settings.get("model")
+    provider = request.provider or effective.get("provider")
+    model = request.model or effective.get("model")
     if not isinstance(provider, str) or not provider.strip() or not isinstance(model, str) or not model.strip():
         raise BuddyConfigurationError("Choose a Chat provider and model before sending")
     payload = {

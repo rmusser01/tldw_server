@@ -266,14 +266,22 @@ def test_postgres_v65_upgrade_installs_buddy_storage_and_forced_tenant_policies(
 def test_conversation_target_resolves_workspace_scope_before_attachment(db):
     db.upsert_workspace("ws", "Workspace")
     conversation = db.add_conversation(
-        {"title": "Scoped chat", "client_id": "1", "scope_type": "workspace", "workspace_id": "ws"}
+        {
+            "title": "Scoped chat",
+            "client_id": "1",
+            "scope_type": "workspace",
+            "workspace_id": "ws",
+        }
     )
+    with db.transaction() as conn:
+        conn.execute("UPDATE conversations SET created_at = ? WHERE id = ?", ("2026-09-08T12:30:00Z", conversation))
     with _client(db) as client:
         response = client.get(f"/api/v1/buddies/conversation-targets/{conversation}")
         assert response.status_code == 200
         assert response.json() == {
             "id": conversation,
             "title": "Scoped chat",
+            "created_at": "2026-09-08T12:30:00Z",
             "scope_type": "workspace",
             "workspace_id": "ws",
             "version": 1,
@@ -470,8 +478,15 @@ def test_workspace_attachment_rejects_other_owner_without_disclosing_title(db):
 def test_workspace_attachment_projects_only_owned_conversations_with_scope(db):
     db.upsert_workspace("ws", "My workspace")
     owned_id = db.add_conversation(
-        {"title": "Own scoped chat", "client_id": "1", "scope_type": "workspace", "workspace_id": "ws"}
+        {
+            "title": "Own scoped chat",
+            "client_id": "1",
+            "scope_type": "workspace",
+            "workspace_id": "ws",
+        }
     )
+    with db.transaction() as conn:
+        conn.execute("UPDATE conversations SET created_at = ? WHERE id = ?", ("2026-09-08T12:30:00Z", owned_id))
     db.add_conversation(
         {"title": "Other user's chat", "client_id": "2", "scope_type": "workspace", "workspace_id": "ws"}
     )
@@ -488,6 +503,7 @@ def test_workspace_attachment_projects_only_owned_conversations_with_scope(db):
             {
                 "id": owned_id,
                 "title": "Own scoped chat",
+                "created_at": "2026-09-08T12:30:00Z",
                 "scope_type": "workspace",
                 "workspace_id": "ws",
                 "version": 1,

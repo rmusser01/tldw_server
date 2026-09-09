@@ -20,3 +20,14 @@ Use only synthetic test content and isolated profiles. Do not capture a physical
 Fresh WebUI setup, model-catalog repair, Static/Dynamic options, workspace default inheritance, accepted reply continuation across navigation, exact workspace reply targeting and individual result acknowledgement are verified. Both reproduced production defects have focused regressions. Backend SQLite upgrade/rollback and independent Buddy/turn contracts passed; the PostgreSQL case skipped because no database was reachable. The Chrome production artifact includes the final assistant-only error presentation fix and passes its build gates.
 
 The historical legacy artwork loop remains unreproduced with no speculative repair. Native Terminal is explicitly disallowed by Computer Use, and native Chrome lacks Computer Use permissions. Packaged extension installation, native Chatbook, upgraded-profile WebUI and real voice/audio therefore remain open. See `Docs/Reviews/2026-09-09-buddy-v1-qualification.md` for receipts, exact checks and follow-up usability findings. Keep the qualification task In Progress.
+
+
+## Usability follow-ups (TASK-13228, TASK-13229, TASK-13230)
+
+ADR required: no. ADR path: backlog/decisions/005-independent-buddy-bindings-and-work-ownership.md.
+Reason: repair the three recorded usability gaps within the existing attachment, settings, and work-ownership boundaries.
+
+1. Move fresh/reset Buddy placement below the top navigation, preserving saved user placements and viewport clamping. Verify composer hit targets in the live WebUI and focused layout tests.
+2. Derive consistent labels for same-titled loaded conversations using localized creation times and stable identifiers when needed. Keep saved titles and reply/acknowledgement IDs unchanged; test long titles, timestamp collisions, and reordered lists.
+3. Preserve explicit provider/model selections from authorized neutral workspace Chat. Read effective reply settings through the current Buddy attachment, sharing acceptance resolution. Show missing setup before Send, retain drafts, and preserve per-reply overrides. Verify with owned SQLite/HTTP journeys and live UI recovery.
+4. Review, run focused checks and update the existing PR with source-bound follow-up evidence. Native extension/terminal and actual voice remain separate qualification gaps.

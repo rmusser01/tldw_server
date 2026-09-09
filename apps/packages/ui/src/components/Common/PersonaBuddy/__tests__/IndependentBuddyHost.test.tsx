@@ -140,6 +140,36 @@ it("loads an attached Buddy directly when it is outside the first page", async (
   await screen.findByRole("button", { name: "Open Duck — Research" })
   expect(mocks.getBuddy).toHaveBeenCalledWith("duck")
 })
+it("distinguishes long same-titled workspace choices before selecting their stable IDs", async () => {
+  const title = "Research with a long generated conversation title ".repeat(4)
+  const conversations = [
+    { id: "first-chat", title, created_at: "2026-09-09T05:10:00Z" },
+    { id: "second-chat", title, created_at: "2026-09-09T05:12:00Z" }
+  ]
+  mocks.getBuddyAttachment.mockResolvedValue({
+    version: 1,
+    attachment: { buddy_id: "duck", scope_type: "workspace", scope_id: "ws" },
+    target: { title: "Workspace" }
+  })
+  mocks.listBuddyConversations.mockResolvedValue({ conversations })
+  render(<IndependentBuddySession />)
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Open Duck — Workspace" })
+  )
+  const select = screen.getByRole("combobox", { name: "Reply to conversation" })
+  const options = Array.from(select.querySelectorAll("option")).filter(
+    (option) => option.value
+  )
+  expect(new Set(options.map((option) => option.textContent)).size).toBe(2)
+  expect(
+    options.every((option) => !option.textContent?.startsWith(title))
+  ).toBe(true)
+  fireEvent.change(select, { target: { value: "second-chat" } })
+  expect(select).toHaveValue("second-chat")
+  expect(
+    conversations.every((conversation) => conversation.title === title)
+  ).toBe(true)
+})
 it("exposes an initial failure and retries the collections", async () => {
   mocks.listBuddies.mockRejectedValueOnce(new Error("Cannot load Buddies"))
   useBuddyManagementStore.getState().show()

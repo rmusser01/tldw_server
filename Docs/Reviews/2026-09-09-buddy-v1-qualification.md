@@ -4,7 +4,7 @@ TASK-13227 is in progress. This report distinguishes browser interaction, automa
 
 ## Source and environment
 
-- Server/WebUI base: `1fc19c7c8384f38eca2becdf53fb8bbcd205be7a`, branch `codex/buddy-v1-live-qualification`. Production changes are limited to optional token-limit parsing and readable saved Buddy errors, described below.
+- Server/WebUI base: `1fc19c7c8384f38eca2becdf53fb8bbcd205be7a`, branch `codex/buddy-v1-live-qualification`. The initial qualification repaired optional token-limit parsing and readable saved Buddy errors. The subsequent usability repairs are recorded in the dated follow-up section below.
 - Contract: [ADR-005](../../backlog/decisions/005-independent-buddy-bindings-and-work-ownership.md).
 - Disposable full server profile: `/private/tmp/buddy-v1-qualification-6_vfinnl`; authenticated single-user backend on loopback18181; WebUI on18180. Config and all observed open SQLite databases are under the disposable profile. User configuration and credentials were not loaded. Backend identity/diff hashes and logs are retained there.
 - The WebUI uses the actual backend and built-in assets. A repository mock OpenAI provider on loopback18182 supplies controlled text for reply checks; it is not a real-model quality or voice test.
@@ -31,7 +31,7 @@ TASK-13227 is in progress. This report distinguishes browser interaction, automa
 - Newly generated workspace chats had no usable saved provider/model for a Buddy reply. Sending preserved the draft and reported "Choose a Chat provider and model before sending." Filling the collapsed optional override fields recovered successfully. [TASK-13230](../../backlog/tasks/task-13230%20-%20Make-Buddy-reply-model-recovery-clear-for-workspace-conversations.md) tracks clearer recovery and settings handoff.
 - Artificially slow model output triggered the existing no-visible-output timeout. Standard Chat showed a readable error, whereas Buddy history initially exposed the saved `__tldw_error__` JSON envelope. A scoped presentation repair reuses the existing decoder; the underlying timeout is not evidence of a Buddy runtime failure.
 
-The three linked usability issues remain open. No docking redesign, conversation-label redesign, or provider-settings handoff was implemented in this qualification.
+The three linked usability issues remained open at the end of the initial qualification. The subsequent follow-up below records their implementation separately from these original observations.
 
 ## Reproduced defects and repairs
 
@@ -76,3 +76,22 @@ Real microphone input, audible queue output, real-provider quality, native Chatb
 [Evidence manifest](artifacts/buddy-v1-13227/manifest.json) records hashes for the curated receipts, investigation reports, focused-test logs and build report beside this file. Repository log copies normalize trailing whitespace and excess blank lines at EOF; original and retained hashes are recorded separately, with raw logs kept in scratch storage. The full disposable profile and clean extension build remain in their scratch directories. These contain synthetic qualification content; user profiles were not used.
 
 The owned WebUI, backend and mock provider processes were stopped after the live walkthrough. Their profiles/logs remain available, and the temporary Next build output was moved into the disposable profile. No user-run process was stopped.
+
+
+## Usability follow-up — TASK-13228, TASK-13229, TASK-13230
+
+PR [#2934](https://github.com/rmusser01/tldw_server/pull/2934) now includes all three repairs. Existing ADR-005 applies; no new database schema, provider credential store, or work-ownership boundary was introduced.
+
+- Fresh/reset position moves to y96, below the top navigation. Saved placements remain unchanged. The live WebUI at 1090×991 reported Buddy bounds (942,96,128,172); actual DOM `elementFromPoint` checks found the composer input and Send center unobstructed after Home reset. Focused store/layout tests cover desktop/compact clamping and preservation of saved positions. Compact pointer interaction was not driven in the live browser. Floating artwork can still cover other page content; its existing drag/keyboard controls remain available.
+- Same-titled loaded conversations use creation time before the title, with a stable identifier for missing or matching timestamps. Picker, result rows, transcript/reply labels, work status, and speech prefixes use the same derivation; saved titles and routing IDs stay unchanged. The API now includes creation timestamps. Independent review caught nullable timestamps rendering as Unix epoch; a failure-first regression now requires the stable-ID fallback for null and absent values.
+- Ordinary neutral workspace Chat saves an explicitly selected provider/model on that owned conversation. A Buddy-scoped read projects the same effective settings used for acceptance. Missing settings open the required fields before Send; valid settings are shown, drafts persist during recovery, and temporary Buddy overrides do not replace conversation defaults. The new read checks the captured connection inside a transport-config factory and pins that configuration through WebUI/extension dispatch; a deferred connection-change regression proves no request reaches the changed account/server.
+
+Live recovery was driven against copied synthetic qualification data in `/private/tmp/buddy-ux-followups-20260909`: the required fields appeared, the draft survived both selections, and turn `156c528764bb46ffaa23d5a7f4e7c1cf` completed in the selected conversation `c71cc7fc-7cd6-4463-b801-7acc6391f4a0`. The live selector/result labels were distinct. These visual checks preceded the final timestamp-null and pinned-transport review corrections; final source hashes and targeted regressions cover those corrections. The subsequent new-workspace browser handoff walkthrough was not completed after disposable connection reconfiguration caused credentials/redirect recovery problems. Canonical Chat-to-Buddy handoff is covered by the real HTTP/SQLite regression, not claimed as a completed browser journey.
+
+Final focused gates: **94 UI tests passed**; **58 backend tests passed, one PostgreSQL availability skip**; **12 adjacent Persona compatibility tests passed** with the test-only mock-provider switch. Production Bandit reports zero findings/errors. ESLint reports zero errors on the root-owned files and existing warnings; the shared position test's existing lint debt is compared separately. Focused typechecking reports no diagnostics in the six changed entrypoints, with 52 dependency diagnostics outside them; this is not a project-wide typecheck pass. A re-review closed both findings. Full local suites were not run.
+
+[Follow-up evidence](artifacts/buddy-ux-followups-13228-13230/manifest.json) retains raw/normalized hashes, source hashes, test logs, static checks, and the completed live turn receipt. Original qualification artifacts above remain historical evidence. Native Terminal, extension installation, upgraded-profile WebUI, and real audio remain open under TASK-13227/32108/13202.
+
+The reviewed Chrome production build completed in 49.5 seconds using the unchanged frozen lock and six exact shared-UI overlays. Manifest targets and ZIP integrity passed (1,378 files). ZIP: `/private/tmp/tldw-buddy-chrome-prod-zy5ty355/tldw-chrome-production-buddy-ux-reviewed.zip`, SHA-256 `92a62668173f71804902357980cabb45e67b4d2503a97ff93f047d9b4ccf8ad5`. [Build inputs and receipt](artifacts/buddy-ux-followups-13228-13230/chrome-build.json) identify every overlay. Native installation remains unverified.
+
+The follow-up backend, WebUI, and mock provider were stopped after verification. Their disposable profile and build output remain in scratch storage.

@@ -21,12 +21,13 @@ import {
   type BuddyAttachmentState,
   type BuddyProfile
 } from "@/services/buddies"
-import type { ServerChatSummary } from "@/services/tldw/TldwApiClient"
+import type { BuddyConversationSummary } from "@/services/buddies"
 import type { PersonaVisualStateId } from "@/types/persona-visuals"
 import { BuddyManagementModal } from "./BuddyManagementModal"
 import { BuddyInteraction } from "./BuddyInteraction"
 import { SpriteFrameRenderer } from "./SpriteFrameRenderer"
 import type { BuddyDraftState } from "./buddy-drafts"
+import { buddyConversationLabels } from "./buddy-conversation-labels"
 
 const emptyAttachment: BuddyAttachmentState = {
   client_slot: "default",
@@ -38,16 +39,16 @@ export const IndependentBuddySession = ({
 }: {
   root?: "web" | "sidepanel"
 }) => {
-  const { t } = useTranslation("sidepanel")
+  const { t, i18n } = useTranslation("sidepanel")
   const label = (key: string, text: string) =>
     t(`buddyManagement.${key}`, { defaultValue: text })
   const management = useBuddyManagementStore()
   const setAttached = useBuddyManagementStore((state) => state.setAttached)
   const [profiles, setProfiles] = React.useState<BuddyProfile[]>([])
   const [attachment, setAttachment] = React.useState(emptyAttachment)
-  const [conversations, setConversations] = React.useState<ServerChatSummary[]>(
-    []
-  )
+  const [conversations, setConversations] = React.useState<
+    BuddyConversationSummary[]
+  >([])
   const [selectedId, setSelectedId] = React.useState("")
   const [open, setOpen] = React.useState(false)
   const [loaded, setLoaded] = React.useState(false)
@@ -246,6 +247,10 @@ export const IndependentBuddySession = ({
     )
   }, [binding?.scope_id, binding?.scope_type])
   const conversation = conversations.find((c) => c.id === selectedId) ?? null
+  const conversationLabels = buddyConversationLabels(
+    conversations,
+    i18n.resolvedLanguage
+  )
   const targetName =
     attachment.target?.title ||
     conversation?.title ||
@@ -456,7 +461,7 @@ export const IndependentBuddySession = ({
                   </option>
                   {conversations.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.title}
+                      {conversationLabels.get(c.id)}
                     </option>
                   ))}
                 </select>

@@ -1,10 +1,7 @@
 import React from "react"
 import { Button, Modal } from "antd"
 import { useTranslation } from "react-i18next"
-import {
-  tldwClient,
-  type ServerChatSummary
-} from "@/services/tldw/TldwApiClient"
+import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { WorkspaceApiResponse } from "@/services/tldw/domains/workspace-api"
 import { listPersonaVisualStarterPacks } from "@/services/persona-visuals"
 import {
@@ -13,7 +10,8 @@ import {
   putBuddyAttachment,
   resolveBuddyConversationTarget,
   type BuddyAttachmentState,
-  type BuddyProfile
+  type BuddyProfile,
+  type BuddyConversationSummary
 } from "@/services/buddies"
 import type { BuddyManagementTarget } from "@/store/buddy-management"
 import type { PersonaVisualStarterPackSummary } from "@/types/persona-visuals"
@@ -119,12 +117,12 @@ export const BuddyManagementModal = ({
   const [location, setLocation] = React.useState(
     attachment.target?.workspace_id ?? ""
   )
-  const [chats, setChats] = React.useState<ServerChatSummary[]>([])
+  const [chats, setChats] = React.useState<BuddyConversationSummary[]>([])
   const [chatOffset, setChatOffset] = React.useState(0)
   const [hasMoreChats, setHasMoreChats] = React.useState(false)
   const [loadingChats, setLoadingChats] = React.useState(true)
   const [resolvedTarget, setResolvedTarget] =
-    React.useState<ServerChatSummary | null>(null)
+    React.useState<BuddyConversationSummary | null>(null)
   const [resolvingTarget, setResolvingTarget] = React.useState(
     target?.scope_type === "conversation"
   )

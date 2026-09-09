@@ -71,6 +71,7 @@ beforeEach(() => {
   })
   mocks.readBuddyConversation.mockResolvedValue({
     conversation: first,
+    replySettings: { provider: "custom-openai-api", model: "saved-model" },
     messages: [
       {
         id: "result",
@@ -82,11 +83,71 @@ beforeEach(() => {
   })
 })
 afterEach(cleanup)
+it("distinguishes duplicate result titles while replies and acknowledgements retain exact IDs", async () => {
+  const duplicateOne = { ...first, title: "Research", created_at: "" }
+  const duplicateTwo = { ...second, title: "Research", created_at: "" }
+  mocks.readBuddyConversation.mockResolvedValue({
+    conversation: duplicateTwo,
+    messages: [],
+    replySettings: { provider: "custom-openai-api", model: "saved-model" }
+  })
+  mocks.listBuddyActivity.mockResolvedValue({
+    items: [
+      {
+        conversation_id: "one",
+        title: "Research",
+        result: { id: "r1", content: "First result" },
+        acknowledged: false
+      },
+      {
+        conversation_id: "two",
+        title: "Research",
+        result: { id: "r2", content: "Second result" },
+        acknowledged: false
+      }
+    ]
+  })
+  mocks.acknowledgeBuddyResult.mockResolvedValue({})
+  mocks.acceptBuddyTurn.mockResolvedValue({
+    id: "new-turn",
+    conversation_id: "two",
+    status: "queued"
+  })
+  render(
+    <BuddyInteraction
+      {...props}
+      conversation={duplicateTwo}
+      conversations={[duplicateOne, duplicateTwo]}
+    />
+  )
+  const results = await screen.findAllByRole("button", { name: /New response/ })
+  expect(new Set(results.map((result) => result.textContent)).size).toBe(2)
+  const reply = screen.getByRole("textbox", { name: /Reply to/ })
+  expect(reply).toHaveAccessibleName(/two.*Research/)
+  fireEvent.click(screen.getAllByRole("button", { name: "Mark read" })[1])
+  await waitFor(() =>
+    expect(mocks.acknowledgeBuddyResult).toHaveBeenCalledWith({
+      conversation_id: "two",
+      result_message_id: "r2"
+    })
+  )
+  fireEvent.change(reply, { target: { value: "Reply only to this target" } })
+  fireEvent.click(screen.getByRole("button", { name: "Send" }))
+  await waitFor(() =>
+    expect(mocks.acceptBuddyTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversation_id: "two",
+        text: "Reply only to this target"
+      })
+    )
+  )
+})
 it("preserves an encoded error quoted in a user message verbatim", async () => {
   const content =
     '__tldw_error__:{"summary":"Quoted summary","hint":"Quoted hint","detail":"Quoted diagnostic"}'
   mocks.readBuddyConversation.mockResolvedValue({
     conversation: first,
+    replySettings: { provider: "custom-openai-api", model: "saved-model" },
     messages: [
       { id: "quoted-error", role: "user", content, created_at: "2026-09-08" }
     ]
@@ -97,6 +158,7 @@ it("preserves an encoded error quoted in a user message verbatim", async () => {
 it("presents a saved chat failure without its encoded envelope or diagnostic details", async () => {
   mocks.readBuddyConversation.mockResolvedValue({
     conversation: first,
+    replySettings: { provider: "custom-openai-api", model: "saved-model" },
     messages: [
       {
         id: "failure",
@@ -183,6 +245,7 @@ it("reads a newly arrived assistant failure with its conversation title and frie
     '__tldw_error__:{"summary":"The reply timed out.","hint":"Try again in a moment.","detail":"Internal upstream timeout diagnostic"}'
   mocks.readBuddyConversation.mockResolvedValue({
     conversation: first,
+    replySettings: { provider: "custom-openai-api", model: "saved-model" },
     messages: [
       { id: "late-error", role: "assistant", content, created_at: "2026-09-08" }
     ]
@@ -256,4 +319,68 @@ it("does not start speech after unmount while its authorized transcript read is 
     })
   )
   expect(mocks.speak).not.toHaveBeenCalled()
+})
+
+it("shows missing reply settings before Send and preserves the draft while recovering", async () => {
+  mocks.readBuddyConversation.mockResolvedValue({
+    conversation: first,
+    messages: [],
+    replySettings: { model: null, provider: null }
+  })
+  mocks.acceptBuddyTurn.mockResolvedValue({
+    id: "turn",
+    status: "queued",
+    conversation_id: "one"
+  })
+  render(<BuddyInteraction {...props} />)
+  const reply = screen.getByLabelText("Reply to Research one")
+  fireEvent.change(reply, { target: { value: "Keep this draft" } })
+  expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
+  await screen.findByText(/Choose a provider and model below before sending/)
+  const model = screen.getByLabelText("Model (required)")
+  const provider = screen.getByLabelText("Provider (required)")
+  expect(model.closest("details")).toHaveAttribute("open")
+  fireEvent.change(model, { target: { value: "recovery-model" } })
+  expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
+  fireEvent.change(provider, { target: { value: "custom-openai-api" } })
+  expect(reply).toHaveValue("Keep this draft")
+  expect(screen.getByRole("button", { name: "Send" })).toBeEnabled()
+  fireEvent.click(screen.getByRole("button", { name: "Send" }))
+  await waitFor(() =>
+    expect(mocks.acceptBuddyTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversation_id: "one",
+        text: "Keep this draft",
+        model: "recovery-model",
+        provider: "custom-openai-api"
+      })
+    )
+  )
+})
+
+it("uses saved conversation settings without sending overrides and blocks a newly selected target until checked", async () => {
+  const { rerender } = render(<BuddyInteraction {...props} />)
+  await screen.findByText(/custom-openai-api.*saved-model/)
+  fireEvent.change(screen.getByLabelText("Reply to Research one"), {
+    target: { value: "Use my saved model" }
+  })
+  expect(screen.getByRole("button", { name: "Send" })).toBeEnabled()
+  mocks.acceptBuddyTurn.mockResolvedValue({
+    id: "turn",
+    status: "queued",
+    conversation_id: "one"
+  })
+  fireEvent.click(screen.getByRole("button", { name: "Send" }))
+  await waitFor(() => expect(mocks.acceptBuddyTurn).toHaveBeenCalledTimes(1))
+  expect(mocks.acceptBuddyTurn.mock.calls[0][0]).not.toHaveProperty("model")
+  expect(mocks.acceptBuddyTurn.mock.calls[0][0]).not.toHaveProperty("provider")
+  mocks.readBuddyConversation.mockReturnValue(new Promise(() => {}))
+  rerender(<BuddyInteraction {...props} conversation={second} />)
+  fireEvent.change(screen.getByLabelText("Reply to Research two"), {
+    target: { value: "Different target" }
+  })
+  expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
+  expect(
+    screen.queryByText(/custom-openai-api.*saved-model/)
+  ).not.toBeInTheDocument()
 })

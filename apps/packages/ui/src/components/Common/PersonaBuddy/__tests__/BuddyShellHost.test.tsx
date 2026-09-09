@@ -388,6 +388,10 @@ describe("BuddyShellHost", () => {
   it("keeps expanded controls in the viewport and restores their usable position on remount", () => {
     vi.stubGlobal("innerWidth", 1280)
     vi.stubGlobal("innerHeight", 720)
+    usePersonaBuddyShellStore.getState().setPosition("web-desktop", {
+      x: 1120,
+      y: 640
+    })
     vi.spyOn(HTMLDivElement.prototype, "getBoundingClientRect")
       .mockImplementation(function (this: HTMLDivElement) {
         const open = Boolean(
@@ -425,6 +429,10 @@ describe("BuddyShellHost", () => {
   it("reclamps content growth without repeated position writes and responds to viewport resize", () => {
     vi.stubGlobal("innerWidth", 1280)
     vi.stubGlobal("innerHeight", 720)
+    usePersonaBuddyShellStore.getState().setPosition("web-desktop", {
+      x: 1120,
+      y: 640
+    })
     let height = 95
     const notifications = new Set<() => void>()
     vi.stubGlobal("ResizeObserver", class {

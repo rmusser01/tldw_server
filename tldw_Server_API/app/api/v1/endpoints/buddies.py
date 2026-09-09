@@ -21,6 +21,7 @@ from tldw_Server_API.app.api.v1.schemas.buddies import (
     BuddyCreate,
     BuddyList,
     BuddyProfile,
+    BuddyReplySettings,
     BuddyUpdate,
 )
 from tldw_Server_API.app.core.Buddy.service import BuddyService
@@ -83,6 +84,20 @@ def conversation_target(conversation_id: str, service: BuddyService = Depends(ge
     """Resolve an owned conversation's current scope before attachment."""
     with _errors():
         return service.conversation_summary(conversation_id)
+
+
+@router.get("/conversation-targets/{conversation_id}/reply-settings", response_model=BuddyReplySettings)
+def conversation_reply_settings(
+    conversation_id: str,
+    response: Response,
+    client_slot: ClientSlot = "default",
+    service: BuddyService = Depends(get_buddy_service),
+) -> dict:
+    """Read the attached target's configured reply model without accepting work."""
+    with _errors():
+        result = service.conversation_reply_settings(client_slot, conversation_id)
+    response.headers["Cache-Control"] = "private, no-store"
+    return result
 
 
 @router.get("/attachment", response_model=BuddyAttachmentResponse)
