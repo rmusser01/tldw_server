@@ -302,10 +302,7 @@ def test_all_platform_transformers_resolutions_exclude_cve_2026_9856() -> None:
 
 @pytest.mark.parametrize(
     ("profile", "dockerfile", "extra"),
-    (
-        (profile, dockerfile, extra)
-        for profile, (dockerfile, extra) in PYTHON_PRODUCTION_PROFILES.items()
-    ),
+    [(profile, dockerfile, extra) for profile, (dockerfile, extra) in PYTHON_PRODUCTION_PROFILES.items()],
 )
 def test_python_production_images_use_locked_noneditable_uv_profiles(
     profile: str, dockerfile: str, extra: str | None
