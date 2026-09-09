@@ -4477,20 +4477,17 @@ async def create_chat_completion(
                     if any(str(provider_api_key).lower().startswith(p) for p in invalid_patterns):
                         raise _provider_credential_http_exception_for_code("provider_authentication_failed")
 
-                if (
-                    request_data.save_to_db is True
-                    and final_conversation_id
-                    and explicit_provider_requested
-                    and explicit_model_requested
-                ):
-                    await asyncio.to_thread(
-                        save_workspace_chat_model_selection,
-                        chat_db=chat_db,
-                        conversation_id=final_conversation_id,
-                        owner_client_id=user_id,
-                        provider=target_api_provider,
-                        model=model,
-                    )
+                await asyncio.to_thread(
+                    save_workspace_chat_model_selection,
+                    chat_db=chat_db,
+                    conversation_id=final_conversation_id,
+                    owner_client_id=user_id,
+                    provider=target_api_provider,
+                    model=model,
+                    save_to_db=request_data.save_to_db,
+                    explicit_provider_requested=explicit_provider_requested,
+                    explicit_model_requested=explicit_model_requested,
+                )
 
                 # --- Character/Conversation Context, History, and Current Turn ---
                 continuation_runtime: dict[str, Any] = {}

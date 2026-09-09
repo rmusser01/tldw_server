@@ -18,12 +18,42 @@ SaveMessageFn = Callable[..., Awaitable[str | None]]
 def save_workspace_chat_model_selection(
     *,
     chat_db: CharactersRAGDB,
-    conversation_id: str,
+    conversation_id: str | None,
     owner_client_id: str,
     provider: str,
     model: str,
+    save_to_db: bool | None,
+    explicit_provider_requested: bool,
+    explicit_model_requested: bool,
 ) -> None:
-    """Retain an explicit plain Chat selection for the same workspace conversation."""
+    """Atomically retain an eligible workspace Chat's explicit model selection.
+
+    Only an owned neutral workspace conversation can receive these defaults.
+    Global conversations, tracked character/Persona behavior, implicit model
+    selection, ephemeral requests and temporary Buddy overrides leave settings
+    unchanged. Existing unrelated settings are preserved.
+
+    Args:
+        chat_db: Authenticated principal's conversation database.
+        conversation_id: Existing target ID, or None before a target is created.
+        owner_client_id: Authenticated owner checked inside the transaction.
+        provider: Resolved provider identifier selected for this completion.
+        model: Resolved model identifier selected for this completion.
+        save_to_db: Original request's persistence preference; only True opts in.
+        explicit_provider_requested: Whether the request supplied a provider.
+        explicit_model_requested: Whether the request supplied a non-auto model.
+
+    Returns:
+        None after merging the selection or leaving an ineligible target unchanged.
+
+    Raises:
+        HTTPException: With 404 if the locked workspace target is missing or
+            foreign, or 409 if its settings version conflicts during the merge.
+        InputError: If the merged settings violate the existing storage contract.
+        CharactersRAGDBError: If a database operation fails.
+    """
+    if save_to_db is not True or not conversation_id or not explicit_provider_requested or not explicit_model_requested:
+        return
     # A Buddy override belongs to that reply, not the conversation's Chat defaults.
     if current_buddy_publication.get() is not None:
         return

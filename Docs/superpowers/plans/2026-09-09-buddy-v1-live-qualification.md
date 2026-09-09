@@ -31,3 +31,14 @@ Reason: repair the three recorded usability gaps within the existing attachment,
 2. Derive consistent labels for same-titled loaded conversations using localized creation times and stable identifiers when needed. Keep saved titles and reply/acknowledgement IDs unchanged; test long titles, timestamp collisions, and reordered lists.
 3. Preserve explicit provider/model selections from authorized neutral workspace Chat. Read effective reply settings through the current Buddy attachment, sharing acceptance resolution. Show missing setup before Send, retain drafts, and preserve per-reply overrides. Verify with owned SQLite/HTTP journeys and live UI recovery.
 4. Review, run focused checks and update the existing PR with source-bound follow-up evidence. Native extension/terminal and actual voice remain separate qualification gaps.
+
+## PR #2934 review follow-up
+
+ADR required: no. ADR path: backlog/decisions/005-independent-buddy-bindings-and-work-ownership.md.
+Reason: complete the reviewed usability fixes and generated API contract within the existing boundaries.
+
+1. Apply the shared duplicate-title labels to the setup attachment picker and verify exact conversation IDs for missing or colliding timestamps.
+2. Stabilize the speech label dependencies without restarting active playback, and verify label changes for queued results.
+3. Move the new persistence eligibility and optional catalog metadata decisions into core services; document the public contracts and new test fixtures, types, and markers.
+4. Regenerate the canonical OpenAPI fingerprint and client types after endpoint descriptions settle, review the generated diff, and pass the drift check.
+5. Review the combined changes, run focused regression/static checks, rebuild the Chrome package with exact final UI sources, retain a separate review evidence bundle, and update the PR review threads. Keep the original receipts attributed to their original source snapshots and the native/voice qualification gaps open.

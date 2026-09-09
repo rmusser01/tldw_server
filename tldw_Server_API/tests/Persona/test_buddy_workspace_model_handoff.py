@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
+from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.tests.Chat.integration.test_persona_backed_chat_conversations import (
     persona_chat_client as _persona_chat_client,
 )
@@ -20,8 +24,19 @@ persona_chat_db = _persona_chat_db
 
 @pytest.mark.parametrize("existing_settings", [None, {"authorNote": "Keep this note", "pinnedMessageIds": ["pin-1"]}])
 def test_workspace_chat_selection_reaches_buddy_without_manual_override(
-    persona_chat_client, persona_chat_db, monkeypatch, existing_settings
-):
+    persona_chat_client: tuple[TestClient, dict[str, str], MagicMock],
+    persona_chat_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+    existing_settings: dict[str, str | list[str]] | None,
+) -> None:
+    """Reuse ordinary Chat's saved selection and keep Buddy overrides temporary.
+
+    Args:
+        persona_chat_client: Real API client, auth headers and mocked provider call.
+        persona_chat_db: Disposable SQLite database shared by Chat and Buddy services.
+        monkeypatch: Scoped test-only provider credential bypass.
+        existing_settings: Unrelated persisted settings that the merge must preserve.
+    """
     monkeypatch.setenv("CHAT_FORCE_MOCK", "1")
     client, headers, provider = persona_chat_client
     db = persona_chat_db
@@ -80,8 +95,19 @@ def test_workspace_chat_selection_reaches_buddy_without_manual_override(
 
 @pytest.mark.parametrize("omitted", ["save_to_db", "api_provider", "model"])
 def test_workspace_chat_does_not_save_implicit_or_ephemeral_selection(
-    persona_chat_client, persona_chat_db, monkeypatch, omitted
-):
+    persona_chat_client: tuple[TestClient, dict[str, str], MagicMock],
+    persona_chat_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+    omitted: str,
+) -> None:
+    """Keep saved defaults unchanged when the request does not opt into persistence.
+
+    Args:
+        persona_chat_client: Real API client, auth headers and mocked provider call.
+        persona_chat_db: Disposable SQLite database storing the prior selection.
+        monkeypatch: Scoped default-model and test-only credential configuration.
+        omitted: Provider/model field to omit, or save_to_db to explicitly disable.
+    """
     monkeypatch.setenv("CHAT_FORCE_MOCK", "1")
     monkeypatch.setattr(chat_endpoint, "_get_default_provider", lambda: "openai")
     monkeypatch.setattr(chat_endpoint, "_get_default_model_for_provider_name", lambda _provider: "gpt-4")
@@ -110,7 +136,18 @@ def test_workspace_chat_does_not_save_implicit_or_ephemeral_selection(
     assert db.get_conversation_settings(conversation_id)["settings"] == previous_settings
 
 
-def test_workspace_model_handoff_rejects_a_foreign_conversation(persona_chat_client, persona_chat_db, monkeypatch):
+def test_workspace_model_handoff_rejects_a_foreign_conversation(
+    persona_chat_client: tuple[TestClient, dict[str, str], MagicMock],
+    persona_chat_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject foreign workspace Chat before provider execution or settings mutation.
+
+    Args:
+        persona_chat_client: Real API client, auth headers and mocked provider call.
+        persona_chat_db: Disposable SQLite database containing another owner's chat.
+        monkeypatch: Scoped test-only provider credential bypass.
+    """
     monkeypatch.setenv("CHAT_FORCE_MOCK", "1")
     client, headers, provider = persona_chat_client
     db = persona_chat_db

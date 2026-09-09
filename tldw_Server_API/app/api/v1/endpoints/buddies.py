@@ -92,8 +92,24 @@ def conversation_reply_settings(
     response: Response,
     client_slot: ClientSlot = "default",
     service: BuddyService = Depends(get_buddy_service),
-) -> dict:
-    """Read the attached target's configured reply model without accepting work."""
+) -> dict[str, str | None]:
+    """Read the attached target's configured reply model without accepting work.
+
+    Args:
+        conversation_id: Exact owned conversation selected for the Buddy reply.
+        response: HTTP response receiving the private, no-store cache policy.
+        client_slot: Principal-local attachment preference slot; defaults to default.
+        service: Authenticated Buddy service supplied by dependency injection.
+
+    Returns:
+        Only nullable provider and model identifiers. Effective roleplay completion
+        settings take precedence over raw conversation settings; no defaults are guessed.
+
+    Raises:
+        HTTPException: With 404 for an unavailable Buddy, attachment or target,
+            including conversations outside the currently attached scope; 422 for
+            invalid configuration.
+    """
     with _errors():
         result = service.conversation_reply_settings(client_slot, conversation_id)
     response.headers["Cache-Control"] = "private, no-store"

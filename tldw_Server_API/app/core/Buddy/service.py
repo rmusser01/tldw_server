@@ -271,7 +271,20 @@ class BuddyService:
         }
 
     def resolve_reply_completion(self, conversation_id: str) -> dict[str, Any]:
-        """Resolve saved completion settings from the principal's exact conversation."""
+        """Resolve saved completion settings from the principal's exact conversation.
+
+        Args:
+            conversation_id: Existing conversation owned by this service's user.
+
+        Returns:
+            Provider and model identifiers, trimmed or None, plus effective
+            sampling settings. Each identifier prefers the roleplay resume
+            completion over raw conversation settings; no server defaults apply.
+
+        Raises:
+            BuddyNotFoundError: If the conversation is missing, deleted or foreign.
+            CharactersRAGDBError: If reading the conversation state fails.
+        """
         try:
             resume = self.db.get_roleplay_resume_state(conversation_id, owner_client_id=self.user_id)
         except NotFoundError as exc:
@@ -285,7 +298,21 @@ class BuddyService:
         return completion
 
     def conversation_reply_settings(self, client_slot: str, conversation_id: str) -> dict[str, str | None]:
-        """Read provider/model only after checking the current attachment and membership."""
+        """Read reply identifiers for a currently attached and authorized target.
+
+        Args:
+            client_slot: Principal-local preference slot containing the attachment.
+            conversation_id: Exact conversation to check against that attachment.
+
+        Returns:
+            Only provider and model, each a trimmed identifier or None, using the
+            same effective-completion fallback as Buddy turn acceptance.
+
+        Raises:
+            BuddyNotFoundError: If the Buddy, attachment or target is unavailable,
+                or the conversation is outside the attached conversation/workspace.
+            CharactersRAGDBError: If reading attachment or conversation state fails.
+        """
         with self.db.transaction():
             attachment = self.attachment(client_slot)["attachment"]
             if attachment is None:

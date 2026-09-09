@@ -63,8 +63,11 @@ export const BuddyInteraction = ({
   conversationPages?: number
 }) => {
   const { t, i18n } = useTranslation("sidepanel")
-  const label = (key: string, text: string) =>
-    t(`buddyManagement.${key}`, { defaultValue: text })
+  const label = React.useCallback(
+    (key: string, text: string) =>
+      t(`buddyManagement.${key}`, { defaultValue: text }),
+    [t]
+  )
   const [localDrafts, setLocalDrafts] = React.useState<Record<string, string>>(
     {}
   )
@@ -100,12 +103,16 @@ export const BuddyInteraction = ({
   const firstLoad = React.useRef(true)
   const pendingSend = React.useRef(false)
   const selectedId = conversation?.id ?? ""
-  const conversationLabels = buddyConversationLabels(
-    conversations,
-    i18n.resolvedLanguage
+  const conversationLabels = React.useMemo(
+    () => buddyConversationLabels(conversations, i18n.resolvedLanguage),
+    [conversations, i18n.resolvedLanguage]
   )
-  const conversationLabel = (id: string, title: string) =>
-    conversationLabels.get(id) ?? title
+  const conversationLabel = React.useCallback(
+    (id: string, title: string) => conversationLabels.get(id) ?? title,
+    [conversationLabels]
+  )
+  const latestConversationLabel = React.useRef(conversationLabel)
+  latestConversationLabel.current = conversationLabel
   const messages =
     transcript.conversationId === selectedId ? transcript.messages : []
   const replySettings =
@@ -126,6 +133,10 @@ export const BuddyInteraction = ({
   speech.current = { speak, cancel }
   const speechGeneration = React.useRef(0)
   const activeSpeech = React.useRef<string | null>(null)
+  const cancelSpeech = React.useCallback(() => {
+    speechGeneration.current++
+    speech.current.cancel()
+  }, [])
   const sttSettings = useSttSettings()
   const speechToTextLanguage = useStoreMessageOption(
     (state) => state.speechToTextLanguage
@@ -166,17 +177,15 @@ export const BuddyInteraction = ({
     mounted.current = true
     return () => {
       mounted.current = false
-      speechGeneration.current++
       captureTarget.current = null
       stopCapture.current()
-      speech.current.cancel()
+      cancelSpeech()
     }
-  }, [])
+  }, [cancelSpeech])
   React.useEffect(() => {
-    speechGeneration.current++
-    speech.current.cancel()
+    cancelSpeech()
     setQueue([])
-  }, [attachmentVersion])
+  }, [attachmentVersion, cancelSpeech])
 
   React.useEffect(() => {
     let active = true
@@ -263,8 +272,7 @@ export const BuddyInteraction = ({
           setTurns([])
           setActivity([])
           onAttentionChange?.(0)
-          speechGeneration.current++
-          speech.current.cancel()
+          cancelSpeech()
           setQueue([])
         }
       } finally {
@@ -278,8 +286,12 @@ export const BuddyInteraction = ({
       window.clearInterval(timer)
     }
   }, [
-    selectedId,
+    attachment,
     attachmentVersion,
+    conversation,
+    label,
+    onAttentionChange,
+    cancelSpeech,
     visible,
     revision,
     readAloud,
@@ -316,7 +328,8 @@ export const BuddyInteraction = ({
       )
         return
       await speech.current.speak({
-        utterance: `${conversationLabel(result.conversation.id, result.conversation.title)}. ${presentBuddyMessage(message)}`,
+        // The authorized read may finish after the locale or title changes.
+        utterance: `${latestConversationLabel.current(result.conversation.id, result.conversation.title)}. ${presentBuddyMessage(message)}`,
         saveClip: false
       })
     })()
@@ -329,10 +342,18 @@ export const BuddyInteraction = ({
           setQueue((q) => q.filter((item) => item.id !== current.id))
         if (mounted.current) setSpeechTick((value) => value + 1)
       })
-  }, [queue, paused, readAloud, speechTick])
+  }, [
+    queue,
+    paused,
+    readAloud,
+    speechTick,
+    attachment,
+    attachmentVersion,
+    conversations,
+    conversationLabel
+  ])
   const pause = () => {
-    speechGeneration.current++
-    speech.current.cancel()
+    cancelSpeech()
     setPaused((value) => !value)
   }
   const send = async () => {

@@ -9,7 +9,10 @@ import {
 } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { BuddyInteraction } from "../BuddyInteraction"
+import type { BuddyConversationSummary } from "@/services/buddies"
 const mocks = vi.hoisted(() => ({
+  locale: "en-US",
+  t: (_key: string, options: { defaultValue: string }) => options.defaultValue,
   getBuddyAttachment: vi.fn(),
   listBuddyTurns: vi.fn(),
   listBuddyActivity: vi.fn(),
@@ -21,6 +24,12 @@ const mocks = vi.hoisted(() => ({
   stop: vi.fn(),
   speak: vi.fn(),
   cancel: vi.fn()
+}))
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: mocks.t,
+    i18n: { resolvedLanguage: mocks.locale }
+  })
 }))
 vi.mock("@/services/buddies", () => mocks)
 vi.mock("@/hooks/useTTS", () => ({
@@ -38,18 +47,18 @@ vi.mock("@/hooks/useServerDictation", () => ({
     isServerDictating: false
   })
 }))
-const first = {
+const first: BuddyConversationSummary = {
   id: "one",
   title: "Research one",
   scope_type: "workspace",
   workspace_id: "ws"
-} as any
-const second = {
+}
+const second: BuddyConversationSummary = {
   id: "two",
   title: "Research two",
   scope_type: "workspace",
   workspace_id: "ws"
-} as any
+}
 const attachment = {
   buddy_id: "duck",
   scope_type: "workspace",
@@ -64,6 +73,7 @@ const props = {
 }
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.locale = "en-US"
   mocks.getBuddyAttachment.mockResolvedValue({ version: 1, attachment })
   mocks.listBuddyTurns.mockResolvedValue({ turns: [] })
   mocks.listBuddyActivity.mockResolvedValue({
@@ -287,7 +297,10 @@ it("does not start speech after unmount while its authorized transcript read is 
     screen.getByRole("checkbox", { name: "Read new responses aloud" })
   )
   await waitFor(() => expect(mocks.listBuddyActivity).toHaveBeenCalledTimes(2))
-  let resolve!: (value: any) => void
+  let resolve!: (value: {
+    conversation: BuddyConversationSummary
+    messages: { id: string; content: string }[]
+  }) => void
   mocks.readBuddyConversation.mockReturnValue(
     new Promise((r) => {
       resolve = r
@@ -383,4 +396,108 @@ it("uses saved conversation settings without sending overrides and blocks a newl
   expect(
     screen.queryByText(/custom-openai-api.*saved-model/)
   ).not.toBeInTheDocument()
+})
+
+it("uses current labels after a pending speech read and for the next queued response without restarting playback", async () => {
+  const dated = [
+    { ...first, title: "Research", created_at: "2026-09-08T12:00:00Z" },
+    { ...second, title: "Research", created_at: "2026-09-09T12:00:00Z" }
+  ]
+  const { rerender } = render(
+    <BuddyInteraction {...props} conversations={dated} visible={false} />
+  )
+  await waitFor(() => expect(mocks.listBuddyActivity).toHaveBeenCalledTimes(1))
+  fireEvent.click(
+    screen.getByRole("checkbox", { name: "Read new responses aloud" })
+  )
+  await waitFor(() => expect(mocks.listBuddyActivity).toHaveBeenCalledTimes(2))
+  let finishRead!: (value: {
+    conversation: typeof first
+    messages: { id: string; role: string; content: string }[]
+  }) => void
+  const pendingRead = new Promise((resolve) => {
+    finishRead = resolve
+  })
+  mocks.readBuddyConversation
+    .mockReturnValueOnce(pendingRead)
+    .mockResolvedValue({
+      conversation: dated[1],
+      messages: [{ id: "late-two", role: "assistant", content: "Second reply" }]
+    })
+  let finishSpeech!: () => void
+  const playing = new Promise<void>((resolve) => {
+    finishSpeech = resolve
+  })
+  mocks.speak.mockReturnValueOnce(playing).mockResolvedValue(undefined)
+  mocks.listBuddyActivity.mockResolvedValue({
+    items: [
+      {
+        conversation_id: "one",
+        title: "Research",
+        result: { id: "late-one", content: "First reply" },
+        acknowledged: false
+      },
+      {
+        conversation_id: "two",
+        title: "Research",
+        result: { id: "late-two", content: "Second reply" },
+        acknowledged: false
+      }
+    ]
+  })
+  rerender(
+    <BuddyInteraction {...props} conversations={[...dated]} visible={false} />
+  )
+  await waitFor(() =>
+    expect(mocks.readBuddyConversation).toHaveBeenCalledTimes(1)
+  )
+  const renamed = dated.map((chat) => ({ ...chat, title: "Renamed research" }))
+  mocks.locale = "de-DE"
+  rerender(
+    <BuddyInteraction {...props} conversations={renamed} visible={false} />
+  )
+  const cancellations = mocks.cancel.mock.calls.length
+  await act(async () => {
+    finishRead({
+      conversation: dated[0],
+      messages: [{ id: "late-one", role: "assistant", content: "First reply" }]
+    })
+    await pendingRead
+  })
+  const dateLabel = (locale: string, createdAt: string) =>
+    new Intl.DateTimeFormat(locale, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit"
+    }).format(new Date(createdAt))
+  await waitFor(() =>
+    expect(mocks.speak).toHaveBeenNthCalledWith(1, {
+      utterance: `${dateLabel("de-DE", dated[0].created_at)} — Renamed research. First reply`,
+      saveClip: false
+    })
+  )
+  mocks.locale = "fr-FR"
+  rerender(
+    <BuddyInteraction {...props} conversations={[...renamed]} visible={false} />
+  )
+  expect(mocks.speak).toHaveBeenCalledTimes(1)
+  expect(mocks.readBuddyConversation).toHaveBeenCalledTimes(1)
+  expect(mocks.cancel).toHaveBeenCalledTimes(cancellations)
+  await act(async () => {
+    finishSpeech()
+    await playing
+  })
+  await waitFor(() =>
+    expect(mocks.speak).toHaveBeenNthCalledWith(2, {
+      utterance: `${dateLabel("fr-FR", dated[1].created_at)} — Renamed research. Second reply`,
+      saveClip: false
+    })
+  )
+  expect(mocks.readBuddyConversation.mock.calls.map((call) => call[1])).toEqual(
+    ["one", "two"]
+  )
+  expect(mocks.cancel).toHaveBeenCalledTimes(cancellations)
 })

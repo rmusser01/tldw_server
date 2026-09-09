@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import pytest
+from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import create_character_conversation
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.tests.Persona.test_independent_buddies import _client, _create
 from tldw_Server_API.tests.Persona.test_independent_buddies import db as _db
 
@@ -12,7 +14,17 @@ pytestmark = pytest.mark.integration
 db = _db
 
 
-def _attach(client, conversation_id, *, workspace_id=None):
+def _attach(client: TestClient, conversation_id: str, *, workspace_id: str | None = None) -> dict[str, object]:
+    """Create a Buddy and attach its default slot through the real HTTP boundary.
+
+    Args:
+        client: Authenticated test client for the owner-scoped Buddy router.
+        conversation_id: Existing conversation to attach when workspace_id is absent.
+        workspace_id: Existing workspace to attach instead of the conversation.
+
+    Returns:
+        The created Buddy's JSON profile, including its ID for later invalidation.
+    """
     buddy = _create(client)
     response = client.put(
         "/api/v1/buddies/attachment",
@@ -39,7 +51,16 @@ def _attach(client, conversation_id, *, workspace_id=None):
         ({"provider": 42, "model": "  "}, {"provider": None, "model": None}),
     ],
 )
-def test_reply_settings_projects_only_usable_selection_without_writes(db, settings, expected):
+def test_reply_settings_projects_only_usable_selection_without_writes(
+    db: CharactersRAGDB, settings: dict[str, str | int], expected: dict[str, str | None]
+) -> None:
+    """Expose usable identifiers without leaking notes or mutating persisted state.
+
+    Args:
+        db: Real disposable SQLite conversation and Buddy database.
+        settings: Raw identifiers, including missing or malformed legacy values.
+        expected: Exact nullable provider/model projection expected over HTTP.
+    """
     conversation_id = db.add_conversation({"title": "Chosen", "client_id": "1"})
     db.upsert_conversation_settings(conversation_id, {**settings, "authorNote": "Private note"})
     before = db.get_conversation_settings(conversation_id)
@@ -52,7 +73,12 @@ def test_reply_settings_projects_only_usable_selection_without_writes(db, settin
     assert db.get_messages_for_conversation(conversation_id) == []
 
 
-def test_reply_settings_uses_authoritative_roleplay_completion_before_raw_settings(db):
+def test_reply_settings_uses_authoritative_roleplay_completion_before_raw_settings(db: CharactersRAGDB) -> None:
+    """Prefer authoritative resume identifiers over conflicting raw settings.
+
+    Args:
+        db: Real disposable database used to create a resumable character chat.
+    """
     character_id = db.add_character_card({"name": "Resume character", "first_message": "Hello"})
     conversation_id = create_character_conversation(
         db,
@@ -72,7 +98,13 @@ def test_reply_settings_uses_authoritative_roleplay_completion_before_raw_settin
 
 
 @pytest.mark.parametrize("change", ["outside", "foreign", "detach", "deleted_workspace", "deleted_buddy"])
-def test_reply_settings_rechecks_current_attachment_and_target_access(db, change):
+def test_reply_settings_rechecks_current_attachment_and_target_access(db: CharactersRAGDB, change: str) -> None:
+    """Reject unavailable or mismatched targets for both owner and foreign readers.
+
+    Args:
+        db: Real disposable SQLite conversation and Buddy database.
+        change: Attachment, ownership, membership or deletion transition to exercise.
+    """
     db.upsert_workspace("selected-workspace", "Research")
     conversation_id = db.add_conversation(
         {"title": "Attached", "client_id": "1", "scope_type": "workspace", "workspace_id": "selected-workspace"}

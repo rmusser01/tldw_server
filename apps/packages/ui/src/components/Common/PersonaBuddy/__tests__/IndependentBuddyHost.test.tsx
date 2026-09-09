@@ -12,6 +12,8 @@ import {
   IndependentBuddyHost,
   IndependentBuddySession
 } from "../IndependentBuddyHost"
+import type { BuddyInteraction } from "../BuddyInteraction"
+import type { BuddyManagementModal } from "../BuddyManagementModal"
 import { useBuddyManagementStore } from "@/store/buddy-management"
 import { usePersonaBuddyShellStore } from "@/store/persona-buddy-shell"
 const mocks = vi.hoisted(() => ({
@@ -44,18 +46,22 @@ vi.mock("../SpriteFrameRenderer", () => ({
   }
 }))
 vi.mock("../BuddyInteraction", () => ({
-  BuddyInteraction: ({ conversation, draftState }: any) => (
+  BuddyInteraction: ({
+    conversation,
+    draftState
+  }: React.ComponentProps<typeof BuddyInteraction>) => (
     <div>
       Reply to {conversation?.title}
       <input
         aria-label="Draft reply"
-        value={draftState?.drafts[conversation?.id] ?? ""}
-        onChange={(e) =>
-          draftState?.setDrafts((previous: any) => ({
+        value={draftState?.drafts[conversation?.id ?? ""] ?? ""}
+        onChange={(e) => {
+          if (!conversation) return
+          draftState?.setDrafts((previous) => ({
             ...previous,
             [conversation.id]: e.target.value
           }))
-        }
+        }}
       />
     </div>
   )
@@ -66,9 +72,9 @@ vi.mock("../BuddyManagementModal", () => ({
     hasMoreProfiles,
     onLoadMoreProfiles,
     onApplied
-  }: any) => (
+  }: React.ComponentProps<typeof BuddyManagementModal>) => (
     <div>
-      Manage {profiles.map((p: any) => p.name).join(",")}
+      Manage {profiles.map((p) => p.name).join(",")}
       {hasMoreProfiles ? (
         <button onClick={onLoadMoreProfiles}>More Buddies</button>
       ) : null}
@@ -234,20 +240,22 @@ it("keeps fetched profile pages through periodic refresh", async () => {
     assets: [],
     display_mode: "static"
   }))
-  mocks.listBuddies.mockImplementation(async ({ offset }: any) => ({
-    buddies:
-      offset === 100
-        ? [
-            {
-              id: "duck",
-              name: "Duck",
-              manifest: {},
-              assets: [],
-              display_mode: "static"
-            }
-          ]
-        : firstPage
-  }))
+  mocks.listBuddies.mockImplementation(
+    async ({ offset }: { offset?: number }) => ({
+      buddies:
+        offset === 100
+          ? [
+              {
+                id: "duck",
+                name: "Duck",
+                manifest: {},
+                assets: [],
+                display_mode: "static"
+              }
+            ]
+          : firstPage
+    })
+  )
   mocks.getBuddy.mockResolvedValue({
     id: "duck",
     name: "Duck",
@@ -373,12 +381,14 @@ it("keeps later workspace conversation choices and drafts through refresh and ar
     id: `c${i}`,
     title: `Conversation ${i}`
   }))
-  mocks.listBuddyConversations.mockImplementation(async ({ offset }: any) => ({
-    conversations:
-      offset === 100
-        ? [{ id: "later", title: "Later conversation" }]
-        : firstPage
-  }))
+  mocks.listBuddyConversations.mockImplementation(
+    async ({ offset }: { offset?: number }) => ({
+      conversations:
+        offset === 100
+          ? [{ id: "later", title: "Later conversation" }]
+          : firstPage
+    })
+  )
   mocks.listBuddies.mockResolvedValue({
     buddies: [
       {
