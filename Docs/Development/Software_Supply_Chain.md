@@ -15,12 +15,14 @@ Implementation is not release certification: current source and image findings
 still block admission. The committed image inventory records exact candidates,
 not an approval to deploy them. Certification requires fresh passing evidence
 or narrowly scoped, human-approved exceptions. As of September 10, 2026 UTC,
-the canonical policy contains five OS applicability exceptions and sixteen
+the canonical policy contains 77 OS applicability exceptions and sixteen
 Chroma exceptions for the supported embedded deployment, owned by `rmusser01`
 and valid through September 17 UTC. Exact scope and authorization are recorded
-in the [OS activation evidence](../Evidence/TASK-13013.7.24-os-exception-activation.md)
-and [Chroma disposition](../Evidence/TASK-13013.7.28-chroma-exclusions.md).
-All other findings remain subject to the admission gate.
+in the [initial OS activation](../Evidence/TASK-13013.7.24-os-exception-activation.md),
+[Chroma disposition](../Evidence/TASK-13013.7.28-chroma-exclusions.md), and
+[binary-package applicability review](../Evidence/TASK-13013.7.29-deployment-applicability.md).
+All other scanner matches remain subject to the admission gate. An unexcepted
+scanner match is not proof of exploitable impact in the supported deployment.
 
 ## Pinned supply-chain tools
 
@@ -237,7 +239,13 @@ The requester subsequently directed activation of the sixteen exact Chroma
 non-applicability records for the supported embedded profile; that authorization,
 source/deployment scope and replay are recorded in
 [TASK-13013.7.28](../Evidence/TASK-13013.7.28-chroma-exclusions.md).
-The old OS-only comment does not authorize these new records. Loading this policy
+The requester directed continued remediation and exclusion of confirmed
+non-applicable findings. A further 72 exact image records, supported by package
+contents, absent affected features or incompatible ABI prerequisites, are recorded
+in [TASK-13013.7.29](../Evidence/TASK-13013.7.29-deployment-applicability.md).
+The old OS-only comment does not authorize these later records; the linked
+evidence records the conversation authorization and the PR review location.
+Loading this policy
 on September 18, 2026 UTC or later fails until expired records are removed or
 replaced through the renewal process below.
 
