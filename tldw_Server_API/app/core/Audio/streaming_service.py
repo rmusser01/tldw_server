@@ -386,6 +386,7 @@ async def _audio_ws_authenticate(
     *,
     endpoint_id: str,
     ws_path: str,
+    allow_initial_auth_message: bool = True,
 ) -> tuple[bool, Optional[int]]:
     """
     Shared authentication helper for audio WebSocket endpoints.
@@ -694,6 +695,9 @@ async def _audio_ws_authenticate(
                 return False, None
 
         # Message-based auth as a fallback
+        if not allow_initial_auth_message:
+            await _stream_error("Authentication required", code=4401)
+            return False, None
         try:
             first_message = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
             auth_data = json.loads(first_message)
@@ -746,6 +750,8 @@ async def _audio_ws_authenticate(
             return False
 
     if cookie_user_id is not None:
+        if not allow_initial_auth_message:
+            return True, cookie_user_id
         try:
             first_message = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
         except asyncio.TimeoutError:
@@ -802,6 +808,10 @@ async def _audio_ws_authenticate(
             token_type=AUTH_TOKEN_TYPE_ACCESS,
         )
         return True, settings.SINGLE_USER_FIXED_ID if hasattr(settings, "SINGLE_USER_FIXED_ID") else None
+    if not allow_initial_auth_message:
+        await _stream_error("Authentication required", code=4401)
+        return False, None
+
     try:
         first_message = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
         auth_data = json.loads(first_message)
