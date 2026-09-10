@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any
 
-
 FetchAll = Callable[[str], Awaitable[list[Any]]]
 Execute = Callable[[str], Awaitable[Any]]
+
+
+def ordinary_sqlite_table_names(conn: sqlite3.Connection) -> set[str]:
+    """Return main-schema ordinary tables, excluding views, virtual and shadow tables."""
+    # sqlite_master also calls virtual tables "table"; use parsed native metadata.
+    rows = conn.execute("PRAGMA main.table_list").fetchall()
+    if not rows:
+        raise ValueError("Database imports require SQLite 3.37 or newer")
+    return {str(row[1]) for row in rows if row[2] == "table"}
 
 
 def _trusted_sqlite_identifier(identifier: str) -> str:
