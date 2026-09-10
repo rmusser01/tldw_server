@@ -4,7 +4,7 @@ title: Implement OpenAI-compatible realtime speech endpoint
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-09-10 01:26'
+updated_date: '2026-09-10 02:02'
 labels:
   - audio
   - realtime
@@ -104,12 +104,14 @@ Original modified files:
 2026-09-09 requested follow-up: rebase onto latest dev again, wait for Qodo reviews on the resulting PR head, address all verified findings and CI issues, then request merge approval. User supplied a Change summary in the task conversation. Continuing isolated worktree and official Backlog CLI fallback; no merge is authorized yet.
 
 Qodo follow-up implementation: rebased cleanly onto dev 456eafb7a6; Qodo confirmed the prior code findings resolved and retained three live-smoke policy findings. Moved real-provider verification to an explicit standalone command with a spoken-WAV input and server-configured providers; replaced skipped pytest smoke with deterministic fake-transport tests. Independent review identified oversized WAV frames, reproduced with a seven-second clip and fixed via chunking plus a 30-second input limit. Final focused suite: 150 passed, no skips. Refreshed the OpenAPI fingerprint after reproducing CI contract drift (2086 -> 2087 paths; no schema count changes) and regenerated ignored frontend types. Ruff/Black, compilation, repository guards, diff check and Bandit passed. Awaiting posted current-head Qodo/CI before asking for merge approval.
+
+Final Qodo follow-up validation: d61c9b8573 received Qodo zero bugs/zero rule violations and all 50 CI checks passed (26 workflow skips). Local backend unit smoke: 403 passed; deployment-shaped startup smoke passed. Dev advanced during CI to f0248aaa00 through PR 2613 (three task documents and one audio-download test only), so the PR was rebased again without conflicts. Tree comparison confirms production code, manual smoke helper, and API fingerprint are unchanged from the fully green head. Focused realtime/route suite plus updated download regression: 153 passed, no skips; Bandit zero findings/errors. Refreshed-head checks run again before any merge. User merge decision and implementation-rationale sentence remain pending. Temporary follow-up plan outcomes are retained in the report; the plan file was removed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Rebased PR 2572 onto dev 40345571a2 and addressed confirmed review defects with regression coverage and existing audio governance integration. Retain the feature as an experimental OpenAI-style manual speech WebSocket subset: it remains useful and is absent from dev. Local focused/shared checks and security validation pass. See Docs/superpowers/reviews/2026-09-09-pr2572-rebase-review.md for full evidence and all comment dispositions. Merge still requires current-head CI and a requester-written Change summary; no merge or live-provider validation is claimed.
+PR 2572 remains useful as an experimental realtime speech adapter. Rebases include latest dev f0248aaa00. Qodo findings are addressed, manual provider verification is separated from deterministic pytest coverage, and the OpenAPI fingerprint is corrected. The preceding identical production tree passed all 50 CI checks and Qodo reported zero issues; the latest rebase passed 153 focused tests plus Bandit and awaits its refreshed remote checks. No merge is authorized yet; request the user decision and their implementation rationale under the Change summary policy.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
