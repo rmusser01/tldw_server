@@ -3,11 +3,38 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from typing import Any
 
 FetchAll = Callable[[str], Awaitable[list[Any]]]
 Execute = Callable[[str], Awaitable[Any]]
+SQLiteAuthorizer = Callable[[int, str | None, str | None, str | None, str | None], int]
+
+
+def sqlite_import_read_authorizer(table_names: Collection[str]) -> SQLiteAuthorizer:
+    """Restrict reads on a fresh importer-owned connection to known source tables.
+
+    Install before inspecting metadata: virtual-table constructors may query
+    uploaded shadow objects while SQLite prepares PRAGMA table_list. Keep the
+    callback installed for subsequent schema checks and ordinary row reads.
+    The owned connection must also disable trusted_schema before metadata;
+    SQLite can skip authorizer callbacks during nested virtual-table setup.
+    """
+    allowed = {"sqlite_master", "sqlite_schema", *(name.lower() for name in table_names)}
+
+    def authorize(
+        action: int,
+        table: str | None,
+        column: str | None,
+        database: str | None,
+        source: str | None,
+    ) -> int:
+        if action == sqlite3.SQLITE_READ:
+            if source is not None or database not in {None, "main"} or (table or "").lower() not in allowed:
+                return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+
+    return authorize
 
 
 def ordinary_sqlite_table_names(conn: sqlite3.Connection) -> set[str]:

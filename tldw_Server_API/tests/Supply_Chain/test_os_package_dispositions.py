@@ -155,9 +155,12 @@ def test_privileged_path_cases_remain_gated_without_fresh_mount_approval(record:
         ]
     }
     policy = load_policy(POLICY, today=TODAY)
-    # TASK39 adds explicit approval after collecting the previously missing image
+    # TASK39 and TASK40 add approval after collecting the missing image/caller
     # facts. Earlier native dispositions alone must still leave these rows gated.
-    policy = replace(policy, exceptions=tuple(r for r in policy.exceptions if not r.id.startswith("TASK-13013.7.39-")))
+    policy = replace(
+        policy,
+        exceptions=tuple(r for r in policy.exceptions if not r.id.startswith(("TASK-13013.7.39-", "TASK-13013.7.40-"))),
+    )
     decision = evaluate_trivy_report(report, component=record["component"], policy=policy, today=TODAY)
     assert len(decision.blocking) == 1 and not decision.excepted
 

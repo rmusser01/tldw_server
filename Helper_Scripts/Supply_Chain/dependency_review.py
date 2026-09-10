@@ -24,6 +24,11 @@ _ADVISORY_IDENTITIES = {
     "GHSA-xph7-9rjv-w5fr": ("CVE-2026-45831", "chromadb", "1.5.9"),
     "GHSA-8mgp-746c-j5xp": ("CVE-2026-81726", "nltk", "3.10.3"),
     "GHSA-qqmf-gpg7-g8gw": ("CVE-2026-58659", "lightning", "2.6.5"),
+    "GHSA-2cp2-2r3c-7p7r": ("CVE-2026-68508", "hydra-core", "1.3.2"),
+    "GHSA-9379-mwvr-7wxx": ("CVE-2025-33245", "nemo-toolkit", "2.0.0"),
+    "GHSA-hvjw-vp7g-39h5": ("CVE-2025-33253", "nemo-toolkit", "2.0.0"),
+    "GHSA-m4jw-wgmf-889x": ("CVE-2026-24157", "nemo-toolkit", "2.0.0"),
+    "GHSA-v7v2-m736-cf3c": ("CVE-2026-24159", "nemo-toolkit", "2.0.0"),
 }
 _GHSA_PATTERN = re.compile(r"GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}")
 _MANIFESTS = frozenset({"pyproject.toml", "uv.lock"})

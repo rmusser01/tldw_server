@@ -76,9 +76,10 @@ def test_lightning_alias_without_canonical_approval_does_not_authorize() -> None
     assert derive_allow_ghsas([_change()], policy=without_lightning, today=TODAY) == ()
 
 
-def test_optional_advisories_remain_gated_alongside_lightning() -> None:
-    """Catch extending the Lightning decision to unrelated Hydra or NeMo advisories."""
+def test_lightning_approval_alone_does_not_allow_optional_advisories() -> None:
+    """Catch authorizing Hydra or NeMo without their separate TASK40 approvals."""
     policy = load_policy(POLICY, today=TODAY)
+    policy = replace(policy, exceptions=tuple(r for r in policy.exceptions if not r.id.startswith("TASK-13013.7.40-")))
     hydra = _change(
         name="hydra-core",
         version="1.3.2",
