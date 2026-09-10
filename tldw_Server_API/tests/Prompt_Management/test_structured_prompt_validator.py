@@ -54,6 +54,17 @@ def test_validator_accepts_valid_definition():
     assert errors == []
 
 
+def test_discriminated_parser_preserves_v1_compatibility():
+    from tldw_Server_API.app.core.Prompt_Management import structured_prompts
+
+    payload = _make_definition()
+    parsed = structured_prompts.parse_prompt_definition(payload)
+    assert isinstance(parsed, structured_prompts.PromptDefinition)
+    assert isinstance(parsed, structured_prompts.MultiMessagePromptDefinitionV1)
+    assert parsed.model_dump(exclude_unset=True) == payload
+    assert validate_prompt_definition(parsed) == []
+
+
 def test_validator_rejects_duplicate_variable_names():
     definition = _make_definition(
         variables=[

@@ -1,28 +1,35 @@
-from collections.abc import Mapping
 import re
+from collections.abc import Mapping
 from typing import Any
 
-from .models import PromptDefinition, ValidationIssue
+from pydantic import ValidationError
+
+from .models import PromptDefinition, SingleTextRecipeDefinitionV2, ValidationIssue
 
 SUPPORTED_SCHEMA_VERSION = 1
 VALID_BLOCK_ROLES = {"system", "developer", "user", "assistant"}
 _TEMPLATE_VARIABLE_PATTERN = re.compile(r"{{\s*([a-zA-Z0-9_]+)\s*}}")
+_XML_SECTION_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*$")
 
 
 def _as_mapping(value: Any) -> Mapping[str, Any]:
-    if isinstance(value, PromptDefinition):
+    if isinstance(value, (PromptDefinition, SingleTextRecipeDefinitionV2)):
         return value.model_dump()
     if isinstance(value, Mapping):
         return value
     return {}
 
 
-def validate_prompt_definition(definition: dict[str, Any] | PromptDefinition) -> list[ValidationIssue]:
+def validate_prompt_definition(
+    definition: dict[str, Any] | PromptDefinition | SingleTextRecipeDefinitionV2,
+) -> list[ValidationIssue]:
+    """Return stable structural/semantic issues without modifying either schema."""
     payload = _as_mapping(definition)
     issues: list[ValidationIssue] = []
     declared_variable_names: set[str] = set()
 
-    if payload.get("schema_version") != SUPPORTED_SCHEMA_VERSION:
+    version = payload.get("schema_version")
+    if type(version) is not int or version not in (SUPPORTED_SCHEMA_VERSION, 2):
         issues.append(
             ValidationIssue(
                 code="unsupported_schema_version",
@@ -30,6 +37,12 @@ def validate_prompt_definition(definition: dict[str, Any] | PromptDefinition) ->
                 path="schema_version",
             )
         )
+        return issues
+
+    if version == 2:
+        issues = _validate_recipe_structure(payload)
+        if issues:
+            return issues
 
     variables = payload.get("variables", [])
     if isinstance(variables, list):
@@ -73,7 +86,7 @@ def validate_prompt_definition(definition: dict[str, Any] | PromptDefinition) ->
                 seen_block_ids.add(block_id)
 
             role = block.get("role")
-            if role not in VALID_BLOCK_ROLES:
+            if role not in VALID_BLOCK_ROLES or (version == 2 and role != payload["assembly_config"]["target_role"]):
                 issues.append(
                     ValidationIssue(
                         code="invalid_block_role",
@@ -99,4 +112,62 @@ def validate_prompt_definition(definition: dict[str, Any] | PromptDefinition) ->
                 if issues:
                     break
 
+    if version == 2 and not issues:
+        issues.extend(_validate_recipe_section_keys(payload))
     return issues
+
+
+def _validate_recipe_structure(payload: Mapping[str, Any]) -> list[ValidationIssue]:
+    """Validate exact recipe identity before bounded Pydantic field validation."""
+    config = payload.get("assembly_config")
+    config = config if isinstance(config, Mapping) else {}
+    discriminants = [
+        (payload, "definition_kind", {"single_text_recipe"}, "definition_kind"),
+        (payload, "format", {"structured"}, "format"),
+        (config, "assembly_mode", {"single_text"}, "assembly_config.assembly_mode"),
+        (config, "target_role", {"system", "user"}, "assembly_config.target_role"),
+        (config, "render_format", {"xml", "markdown", "freeform"}, "assembly_config.render_format"),
+    ]
+    for source, key, allowed, path in discriminants:
+        value = source.get(key)
+        if not isinstance(value, str) or value not in allowed:
+            return [ValidationIssue(code=f"invalid_{key}", message=f"Invalid recipe {key}.", path=path)]
+    try:
+        SingleTextRecipeDefinitionV2.model_validate(payload)
+    except ValidationError as error:
+        issues = []
+        for detail in error.errors(include_input=False, include_url=False):
+            location = detail["loc"]
+            path = "".join(f"[{part}]" if isinstance(part, int) else f".{part}" for part in location).lstrip(".")
+            code = detail["type"]
+            if len(location) == 3 and location[0] == "blocks" and location[-1] == "role":
+                code = "invalid_block_role"
+            issues.append(ValidationIssue(code=code, message=detail["msg"], path=path))
+        return issues
+    return []
+
+
+def _validate_recipe_section_keys(payload: Mapping[str, Any]) -> list[ValidationIssue]:
+    """Require valid unique keys only for enabled XML-style sections."""
+    if payload["assembly_config"]["render_format"] != "xml":
+        return []
+    seen_keys: set[str] = set()
+    for index, block in enumerate(payload.get("blocks", [])):
+        if not block.get("enabled", True):
+            continue
+        key = block.get("section_key")
+        path = f"blocks[{index}].section_key"
+        if not isinstance(key, str) or not _XML_SECTION_KEY_PATTERN.fullmatch(key):
+            return [
+                ValidationIssue(
+                    code="invalid_section_key", message="Enabled XML blocks require a valid section key.", path=path
+                )
+            ]
+        if key in seen_keys:
+            return [
+                ValidationIssue(
+                    code="duplicate_section_key", message="Enabled XML section keys must be unique.", path=path
+                )
+            ]
+        seen_keys.add(key)
+    return []
