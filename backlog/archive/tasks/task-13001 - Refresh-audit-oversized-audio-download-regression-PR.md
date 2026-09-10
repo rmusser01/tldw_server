@@ -2,24 +2,25 @@
 id: TASK-13001
 title: Refresh audit oversized audio download regression PR
 status: In Progress
-created_date: 2026-07-18 18:35
+assignee: []
+created_date: '2026-07-18 18:35'
+updated_date: '2026-09-10 00:40'
 labels:
-- audit
-- remediation
-- media
-- tests
-- pr-followup
-priority: low
+  - audit
+  - remediation
+  - media
+  - tests
+  - pr-followup
+dependencies: []
 references:
-- AUDIT-2026-06-27-MEDIA-004
-- https://github.com/rmusser01/tldw_server/pull/2613
-- Supersedes colliding audit task TASK-12144
+  - AUDIT-2026-06-27-MEDIA-004
+  - 'https://github.com/rmusser01/tldw_server/pull/2613'
+  - Supersedes colliding audit task TASK-12144
 documentation:
-- Docs/superpowers/reviews/2026-06-27-repo-audit/domains/media-ingestion-storage.md
-- Docs/superpowers/reviews/2026-06-27-repo-audit/remediation-backlog-draft.md
-modified_files:
-- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_audio_download_limits.py
-updated_date: 2026-07-18 21:49
+  - >-
+    Docs/superpowers/reviews/2026-06-27-repo-audit/domains/media-ingestion-storage.md
+  - Docs/superpowers/reviews/2026-06-27-repo-audit/remediation-backlog-draft.md
+priority: low
 ---
 
 ## Description
@@ -44,6 +45,7 @@ Stage 1: migrate the colliding task record and rebase onto current origin/dev. S
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Rebased onto origin/dev 668b0fce5707134768f880b5d064ccc5b0cc4691. The original active-invocation audit fix is already present in latest dev, so the final PR delta was reviewed as incremental contract coverage. Replaced the brittle exact headers/timeout equality with assertions for one request to the intended URL, stream=True, and zero iter_content calls, proving oversized Content-Length is rejected before response-body consumption. The shared fake response now uses yield from, clearing the touched-file Ruff diagnostic.
 
@@ -53,9 +55,16 @@ Tracking: the PR's old TASK-12144 was archived before rebase because latest dev 
 Final pre-push latest-dev check: merge-base equals origin/dev 29acaca8c781213e27b12066372df13855e2e7a6. Reverification on this base: 3 tests passed with 14 warnings, Ruff passed, Bandit remained 7 LOW B101 pytest-assert findings with 0 errors, and diff checks passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
+September 2026 refresh: this audit record is superseded by a new task because current dev independently allocated TASK-13001 to UserProfiles. Archive this record from the original PR revision, where lookup is unambiguous, and retain the UserProfiles task unchanged on rebase.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+
+<!-- SECTION:FINAL_SUMMARY:END -->
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 
