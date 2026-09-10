@@ -4,7 +4,7 @@ title: Review and rebase PR 2599 audio.cpp TTS provider
 status: Done
 assignee: []
 created_date: '2026-09-10 00:37'
-updated_date: '2026-09-10 01:15'
+updated_date: '2026-09-10 01:19'
 labels: []
 dependencies: []
 references:
@@ -58,6 +58,8 @@ The review-specific working plan was completed and removed per AGENTS.md; origin
 Follow-up authorized by requester: address newly posted Qodo review 5611102940 before merge. Validate bounded retry after port binding races, require recognized positive health status, and atomically replace installer YAML without truncating existing config on failure. Reopening TASK-13231 for these focused review fixes.
 
 Qodo follow-up 5611102940 addressed: startup retries confirmed bind collisions only within the configured range (including port_probe_max=0), exhausted ranges record backoff, health requires explicit positive status in the client/supervisor/adapter, and installer YAML replacement is atomic with permissions, ownership and symlink-target preservation. Regression red runs: 14 original follow-up failures, one exhausted-port/backoff failure, two ownership failures; all fixed. Final focused/adjacent suite: 147 passed, 4 existing warnings (8.82s). Ruff, compileall and git diff --check pass. Bandit touched production scope has zero findings/errors. Real CPU synthesis and forced-crash restart smoke passed again: 119084-byte 24kHz mono WAV and 69120-byte raw PCM after restart. Independent review found no remaining actionable blockers. Existing inline review threads were replied to and resolved; another Qodo review and fresh CI will run after publishing. Repository human-owned rationale remains required before merge. Follow-up working plan completed locally and removed; task retains verification and pending external merge gates.
+
+Latest dev 456eafb7a603449722ba8db806071a5e2aa5e7d6 introduced an independently allocated active TASK-13231 for PR 2628. Archive this completed PR 2599 review record and continue merge follow-up in a newly allocated task to avoid ambiguous active task lookup.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
