@@ -2,9 +2,11 @@
 
 import json
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from hypothesis import given
@@ -33,6 +35,42 @@ def versioned_migration_db(
         conn.execute("CREATE TABLE schema_version (version INTEGER)")
         conn.execute("INSERT INTO schema_version VALUES (0)")
     return migration_db
+
+
+@pytest.fixture
+def migration_with_failed_restoration(
+    versioned_migration_db: tuple[Path, DatabaseMigrator],
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[tuple[Path, DatabaseMigrator, list[Any]]]:
+    """Inject a restoration-only SQLite error and capture warning diagnostics."""
+    db_path, migrator = versioned_migration_db
+    messages: list[Any] = []
+
+    class RestoreFailureConnection(sqlite3.Connection):
+        """Keep real transactions while rejecting the final foreign-key setting."""
+
+        def execute(self, sql: str, parameters: Any = ()) -> sqlite3.Cursor:
+            """Fail the restoration statement without affecting migration SQL."""
+            if sql.strip() == "PRAGMA foreign_keys=ON;":
+                raise sqlite3.OperationalError("restoration unavailable")
+            return super().execute(sql, parameters)
+
+    @contextmanager
+    def get_connection() -> Iterator[sqlite3.Connection]:
+        """Provide and close the injected SQLite connection for this migrator."""
+        conn = sqlite3.connect(db_path, factory=RestoreFailureConnection)
+        conn.row_factory = sqlite3.Row
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    monkeypatch.setattr(migrator, "_get_connection", get_connection)
+    sink = db_migration_module.logger.add(messages.append, level="WARNING")
+    try:
+        yield db_path, migrator, messages
+    finally:
+        db_migration_module.logger.remove(sink)
 
 
 def test_migrate_to_version_rejects_missing_intermediate_versions(tmp_path: Path):
@@ -284,6 +322,45 @@ def test_migration_commit_failure_rolls_back_bookkeeping_and_allows_retry(
         assert conn.execute("SELECT parent_id FROM child").fetchall() == [(7,)]
         assert conn.execute("SELECT version FROM schema_version").fetchone() == (1,)
         assert conn.execute("SELECT version, success FROM schema_migrations").fetchall() == [(1, 1)]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("succeeds", [True, False], ids=["after-success", "after-error"])
+def test_migration_restoration_failure_logs_context_and_preserves_outcome(
+    migration_with_failed_restoration: tuple[Path, DatabaseMigrator, list[Any]],
+    succeeds: bool,
+) -> None:
+    """Restoration diagnostics identify the migration without masking its outcome."""
+    db_path, migrator, messages = migration_with_failed_restoration
+    body = "CREATE TABLE widgets (id INTEGER);"
+    if not succeeds:
+        body += "INSERT INTO missing_table VALUES (1);"
+    migration = db_migration_module.Migration(
+        1, "restore_diagnostic", "PRAGMA foreign_keys=OFF; " + body + " PRAGMA foreign_keys=ON;",
+    )
+    if succeeds:
+        migrator.execute_migration(migration)
+    else:
+        with pytest.raises(MigrationError, match="missing_table"):
+            migrator.execute_migration(migration)
+
+    with sqlite3.connect(db_path) as conn:
+        assert bool(conn.execute(
+            "SELECT name FROM sqlite_master WHERE name='widgets'"
+        ).fetchall()) is succeeds
+        assert conn.execute("SELECT version FROM schema_version").fetchone() == (int(succeeds),)
+        assert conn.execute("SELECT success FROM schema_migrations").fetchall() == [(int(succeeds),)]
+
+    records = [message.record for message in messages if "restore" in message.record["message"]]
+    assert len(records) == 1
+    record = records[0]
+    assert record["extra"].items() >= {
+        "migration_name": "restore_diagnostic", "migration_version": 1,
+        "direction": "up", "phase": "after_success" if succeeds else "after_error",
+    }.items()
+    assert record["exception"].type is sqlite3.OperationalError
+    assert str(record["exception"].value) == "restoration unavailable"
+    assert record["exception"].traceback is not None
 
 
 @pytest.mark.unit

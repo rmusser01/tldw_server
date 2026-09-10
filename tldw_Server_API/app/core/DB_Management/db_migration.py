@@ -625,9 +625,13 @@ class DatabaseMigrator:
                     try:
                         conn.execute(statement)
                     except sqlite3.Error as pragma_err:
-                        logger.debug(
-                            "Failed to restore migration connection PRAGMA after success: {}",
-                            pragma_err,
+                        logger.bind(
+                            migration_name=migration.name,
+                            migration_version=migration.version,
+                            direction=direction,
+                            phase="after_success",
+                        ).opt(exception=pragma_err).warning(
+                            "Failed to restore migration connection PRAGMA after success",
                         )
 
                 logger.info(
@@ -642,9 +646,13 @@ class DatabaseMigrator:
                     try:
                         conn.execute(statement)
                     except sqlite3.Error as pragma_err:
-                        logger.debug(
-                            "Failed to restore migration connection PRAGMA after error: {}",
-                            pragma_err,
+                        logger.bind(
+                            migration_name=migration.name,
+                            migration_version=migration.version,
+                            direction=direction,
+                            phase="after_error",
+                        ).opt(exception=pragma_err).warning(
+                            "Failed to restore migration connection PRAGMA after error",
                         )
 
                 # Record failed migration

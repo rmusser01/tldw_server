@@ -190,7 +190,7 @@ class TestMigrations(unittest.TestCase):
         self.assertEqual(result["migrations_applied"][0]["direction"], "down")
 
     @pytest.mark.unit
-    def test_no_migrations_upgrade_rejects_missing_chain(self):
+    def test_no_migrations_upgrade_rejects_missing_chain(self) -> None:
         """Reject an unavailable upgrade before changing the schema version."""
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER)")
