@@ -865,7 +865,6 @@ class JWTService:
             logger.debug(f"extract_jti failed to decode token: {e}")
             return None
 
-
     def create_password_reset_token(
         self,
         user_id: int,

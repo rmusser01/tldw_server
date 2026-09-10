@@ -3,8 +3,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from fastapi import HTTPException
 import pytest
+from fastapi import HTTPException
 
 from tldw_Server_API.app.core.AuthNZ import User_DB_Handling as user_handling
 

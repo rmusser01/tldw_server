@@ -57,11 +57,7 @@ def _role_name_from_row(row: Any) -> str | None:
     if isinstance(row, dict):
         value = row.get("name") or row.get("role") or row.get("role_name")
         return _clean_role_name(value)
-    value = (
-        getattr(row, "name", None)
-        or getattr(row, "role", None)
-        or getattr(row, "role_name", None)
-    )
+    value = getattr(row, "name", None) or getattr(row, "role", None) or getattr(row, "role_name", None)
     return _clean_role_name(value)
 
 

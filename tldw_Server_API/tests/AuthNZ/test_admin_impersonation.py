@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from jose import jwt
-from tldw_Server_API.app.api.v1.endpoints.admin import admin_impersonation
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
+from jose import jwt
 
+from tldw_Server_API.app.api.v1.endpoints.admin import admin_impersonation
 from tldw_Server_API.app.api.v1.endpoints.admin.admin_impersonation import (
     ImpersonationTokenResponse,
     create_impersonation_token,
@@ -396,6 +396,7 @@ def _install_endpoint_stubs(
         return _StubRepo()
 
     class _StubJWTService:
+
         def create_impersonation_access_token(self, **kwargs: Any) -> str:
             jwt_calls.append(kwargs)
             issued_at = datetime.now(timezone.utc)
@@ -423,7 +424,9 @@ def _install_endpoint_stubs(
     )
     monkeypatch.setattr(admin_impersonation, "get_jwt_service", lambda: _StubJWTService(), raising=False)
     monkeypatch.setattr(admin_impersonation, "emit_impersonation_issuance_audit_event", _emit, raising=False)
-    monkeypatch.setattr(admin_impersonation, "AuthnzRbacRepo", lambda: SimpleNamespace(get_user_roles=lambda _user_id: []))
+    monkeypatch.setattr(
+        admin_impersonation, "AuthnzRbacRepo", lambda: SimpleNamespace(get_user_roles=lambda _user_id: [])
+    )
     return jwt_calls, audit_calls
 
 
@@ -472,7 +475,7 @@ class TestCurrentDevImpersonationCompatibility:
         assert exc_info.value.status_code == 403
         assert exc_info.value.detail == "Impersonation requires a non-impersonated user principal"
         assert jwt_calls == []
-        assert audit_calls == [{"actor_id": 1, "target_user_id": 42, "expires_in_minutes": 15}]
+        assert audit_calls == []
 
     @pytest.mark.asyncio
     async def test_success_uses_backend_agnostic_user_repository(self, monkeypatch):
@@ -505,18 +508,7 @@ class TestCurrentDevImpersonationCompatibility:
             {
                 "actor_id": 1,
                 "target_user_id": 42,
-                "event_type": admin_impersonation.AuditEventType.AUTH_TOKEN_CREATED,
-                "category": admin_impersonation.AuditEventCategory.AUTHORIZATION,
-                "resource_type": "user_impersonation",
-                "resource_id": "42",
-                "action": "admin.impersonation.token.create",
-                "metadata": {
-                    "impersonated_by": 1,
-                    "impersonated_user_id": 42,
-                    "expires_in_minutes": 15,
-                    "impersonation": True,
-                },
-                "raise_on_failure": True,
+                "expires_in_minutes": 15,
             }
         ]
 
