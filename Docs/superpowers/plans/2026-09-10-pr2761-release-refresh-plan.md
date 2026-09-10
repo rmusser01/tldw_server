@@ -11,9 +11,9 @@
 
 | Item | Recorded state |
 | --- | --- |
-| Integrated release code and verified blocker fixes | `50dcf5453b1ba10b0eabb505ff32b831f47f8185` |
+| Integrated release code and verified blocker fixes | `910c526513a03b305b2976fec6f1dee73bacc1e9` |
 | Latest executable-fix/metadata push | `decdf9db77` (source `50dcf5453b`); blocker closure below is in progress |
-| Protected source snapshot | `50dcf5453b1ba10b0eabb505ff32b831f47f8185`, 7,099 files |
+| Protected source snapshot | `910c526513a03b305b2976fec6f1dee73bacc1e9`, 7,100 files |
 | PR branch / target | `codex/release-main-0.1.42` → `main` |
 | PR state at inspection | Draft; no merge or publication performed |
 | Remote CI snapshot | On `decdf9db77`, backend/security/coverage/container/E2E/license/docs and seven frontend shards pass. Shard 6 has one failing Flashcard cloze-template assertion (538 shared-UI tests pass in that shard); the prior reminder and Research failures pass. CodeQL remains unresolved. |
@@ -285,3 +285,15 @@ The temporary controller initially omitted volume-root ownership and was correct
 This local diagnostic image uses clean `0cec0bb409` plus the exact Dockerfile repair. Its application runtime source equals `50dcf5453b`; embedded tests/docs/metadata are older and this is not a published artifact. The published 0.1.38 image failed importing `mcp_unified`, so a working deployed rollback baseline and seeded cross-version upgrade/restore remain open. PostgreSQL production-reference/Caddy, multi-worker/provider load, encrypted personal-context data, full lifecycle and capacity certification are not covered by this smoke.
 
 PR #2869 remains unchanged at `78c3f92228c6411ee4637b9d2df9aa3b50aacdc8`, with conflicts and nine failed image/source/security checks. Its active separate work is not integrated. At `44c6b45c85`, backend, security, app-container build and five frontend shards pass; other frontend shards, coverage and E2E were still running at this snapshot. Final current-head gate results are maintained in the PR description; this evidence update does not waive fresh checks.
+
+## Verified source freeze for the current closure batch
+
+Source **`910c526513a03b305b2976fec6f1dee73bacc1e9`** contains the verified fixes above. The regenerated
+manifest covers **7,100 protected files**, SHA-256
+**`96b17d0aa64f09247145ac8beb88ee75bfa60cf5f84e7cb43b9698678677d12a`**. Legal/date bytes are unchanged.
+Independent review found no frontend regressions. Independent integration
+verification passed **42 tests**; docs/workflow contracts passed **26 tests**,
+with only the previously documented host-limited strict docs build excluded.
+The final full nonincremental WebUI typecheck passed after all frontend edits.
+The pre-refresh license regression failed as expected against the stale manifest;
+source and metadata are pushed together only after the refreshed record passes.
