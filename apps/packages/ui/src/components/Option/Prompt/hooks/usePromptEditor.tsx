@@ -299,7 +299,7 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
   })
 
   const { mutate: permanentDeletePromptMutation } = useMutation({
-    mutationFn: permanentlyDeletePrompt,
+    mutationFn: (id: string) => permanentlyDeletePrompt(id),
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: ["fetchDeletedPrompts"]

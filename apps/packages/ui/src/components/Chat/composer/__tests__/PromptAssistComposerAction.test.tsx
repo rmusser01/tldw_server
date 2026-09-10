@@ -3,7 +3,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import React from "react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { CLEAR_TASK_RECIPE } from "@/components/Common/PromptAssist/recipes/built-in-recipes"
+import { clearRecipePersistenceUncertainty, markRecipePersistenceUncertain } from "@/services/recipe-persistence-uncertainty"
+import * as serverOnline from "@/hooks/useServerOnline"
 
 import { PromptAssistComposerAction } from "../PromptAssistComposerAction"
 import { useComposerText } from "../hooks/useComposerText"
@@ -327,6 +330,7 @@ const renderHarness = (props: HarnessProps = {}) => {
   const view = render(renderTree(props))
   return {
     ...view,
+    queryClient,
     rerenderHarness: (nextProps: HarnessProps) =>
       view.rerender(renderTree(nextProps))
   }
@@ -346,6 +350,7 @@ const improveNow = async (user: ReturnType<typeof userEvent.setup>) => {
 }
 
 describe("PromptAssistComposerAction entry and request contract", () => {
+  afterEach(() => clearRecipePersistenceUncertainty("scoped-recipe", "backend-a"))
   beforeEach(() => {
     vi.clearAllMocks()
     draftBucketMocks.records.clear()
@@ -354,6 +359,38 @@ describe("PromptAssistComposerAction entry and request contract", () => {
     mocks.improvePrompt.mockImplementation(async (request) =>
       improvementResponse(request.operation_id)
     )
+  })
+
+  it.each([
+    ["backend-a", "first-credential", false],
+    ["backend-a", "refreshed-credential", false],
+    ["backend-b", "first-credential", true]
+  ])("scopes composer recipe ownership to %s, independently of %s", async (backend, revision, enabled) => {
+    vi.spyOn(serverOnline, "useServerOnline").mockReturnValue(true)
+    markRecipePersistenceUncertain("scoped-recipe", "backend-a")
+    const definition = structuredClone(CLEAR_TASK_RECIPE.definition)
+    definition.assembly_config.target_role = "user"
+    definition.blocks.forEach(block => { block.role = "user" })
+    mocks.getAllPrompts.mockResolvedValue([{
+      id: "scoped-recipe", name: "Scoped recipe", title: "Scoped recipe", content: "Task", is_system: false, createdAt: 1,
+      promptFormat: "structured", promptSchemaVersion: 2, syncStatus: "local",
+      structuredPromptDefinition: definition
+    }])
+    mocks.fetchPromptCapabilities.mockResolvedValue({
+      availability: "available", prompt_improvement_v1: { supported: true, limits: null },
+      single_text_recipe_v2: { supported: true },
+      prompt_persistence: { create_authorized: true, update_authorized: true }
+    })
+    const user = userEvent.setup()
+    const view = renderHarness({ promptAssistBackendKey: backend, promptAssistAuthorizationRevision: revision })
+    await openActions(user)
+    await user.click(screen.getByRole("button", { name: /Build from recipe/ }))
+    await screen.findByRole("option", { name: "Scoped recipe" })
+    await user.selectOptions(screen.getByRole("combobox", { name: "Recipe source" }), "saved:scoped-recipe")
+    await waitFor(() => expect(view.queryClient.isFetching()).toBe(0))
+    const update = screen.getByRole("button", { name: "Update recipe" })
+    if (enabled) expect(update).toBeEnabled()
+    else expect(update).toBeDisabled()
   })
 
   it("builds locally without a model and restores an exact whitespace Unicode draft", async () => {

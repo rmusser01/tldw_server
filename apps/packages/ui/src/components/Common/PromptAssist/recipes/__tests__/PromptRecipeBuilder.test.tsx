@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { clearRecipePersistenceUncertainty } from "@/services/recipe-persistence-uncertainty";
 
 import { PromptRecipeBuilder } from "../PromptRecipeBuilder";
 import { CLEAR_TASK_RECIPE } from "../built-in-recipes";
@@ -105,6 +106,7 @@ const renderBuilder = (
     <QueryClientProvider client={queryClient}>
       <PromptRecipeBuilder
         target="system"
+        persistenceScope="backend-a"
         capabilities={capabilities(true)}
         onApply={onApply}
         onBack={onBack}
@@ -116,8 +118,15 @@ const renderBuilder = (
 };
 
 describe("PromptRecipeBuilder", () => {
+  afterEach(() => {
+    for (const scope of ["backend-a", "backend-b"]) {
+      for (const [id] of mocks.markPromptSyncError.mock.calls) {
+        clearRecipePersistenceUncertainty(id, scope);
+      }
+    }
+  });
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     state.online = true;
     state.privateMode = false;
     mocks.getAllPrompts.mockResolvedValue([
@@ -588,6 +597,28 @@ describe("PromptRecipeBuilder", () => {
     ).toBeDisabled();
 
     first.unmount();
+    // A successful reconciliation of this shared local record under B must
+    // neither inherit A's lock nor release it when returning to A.
+    const otherBackend = renderBuilder({ persistenceScope: "backend-b" });
+    const otherSource = await screen.findByRole("combobox", {
+      name: "Recipe source",
+    });
+    await within(otherSource).findByRole("option", { name: "Untitled recipe" });
+    await user.selectOptions(otherSource, "saved:marker-failed-id");
+    expect(screen.getByRole("button", { name: "Update recipe" })).toBeEnabled();
+    mocks.autoSyncPrompt.mockResolvedValueOnce({
+      success: true,
+      localId: "marker-failed-id",
+      syncStatus: "synced",
+    });
+    await user.click(screen.getByRole("button", { name: "Update recipe" }));
+    await waitFor(() => expect(mocks.updatePrompt).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Update recipe" }),
+      ).toBeEnabled(),
+    );
+    otherBackend.unmount();
     const reopened = renderBuilder();
     const source = await screen.findByRole("combobox", {
       name: "Recipe source",
@@ -615,8 +646,86 @@ describe("PromptRecipeBuilder", () => {
       screen.getByRole("button", { name: "Apply to system prompt" }),
     ).toBeEnabled();
     expect(mocks.savePrompt).toHaveBeenCalledTimes(1);
-    expect(mocks.autoSyncPrompt).toHaveBeenCalledTimes(1);
+    expect(mocks.autoSyncPrompt).toHaveBeenCalledTimes(2);
     reopened.unmount();
+    clearRecipePersistenceUncertainty("marker-failed-id", "backend-a");
+    renderBuilder();
+    const reconciledSource = await screen.findByRole("combobox", {
+      name: "Recipe source",
+    });
+    await within(reconciledSource).findByRole("option", {
+      name: "Untitled recipe",
+    });
+    await user.selectOptions(reconciledSource, "saved:marker-failed-id");
+    expect(screen.getByRole("button", { name: "Update recipe" })).toBeEnabled();
+  });
+
+  it("retains the scoped lock after durable error marking is overwritten by another backend", async () => {
+    const user = userEvent.setup();
+    const record = recipeRecord(
+      "durable-marker-id",
+      "Durable recipe",
+      "system",
+    );
+    mocks.getAllPrompts.mockImplementation(async () => [
+      structuredClone(record),
+    ]);
+    mocks.shouldAutoSyncWorkspacePrompts.mockResolvedValue(true);
+    mocks.autoSyncPrompt.mockResolvedValue({
+      success: false,
+      localId: record.id,
+      syncStatus: "pending",
+      failureKind: "invalid_server_payload",
+      error: "missing response identity",
+    });
+    mocks.markPromptSyncError.mockImplementation(async () => {
+      record.syncStatus = "error";
+    });
+    const first = renderBuilder();
+    await screen.findByRole("option", { name: "Durable recipe" });
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Recipe source" }),
+      "saved:durable-marker-id",
+    );
+    await user.click(screen.getByRole("button", { name: "Update recipe" }));
+    await screen.findByText(/updated locally.*server outcome.*not.*verified/i);
+    expect(record.syncStatus).toBe("error");
+    first.unmount();
+
+    // B's authoritative reconciliation updates the shared local storage field,
+    // but it cannot establish whether the remote write under A committed.
+    record.syncStatus = "synced";
+    clearRecipePersistenceUncertainty(record.id, "backend-b");
+    const reopened = renderBuilder();
+    await screen.findByRole("option", { name: "Durable recipe" });
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Recipe source" }),
+      "saved:durable-marker-id",
+    );
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Update recipe" }),
+    ).toBeDisabled();
+    expect(mocks.updatePrompt).toHaveBeenCalledTimes(1);
+    reopened.unmount();
+
+    clearRecipePersistenceUncertainty(record.id, "backend-a");
+    renderBuilder();
+    await screen.findByRole("option", { name: "Durable recipe" });
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Recipe source" }),
+      "saved:durable-marker-id",
+    );
+    expect(screen.getByRole("button", { name: "Update recipe" })).toBeEnabled();
+  });
+
+  it("disables persistence without a stable scope even with authorized capabilities", async () => {
+    renderBuilder({ persistenceScope: null });
+    expect(
+      await screen.findByRole("button", { name: "Save as new recipe" }),
+    ).toBeDisabled();
   });
 
   it("retains an uncertain Update, marks it error, and locks both writes", async () => {
@@ -764,7 +873,10 @@ describe("PromptRecipeBuilder", () => {
       await screen.findByText(/Could not save the recipe/),
     ).toBeInTheDocument();
     expect(records.map((record) => record.id)).toEqual(["system-id"]);
-    expect(mocks.permanentlyDeletePrompt).toHaveBeenCalledWith("new-1");
+    expect(mocks.permanentlyDeletePrompt).toHaveBeenCalledWith(
+      "new-1",
+      "backend-a",
+    );
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["fetchAllPrompts"] });
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: ["getAllPromptsForSelect"],

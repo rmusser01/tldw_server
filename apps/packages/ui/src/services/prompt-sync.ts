@@ -37,7 +37,7 @@ import {
   parseStructuredPromptDefinitionForTransport,
   type ParsedStructuredPromptDefinition
 } from '@/services/structured-prompt-transport'
-import { clearRecipePersistenceUncertainty } from '@/services/recipe-persistence-uncertainty'
+import { clearRecipePersistenceUncertainty, getRecipePersistenceScope } from '@/services/recipe-persistence-uncertainty'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -383,6 +383,7 @@ async function createServerCopy(
     }
   }
   let response: Awaited<ReturnType<typeof createServerPrompt>>
+  const persistenceScope = await getRecipePersistenceScope()
   try {
     response = await createServerPrompt(createPayload)
   } catch (error: unknown) {
@@ -429,7 +430,7 @@ async function createServerCopy(
       failureKind: 'transient'
     }
   }
-  clearRecipePersistenceUncertainty(localId)
+  clearRecipePersistenceUncertainty(localId, persistenceScope)
   return {
     success: true,
     localId,
@@ -609,6 +610,7 @@ export async function pushToStudio(
       }
     }
     let response: Awaited<ReturnType<typeof updateServerPrompt>>
+    const persistenceScope = await getRecipePersistenceScope()
     try {
       response = await updateServerPrompt(local.serverId, updatePayload)
     } catch (error: unknown) {
@@ -658,7 +660,7 @@ export async function pushToStudio(
         failureKind: 'transient'
       }
     }
-    clearRecipePersistenceUncertainty(localId)
+    clearRecipePersistenceUncertainty(localId, persistenceScope)
     return {
       success: true,
       localId,
@@ -681,6 +683,7 @@ export async function pullFromStudio(
   serverId: number,
   existingLocalId?: string
 ): Promise<SyncResult> {
+  const persistenceScope = await getRecipePersistenceScope()
   try {
     const response = await getServerPrompt(serverId)
     const serverPrompt = unwrapResponseData<ServerPrompt>(response)
@@ -701,7 +704,7 @@ export async function pullFromStudio(
       if (local) {
         const updateFields = serverToLocalFields(serverPrompt)
         await db.prompts.update(existingLocalId, updateFields)
-        clearRecipePersistenceUncertainty(existingLocalId)
+        clearRecipePersistenceUncertainty(existingLocalId, persistenceScope)
 
         return {
           success: true,
@@ -717,7 +720,7 @@ export async function pullFromStudio(
     if (existing) {
       const updateFields = serverToLocalFields(serverPrompt)
       await db.prompts.update(existing.id, updateFields)
-      clearRecipePersistenceUncertainty(existing.id)
+      clearRecipePersistenceUncertainty(existing.id, persistenceScope)
 
       return {
         success: true,
@@ -730,7 +733,7 @@ export async function pullFromStudio(
     // Create new local prompt
     const newLocal = serverToNewLocalPrompt(serverPrompt)
     await db.prompts.add(newLocal)
-    clearRecipePersistenceUncertainty(newLocal.id)
+    clearRecipePersistenceUncertainty(newLocal.id, persistenceScope)
 
     return {
       success: true,

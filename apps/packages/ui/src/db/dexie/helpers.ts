@@ -32,7 +32,7 @@ import {
 } from ".."
 import { ModelNickname } from "./nickname"
 import { ModelDb } from "./models"
-import { clearRecipePersistenceUncertainty } from "@/services/recipe-persistence-uncertainty"
+import { clearRecipePersistenceUncertainty, getRecipePersistenceScope } from "@/services/recipe-persistence-uncertainty"
 
 // Helper function to generate IDs (keeping the same format)
 export const generateID = () => {
@@ -600,12 +600,18 @@ export const deletePromptById = async (id: string) => {
   return id
 }
 
-export const permanentlyDeletePrompt = async (id: string) => {
+export const permanentlyDeletePrompt = async (
+  id: string,
+  persistenceScope?: string | null
+) => {
+  const scope = persistenceScope === undefined
+    ? await getRecipePersistenceScope()
+    : persistenceScope
   // Hard delete: removes from both Dexie and Firefox storage
   const db = new PageAssistDatabase()
   await db.permanentlyDeletePrompt(id)
   await deletePromptByIdFB(id)
-  clearRecipePersistenceUncertainty(id)
+  clearRecipePersistenceUncertainty(id, scope)
   return id
 }
 

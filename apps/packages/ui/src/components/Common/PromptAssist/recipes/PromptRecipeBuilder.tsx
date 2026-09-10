@@ -19,7 +19,6 @@ import {
   shouldAutoSyncWorkspacePrompts,
 } from "@/services/prompt-sync";
 import {
-  clearRecipePersistenceUncertainty,
   isRecipePersistenceUncertain,
   markRecipePersistenceUncertain,
 } from "@/services/recipe-persistence-uncertainty";
@@ -35,6 +34,7 @@ import type { RecipeTarget, SingleTextRecipeDefinition } from "./types";
 export type PromptRecipeBuilderProps = {
   target: RecipeTarget;
   capabilities: PromptCapabilities | undefined;
+  persistenceScope: string | null;
   onApply: (compiledText: string) => void;
   onBack: () => void;
 };
@@ -60,6 +60,7 @@ const isUncertainSyncFailure = (error: unknown) =>
 export function PromptRecipeBuilder({
   target,
   capabilities,
+  persistenceScope,
   onApply,
   onBack,
 }: PromptRecipeBuilderProps) {
@@ -73,7 +74,7 @@ export function PromptRecipeBuilder({
   });
   const persistence = getRecipePersistenceState(isOnline, capabilities);
   const basePersistenceAvailable =
-    persistence.available && !isFireFoxPrivateMode;
+    persistence.available && !isFireFoxPrivateMode && Boolean(persistenceScope);
   const savePersistenceAvailable =
     basePersistenceAvailable &&
     capabilities?.prompt_persistence?.create_authorized === true;
@@ -93,7 +94,7 @@ export function PromptRecipeBuilder({
           "common:promptAssist.recipeOffline",
           "Recipe saving is unavailable offline. You can still edit, preview, and apply this local draft.",
         )
-      : !capabilities
+      : !capabilities || !persistenceScope
         ? t(
             "common:promptAssist.recipeChecking",
             "Checking whether this server supports recipe saving. You can still edit, preview, and apply.",
@@ -130,12 +131,12 @@ export function PromptRecipeBuilder({
         }
         const source = cloneSavedRecipeSource(prompt);
         return [
-          isRecipePersistenceUncertain(source.id)
+          isRecipePersistenceUncertain(source.id, persistenceScope)
             ? { ...source, syncStatus: "error" as const }
             : source,
         ];
       }),
-    [prompts, target],
+    [prompts, target, persistenceScope],
   );
 
   const refreshPromptQueries = React.useCallback(async () => {
@@ -145,22 +146,27 @@ export function PromptRecipeBuilder({
     ]);
   }, [queryClient]);
 
-  const syncIfEnabled = React.useCallback(async (id: string) => {
-    if (!(await shouldAutoSyncWorkspacePrompts())) return false;
-    const result = await autoSyncPrompt(id);
-    if (!result.success && result.failureKind === "invalid_server_payload") {
-      markRecipePersistenceUncertain(id);
-      try {
-        await markPromptSyncError(id);
-        clearRecipePersistenceUncertainty(id);
-      } catch {
-        // The remote write is still uncertain, so local rollback is never safe.
+  const syncIfEnabled = React.useCallback(
+    async (id: string) => {
+      if (!(await shouldAutoSyncWorkspacePrompts())) return false;
+      const result = await autoSyncPrompt(id);
+      if (!result.success && result.failureKind === "invalid_server_payload") {
+        markRecipePersistenceUncertain(id, persistenceScope);
+        try {
+          await markPromptSyncError(id);
+          // Keep the scoped marker: another backend can overwrite the shared
+          // durable status without reconciling this owner's remote outcome.
+        } catch {
+          // The remote write is still uncertain, so local rollback is never safe.
+        }
+        throw uncertainSyncFailure;
       }
-      throw uncertainSyncFailure;
-    }
-    if (result.success) clearRecipePersistenceUncertainty(id);
-    return acceptSyncResult(result);
-  }, []);
+      // Authoritative success is cleared by sync under its dispatch scope, which
+      // can differ from this editor's owner if the connection changed mid-save.
+      return acceptSyncResult(result);
+    },
+    [persistenceScope],
+  );
 
   const saveAsNew = React.useCallback(
     async (definition: SingleTextRecipeDefinition) => {
@@ -176,7 +182,7 @@ export function PromptRecipeBuilder({
         } catch (error) {
           if (isUncertainSyncFailure(error)) throw error;
           try {
-            await permanentlyDeletePrompt(saved.id);
+            await permanentlyDeletePrompt(saved.id, persistenceScope);
           } catch {
             throw rollbackFailure("save");
           }
@@ -186,7 +192,13 @@ export function PromptRecipeBuilder({
         await refreshPromptQueries();
       }
     },
-    [refreshPromptQueries, savePersistenceAvailable, syncIfEnabled, t],
+    [
+      persistenceScope,
+      refreshPromptQueries,
+      savePersistenceAvailable,
+      syncIfEnabled,
+      t,
+    ],
   );
 
   const updateSaved = React.useCallback(

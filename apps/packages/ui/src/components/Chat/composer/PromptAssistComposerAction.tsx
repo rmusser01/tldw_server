@@ -409,6 +409,7 @@ export function PromptAssistComposerAction({
               <PromptRecipeBuilder
                 target="user_message"
                 capabilities={recipeCapabilities}
+                persistenceScope={normalizedBackendKey}
                 onApply={applyRecipe}
                 onBack={closeRecipeBuilder}
               />

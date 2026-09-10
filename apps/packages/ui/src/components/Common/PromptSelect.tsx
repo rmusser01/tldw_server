@@ -905,6 +905,7 @@ export const PromptSelect: React.FC<Props> = ({
             <PromptRecipeBuilder
               target="system"
               capabilities={recipeCapabilities}
+              persistenceScope={normalizedPromptAssistBackendKey}
               onApply={applyRecipe}
               onBack={leaveRecipeMode}
             />
