@@ -11,9 +11,9 @@
 
 | Item | Recorded state |
 | --- | --- |
-| Integrated release code and verified blocker fixes | `910c526513a03b305b2976fec6f1dee73bacc1e9` |
+| Integrated release code and verified blocker fixes | `28ddb8ad8c99fa8d253e1d300a26cd7eb1f4e8cf` |
 | Latest executable-fix/metadata push | `d5ba8b5be7a9b74e8b7f74a63b2b7fccd6079135` (source `910c526513`); subsequent closure batch below is in progress |
-| Protected source snapshot | `910c526513a03b305b2976fec6f1dee73bacc1e9`, 7,100 files |
+| Protected source snapshot | `28ddb8ad8c99fa8d253e1d300a26cd7eb1f4e8cf`, 7,106 files |
 | PR branch / target | `codex/release-main-0.1.42` → `main` |
 | PR state at inspection | Draft; no merge or publication performed |
 | Remote CI snapshot | On `d5ba8b5be7`, backend/security/coverage/container/E2E/license/docs and all eight frontend shards pass, including all five container builds. The frontend aggregate remains running at inspection. Completed CodeQL scans report 445 open instances (7 critical); the three targeted exception alerts and the TTS service finding are absent from the open PR inventory. |
