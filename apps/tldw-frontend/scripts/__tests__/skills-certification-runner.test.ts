@@ -316,10 +316,7 @@ describe('Skills certification runner', () => {
       expect(summary.failures).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            category: `webui_${mode}`
-              .replace('startup', 'startup')
-              .replace('workflow', 'workflow')
-              .replace('launch', 'launch'),
+            category: `webui_${mode}`,
           }),
         ])
       );

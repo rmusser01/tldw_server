@@ -12,11 +12,11 @@
 | Item | Recorded state |
 | --- | --- |
 | Integrated release code and verified blocker fixes | `eeb69d440fdf8204c9e560b8b89b94112c094c8d` |
-| Last observed CI head before the final closure batch | `c97cb2a1ab7a5177e64bba597ba3e1aa418fedac`; backend/security/docs pass, remaining lanes run and CodeQL remains failed. The source above and its metadata companion require fresh-head CI. |
+| Latest observed CI head | `6150040801bc697acd79e2b2e90aae3337879612`; backend/security/E2E/licensing and all five container builds pass. All eight frontend shards pass; frontend aggregate and coverage still run. CodeQL remains failed. Further source changes require fresh-head CI. |
 | Protected source snapshot | `eeb69d440fdf8204c9e560b8b89b94112c094c8d`, 7,106 files |
 | PR branch / target | `codex/release-main-0.1.42` → `main` |
 | PR state at inspection | Draft; no merge or publication performed |
-| Remote CI snapshot | On `d5ba8b5be7`, backend/security/coverage/container/E2E/license/docs and all eight frontend shards pass, including all five container builds. The frontend aggregate remains running at inspection. Completed CodeQL scans report 445 open instances (7 critical); the three targeted exception alerts and the TTS service finding are absent from the open PR inventory. |
+| Remote CI snapshot | On `6150040801`, 70 checks succeeded, four run, 37 skipped and CodeQL failed. Container aggregate and all five images pass. The open CodeQL inventory is temporarily mixed: 447 instances across `6150040801` and `c97cb2a1ab` while default Python analysis runs. The aggregate reports missing Python analysis; this is not a completed current-head security count. |
 | Latest metadata checks | 37 passed, one local docs-build test deselected due host multiprocessing failure; unchanged standard test/build passes remotely. Other scoped verification is recorded below. |
 | Standard docs evidence | Unchanged standard build and docs suite pass in CI [run 34491682436](https://github.com/rmusser01/tldw_server/actions/runs/34491682436/job/102919740634). |
 | Latest observed GitHub publication | v0.1.38; no remote v0.1.39–v0.1.42 tags |
@@ -73,6 +73,41 @@ Run tests with the project virtual environment activated and execute from this w
 
 Requester explicitly authorized addressing all issues and blockers. Work is
 tracked in the existing owning tasks; no release scope exception was granted.
+
+Continuation after `6150040801` has verified three independently reviewed fixes:
+
+- [Notification hooks](../../Evidence/PR2761-notification-hooks.md): scope-keyed
+  snapshots recover automatically without displaying another account's count;
+  stale reads/watch events cannot overwrite the current subscription. The Antd
+  adapter supports frozen APIs without mutating other consumers' methods.
+  WebUI selection passes 25 tests; the overlapping shared-package selection
+  passes 23 tests. Both installed-Plasmo and WebUI focused typechecks pass,
+  with all four remaining compiler rules enabled on the touched hook scope.
+- [Web-clipper storage](../../Evidence/PR2761-web-clipper-storage-strictness.md):
+  six optional-method narrowing diagnostics are fixed in the extracted runtime
+  adapter, now included in required strict checking. All 13 handoff tests pass;
+  callback/Promise settlement, receiver and browser fallback behavior are retained.
+- [CodeQL test fixtures](../../Evidence/PR2761-critical-CodeQL-assessment.md):
+  remove three no-op category replacements and replace an incomplete script-tag
+  regex with the existing HTML parser. Four parser regressions failed before
+  the repair; 58 fixture tests now pass under installed Vitest 4.0.18. No scan
+  closure or production security boundary change is claimed.
+
+Across these selections, 96 focused frontend tests pass. The full nonincremental
+WebUI typecheck also passes. Release docs/workflow tests pass 26 cases with one
+unchanged host-limited docs test deselected. No Python implementation changed;
+the required shared hook gate scans 5,160 files with zero failures, while 1,379
+unrelated ESLint errors remain outside that three-rule gate. No global four-rule
+rescan or full shared-lint success is claimed. For the TypeScript changes,
+Bandit cannot parse TypeScript and its parser errors are explicitly recorded in
+the evidence. The metadata companion still requires its own Python validation.
+Independent reviews found no actionable issues in the three bounded scopes.
+Whole-WebUI strictness, the remaining global compiler rules and the security
+inventory remain open; these scoped fixes do not close TASK-12116.
+
+Current container evidence is [run 34526384567](https://github.com/rmusser01/tldw_server/actions/runs/34526384567).
+The separate supply-chain PR #2869 remains at `78c3f92228` with nine failed
+checks; its unverified concurrent work is not integrated.
 
 - [Frontend hardening](../../Evidence/PR2761-frontend-hardening.md): Flashcard
   template suite 8 passes; five shared dependency majors aligned with 38

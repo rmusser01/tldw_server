@@ -1,3 +1,8 @@
+import {
+  readExtensionStorageValue,
+  writeExtensionStorageValue,
+  removeExtensionStorageValue
+} from "./extension-storage"
 import type { PendingClipDraft } from "./pending-draft"
 import type { WebClipperSaveResponse } from "./types"
 
@@ -19,9 +24,6 @@ export type PendingWebClipAgentTaskRequest = {
   hasScreenshot: boolean
   createdAt: string
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
 
 const readString = (value: unknown): string =>
   typeof value === "string" ? value.trim() : ""
@@ -48,136 +50,8 @@ const generateUUID = (): string => {
   })
 }
 
-type ExtensionStorageArea = {
-  get?: (
-    key: string,
-    callback?: (items: Record<string, unknown>) => void
-  ) => Promise<Record<string, unknown>> | void
-  set?: (
-    items: Record<string, unknown>,
-    callback?: () => void
-  ) => Promise<void> | void
-  remove?: (key: string, callback?: () => void) => Promise<void> | void
-}
-
-const getExtensionStorageArea = (): ExtensionStorageArea | null => {
-  const storage = globalThis.chrome?.storage
-  return storage?.session ?? storage?.local ?? null
-}
-
 const reportStorageFailure = (operation: string, error: unknown): void => {
   console.warn(`Web clipper agent-task handoff ${operation} failed`, error)
-}
-
-const getChromeRuntimeError = (): unknown =>
-  globalThis.chrome?.runtime?.lastError ?? null
-
-const readExtensionStorageValue = async (key: string): Promise<unknown> => {
-  const storage = getExtensionStorageArea()
-  if (!storage?.get) return undefined
-
-  return new Promise((resolve) => {
-    let settled = false
-    const settle = (items: unknown) => {
-      if (settled) return
-      settled = true
-      resolve(isRecord(items) ? items[key] : undefined)
-    }
-
-    try {
-      const maybePromise = storage.get(key, (items) => {
-        const runtimeError = getChromeRuntimeError()
-        if (runtimeError) {
-          reportStorageFailure("extension read", runtimeError)
-          settle(undefined)
-          return
-        }
-        settle(items)
-      })
-      if (maybePromise && typeof maybePromise.then === "function") {
-        void maybePromise.then(settle).catch((error) => {
-          reportStorageFailure("extension read", error)
-          settle(undefined)
-        })
-      }
-    } catch (error) {
-      reportStorageFailure("extension read", error)
-      settle(undefined)
-    }
-  })
-}
-
-const writeExtensionStorageValue = async (
-  key: string,
-  value: unknown
-): Promise<boolean> => {
-  const storage = getExtensionStorageArea()
-  if (!storage?.set) return false
-
-  return new Promise((resolve) => {
-    let settled = false
-    const settle = (success: boolean) => {
-      if (settled) return
-      settled = true
-      resolve(success)
-    }
-
-    try {
-      const maybePromise = storage.set({ [key]: value }, () => {
-        const runtimeError = getChromeRuntimeError()
-        if (runtimeError) {
-          reportStorageFailure("extension write", runtimeError)
-          settle(false)
-          return
-        }
-        settle(true)
-      })
-      if (maybePromise && typeof maybePromise.then === "function") {
-        void maybePromise.then(() => settle(true)).catch((error) => {
-          reportStorageFailure("extension write", error)
-          settle(false)
-        })
-      }
-    } catch (error) {
-      reportStorageFailure("extension write", error)
-      settle(false)
-    }
-  })
-}
-
-const removeExtensionStorageValue = async (key: string): Promise<boolean> => {
-  const storage = getExtensionStorageArea()
-  if (!storage?.remove) return false
-
-  return new Promise((resolve) => {
-    let settled = false
-    const settle = (success: boolean) => {
-      if (settled) return
-      settled = true
-      resolve(success)
-    }
-
-    try {
-      const maybePromise = storage.remove(key, () => {
-        const runtimeError = getChromeRuntimeError()
-        if (runtimeError) {
-          reportStorageFailure("extension remove", runtimeError)
-          settle(false)
-          return
-        }
-        settle(true)
-      })
-      if (maybePromise && typeof maybePromise.then === "function") {
-        void maybePromise.then(() => settle(true)).catch((error) => {
-          reportStorageFailure("extension remove", error)
-          settle(false)
-        })
-      }
-    } catch (error) {
-      reportStorageFailure("extension remove", error)
-      settle(false)
-    }
-  })
 }
 
 const readBrowserStorageValue = (key: string): unknown => {

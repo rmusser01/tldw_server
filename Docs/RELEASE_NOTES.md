@@ -77,6 +77,9 @@ complete grouped rollup and the release-refresh plan for outstanding gates.
 
 ### Operations and CI
 
+- Notification counts recover after account changes while keeping previous
+  account data hidden. Notification adapters support immutable shared APIs;
+  web-clipper extension storage now has required strict TypeScript coverage.
 - The API image includes the local Personal Context core package needed at
   startup. Its build now checks imports of both local Python packages.
 - Hardened Jobs admission transactions, quotas, idempotency, and concurrent

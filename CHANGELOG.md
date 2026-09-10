@@ -104,6 +104,10 @@ and this project adheres to Some kind of Versioning
   required at startup and check local package imports while building the image.
 - **Frontend Type Safety** — Repaired WebUI type errors and added a required
   nonincremental TypeScript check to the frontend CI gate.
+- **Notification And Storage Follow-Ups** — Unread counts recover after account
+  changes without displaying the previous account's data. Notification adapters
+  preserve shared APIs, and web-clipper extension storage is checked under strict
+  TypeScript while retaining callback and Promise compatibility.
 
 ### Upgrade And Release Readiness
 

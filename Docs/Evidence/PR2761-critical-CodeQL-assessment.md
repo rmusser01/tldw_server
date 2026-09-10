@@ -164,3 +164,27 @@ The subsequent completed scan reports **445 open instances**, all on
 Alerts **2119, 2120 and 2121** are no longer open on this PR; no open finding
 points to `services/tts.ts`. This confirms the targeted scan result while the
 aggregate remains failed. Snapshot: `/tmp/pr2761-codeql-d5ba-complete-open.json`.
+
+## Test-fixture corrections after 6150040801
+
+Alerts 2631–2633 flag identity replacements in the Skills certification runner
+test. The expected category is now simply `webui_${mode}`; all three modes and
+their exact category assertions remain. Alert 2356 flags the theme-bootstrap
+test's HTML regex. That test now uses the extension's existing Cheerio parser
+to inspect actual script elements and attributes. It also checks that the
+head bootstrap is a synchronous classic external script.
+
+Four new cases failed against the old parser: end-tag whitespace, mixed-case
+module tags with whitespace, a `data-src` attribute, and `src=` text inside an
+unrelated attribute. All are detected with the parser; external scripts and
+empty bodies remain excluded. The existing conservative policy rejects every
+nonempty inline script body, including data scripts. This changes test coverage,
+not production HTML handling or the production security boundary.
+
+The standard frontend configuration passes **47 Skills runner tests**; a direct
+extension-directory invocation passes **11 theme tests**. Scoped ESLint exits
+zero (root invocation emits the existing Next pages-directory lookup diagnostic)
+and diff checks pass. No dependency, suppression or alert state changed. A fresh
+analysis must confirm alert closure. The intermediate `6150040801` inventory
+contains 447 open instances across that head and `c97cb2a1ab` while Python runs;
+it is not a completed current-head security result.
