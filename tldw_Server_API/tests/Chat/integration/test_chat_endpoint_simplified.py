@@ -36,7 +36,11 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCredentialRuntime,
 )
 from tldw_Server_API.app.core.Chat import bounded_daemon as bounded_daemon_module
-from tldw_Server_API.app.core.Chat import chat_service, streaming_utils
+from tldw_Server_API.app.core.Chat import (
+    chat_service,
+    chat_target_resolution,
+    streaming_utils,
+)
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
     ChatAuthenticationError,
@@ -1006,6 +1010,175 @@ def test_chat_completion_default_model_tracks_model(authenticated_client, mock_c
 
         assert response.status_code == status.HTTP_200_OK
         assert captured.get("model") == "default-model"
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize("request_model", [None, "", "   "])
+@pytest.mark.parametrize(
+    ("provider", "snapshot", "expected_model"),
+    [
+        ("local-llm", {"local_llm": {"model": "local-env-model"}}, "local-env-model"),
+        ("ollama", {"ollama_api": {"model": "ollama-config-model"}}, "ollama-config-model"),
+    ],
+)
+def test_chat_completion_omitted_model_uses_provider_configuration_in_payload(
+    authenticated_client,
+    mock_chacha_db,
+    setup_dependencies,
+    monkeypatch,
+    streaming,
+    provider,
+    snapshot,
+    expected_model,
+    request_model,
+):
+    captured: dict[str, object] = {}
+    runtime_type = _credential_runtime_double(api_keys={provider: None})
+    provider_manager = MagicMock()
+    provider_manager.circuit_breakers = {
+        provider: SimpleNamespace(can_attempt_call=lambda: True)
+    }
+
+    async def execute_non_stream(**kwargs):
+        captured.update(kwargs["cleaned_args"])
+        return {
+            "id": "chatcmpl-default-model",
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+        }
+
+    async def execute_stream(**kwargs):
+        captured.update(kwargs["cleaned_args"])
+
+        async def body():
+            yield 'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(body(), media_type="text/event-stream")
+
+    monkeypatch.delenv(
+        f"DEFAULT_MODEL_{provider.replace('-', '_').upper()}",
+        raising=False,
+    )
+
+    def default_model(target_provider):
+        return chat_target_resolution.get_default_model_for_provider(
+            target_provider,
+            config_loader=lambda: None,
+            provider_config_loader=lambda: snapshot,
+        )
+
+    with (
+        patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
+        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", False),
+        patch.object(
+            chat_endpoint,
+            "_get_default_model_for_provider_name",
+            side_effect=default_model,
+        ),
+        patch.object(chat_endpoint, "validate_provider_override", return_value=None),
+        patch.object(chat_endpoint, "execute_non_stream_call", side_effect=execute_non_stream),
+        patch.object(chat_endpoint, "execute_streaming_call", side_effect=execute_stream),
+    ):
+        response = authenticated_client.post(
+            "/api/v1/chat/completions",
+            json={
+                "api_provider": provider,
+                "model": request_model,
+                "messages": [{"role": "user", "content": "Hello"}],
+                "stream": streaming,
+            },
+        )
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert captured["model"] == expected_model
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize("request_model", [None, "", "   "])
+def test_chat_completion_omitted_model_without_configuration_fails_before_dispatch(
+    authenticated_client,
+    mock_chacha_db,
+    setup_dependencies,
+    streaming,
+    request_model,
+):
+    provider_call = AsyncMock()
+    with (
+        patch.object(chat_endpoint, "_get_default_model_for_provider_name", return_value=None),
+        patch.object(chat_endpoint, "execute_non_stream_call", provider_call),
+        patch.object(chat_endpoint, "execute_streaming_call", provider_call),
+    ):
+        response = authenticated_client.post(
+            "/api/v1/chat/completions",
+            json={
+                "api_provider": "local-llm",
+                "model": request_model,
+                "messages": [{"role": "user", "content": "Hello"}],
+                "stream": streaming,
+            },
+        )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert "Model is required for provider 'local-llm'" in response.json()["detail"]
+    provider_call.assert_not_awaited()
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+def test_chat_completion_explicit_model_precedes_provider_configuration(
+    authenticated_client,
+    mock_chacha_db,
+    setup_dependencies,
+    streaming,
+):
+    captured: dict[str, object] = {}
+    runtime_type = _credential_runtime_double(api_keys={"ollama": None})
+    provider_manager = MagicMock()
+    provider_manager.circuit_breakers = {
+        "ollama": SimpleNamespace(can_attempt_call=lambda: True)
+    }
+
+    async def execute_non_stream(**kwargs):
+        captured.update(kwargs["cleaned_args"])
+        return {
+            "id": "chatcmpl-explicit-model",
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+        }
+
+    async def execute_stream(**kwargs):
+        captured.update(kwargs["cleaned_args"])
+
+        async def body():
+            yield 'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(body(), media_type="text/event-stream")
+
+    with (
+        patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
+        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", False),
+        patch.object(
+            chat_endpoint,
+            "_get_default_model_for_provider_name",
+            side_effect=AssertionError("provider default consulted for explicit model"),
+        ),
+        patch.object(chat_endpoint, "validate_provider_override", return_value=None),
+        patch.object(chat_endpoint, "execute_non_stream_call", side_effect=execute_non_stream),
+        patch.object(chat_endpoint, "execute_streaming_call", side_effect=execute_stream),
+    ):
+        response = authenticated_client.post(
+            "/api/v1/chat/completions",
+            json={
+                "api_provider": "ollama",
+                "model": "explicit-model",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "stream": streaming,
+            },
+        )
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert captured["model"] == "explicit-model"
 
 
 def test_chat_completion_downgrades_structured_response_format_before_provider_call(

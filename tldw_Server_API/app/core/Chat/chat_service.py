@@ -1581,7 +1581,7 @@ def _find_catalog_providers_for_model_cached(model: str) -> tuple[str, ...]:
 def infer_provider_from_model_catalog(
     *,
     provider: str,
-    model: str,
+    model: str | None,
     provider_explicit: bool,
 ) -> tuple[str, dict[str, Any]]:
     """Infer provider from model catalog when the current provider likely mismatches.
@@ -1785,7 +1785,12 @@ def parse_provider_model_for_metrics(
 
     Returns (provider, model_for_metrics).
     """
-    model_str = getattr(request_data, "model", None) or "unknown"
+    raw_model = getattr(request_data, "model", None)
+    model_str = (
+        raw_model.strip()
+        if isinstance(raw_model, str) and raw_model.strip()
+        else "unknown"
+    )
     api_provider = getattr(request_data, "api_provider", None)
     model_provider, model_name, _ = _split_inline_provider_model(model_str)
     if model_provider is not None and model_name is not None:
@@ -1924,7 +1929,7 @@ def resolve_provider_and_model(
     metrics_default_provider: str,
     normalize_default_provider: str,
     routing_decision: RoutingDecision | None = None,
-) -> tuple[str, str, str, str, dict[str, Any]]:
+) -> tuple[str, str, str, str | None, dict[str, Any]]:
     """Resolve provider/model for metrics and execution and record the decision path.
 
     Returns a 5-tuple:
@@ -1983,7 +1988,11 @@ def resolve_provider_and_model(
     )
 
     selected_provider = metrics_provider
-    selected_model = metrics_model
+    selected_model = (
+        raw_model.strip()
+        if isinstance(raw_model, str) and raw_model.strip()
+        else None
+    )
 
     # Step 2: normalize provider/model for execution (may mutate request_data.model)
     try:
@@ -1992,14 +2001,17 @@ def resolve_provider_and_model(
         )
         selected_provider = normalized_provider
         new_model = getattr(request_data, "model", None)
-        if new_model:
-            selected_model = new_model
+        selected_model = (
+            new_model.strip()
+            if isinstance(new_model, str) and new_model.strip()
+            else None
+        )
     except _CHAT_NONCRITICAL_EXCEPTIONS as exc:
-        # Do not block the request if normalization fails; fall back to metrics values.
+        # Keep the pre-normalization execution values if optional normalization fails.
         pass
         logger.debug(
             "resolve_provider_and_model: normalization failed, "
-            "falling back to metrics provider/model. Error={}",
+            "keeping pre-normalization execution values. Error={}",
             exc,
         )
 
@@ -2778,8 +2790,11 @@ def build_call_params_from_request(
             and (not isinstance(declared_fields, Mapping) or key in declared_fields)
         )
     }
-    if resolved_model:
-        call_params["model"] = resolved_model
+    call_model = resolved_model if resolved_model is not None else call_params.get("model")
+    if isinstance(call_model, str) and call_model.strip():
+        call_params["model"] = call_model.strip()
+    else:
+        call_params.pop("model", None)
 
     # Rename keys to match chat_api_call's generic signature
     if "temperature" in call_params:
@@ -2809,7 +2824,7 @@ def build_call_params_from_request(
         tools=chat_tools if isinstance(chat_tools, list) else None,
         allow_catalog=get_chat_tool_allow_catalog(),
         rollout_mode=rollout_mode,
-        provider_key=f"{target_api_provider}:{call_params.get('model') or getattr(request_data, 'model', None) or ''}",
+        provider_key=f"{target_api_provider}:{call_params.get('model') or ''}",
         provider_allowlist=provider_allowlist,
         streaming=bool(getattr(request_data, "stream", False)),
         presentation_variant=presentation_variant,

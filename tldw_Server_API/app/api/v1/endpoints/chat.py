@@ -2243,7 +2243,7 @@ def _create_chat_macro_run_payload(
         request_messages=request_data.messages,
         model_selection={
             "api_provider": selected_provider or request_data.api_provider,
-            "model": selected_model or request_data.model,
+            "model": selected_model,
         },
         output_profile=resolved_profile.name,
         request_metadata=request_metadata,
@@ -3533,7 +3533,7 @@ async def create_chat_completion(
 
         provider = metrics_provider
         model = metrics_model
-        initial_provider = metrics_provider
+        initial_provider = selected_provider
 
         try:
             logger.debug("Provider/model resolution: {}", provider_debug)
@@ -4311,7 +4311,7 @@ async def create_chat_completion(
 
             # Normalize provider/model on the request for downstream logic (already resolved)
             provider = selected_provider
-            model = selected_model or model
+            model = selected_model
 
             try:
                 if not request_model_was_explicit:
