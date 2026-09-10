@@ -55,7 +55,7 @@ def test_python_v1_parser_preserves_shared_integer_fixture_exactly(case: dict) -
         payload["variables"][0]["max_length"] = case["input_value"]
     before = copy.deepcopy(payload)
 
-    if case["python_value"] is None:
+    if case["python_value"] is None and not case["sync_eligible"]:
         with pytest.raises(ValueError):
             parse_stored_prompt_definition(payload, schema_version=1)
         assert payload == before

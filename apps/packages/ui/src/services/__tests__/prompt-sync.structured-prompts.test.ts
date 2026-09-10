@@ -11,6 +11,10 @@ const state = vi.hoisted(() => ({
 }))
 
 const mocks = vi.hoisted(() => ({
+  getDefaults: vi.fn(),
+  setDefaults: vi.fn(),
+  listProjects: vi.fn(),
+  createProject: vi.fn(),
   createPrompt: vi.fn(),
   updatePrompt: vi.fn(),
   getPrompt: vi.fn(),
@@ -21,16 +25,13 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock("@/services/prompt-studio-settings", () => ({
-  getPromptStudioDefaults: async () => ({
-    defaultProjectId: null,
-    autoSyncWorkspacePrompts: true
-  }),
-  setPromptStudioDefaults: async () => undefined
+  getPromptStudioDefaults: (...args: unknown[]) => mocks.getDefaults(...args),
+  setPromptStudioDefaults: (...args: unknown[]) => mocks.setDefaults(...args)
 }))
 
 vi.mock("@/services/prompt-studio", () => ({
-  listProjects: vi.fn(async () => ({ data: { data: [] } })),
-  createProject: vi.fn(async () => ({ data: { data: { id: 42 } } })),
+  listProjects: (...args: unknown[]) => mocks.listProjects(...args),
+  createProject: (...args: unknown[]) => mocks.createProject(...args),
   createPrompt: (...args: unknown[]) =>
     (mocks.createPrompt as (...args: unknown[]) => unknown)(...args),
   updatePrompt: (...args: unknown[]) =>
@@ -135,7 +136,7 @@ const makeRecipeDefinition = (content = "Explain {{topic}}.") => ({
 type V1IntegerSyncCase = {
   name: string
   field: "order" | "max_length" | "schema_version"
-  input_value: number | string
+  input_value: number | string | null
   python_value: number | null
   sync_eligible: boolean
 }
@@ -168,7 +169,7 @@ const makeCanonicalV1IntegerDefinition = (
 ) =>
   makeV1IntegerDefinition({
     field: testCase.field,
-    input_value: testCase.python_value ?? 1
+    input_value: testCase.python_value
   })
 
 const getV1IntegerValue = (
@@ -185,6 +186,15 @@ describe("prompt-sync structured prompt support", () => {
   beforeEach(() => {
     state.prompts.clear()
 
+    mocks.getDefaults.mockReset().mockResolvedValue({
+      defaultProjectId: null,
+      autoSyncWorkspacePrompts: true
+    })
+    mocks.setDefaults.mockReset().mockResolvedValue(undefined)
+    mocks.listProjects.mockReset().mockResolvedValue({ data: { data: [] } })
+    mocks.createProject
+      .mockReset()
+      .mockResolvedValue({ data: { data: { id: 42 } } })
     mocks.createPrompt.mockReset()
     mocks.updatePrompt.mockReset()
     mocks.getPrompt.mockReset()
@@ -431,6 +441,51 @@ describe("prompt-sync structured prompt support", () => {
     }
   )
 
+  it.each(v1IntegerSyncCases.filter((testCase) => !testCase.sync_eligible))(
+    "auto-sync rejects v1 integers before defaults, requests, or writes: $name",
+    async (testCase) => {
+      const original = {
+        id: `auto-${testCase.name}`,
+        title: "V1 integer prompt",
+        content: "Explain {{topic}}.",
+        user_prompt: "Explain {{topic}}.",
+        is_system: false,
+        promptFormat: "structured",
+        promptSchemaVersion: 1,
+        structuredPromptDefinition: makeV1IntegerDefinition(testCase),
+        syncStatus: "conflict",
+        serverId: 814,
+        studioPromptId: 814,
+        studioProjectId: null,
+        updatedAt: 20,
+        createdAt: 1,
+        lastSyncedAt: 10,
+        serverUpdatedAt: "2026-03-10T00:00:00Z"
+      }
+      state.prompts.set(original.id, structuredClone(original))
+      const { autoSyncPrompt } = await importPromptSync()
+
+      expect(await autoSyncPrompt(original.id)).toEqual({
+        success: false,
+        localId: original.id,
+        serverId: 814,
+        error: "invalid_prompt_definition",
+        syncStatus: "conflict",
+        failureKind: "validation"
+      })
+      expect(mocks.getDefaults).not.toHaveBeenCalled()
+      expect(mocks.setDefaults).not.toHaveBeenCalled()
+      expect(mocks.listProjects).not.toHaveBeenCalled()
+      expect(mocks.createProject).not.toHaveBeenCalled()
+      expect(mocks.createPrompt).not.toHaveBeenCalled()
+      expect(mocks.updatePrompt).not.toHaveBeenCalled()
+      expect(mocks.getPrompt).not.toHaveBeenCalled()
+      expect(mocks.promptAdd).not.toHaveBeenCalled()
+      expect(mocks.promptUpdate).not.toHaveBeenCalled()
+      expect(state.prompts.get(original.id)).toEqual(original)
+    }
+  )
+
   it("exposes the recipe union and single-text preview response contract", () => {
     const definition: StructuredPromptDefinition = makeRecipeDefinition()
     const response = {} as StructuredPromptPreviewResponse
@@ -496,11 +551,36 @@ describe("prompt-sync structured prompt support", () => {
     )
   })
 
-  it.each(v1IntegerSyncCases)(
-    "pull enforces the exact v1 integer sync contract: $name",
+  it.each(
+    v1IntegerSyncCases.flatMap((testCase) =>
+      [false, true].map((existing) => ({ ...testCase, existing }))
+    )
+  )(
+    "pull enforces the exact v1 integer sync contract (existing=$existing): $name",
     async (testCase) => {
       const definition = makeV1IntegerDefinition(testCase)
       const definitionBefore = JSON.stringify(definition)
+      const original = {
+        id: "existing-local-id",
+        title: "Good local record",
+        content: "Explain {{topic}}.",
+        user_prompt: "Explain {{topic}}.",
+        is_system: false,
+        promptFormat: "structured",
+        promptSchemaVersion: 1,
+        structuredPromptDefinition: makeDefinition("Explain {{topic}}."),
+        syncStatus: "conflict",
+        serverId: 811,
+        studioPromptId: 811,
+        studioProjectId: 42,
+        updatedAt: 20,
+        createdAt: 1,
+        lastSyncedAt: 10,
+        serverUpdatedAt: "2026-03-10T00:00:00Z"
+      }
+      if (testCase.existing) {
+        state.prompts.set(original.id, structuredClone(original))
+      }
       mocks.getPrompt.mockResolvedValueOnce({
         data: {
           data: {
@@ -519,17 +599,25 @@ describe("prompt-sync structured prompt support", () => {
       })
 
       const { pullFromStudio } = await importPromptSync()
-      const result = await pullFromStudio(811)
+      const result = await pullFromStudio(
+        811,
+        testCase.existing ? original.id : undefined
+      )
 
       if (testCase.sync_eligible) {
         expect(result).toEqual(
           expect.objectContaining({ success: true, syncStatus: "synced" })
         )
-        const saved = state.prompts.get("generated-local-id")
+        const saved = state.prompts.get(
+          testCase.existing ? original.id : "generated-local-id"
+        )
         expect(
           getV1IntegerValue(saved.structuredPromptDefinition, testCase.field)
         ).toBe(testCase.python_value)
-        expect(mocks.promptAdd).toHaveBeenCalledTimes(1)
+        expect(mocks.promptAdd).toHaveBeenCalledTimes(testCase.existing ? 0 : 1)
+        expect(mocks.promptUpdate).toHaveBeenCalledTimes(
+          testCase.existing ? 1 : 0
+        )
         expect(saved.structuredPromptDefinition).toEqual(
           makeCanonicalV1IntegerDefinition(testCase)
         )
@@ -542,7 +630,10 @@ describe("prompt-sync structured prompt support", () => {
         )
         expect(mocks.promptAdd).not.toHaveBeenCalled()
         expect(mocks.promptUpdate).not.toHaveBeenCalled()
-        expect(state.prompts.size).toBe(0)
+        expect(state.prompts.size).toBe(testCase.existing ? 1 : 0)
+        if (testCase.existing) {
+          expect(state.prompts.get(original.id)).toEqual(original)
+        }
       }
       expect(JSON.stringify(definition)).toBe(definitionBefore)
     }
@@ -691,7 +782,9 @@ describe("prompt-sync structured prompt support", () => {
       const result = await getSyncStatus(original.id)
 
       const hasConflict =
-        testCase.sync_eligible && testCase.field !== "schema_version"
+        testCase.sync_eligible &&
+        testCase.field !== "schema_version" &&
+        !(testCase.field === "max_length" && testCase.python_value === null)
       expect(result).toEqual(
         expect.objectContaining({
           status: hasConflict ? "conflict" : "synced",

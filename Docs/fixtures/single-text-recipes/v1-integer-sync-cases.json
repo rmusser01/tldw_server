@@ -432,5 +432,852 @@
     "input_value": "9_007_199_254_740_993",
     "python_value": null,
     "sync_eligible": false
+  },
+  {
+    "name": "schema_version-whitespace-U0009",
+    "field": "schema_version",
+    "input_value": "\t+0_1.00\t",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema_version-whitespace-U000a",
+    "field": "schema_version",
+    "input_value": "\n+0_1.00\n",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema_version-whitespace-U000b",
+    "field": "schema_version",
+    "input_value": "\u000b+0_1.00\u000b",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema_version-whitespace-U000c",
+    "field": "schema_version",
+    "input_value": "\f+0_1.00\f",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema_version-whitespace-U000d",
+    "field": "schema_version",
+    "input_value": "\r+0_1.00\r",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema_version-whitespace-U0020",
+    "field": "schema_version",
+    "input_value": " +0_1.00 ",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema_version-whitespace-U0085",
+    "field": "schema_version",
+    "input_value": "\u0085+0_1.00\u0085",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema_version-whitespace-U00a0",
+    "field": "schema_version",
+    "input_value": "\u00a0+0_1.00\u00a0",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema_version-whitespace-U1680",
+    "field": "schema_version",
+    "input_value": "\u1680+0_1.00\u1680",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema_version-whitespace-U2000",
+    "field": "schema_version",
+    "input_value": "\u2000+0_1.00\u2000",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema_version-whitespace-U2001",
+    "field": "schema_version",
+    "input_value": "\u2001+0_1.00\u2001",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema_version-whitespace-U2002",
+    "field": "schema_version",
+    "input_value": "\u2002+0_1.00\u2002",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema_version-whitespace-U2003",
+    "field": "schema_version",
+    "input_value": "\u2003+0_1.00\u2003",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema_version-whitespace-U2004",
+    "field": "schema_version",
+    "input_value": "\u2004+0_1.00\u2004",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema_version-whitespace-U2005",
+    "field": "schema_version",
+    "input_value": "\u2005+0_1.00\u2005",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema_version-whitespace-U2006",
+    "field": "schema_version",
+    "input_value": "\u2006+0_1.00\u2006",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema_version-whitespace-U2007",
+    "field": "schema_version",
+    "input_value": "\u2007+0_1.00\u2007",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema_version-whitespace-U2008",
+    "field": "schema_version",
+    "input_value": "\u2008+0_1.00\u2008",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema_version-whitespace-U2009",
+    "field": "schema_version",
+    "input_value": "\u2009+0_1.00\u2009",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema_version-whitespace-U200a",
+    "field": "schema_version",
+    "input_value": "\u200a+0_1.00\u200a",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema_version-whitespace-U2028",
+    "field": "schema_version",
+    "input_value": "\u2028+0_1.00\u2028",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema_version-whitespace-U2029",
+    "field": "schema_version",
+    "input_value": "\u2029+0_1.00\u2029",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema_version-whitespace-U202f",
+    "field": "schema_version",
+    "input_value": "\u202f+0_1.00\u202f",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema_version-whitespace-U205f",
+    "field": "schema_version",
+    "input_value": "\u205f+0_1.00\u205f",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema_version-whitespace-U3000",
+    "field": "schema_version",
+    "input_value": "\u3000+0_1.00\u3000",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema_version-whitespace-U001c",
+    "field": "schema_version",
+    "input_value": "\u001c+0_1.00\u001c",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "schema_version-whitespace-U001d",
+    "field": "schema_version",
+    "input_value": "\u001d+0_1.00\u001d",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "schema_version-whitespace-U001e",
+    "field": "schema_version",
+    "input_value": "\u001e+0_1.00\u001e",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "schema_version-whitespace-U001f",
+    "field": "schema_version",
+    "input_value": "\u001f+0_1.00\u001f",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "schema_version-whitespace-Ufeff",
+    "field": "schema_version",
+    "input_value": "\ufeff+0_1.00\ufeff",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "schema_version-NEL-invalid-\"\u00851__0\u0085\"",
+    "field": "schema_version",
+    "input_value": "\u00851__0\u0085",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "schema_version-NEL-invalid-\"\u00851.0_0\u0085\"",
+    "field": "schema_version",
+    "input_value": "\u00851.0_0\u0085",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "schema_version-NEL-invalid-\"\u00851_0.1\u0085\"",
+    "field": "schema_version",
+    "input_value": "\u00851_0.1\u0085",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "schema_version-NEL-invalid-\"\u0085\ufeff1\u0085\"",
+    "field": "schema_version",
+    "input_value": "\u0085\ufeff1\u0085",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "schema_version-NEL-invalid-\"1\u00850\"",
+    "field": "schema_version",
+    "input_value": "1\u00850",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "schema_version-NEL-invalid-\"\u0085null\u0085\"",
+    "field": "schema_version",
+    "input_value": "\u0085null\u0085",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "schema_version-NEL-invalid-\"\u0085\u0085\"",
+    "field": "schema_version",
+    "input_value": "\u0085\u0085",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-whitespace-U0009",
+    "field": "order",
+    "input_value": "\t+1_0.00\t",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-whitespace-U000a",
+    "field": "order",
+    "input_value": "\n+1_0.00\n",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-whitespace-U000b",
+    "field": "order",
+    "input_value": "\u000b+1_0.00\u000b",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-whitespace-U000c",
+    "field": "order",
+    "input_value": "\f+1_0.00\f",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-whitespace-U000d",
+    "field": "order",
+    "input_value": "\r+1_0.00\r",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-whitespace-U0020",
+    "field": "order",
+    "input_value": " +1_0.00 ",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-whitespace-U0085",
+    "field": "order",
+    "input_value": "\u0085+1_0.00\u0085",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-whitespace-U00a0",
+    "field": "order",
+    "input_value": "\u00a0+1_0.00\u00a0",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-whitespace-U1680",
+    "field": "order",
+    "input_value": "\u1680+1_0.00\u1680",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-whitespace-U2000",
+    "field": "order",
+    "input_value": "\u2000+1_0.00\u2000",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-whitespace-U2001",
+    "field": "order",
+    "input_value": "\u2001+1_0.00\u2001",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-whitespace-U2002",
+    "field": "order",
+    "input_value": "\u2002+1_0.00\u2002",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-whitespace-U2003",
+    "field": "order",
+    "input_value": "\u2003+1_0.00\u2003",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-whitespace-U2004",
+    "field": "order",
+    "input_value": "\u2004+1_0.00\u2004",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-whitespace-U2005",
+    "field": "order",
+    "input_value": "\u2005+1_0.00\u2005",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-whitespace-U2006",
+    "field": "order",
+    "input_value": "\u2006+1_0.00\u2006",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-whitespace-U2007",
+    "field": "order",
+    "input_value": "\u2007+1_0.00\u2007",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-whitespace-U2008",
+    "field": "order",
+    "input_value": "\u2008+1_0.00\u2008",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-whitespace-U2009",
+    "field": "order",
+    "input_value": "\u2009+1_0.00\u2009",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-whitespace-U200a",
+    "field": "order",
+    "input_value": "\u200a+1_0.00\u200a",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-whitespace-U2028",
+    "field": "order",
+    "input_value": "\u2028+1_0.00\u2028",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-whitespace-U2029",
+    "field": "order",
+    "input_value": "\u2029+1_0.00\u2029",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-whitespace-U202f",
+    "field": "order",
+    "input_value": "\u202f+1_0.00\u202f",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-whitespace-U205f",
+    "field": "order",
+    "input_value": "\u205f+1_0.00\u205f",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-whitespace-U3000",
+    "field": "order",
+    "input_value": "\u3000+1_0.00\u3000",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-whitespace-U001c",
+    "field": "order",
+    "input_value": "\u001c+1_0.00\u001c",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-whitespace-U001d",
+    "field": "order",
+    "input_value": "\u001d+1_0.00\u001d",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-whitespace-U001e",
+    "field": "order",
+    "input_value": "\u001e+1_0.00\u001e",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-whitespace-U001f",
+    "field": "order",
+    "input_value": "\u001f+1_0.00\u001f",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-whitespace-Ufeff",
+    "field": "order",
+    "input_value": "\ufeff+1_0.00\ufeff",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-NEL-invalid-\"\u00851__0\u0085\"",
+    "field": "order",
+    "input_value": "\u00851__0\u0085",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-NEL-invalid-\"\u00851.0_0\u0085\"",
+    "field": "order",
+    "input_value": "\u00851.0_0\u0085",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-NEL-invalid-\"\u00851_0.1\u0085\"",
+    "field": "order",
+    "input_value": "\u00851_0.1\u0085",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-NEL-invalid-\"\u0085\ufeff1\u0085\"",
+    "field": "order",
+    "input_value": "\u0085\ufeff1\u0085",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-NEL-invalid-\"1\u00850\"",
+    "field": "order",
+    "input_value": "1\u00850",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-NEL-invalid-\"\u0085null\u0085\"",
+    "field": "order",
+    "input_value": "\u0085null\u0085",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-NEL-invalid-\"\u0085\u0085\"",
+    "field": "order",
+    "input_value": "\u0085\u0085",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "max_length-whitespace-U0009",
+    "field": "max_length",
+    "input_value": "\t+1_0.00\t",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-whitespace-U000a",
+    "field": "max_length",
+    "input_value": "\n+1_0.00\n",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-whitespace-U000b",
+    "field": "max_length",
+    "input_value": "\u000b+1_0.00\u000b",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-whitespace-U000c",
+    "field": "max_length",
+    "input_value": "\f+1_0.00\f",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-whitespace-U000d",
+    "field": "max_length",
+    "input_value": "\r+1_0.00\r",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-whitespace-U0020",
+    "field": "max_length",
+    "input_value": " +1_0.00 ",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-whitespace-U0085",
+    "field": "max_length",
+    "input_value": "\u0085+1_0.00\u0085",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-whitespace-U00a0",
+    "field": "max_length",
+    "input_value": "\u00a0+1_0.00\u00a0",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-whitespace-U1680",
+    "field": "max_length",
+    "input_value": "\u1680+1_0.00\u1680",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-whitespace-U2000",
+    "field": "max_length",
+    "input_value": "\u2000+1_0.00\u2000",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-whitespace-U2001",
+    "field": "max_length",
+    "input_value": "\u2001+1_0.00\u2001",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-whitespace-U2002",
+    "field": "max_length",
+    "input_value": "\u2002+1_0.00\u2002",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-whitespace-U2003",
+    "field": "max_length",
+    "input_value": "\u2003+1_0.00\u2003",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-whitespace-U2004",
+    "field": "max_length",
+    "input_value": "\u2004+1_0.00\u2004",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-whitespace-U2005",
+    "field": "max_length",
+    "input_value": "\u2005+1_0.00\u2005",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-whitespace-U2006",
+    "field": "max_length",
+    "input_value": "\u2006+1_0.00\u2006",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-whitespace-U2007",
+    "field": "max_length",
+    "input_value": "\u2007+1_0.00\u2007",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-whitespace-U2008",
+    "field": "max_length",
+    "input_value": "\u2008+1_0.00\u2008",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-whitespace-U2009",
+    "field": "max_length",
+    "input_value": "\u2009+1_0.00\u2009",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-whitespace-U200a",
+    "field": "max_length",
+    "input_value": "\u200a+1_0.00\u200a",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-whitespace-U2028",
+    "field": "max_length",
+    "input_value": "\u2028+1_0.00\u2028",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-whitespace-U2029",
+    "field": "max_length",
+    "input_value": "\u2029+1_0.00\u2029",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-whitespace-U202f",
+    "field": "max_length",
+    "input_value": "\u202f+1_0.00\u202f",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-whitespace-U205f",
+    "field": "max_length",
+    "input_value": "\u205f+1_0.00\u205f",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-whitespace-U3000",
+    "field": "max_length",
+    "input_value": "\u3000+1_0.00\u3000",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-whitespace-U001c",
+    "field": "max_length",
+    "input_value": "\u001c+1_0.00\u001c",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "max_length-whitespace-U001d",
+    "field": "max_length",
+    "input_value": "\u001d+1_0.00\u001d",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "max_length-whitespace-U001e",
+    "field": "max_length",
+    "input_value": "\u001e+1_0.00\u001e",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "max_length-whitespace-U001f",
+    "field": "max_length",
+    "input_value": "\u001f+1_0.00\u001f",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "max_length-whitespace-Ufeff",
+    "field": "max_length",
+    "input_value": "\ufeff+1_0.00\ufeff",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "max_length-NEL-invalid-\"\u00851__0\u0085\"",
+    "field": "max_length",
+    "input_value": "\u00851__0\u0085",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "max_length-NEL-invalid-\"\u00851.0_0\u0085\"",
+    "field": "max_length",
+    "input_value": "\u00851.0_0\u0085",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "max_length-NEL-invalid-\"\u00851_0.1\u0085\"",
+    "field": "max_length",
+    "input_value": "\u00851_0.1\u0085",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "max_length-NEL-invalid-\"\u0085\ufeff1\u0085\"",
+    "field": "max_length",
+    "input_value": "\u0085\ufeff1\u0085",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "max_length-NEL-invalid-\"1\u00850\"",
+    "field": "max_length",
+    "input_value": "1\u00850",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "max_length-NEL-invalid-\"\u0085null\u0085\"",
+    "field": "max_length",
+    "input_value": "\u0085null\u0085",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "max_length-NEL-invalid-\"\u0085\u0085\"",
+    "field": "max_length",
+    "input_value": "\u0085\u0085",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-NEL-boundary-9007199254740991",
+    "field": "order",
+    "input_value": "\u00859_007_199_254_740_991.00\u0085",
+    "python_value": 9007199254740991,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-NEL-boundary-9007199254740992",
+    "field": "order",
+    "input_value": "\u00859_007_199_254_740_992\u0085",
+    "python_value": 9007199254740992,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-NEL-boundary-9007199254740993",
+    "field": "order",
+    "input_value": "\u0085+9_007_199_254_740_993.00\u0085",
+    "python_value": 9007199254740993,
+    "sync_eligible": false
+  },
+  {
+    "name": "max_length-NEL-boundary-9007199254740991",
+    "field": "max_length",
+    "input_value": "\u00859_007_199_254_740_991.00\u0085",
+    "python_value": 9007199254740991,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-NEL-boundary-9007199254740992",
+    "field": "max_length",
+    "input_value": "\u00859_007_199_254_740_992\u0085",
+    "python_value": 9007199254740992,
+    "sync_eligible": false
+  },
+  {
+    "name": "max_length-NEL-boundary-9007199254740993",
+    "field": "max_length",
+    "input_value": "\u0085+9_007_199_254_740_993.00\u0085",
+    "python_value": 9007199254740993,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-NEL-negative-9007199254740991",
+    "field": "order",
+    "input_value": "\u0085-9007199254740991.00\u0085",
+    "python_value": -9007199254740991,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-NEL-negative-9007199254740992",
+    "field": "order",
+    "input_value": "\u0085-9007199254740992.00\u0085",
+    "python_value": -9007199254740992,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-NEL-negative-9007199254740993",
+    "field": "order",
+    "input_value": "\u0085-9007199254740993.00\u0085",
+    "python_value": -9007199254740993,
+    "sync_eligible": false
+  },
+  {
+    "name": "max-length-null-remains-null",
+    "field": "max_length",
+    "input_value": null,
+    "python_value": null,
+    "sync_eligible": true
   }
 ]

@@ -70,6 +70,9 @@ const VARIABLE_NAME_PATTERN = /^[A-Za-z0-9_]+$/
 const XML_SECTION_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_.-]*$/
 // Python v1 accepts wider integers, but sync must round-trip exactly through JSON/JS.
 const MAX_SAFE_INTEGER_TEXT = String(Number.MAX_SAFE_INTEGER)
+// Pydantic integer whitespace: includes NEL, unlike JS trim; excludes BOM and FS–US.
+const PYDANTIC_INTEGER_EDGE_WHITESPACE =
+  /^[\t\n\v\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+|[\t\n\v\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$/g
 // Python str.strip() whitespace parity for IDs used by backend duplicate checks.
 const PYTHON_EDGE_WHITESPACE =
   /^[\t\n\v\f\r \u001c-\u001f\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+|[\t\n\v\f\r \u001c-\u001f\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$/g
@@ -169,7 +172,7 @@ const coerceV1Integer = (value: unknown, nullable = false): number | null => {
     return value === 0 ? 0 : value
   }
   if (typeof value === "string") {
-    const normalized = value.trim()
+    const normalized = value.replace(PYDANTIC_INTEGER_EDGE_WHITESPACE, "")
     if (!/^[+-]?\d(?:_?\d)*(?:\.0+)?$/.test(normalized)) return fail()
     const integerText = normalized.replace(/_/g, "").replace(/\.0+$/, "")
     const digits = integerText.replace(/^[+-]?0*/, "") || "0"

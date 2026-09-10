@@ -68,7 +68,7 @@ type V1TransportCase = {
 type V1IntegerSyncCase = {
   name: string
   field: "order" | "max_length" | "schema_version"
-  input_value: number | string
+  input_value: number | string | null
   python_value: number | null
   sync_eligible: boolean
 }
@@ -663,16 +663,21 @@ describe("structured prompt transport validation", () => {
     }
   )
 
-  it.each(["order", "max_length", "schema_version"] as const)(
-    "retains strict v2 rejection of integer strings in %s",
-    (field) => {
+  it.each(
+    (["order", "max_length", "schema_version"] as const).flatMap((field) =>
+      ["", "\u0085", "\ufeff"].map((whitespace) => ({ field, whitespace }))
+    )
+  )(
+    "retains strict v2 rejection of integer strings in $field ($whitespace)",
+    ({ field, whitespace }) => {
       const input = recipe()
+      const value = `${whitespace}${field === "schema_version" ? "0_2" : "1_0"}.00${whitespace}`
       if (field === "schema_version") {
-        ;(input as Record<string, unknown>).schema_version = "0_2.00"
+        ;(input as Record<string, unknown>).schema_version = value
       } else if (field === "order") {
-        ;(input.blocks[0] as Record<string, unknown>).order = "1_0.00"
+        ;(input.blocks[0] as Record<string, unknown>).order = value
       } else {
-        ;(input.variables[0] as Record<string, unknown>).max_length = "1_0.00"
+        ;(input.variables[0] as Record<string, unknown>).max_length = value
       }
       const before = JSON.stringify(input)
 
