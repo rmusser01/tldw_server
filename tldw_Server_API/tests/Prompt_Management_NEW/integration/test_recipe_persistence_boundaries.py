@@ -143,6 +143,121 @@ def test_preview_allows_declared_identity_named_runtime_variable(boundary_client
     assert db_state(db) == ([], [])
 
 
+@pytest.mark.parametrize("explicit_legacy", [False, True])
+@pytest.mark.parametrize("target", ["system", "user"])
+@pytest.mark.parametrize(
+    "contradiction, expected",
+    [
+        ("v2", "invalid_recipe_prompt_format"),
+        ("v2_no_outer", "invalid_recipe_prompt_format"),
+        ("future", "unsupported_schema_version"),
+        ("future_no_outer", "unsupported_schema_version"),
+        ("malformed", "invalid_prompt_definition"),
+        ("mistagged", "invalid_prompt_definition"),
+        ("missing_kind", "invalid_prompt_definition"),
+        ("runtime_values", "invalid_recipe_runtime_values"),
+        ("variable_values", "invalid_recipe_runtime_values"),
+        ("resolved_values", "invalid_recipe_runtime_values"),
+        ("schema_only_v2", "invalid_prompt_definition"),
+        ("schema_only_future", "invalid_prompt_definition"),
+        ("v1_outer_v2", "invalid_prompt_definition"),
+        ("malformed_v1", "invalid_prompt_definition"),
+    ],
+)
+def test_legacy_preview_rejects_contradictory_identity(
+    boundary_client, explicit_legacy, target, contradiction, expected
+):
+    client, db = boundary_client
+    db.add_prompt("Good", None, None, system_prompt="Keep")
+    before = db_state(db)
+    payload = recipe(target)
+    payload.pop("prompt_format")
+    if explicit_legacy:
+        payload["prompt_format"] = "legacy"
+    payload["system_prompt"] = "PRIVATE_FALLBACK_TEXT"
+    definition = payload["prompt_definition"]
+    definition["blocks"][0]["content"] = "PRIVATE_RECIPE_BODY"
+    if contradiction.startswith("future"):
+        definition["schema_version"] = 99
+    if contradiction.endswith("no_outer"):
+        payload.pop("prompt_schema_version")
+    if contradiction == "malformed":
+        definition["assembly_config"]["target_role"] = {"PRIVATE_RECIPE_BODY": "{hostile}"}
+    elif contradiction == "mistagged":
+        definition["schema_version"] = 1
+        payload["prompt_schema_version"] = 1
+    elif contradiction == "missing_kind":
+        definition.pop("definition_kind")
+    elif contradiction in {"runtime_values", "variable_values", "resolved_values"}:
+        definition["blocks"][0][contradiction] = {"PRIVATE_RECIPE_BODY": "{hostile}"}
+    elif contradiction.startswith("schema_only"):
+        payload["prompt_definition"] = None
+        payload["prompt_schema_version"] = 2 if contradiction.endswith("v2") else 99
+    elif contradiction in {"v1_outer_v2", "malformed_v1"}:
+        definition["blocks"][0].pop("section_key")
+        payload["prompt_definition"] = {"schema_version": 1, "blocks": definition["blocks"]}
+        if contradiction == "malformed_v1":
+            payload["prompt_schema_version"] = 1
+            definition["blocks"][0]["role"] = {"PRIVATE_RECIPE_BODY": "{hostile}"}
+    payload["variables"] = {"schema_version": "ephemeral", "unused": {"resolved_values": "ephemeral"}}
+    original = deepcopy(payload)
+    messages = []
+    sink = logger.add(messages.append, format="{message}")
+    try:
+        response = client.post("/api/v1/prompts/preview", json=payload)
+    finally:
+        logger.remove(sink)
+    assert response.status_code == 400, response.text
+    assert response.json() == {"detail": expected}
+    assert "PRIVATE_" not in response.text + "".join(str(message) for message in messages)
+    assert db_state(db) == before
+    assert payload == original
+
+
+@pytest.mark.parametrize("mode", ["default", "legacy", "legacy_null", "legacy_v1", "structured_v1", "structured_v2"])
+@pytest.mark.parametrize("target", ["system", "user"])
+def test_preview_compatible_envelopes_keep_exact_output_and_ephemeral_values(boundary_client, mode, target):
+    client, db = boundary_client
+    db.add_prompt("Good", None, None, system_prompt="Keep")
+    before = db_state(db)
+    authored = '{"schema_version": 99, "runtime_values": "opaque"}'
+    payload = {
+        f"{target}_prompt": authored,
+        "variables": {"schema_version": "One", "runtime_values": "Two", "unused": {"resolved_values": "ephemeral"}},
+    }
+    expected_text = authored
+    if mode != "default":
+        payload["prompt_format"] = "structured" if mode.startswith("structured") else "legacy"
+    if mode == "legacy_null":
+        payload.update(prompt_schema_version=None, prompt_definition=None)
+    elif mode == "legacy_v1":
+        payload["prompt_schema_version"] = 1
+    elif mode.startswith("structured"):
+        definition = recipe(target)["prompt_definition"]
+        if mode == "structured_v1":
+            definition["blocks"][0].pop("section_key")
+            definition = {"schema_version": 1, "blocks": definition["blocks"]}
+        definition["variables"] = [{"name": name, "required": True} for name in ("schema_version", "runtime_values")]
+        definition["blocks"][0].update(content="{{schema_version}} {{runtime_values}}", is_template=True)
+        payload.update(prompt_schema_version=definition["schema_version"], prompt_definition=definition)
+        expected_text = "One Two"
+    original = deepcopy(payload)
+    response = client.post("/api/v1/prompts/preview", json=payload)
+    assert response.status_code == 200, response.text
+    expected = {
+        "prompt_format": "structured" if mode.startswith("structured") else "legacy",
+        "prompt_schema_version": payload.get("prompt_schema_version") if mode.startswith("structured") else None,
+        "assembled_messages": [{"role": target, "content": expected_text}],
+        "legacy_system_prompt": expected_text if target == "system" else "",
+        "legacy_user_prompt": expected_text if target == "user" else "",
+    }
+    if mode == "structured_v2":
+        expected.update(assembled_messages=[], rendered_text=expected_text)
+    assert response.json() == expected
+    assert db_state(db) == before
+    assert payload == original
+
+
 @pytest.mark.parametrize("outer_version", [2, 99])
 @pytest.mark.parametrize("inner_error", ["duplicate_id", "invalid_role", "implicit_v1", "json_definition"])
 @pytest.mark.parametrize("operation", ["post", "put", "preview", "db_add", "db_overwrite", "db_update"])

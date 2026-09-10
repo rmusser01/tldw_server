@@ -280,6 +280,22 @@ def _coerce_preview_definition(
         )
         return definition, "structured", definition_schema_version
 
+    if prompt_definition_payload is not None:
+        try:
+            supplied_definition = parse_stored_prompt_definition(
+                prompt_definition_payload, schema_version=prompt_schema_version
+            )
+        except ValueError as error:
+            # A contradictory legacy envelope must not expose rich v1 errors.
+            code = str(error)
+            if code not in {"unsupported_schema_version", "invalid_recipe_runtime_values"}:
+                code = "invalid_prompt_definition"
+            raise InputError(code) from None
+        if isinstance(supplied_definition, SingleTextRecipeDefinitionV2):
+            raise InputError("invalid_recipe_prompt_format")
+    if prompt_schema_version not in (None, 1):
+        raise InputError("invalid_prompt_definition")
+
     _validate_request_text(system_prompt, user_prompt)
     definition = convert_legacy_prompt_to_definition(
         system_prompt=system_prompt,
