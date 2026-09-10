@@ -170,6 +170,18 @@ preserved, and an ES256 round trip through PyJWT's cryptography backend. It runs
 without network access or capabilities, with a read-only root and temporary
 scratch storage.
 
+The release backend job now runs the same probe for app, worker and audio-worker.
+It pulls the immutable `linux/amd64` child selected from the scanned subject,
+verifies the child manifest hash and the local image's repository digest and
+platform, then runs that child with `--pull never` and the same isolation controls.
+The release runtime JSON records the parent subject, platform manifest digest
+and config digest taken from the authenticated manifest. Both the runtime JSON
+and platform manifest join the image checksums and aggregate release file hashes.
+Backend admission requires both the runtime step and vulnerability decision to
+succeed. The source-admission prerequisite still applies; this workflow change
+does not establish fresh release-image evidence until a release job actually runs.
+See [TASK-13013.7.25](../Evidence/TASK-13013.7.25-release-runtime-admission.md).
+
 `runtime-image-<name>.json` records these results, the lock hash, and the subject
 and config digests; it is included in the evidence checksum manifest. Probe
 failure rejects admission but does not suppress vulnerability scans or uploads.
