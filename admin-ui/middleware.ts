@@ -187,10 +187,17 @@ const verifyJwtLocally = async (
   const [headerSegment, payloadSegment, signatureSegment] = parts;
   const header = base64UrlToJson<{ alg?: string }>(headerSegment);
   if (!header) return { ok: false };
-  if (!header.alg || header.alg.toUpperCase() !== algorithm) return { ok: false };
+  if (typeof header.alg !== 'string' || header.alg.toUpperCase() !== algorithm) {
+    return { ok: false };
+  }
 
   const data = new TextEncoder().encode(`${headerSegment}.${payloadSegment}`);
-  const signature = base64UrlToUint8Array(signatureSegment);
+  let signature: Uint8Array<ArrayBuffer>;
+  try {
+    signature = base64UrlToUint8Array(signatureSegment);
+  } catch {
+    return { ok: false };
+  }
   const secrets = [secret, secondarySecret].filter((value): value is string => !!value);
   let signatureValid = false;
 

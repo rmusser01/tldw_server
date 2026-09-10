@@ -6,13 +6,19 @@ import os
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from loguru import logger
+
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     DEFAULT_LLM_PROVIDER,
 )
+from tldw_Server_API.app.core.AuthNZ.byok_helpers import load_server_config_snapshot
 from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
     get_llm_provider_override,
     get_override_default_model,
     validate_provider_override,
+)
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    configured_provider_model_from_snapshot,
 )
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_service import (
@@ -90,6 +96,7 @@ def get_default_model_for_provider(
     override_default_resolver: Callable[[str], str | None] = get_override_default_model,
     override_resolver: Callable[[str], Any] = get_llm_provider_override,
     config_loader: Callable[[], Any] = load_comprehensive_config,
+    provider_config_loader: Callable[[], dict[str, Any]] = load_server_config_snapshot,
 ) -> str | None:
     """Resolve the ordinary server default model for one provider."""
 
@@ -122,9 +129,28 @@ def get_default_model_for_provider(
             )
             if isinstance(configured, str) and configured.strip():
                 return configured.strip()
-    except (AttributeError, KeyError, TypeError, ValueError):
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        # Configuration diagnostics can contain credentials; log context and type only.
+        # The provider snapshot may still supply a usable default after this failure.
+        logger.warning(
+            "Default model lookup failed: provider={}, source=Chat-Module, error_type={}; trying provider snapshot",
+            normalized_provider,
+            type(exc).__name__,
+        )
+
+    try:
+        return configured_provider_model_from_snapshot(
+            normalized_provider,
+            provider_config_loader(),
+        )
+    except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        # Retain the missing-model result so callers apply their existing request error.
+        logger.warning(
+            "Default model lookup failed: provider={}, source=provider snapshot, error_type={}; no default available",
+            normalized_provider,
+            type(exc).__name__,
+        )
         return None
-    return None
 
 
 def _configuration_error(provider: str | None = None) -> ChatConfigurationError:

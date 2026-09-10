@@ -1,12 +1,161 @@
+"""Provider and model resolution across server defaults and configuration failures."""
+
 from __future__ import annotations
 
+import configparser
 from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
+from loguru import logger
 
 from tldw_Server_API.app.api.v1.endpoints import sharing
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+
+
+def _empty_override(_provider: str) -> None:
+    """Represent an absent administrator override for provider-default regressions."""
+    return None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("source", ["Chat-Module", "provider snapshot"])
+def test_model_configuration_failure_is_logged_without_leaking_exception_text(
+    monkeypatch: pytest.MonkeyPatch, source: str
+) -> None:
+    """Failed default lookups remain diagnosable without exposing configuration secrets."""
+    from tldw_Server_API.app.core.Chat.chat_target_resolution import get_default_model_for_provider
+
+    monkeypatch.delenv("DEFAULT_MODEL_OLLAMA", raising=False)
+    messages: list[str] = []
+    # Synthetic diagnostic content verifies that configuration secrets stay out of logs.
+    exception_secret = "private-value-from-broken-provider-config"  # nosec B105
+
+    def fail_config_load() -> configparser.ConfigParser:
+        """Simulate a parsing failure whose message contains sensitive config text."""
+        raise ValueError(exception_secret)
+
+    def fail_snapshot_load() -> dict[str, object]:
+        """Simulate a provider snapshot failure with sensitive diagnostic details."""
+        raise RuntimeError(exception_secret)
+
+    handler = logger.add(lambda message: messages.append(str(message)), format="{message}", level="WARNING")
+    try:
+        result = get_default_model_for_provider(
+            " OLLAMA ",
+            override_default_resolver=_empty_override,
+            override_resolver=_empty_override,
+            config_loader=fail_config_load if source == "Chat-Module" else configparser.ConfigParser,
+            provider_config_loader=(
+                fail_snapshot_load
+                if source == "provider snapshot"
+                else lambda: {"ollama_api": {"model": "fallback-model"}}
+            ),
+        )
+    finally:
+        logger.remove(handler)
+
+    assert result == ("fallback-model" if source == "Chat-Module" else None)
+    assert any(source in message and "ollama" in message for message in messages)
+    assert any(("ValueError" if source == "Chat-Module" else "RuntimeError") in message for message in messages)
+    assert all(exception_secret not in message for message in messages)
+
+
+@pytest.mark.unit
+def test_local_llm_environment_supplies_omitted_chat_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ import byok_helpers
+    from tldw_Server_API.app.core.Chat.chat_target_resolution import (
+        get_default_model_for_provider,
+    )
+
+    monkeypatch.delenv("DEFAULT_MODEL_LOCAL_LLM", raising=False)
+    monkeypatch.setenv("LOCAL_LLM_MODEL", "local-env-model")
+    monkeypatch.setattr(byok_helpers, "load_and_log_configs", lambda **_kwargs: {})
+
+    assert (
+        get_default_model_for_provider(
+            "local-llm",
+            override_default_resolver=_empty_override,
+            override_resolver=_empty_override,
+            config_loader=configparser.ConfigParser,
+            provider_config_loader=byok_helpers.load_server_config_snapshot,
+        )
+        == "local-env-model"
+    )
+
+
+@pytest.mark.unit
+def test_ollama_local_api_configuration_supplies_omitted_chat_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core import config as config_module
+    from tldw_Server_API.app.core.AuthNZ import byok_helpers
+    from tldw_Server_API.app.core.Chat.chat_target_resolution import (
+        get_default_model_for_provider,
+    )
+
+    parser = configparser.ConfigParser()
+    parser["Local-API"] = {"ollama_model": "ollama-config-model"}
+    monkeypatch.delenv("DEFAULT_MODEL_OLLAMA", raising=False)
+    monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
+    monkeypatch.setattr(config_module, "load_comprehensive_config", lambda: parser)
+
+    assert (
+        get_default_model_for_provider(
+            "ollama",
+            override_default_resolver=_empty_override,
+            override_resolver=_empty_override,
+            config_loader=configparser.ConfigParser,
+            provider_config_loader=byok_helpers.load_server_config_snapshot,
+        )
+        == "ollama-config-model"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("override_default", "allowed_models", "environment", "chat_default", "expected"),
+    [
+        ("admin-default", ["admin-allowed"], "env-default", "chat-default", "admin-default"),
+        (None, ["admin-allowed"], "env-default", "chat-default", "admin-allowed"),
+        (None, None, "env-default", "chat-default", "env-default"),
+        (None, None, None, "chat-default", "chat-default"),
+        (None, None, None, None, "provider-default"),
+    ],
+)
+def test_default_model_precedence_preserves_existing_server_policy(
+    monkeypatch: pytest.MonkeyPatch,
+    override_default: str | None,
+    allowed_models: list[str] | None,
+    environment: str | None,
+    chat_default: str | None,
+    expected: str,
+) -> None:
+    from tldw_Server_API.app.core.Chat.chat_target_resolution import (
+        get_default_model_for_provider,
+    )
+
+    if environment is None:
+        monkeypatch.delenv("DEFAULT_MODEL_OLLAMA", raising=False)
+    else:
+        monkeypatch.setenv("DEFAULT_MODEL_OLLAMA", environment)
+    config = configparser.ConfigParser()
+    if chat_default is not None:
+        config["Chat-Module"] = {"default_model_ollama": chat_default}
+    override = SimpleNamespace(allowed_models=allowed_models)
+
+    assert (
+        get_default_model_for_provider(
+            "ollama",
+            override_default_resolver=lambda _provider: override_default,
+            override_resolver=lambda _provider: override,
+            config_loader=lambda: config,
+            provider_config_loader=lambda: {"ollama_api": {"model": "provider-default"}},
+        )
+        == expected
+    )
 
 
 class _Registry:

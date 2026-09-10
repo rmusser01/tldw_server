@@ -1015,14 +1015,19 @@ def _normalize_llamacpp_base_url(base_url: str) -> str:
 
 
 def _resolve_provider_and_model_for_request(request_data: Any) -> tuple[str, str]:
-    """Resolve provider/model pair from the request payload."""
-    _, metrics_model, selected_provider, selected_model, _debug = resolve_provider_and_model(
+    """Resolve the execution provider/model pair from the request payload."""
+    _, _, selected_provider, selected_model, _debug = resolve_provider_and_model(
         request_data=request_data,
         metrics_default_provider=DEFAULT_LLM_PROVIDER,
         normalize_default_provider=_get_default_provider(),
     )
     provider = selected_provider
-    model = selected_model or metrics_model or getattr(request_data, "model", None)
+    model = selected_model
+    if not isinstance(model, str) or not model.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Model is required for provider '{provider}'.",
+        )
     return provider, model
 
 

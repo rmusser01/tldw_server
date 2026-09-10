@@ -118,9 +118,9 @@ class AuthnzSessionsRepo:
                         encrypted_token, encrypted_refresh,
                         expires_at, refresh_expires_at,
                         ip_address, user_agent, device_id,
-                        access_jti, refresh_jti
+                        access_jti, refresh_jti, last_activity
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                     """,
                     (
                         user_id,

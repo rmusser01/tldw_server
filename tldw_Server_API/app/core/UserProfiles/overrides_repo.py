@@ -335,7 +335,7 @@ class OrgProfileOverridesRepo:
                     WHERE org_id = ANY($1)
                     ORDER BY org_id, key
                     """,
-                    org_ids,
+                    (org_ids,),
                 )
                 return [self._row_to_dict(dict(r)) for r in rows]
 
@@ -448,7 +448,7 @@ class OrgProfileOverridesRepo:
             if getattr(self.db_pool, "pool", None) is not None:
                 row = await self.db_pool.fetchone(
                     "SELECT MAX(updated_at) AS updated_at FROM public.org_config_overrides WHERE org_id = ANY($1)",
-                    org_ids,
+                    (org_ids,),
                 )
                 return row.get("updated_at") if row else None
 
@@ -533,7 +533,7 @@ class TeamProfileOverridesRepo:
                     WHERE team_id = ANY($1)
                     ORDER BY team_id, key
                     """,
-                    team_ids,
+                    (team_ids,),
                 )
                 return [self._row_to_dict(dict(r)) for r in rows]
 
@@ -646,7 +646,7 @@ class TeamProfileOverridesRepo:
             if getattr(self.db_pool, "pool", None) is not None:
                 row = await self.db_pool.fetchone(
                     "SELECT MAX(updated_at) AS updated_at FROM public.team_config_overrides WHERE team_id = ANY($1)",
-                    team_ids,
+                    (team_ids,),
                 )
                 return row.get("updated_at") if row else None
 

@@ -2,6 +2,7 @@
 # Description: Handles user authentication and identification based on application mode.
 #
 # Imports
+import asyncio
 import contextlib
 import os
 from typing import Any, Optional, Union
@@ -696,8 +697,8 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
         subject_db_id_int = None
 
     # --- Enrich with roles/permissions from central AuthNZ RBAC tables ---
-    roles, perms, is_admin = _enrich_user_with_rbac(
-        subject_db_id_int, user_data, pii_redact_logs=pii_redact_logs
+    roles, perms, is_admin = await asyncio.to_thread(
+        _enrich_user_with_rbac, subject_db_id_int, user_data, pii_redact_logs=pii_redact_logs
     )
 
     # --- Create and validate the User Pydantic model ---
@@ -1167,8 +1168,8 @@ async def authenticate_api_key_user(request: Request, api_key: str) -> User:
         if user_data.get("is_superuser"):
             user_data.setdefault("is_admin", True)
 
-        roles, perms, is_admin_flag = _enrich_user_with_rbac(
-            user_id, user_data, pii_redact_logs=getattr(settings, "PII_REDACT_LOGS", False)
+        roles, perms, is_admin_flag = await asyncio.to_thread(
+            _enrich_user_with_rbac, user_id, user_data, pii_redact_logs=getattr(settings, "PII_REDACT_LOGS", False)
         )
 
         user_data["roles"] = roles

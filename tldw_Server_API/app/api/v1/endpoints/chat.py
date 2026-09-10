@@ -2243,7 +2243,7 @@ def _create_chat_macro_run_payload(
         request_messages=request_data.messages,
         model_selection={
             "api_provider": selected_provider or request_data.api_provider,
-            "model": selected_model or request_data.model,
+            "model": selected_model,
         },
         output_profile=resolved_profile.name,
         request_metadata=request_metadata,
@@ -3533,7 +3533,7 @@ async def create_chat_completion(
 
         provider = metrics_provider
         model = metrics_model
-        initial_provider = metrics_provider
+        initial_provider = selected_provider
 
         try:
             logger.debug("Provider/model resolution: {}", provider_debug)
@@ -4182,6 +4182,37 @@ async def create_chat_completion(
                     logger.debug(f"Billing token pre-check failed (fail-open): {_billing_err}")
                     _billing_enforcer = None
 
+            # Resolve one effective model before either durable macro creation or direct dispatch.
+            provider = selected_provider
+            model = selected_model
+
+            try:
+                if not request_model_was_explicit:
+                    default_model_for_provider = _get_default_model_for_provider_name(provider)
+                    if default_model_for_provider:
+                        model = default_model_for_provider
+                        request_data.model = default_model_for_provider
+                override_error = validate_provider_override(provider, model)
+            except ByokResolutionError as credential_error:
+                raise_detached_error(
+                    _provider_credential_http_exception(credential_error)
+                )
+            if not model:
+                # Fail fast with a clear client error instead of cascading into a 500
+                # when downstream provider adapters require an explicit model.
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Model is required for provider '{provider}'. Please select a model in the WebUI "
+                        f"or configure a default via environment variable 'DEFAULT_MODEL_{provider.replace('.', '_').replace('-', '_').upper()}'"
+                    ),
+                )
+
+            if override_error:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=override_error)
+
+            selected_model = model
+
             if chat_macro_intent is not None:
                 macro_command = str(chat_macro_intent["command"])
                 try:
@@ -4308,35 +4339,6 @@ async def create_chat_completion(
                 raise
             except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as e:
                 logger.warning(f"Moderation input processing error: {e}")
-
-            # Normalize provider/model on the request for downstream logic (already resolved)
-            provider = selected_provider
-            model = selected_model or model
-
-            try:
-                if not request_model_was_explicit:
-                    default_model_for_provider = _get_default_model_for_provider_name(provider)
-                    if default_model_for_provider:
-                        model = default_model_for_provider
-                        request_data.model = default_model_for_provider
-                override_error = validate_provider_override(provider, model)
-            except ByokResolutionError as credential_error:
-                raise_detached_error(
-                    _provider_credential_http_exception(credential_error)
-                )
-            if not model:
-                # Fail fast with a clear client error instead of cascading into a 500
-                # when downstream provider adapters require an explicit model.
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=(
-                        f"Model is required for provider '{provider}'. Please select a model in the WebUI "
-                        f"or configure a default via environment variable 'DEFAULT_MODEL_{provider.replace('.', '_').replace('-', '_').upper()}'"
-                    ),
-                )
-
-            if override_error:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=override_error)
 
             persona_alias_used = _resolve_character_id_from_persona_alias(request_data)
 

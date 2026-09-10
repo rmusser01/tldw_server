@@ -1,14 +1,82 @@
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.chat_service import (
-    resolve_provider_and_model,
+    build_call_params_from_request,
     invalidate_model_alias_caches,
+    resolve_provider_and_model,
 )
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("request_model", [None, "", "   "])
+def test_omitted_model_keeps_metrics_placeholder_out_of_outgoing_payload(
+    request_model: str | None,
+) -> None:
+    request = ChatCompletionRequest(
+        api_provider="local-llm",
+        model=request_model,
+        messages=[{"role": "user", "content": "Hello"}],
+    )
+
+    metrics_provider, metrics_model, selected_provider, selected_model, _ = resolve_provider_and_model(
+        request_data=request,
+        metrics_default_provider="openai",
+        normalize_default_provider="openai",
+    )
+    params = build_call_params_from_request(
+        request_data=request,
+        target_api_provider=selected_provider,
+        provider_api_key=None,
+        templated_llm_payload=[{"role": "user", "content": "Hello"}],
+        final_system_message=None,
+        resolved_model=selected_model,
+    )
+
+    assert (metrics_provider, metrics_model) == ("local-llm", "unknown")
+    assert selected_model is None
+    assert "model" not in params
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("request_model", [None, "", "   "])
+def test_blank_model_stays_omitted_during_execution_resolution(
+    request_model: str | None,
+) -> None:
+    request = ChatCompletionRequest(
+        api_provider="local-llm",
+        model=request_model,
+        messages=[{"role": "user", "content": "Hello"}],
+    )
+
+    _, _, _, selected_model, _ = resolve_provider_and_model(
+        request_data=request,
+        metrics_default_provider="openai",
+        normalize_default_provider="openai",
+    )
+
+    assert selected_model is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("request_model", [None, "", "   "])
+def test_messages_shared_resolver_does_not_promote_metrics_placeholder(
+    request_model: str | None,
+) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import messages
+
+    request = SimpleNamespace(api_provider="local-llm", model=request_model)
+
+    with pytest.raises(HTTPException) as exc_info:
+        messages._resolve_provider_and_model_for_request(request)
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "Model is required for provider 'local-llm'."
 
 
 @pytest.mark.unit

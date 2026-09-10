@@ -335,7 +335,10 @@ const isWebhookStatus = (value: unknown): value is WebhookStatus => {
 };
 
 const getWebhookStatus = async (): Promise<WebhookStatus> => {
-  const status = await requestJson<unknown>('/admin/webhooks/status');
+  const response = await requestJson<unknown>('/admin/webhooks/status');
+  const status = isRecord(response) ? { ...response } : response;
+  // The registration UI does not consume the added delivery runtime details.
+  if (isRecord(status)) delete status.delivery;
   if (!isWebhookStatus(status)) {
     throw new WebhookContractError(200, 'Webhook API returned an invalid status response');
   }

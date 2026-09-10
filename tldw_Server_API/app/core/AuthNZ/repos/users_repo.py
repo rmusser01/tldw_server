@@ -296,7 +296,7 @@ class AuthnzUsersRepo:
             # Total count
             count_query_template = "SELECT COUNT(DISTINCT users.id) FROM users{join_clause}{where_clause}"
             count_query = count_query_template.format_map(locals())  # nosec B608
-            total = await db.db_pool.fetchval(count_query, *params)
+            total = await db.db_pool.fetchval(count_query, params)
 
             # Page of users
             if is_pg:

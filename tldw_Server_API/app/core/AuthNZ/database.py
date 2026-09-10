@@ -1975,7 +1975,13 @@ def _normalize_sqlite_sql(query: str) -> str:
 
 
 def _flatten_params(args: tuple[Any, ...]) -> tuple[Any, ...]:
-    """Support both variadic and single-sequence parameter passing."""
+    """Support both variadic and single-sequence parameter passing.
+
+    To bind one PostgreSQL array, pass a parameter sequence containing that
+    array: ``pool.fetchone(sql, (ids,))``. Passing ``ids`` alone denotes the
+    complete parameter sequence, so its elements become separate arguments.
+    Raw acquired connections use asyncpg's variadic convention instead.
+    """
     if len(args) == 1 and isinstance(args[0], (list, tuple)):
         return tuple(args[0])
     return tuple(args)

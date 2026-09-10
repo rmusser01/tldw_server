@@ -14,6 +14,9 @@ from typing import Any
 import asyncpg
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.authnz_session_schema import (
+    ensure_postgres_session_last_activity,
+)
 from tldw_Server_API.app.core.DB_Management.backends.pg_sharing_schema import (
     apply_postgres_sharing_schema,
     postgres_sharing_schema_issues,
@@ -3539,6 +3542,7 @@ async def ensure_authnz_core_tables_pg(pool: DatabasePool | None = None) -> bool
         async with db_pool.transaction() as conn:
             for sql, params in _CREATE_AUTHNZ_CORE_TABLES:
                 await conn.execute(sql, *params)
+            await ensure_postgres_session_last_activity(conn)
             has_legacy_uses = await conn.fetchval(
                 "SELECT EXISTS ("
                 "SELECT 1 FROM information_schema.columns "

@@ -936,6 +936,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/AuthNZ/integration/test_admin_*.py
               tldw_Server_API/tests/AuthNZ/integration/test_api_key_*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_audio_quota_dates_postgres.py
               tldw_Server_API/tests/AuthNZ/integration/test_auth_*.py
           - name: auth-integration-authnz
             paths: >-
@@ -1295,14 +1296,20 @@ jobs:
           - name: media-core-api
             paths: >-
               tldw_Server_API/tests/Media/test_archive_member_cap.py
+              tldw_Server_API/tests/Media/test_audio_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py
               tldw_Server_API/tests/Media/test_cache_index.py
+              tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_email_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py
               tldw_Server_API/tests/Media/test_json_*.py
               tldw_Server_API/tests/Media/test_media_*.py
               tldw_Server_API/tests/Media/test_navigation_policy_contract.py
+              tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_process_code_and_uploads.py
               tldw_Server_API/tests/Media/test_upload_sink_security.py
+              tldw_Server_API/tests/Media/test_video_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_web_summary_service_prompt.py
               tldw_Server_API/tests/Media/unit
           - name: media-ingestion-new-ocr
             paths: >-
@@ -1327,6 +1334,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_original_file_replacement.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py
           - name: media-ingestion-new-unit-mediawiki
             paths: >-
@@ -2426,6 +2434,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/AuthNZ/integration/test_admin_*.py
               tldw_Server_API/tests/AuthNZ/integration/test_api_key_*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_audio_quota_dates_postgres.py
               tldw_Server_API/tests/AuthNZ/integration/test_auth_*.py
           - name: auth-integration-authnz
             paths: >-
@@ -2785,14 +2794,20 @@ jobs:
           - name: media-core-api
             paths: >-
               tldw_Server_API/tests/Media/test_archive_member_cap.py
+              tldw_Server_API/tests/Media/test_audio_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py
               tldw_Server_API/tests/Media/test_cache_index.py
+              tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_email_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py
               tldw_Server_API/tests/Media/test_json_*.py
               tldw_Server_API/tests/Media/test_media_*.py
               tldw_Server_API/tests/Media/test_navigation_policy_contract.py
+              tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_process_code_and_uploads.py
               tldw_Server_API/tests/Media/test_upload_sink_security.py
+              tldw_Server_API/tests/Media/test_video_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_web_summary_service_prompt.py
               tldw_Server_API/tests/Media/unit
           - name: media-ingestion-new-ocr
             paths: >-
@@ -2817,6 +2832,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_original_file_replacement.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py
           - name: media-ingestion-new-unit-mediawiki
             paths: >-
@@ -2932,6 +2948,7 @@ jobs:
               tldw_Server_API/tests/Visual_Identities
           - name: chat-character-integration-api
             paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
@@ -3785,6 +3802,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/AuthNZ/integration/test_admin_*.py
               tldw_Server_API/tests/AuthNZ/integration/test_api_key_*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_audio_quota_dates_postgres.py
               tldw_Server_API/tests/AuthNZ/integration/test_auth_*.py
           - name: auth-integration-authnz
             paths: >-
@@ -4144,14 +4162,20 @@ jobs:
           - name: media-core-api
             paths: >-
               tldw_Server_API/tests/Media/test_archive_member_cap.py
+              tldw_Server_API/tests/Media/test_audio_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py
               tldw_Server_API/tests/Media/test_cache_index.py
+              tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_email_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py
               tldw_Server_API/tests/Media/test_json_*.py
               tldw_Server_API/tests/Media/test_media_*.py
               tldw_Server_API/tests/Media/test_navigation_policy_contract.py
+              tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_process_code_and_uploads.py
               tldw_Server_API/tests/Media/test_upload_sink_security.py
+              tldw_Server_API/tests/Media/test_video_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_web_summary_service_prompt.py
               tldw_Server_API/tests/Media/unit
           - name: media-ingestion-new-ocr
             paths: >-
@@ -4176,6 +4200,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_original_file_replacement.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py
           - name: media-ingestion-new-unit-mediawiki
             paths: >-
@@ -4291,6 +4316,7 @@ jobs:
               tldw_Server_API/tests/Visual_Identities
           - name: chat-character-integration-api
             paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
@@ -5067,6 +5093,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/AuthNZ/integration/test_admin_*.py
               tldw_Server_API/tests/AuthNZ/integration/test_api_key_*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_audio_quota_dates_postgres.py
               tldw_Server_API/tests/AuthNZ/integration/test_auth_*.py
           - name: auth-integration-authnz
             paths: >-
@@ -5426,14 +5453,20 @@ jobs:
           - name: media-core-api
             paths: >-
               tldw_Server_API/tests/Media/test_archive_member_cap.py
+              tldw_Server_API/tests/Media/test_audio_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py
               tldw_Server_API/tests/Media/test_cache_index.py
+              tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_email_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py
               tldw_Server_API/tests/Media/test_json_*.py
               tldw_Server_API/tests/Media/test_media_*.py
               tldw_Server_API/tests/Media/test_navigation_policy_contract.py
+              tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_process_code_and_uploads.py
               tldw_Server_API/tests/Media/test_upload_sink_security.py
+              tldw_Server_API/tests/Media/test_video_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_web_summary_service_prompt.py
               tldw_Server_API/tests/Media/unit
           - name: media-ingestion-new-ocr
             paths: >-
@@ -5458,6 +5491,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_original_file_replacement.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py
           - name: media-ingestion-new-unit-mediawiki
             paths: >-
@@ -5573,6 +5607,7 @@ jobs:
               tldw_Server_API/tests/Visual_Identities
           - name: chat-character-integration-api
             paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
@@ -6355,6 +6390,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/AuthNZ/integration/test_admin_*.py
               tldw_Server_API/tests/AuthNZ/integration/test_api_key_*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_audio_quota_dates_postgres.py
               tldw_Server_API/tests/AuthNZ/integration/test_auth_*.py
           - name: auth-integration-authnz
             paths: >-
@@ -6714,14 +6750,20 @@ jobs:
           - name: media-core-api
             paths: >-
               tldw_Server_API/tests/Media/test_archive_member_cap.py
+              tldw_Server_API/tests/Media/test_audio_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py
               tldw_Server_API/tests/Media/test_cache_index.py
+              tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_email_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py
               tldw_Server_API/tests/Media/test_json_*.py
               tldw_Server_API/tests/Media/test_media_*.py
               tldw_Server_API/tests/Media/test_navigation_policy_contract.py
+              tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_process_code_and_uploads.py
               tldw_Server_API/tests/Media/test_upload_sink_security.py
+              tldw_Server_API/tests/Media/test_video_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_web_summary_service_prompt.py
               tldw_Server_API/tests/Media/unit
           - name: media-ingestion-new-ocr
             paths: >-
@@ -6746,6 +6788,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_original_file_replacement.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py
           - name: media-ingestion-new-unit-mediawiki
             paths: >-
@@ -6861,6 +6904,7 @@ jobs:
               tldw_Server_API/tests/Visual_Identities
           - name: chat-character-integration-api
             paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
