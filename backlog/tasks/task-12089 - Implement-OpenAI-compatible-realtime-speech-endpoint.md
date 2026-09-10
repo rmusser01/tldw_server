@@ -1,10 +1,10 @@
 ---
 id: TASK-12089
 title: Implement OpenAI-compatible realtime speech endpoint
-status: Done
+status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-09-10 01:05'
+updated_date: '2026-09-10 01:26'
 labels:
   - audio
   - realtime
@@ -100,6 +100,10 @@ Original modified files:
 - tldw_Server_API/tests/Resource_Governance/test_realtime_route_policy.py
 
 2026-09-09 follow-up complete: reviewed all 23 inline comments and current-dev integration; fixed confirmed streaming/backpressure, cancellation, lifecycle, metadata, cookie-auth, quota, credential-policy, redaction and dialogue-context defects. Independent final review found no additional must-fix findings. Focused suite: 140 passed, 1 intentional live-provider smoke skip. Shared regression slice: 92 passed. Ruff/Black, repository guards, compilation, diff check and Bandit passed (0 findings, 0 errors). Review report documents applicability, unsupported suggestions, experimental protocol limits, historical CI failures and the human Change summary merge gate. Main checkout preserved. Temporary follow-up plan completed and its outcome retained in the report. Remote current-head CI remains a pre-merge condition.
+
+2026-09-09 requested follow-up: rebase onto latest dev again, wait for Qodo reviews on the resulting PR head, address all verified findings and CI issues, then request merge approval. User supplied a Change summary in the task conversation. Continuing isolated worktree and official Backlog CLI fallback; no merge is authorized yet.
+
+Qodo follow-up implementation: rebased cleanly onto dev 456eafb7a6; Qodo confirmed the prior code findings resolved and retained three live-smoke policy findings. Moved real-provider verification to an explicit standalone command with a spoken-WAV input and server-configured providers; replaced skipped pytest smoke with deterministic fake-transport tests. Independent review identified oversized WAV frames, reproduced with a seven-second clip and fixed via chunking plus a 30-second input limit. Final focused suite: 150 passed, no skips. Refreshed the OpenAPI fingerprint after reproducing CI contract drift (2086 -> 2087 paths; no schema count changes) and regenerated ignored frontend types. Ruff/Black, compilation, repository guards, diff check and Bandit passed. Awaiting posted current-head Qodo/CI before asking for merge approval.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

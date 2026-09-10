@@ -73,3 +73,38 @@ The local suites do not replace the repository's cross-platform CI matrix. Befor
 - The requester must write their own **Change summary** explaining both the change and why the implementation choices were made, as required by `Docs/superpowers/AI_GENERATED_PR_CHANGE_SUMMARY_POLICY_2026_04_17.md`. This agent-written report does not satisfy that gate.
 
 The temporary follow-up plan `IMPLEMENTATION_PLAN_pr2572_rebase_review.md` completed three stages: rebase/applicability, regression fixes, and verification/recommendation. Its outcome is retained here and in TASK-12089; the temporary file is removed on completion.
+
+## Subsequent Qodo follow-up
+
+At the requester's direction, the branch was rebased again onto `dev`
+`456eafb7a603449722ba8db806071a5e2aa5e7d6`. This rebase was conflict-free; backup
+branch `codex/pr2572-before-rebase-20260910` preserves the previous published head.
+
+Qodo's updated review of `3c6957516a` marked all prior code defects resolved and
+retained three live-smoke policy comments. This follow-up supersedes the earlier
+decision to retain that pytest test: real-provider verification now lives in
+`Helper_Scripts/Testing-related/realtime_speech_smoke.py`, explicitly invoked with
+a spoken WAV against a configured server. `test_realtime_smoke_cli.py` uses a fake
+transport, one unit marker, and no configuration-dependent skips. The production
+realtime pipeline remains unchanged from the preceding review.
+
+The manual command validates 16 kHz mono PCM16 input, caps it at 30 seconds, and
+splits it into frames below the protocol limit. An independent review caught the
+initial single-frame assumption; a seven-second recording reproduced the defect
+before the chunking fix. Fake-transport tests cover the request sequence, completed
+and failed responses, error events, auth requirements, WAV validation and chunking.
+
+The `backend-required` failure on the preceding head was traced to the new
+capabilities path missing from the OpenAPI fingerprint. Canonical export reproduced
+the exact CI mismatch. The fingerprint now contains 2,087 paths and 3,163 schemas,
+with SHA-256 `00409b322975045d73f60965d6786d699734f8576505597b145f46be36dd3102`.
+Frontend types were regenerated and include the capabilities endpoint; these
+generated type files are intentionally gitignored by the existing workflow.
+The job also logged a non-gating mypy/NumPy stub compatibility error under its
+existing `continue-on-error` type-check step; this is not the contract-drift failure.
+
+Local follow-up verification: **150 focused tests passed, no skips**, OpenAPI drift
+check passed, frontend types generated, Ruff/Black passed, repository guards and
+compilation passed, and Bandit reported zero findings or errors. Live-provider
+interoperability and latency remain unverified. Posted Qodo findings and required
+checks on the new head must be assessed before requesting the merge decision.

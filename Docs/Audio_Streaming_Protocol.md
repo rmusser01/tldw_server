@@ -424,6 +424,27 @@ the buffered TTS fallback still waits for the full text before starting synthesi
 Use `GET /api/v1/audio/realtime/capabilities` to discover persistence metadata, optional/deferred events, audio
 limits, close codes, and route support.
 
+### Manual Provider Smoke
+
+Configure and start the server with the intended STT, chat, and TTS providers. To
+exercise that deployment, activate the project virtual environment, set
+`TLDW_REALTIME_LIVE_SMOKE_AUTH_TOKEN` (or `SINGLE_USER_API_KEY`), and run:
+
+```bash
+python Helper_Scripts/Testing-related/realtime_speech_smoke.py --audio /path/to/spoken-16khz-mono.wav
+```
+
+The input must be a nonempty 16 kHz mono PCM16 WAV containing at most 30 seconds
+of speech. The command splits audio into frames below the server limit. Use `--url`
+to select a server other than `ws://127.0.0.1:8000/v1/realtime`. The command checks
+the manual turn lifecycle through a completed `response.done`; it can consume
+paid provider usage. Provider selection belongs to the running server's normal
+configuration. No credentials or transcript text are printed by the command.
+
+TASK-12089 moved provider verification out of pytest in response to Qodo's test
+policy review. Automated realtime and smoke-command tests use fake providers or
+fake transport and require no provider credentials or environment-driven skips.
+
 ### Provider Hints
 
 The default realtime pipeline uses the existing configured STT, chat, and TTS provider stacks. Optional env overrides:

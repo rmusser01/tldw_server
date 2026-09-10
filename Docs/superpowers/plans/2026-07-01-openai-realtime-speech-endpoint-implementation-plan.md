@@ -618,7 +618,8 @@ Expected result: pytest reports `20 passed`; Bandit reports `errors=[]` and `res
 
 Create:
 
-- `tldw_Server_API/tests/Audio/test_realtime_live_smoke.py`
+- `Helper_Scripts/Testing-related/realtime_speech_smoke.py` (manual provider verification)
+- `tldw_Server_API/tests/Audio/test_realtime_smoke_cli.py` (fake-transport regression coverage)
 
 Modify:
 
@@ -643,15 +644,18 @@ Modify:
 - [x] Update `Docs/Product/Realtime_Voice_Latency_PRD.md` with a note that the new endpoint carries `generation_id` from Stage 1 and that latency/interruption benchmarks remain Stage 2 work.
 - [x] Update the design spec status from `Draft for user review` to `Accepted for implementation` after implementation begins.
 
-### Task 5.2: Add Live Smoke Test Marker
+### Task 5.2: Add Manual Provider Smoke
 
-- [x] Add `test_realtime_live_smoke.py`.
-- [x] Mark the module with `pytestmark = [pytest.mark.external_api, pytest.mark.local_llm_service]`.
-- [x] Skip unless `TLDW_REALTIME_LIVE_SMOKE=1`.
-- [x] Require explicit provider environment variables for STT, LLM, and TTS.
-- [x] Send a short generated PCM16 silence-plus-tone fixture through `/v1/realtime`.
-- [x] Assert a `response.done` event arrives.
-- [x] Keep this test out of default verification commands.
+Amended during TASK-12089's September 2026 Qodo follow-up: provider verification
+is an explicitly invoked script rather than an environment-skipped pytest test.
+This preserves manual validation while making automated tests deterministic.
+
+- [x] Add `Helper_Scripts/Testing-related/realtime_speech_smoke.py`.
+- [x] Require an explicit spoken 16 kHz mono PCM16 WAV and authentication.
+- [x] Use the running server's normal STT, LLM, and TTS configuration.
+- [x] Check the manual turn lifecycle through a completed `response.done`.
+- [x] Cover the command with fake-transport unit tests using one `unit` marker.
+- [x] Keep real-provider calls outside pytest and normal CI.
 
 ### Task 5.3: Run Focused Verification
 
