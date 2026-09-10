@@ -8,7 +8,6 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-
 SQLITE_MAGIC = b"SQLite format 3\x00"
 
 REQUIRED_SCHEMA: dict[str, set[str]] = {
@@ -116,11 +115,13 @@ def validate_openwebui_file_schema(conn: sqlite3.Connection) -> None:
 
 
 def _validate_required_schema(conn: sqlite3.Connection, required_schema: dict[str, set[str]]) -> None:
-    """Validate that a source database contains the required tables and columns."""
-    table_rows = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table'",
-    ).fetchall()
-    tables = {str(row["name"]) for row in table_rows}
+    """Require ordinary source tables; virtual tables can execute uploaded views."""
+    # sqlite_master also labels virtual tables as "table". Use parsed metadata
+    # instead of interpreting attacker-controlled CREATE statements or rootpages.
+    table_rows = conn.execute("PRAGMA main.table_list").fetchall()
+    if not table_rows:
+        raise ValueError("OpenWebUI database imports require SQLite 3.37 or newer")
+    tables = {str(row["name"]) for row in table_rows if row["type"] == "table"}
     missing_tables = sorted(set(required_schema) - tables)
     if missing_tables:
         missing = ", ".join(missing_tables)
