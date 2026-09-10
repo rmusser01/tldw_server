@@ -199,3 +199,10 @@ normalizer repair; runtime regression success does not establish analyzer
 closure. Alerts 2119–2121 and 2599 remain absent from the open PR inventory.
 The new fixture corrections need analysis of their later source commit.
 Snapshot: `/tmp/pr2761-fourth-codeql.json`. No alert state was changed.
+
+The later `0929b44a5a` JavaScript analysis no longer has open instances for
+the four targeted fixture alerts **2356 and 2631–2633**. No alert was dismissed.
+The total PR inventory at this observation is **443**, mixed between
+`0929b44a5a` and preceding `6150040801` while Python analysis runs; this is not
+a complete-current-head count. The aggregate remains failed. Snapshot:
+`/tmp/pr2761-0929-codeql.json`.

@@ -11,9 +11,9 @@
 
 | Item | Recorded state |
 | --- | --- |
-| Integrated release code and verified blocker fixes | `433f18091ef1921d1a0e3b8d4eec6a82db9a4284` |
+| Integrated release code and verified blocker fixes | `23dd07bf23a89101dee737b62898b403cb9bef70` |
 | Latest observed CI head | `0929b44a5af3bed60142550719f610d048bec3e2`; 65 checks pass, eight run, 37 skip and CodeQL fails. Backend/security/container pass; remaining frontend/coverage/E2E lanes run. Further source changes require fresh-head CI. |
-| Protected source snapshot | `433f18091ef1921d1a0e3b8d4eec6a82db9a4284`, 7,109 files |
+| Protected source snapshot | `23dd07bf23a89101dee737b62898b403cb9bef70`, 7,110 files |
 | PR branch / target | `codex/release-main-0.1.42` → `main` |
 | PR state at inspection | Draft; no merge or publication performed |
 | Remote CI snapshot | On `6150040801`, container aggregate/all five images, E2E, backend/security/license and all eight frontend shards pass; frontend aggregate and coverage still run. Completed CodeQL inventory: 447 open instances, all on `6150040801` (7 critical, 437 high, 3 medium). Its failed changed-code aggregate reports 424 alerts; that is a different measure from all open PR instances. |
@@ -90,8 +90,11 @@ Continuation after `6150040801` has verified three independently reviewed fixes:
 - [CodeQL test fixtures](../../Evidence/PR2761-critical-CodeQL-assessment.md):
   remove three no-op category replacements and replace an incomplete script-tag
   regex with the existing HTML parser. Four parser regressions failed before
-  the repair; 58 fixture tests now pass under installed Vitest 4.0.18. No scan
-  closure or production security boundary change is claimed.
+  the repair; 58 fixture tests now pass under installed Vitest 4.0.18. The later
+  `0929b44a5a` JavaScript scan confirms alerts 2356 and 2631–2633 are no longer
+  open. Its mixed-language PR inventory is 443 while preceding Python instances
+  remain, so this is not a completed current-head total. The aggregate still
+  fails; no production security boundary or alert state was changed.
 
 Across these selections, 96 focused frontend tests pass. The full nonincremental
 WebUI typecheck also passes. Release docs/workflow tests pass 26 cases with one
