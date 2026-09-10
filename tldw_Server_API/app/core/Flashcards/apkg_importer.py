@@ -14,7 +14,10 @@ import zipfile
 from datetime import datetime, timezone
 from typing import Any
 
-from tldw_Server_API.app.core.DB_Management.sqlite_schema_helpers import ordinary_sqlite_table_names
+from tldw_Server_API.app.core.DB_Management.sqlite_schema_helpers import (
+    ordinary_sqlite_table_names,
+    sqlite_import_read_authorizer,
+)
 from tldw_Server_API.app.core.Flashcards.asset_refs import build_flashcard_asset_markdown
 
 
@@ -282,6 +285,12 @@ def import_rows_from_apkg_bytes(
         except sqlite3.Error as exc:
             raise APKGImportError("Failed to open APKG collection database") from exc
         try:
+            # Nested virtual-table initialization can bypass the read authorizer.
+            conn.execute("PRAGMA trusted_schema = OFF")
+            schema_trust = conn.execute("PRAGMA trusted_schema").fetchone()
+            if schema_trust is None or schema_trust[0] != 0:
+                raise sqlite3.DatabaseError("Unable to disable SQLite schema trust")
+            conn.set_authorizer(sqlite_import_read_authorizer({"col", "notes", "cards"}))
             with conn:
                 try:
                     tables = {name.lower() for name in ordinary_sqlite_table_names(conn)}
