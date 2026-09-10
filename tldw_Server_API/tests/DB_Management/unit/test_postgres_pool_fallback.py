@@ -82,7 +82,9 @@ def test_fallback_pool_discard_replaces_poisoned_managed_connection(
     assert replacement.closed is False
     pool.return_connection(replacement)
     assert replacement.closed is False
-    assert pool.get_connection() is replacement
+    reborrowed = pool.get_connection()
+    assert reborrowed.closed is False
+    pool.return_connection(reborrowed)
     pool.close_all()
 
 

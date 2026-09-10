@@ -4,7 +4,7 @@ title: Review and rebase PR 2627 SQLite migration durability
 status: Done
 assignee: []
 created_date: '2026-09-10 00:43'
-updated_date: '2026-09-10 02:40'
+updated_date: '2026-09-10 03:04'
 labels:
   - db
   - migrations
@@ -71,6 +71,7 @@ Legacy rejection follow-up: use the existing pool invalidation API to close/remo
 Injected-pool compatibility follow-up: provide invalidate_connection through the shared pool contract, with a close default and matching-current-handle SQLite override. Exercise compliant injected pools and current/stale/external ownership. Complete: focused red/green and expanded 14-module verification, 227 passed and 12 PostgreSQL-related skips; lint/security/independent review pass.
 Pool contract completion: delegate PostgreSQL invalidation to existing discard bookkeeping and document all implementations with ownership, return and error behavior. Complete: both PostgreSQL modes reproduced bookkeeping loss before the override, 19 focused tests and 237 expanded tests pass afterward, with 12 unavailable-PostgreSQL integration skips; security/review pass.
 Final fallback-test maintenance: replace private-container assertions with observable return/reuse behavior so storage refactors remain possible and the lost-capacity regression stays detectable. Complete: close-only mutation fails on replacement closure; restored code passes all 19 focused tests, lint/security and review.
+Reborrow contract follow-up: verify an open reborrowed handle and explicitly return it without requiring object identity. Complete: close-only mutation remains red; 19 focused tests pass, production code is unchanged, and independent review has no findings.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -125,12 +126,20 @@ Repository search confirms SQLite and PostgreSQL are the only production impleme
 2026-09-10 Qodo test-maintenance follow-up on f86e1e15ec (zero bugs, one rule): removed private _connections/_free assertions from the parameterized fallback removal test. The replacement must now remain open after return and be borrowed again, proving it has managed capacity rather than being an overflow connection. Merely obtaining a distinct new handle would not catch the prior capacity leak because overflow is permitted. Verified the old close-only invalidation fails this public assertion, then restored production exactly and passed 19 focused pool/legacy tests (4 warnings, 0.69s). No application code changed in this follow-up; the preceding expanded 237-pass/12-PostgreSQL-skip validation still covers that exact application code. Ruff, compilation, whitespace and fresh Bandit over all six application modules pass with zero findings. Logs: /tmp/pr2627-public-capacity-red.log, /tmp/pr2627-public-capacity-green.log, /tmp/pr2627-public-capacity-bandit.json. Await final-head Qodo review and required GitHub gates before merge.
 
 Independent review confirmed the public replacement return/reuse assertions detect lost managed capacity without depending on internal containers; no findings. Production diff is empty.
+
+2026-09-10 Qodo review on c9a21bf84a requests removing the reborrow identity assertion from the fallback test. Plan: verify the reborrowed connection is open and return it through the public API, retaining the replacement-open-after-return assertion that catches lost managed capacity. This is test-only; confirm the close-only regression remains red and the focused suite remains green.
+
+2026-09-10 Qodo follow-up on c9a21bf84a: removed the reborrowed-connection identity requirement; assert the borrowed handle is open and return it explicitly. Retained replacement-open-after-return, which detects lost managed capacity even when overflow is allowed. Temporarily restoring close-only PostgreSQL invalidation still fails that assertion (1 failed, 9 deselected); restored production byte-for-byte to HEAD. Final focused pool/legacy tests: 19 passed, 4 warnings in 0.79s. Ruff, py_compile, whitespace and fresh Bandit over all six application modules pass with zero findings. Independent review found no substantive issue. Application code remains covered by the preceding expanded 237-pass/12-PostgreSQL-unavailable-skip run. Logs: /tmp/pr2627-reborrow-red.log, /tmp/pr2627-reborrow-green.log, /tmp/pr2627-reborrow-bandit.json. Dev remains f0248aaa00. Final-head Qodo and required CI remain merge gates.
+
+2026-09-10 final merge refresh: Qodo completed review of 5817166aa8 with zero bugs, rule violations or skill insights and all threads resolved. Dev advanced to 6b61b5074cc4c388fe90270b3f40d28dc2731115 by merging the audio.cpp TTS provider; the 23 changed files do not overlap this PR. Rebase the existing patches, confirm unchanged code range-diff and run affected migration/pool checks before publishing the refreshed head.
+
+2026-09-10 rebased onto dev 6b61b5074cc4c388fe90270b3f40d28dc2731115 after Qodo cleared 5817166aa8 with zero findings. Rebase had no conflicts; all eleven patches matched in range-diff and all migration production/test/docs files remain byte-identical to the reviewed head. Fresh expanded 15-module suite: 237 passed, 12 PostgreSQL-unavailable skips, 4 warnings. Ruff, compilation, repository guards, whitespace and unchanged packaged SQL checks pass; fresh Bandit over six application modules reports zero findings. Logs: /tmp/pr2627-final-rebase-tests.log and /tmp/pr2627-final-rebase-bandit.json. Only this task record is amended for new verification; request final-head Qodo and await required CI before merging.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Rebased PR #2627 onto dev f0248aaa00 and addressed Qodo feedback through reviewed head f86e1e15ec. Atomic migration execution, unchanged SQL/checksums, wrapper compatibility, recovery guidance and backend-neutral invalidation are implemented. Final fallback regression verifies public replacement reuse instead of private storage. Expanded application validation: 237 passed, 12 PostgreSQL-unavailable skips; latest test-only follow-up: 19 focused tests passed with application code unchanged and zero Bandit findings. Requester-owned Change summary is present. Await final-head Qodo review and required checks before the authorized merge.
+Rebased PR #2627 onto latest dev 6b61b5074c with unchanged implementation patches. All fourteen Qodo findings through 5817166aa8 are resolved, and Qodo completed that head with zero findings. Atomic migration execution, unchanged SQL/checksums, compatibility, recovery guidance and backend-neutral invalidation remain useful. Fresh post-rebase expanded validation: 237 passed, 12 PostgreSQL-unavailable skips, zero Bandit findings; lint/guards pass. Human Change summary remains present. Await review and required CI on the republished head before the authorized merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
