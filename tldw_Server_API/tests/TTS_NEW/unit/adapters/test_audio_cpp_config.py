@@ -55,10 +55,7 @@ def test_validate_base_url_requires_loopback_by_default():
     with pytest.raises(TTSValidationError):
         validate_base_url("http://example.com:8080")
 
-    assert (
-        validate_base_url("http://example.com:8080", allow_remote_base_url=True)
-        == "http://example.com:8080"
-    )
+    assert validate_base_url("http://example.com:8080", allow_remote_base_url=True) == "http://example.com:8080"
 
 
 @pytest.mark.unit
@@ -134,3 +131,35 @@ def test_audio_cpp_config_builds_reference_paths_without_user_filename():
     assert path.suffix == ".wav"
     assert "my private voice" not in path.name
     assert path.name.startswith("voice_ref_")
+
+
+@pytest.mark.unit
+def test_rendered_config_preserves_backend_and_native_idle_unload():
+    config = _provider_config(backend="metal")
+    config["extra_params"]["server"]["idle_shutdown_seconds"] = 12
+    rendered = AudioCppConfig.from_provider_config(config).render_server_config()
+    assert rendered["backend"] == "metal"
+    assert rendered["idle_unload_ms"] == 12000
+
+
+@pytest.mark.unit
+def test_rendered_config_requires_explicit_model_path():
+    config = _provider_config(model_path=None)
+    config["extra_params"]["server"]["model"].pop("path")
+    with pytest.raises(TTSValidationError, match="model.path"):
+        AudioCppConfig.from_provider_config(config).render_server_config()
+
+
+@pytest.mark.unit
+def test_zero_disables_native_idle_unload():
+    config = _provider_config()
+    config["extra_params"]["server"]["idle_shutdown_seconds"] = 0
+    assert AudioCppConfig.from_provider_config(config).render_server_config()["idle_unload_ms"] == 0
+
+
+@pytest.mark.unit
+def test_rendered_config_preserves_default_voice_preset():
+    config = _provider_config()
+    config["extra_params"]["server"]["model"]["default_voice_preset"] = {"voice_id": "alba"}
+    rendered = AudioCppConfig.from_provider_config(config).render_server_config()
+    assert rendered["models"][0]["default_voice_preset"] == {"voice_id": "alba"}

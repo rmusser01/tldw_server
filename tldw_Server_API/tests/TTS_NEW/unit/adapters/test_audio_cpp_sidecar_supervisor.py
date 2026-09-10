@@ -50,9 +50,7 @@ class _NeverReadyClient:
         self.base_url = base_url
 
     async def health(self) -> dict[str, str]:
-        raise RuntimeError(
-            "raw stderr: token=secret C:/Users/GDesktop-1/Working/tldw/models/audio_cpp/server.json"
-        )
+        raise RuntimeError("raw stderr: token=secret C:/Users/GDesktop-1/Working/tldw/models/audio_cpp/server.json")
 
     async def close(self) -> None:
         return None
@@ -194,22 +192,83 @@ async def test_startup_timeout_terminates_process_records_backoff_and_sanitizes_
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
-async def test_shutdown_if_idle_stops_live_process_once():
-    from tldw_Server_API.app.core.TTS.adapters.audio_cpp_sidecar_supervisor import (
-        AudioCppSidecarSupervisor,
-    )
+async def test_cancelled_startup_terminates_child_and_closes_health_client(monkeypatch, tmp_path):
+    import asyncio
 
-    test_root = _workspace_test_dir("sidecar_idle_shutdown")
-    supervisor = AudioCppSidecarSupervisor(_provider_config(test_root), repo_root=test_root)
+    from tldw_Server_API.app.core.TTS.adapters import audio_cpp_sidecar_supervisor as module
+
     process = _FakeProcess()
-    supervisor._process = process
-    supervisor._base_url = "http://127.0.0.1:8080"
-    supervisor._last_activity_at = 0
+    started = asyncio.Event()
+    clients = []
 
-    first = await supervisor.shutdown_if_idle()
-    second = await supervisor.shutdown_if_idle()
+    class WaitingClient(_ReadyClient):
+        closed = False
 
-    assert first is True
-    assert second is False
-    assert process.terminate_called is True
+        async def health(self):
+            started.set()
+            await asyncio.Event().wait()
+
+        async def close(self):
+            self.closed = True
+
+    def client_factory(**kwargs):
+        client = WaitingClient(**kwargs)
+        clients.append(client)
+        return client
+
+    async def spawn(*args, **kwargs):
+        return process
+
+    monkeypatch.setattr(module, "is_port_free", lambda host, port: True)
+    monkeypatch.setattr(module, "AudioCppClient", client_factory)
+    monkeypatch.setattr(module.asyncio, "create_subprocess_exec", spawn)
+    supervisor = module.AudioCppSidecarSupervisor(_provider_config(tmp_path), repo_root=tmp_path)
+    task = asyncio.create_task(supervisor.ensure_started())
+    await asyncio.wait_for(started.wait(), 2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert process.terminate_called
+    assert clients[0].closed
+    assert supervisor.base_url is None
+    assert not supervisor.server_config_path.exists()
+
+
+@pytest.mark.unit
+async def test_restart_closes_previous_health_client(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.TTS.adapters import audio_cpp_sidecar_supervisor as module
+
+    clients = []
+
+    class Client(_ReadyClient):
+        closed = False
+
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            clients.append(self)
+
+        async def close(self):
+            self.closed = True
+
+    async def spawn(*args, **kwargs):
+        return _FakeProcess()
+
+    monkeypatch.setattr(module, "is_port_free", lambda host, port: True)
+    monkeypatch.setattr(module, "AudioCppClient", Client)
+    monkeypatch.setattr(module.asyncio, "create_subprocess_exec", spawn)
+    supervisor = module.AudioCppSidecarSupervisor(_provider_config(tmp_path), repo_root=tmp_path)
+    await supervisor.ensure_started()
+    supervisor._process.returncode = 1
+    await supervisor.ensure_started()
+    assert clients[0].closed
+    await supervisor.shutdown()
+    assert clients[1].closed
+
+
+@pytest.mark.unit
+def test_supervisors_do_not_share_generated_config_paths(tmp_path):
+    from tldw_Server_API.app.core.TTS.adapters.audio_cpp_sidecar_supervisor import AudioCppSidecarSupervisor
+
+    first = AudioCppSidecarSupervisor(_provider_config(tmp_path), repo_root=tmp_path)
+    second = AudioCppSidecarSupervisor(_provider_config(tmp_path), repo_root=tmp_path)
+    assert first.server_config_path != second.server_config_path

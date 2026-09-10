@@ -21,7 +21,7 @@ def test_audio_cpp_yaml_config_is_disabled_and_preserves_runtime_settings():
     assert provider_config.backend == "cuda"
     assert provider_config.base_url == "http://127.0.0.1:8080"
     assert provider_config.model == "audio-cpp/pocket-tts"
-    assert provider_config.model_path == "models/audio_cpp/pocket-tts"
+    assert provider_config.model_path == "models/audio_cpp/PocketTTS-GGUF/english"
     assert provider_config.binary_path is None
     assert provider_config.device == "cuda"
     assert provider_config.timeout == 300
@@ -38,7 +38,8 @@ def test_audio_cpp_yaml_config_is_disabled_and_preserves_runtime_settings():
     assert extra["server"]["host"] == "127.0.0.1"
     assert extra["server"]["autoselect_port"] is True
     assert extra["server"]["model"]["id"] == "pocket-tts"
-    assert extra["voices"]["alba"]["request_field"] is None
+    assert extra["voices"]["alba"]["request_field"] == "voice"
+    assert extra["server"]["model"]["default_voice_preset"] == {"voice_id": "alba"}
 
 
 @pytest.mark.unit

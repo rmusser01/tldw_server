@@ -101,3 +101,19 @@ async def test_audio_cpp_client_maps_transport_errors_to_tts_network_error():
         client = AudioCppClient(base_url="http://127.0.0.1:8080", http_client=http_client)
         with pytest.raises(TTSNetworkError):
             await client.health()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("status", [302, 500])
+async def test_http_errors_never_expose_arbitrary_upstream_body(status):
+    body = 'Authorization: Bearer private-credential; "token": "private-token"'
+
+    def handler(request):
+        return httpx.Response(status, text=body)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        client = AudioCppClient(base_url="http://127.0.0.1:8080", http_client=http_client)
+        with pytest.raises(TTSProviderError) as error:
+            await client.speech({"input": "hello"})
+    assert "private-credential" not in str(error.value.details)
+    assert "private-token" not in str(error.value.details)

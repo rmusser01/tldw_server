@@ -7,7 +7,7 @@ import argparse
 import subprocess  # nosec B404 - installer CLI intentionally runs explicit argv lists
 import sys
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from loguru import logger
@@ -61,8 +61,8 @@ def build_runtime_layout(
     return AudioCppRuntimeLayout(
         provider_name=PROVIDER_NAME,
         runtime_base=base,
-        binary_path=root / "bin" / default_binary_name(platform_name),
-        model_path=base / "pocket-tts",
+        binary_path=base / "_build" / "bin" / default_binary_name(platform_name),
+        model_path=base / "PocketTTS-GGUF" / "english",
         server_config_path=base / "server.json",
         shared_scratch_dir=base / "runtime" / "scratch",
         source_dir=root / DEFAULT_SOURCE_DIR,
@@ -140,6 +140,7 @@ def _render_provider_block(
     enable_provider: bool,
     base_url: str,
     provider_indent: int,
+    backend: str,
 ) -> list[str]:
     provider_prefix = " " * provider_indent
     key_prefix = provider_prefix + "  "
@@ -156,12 +157,12 @@ def _render_provider_block(
     return [
         f"{provider_prefix}{PROVIDER_NAME}:",
         f"{key_prefix}enabled: {'true' if enable_provider else 'false'}",
-        f'{key_prefix}backend: "cuda"',
+        f'{key_prefix}backend: "{backend}"',
         f'{key_prefix}base_url: "{base_url}"',
         f'{key_prefix}model: "audio-cpp/pocket-tts"',
         f'{key_prefix}model_path: "{model_path}"',
         f'{key_prefix}binary_path: "{binary_path}"',
-        f"{key_prefix}device: cuda",
+        f"{key_prefix}device: {backend}",
         f"{key_prefix}timeout: 300",
         f"{key_prefix}sample_rate: 24000",
         f"{key_prefix}max_concurrent_generations: 1",
@@ -173,6 +174,7 @@ def _render_provider_block(
         f"{nested_prefix}retain_request_artifacts: false",
         f"{nested_prefix}server:",
         f'{server_prefix}host: "127.0.0.1"',
+        f'{server_prefix}backend: "{backend}"',
         f"{server_prefix}port: 8080",
         f"{server_prefix}autoselect_port: true",
         f"{server_prefix}port_probe_max: 10",
@@ -193,6 +195,8 @@ def _render_provider_block(
         f'{model_prefix}path: "{model_path}"',
         f'{model_prefix}task: "tts"',
         f'{model_prefix}mode: "offline"',
+        f"{model_prefix}default_voice_preset:",
+        f'{model_nested_prefix}voice_id: "alba"',
         f"{model_prefix}load_options:",
         f'{model_nested_prefix}language: "english"',
         f"{model_prefix}session_options:",
@@ -210,6 +214,7 @@ def patch_tts_config(
     repo_root: Path | None = None,
     enable_provider: bool = False,
     base_url: str = "http://127.0.0.1:8080",
+    backend: str = "cuda",
 ) -> bool:
     """Patch only the audio_cpp provider block."""
     if not config_path.exists():
@@ -230,6 +235,7 @@ def patch_tts_config(
         enable_provider=enable_provider,
         base_url=base_url,
         provider_indent=provider_indent,
+        backend=backend,
     )
     if block_start is not None and block_end is not None:
         lines[block_start:block_end] = block_lines
@@ -249,7 +255,6 @@ def build_cmake_configure_command(
     *,
     source_dir: Path,
     build_dir: Path,
-    install_dir: Path,
     backend: str = "cuda",
 ) -> list[str]:
     return [
@@ -258,13 +263,18 @@ def build_cmake_configure_command(
         str(source_dir),
         "-B",
         str(build_dir),
-        f"-DCMAKE_INSTALL_PREFIX={install_dir}",
-        f"-DAUDIOCPP_BACKEND={backend}",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DAUDIOCPP_DEPLOYMENT_BUILD=ON",
+        f"-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE={build_dir.resolve() / 'bin'}",
+        *[
+            f"-DENGINE_ENABLE_{name.upper()}={'ON' if backend == name else 'OFF'}"
+            for name in ("cuda", "hip", "vulkan", "metal")
+        ],
     ]
 
 
 def build_cmake_build_command(build_dir: Path) -> list[str]:
-    return ["cmake", "--build", str(build_dir), "--config", "Release"]
+    return ["cmake", "--build", str(build_dir), "--config", "Release", "--target", "audiocpp_server"]
 
 
 def build_model_manager_command(
@@ -276,7 +286,7 @@ def build_model_manager_command(
 ) -> list[str]:
     return [
         python_executable,
-        str(source_dir / "tools" / "model_manager.py"),
+        str(source_dir / "tools" / "model_manager_v2.py"),
         "install",
         package_id,
         "--models-root",
@@ -295,13 +305,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--source-dir")
     parser.add_argument("--build-dir")
     parser.add_argument("--config-path", default=str(DEFAULT_CONFIG_PATH))
-    parser.add_argument("--backend", default="cuda")
-    parser.add_argument("--package-id", default="pocket-tts")
+    parser.add_argument("--backend", choices=("cpu", "cuda", "hip", "vulkan", "metal"), default="cuda")
+    parser.add_argument("--package-id", default="pocket_tts_english_q8_0")
     parser.add_argument("--enable-provider", action="store_true")
     parser.add_argument("--clone", action="store_true", help="Clone audio.cpp")
     parser.add_argument("--configure", action="store_true", help="Run cmake configure")
     parser.add_argument("--build", action="store_true", help="Run cmake build")
-    parser.add_argument("--install-model", action="store_true", help="Run upstream model_manager.py install")
+    parser.add_argument("--install-model", action="store_true", help="Run upstream model_manager_v2.py install")
     parser.add_argument("--patch-config", action="store_true", help="Patch tts_providers_config.yaml")
     return parser.parse_args(argv)
 
@@ -313,6 +323,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     source_dir = Path(args.source_dir).expanduser() if args.source_dir else layout.source_dir
     build_dir = Path(args.build_dir).expanduser() if args.build_dir else layout.build_dir
 
+    source_dir = (repo_root / source_dir).resolve()
+    build_dir = (repo_root / build_dir).resolve()
+    layout = replace(
+        layout, source_dir=source_dir, build_dir=build_dir, binary_path=build_dir / "bin" / default_binary_name()
+    )
+
     if args.clone:
         _run_checked(build_clone_command(args.repo_url, source_dir))
     if args.configure:
@@ -320,7 +336,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             build_cmake_configure_command(
                 source_dir=source_dir,
                 build_dir=build_dir,
-                install_dir=layout.runtime_base,
                 backend=args.backend,
             )
         )
@@ -340,6 +355,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             layout=layout,
             repo_root=repo_root,
             enable_provider=args.enable_provider,
+            backend=args.backend,
         )
 
     logger.info("audio.cpp runtime layout: {}", layout.runtime_base)

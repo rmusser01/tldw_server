@@ -152,7 +152,7 @@ class AudioCppConfig:
             external_voice_reference_mode=mode,
             retain_request_artifacts=_as_bool(extra_params.get("retain_request_artifacts"), default=False),
             request_option_allowlist=tuple(str(item) for item in allowlist),
-            server=dict(extra_params.get("server") or {}),
+            server={"backend": config.get("backend") or "cuda", **dict(extra_params.get("server") or {})},
             repo_root=Path(repo_root or Path.cwd()).resolve(strict=False),
         )
 
@@ -188,6 +188,8 @@ class AudioCppConfig:
         host = validate_managed_host(self.server.get("host"))
         model_config = dict(self.server.get("model") or {})
         configured_model_path = model_config.get("path") or self.model_path
+        if not configured_model_path:
+            raise TTSValidationError("audio.cpp managed mode requires model.path", provider=PROVIDER_KEY)
         model_path = self._resolve_repo_path(configured_model_path)
         self._ensure_within(model_path, self.models_root, "model.path")
 
@@ -200,8 +202,12 @@ class AudioCppConfig:
             "load_options": dict(model_config.get("load_options") or {}),
             "session_options": dict(model_config.get("session_options") or {}),
         }
+        if model_config.get("default_voice_preset"):
+            model_entry["default_voice_preset"] = dict(model_config["default_voice_preset"])
         return {
             "host": host,
+            "backend": str(self.server.get("backend") or "cuda"),
+            "idle_unload_ms": max(0, int(float(self.server.get("idle_shutdown_seconds", 900)) * 1000)),
             "port": int(self.server.get("port") or 8080),
             "lazy_load": _as_bool(self.server.get("lazy_load"), default=True),
             "device": self.server.get("device", 0),

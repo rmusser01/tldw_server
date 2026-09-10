@@ -1404,7 +1404,7 @@ class TTSAdapterFactory:
         "dia-1.6b": TTSProvider.DIA,
 
         # Chatterbox models
-        **dict.fromkeys(CHATTERBOX_MODEL_PROVIDER_ALIASES, TTSProvider.CHATTERBOX),
+        **{alias: TTSProvider.CHATTERBOX for alias in CHATTERBOX_MODEL_PROVIDER_ALIASES},
 
         # VibeVoice models
         "vibevoice": TTSProvider.VIBEVOICE,

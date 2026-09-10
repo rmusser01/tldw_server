@@ -16,7 +16,7 @@ def _workspace_test_dir(name: str) -> Path:
 
 @pytest.mark.unit
 def test_audio_cpp_installer_builds_repo_local_runtime_layout():
-    from Helper_Scripts.install_tts_audio_cpp import build_runtime_layout
+    from Helper_Scripts.TTS_Installers.install_tts_audio_cpp import build_runtime_layout
 
     repo_root = Path(__file__).resolve().parents[4]
 
@@ -24,15 +24,15 @@ def test_audio_cpp_installer_builds_repo_local_runtime_layout():
 
     assert layout.provider_name == "audio_cpp"
     assert layout.runtime_base.relative_to(repo_root).as_posix() == "models/audio_cpp"
-    assert layout.binary_path.relative_to(repo_root).as_posix() == "bin/audiocpp_server"
-    assert layout.model_path.relative_to(repo_root).as_posix() == "models/audio_cpp/pocket-tts"
+    assert layout.binary_path.relative_to(repo_root).as_posix() == "models/audio_cpp/_build/bin/audiocpp_server"
+    assert layout.model_path.relative_to(repo_root).as_posix() == "models/audio_cpp/PocketTTS-GGUF/english"
     assert layout.server_config_path.relative_to(repo_root).as_posix() == "models/audio_cpp/server.json"
     assert layout.shared_scratch_dir.relative_to(repo_root).as_posix() == "models/audio_cpp/runtime/scratch"
 
 
 @pytest.mark.unit
 def test_audio_cpp_installer_patches_config_without_enabling_provider_by_default():
-    from Helper_Scripts.install_tts_audio_cpp import build_runtime_layout, patch_tts_config
+    from Helper_Scripts.TTS_Installers.install_tts_audio_cpp import build_runtime_layout, patch_tts_config
 
     test_root = _workspace_test_dir("installer_patch_disabled")
     config_path = test_root / "tts_providers_config.yaml"
@@ -63,8 +63,8 @@ providers:
     assert changed is True
     assert "audio_cpp:\n    enabled: false" in content
     assert 'base_url: "http://127.0.0.1:9010"' in content
-    assert 'binary_path: "bin/audiocpp_server"' in content
-    assert 'model_path: "models/audio_cpp/pocket-tts"' in content
+    assert 'binary_path: "models/audio_cpp/_build/bin/audiocpp_server"' in content
+    assert 'model_path: "models/audio_cpp/PocketTTS-GGUF/english"' in content
     assert 'server_config_path: "models/audio_cpp/server.json"' in content
     assert "HF_TOKEN" not in content
     assert "api_key" not in content
@@ -72,7 +72,7 @@ providers:
 
 @pytest.mark.unit
 def test_audio_cpp_installer_can_enable_provider_when_requested():
-    from Helper_Scripts.install_tts_audio_cpp import build_runtime_layout, patch_tts_config
+    from Helper_Scripts.TTS_Installers.install_tts_audio_cpp import build_runtime_layout, patch_tts_config
 
     test_root = _workspace_test_dir("installer_patch_enabled")
     config_path = test_root / "tts_providers_config.yaml"
@@ -95,7 +95,7 @@ def test_audio_cpp_installer_can_enable_provider_when_requested():
 
 @pytest.mark.unit
 def test_audio_cpp_installer_builds_explicit_clone_build_and_model_manager_commands():
-    from Helper_Scripts.install_tts_audio_cpp import (
+    from Helper_Scripts.TTS_Installers.install_tts_audio_cpp import (
         build_clone_command,
         build_cmake_build_command,
         build_cmake_configure_command,
@@ -118,7 +118,6 @@ def test_audio_cpp_installer_builds_explicit_clone_build_and_model_manager_comma
     assert build_cmake_configure_command(
         source_dir=source_dir,
         build_dir=build_dir,
-        install_dir=install_dir,
         backend="cuda",
     ) == [
         "cmake",
@@ -126,20 +125,33 @@ def test_audio_cpp_installer_builds_explicit_clone_build_and_model_manager_comma
         str(source_dir),
         "-B",
         str(build_dir),
-        f"-DCMAKE_INSTALL_PREFIX={install_dir}",
-        "-DAUDIOCPP_BACKEND=cuda",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DAUDIOCPP_DEPLOYMENT_BUILD=ON",
+        f"-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE={build_dir.resolve() / 'bin'}",
+        "-DENGINE_ENABLE_CUDA=ON",
+        "-DENGINE_ENABLE_HIP=OFF",
+        "-DENGINE_ENABLE_VULKAN=OFF",
+        "-DENGINE_ENABLE_METAL=OFF",
     ]
-    assert build_cmake_build_command(build_dir) == ["cmake", "--build", str(build_dir), "--config", "Release"]
+    assert build_cmake_build_command(build_dir) == [
+        "cmake",
+        "--build",
+        str(build_dir),
+        "--config",
+        "Release",
+        "--target",
+        "audiocpp_server",
+    ]
     assert build_model_manager_command(
         source_dir=source_dir,
-        package_id="pocket-tts",
+        package_id="pocket_tts_english_q8_0",
         models_root=install_dir / "models",
         python_executable="python",
     ) == [
         "python",
-        str(source_dir / "tools" / "model_manager.py"),
+        str(source_dir / "tools" / "model_manager_v2.py"),
         "install",
-        "pocket-tts",
+        "pocket_tts_english_q8_0",
         "--models-root",
         str(install_dir / "models"),
     ]
@@ -147,10 +159,38 @@ def test_audio_cpp_installer_builds_explicit_clone_build_and_model_manager_comma
 
 @pytest.mark.unit
 def test_audio_cpp_installer_builds_windows_binary_layout():
-    from Helper_Scripts.install_tts_audio_cpp import build_runtime_layout
+    from Helper_Scripts.TTS_Installers.install_tts_audio_cpp import build_runtime_layout
 
     repo_root = Path(__file__).resolve().parents[4]
 
     layout = build_runtime_layout(Path("models") / "audio_cpp", repo_root=repo_root, platform_name="win32")
 
-    assert layout.binary_path.relative_to(repo_root).as_posix() == "bin/audiocpp_server.exe"
+    assert layout.binary_path.relative_to(repo_root).as_posix() == "models/audio_cpp/_build/bin/audiocpp_server.exe"
+
+
+@pytest.mark.unit
+def test_installer_config_uses_custom_build_output_and_backend(tmp_path, monkeypatch):
+    import yaml
+    from Helper_Scripts.TTS_Installers import install_tts_audio_cpp as installer
+
+    config = tmp_path / "providers.yaml"
+    config.write_text("providers:\n", encoding="utf-8")
+    monkeypatch.setattr(installer, "resolve_repo_root", lambda: tmp_path)
+    installer.main(
+        ["--build-dir", "custom-build", "--backend", "metal", "--config-path", str(config), "--patch-config"]
+    )
+    provider = yaml.safe_load(config.read_text())["providers"]["audio_cpp"]
+    assert provider["binary_path"] == "custom-build/bin/audiocpp_server"
+    assert provider["backend"] == "metal"
+    assert provider["extra_params"]["server"]["backend"] == "metal"
+    assert provider["extra_params"]["server"]["model"]["default_voice_preset"] == {"voice_id": "alba"}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("backend", ["cpu", "cuda", "hip", "vulkan", "metal"])
+def test_installer_enables_only_selected_backend(backend, tmp_path):
+    from Helper_Scripts.TTS_Installers.install_tts_audio_cpp import build_cmake_configure_command
+
+    command = build_cmake_configure_command(source_dir=tmp_path, build_dir=tmp_path / "build", backend=backend)
+    enabled = [arg for arg in command if arg.startswith("-DENGINE_ENABLE_") and arg.endswith("=ON")]
+    assert enabled == ([] if backend == "cpu" else [f"-DENGINE_ENABLE_{backend.upper()}=ON"])

@@ -174,7 +174,7 @@ providers:
     backend: "cuda"
     base_url: "http://127.0.0.1:8080"
     model: "audio-cpp/pocket-tts"
-    model_path: "models/audio_cpp/pocket-tts"
+    model_path: "models/audio_cpp/PocketTTS-GGUF/english"
     binary_path: null
     device: "cuda"
     timeout: 300
@@ -197,7 +197,7 @@ providers:
         startup_timeout_seconds: 30
         healthcheck_interval_seconds: 0.25
         startup_backoff_seconds: 5
-        idle_shutdown_seconds: 900
+        idle_shutdown_seconds: 900  # Native model idle unload; 0 disables (process stays warm)
         terminate_timeout_seconds: 10
         server_config_path: "models/audio_cpp/server.json"
         models_root: "models/audio_cpp"
@@ -208,7 +208,9 @@ providers:
         model:
           id: "pocket-tts"
           family: "pocket_tts"
-          path: "models/audio_cpp/pocket-tts"
+          default_voice_preset:
+            voice_id: "alba"
+          path: "models/audio_cpp/PocketTTS-GGUF/english"
           task: "tts"
           mode: "offline"
           load_options:
@@ -218,7 +220,7 @@ providers:
       voices:
         alba:
           upstream_value: "alba"
-          request_field: null
+          request_field: "voice"
 
   # KittenTTS ONNX Configuration (local; English single-speaker voices)
   kitten_tts:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -17,12 +16,6 @@ from ..tts_exceptions import (
 )
 from .audio_cpp_config import PROVIDER_KEY, validate_base_url
 
-_WINDOWS_PATH_RE = re.compile(r"\b[A-Za-z]:\\[^\r\n\t]+")
-_POSIX_PATH_RE = re.compile(r"(?<!\w)/(?:[^\s/:;,)\]}]+/)+[^\s:;,)\]}]+")
-_SECRET_RE = re.compile(
-    r"(?i)\b(api[_-]?key|token|secret|authorization|bearer)\s*[:=]\s*[^,\s]+"
-)
-
 
 @dataclass(frozen=True)
 class AudioCppSpeechResult:
@@ -31,20 +24,6 @@ class AudioCppSpeechResult:
     audio_bytes: bytes
     content_type: str
     metadata: dict[str, Any] = field(default_factory=dict)
-
-
-def _sanitize_error_text(text: str | None, *, redaction_terms: list[str] | None = None) -> str:
-    sanitized = str(text or "").strip()
-    for term in redaction_terms or []:
-        if term:
-            sanitized = sanitized.replace(str(term), "[redacted-input]")
-    sanitized = _WINDOWS_PATH_RE.sub("[redacted-path]", sanitized)
-    sanitized = _POSIX_PATH_RE.sub("[redacted-path]", sanitized)
-    sanitized = _SECRET_RE.sub(lambda match: f"{match.group(1)}=[redacted-secret]", sanitized)
-    sanitized = re.sub(r"\s+", " ", sanitized).strip()
-    if len(sanitized) > 300:
-        return f"{sanitized[:300]}..."
-    return sanitized
 
 
 class AudioCppClient:
@@ -58,6 +37,7 @@ class AudioCppClient:
         timeout: float = 300.0,
         allow_remote_base_url: bool = False,
     ) -> None:
+        """Use an injected client or own a proxy-independent HTTP client."""
         self.base_url = validate_base_url(
             base_url,
             allow_remote_base_url=allow_remote_base_url,
@@ -99,22 +79,17 @@ class AudioCppClient:
             ) from exc
         return response
 
-    def _raise_for_status(self, response: httpx.Response, *, payload: dict[str, Any] | None = None) -> None:
-        if response.status_code < 400:
+    def _raise_for_status(self, response: httpx.Response) -> None:
+        """Expose status only; arbitrary upstream bodies can contain private data."""
+        if 200 <= response.status_code < 300:
             return
-        request_text = ""
-        if isinstance(payload, dict):
-            request_text = str(payload.get("input") or "")
         raise TTSProviderError(
             f"audio.cpp server returned HTTP {response.status_code}",
             provider=PROVIDER_KEY,
             error_code=f"HTTP_{response.status_code}",
             details={
                 "status_code": response.status_code,
-                "response_text": _sanitize_error_text(
-                    response.text,
-                    redaction_terms=[request_text],
-                ),
+                "response_text": "Upstream error response omitted",
             },
         )
 
@@ -158,7 +133,7 @@ class AudioCppClient:
 
     async def speech(self, payload: dict[str, Any]) -> AudioCppSpeechResult:
         response = await self._request("POST", "/v1/audio/speech", json=payload)
-        self._raise_for_status(response, payload=payload)
+        self._raise_for_status(response)
         content_type = self._content_type(response) or "application/octet-stream"
         if content_type != "application/json":
             return AudioCppSpeechResult(

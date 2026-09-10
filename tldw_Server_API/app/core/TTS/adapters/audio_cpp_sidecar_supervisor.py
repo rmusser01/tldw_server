@@ -8,6 +8,7 @@ import json
 import os
 import socket
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -67,7 +68,6 @@ class AudioCppSidecarSupervisor:
         self._startup_timeout_seconds = float(self._server.get("startup_timeout_seconds") or 30.0)
         self._healthcheck_interval_seconds = float(self._server.get("healthcheck_interval_seconds") or 0.25)
         self._startup_backoff_seconds = float(self._server.get("startup_backoff_seconds") or 5.0)
-        self._idle_shutdown_seconds = float(self._server.get("idle_shutdown_seconds") or 900.0)
         self._terminate_timeout_seconds = float(self._server.get("terminate_timeout_seconds") or 10.0)
         self._binary_path = self._resolve_repo_path(self._provider_config.get("binary_path"))
         self.server_config_path = self._resolve_server_config_path()
@@ -76,7 +76,6 @@ class AudioCppSidecarSupervisor:
         self._port: int | None = None
         self._base_url: str | None = None
         self._last_failure_at: float | None = None
-        self._last_activity_at: float | None = None
         self._lock = asyncio.Lock()
 
     @property
@@ -95,11 +94,9 @@ class AudioCppSidecarSupervisor:
         """Start the sidecar when needed and return its loopback base URL."""
         async with self._lock:
             if self._is_process_running() and self._base_url:
-                if await self._shutdown_if_idle_locked():
-                    logger.debug("Restarting audio.cpp sidecar after idle shutdown")
-                else:
-                    self._last_activity_at = time.time()
-                    return self._base_url
+                return self._base_url
+
+            await self._close_client()
 
             if self._last_failure_at is not None:
                 elapsed = time.time() - self._last_failure_at
@@ -111,7 +108,7 @@ class AudioCppSidecarSupervisor:
                     )
 
             selected_port = self._select_port()
-            self._write_server_config(selected_port)
+            await asyncio.to_thread(self._write_server_config, selected_port)
             base_url = self._build_base_url(self._host, selected_port)
             try:
                 self._port = selected_port
@@ -123,6 +120,10 @@ class AudioCppSidecarSupervisor:
                     allow_remote_base_url=False,
                 )
                 await self._wait_for_ready()
+            except asyncio.CancelledError:
+                await self._stop_process_locked()
+                await self._close_client()
+                raise
             except Exception as exc:
                 self._record_failure()
                 await self._stop_process_locked()
@@ -133,12 +134,7 @@ class AudioCppSidecarSupervisor:
                     error_code="SIDECAR_STARTUP_FAILED",
                 ) from exc
 
-            self._last_activity_at = time.time()
             return base_url
-
-    async def shutdown_if_idle(self) -> bool:
-        async with self._lock:
-            return await self._shutdown_if_idle_locked()
 
     async def shutdown(self) -> None:
         async with self._lock:
@@ -186,7 +182,7 @@ class AudioCppSidecarSupervisor:
                 provider=PROVIDER_KEY,
                 error_code="SERVER_CONFIG_PATH_OUTSIDE_ROOT",
             ) from exc
-        return resolved
+        return resolved.with_name(f"{resolved.stem}.{uuid.uuid4().hex}{resolved.suffix}")
 
     def _select_port(self) -> int:
         if not self._autoselect_port:
@@ -263,17 +259,6 @@ class AudioCppSidecarSupervisor:
         status = str(payload.get("status") or payload.get("state") or "ok").strip().lower()
         return status not in {"error", "failed", "unhealthy"}
 
-    async def _shutdown_if_idle_locked(self) -> bool:
-        if self._idle_shutdown_seconds <= 0 or self._last_activity_at is None:
-            return False
-        if (time.time() - self._last_activity_at) < self._idle_shutdown_seconds:
-            return False
-        if self._process is None or self._process.returncode is not None:
-            self._clear_process_state()
-            return False
-        await self._stop_process_locked()
-        return True
-
     def _is_process_running(self) -> bool:
         return self._process is not None and self._process.returncode is None
 
@@ -281,6 +266,11 @@ class AudioCppSidecarSupervisor:
         self._last_failure_at = time.time()
 
     async def _close_client(self) -> None:
+        """Close the health client and discard this instance's generated config."""
+        try:
+            await asyncio.to_thread(self.server_config_path.unlink, missing_ok=True)
+        except OSError as exc:
+            logger.warning("audio.cpp config cleanup failed: {}", type(exc).__name__)
         client = self._client
         self._client = None
         if client is None:
@@ -306,8 +296,10 @@ class AudioCppSidecarSupervisor:
         except asyncio.TimeoutError:
             with contextlib.suppress(ProcessLookupError):
                 process.kill()
-            with contextlib.suppress(Exception):
-                await process.wait()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=self._terminate_timeout_seconds)
+            except ProcessLookupError:
+                logger.debug("audio.cpp process already reaped during shutdown")
         finally:
             self._clear_process_state(process)
 
@@ -317,7 +309,6 @@ class AudioCppSidecarSupervisor:
         self._process = None
         self._base_url = None
         self._port = None
-        self._last_activity_at = None
 
     @staticmethod
     def _build_base_url(host: str, port: int) -> str:

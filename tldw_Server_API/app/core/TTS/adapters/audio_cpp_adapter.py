@@ -5,11 +5,15 @@ from __future__ import annotations
 import asyncio
 import base64
 import inspect
+import io
 import math
+import os
+import wave
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from loguru import logger
 
 from ..tts_exceptions import (
@@ -69,7 +73,8 @@ class AudioCppTTSAdapter(TTSAdapter):
     PROVIDER_KEY = AUDIO_CPP_PROVIDER_KEY
     SUPPORTED_FORMATS = _SUPPORTED_FORMATS
 
-    def __init__(self, config: dict[str, Any] | None = None):
+    def __init__(self, config: dict[str, Any] | None = None) -> None:
+        """Configure the provider without starting its optional runtime."""
         super().__init__(config)
         cfg = config or {}
         self._audio_cpp_config = AudioCppConfig.from_provider_config(cfg, repo_root=Path.cwd())
@@ -81,6 +86,7 @@ class AudioCppTTSAdapter(TTSAdapter):
         self._owns_sidecar_supervisor = self._sidecar_supervisor is None
         self._available_models: list[str] = []
         self._voices = self._parse_voice_catalog(cfg)
+        self._generation_lock = asyncio.Lock()
 
     async def ensure_initialized(self) -> bool:
         """Propagate initialization errors so registry logs keep the root cause."""
@@ -101,7 +107,8 @@ class AudioCppTTSAdapter(TTSAdapter):
                 else:
                     self._status = ProviderStatus.ERROR
                 return success
-            except Exception:
+            except (Exception, asyncio.CancelledError):
+                await self._cleanup_resources()
                 self._status = ProviderStatus.ERROR
                 raise
 
@@ -146,7 +153,9 @@ class AudioCppTTSAdapter(TTSAdapter):
             supported_formats=self.SUPPORTED_FORMATS,
             max_text_length=self.max_text_length,
             supports_streaming=True,
-            supports_voice_cloning=True,
+            supports_voice_cloning=(
+                self._audio_cpp_config.managed or self._audio_cpp_config.external_voice_reference_mode == "shared_path"
+            ),
             supports_emotion_control=False,
             supports_speech_rate=False,
             supports_pitch_control=False,
@@ -167,6 +176,12 @@ class AudioCppTTSAdapter(TTSAdapter):
         )
 
     async def generate(self, request: TTSRequest) -> TTSResponse:
+        """Generate audio while keeping managed startup and cleanup serialized."""
+        async with self._generation_lock:
+            return await self._generate(request)
+
+    async def _generate(self, request: TTSRequest) -> TTSResponse:
+        """Generate once and release any staged voice reference."""
         if not await self.ensure_initialized():
             raise TTSProviderNotConfiguredError(
                 "audio.cpp adapter not initialized",
@@ -185,6 +200,12 @@ class AudioCppTTSAdapter(TTSAdapter):
                 provider=self.PROVIDER_KEY,
             )
 
+        if self._audio_cpp_config.managed and self._sidecar_supervisor is not None:
+            base_url = await self._sidecar_supervisor.ensure_started()
+            if self._owns_client and self._client.base_url != base_url:
+                await self._client.close()
+                self._client = AudioCppClient(base_url=base_url, timeout=float(self._audio_cpp_config.timeout))
+
         payload, ignored_options, voice_used, staged_reference = await self._build_payload(request)
         try:
             result = await self._client.speech(payload)
@@ -195,9 +216,15 @@ class AudioCppTTSAdapter(TTSAdapter):
                 voice_used=voice_used,
             )
         finally:
-            self._cleanup_reference(staged_reference)
+            await self._cleanup_reference(staged_reference)
+
+    async def close(self) -> None:
+        """Wait for active generation before releasing provider resources."""
+        async with self._generation_lock:
+            await super().close()
 
     async def _cleanup_resources(self) -> None:
+        """Close owned clients and the managed process; allow later reinitialization."""
         client = self._client
         if client is not None and self._owns_client:
             close = getattr(client, "close", None)
@@ -205,6 +232,7 @@ class AudioCppTTSAdapter(TTSAdapter):
                 maybe_close = close()
                 if inspect.isawaitable(maybe_close):
                     await maybe_close
+            self._client = None
         supervisor = self._sidecar_supervisor
         if supervisor is not None and self._owns_sidecar_supervisor:
             shutdown = getattr(supervisor, "shutdown", None)
@@ -252,7 +280,7 @@ class AudioCppTTSAdapter(TTSAdapter):
         return self._strip_model_namespace(self._audio_cpp_config.model)
 
     def _resolve_upstream_model(self, request: TTSRequest) -> str:
-        return self._strip_model_namespace(request.model or self._audio_cpp_config.model)
+        return self._strip_model_namespace(request.model) if request.model else self._configured_upstream_model()
 
     @staticmethod
     def _strip_model_namespace(model: str | None) -> str:
@@ -260,7 +288,7 @@ class AudioCppTTSAdapter(TTSAdapter):
         lowered = value.lower()
         for prefix in _NAMESPACED_MODEL_PREFIXES:
             if lowered.startswith(prefix):
-                return value[len(prefix):].strip() or "pocket-tts"
+                return value[len(prefix) :].strip() or "pocket-tts"
         return value or "pocket-tts"
 
     def _validate_configured_model_available(self) -> None:
@@ -268,9 +296,7 @@ class AudioCppTTSAdapter(TTSAdapter):
             return
         configured_model = self._configured_upstream_model().lower()
         known_models = {
-            self._strip_model_namespace(model).lower()
-            for model in self._available_models
-            if str(model).strip()
+            self._strip_model_namespace(model).lower() for model in self._available_models if str(model).strip()
         }
         if configured_model not in known_models:
             raise TTSModelNotFoundError(
@@ -325,7 +351,7 @@ class AudioCppTTSAdapter(TTSAdapter):
             return
 
         field_name = str(request_field).strip()
-        if not field_name or field_name in {"voice", "voice_id"}:
+        if not field_name or field_name == "voice_id":
             raise TTSValidationError(
                 "audio.cpp voice mapping uses an unsupported request field",
                 provider=self.PROVIDER_KEY,
@@ -336,10 +362,7 @@ class AudioCppTTSAdapter(TTSAdapter):
     async def _stage_reference_audio(self, voice_reference: Any) -> Path | None:
         if voice_reference is None:
             return None
-        if (
-            not self._audio_cpp_config.managed
-            and self._audio_cpp_config.external_voice_reference_mode != "shared_path"
-        ):
+        if not self._audio_cpp_config.managed and self._audio_cpp_config.external_voice_reference_mode != "shared_path":
             raise TTSValidationError(
                 "audio.cpp voice_reference requires managed mode or external shared_path mode",
                 provider=self.PROVIDER_KEY,
@@ -348,13 +371,28 @@ class AudioCppTTSAdapter(TTSAdapter):
 
         audio_bytes = self._extract_voice_reference_bytes(voice_reference)
         path = self._audio_cpp_config.build_reference_scratch_path()
-        await asyncio.to_thread(self._write_reference_audio_sync, path, audio_bytes)
+        writer = asyncio.create_task(asyncio.to_thread(self._write_reference_audio_sync, path, audio_bytes))
+        try:
+            await asyncio.shield(writer)
+        except asyncio.CancelledError:
+            try:
+                await writer
+            finally:
+                await self._cleanup_reference(path)
+            raise
         return path
 
     @staticmethod
     def _write_reference_audio_sync(path: Path, audio_bytes: bytes) -> None:
+        """Create reference audio exclusively with owner-only permissions."""
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(audio_bytes)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            with os.fdopen(fd, "wb") as output:
+                output.write(audio_bytes)
+        except OSError:
+            path.unlink(missing_ok=True)
+            raise
 
     def _extract_voice_reference_bytes(self, voice_reference: Any) -> bytes:
         if isinstance(voice_reference, bytes):
@@ -376,11 +414,14 @@ class AudioCppTTSAdapter(TTSAdapter):
             details={"type": type(voice_reference).__name__},
         )
 
-    def _cleanup_reference(self, staged_reference: Path | None) -> None:
+    async def _cleanup_reference(self, staged_reference: Path | None) -> None:
+        """Remove request artifacts off the event loop unless retention is configured."""
         if staged_reference is None or self._audio_cpp_config.retain_request_artifacts:
             return
-        with suppress(OSError, ValueError):
-            staged_reference.unlink(missing_ok=True)
+        try:
+            await asyncio.to_thread(staged_reference.unlink, missing_ok=True)
+        except OSError as exc:
+            logger.warning("audio.cpp reference cleanup failed: {}", type(exc).__name__)
 
     def _build_response(
         self,
@@ -411,12 +452,33 @@ class AudioCppTTSAdapter(TTSAdapter):
             }
         )
 
+        audio_format = self._resolve_response_format(content_type, metadata)
+        audio_bytes = result.audio_bytes
+        sample_rate, channels = self.sample_rate, 1
+        if audio_format == AudioFormat.WAV:
+            try:
+                with wave.open(io.BytesIO(audio_bytes), "rb") as audio:
+                    sample_rate, channels = audio.getframerate(), audio.getnchannels()
+                    if request.format == AudioFormat.PCM:
+                        if audio.getsampwidth() != 2:
+                            raise wave.Error("Expected PCM16 output")
+                        audio_bytes = audio.readframes(audio.getnframes())
+                        if channels > 1:
+                            samples = np.frombuffer(audio_bytes, dtype="<i2").reshape(-1, channels)
+                            audio_bytes = samples.mean(axis=1).astype("<i2").tobytes()
+                            channels = 1
+                        audio_format = AudioFormat.PCM
+            except (wave.Error, EOFError) as exc:
+                raise TTSGenerationError(
+                    "audio.cpp returned invalid PCM16 WAV audio", provider=self.PROVIDER_KEY
+                ) from exc
+
         return TTSResponse(
-            audio_data=result.audio_bytes,
+            audio_data=audio_bytes,
             audio_stream=None,
-            format=self._resolve_response_format(content_type, metadata),
-            sample_rate=self.sample_rate,
-            channels=1,
+            format=audio_format,
+            sample_rate=sample_rate,
+            channels=channels,
             voice_used=voice_used,
             provider=self.PROVIDER_KEY,
             model=request.model or self._audio_cpp_config.model,

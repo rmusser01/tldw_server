@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import io
+import wave
 from pathlib import Path
 
 import pytest
@@ -12,7 +14,16 @@ from tldw_Server_API.app.core.TTS.adapters.audio_cpp_adapter import AudioCppTTSA
 from tldw_Server_API.app.core.TTS.adapters.audio_cpp_client import AudioCppSpeechResult
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
 
-WAV_BYTES = b"RIFF$\x00\x00\x00WAVEfmt "
+
+def _wav_bytes(*, rate=24000, channels=1, frames=b"\x01\x00" * 100):
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as output:
+        output.setparams((channels, 2, rate, 0, "NONE", "not compressed"))
+        output.writeframes(frames)
+    return buffer.getvalue()
+
+
+WAV_BYTES = _wav_bytes()
 
 
 class _FakeAudioCppClient:
@@ -170,3 +181,27 @@ async def test_generate_speech_uses_audio_cpp_adapter_for_namespaced_model():
     assert metadata["provider"] == "audio_cpp"
     assert metadata["model"] == "audio-cpp/pocket-tts"
     assert metadata["incremental_streaming"] is False
+
+
+@pytest.mark.integration
+async def test_service_chunking_concatenates_pcm_without_wav_headers():
+    from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, TTSRequest
+
+    client = _FakeAudioCppClient()
+    factory = TTSAdapterFactory(_factory_config(client))
+    service = TTSServiceV2(factory=factory)
+    adapter = await factory.registry.get_adapter("audio_cpp")
+    request = TTSRequest(
+        text="First sentence. Second sentence. Third sentence.",
+        model="audio-cpp/pocket-tts",
+        format=AudioFormat.PCM,
+        extra_params={"audio_checks": False},
+    )
+    try:
+        response = await service._generate_chunked_response(
+            adapter, request, "audio_cpp", target_chars=16, max_chars=20, min_chars=1, crossfade_ms=0
+        )
+    finally:
+        await service.shutdown()
+    assert len(client.payloads) > 1
+    assert response.audio_data == b"\x01\x00" * (100 * len(client.payloads))

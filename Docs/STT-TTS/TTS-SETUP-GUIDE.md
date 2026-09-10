@@ -297,7 +297,7 @@ python Helper_Scripts/TTS_Installers/install_tts_omnivoice_sidecar.py \
   --model-path models/omnivoice_sidecar/models/OmniVoice
 
 # audio.cpp sidecar config helper (explicit clone/build/model flags)
-python Helper_Scripts/install_tts_audio_cpp.py --patch-config
+python Helper_Scripts/TTS_Installers/install_tts_audio_cpp.py --patch-config
 
 # NeuTTS (deps; optional prefetch)
 python Helper_Scripts/TTS_Installers/install_tts_neutts.py --prefetch
@@ -375,10 +375,11 @@ Example request:
 server. It is disabled by default and does not vendor audio.cpp source or
 prebuilt binaries into tldw_server.
 
-The first supported path is CUDA-first for the managed HTTP server. Upstream also
-documents other build backends for parts of audio.cpp, but this tldw integration
-treats non-CUDA managed server builds as future verification work unless you run
-and validate the external server yourself.
+The helper supports `--backend cpu|cuda|hip|vulkan|metal` (default `cuda`)
+and emits both the upstream build flags and runtime backend setting. Backend
+performance and model coverage depend on audio.cpp. The setup contract was checked
+against upstream commit `fa5aaac9266a98c68f8a5c9fcd1ba6ff65875416` (2026-09-09);
+older builds may lack the native idle-unload option used below.
 
 #### External Server Mode
 
@@ -401,11 +402,18 @@ The adapter checks `/health` and `/v1/models` during initialization. By default,
 `base_url` must be loopback. Set `allow_remote_base_url: true` only when an
 admin intentionally exposes a trusted remote audio.cpp server.
 
-Reference-audio cloning in external mode is disabled by default because upstream
-expects `voice_ref` to be a path readable by the audio.cpp server process. To use
+Reference-audio cloning in external mode is disabled by default because this
+adapter sends `voice_ref` as a path readable by the audio.cpp server process. To use
 it with a separate server, set `external_voice_reference_mode: "shared_path"` and
 configure `shared_scratch_dir` to a directory that both tldw and the server can
-read.
+read. Staged files use owner-only permissions, so run both processes as the same
+OS user. Files are removed after success, failure, or request cancellation unless
+`retain_request_artifacts` is enabled. Cloning capability discovery reflects this
+configuration. An explicit voice catalog entry can set `request_field: "voice"`
+to select a native upstream voice; entries with a null field remain metadata only
+and require reference audio. Generic voice IDs are not forwarded automatically.
+Upstream also supports inline base64 references; this adapter retains shared-file
+reference staging.
 
 #### Managed Sidecar Mode
 
@@ -418,13 +426,13 @@ audiocpp_server --config <generated server_config_path>
 Patch the provider config without enabling it:
 
 ```bash
-python Helper_Scripts/install_tts_audio_cpp.py --patch-config
+python Helper_Scripts/TTS_Installers/install_tts_audio_cpp.py --patch-config
 ```
 
 Enable it in the generated config or run:
 
 ```bash
-python Helper_Scripts/install_tts_audio_cpp.py --patch-config --enable-provider
+python Helper_Scripts/TTS_Installers/install_tts_audio_cpp.py --patch-config --enable-provider
 ```
 
 The helper builds repo-local paths under `models/audio_cpp`, sets
@@ -435,32 +443,46 @@ pass explicit admin flags such as `--clone`, `--configure`, `--build`, or
 
 The generated sidecar config stays under `models/audio_cpp`, binds to
 `127.0.0.1`, autoselects a free port by default, waits for `/health`, backs off
-after startup failure, and can stop after an idle interval. Normal speech
-requests cannot inject extra command arguments or environment variables.
+after startup failure, and restarts a crashed child before the next request.
+Each supervisor uses a unique generated config file to avoid config overwrites
+between workers. Port selection remains a bind probe; simultaneous starts can
+race and a failed startup uses the configured retry/backoff. Normal speech requests
+cannot inject extra command arguments or environment variables.
 
 #### Build And Model Package Commands
 
 The helper exposes explicit commands for operators who want a single entry point:
 
 ```bash
-python Helper_Scripts/install_tts_audio_cpp.py --clone
-python Helper_Scripts/install_tts_audio_cpp.py --configure --build
-python Helper_Scripts/install_tts_audio_cpp.py --install-model --package-id pocket-tts
+python Helper_Scripts/TTS_Installers/install_tts_audio_cpp.py --clone
+python Helper_Scripts/TTS_Installers/install_tts_audio_cpp.py --configure --build --backend cuda
+python Helper_Scripts/TTS_Installers/install_tts_audio_cpp.py --install-model --package-id pocket_tts_english_q8_0
 ```
 
 Model installation is always explicit. audio.cpp's upstream
-`tools/model_manager.py` handles package installation, including any gated
+`tools/model_manager_v2.py` handles package installation, including any gated
 packages or token requirements. Do not put Hugging Face tokens or API keys in
 `tts_providers_config.yaml`.
+
+The default binary path is `models/audio_cpp/_build/bin/audiocpp_server`
+(`.exe` on Windows), and the default model directory is
+`models/audio_cpp/PocketTTS-GGUF/english`. `--build-dir` is reflected in the
+patched binary path. The bundled Alba voice is configured as PocketTTS's
+`default_voice_preset`, so text-only requests work without reference audio.
+For another package, update `model_path`, its default voice preset, and
+`extra_params.server.model` to match that package's directory, family, and ID.
+On macOS without OpenMP, install the build prerequisite or configure upstream
+with `-DENGINE_ENABLE_OPENMP=OFF` before running the helper's `--build` step.
 
 No model download happens during normal tldw startup or a `/audio/speech`
 request. If the configured model files are missing, initialization or generation
 fails closed instead of fetching assets silently.
 
-Runtime note: audio.cpp can register lazy-loaded model ids at server startup, but
-models and task sessions may remain resident after first use until the sidecar
-process exits. Use `idle_shutdown_seconds` to release that memory in managed
-mode, or restart an external server when you need to unload resident models.
+Runtime note: the legacy `idle_shutdown_seconds` setting now configures upstream
+`idle_unload_ms` (seconds multiplied by 1000). Models unload after inactivity,
+while the process stays warm and reloads lazily on the next request. Active
+inference is protected by upstream's idle-unload policy. Set `0` to disable it;
+external servers configure `idle_unload_ms` themselves.
 
 License and packaging note: audio.cpp is Apache-2.0 while tldw_server is GPLv2
 per project metadata. This implementation treats audio.cpp as an optional
