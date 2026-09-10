@@ -10,7 +10,7 @@ from copy import deepcopy
 from datetime import datetime
 
 import pytest
-from hypothesis import HealthCheck, assume, given, settings
+from hypothesis import HealthCheck, assume, example, given, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import Bundle, RuleBasedStateMachine, invariant, precondition, rule
 
@@ -702,10 +702,10 @@ def test_recipe_validation_preserves_order_unicode_and_separator(
 @given(
     name=st.text(alphabet="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_", min_size=1, max_size=128)
 )
-def test_recipe_duplicate_identifiers_and_variable_grammar(name: str) -> None:
+def test_recipe_duplicate_variable_names_and_grammar(name: str) -> None:
     """Every resolvable variable name is accepted once and rejected when duplicated."""
     block = {
-        "id": name,
+        "id": "block",
         "name": "Label",
         "role": "user",
         "order": 0,
@@ -717,10 +717,26 @@ def test_recipe_duplicate_identifiers_and_variable_grammar(name: str) -> None:
     payload["variables"].append({"name": name})
     issues = structured_prompts.validate_prompt_definition(payload)
     assert issues[0].code == "duplicate_variable_name"
-    payload["variables"].pop()
-    payload["blocks"].append(deepcopy(block))
+
+
+@pytest.mark.property
+@given(block_id=st.text(min_size=1, max_size=128))
+@example(block_id=" ")
+@example(block_id="\t")
+@example(block_id="\u2003")
+def test_recipe_block_identity_rejects_blank_and_duplicate_ids(block_id: str) -> None:
+    """Block IDs have their own Unicode domain; every accepted ID participates in duplicate detection."""
+    block = {"id": block_id, "name": "First", "role": "user", "order": 0, "content": "First content"}
+    payload = _recipe_definition([block, {**block, "name": "Second", "order": 1, "content": "Second content"}])
+    original = deepcopy(payload)
     issues = structured_prompts.validate_prompt_definition(payload)
-    assert issues[0].code == "duplicate_block_id"
+    expected = (
+        [("duplicate_block_id", "blocks[1].id")]
+        if block_id.strip()
+        else [("invalid_block_id", "blocks[0].id"), ("invalid_block_id", "blocks[1].id")]
+    )
+    assert [(issue.code, issue.path) for issue in issues] == expected
+    assert payload == original
 
 
 @pytest.mark.property

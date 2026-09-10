@@ -4,7 +4,8 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, TypeAdapter, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, TypeAdapter, field_validator, model_validator
+from pydantic_core import PydanticCustomError
 
 SINGLE_TEXT_RECIPE_LIMITS: Mapping[str, int] = MappingProxyType(
     {
@@ -109,6 +110,14 @@ class SingleTextRecipeBlock(PromptBlock):
     name: str = Field(..., min_length=1, max_length=SINGLE_TEXT_RECIPE_LIMITS["max_label_length"])
     content: str = Field(..., max_length=SINGLE_TEXT_RECIPE_LIMITS["max_content_length"])
     section_key: str | None = Field(default=None, max_length=SINGLE_TEXT_RECIPE_LIMITS["max_key_length"])
+
+    @field_validator("id")
+    @classmethod
+    def require_nonblank_id(cls, value: str) -> str:
+        """Reject IDs skipped by duplicate detection without rewriting stored identity."""
+        if not value.strip():
+            raise PydanticCustomError("invalid_block_id", "Recipe block IDs must contain a non-whitespace character.")
+        return value
 
 
 class SingleTextRecipeAssemblyConfig(BaseModel):

@@ -260,3 +260,46 @@ def test_recipe_model_rejects_float_schema_version() -> None:
     payload["schema_version"] = 2.0
     with pytest.raises(ValidationError):
         structured_prompts.SingleTextRecipeDefinitionV2.model_validate(payload)
+
+
+@pytest.mark.parametrize("block_id", [" ", "   ", "\t", "\n", "\u00a0", "\u2003", "\x1c", "\x1f", "\t \u00a0"])
+@pytest.mark.parametrize("block_count", [1, 2])
+def test_rejects_whitespace_only_block_ids_without_mutation(block_id: str, block_count: int) -> None:
+    """Reject blank identities even when distinct blocks would share an edit/remove key."""
+    payload = valid_recipe()
+    payload["assembly_config"]["render_format"] = "freeform"
+    payload["blocks"] = [
+        {**payload["blocks"][0], "id": block_id, "name": f"Block {i}", "content": f"Content {i}", "order": i}
+        for i in range(block_count)
+    ]
+    original = deepcopy(payload)
+    issues = validate_prompt_definition(payload)
+    assert [(issue.code, issue.path) for issue in issues] == [
+        ("invalid_block_id", f"blocks[{i}].id") for i in range(block_count)
+    ]
+    with pytest.raises(ValidationError) as error:
+        structured_prompts.parse_prompt_definition(payload)
+    assert error.value.errors()[0]["type"] == "invalid_block_id"
+    assert payload == original
+
+
+@pytest.mark.parametrize("block_id", [" x ", "\tα\u00a0", "\u200b"])
+def test_preserves_nonblank_block_ids_without_normalization(block_id: str) -> None:
+    payload = valid_recipe()
+    payload["blocks"][0]["id"] = block_id
+    original = deepcopy(payload)
+    assert validate_prompt_definition(payload) == []
+    assert structured_prompts.parse_prompt_definition(payload).blocks[0].id == block_id
+    assert payload == original
+
+
+def test_v1_whitespace_block_id_behavior_is_unchanged() -> None:
+    payload = {
+        "schema_version": 1,
+        "blocks": [{"id": "\t ", "name": "Label", "content": "Content", "role": "system", "order": 0}],
+    }
+    original = deepcopy(payload)
+    parsed = structured_prompts.PromptDefinition.model_validate(payload)
+    assert validate_prompt_definition(parsed) == []
+    assert parsed.blocks[0].id == "\t "
+    assert payload == original
