@@ -41,3 +41,34 @@ Commands used normal repository fixtures without network-guard bypasses, after a
 Local transcripts: `/tmp/pr2761-critical-http-review.log`, `/tmp/pr2761-critical-xpath-review.log`, `/tmp/pr2761-critical-url-guard-review.log`.
 
 **Unresolved:** No additional exploitable bypass among these seven alerts was demonstrated by this bounded review. They remain open; this document does not classify all seven as false positives or satisfy the failing aggregate gate. Current-candidate analysis and individual security review remain necessary. No thresholds, suppressions, alert states or source behavior were changed for this assessment. The separately demonstrated slash-parser denial of service (high alert 2599) was fixed and tested in the pushed batch; it is not one of these seven critical alerts.
+
+## Supplement: partial scan of 7c79e085df
+
+The [candidate default run](https://github.com/rmusser01/tldw_server/actions/runs/34495652240) has completed JavaScript analysis `1755853801` (85 results, no ingestion error) and Actions analysis `1755785764` (239 results, no ingestion error). Its [Python job](https://github.com/rmusser01/tldw_server/actions/runs/34495652240/job/102933313666) was still running at this review. Consequently, [aggregate check 102933918456](https://github.com/rmusser01/tldw_server/runs/102933918456) reports **272** changed-code alerts (1 critical, 268 high, 3 medium) and explicitly says Python is missing. This is not a verified reduction from the earlier complete 379-alert aggregate. Alert 2599 still references the pre-fix Python analysis; its analyzer closure remains unverified.
+
+### Speech persistence: replacement alert 2668
+
+[Old alert 2655](https://github.com/rmusser01/tldw_server/security/code-scanning/2655) became fixed for this PR, but [replacement alert 2668](https://github.com/rmusser01/tldw_server/security/code-scanning/2668), `js/clear-text-storage-of-sensitive-data`, flags `SpeechPlaygroundPage.tsx:1061–1070`. JavaScript therefore still has 37 open alerts, not 36.
+
+The downloaded SARIF contains four paths for this result. Each path passes from the OpenAI API-key getter into `getTTSSettings` through the same imprecise tuple transition:
+
+1. `tts.ts:553`, `getOpenAITTSApiKey()`, is **zero-based array position 13** in the `Promise.all` input.
+2. At `tts.ts:538`, SARIF changes `[13, PromiseValue]` to `[PromiseValue, ArrayElement]`; the destructuring at line 499 likewise carries only `[ArrayElement]`.
+3. The path then selects `tldwTtsBackend` at `tts.ts:523`, which is actually **position 20**, populated by `getTldwTTSBackend()` at line 562. Position 13 populates `openAITTSApiKey` at line 514.
+4. That backend field flows through `configuredTldwBackend` and `selectedTldwBackend` (`SpeechPlaygroundPage.tsx:889, 911–915`) into the persisted `backend` field at line 1067.
+
+The persistence fix explicitly projects provider, voice, model, backend and fallback fields instead of spreading the selection object. Existing regression tests establish that extra credential fields in a selection are excluded. For the new trace, a bounded local check executed the actual parsed `getTTSSettings` initializer with distinct deterministic getter results: the API-key sentinel remained in `openAITTSApiKey`, and `tldwTtsBackend` contained only the backend getter result. All three mapping assertions passed. This verifies tuple pairing with stubbed getters; it is not a live credential-storage test. The trace and source provide specific evidence of array-index imprecision for this replacement finding. The alert remains open and requires review; no source restructuring or suppression was used to force analyzer closure.
+
+Local evidence: `/tmp/pr2761-codeql-7c79-js.sarif.json` and `/tmp/pr2761-speech-sarif-tuple-proof.log`.
+
+### Added Actions alert and count reconciliation
+
+[Alert 2667](https://github.com/rmusser01/tldw_server/security/code-scanning/2667), `actions/cache-poisoning/poisonable-step`, flags the added WebUI typecheck step at `.github/workflows/frontend-required.yml:640–645`. Its message explicitly combines the checkout expression at line 596 with `workflow_dispatch`. On that event, admission is skipped and the PR/workflow-run payload properties are absent, so the expression falls through to the selected ref's `github.sha`. The untrusted PR-head alternatives belong to different events. This is the same cross-event source combination identified in the earlier cache-alert review; adding a command adds another flagged sink. It does not demonstrate a new workflow-run cache-write exploit. The inspected CodeQL Actions model associates jobs with workflow trigger events without fully evaluating these event-specific alternatives. Review remains open, particularly for any separate cache-write trust issue; the typecheck gate and analyzer thresholds are unchanged.
+
+The branch-open snapshot changed from **448 to 449**: old 2655 disappeared, replacement 2668 appeared, and Actions 2667 appeared. JavaScript remains 37 open; Actions increased from 238 to 239; 173 Python instances still came from the old `7d7a2e7` analysis. Branch-open totals and changed-code aggregate totals are different measures. A complete current-head Python analysis is required before reconciling the final aggregate against 379.
+
+## Completed scan follow-up: 30338ef7de
+
+All three current-source analyses completed without ingestion errors: Python `1756055450` (564 results), JavaScript `1755993012` (85), Actions `1755924298` (239). The prior 7c79 Python analysis also completed with 564 results. The partial-scan caveats above describe that earlier observation only.
+
+The branch alert API now reports **448 open instances**: 172 Python, 37 JavaScript and 239 Actions; severity distribution is 7 critical, 435 high and 6 medium. **Slash-regex alert 2599 is fixed** for this PR. Old Speech 2655 is fixed and replacement 2668 remains open as assessed above. The aggregate [check 102941684745](https://github.com/rmusser01/tldw_server/runs/102941684745) still reports failure and 379 changed-code alerts (7 critical, 367 high, 5 medium). Its output timestamp predates the completed Python scan; do not equate its total with the branch-open inventory or manufacture a green result. No alerts were dismissed. Snapshot: `/tmp/pr2761-30338-all-alerts.json`.

@@ -29,7 +29,7 @@ def _as_utc_datetime(value: object) -> datetime:
 
 
 def run_idempotent_create_scope_scenario(make_manager: ManagerFactory) -> None:
-    """Verify idempotency is scoped by domain, queue, type, and owner."""
+    """Verify low-level idempotency is scoped by domain, queue, and type."""
 
     jm = make_manager()
     key = "idem-key-123"

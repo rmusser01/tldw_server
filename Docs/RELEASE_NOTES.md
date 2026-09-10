@@ -67,6 +67,8 @@ complete grouped rollup and the release-refresh plan for outstanding gates.
 
 ### Operations and CI
 
+- The API image includes the local Personal Context core package needed at
+  startup. Its build now checks imports of both local Python packages.
 - Hardened Jobs admission transactions, quotas, idempotency, and concurrent
   capacity enforcement.
 - Added strict live-integration certification for Skills.

@@ -1978,10 +1978,8 @@ describe("ScheduledTasksPage", () => {
     await user.type(await screen.findByRole("textbox", { name: "Title" }), "Missing run at")
     await user.click(await screen.findByRole("button", { name: "Save reminder" }))
 
-    await waitFor(() => {
-      expect(mocks.createScheduledTaskReminder).not.toHaveBeenCalled()
-    })
-    expect(screen.getByText("Run at is required for one-time reminders")).toBeInTheDocument()
+    expect(await screen.findByText("Run at is required for one-time reminders")).toBeInTheDocument()
+    expect(mocks.createScheduledTaskReminder).not.toHaveBeenCalled()
   }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
   it("creates a daily recurring reminder with cron and timezone from safer controls", async () => {
@@ -2098,10 +2096,8 @@ describe("ScheduledTasksPage", () => {
     fireEvent.change(screen.getByLabelText("Run once at"), { target: { value: "   " } })
     await user.click(await screen.findByRole("button", { name: "Save reminder" }))
 
-    await waitFor(() => {
-      expect(mocks.createScheduledTaskReminder).not.toHaveBeenCalled()
-    })
-    expect(screen.getByText("Run at is required for one-time reminders")).toBeInTheDocument()
+    expect(await screen.findByText("Run at is required for one-time reminders")).toBeInTheDocument()
+    expect(mocks.createScheduledTaskReminder).not.toHaveBeenCalled()
   })
 
   it("does not create a recurring reminder with whitespace-only cron and timezone", async () => {
@@ -2126,11 +2122,9 @@ describe("ScheduledTasksPage", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Timezone" }), { target: { value: "   " } })
     await user.click(screen.getByRole("button", { name: "Save reminder" }))
 
-    await waitFor(() => {
-      expect(mocks.createScheduledTaskReminder).not.toHaveBeenCalled()
-    })
-    expect(screen.getByText("Cron is required for recurring reminders")).toBeInTheDocument()
-    expect(screen.getByText("Timezone is required for recurring reminders")).toBeInTheDocument()
+    expect(await screen.findByText("Cron is required for recurring reminders")).toBeInTheDocument()
+    expect(await screen.findByText("Timezone is required for recurring reminders")).toBeInTheDocument()
+    expect(mocks.createScheduledTaskReminder).not.toHaveBeenCalled()
   }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
   it("preserves an existing recurring custom cron when editing unrelated fields", async () => {

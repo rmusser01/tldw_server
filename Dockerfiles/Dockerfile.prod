@@ -22,6 +22,7 @@ COPY pyproject.toml README.md LICENSE /app/
 COPY LICENSES /app/LICENSES
 COPY tldw_Server_API /app/tldw_Server_API
 COPY apps/mcp-unified/src /app/apps/mcp-unified/src
+COPY packages/tldw_profile_core/src /app/packages/tldw_profile_core/src
 
 RUN pip install --upgrade pip && \
     pip install --prefix=/install .
@@ -44,6 +45,9 @@ WORKDIR /app
 
 # Bring in installed Python deps from the builder image.
 COPY --from=builder /install /usr/local
+
+# Verify local packages are installed, without relying on repository PYTHONPATH.
+RUN python -c "import mcp_unified; import tldw_profile_core"
 
 # Create runtime user up front so content copies can avoid recursive chown.
 RUN useradd -m -u 10001 appuser

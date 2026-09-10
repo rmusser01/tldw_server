@@ -12,7 +12,8 @@ Published release notes entry point.
 - Back up persistent data before upgrading; the accumulated train includes
   schema changes. See the repository deployment and migration runbooks.
 - Candidate repairs cover speech preference persistence, exported media
-  artifacts, extension error copy and the required WebUI TypeScript check.
+  artifacts, extension error copy, required WebUI TypeScript checking, and
+  the missing local Python package needed for API container startup.
 - Verify installed artifact digests: repository rollups 0.1.39–0.1.41 do not
   establish publication. At preparation, GitHub/GHCR app latest was 0.1.38
   and public PyPI listed 0.1.32.

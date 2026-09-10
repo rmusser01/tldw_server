@@ -89,6 +89,8 @@ and this project adheres to Some kind of Versioning
   persisted speech settings, restored missing extension role-play error copy,
   restored media artifact dictionaries used by full-account export, and
   prevented quadratic slash-command parsing on malformed multiline input.
+- **API Container Packaging** — Include the local Personal Context core package
+  required at startup and check local package imports while building the image.
 - **Frontend Type Safety** — Repaired WebUI type errors and added a required
   nonincremental TypeScript check to the frontend CI gate.
 

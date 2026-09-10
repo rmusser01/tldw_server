@@ -4,7 +4,7 @@ title: 'Re-enable frontend type-safety and lint gates, harden persisted stores'
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-09-10 15:20'
+updated_date: '2026-09-10 16:32'
 labels:
   - tech-debt
   - high
@@ -48,4 +48,6 @@ This is a phased hardening ticket; land incrementally so each step keeps CI gree
 PR2761 refresh: repairing the real nonincremental WebUI TypeScript baseline, then adding an explicit failing typecheck step to frontend-required. No tsconfig relaxation; remaining strictness/hooks/dependency-major work stays open. Persisted version/migration work from PR2575 and661b is present in frozen candidate and should be verified before closing criterion4.
 
 Verified all9 named persisted Zustand stores already declare version1 plus identity migrate in this candidate (playground-session, persona-buddy-shell, notes-dock, ui-mode, actor, quick-ingest-session, folder, feedback, acp-sessions). Existing five-suite persistence/store selection passed17tests. Criterion4 closed for the current unchanged schema; this does not claim forward-schema migrations. WebUI nonincremental tsc also passes; CI gate added but criterion1 awaits new-head CI evidence. Strictness/additional hook rules/dependency-major alignment remain open.
+
+30338follow-up: typecheck remains skipped because frontend aggregate stops after shard5 failure; criterion1 stays open. Measured separate flags: noImplicitAny948diagnostics/252files; strictNullChecks664/177. Seven disabled compiler-hook rules add25diagnostics/14files in328file sample. Five runtime major mismatches remain (zustand,dexie-react-hooks,marked,d3-dsv,property-information). Baseline logs under/tmp/pr2761-*baseline.log; plan records counts. No broad strictness/dependency change made.
 <!-- SECTION:NOTES:END -->

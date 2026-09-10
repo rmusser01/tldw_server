@@ -12,16 +12,17 @@
 | Item | Recorded state |
 | --- | --- |
 | Integrated release code and verified blocker fixes | `0cec0bb409ddbd2de0089e1909b4b6b718823de3` |
-| Pushed candidate before ongoing blocker fixes | `7d7a2e708dd2e2621199bfbcaa709f9e44e76026` |
+| Latest pushed candidate at this update | `30338ef7de` (Research readiness fix and refreshed protected-source record) |
+| Protected source snapshot | `d1af177bf3f55d05231ebec79ee6e7f2528a55e3`, 7,099 files |
 | PR branch / target | `codex/release-main-0.1.42` → `main` |
-| PR state at inspection | Draft, `UNSTABLE`; no merge or publication performed |
-| Remote CI snapshot for 7d7a2e708d | Backend, security, container, E2E, trusted license and standard docs pass; frontend shards 1/2/6 and CodeQL fail; coverage and other jobs pending. Fixes underway below. |
-| Local focused checks | 241 passed; one docs-build test unpassed due host multiprocessing failure |
+| PR state at inspection | Draft; no merge or publication performed |
+| Remote CI snapshot | On `30338ef7de`, backend/security/coverage/container/E2E/license/docs and seven frontend shards pass. Shard 5 reminder validation failed; the complete repaired suite passes 50 tests locally. CodeQL remains unresolved. Image startup separately exposed a missing package despite the passing build gate. |
+| Latest metadata checks | 36 passed, one local docs-build test deselected due host multiprocessing failure; unchanged standard test/build passes remotely. Other scoped verification is recorded below. |
 | Standard docs evidence | Unchanged standard build and docs suite pass in CI [run 34491682436](https://github.com/rmusser01/tldw_server/actions/runs/34491682436/job/102919740634). |
 | Latest observed GitHub publication | v0.1.38; no remote v0.1.39–v0.1.42 tags |
 | Primary checkout | `dev`, unchanged; its local `a27ecb12f0` tracking commit is outside this release freeze |
 
-CI counts are an observation, not a permanent state. Documentation follow-ups advance the PR head; always retrieve its current SHA and require results for that SHA before merge. The next work is **Stage 4.1: inspect the failed CodeQL result and complete current-head CI**, then resolve the remaining rows in Stage 4. No gate is waived by this plan.
+CI counts are an observation, not a permanent state. Documentation follow-ups advance the PR head; always retrieve its current SHA and require results for that SHA before merge. The next work is **Stage 4.1: complete fresh-head CI/security review**, alongside the isolated backup/upgrade/restore rehearsal and remaining dependency work in Stage 4. No gate is waived by this plan.
 
 ## Stage 1: Recover and freeze
 **Goal:** Restore the existing release branch and identify the current inputs.
@@ -225,3 +226,17 @@ Final metadata verification: **36 passed, 1 host-limited docs test deselected, 4
 - Protected source now **`d1af177bf3f55d05231ebec79ee6e7f2528a55e3`**, retaining the verified runtime fixes in `0cec0bb409`. Manifest: **7,099 files**, SHA-256 **`8a2ad512bb17328c436e3a77cc346f1d98dac91e1973a0a76dc985de7a973bdc`**. Legal/date bytes remain unchanged. Runtime rehearsal continues against `0cec0bb409`; subsequent source changes are frontend test and evidence only.
 - Metadata validation: **36 passed, 1 host-limited docs test deselected, 4 existing warnings**; scoped Bandit and Ruff clean; protected-tree equality and diff whitespace checks pass. The standard docs CI test/build passed again on `7c79e085df`.
 - On `7c79e085df`, all seven other frontend shards and E2E passed; only shard 3's Research readiness race failed. Its replacement retains assertions and has **19 passing tests**. Coverage and Python CodeQL analysis were still running at this snapshot. Push the complete source/metadata pair and require fresh-head results.
+
+### Lifecycle supplement
+
+- **35 passed, 4 warnings** on six existing suites: SQLite Jobs idempotency and owner attribution; RAG semantic-cache tenant scoping; storage cleanup including unregister failure and sanitized error logging; file-export garbage collection; mocked embeddings-erasure orchestration. Logs: `/tmp/pr2761-lifecycle-supplement.log`, `/tmp/pr2761-lifecycle-supplement.xml`. Tests use their normal fixtures; Chroma/category erasure is mocked, so this does not certify whole-account deletion or backup erasure. Pytest also warned while cleaning an unrelated older temporary directory. TASK-13013.8 remains In Progress.
+
+## Container startup and final-head follow-up
+
+- At `30338ef7de`, [backend](https://github.com/rmusser01/tldw_server/actions/runs/34497893928/job/102941664409), [security](https://github.com/rmusser01/tldw_server/actions/runs/34497893730/job/102941363352), [coverage](https://github.com/rmusser01/tldw_server/actions/runs/34497893374/job/102943511571), [E2E](https://github.com/rmusser01/tldw_server/actions/runs/34497893572/job/102941132694), [container build](https://github.com/rmusser01/tldw_server/actions/runs/34497894239/job/102944274722), [standard docs](https://github.com/rmusser01/tldw_server/actions/runs/34497893739/job/102940917378), and trusted main license pass. Only frontend shard 5 fails alongside CodeQL. The aggregate never reaches its typecheck while a shard fails; TASK-12116 criterion 1 is still open.
+- The new shard-5 failure is the whitespace-only reminder validation case. It and two adjacent one-time negative cases waited for a no-call assertion that could pass before asynchronous validation. They now await positive error messages before asserting no create request. The entire ScheduledTasks file passes **50 tests** (103.36 seconds); no application validation changed. One initial local invocation used the wrong workspace runner and failed before running tests; the recorded passing run uses the installed WebUI Vitest with its normal config.
+- Actual image startup exposed omissions that a successful image build missed. Published `0.1.38` cannot import `mcp_unified`; candidate runtime `0cec0bb409` cannot import `tldw_profile_core`. Candidate app packaging now copies the already-declared local profile package and imports both local packages during the runtime image build. The explicit server-only Docker COPY allowlist test is updated for that one source directory. **31 Docker/reference/packaging tests pass**; touched Python Ruff/Bandit are clean (B101 assertions excluded). Full image rebuild/startup is in progress. Worker Docker changes remain with active supply-chain work.
+- The published baseline failure blocks a genuine baseline-seeded cross-version rehearsal. Preserve that failure; do not silently patch an immutable historical image and call it the published artifact. If candidate startup succeeds, perform a separately labeled candidate backup/restore smoke, retaining the cross-version gate.
+- Actual owner-scoped Jobs receipts are verified separately from low-level create deduplication: **90 SQLite/PostgreSQL tests passed, zero skips**, including owner isolation, rollback, corrupt correlation, archive behavior and concurrency. The low-level scenario's owner claim was inaccurate; the documented boundary is `(domain, queue, job_type, idempotency_key)`. A temporary assertion demanding an incompatible fifth owner dimension failed on both backends and was removed after contract review. Only its docstring was corrected. This was not evidence of a new public cross-tenant exploit. Logs: `/tmp/pr2761-jobs-receipts.log`, `/tmp/pr2761-jobs-receipts.xml`.
+- Release Backlog integrity rerun passes: **13 release nodes, 4 historical records**.
+- TASK-12116 remaining strictness baseline is now measured: separate flag runs produce **948 noImplicitAny diagnostics in 252 files** and **664 strictNullChecks diagnostics in 177 files**. A 328-file hook sample adds **25 diagnostics in 14 files** under the seven disabled compiler rules. Five shared runtime dependency-major mismatches remain. Enabling all these gates is substantial uncompleted work, not a passing current baseline.
