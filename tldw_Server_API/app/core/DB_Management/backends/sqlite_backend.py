@@ -170,7 +170,24 @@ class SQLiteConnectionPool(ConnectionPool):
         pass
 
     def invalidate_connection(self, connection: sqlite3.Connection) -> None:
-        """Invalidate a borrowed handle without discarding a different current handle."""
+        """Close a failed handle and remove its matching current-thread cache entry.
+
+        A different current handle remains cached and usable. Matching cached
+        handles use ``clear_thread_local_connection()``, including its existing
+        suppression of OSError, RuntimeError and sqlite3.Error during close.
+
+        Args:
+            connection: SQLite handle borrowed on the calling thread, or an
+                uncached handle owned by the caller. Do not reuse it afterward.
+
+        Returns:
+            None.
+
+        Raises:
+            Exception: Close errors for uncached handles propagate unchanged,
+                including sqlite3.Error, OSError and RuntimeError. Unexpected
+                errors outside the cached-cleanup suppression also propagate.
+        """
         with self._lock:
             if self._connections.get(threading.get_ident()) is connection:
                 self.clear_thread_local_connection()

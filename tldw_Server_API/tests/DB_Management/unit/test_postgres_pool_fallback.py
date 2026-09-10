@@ -1,5 +1,9 @@
+"""Regression tests for PostgreSQL pool checkout cleanup and capacity."""
+
 import threading
 from types import SimpleNamespace
+
+import pytest
 
 import tldw_Server_API.app.core.DB_Management.backends.postgresql_backend as pg_backend
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
@@ -56,15 +60,20 @@ def test_fallback_pool_closes_overflow_connections_on_return(monkeypatch) -> Non
     pool.close_all()
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize("operation", ["discard_connection", "invalidate_connection"], ids=[
+    "discard-poisoned-checkout", "invalidate-poisoned-checkout",
+])
 def test_fallback_pool_discard_replaces_poisoned_managed_connection(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch, operation: str,
 ) -> None:
+    """Both removal APIs release managed capacity and permit a healthy replacement."""
     _configure_fake_psycopg(monkeypatch)
     cfg = DatabaseConfig(backend_type=BackendType.POSTGRESQL, pool_size=1)
     pool = pg_backend.PostgreSQLConnectionPool(cfg)
 
     poisoned = pool.get_connection()
-    pool.discard_connection(poisoned)
+    getattr(pool, operation)(poisoned)
 
     assert poisoned.closed is True
     assert poisoned not in pool._connections
@@ -213,15 +222,22 @@ def test_psycopg_pool_constructor_opens_primary_and_compatibility_paths(
     assert [call.get("open") for call in calls] == [True, True]
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize("operation", ["discard_connection", "invalidate_connection"], ids=[
+    "discard-poisoned-checkout", "invalidate-poisoned-checkout",
+])
 def test_psycopg_pool_discard_closes_and_returns_checkout_for_bookkeeping(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch, operation: str,
 ) -> None:
     """A poisoned delegate checkout must still be paired with putconn()."""
 
     returned: list[_DummyConn] = []
 
     class _Delegate:
+        """Record checkouts returned to the psycopg pool for replacement."""
+
         def putconn(self, connection: _DummyConn) -> None:
+            """Retain the returned checkout as observable pool bookkeeping."""
             returned.append(connection)
 
     delegate = _Delegate()
@@ -236,7 +252,7 @@ def test_psycopg_pool_discard_closes_and_returns_checkout_for_bookkeeping(
     pool = pg_backend.PostgreSQLConnectionPool(cfg)
     poisoned = _DummyConn()
 
-    pool.discard_connection(poisoned)
+    getattr(pool, operation)(poisoned)
 
     assert poisoned.closed is True
     assert poisoned.close_calls == 1
