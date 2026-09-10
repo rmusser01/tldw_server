@@ -2716,6 +2716,19 @@ async def handle_unified_websocket(
             protocol_frame = _audio_protocol_frame_for_config(config_data, config)
             protocol_config = validate_audio_stream_config(protocol_frame, AUDIO_TRANSCRIBE_ENDPOINT)
 
+            if "parakeet_rnnt_model_name" in config_data:
+                requested_rnnt_model = config_data["parakeet_rnnt_model_name"]
+                if not isinstance(requested_rnnt_model, str) or requested_rnnt_model not in (
+                    config.parakeet_rnnt_model_name,
+                    "nvidia/parakeet-tdt-0.6b-v3",
+                    "nvidia/parakeet_realtime_eou_120m-v1",
+                ):
+                    raise AudioProtocolError(
+                        "bad_request",
+                        "parakeet_rnnt_model_name must select a supported built-in model "
+                        "or the server-configured model; omit it to keep the server selection",
+                    )
+
             # Update configuration
             old_variant = config.model_variant
             raw_model = config_data.get("model", "parakeet")
