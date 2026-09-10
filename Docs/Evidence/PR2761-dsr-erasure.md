@@ -107,6 +107,19 @@ root and disables no guards.
 
 ## Remaining limits
 
+An additional log review found five raw exception interpolations in embedding
+count/deletion diagnostics and DSR coverage-preview warnings. Five captured-log
+regressions reproduced private sentinel disclosure before the change. These
+sites now retain the exception class and operational context without the
+exception body. The four-file DSR selection passes **31 tests** (6 existing
+warnings); Ruff passes and Bandit reports zero findings with test assertions
+excluded. Deletion still proceeds when a collection count fails, and unavailable
+preview coverage still returns its existing fixed HTTP 500 response. Logs:
+`/tmp/pr2761-dsr-remaining-logs-red.log`,
+`/tmp/pr2761-dsr-remaining-logs-green.log` and
+`/tmp/pr2761-dsr-remaining-logs-bandit.json`. Chroma interactions in these added
+tests are mocked; this is privacy/error-behavior evidence, not live Chroma erasure.
+
 The DSR correction cannot itself erase externally stored attachment objects. Their
 restricting registry rows must be cleaned up by an appropriate lifecycle
 operation before notes erasure can succeed. It deliberately honors the schema

@@ -21,6 +21,8 @@ Published release notes entry point.
   timeout checks. Shared hook enforcement covers corrected moderation/workflow
   clocks. Local model and audio input validation rejects symlink aliases before
   resolution; manual CI comparisons honor the selected base commit.
+- Delayed voice-message saves preserve newer turns; empty conversations retain
+  zero token counts. Additional DSR failure diagnostics exclude private text.
 - Verify installed artifact digests: repository rollups 0.1.39–0.1.41 do not
   establish publication. At preparation, GitHub/GHCR app latest was 0.1.38
   and public PyPI listed 0.1.32.

@@ -83,6 +83,9 @@ and this project adheres to Some kind of Versioning
   for URL/API-key guards and request timeout selection. Restored shared UI hook
   enforcement, corrected moderation/workflow clocks, validated local model
   directories before loading, and honored manual CI comparison base commits.
+- **Voice And Privacy Follow-up** — Prevented delayed voice-message saves from
+  discarding newer turns, reset empty-conversation token totals, and removed raw
+  exception text from additional DSR preview and erasure diagnostics.
 
 - **Authentication And Data Integrity** — Hardened trusted-proxy identity and
   login lockout isolation, embeddings authentication/metrics access, SQLite

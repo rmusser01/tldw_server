@@ -595,7 +595,10 @@ def test_model_identifier_rejects_directory_symlink(
     model_path.mkdir()
     alias = tmp_path / "organization" / "local-model"
     alias.parent.mkdir()
-    alias.symlink_to(model_path, target_is_directory=True)
+    try:
+        alias.symlink_to(model_path, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("directory symlinks not supported on this platform")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(atlib, "WHISPER_MODEL_BASE_DIR", tmp_path)
     normalize = getattr(atlib, f"_normalize_{provider}_model_identifier")

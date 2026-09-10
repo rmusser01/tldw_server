@@ -36,27 +36,36 @@ const idState = vi.hoisted(() => ({
 }))
 
 vi.mock("@/store/option", () => ({
-  useStoreMessageOption: () => ({
-    messages: storeState.messages,
-    setMessages: (updater: Message[] | ((prev: Message[]) => Message[])) => {
-      storeState.messages =
-        typeof updater === "function" ? updater(storeState.messages) : updater
-      storeState.setMessages(updater)
-    },
-    history: storeState.history,
-    setHistory: (
-      updater:
-        | { role: "user" | "assistant" | "system"; content: string }[]
-        | ((prev: { role: "user" | "assistant" | "system"; content: string }[]) => { role: "user" | "assistant" | "system"; content: string }[])
-    ) => {
-      storeState.history =
-        typeof updater === "function" ? updater(storeState.history) : updater
-      storeState.setHistory(updater)
-    },
-    historyId: storeState.historyId,
-    setHistoryId: (...args: unknown[]) => storeState.setHistoryId(...args),
-    temporaryChat: storeState.temporaryChat
-  })
+  useStoreMessageOption: () => {
+    // Store writes notify React subscribers in production, including before an
+    // asynchronous save completes. Keep that behavior in this store boundary.
+    const [, notify] = React.useReducer((version: number) => version + 1, 0)
+    return {
+      messages: storeState.messages,
+      setMessages: (updater: Message[] | ((prev: Message[]) => Message[])) => {
+        storeState.messages =
+          typeof updater === "function" ? updater(storeState.messages) : updater
+        storeState.setMessages(updater)
+        notify()
+      },
+      history: storeState.history,
+      setHistory: (
+        updater:
+          | { role: "user" | "assistant" | "system"; content: string }[]
+          | ((
+              prev: { role: "user" | "assistant" | "system"; content: string }[]
+            ) => { role: "user" | "assistant" | "system"; content: string }[])
+      ) => {
+        storeState.history =
+          typeof updater === "function" ? updater(storeState.history) : updater
+        storeState.setHistory(updater)
+        notify()
+      },
+      historyId: storeState.historyId,
+      setHistoryId: (...args: unknown[]) => storeState.setHistoryId(...args),
+      temporaryChat: storeState.temporaryChat
+    }
+  }
 }))
 
 vi.mock("@/hooks/useVoiceChatSettings", () => ({
@@ -105,6 +114,80 @@ describe("useVoiceChatMessages", () => {
     resetStore()
   })
 
+  it("clears the rendered assistant ID when reset changes no messages", () => {
+    const { result } = renderHook(() => useVoiceChatMessages())
+    act(() => result.current.beginTurn("First turn"))
+    expect(result.current.activeAssistantId).toBe("generated-id-2")
+
+    act(() => result.current.resetTurn())
+
+    expect(result.current.activeAssistantId).toBeNull()
+  })
+
+  it.each(["finalizeAssistant", "failTurn"] as const)(
+    "%s completion preserves a newer turn and its incoming deltas",
+    async (finish) => {
+      let resolveSave!: (value: unknown) => void
+      const pendingSave = new Promise<unknown>((resolve) => {
+        resolveSave = resolve
+      })
+      saveMessageOnSuccessMock.mockImplementationOnce(() => pendingSave)
+      const { result } = renderHook(() => useVoiceChatMessages())
+      act(() => {
+        result.current.beginTurn("First turn")
+        result.current.appendAssistantDelta("First response")
+      })
+      let completion!: Promise<void>
+      act(() => {
+        completion = result.current[finish]("First response")
+      })
+      act(() => {
+        result.current.beginTurn("Second turn")
+        result.current.appendAssistantDelta("Second ")
+      })
+
+      await act(async () => {
+        resolveSave({})
+        await completion
+      })
+      act(() => result.current.appendAssistantDelta("response"))
+
+      expect(
+        storeState.messages.find((message) => message.id === "generated-id-4")
+          ?.message
+      ).toBe("Second response▋")
+      expect(result.current.activeAssistantId).toBe("generated-id-4")
+    }
+  )
+
+  it.each(["finalizeAssistant", "failTurn"] as const)(
+    "%s clears the rendered assistant ID after persistence completes",
+    async (finish) => {
+      let resolveSave!: (value: unknown) => void
+      const pendingSave = new Promise<unknown>((resolve) => {
+        resolveSave = resolve
+      })
+      saveMessageOnSuccessMock.mockImplementationOnce(() => pendingSave)
+      const { result } = renderHook(() => useVoiceChatMessages())
+      act(() => {
+        result.current.beginTurn("First turn")
+        result.current.appendAssistantDelta("First response")
+      })
+      let completion!: Promise<void>
+      act(() => {
+        completion = result.current[finish]("First response")
+      })
+      expect(result.current.activeAssistantId).toBe("generated-id-2")
+
+      await act(async () => {
+        resolveSave({})
+        await completion
+      })
+
+      expect(result.current.activeAssistantId).toBeNull()
+    }
+  )
+
   it("removes the empty assistant placeholder when the stream fails before assistant text arrives", async () => {
     const { result } = renderHook(() => useVoiceChatMessages())
 
@@ -117,7 +200,9 @@ describe("useVoiceChatMessages", () => {
     })
 
     expect(storeState.messages.map((message) => message.role)).toEqual(["user"])
-    expect(storeState.history).toEqual([{ role: "user", content: "hello there" }])
+    expect(storeState.history).toEqual([
+      { role: "user", content: "hello there" }
+    ])
     expect(saveMessageOnSuccessMock).not.toHaveBeenCalled()
   })
 
@@ -145,10 +230,14 @@ describe("useVoiceChatMessages", () => {
       await result.current.failTurn("voice_chat_error")
     })
 
-    const assistant = storeState.messages.find((message) => message.role === "assistant")
+    const assistant = storeState.messages.find(
+      (message) => message.role === "assistant"
+    )
     expect(assistant?.message).toBe("Partial answer")
     expect(assistant?.generationInfo?.interrupted).toBe(true)
-    expect(assistant?.generationInfo?.interruptionReason).toBe("voice_chat_error")
+    expect(assistant?.generationInfo?.interruptionReason).toBe(
+      "voice_chat_error"
+    )
     expect(storeState.history.at(-1)).toEqual({
       role: "assistant",
       content: "Partial answer"
@@ -173,7 +262,9 @@ describe("useVoiceChatMessages", () => {
     })
 
     expect(storeState.messages.map((message) => message.role)).toEqual(["user"])
-    expect(storeState.history).toEqual([{ role: "user", content: "hello there" }])
+    expect(storeState.history).toEqual([
+      { role: "user", content: "hello there" }
+    ])
     expect(saveMessageOnSuccessMock).not.toHaveBeenCalled()
   })
 })

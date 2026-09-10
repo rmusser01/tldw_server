@@ -12,7 +12,7 @@
 | Item | Recorded state |
 | --- | --- |
 | Integrated release code and verified blocker fixes | `28ddb8ad8c99fa8d253e1d300a26cd7eb1f4e8cf` |
-| Latest executable-fix/metadata push | `d5ba8b5be7a9b74e8b7f74a63b2b7fccd6079135` (source `910c526513`); subsequent closure batch below is in progress |
+| Latest executable-fix/metadata push | `c97cb2a1ab7a5177e64bba597ba3e1aa418fedac` (source `28ddb8ad8c`); fresh CI is running |
 | Protected source snapshot | `28ddb8ad8c99fa8d253e1d300a26cd7eb1f4e8cf`, 7,106 files |
 | PR branch / target | `codex/release-main-0.1.42` → `main` |
 | PR state at inspection | Draft; no merge or publication performed |
@@ -83,7 +83,11 @@ tracked in the existing owning tasks; no release scope exception was granted.
   and the Skills runner harness passes 47 tests and a scoped strict-null compile.
   [Hooks follow-up](../../Evidence/PR2761-hooks-enforcement.md) repairs and enforces
   purity/static-components in the shared UI scope. Whole-WebUI strictness and
-  403 findings across the remaining four disabled compiler-era rules stay open.
+  the remaining four disabled compiler-era rules stay open. The subsequent
+  [chat hook repairs](../../Evidence/PR2761-chat-hook-state.md) resolve nine refs
+  findings from the 403-finding baseline: delayed saves preserve newer voice turns,
+  assistant IDs update on reset/completion, and empty token caches retain zero.
+  34 tests and focused typecheck/lint pass; no global rescan is claimed.
 - [CodeQL fixes](../../Evidence/PR2761-critical-CodeQL-assessment.md): three
   reproduced raw-exception disclosures repaired in ACP and embedding requeue
   responses; credential reads separated from the TTS preference tuple.
@@ -107,18 +111,29 @@ tracked in the existing owning tasks; no release scope exception was granted.
   verifies deletion, restart after failure before/after unlink and isolation of
   equal-content data belonging to another owner; 68 tests pass. Coordinated
   whole-account attachment/history/backup erasure is not yet certified.
+  Five additional embedding/preview failure-log privacy regressions were
+  reproduced and fixed; the DSR suite now passes 31 tests. The combined DSR/audio
+  selection passes 96 tests, with no new Bandit findings in changed Python.
 - The published 0.1.38 startup failure, unknown deployed rollback baseline,
   measured production capacity envelope, supply-chain vulnerability disposition
   and final human review remain explicit prerequisites. Passing candidate
   same-image restoration does not replace them.
-- Capacity evidence is being gathered from a clean `910c526513` production
-  image in an isolated, resource-capped Docker environment. The supported
+- Capacity evidence was being prepared from clean `910c526513` Dockerfile
+  source in an isolated, resource-capped Docker environment. The supported
   profile uses multi-user PostgreSQL AuthNZ and SQLite content, with one
   disposable actor and real pool/queue/storage measurements. Single-user mode
   cannot provide a production PostgreSQL pool because it selects SQLite.
-  Image build and measured steady/overload/recovery phases must finish before
-  any capacity conclusion; this diagnostic will not certify the final artifact
-  or an unspecified deployed production profile.
+  Build steps and runtime package imports passed, but final image export was
+  stopped when concurrent Docker builds reduced host free space to about 12 GiB.
+  No startup/preflight/traffic phase ran, so there is no capacity result.
+  [Stopped-build evidence](../../Evidence/PR2761-capacity-diagnostic.md) records
+  exclusive fixture/context cleanup and approximately 8.56 GB of exact-ID cache
+  reclamation. Host space subsequently fell to about 7 GiB while other builds
+  continued; physical recovery is not confirmed. Cleanup is limited to task-owned
+  artifacts; shared caches and unrelated builds must not be pruned.
+  The run needs a suitable runner with
+  adequate disk capacity. This diagnostic cannot certify the final artifact or
+  an unspecified deployed production profile.
 
 ### 4.1 Current-head CI and local docs failure — agent
 

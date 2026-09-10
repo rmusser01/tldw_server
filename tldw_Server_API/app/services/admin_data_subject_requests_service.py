@@ -210,7 +210,7 @@ async def _count_embeddings(user_id: int) -> int:
         try:
             manager = _get_chroma_manager_for_user(user_id)
         except Exception as exc:
-            logger.debug("ChromaDB not available for user {}: {}", user_id, exc)
+            logger.debug("ChromaDB not available for user {}: {}", user_id, type(exc).__name__)
             return 0
         try:
             collections = manager.list_collections()
@@ -222,11 +222,11 @@ async def _count_embeddings(user_id: int) -> int:
                     logger.debug(
                         "Failed to count ChromaDB collection for user {}: {}",
                         user_id,
-                        exc,
+                        type(exc).__name__,
                     )
             return total
         except Exception as exc:
-            logger.debug("Failed to count embeddings for user {}: {}", user_id, exc)
+            logger.debug("Failed to count embeddings for user {}: {}", user_id, type(exc).__name__)
             return 0
 
     return await asyncio.to_thread(_count_sync)
@@ -328,7 +328,7 @@ async def preview_data_subject_request(
             selected_categories=selected_categories,
         )
     except DataSubjectRequestCoverageUnavailableError as exc:
-        logger.warning("DSR preview unavailable for user {}: {}", user["id"], exc)
+        logger.warning("DSR preview unavailable for user {}: {}", user["id"], type(exc).__name__)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="requester_data_unavailable",
@@ -536,7 +536,7 @@ async def _erase_embeddings(user_id: int) -> int:
                 logger.debug(
                     "Failed to count ChromaDB collection before deletion for user {}: {}",
                     user_id,
-                    exc,
+                    type(exc).__name__,
                 )
             try:
                 manager.delete_collection(col.name)

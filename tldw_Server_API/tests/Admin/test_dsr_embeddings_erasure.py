@@ -12,7 +12,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -123,6 +122,76 @@ class TestCountEmbeddings:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_at", ["manager", "list", "count", "erasure_count"])
+async def test_embedding_failure_logs_exclude_private_exception_content(monkeypatch, _mock_chroma_manager, failure_at):
+    from tldw_Server_API.app.services import admin_data_subject_requests_service as service
+
+    private_marker = "private-subject-embedding-content"
+    failure = RuntimeError(private_marker)
+    get_manager = MagicMock(return_value=_mock_chroma_manager)
+    monkeypatch.setattr(service, "_get_chroma_manager_for_user", get_manager)
+    if failure_at == "manager":
+        get_manager.side_effect = failure
+    elif failure_at == "list":
+        _mock_chroma_manager.list_collections.side_effect = failure
+    else:
+        _mock_chroma_manager.list_collections.return_value[0].count.side_effect = failure
+
+    messages = []
+    sink = service.logger.add(
+        lambda message: messages.append(message.record["message"]),
+        level="DEBUG",
+        filter=lambda record: record["name"] == service.__name__,
+    )
+    try:
+        handler = service._erase_embeddings if failure_at == "erasure_count" else service._count_embeddings
+        assert await handler(7) == 0
+    finally:
+        service.logger.remove(sink)
+
+    assert messages
+    assert private_marker not in "\n".join(messages)
+    if failure_at == "erasure_count":
+        _mock_chroma_manager.delete_collection.assert_called_once_with("default")
+
+
+@pytest.mark.asyncio
+async def test_preview_failure_logs_exclude_private_exception_content(monkeypatch):
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.services import admin_data_subject_requests_service as service
+
+    private_marker = "private-subject-coverage-content"
+    monkeypatch.setattr(service, "_resolve_requester_user", AsyncMock(return_value={"id": 7}))
+    monkeypatch.setattr(service, "_enforce_requester_visibility", AsyncMock())
+    monkeypatch.setattr(
+        service,
+        "_build_summary_for_user",
+        AsyncMock(side_effect=service.DataSubjectRequestCoverageUnavailableError(private_marker)),
+    )
+    messages = []
+    sink = service.logger.add(
+        lambda message: messages.append(message.record["message"]),
+        level="WARNING",
+        filter=lambda record: record["name"] == service.__name__,
+    )
+    try:
+        with pytest.raises(HTTPException) as error:
+            await service.preview_data_subject_request(
+                requester_identifier="7",
+                categories=["notes"],
+                users_repo=MagicMock(),
+            )
+    finally:
+        service.logger.remove(sink)
+
+    assert error.value.status_code == 500
+    assert error.value.detail == "requester_data_unavailable"
+    assert messages
+    assert private_marker not in "\n".join(messages)
+
+
 class TestUpdateRequestStatus:
     """Verify update_request_status exists and validates status values."""
 
@@ -147,7 +216,7 @@ class TestUpdateRequestStatus:
         )
 
         expected = {"pending", "recorded", "executing", "completed", "failed"}
-        assert AuthnzDataSubjectRequestsRepo._VALID_STATUSES == expected
+        assert expected == AuthnzDataSubjectRequestsRepo._VALID_STATUSES
 
 
 # ---------------------------------------------------------------------------

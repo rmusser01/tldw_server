@@ -40,6 +40,8 @@ complete grouped rollup and the release-refresh plan for outstanding gates.
   shared UI hook enforcement and corrected moderation expiry/workflow clocks.
 - Validate local model directories before loading and reject audio input
   symlinks before path resolution. Manual CI comparisons honor the selected base.
+- Prevent delayed voice-message saves from discarding newer turns, retain zero
+  tokens after clearing a conversation, and redact additional DSR diagnostics.
 - Repository rollups 0.1.39–0.1.41 are not published-artifact evidence. At
   candidate preparation, GitHub and GHCR app `latest` were 0.1.38; public PyPI
   listed 0.1.32. Identify the installed digest before choosing a rollback baseline.

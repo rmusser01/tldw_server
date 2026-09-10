@@ -1,0 +1,12 @@
+{
+  "ServerVersion": "29.2.0",
+  "Architecture": "aarch64",
+  "OSType": "linux",
+  "OperatingSystem": "Docker Desktop",
+  "KernelVersion": "6.12.67-linuxkit",
+  "NCPU": 18,
+  "MemTotal": 16746053632,
+  "DockerRootDir": "/var/lib/docker",
+  "Driver": "overlayfs",
+  "scope": "Shared Docker Desktop VM observed before load; planned API limit 2 CPU / 4 GiB, but no API container was created"
+}
