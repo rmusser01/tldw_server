@@ -81,6 +81,56 @@ def test_injected_sqlite_pool_retains_legacy_guidance_and_closes_connection(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("close_error", [sqlite3.OperationalError, OSError, RuntimeError, ValueError], ids=[
+    "sqlite-close-error", "os-close-error", "runtime-close-error", "wrapper-close-error",
+])
+def test_injected_pool_close_failure_preserves_legacy_recovery_guidance(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    uncached_sqlite_pool: ConnectionPool,
+    close_error: type[Exception],
+) -> None:
+    """A cleanup exception is diagnosed without replacing unsupported-schema guidance."""
+    class CloseFailureConnection(sqlite3.Connection):
+        """Model a compliant injected checkout whose close method fails."""
+
+        def close(self) -> None:
+            """Preserve the open handle until explicit test teardown."""
+            raise close_error("injected close unavailable")
+
+    db_path = tmp_path / "injected.db"
+    startup_conn = sqlite3.connect(db_path, factory=CloseFailureConnection)
+    startup_conn.row_factory = sqlite3.Row
+    messages: list[Any] = []
+    sink = sqlite_helpers_module.logger.add(messages.append, level="WARNING")
+    try:
+        startup_conn.execute("CREATE TABLE schema_version (version INTEGER)")
+        startup_conn.execute("INSERT INTO schema_version VALUES (21)")
+        startup_conn.commit()
+        backend = DatabaseBackendFactory.create_backend(
+            DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=str(db_path)),
+        )
+        monkeypatch.setattr(backend, "get_pool", lambda: uncached_sqlite_pool)
+        monkeypatch.setattr(uncached_sqlite_pool, "get_connection", lambda: startup_conn)
+        with pytest.raises(DatabaseError, match="unsupported legacy Media DB schema version 21") as exc_info:
+            MediaDatabase(db_path=str(db_path), client_id="failed-close-legacy", backend=backend)
+        assert "Docs/Database_Migrations.md" in str(exc_info.value)
+        assert startup_conn.execute("SELECT version FROM schema_version").fetchone()[0] == 21
+        assert startup_conn.execute(
+            "SELECT name FROM sqlite_master WHERE name='schema_migrations'"
+        ).fetchall() == []
+        records = [message.record for message in messages if "Failed to invalidate" in message.record["message"]]
+        assert len(records) == 1
+        assert "schema_version=21" in records[0]["message"]
+        assert f"connection_id={id(startup_conn)}" in records[0]["message"]
+        assert records[0]["exception"].type is close_error
+        assert records[0]["exception"].traceback is not None
+    finally:
+        sqlite_helpers_module.logger.remove(sink)
+        sqlite3.Connection.close(startup_conn)
+
+
+@pytest.mark.unit
 def test_media_db_upgrade_no_migrations_reports_explicit_diagnostics(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,

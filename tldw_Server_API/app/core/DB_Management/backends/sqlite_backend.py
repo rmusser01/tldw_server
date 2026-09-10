@@ -173,8 +173,9 @@ class SQLiteConnectionPool(ConnectionPool):
         """Close a failed handle and remove its matching current-thread cache entry.
 
         A different current handle remains cached and usable. Matching cached
-        handles use ``clear_thread_local_connection()``, including its existing
-        suppression of OSError, RuntimeError and sqlite3.Error during close.
+        handles use ``clear_thread_local_connection()``: ordinary close failures
+        are logged with a traceback, and the handle is detached to prevent reuse
+        even if the underlying resource could not be closed.
 
         Args:
             connection: SQLite handle borrowed on the calling thread, or an
@@ -184,9 +185,9 @@ class SQLiteConnectionPool(ConnectionPool):
             None.
 
         Raises:
-            Exception: Close errors for uncached handles propagate unchanged,
-                including sqlite3.Error, OSError and RuntimeError. Unexpected
-                errors outside the cached-cleanup suppression also propagate.
+            Exception: Close errors for uncached handles propagate unchanged.
+            BaseException: Process-control exceptions during cached close, such
+                as KeyboardInterrupt, are not suppressed.
         """
         with self._lock:
             if self._connections.get(threading.get_ident()) is connection:
@@ -195,18 +196,33 @@ class SQLiteConnectionPool(ConnectionPool):
                 connection.close()
 
     def clear_thread_local_connection(self) -> None:
-        """Clear the current thread's connection reference from the pool.
+        """Close and detach the current thread's cached connection.
 
-        This provides a safe way for higher layers to invalidate a broken
-        connection without reaching into private attributes.
+        Ordinary exceptions from close are logged with connection/thread context
+        and traceback. The failed handle is still detached so subsequent borrows
+        create a fresh connection; its underlying resource may remain open. This
+        method does not retry or reuse that handle.
+
+        Returns:
+            None.
+
+        Raises:
+            BaseException: Process-control exceptions during close, such as
+                KeyboardInterrupt, are not suppressed.
         """
         thread_id = threading.get_ident()
         with self._lock:
             try:
                 conn = self._connections.get(thread_id)
                 if conn:
-                    with suppress(OSError, RuntimeError, sqlite3.Error):
+                    try:
                         conn.close()
+                    except Exception:
+                        logger.exception(
+                            "Failed to close rejected SQLite connection {connection_id} "
+                            "on thread {thread_id}; detaching it to prevent reuse",
+                            connection_id=id(conn), thread_id=thread_id,
+                        )
                 self._connections[thread_id] = None
             except (AttributeError, KeyError, RuntimeError, TypeError):
                 pass

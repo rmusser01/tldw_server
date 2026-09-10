@@ -4,7 +4,7 @@ title: Review and rebase PR 2627 SQLite migration durability
 status: Done
 assignee: []
 created_date: '2026-09-10 00:43'
-updated_date: '2026-09-10 04:03'
+updated_date: '2026-09-10 04:16'
 labels:
   - db
   - migrations
@@ -74,6 +74,7 @@ Final fallback-test maintenance: replace private-container assertions with obser
 Reborrow contract follow-up: verify an open reborrowed handle and explicitly return it without requiring object identity. Complete: close-only mutation remains red; 19 focused tests pass, production code is unchanged, and independent review has no findings.
 Transaction-scope maintenance: use native SQLite connection contexts for migration commit/rollback and separate failure recording. Complete: commit-time deferred-FK failure characterization and retry pass before/after, all 238 expanded tests pass, security and independent review clear.
 Restoration diagnostics: bind migration identity/direction/phase and attach the active exception at warning level in both restoration handlers; annotate the modified internal test. Complete: both diagnostic cases reproduced missing warning records, final unit and expanded suites pass, security and independent review clear.
+Close-failure handling: log ordinary cached close exceptions, detach rejected handles, and preserve legacy guidance when injected cleanup fails. Complete: ten initial cases and four wrapper edge cases reproduced failures; final focused33 and expanded254 tests pass with12PostgreSQL-unavailable skips, zero Bandit findings and independent review clear.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -152,12 +153,16 @@ Independent review confirmed the public replacement return/reuse assertions dete
 2026-09-10 Qodo cleared c1fb7a19ac at 03:46:41Z with zero bugs, rule violations and skill insights; confirmation 5612520850 names that head and all threads are resolved. Dev advanced to 177d58ac6fee87678d65ce3a9db0216021b6b68e by merging realtime speech PR #2572 (40 changed files, no overlap with this PR). Refresh onto the current base, verify unchanged patches and migration/bootstrap/backend behavior, then publish with exact lease protection and await final gates.
 
 2026-09-10 refreshed onto dev 177d58ac6fee87678d65ce3a9db0216021b6b68e after Qodo cleared c1fb7a19ac. All thirteen patches rebased without conflicts and matched exactly in range-diff; all ten changed Python files and migration guidance are byte-identical to that reviewed head. Fresh expanded suite: 240 passed, 12 PostgreSQL-unavailable skips, 4 warnings in 38.00s. Ruff, compilation, repository guards, whitespace, unchanged packaged SQL and fresh Bandit (zero findings) pass. Logs: /tmp/pr2627-realtime-rebase-tests.log and /tmp/pr2627-realtime-rebase-bandit.json. Amend this verification into the last existing commit, publish with exact force-with-lease and await final-head Qodo/CI before authorized merge.
+
+2026-09-10 Qodo review on f76d566c78 reports two cleanup edge cases: cached SQLite close errors are suppressed silently by the existing clear helper, and injected pool close errors can mask unsupported-legacy recovery guidance. Plan: add real SQLite close-failure tests; log expected cached-close failures with connection/thread context and traceback while deliberately detaching to prevent reuse; document that behavior. Catch expected invalidation failures narrowly on legacy rejection, log context/traceback, and still raise the intended recovery SchemaError. Preserve generic pool ownership and successful cleanup. Validate focused/full scopes and independent review before publishing.
+
+2026-09-10 close-failure follow-up on f76d566c78: cached SQLite cleanup now logs every ordinary conn.close exception with connection/thread identity and traceback before continuing existing detachment. Documentation states failed resources may remain open but rejected handles are not retried or reused; process-control BaseExceptions are unsuppressed, and uncached invalidation retains propagation. Legacy rejection catches Exception narrowly around pool invalidation, logs identity/schema/traceback using logger.exception (compatible with the module stdlib fallback), and still raises the intended recovery SchemaError. It never returns/reuses the failed checkout. Ten initial real SQLite cases reproduced silent diagnostics or masked guidance. Independent review identified TypeError/ValueError wrapper close errors that escaped the initial limited catch or retained the cache; four additional cases failed before broadening only the close call handler. That red run also exposed consequent fixture teardown errors from the stale pool entry. Final five-exception/two-API cached cases plus four injected cases pass. Reviewer confirmed no remaining substantive issue. Expanded15module suite:254passed,12PostgreSQL-unavailable skips,4warnings. Final focused pool/legacy suite:33passed after simplifying the logger expression. Ruff BLE001 did not recognize chained Loguru exception logging, so used direct logger.exception with named context formatting arguments, which appear in both message and captured fields; no lint suppression. All ten-file Ruff/compilation checks, repository guards, whitespace and packaged-SQL equality pass; Bandit over six application modules reports zero findings. Logs: /tmp/pr2627-close-failure-red.log, /tmp/pr2627-wrapper-close-red.log, /tmp/pr2627-close-failure-full.log, /tmp/pr2627-close-failure-final-focused.log, /tmp/pr2627-close-failure-bandit.json. Dev remains177d58ac6f. Await final-head Qodo and required CI before merge.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Rebased PR #2627 onto latest dev 177d58ac6f with all thirteen patches unchanged. All seventeen Qodo findings are resolved and Qodo cleared c1fb7a19ac with zero findings. Atomic migration durability, native transaction scopes, compatibility/checksums and recovery remain useful. Fresh post-rebase validation: 240 passed, 12 PostgreSQL-unavailable skips; zero Bandit findings and clean lint/guards. Human Change summary preserved. Await final-head Qodo and required CI before authorized merge.
+PR#2627 is rebased onto dev177d58ac6f and all nineteen Qodo findings through f76d566c78 are addressed. Migration durability, compatibility/checksums, native transaction contexts and recovery remain useful. Cached close failures are diagnosed and rejected handles detached; injected cleanup failures no longer hide recovery guidance. Expanded validation254passed/12PostgreSQL-unavailable skips; final focused33passed; zero Bandit findings, clean lint/guards and independent review. Human Change summary preserved. Await final-head review/CI before authorized merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

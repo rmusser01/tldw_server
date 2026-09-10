@@ -275,8 +275,14 @@ def bootstrap_sqlite_schema(db: SupportsSqlitePostCoreStructures) -> None:
                         current_db_version
                         < MIN_SUPPORTED_SQLITE_MEDIA_DB_MIGRATION_VERSION
                     ):
-                        # Failed startup must not leave an open or stale pooled handle.
-                        db.backend.get_pool().invalidate_connection(conn)
+                        # Cleanup must not mask the primary unsupported-schema error.
+                        try:
+                            db.backend.get_pool().invalidate_connection(conn)
+                        except Exception:
+                            logger.exception(
+                                "Failed to invalidate rejected legacy Media DB connection "
+                                f"(schema_version={current_db_version}, connection_id={id(conn)})"
+                            )
                         raise SchemaError(
                             "unsupported legacy Media DB schema version "
                             f"{current_db_version}; minimum supported automatic "
