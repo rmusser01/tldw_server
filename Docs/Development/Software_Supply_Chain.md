@@ -182,6 +182,14 @@ succeed. The source-admission prerequisite still applies; this workflow change
 does not establish fresh release-image evidence until a release job actually runs.
 See [TASK-13013.7.25](../Evidence/TASK-13013.7.25-release-runtime-admission.md).
 
+All six application-owned persistent Chroma client constructors explicitly select
+the embedded Rust API, so `CHROMA_API_IMPL` cannot switch those paths to HTTP.
+The declared Chroma minimum is 1.5.9, the existing locked and tested version;
+resolved dependencies are unchanged. Explicit client/factory injection remains
+outside this guarantee. This configuration hardening does not activate a Chroma
+exception or qualify a new artifact. See
+[TASK-13013.7.26](../Evidence/TASK-13013.7.26-embedded-chroma-settings.md).
+
 `runtime-image-<name>.json` records these results, the lock hash, and the subject
 and config digests; it is included in the evidence checksum manifest. Probe
 failure rejects admission but does not suppress vulnerability scans or uploads.

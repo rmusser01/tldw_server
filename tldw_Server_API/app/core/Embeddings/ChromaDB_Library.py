@@ -353,8 +353,9 @@ class ChromaDBManager:
                     f"User '{self.user_id}': Using internal in-memory Chroma client (config backend=stub)."
                 )
             else:
-                # Build robust Settings with explicit persist_directory for Chroma 0.4.x/1.x compatibility
+                # Keep internal persistent storage embedded despite CHROMA_API_IMPL in the environment.
                 client_settings = ChromaSettings(
+                    chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
                     persist_directory=str(self.user_chroma_path),
                     anonymized_telemetry=chroma_client_settings_config.get("anonymized_telemetry", False),
                     allow_reset=chroma_client_settings_config.get("allow_reset", True),
