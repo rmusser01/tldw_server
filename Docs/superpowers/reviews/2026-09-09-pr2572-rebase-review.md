@@ -130,3 +130,16 @@ conditional on that head's checks, the requester-owned Change summary (including
 the implementation rationale), and explicit merge approval. The temporary
 `IMPLEMENTATION_PLAN_pr2572_qodo_followup.md` is removed after its implementation
 and verification outcomes are retained here and in TASK-12089.
+
+### Approved merge and final base update
+
+The requester supplied the Change summary and explicitly authorized merging PR
+2572. That instruction resolves the pending requester decision above; no further
+approval or rationale is pending.
+
+GitHub rejected the initial merge because its strict required-check rule requires
+the latest dev. PR 2599 had advanced dev to `6b61b5074c` with the audio.cpp TTS
+provider. Rebase completed without conflicts, and the reviewed realtime feature
+was unchanged. Realtime, route-policy, audio-download, and audio.cpp registry
+regressions passed: **156 passed**. Bandit reported zero findings and errors.
+The updated head must pass GitHub's required checks before the authorized merge.

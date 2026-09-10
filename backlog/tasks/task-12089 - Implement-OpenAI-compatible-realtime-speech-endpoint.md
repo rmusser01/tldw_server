@@ -1,10 +1,10 @@
 ---
 id: TASK-12089
 title: Implement OpenAI-compatible realtime speech endpoint
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-09-10 02:02'
+updated_date: '2026-09-10 02:59'
 labels:
   - audio
   - realtime
@@ -106,12 +106,14 @@ Original modified files:
 Qodo follow-up implementation: rebased cleanly onto dev 456eafb7a6; Qodo confirmed the prior code findings resolved and retained three live-smoke policy findings. Moved real-provider verification to an explicit standalone command with a spoken-WAV input and server-configured providers; replaced skipped pytest smoke with deterministic fake-transport tests. Independent review identified oversized WAV frames, reproduced with a seven-second clip and fixed via chunking plus a 30-second input limit. Final focused suite: 150 passed, no skips. Refreshed the OpenAPI fingerprint after reproducing CI contract drift (2086 -> 2087 paths; no schema count changes) and regenerated ignored frontend types. Ruff/Black, compilation, repository guards, diff check and Bandit passed. Awaiting posted current-head Qodo/CI before asking for merge approval.
 
 Final Qodo follow-up validation: d61c9b8573 received Qodo zero bugs/zero rule violations and all 50 CI checks passed (26 workflow skips). Local backend unit smoke: 403 passed; deployment-shaped startup smoke passed. Dev advanced during CI to f0248aaa00 through PR 2613 (three task documents and one audio-download test only), so the PR was rebased again without conflicts. Tree comparison confirms production code, manual smoke helper, and API fingerprint are unchanged from the fully green head. Focused realtime/route suite plus updated download regression: 153 passed, no skips; Bandit zero findings/errors. Refreshed-head checks run again before any merge. User merge decision and implementation-rationale sentence remain pending. Temporary follow-up plan outcomes are retained in the report; the plan file was removed.
+
+2026-09-10 merge instruction: requester supplied the Change summary and explicitly authorized merging PR 2572; no further approval or rationale is pending. GitHub strict status checks rejected the first merge because dev advanced through PR 2599 (audio.cpp TTS). Rebased cleanly onto dev 6b61b5074c. Feature implementation and review fixes are complete; the requested merge will proceed after GitHub required checks on the updated head.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-PR 2572 remains useful as an experimental realtime speech adapter. Rebases include latest dev f0248aaa00. Qodo findings are addressed, manual provider verification is separated from deterministic pytest coverage, and the OpenAPI fingerprint is corrected. The preceding identical production tree passed all 50 CI checks and Qodo reported zero issues; the latest rebase passed 153 focused tests plus Bandit and awaits its refreshed remote checks. No merge is authorized yet; request the user decision and their implementation rationale under the Change summary policy.
+Implementation and review of PR 2572 are complete. The requester supplied the Change summary and explicitly authorized merge. All confirmed Qodo findings were fixed, with zero findings on the preceding reviewed head. Final rebase includes dev 6b61b5074c and preserves the reviewed realtime feature. GitHub required checks must finish on the rebased head before the authorized merge can execute; live-provider interoperability and latency remain unverified.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
