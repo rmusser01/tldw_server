@@ -5,6 +5,24 @@
 **Architecture:** Preserve the existing PR branch and merge the frozen dev source without rewriting history. Tag only the eventual reviewed main merge commit; do not run `make release-patch` after the pre-bump because it would select 0.1.43.
 **Spec:** `Docs/superpowers/specs/2026-07-26-release-0.1.42-reviewed-metadata-design.md`, superseded for the source/date values below.
 
+## Current release status
+
+**Release is not ready to merge or publish.** This document is the active execution plan for [PR #2761](https://github.com/rmusser01/tldw_server/pull/2761), including unfinished work. The July design is historical; its source/date values are superseded here.
+
+| Item | Recorded state |
+| --- | --- |
+| Integrated release code | `b3287b5437c122a12edf0dcafb155578b978a2ae` |
+| Pushed candidate including generated-doc synchronization | `e5ad549c211ba96a1873e356b20f4883358b4476` |
+| PR branch / target | `codex/release-main-0.1.42` → `main` |
+| PR state at inspection | Draft, `UNSTABLE`; no merge or publication performed |
+| Remote CI snapshot for e5ad549c21 | 17 successful checks, 49 pending; one failed **CodeQL** check ([run](https://github.com/rmusser01/tldw_server/runs/102918248263)) |
+| Local focused checks | 241 passed; one docs-build test unpassed due host multiprocessing failure |
+| Local docs alternative | Strict serial build passed; standard build still needs successful evidence |
+| Latest observed GitHub publication | v0.1.38; no remote v0.1.39–v0.1.42 tags |
+| Primary checkout | `dev`, unchanged; its local `a27ecb12f0` tracking commit is outside this release freeze |
+
+CI counts are an observation, not a permanent state. Documentation follow-ups advance the PR head; always retrieve its current SHA and require results for that SHA before merge. The next work is **Stage 4.1: inspect the failed CodeQL result and complete current-head CI**, then resolve the remaining rows in Stage 4. No gate is waived by this plan.
+
 ## Stage 1: Recover and freeze
 **Goal:** Restore the existing release branch and identify the current inputs.
 **Success Criteria:** Original PR ancestry is retained; unrelated local work is excluded.
@@ -34,22 +52,99 @@
 **Goal:** Commit the refreshed candidate and update PR #2761 with accurate verification and blockers.
 **Success Criteria:** Focused checks pass or exact failures are documented; remote PR points to the verified candidate.
 **Tests:** Focused pytest release/docs/CI suite, strict MkDocs, Actionlint, scoped Bandit, diff checks, protected-tree equality, final ancestry checks.
-**Status:** In Progress
+**Status:** Complete (candidate preparation and push; release gates remain in Stage 4)
+
+- [x] Commit frozen-dev integration and release refresh as `b3287b5437` (TASK-13013.3).
+- [x] Commit the regenerated Buddy/persona guide and evidence as `e5ad549c21`.
+- [x] Push the existing PR branch without rewriting history.
+- [x] Update PR #2761 title/body with current scope, evidence, and blockers; preserve draft status and human-summary placeholder.
+- [x] Verify clean release worktree, remote/local candidate equality, frozen-input ancestry, and unchanged primary dev checkout.
 
 Run tests with the project virtual environment activated and execute from this worktree. Keep the human Change summary placeholder intact. Local focused tests do not replace the required remote backend, security, coverage, frontend, E2E, container, and trusted license gates on the final candidate.
 
-## Stage 4: Publication gate and handoff
-**Goal:** Record the remaining release prerequisites and the exact publication path.
-**Success Criteria:** No merge, tag, or publication is represented as complete without corresponding evidence.
-**Tests:** Recheck PR head, gates, human review, tags and releases before publication; verify package/container provenance after publication.
-**Status:** Not Started
+## Stage 4: Close release blockers
+**Goal:** Obtain explicit evidence for every prerequisite before marking the candidate merge-ready.
+**Success Criteria:** Every unchecked item below is completed or has a requester-approved scope decision recorded in its owning task; no failed or stale required check is accepted as green.
+**Tests:** Current-head GitHub checks, standard strict docs build, dependency-task verification, publication inventory, migration/restore rehearsal, and human review.
+**Status:** In Progress
 
-- The repository requires a requester-authored Change summary explaining what changed and why; the PR currently contains only a placeholder.
-- The completed frontend legal record requires requester review before merge.
-- TASK-13013.7 (supply chain), TASK-13013.8 (tenant/data lifecycle), TASK-13013.9 (capacity/soak), and TASK-12116 (frontend safety) remain open dependencies; resolve them or record explicit release-scope decisions before claiming core release readiness.
-- GitHub currently lists v0.1.38 as the latest published release; a remote query for v0.1.4-prefixed tags returned no entries. Historical 0.1.39–0.1.41 metadata is not proof of publication. Reconcile this distribution gap and select a verified deployed rollback target before release.
-- Back up persistent data before upgrading: the accumulated train includes AuthNZ, conversation, notes sync, presentation, personal-context, and webhook schema changes. Do not assume an old binary can read migrated databases. Use `Docs/Deployment/Production_Reference_Deployment.md` and `Docs/Admin_Webhooks_Migration_Runbook.md` for operational preparation.
-- After approved merge, fetch main and require it to equal PR #2761's merge SHA. Tag that exact commit as v0.1.42 and create the GitHub Release from its curated changelog with `--verify-tag`. Verify automatic PyPI and Docker publications, then sync released main back to dev.
+### 4.1 Current-head CI and local docs failure — agent
+
+- [ ] Inspect the failed [CodeQL check](https://github.com/rmusser01/tldw_server/runs/102918248263), retain its failure details, and determine whether it is a code, configuration, permission, or infrastructure failure. The snapshot alone does not establish the cause.
+- [ ] Read all current-head check results and fix actionable regressions. Do not cancel required checks to manufacture readiness. After changes, push and revalidate the new head.
+- [ ] Record success and run URLs for `backend-required`, `security-required`, `coverage-required`, `frontend-required`, `e2e-required`, `container-build-check`, and `frontend-license-policy/trusted/main`; capture remaining failing review/security checks as well.
+- [ ] Re-run `test_strict_local_build_preserves_canonical_site_sources` and the unchanged strict MkDocs command on a host or CI runner that can allocate multiprocessing semaphores. Attach successful evidence for the candidate. The serial build is useful evidence but does not close this failed test.
+
+Read-only status commands:
+
+```bash
+gh pr view 2761 --repo rmusser01/tldw_server --json headRefOid,isDraft,mergeStateStatus,statusCheckRollup
+gh pr checks 2761 --repo rmusser01/tldw_server
+```
+
+Local reproduction, from the release worktree:
+
+```bash
+source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+python -m pytest tldw_Server_API/tests/Docs/test_release_docs_contract.py::test_strict_local_build_preserves_canonical_site_sources -q --override-ini addopts=''
+python -m mkdocs build --strict -f Docs/mkdocs.yml --site-dir /tmp/pr2761-docs-site
+```
+
+**Exit evidence:** Candidate SHA, check name, conclusion, and run URL for each gate; standard docs-build success. Main's ruleset enforces only the trusted license context, whereas the six core gates are enforced on dev. That ruleset minimum does not replace the release-readiness requirements.
+
+### 4.2 Open readiness dependencies — agent, with requester ownership of scope decisions
+
+Inspect existing child work and merged evidence before starting duplicate implementation. Current task status alone does not prove either completion or absence of work.
+
+| Owning task | Remaining work and required completion evidence |
+| --- | --- |
+| [TASK-13013.7](../../../backlog/tasks/task-13013.7%20-%20Close-dependency-and-software-supply-chain-release-gaps.md) | Prove the supported frontend security baseline; Bun dependency-update and SBOM coverage; reproducible Python production resolution; immutable base images/artifact provenance; vulnerability scans and explicit exceptions. Record exact versions, digests, reports, and tested source SHA. |
+| [TASK-13013.8](../../../backlog/tasks/task-13013.8%20-%20Prove-reusable-tenant-isolation-and-data-lifecycle-primitives.md) | Run cross-user and cross-organization negative tests for selected API/job/media/note/RAG/storage paths. Verify export, deletion, durable cleanup and partial-failure recovery, including logs/jobs/caches/backups. Record the tested profile and results. |
+| [TASK-13013.9](../../../backlog/tasks/task-13013.9%20-%20Create-a-reusable-release-capacity-and-soak-test-harness.md) | Supply and run the reproducible capacity/soak profile with datasets, duration, pass thresholds and artifact output. Measure authentication/workflow load, queue depth, database pools, storage and overload recovery against an exact artifact. Record the supported operating envelope. |
+| [TASK-12116](../../../backlog/tasks/task-12116%20-%20Re-enable-frontend-type-safety-and-lint-gates.md) | Reconcile TypeScript merge gating/strictness, React hooks enforcement, persisted Zustand version/migration contracts, and shared dependency majors. Link actual CI and migration-test evidence; a frontend build alone is insufficient. |
+
+- [ ] Close each dependency with its required evidence, or obtain an explicit requester decision specifying what is outside this release's supported scope, why, and what risk remains. Record decisions in both the owning task and this plan. None has been granted in this session.
+
+### 4.3 Distribution lineage, migration and rollback — agent
+
+- [ ] Reconcile repository 0.1.39–0.1.41 metadata with GitHub, PyPI and container publication inventories. Record each existing version, source commit, artifact digest, and publication status. Do not invent missing releases or recreate tags merely to match documentation.
+- [ ] Confirm 0.1.42 is unused across the intended publication targets before publication. If any artifact already exists, establish its provenance and follow recovery instead of overwriting it.
+- [ ] Select a verified deployed rollback version and its immutable image/package identity. `v0.1.38` being GitHub's latest release does not prove it is the deployed rollback target.
+- [ ] Assess authentication, conversation, notes-sync, presentation, personal-context and webhook schema changes from that target to the candidate; record configuration changes and incompatible downgrade paths.
+- [ ] Rehearse backup, upgrade/health verification, and restore using representative data. Cover databases, uploaded content and configuration. Record backup checksums, restore commands and results. Do not assume an older binary can read migrated databases.
+
+Use [Production Reference Deployment](../../Deployment/Production_Reference_Deployment.md), [Admin Webhooks Migration Runbook](../../Admin_Webhooks_Migration_Runbook.md), and [Standalone HTML Presentations](../../Deployment/Standalone_HTML_Presentations.md). Keep standalone HTML generation disabled until its documented schema-v2 backup and rollout prerequisites are met.
+
+**Exit evidence:** Distribution inventory, approved version, exact rollback artifact, configuration/schema compatibility assessment, and successful backup/restore rehearsal linked here and from TASK-13013.3.
+
+### 4.4 Human review — requester
+
+- [ ] Write the PR's `Change summary` in the requester's own words, explaining what changed and why the implementation choices were made, per [the repository policy](../AI_GENERATED_PR_CHANGE_SUMMARY_POLICY_2026_04_17.md). The current placeholder does not satisfy this gate.
+- [ ] Review the completed [0.1.42 legal record](../../../LICENSES/releases/0.1.42/release.json), [Countdown grant](../../../LICENSES/releases/0.1.42/PolyForm-Countdown-1.0.0.txt), source revision and manifest. The `today/now` response authorized refreshing dates; it did not record final legal-file review or waive other release gates.
+- [ ] If release day changes before publication, obtain revised release/Countdown dates and refresh every dated surface, manifest verification and review as required by the original design.
+
+**Exit evidence:** Requester-owned PR summary and an explicit review record covering the final legal record and source snapshot. Agent-generated copy cannot substitute for either.
+
+## Stage 5: Merge, publish, verify and sync
+**Goal:** Publish exactly the reviewed candidate and prove source/artifact/rollback lineage.
+**Success Criteria:** Reviewed main merge SHA, immutable v0.1.42 tag, GitHub release, server-only package/container provenance, and main-to-dev synchronization agree.
+**Tests:** Pre-merge gate recheck, tag/source checks, publication workflow results, artifact attestations, and ancestry checks.
+**Status:** Not Started — blocked on Stage 4
+
+These are future execution steps, not authorization to merge or publish while Stage 4 is incomplete.
+
+- [ ] Re-read the PR head and require all Stage 4 evidence to cover it. Obtain the final release decision once the reviewable result is complete.
+- [ ] Merge PR #2761 using the allowed merge-commit method; do not use an administrative bypass or reuse historical bypass claims.
+- [ ] Read PR #2761's `mergeCommit.oid`, fetch main, and require `origin/main` to equal that exact SHA. Stop if main moved; do not guess a tag target.
+- [ ] Recheck whether v0.1.42 or any corresponding artifact exists; recover an existing publication rather than creating a duplicate.
+- [ ] Create the annotated `v0.1.42` tag on the verified merge SHA; verify the tag resolves to that SHA before pushing it.
+- [ ] Extract release notes from the **tagged** `CHANGELOG.md` using `Helper_Scripts.release.extract_release_notes_for_version`, then create the GitHub Release with `--verify-tag` and those notes.
+- [ ] Verify the automatic `publish-pypi.yml` run caused by the main version change; do not dispatch a duplicate publish. Record wheel/sdist identity and source correspondence.
+- [ ] Verify `publish-docker.yml` succeeds for `app`, `worker` and `audio-worker`. Record versioned GHCR image digests and provenance attestations. Verify protected frontend source/build output is absent from server artifacts; no protected frontend binary is to be published.
+- [ ] Sync released main into dev through a reviewed PR. Verify `origin/main` is an ancestor of `origin/dev` after merge.
+- [ ] Record the final merge/tag/artifact identities, publication links, verification, rollback target, sync PR, and remaining accepted caveats; close TASK-13013.3 only when its acceptance criteria are satisfied.
+
+**Do not run `make release-patch` for this pre-bumped candidate:** it would choose 0.1.43. If tag push succeeds but release creation fails, create only the missing GitHub Release. If a publication workflow fails, recover that workflow for the immutable release; never move the tag to fix an artifact.
 
 ## Verification evidence (2026-09-10)
 
