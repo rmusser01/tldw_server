@@ -11,7 +11,7 @@
 
 | Item | Recorded state |
 | --- | --- |
-| Integrated release code | `b3287b5437c122a12edf0dcafb155578b978a2ae` |
+| Integrated release code and verified blocker fixes | `0cec0bb409ddbd2de0089e1909b4b6b718823de3` |
 | Pushed candidate before ongoing blocker fixes | `7d7a2e708dd2e2621199bfbcaa709f9e44e76026` |
 | PR branch / target | `codex/release-main-0.1.42` → `main` |
 | PR state at inspection | Draft, `UNSTABLE`; no merge or publication performed |
@@ -38,9 +38,9 @@ CI counts are an observation, not a permanent state. Documentation follow-ups ad
 
 ## Stage 2: Refresh reviewed metadata
 **Goal:** Make the release notes, license record, manifest, and tests describe the frozen source.
-**Success Criteria:** Version surfaces agree on 0.1.42; protected trees match frozen dev; manifest covers every tracked protected file.
+**Success Criteria:** Version surfaces agree on 0.1.42; protected trees match the final verified source commit; manifest covers every tracked protected file.
 **Tests:** Release helpers, licensing policy, release documentation contracts, docs regeneration idempotence.
-**Status:** In Progress — final source/manifest refresh follows blocker fixes
+**Status:** Complete — protected source/manifest refreshed after verified fixes
 
 - Requester approved `today/now` on 2026-09-10 for the refreshed dates.
 - Release date: `2026-09-10`; Countdown start: `2028-09-10T12:00:00Z`, preserving the original two-year interval and the verbatim template's fixed noon UTC activation.
@@ -202,3 +202,9 @@ The final protected source identity must advance from frozen dev to the verified
 - Harness independent review initially found one test violating the normal HTTP-mocking guard. Replaced that constructor monkeypatch with a real ephemeral loopback collector. **30 tests now pass under the normal repository configuration**, with four existing warnings; production/test Bandit reports are clean (test assertions excluded). No guard or test configuration was disabled.
 - Complete ScheduledTasks suite: **50 passed**. Notes/Companion: **21 passed**. Chat/image/locale: **23 passed**. Full WebUI nonincremental typecheck: **passed**. Standard docs contracts after release-note edits: **18 passed**, host-limited build test separately covered by remote standard docs success.
 - Real bugs repaired in this batch: speech credential-field persistence, registered media artifacts omitted from export, and slash-command regex backtracking. Other frontend changes repair types, missing locale copy, incomplete fixtures and asynchronous test assertions.
+
+Protected source freeze refreshed to **`0cec0bb409ddbd2de0089e1909b4b6b718823de3`** after the verified blocker fixes. The manifest covers **7099 tracked files**, SHA-256 **`540fd61c20a6ffd6356d25238d49efc9568ba41a6f3b56d44173e4868c4edc64`**. Release date and Countdown/legal bytes are unchanged; source ancestry retains both original frozen inputs. The following metadata commit and CI must validate this final source snapshot.
+
+Final metadata verification: **36 passed, 1 host-limited docs test deselected, 4 existing warnings**; that unchanged docs build already passed on the CI runner and must pass again on the final head. Scoped licensing-test Bandit has zero findings, protected trees equal `0cec0bb409`, and frozen dev/main remain ancestors. The primary checkout remains clean at `a27ecb12f0f6371314555ee4929dfd4d3372b7ea`.
+
+[Migration compatibility assessment](../../Evidence/PR2761-0.1.38-migration-assessment.md) now records the exact published app reference and candidate source: AuthNZ 89→98, ChaChaNotes 51→66, forward-only Slides, canonical Notes/Sync blobs, Personal Context keys, and conditional webhook rollback. All 14 linked local sources resolve. This closes the bounded source comparison; it does not claim a chosen deployed baseline or a live restore rehearsal. Next: push the source/metadata batch, inspect fresh CI, and work any new actionable failures. Retain draft status for unresolved CodeQL, readiness dependencies, full deployment evidence and final human review.
