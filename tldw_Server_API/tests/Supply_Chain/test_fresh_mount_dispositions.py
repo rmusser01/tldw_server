@@ -106,5 +106,10 @@ def test_complete_fresh_report_removes_only_four_reviewed_mount_rows(component: 
     assert {r.vulnerability_id for r in removed} == set(CVES)
     assert len(actual.blocking) == remaining
     assert set(prior.excepted).issubset(actual.excepted)
-    assert not actual.unmatched_exception_ids
+    # This retained report predates the fixed SQLite package in TASK42.
+    assert set(actual.unmatched_exception_ids) == {
+        record.id
+        for record in policy.exceptions
+        if record.component == component and record.id.startswith("TASK-13013.7.42-")
+    }
     assert json.dumps(report, sort_keys=True) == original

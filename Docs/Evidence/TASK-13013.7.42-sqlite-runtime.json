@@ -1,21 +1,7 @@
 {
   "task": "TASK-13013.7.42",
-  "status": "In Progress",
-  "canonical_qualification_complete": false,
-  "blocker": {
-    "host_free_bytes": 14883688448,
-    "canonical_status": "blocked by host storage",
-    "last_retry_exit_code": 130,
-    "last_retry_stopped_by_agent_before_disk_reserve": true,
-    "space_reclamation_helper": "docker/desktop-reclaim-space@sha256:8b26e45c51632fd78131f3bddca76122bebc1dd8376f16dd26f769c7f33121fd",
-    "space_reclamation_command_exit_code": 0,
-    "space_reclamation_reference": "https://docs.docker.com/desktop/troubleshoot-and-support/faqs/macfaqs/",
-    "notes": [
-      "All recorded prunes use exact task-owned IDs; no global prune.",
-      "All TASK39 and TASK41 OCI layouts remain retained. TASK39 loaded duplicates and its three exported Docker build-history copies were removed.",
-      "Docker cache-reported reclaimed bytes did not produce equivalent host free-space growth. No additional full canonical build attempted."
-    ]
-  },
+  "status": "Done",
+  "canonical_qualification_complete": true,
   "source_bindings": {
     "source_commit": "4c64af2c4612428408b749eb3b2fc304c83ee2f4",
     "source_archive_sha256": "35dd34c87b1a129f679ed508d5159f1606666bb762f101d5bf09066e403db645",
@@ -104,8 +90,6 @@
     "scope": "SQLite-only derivatives of verified TASK41 images; not canonical rebuilds",
     "packaged_source_revision": "08d232ef8cad33fbc2b27b6daa6006a6d3cd426a",
     "canonical_source_revision": "4c64af2c4612428408b749eb3b2fc304c83ee2f4",
-    "canonical_build_status": "blocked by host storage",
-    "new_active_dispositions": 0,
     "results": [
       {
         "component": "image-app",
@@ -152,26 +136,441 @@
         "native_library_sha256": "666b2574049ed1db068b4a70837171d327c1696bf0498e6538913711c1a28370",
         "dockerfile_sha256": "93b98c580a6fcfe62141eb690b98497f952468506797975cb5cbb3e262a97de2"
       }
-    ]
+    ],
+    "canonical_build_status_at_compatibility_checkpoint": "blocked by host storage",
+    "active_dispositions_at_compatibility_checkpoint": 0
   },
   "focused_source_tests": {
-    "passed": 261,
+    "passed": 292,
     "warnings": 0,
-    "record": "evidence/focused-pytest-final-source.txt"
+    "record": "evidence/focused-pytest-canonical-final.txt"
   },
   "policy": {
-    "active_records": 336,
-    "active_policy_sha256": "33c9c0eface2dd7b5c2f82be398197b95f3dcecba4c68effdfbcc21a6e0918a6",
-    "new_active_records": 0,
-    "proposed_records": 6,
-    "proposal_tests": 30,
-    "canonical_build_and_scan_required_before_activation": true
+    "before_sha256": "33c9c0eface2dd7b5c2f82be398197b95f3dcecba4c68effdfbcc21a6e0918a6",
+    "after_sha256": "6c2b09f66cbafe5bc93ca3f5a942125e72e4da62afd77c296197d0029910bf5a",
+    "before_records": 336,
+    "after_records": 342,
+    "all_prior_records_preserved": true,
+    "original_serialization_unchanged": true,
+    "added_ids": [
+      "TASK-13013.7.42-SQLITE-01",
+      "TASK-13013.7.42-SQLITE-02",
+      "TASK-13013.7.42-SQLITE-03",
+      "TASK-13013.7.42-SQLITE-04",
+      "TASK-13013.7.42-SQLITE-05",
+      "TASK-13013.7.42-SQLITE-06"
+    ],
+    "new_active_records": 6,
+    "policy_tests": 31,
+    "expires_on": "2026-09-17",
+    "unexcepted_scanner_rows": {
+      "app": 154,
+      "worker": 0,
+      "audio-worker": 154
+    },
+    "remaining_rows_are_confirmed_application_exploits": false,
+    "remaining_preexisting_rows": {
+      "restricted_ffmpeg_family": 306,
+      "XML6653": 2
+    }
   },
   "evidence_archive": {
     "path": "Docs/Evidence/TASK-13013.7.42-sqlite-runtime-evidence.zip",
-    "sha256": "fee421e96f51197120080155ab1035dafb0ace2c45c7fe5396b6d7bb9e38f2fa",
-    "bytes": 2465570,
+    "sha256": "0f8892831598cf9ab0900fe62370e66d2d571b7f975ea2eafc67d568f7d6b7a1",
+    "bytes": 5475439,
     "members": {
+      "canonical/app-build-metadata.json": {
+        "sha256": "21b54dcd677783f5830d0f3a3f74cf81c4ec71923fbaf2db1c59d8a348c62164",
+        "bytes": 2470
+      },
+      "canonical/app-build-record.json": {
+        "sha256": "0ba3ddb11444906a59d17fa4e1fd6787fc14b49e649171f86fb68ef71df13498",
+        "bytes": 813
+      },
+      "canonical/app-build.log": {
+        "sha256": "f51e145325ee3f7abcd0cee320e83104d029d50a28961a18e598590f4625bab4",
+        "bytes": 154218
+      },
+      "canonical/app-check-run.log": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "canonical/app-checks-complete.json": {
+        "sha256": "49739265bbfef0ad0ecda42abcc3c2ef6c5f3b28a2f87f4305d61355061b6f21",
+        "bytes": 2669
+      },
+      "canonical/app-cyclonedx-scan.log": {
+        "sha256": "03dc41c39ebfd9843969c770cb017b573a287c47f9c48e5fba4f4abe0b782cbf",
+        "bytes": 610
+      },
+      "canonical/app-decision.json": {
+        "sha256": "f19d57d1adb511081b5d36336cd405c47bd410a99596f62b66f791430f54dd09",
+        "bytes": 78851
+      },
+      "canonical/app-identity.json": {
+        "sha256": "91b07f059c4699bc941367ae12bc60e7a4d2d5624271829d82259600ae470582",
+        "bytes": 6988
+      },
+      "canonical/app-image-inspect.json": {
+        "sha256": "a15ead114017c8c5285ce446bfc3e5da49323d9bb6e90c53aa0fdeca3e2d872b",
+        "bytes": 4534
+      },
+      "canonical/app-json-scan.log": {
+        "sha256": "51b242bcbf28756d13bd0fe32a588bbdc4f439cd1a81f7594e68810915378dbe",
+        "bytes": 780
+      },
+      "canonical/app-layout/blobs/sha256/816631a1246dd16e73dd4095c181817f9b304c4d516f3de21e6cea83cd06a354": {
+        "sha256": "816631a1246dd16e73dd4095c181817f9b304c4d516f3de21e6cea83cd06a354",
+        "bytes": 12401
+      },
+      "canonical/app-layout/blobs/sha256/b8492f81d1b11238427e65779a9f915ec821f6947ada0d6ca3c76c033e068bbe": {
+        "sha256": "b8492f81d1b11238427e65779a9f915ec821f6947ada0d6ca3c76c033e068bbe",
+        "bytes": 841
+      },
+      "canonical/app-layout/blobs/sha256/ce60e5ca35268dc412021b43c0fe35b45c9fdb18332877f987e9d69494b54c83": {
+        "sha256": "ce60e5ca35268dc412021b43c0fe35b45c9fdb18332877f987e9d69494b54c83",
+        "bytes": 241
+      },
+      "canonical/app-layout/blobs/sha256/e1896ccb8c4059fac676c4f835c90c39a414afdb1bf44283c51c55ce041a8752": {
+        "sha256": "e1896ccb8c4059fac676c4f835c90c39a414afdb1bf44283c51c55ce041a8752",
+        "bytes": 6142140
+      },
+      "canonical/app-layout/blobs/sha256/e57a9769499d3de662df8c8425e4fda05959e8df50fd6ff6f12c54c7df64799e": {
+        "sha256": "e57a9769499d3de662df8c8425e4fda05959e8df50fd6ff6f12c54c7df64799e",
+        "bytes": 52929
+      },
+      "canonical/app-layout/blobs/sha256/e7365b35623a175c27808e3e33fc8f5d731b808c6faca4be204d0b43cbc7d54c": {
+        "sha256": "e7365b35623a175c27808e3e33fc8f5d731b808c6faca4be204d0b43cbc7d54c",
+        "bytes": 856
+      },
+      "canonical/app-layout/blobs/sha256/fba76cd19abf2c962eb8b9999d2c35562b5b7b9dda19c92138ecd86fc2f27283": {
+        "sha256": "fba76cd19abf2c962eb8b9999d2c35562b5b7b9dda19c92138ecd86fc2f27283",
+        "bytes": 3537
+      },
+      "canonical/app-layout/index.json": {
+        "sha256": "4c265f02e8982e5a10a0344fac08397b5226d205278e2889bed305bbbca2c9f8",
+        "bytes": 442
+      },
+      "canonical/app-layout/oci-layout": {
+        "sha256": "18f0797eab35a4597c1e9624aa4f15fd91f6254e5538c1e0d193b2a95dd4acc6",
+        "bytes": 30
+      },
+      "canonical/app-load.log": {
+        "sha256": "0152049504a8ac5b49bd3b0b09c14282d104dfcddf3c7077b77eadb65810f234",
+        "bytes": 49
+      },
+      "canonical/app-packaged-sqlite.json": {
+        "sha256": "72b62634ce0e3aaf268f7bcf2b5729bb463a11d1dc6709e6f174e69d9ffa1f88",
+        "bytes": 14266
+      },
+      "canonical/app-packaged-sqlite.stderr": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "canonical/app-scan-finished.txt": {
+        "sha256": "f753c9938659161d797baae0d0378ecdcab91bafdfc4213c34ea69c1edf19801",
+        "bytes": 21
+      },
+      "canonical/app-scan-started.txt": {
+        "sha256": "0a67628b42721cae337cc61e2dbfa5d2bd5611c975e1a20d04dc616fdfefc451",
+        "bytes": 21
+      },
+      "canonical/app-source-sqlite.json": {
+        "sha256": "eb132e5f581545def0833e3e7b62a96d6611bee96ca161e42cbec1371243f003",
+        "bytes": 14149
+      },
+      "canonical/app-source-sqlite.stderr": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "canonical/audio-worker-build-metadata.json": {
+        "sha256": "b46a534562c9a898f60aacf5e4bca544ed2001d2602f8d0628402adb80dea6ac",
+        "bytes": 2491
+      },
+      "canonical/audio-worker-build-record.json": {
+        "sha256": "323e54ba0184ce38dcbb75181d3d48189538b5a669b5369a0bf843ef53bbdd61",
+        "bytes": 852
+      },
+      "canonical/audio-worker-build.log": {
+        "sha256": "5bbe892ffb32f5395ba30a885863c12e0b89f80f521fd7c6249b813f7cb695ea",
+        "bytes": 148800
+      },
+      "canonical/audio-worker-check-run.log": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "canonical/audio-worker-checks-complete.json": {
+        "sha256": "f2261adc44ea9abf8ad964d79960ae27256ed3d09f65f69dffdf03d8c5405314",
+        "bytes": 2579
+      },
+      "canonical/audio-worker-cyclonedx-scan.log": {
+        "sha256": "bdb78b45ea2f3eac3663720b556f9934cbc4d42879af134af7a6cb3f0206ff59",
+        "bytes": 610
+      },
+      "canonical/audio-worker-decision.json": {
+        "sha256": "a4bd1b2d67a2ff5dc981700a1f186da95841eb8fb84f5e366ede37a065de38c7",
+        "bytes": 78860
+      },
+      "canonical/audio-worker-identity.json": {
+        "sha256": "e9257a3d314e670f173b827495a6a6dfcd51236f49ba49b0231eb52a4c097da1",
+        "bytes": 5055
+      },
+      "canonical/audio-worker-image-inspect.json": {
+        "sha256": "c68f47aa1070628a44898ea72c15119403ede17fc7847ef316d86d1fe1df2e6a",
+        "bytes": 3211
+      },
+      "canonical/audio-worker-json-scan.log": {
+        "sha256": "2d503db50a9b354b1015e10b7f0ddf579c4f00b421295c637b31b42d9e66eae8",
+        "bytes": 780
+      },
+      "canonical/audio-worker-layout/blobs/sha256/08c48abddb2ce31d0a68ae3efc7318599a079b5b62e48edc79c0c8dc53bff72e": {
+        "sha256": "08c48abddb2ce31d0a68ae3efc7318599a079b5b62e48edc79c0c8dc53bff72e",
+        "bytes": 2201
+      },
+      "canonical/audio-worker-layout/blobs/sha256/13ec5f9a4518058557413a3d704ced244126ef8105a8894b4460c544d40a3355": {
+        "sha256": "13ec5f9a4518058557413a3d704ced244126ef8105a8894b4460c544d40a3355",
+        "bytes": 241
+      },
+      "canonical/audio-worker-layout/blobs/sha256/a41425d846cfd4b30af81cb68dd6d9263e529fa28a72bedaedc76b8aa1e03341": {
+        "sha256": "a41425d846cfd4b30af81cb68dd6d9263e529fa28a72bedaedc76b8aa1e03341",
+        "bytes": 6164956
+      },
+      "canonical/audio-worker-layout/blobs/sha256/ae20343fc235207949e21ea905f686f6a653fc5b01aabc7bc033d53f8880953a": {
+        "sha256": "ae20343fc235207949e21ea905f686f6a653fc5b01aabc7bc033d53f8880953a",
+        "bytes": 8470
+      },
+      "canonical/audio-worker-layout/blobs/sha256/b0ef1bb9e6935a3711264e85298e2c5569d2d88062c5222b42414edc49c5ef29": {
+        "sha256": "b0ef1bb9e6935a3711264e85298e2c5569d2d88062c5222b42414edc49c5ef29",
+        "bytes": 841
+      },
+      "canonical/audio-worker-layout/blobs/sha256/b80e9da3ba66bed8aaadbb58c643e3c058b5d2ec23149f23018ee9ac61bccd05": {
+        "sha256": "b80e9da3ba66bed8aaadbb58c643e3c058b5d2ec23149f23018ee9ac61bccd05",
+        "bytes": 856
+      },
+      "canonical/audio-worker-layout/blobs/sha256/fdcfd609cff75b027de232d8941025575b4d3334fce98c08fa3b3a7e65d2e144": {
+        "sha256": "fdcfd609cff75b027de232d8941025575b4d3334fce98c08fa3b3a7e65d2e144",
+        "bytes": 29553
+      },
+      "canonical/audio-worker-layout/index.json": {
+        "sha256": "6444756a05171032d92c62c18d55be15eecf0461fd2c7febdd24c5b2d1439025",
+        "bytes": 451
+      },
+      "canonical/audio-worker-layout/oci-layout": {
+        "sha256": "18f0797eab35a4597c1e9624aa4f15fd91f6254e5538c1e0d193b2a95dd4acc6",
+        "bytes": 30
+      },
+      "canonical/audio-worker-load.log": {
+        "sha256": "6a7140e3ee2d60a9f42db0c6e74430fc817c1774b2d9757d80a2b22f3c4bdacc",
+        "bytes": 58
+      },
+      "canonical/audio-worker-packaged-sqlite.json": {
+        "sha256": "d3d96fc9477d3c2128d9c5be490b09435c9b9c9f0379a76c10b6f913d4f84b4e",
+        "bytes": 14266
+      },
+      "canonical/audio-worker-packaged-sqlite.stderr": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "canonical/audio-worker-scan-finished.txt": {
+        "sha256": "0a67628b42721cae337cc61e2dbfa5d2bd5611c975e1a20d04dc616fdfefc451",
+        "bytes": 21
+      },
+      "canonical/audio-worker-scan-started.txt": {
+        "sha256": "6a9b9a2d24f86b56a9c9b085e5f3c20b4a085cf0e7b60c0b16da1a436ecc6912",
+        "bytes": 21
+      },
+      "canonical/scan-output/sbom-image-app.cdx.json": {
+        "sha256": "8498db5c5b402bfbfe56c3247519c338356c162be507004198f7ba09ba5704ee",
+        "bytes": 1721414
+      },
+      "canonical/scan-output/sbom-image-audio-worker.cdx.json": {
+        "sha256": "5e15e82b1aecddd7292013114e702069afab6ee757f2f4b0b251f90bb60197e3",
+        "bytes": 1721192
+      },
+      "canonical/scan-output/sbom-image-worker.cdx.json": {
+        "sha256": "8f685a24a338442a0ca12a8418068891fdbb91183b3d4b8c41e693d69af09c40",
+        "bytes": 785524
+      },
+      "canonical/scan-output/trivy-image-app.json": {
+        "sha256": "a92536031684e98d6f78f3d1b1140a3a2ab9a90070de7e8c2dfd7cc7b28e4e25",
+        "bytes": 2772709
+      },
+      "canonical/scan-output/trivy-image-audio-worker.json": {
+        "sha256": "d62035048c5fb3b3726a40ac366ded94cf9e88a01fad4616f161c0dc133afa6f",
+        "bytes": 2765279
+      },
+      "canonical/scan-output/trivy-image-worker.json": {
+        "sha256": "026a942561d37880bcfed8fdf6162d12cacc9986d39852a462eb2eafdc6ba64b",
+        "bytes": 1074068
+      },
+      "canonical/worker-build-metadata.json": {
+        "sha256": "3d983c16b36b6f273f83f9a853c4eaf85a4daf92f6d31fbd0f36bb8ffc23c3f1",
+        "bytes": 2475
+      },
+      "canonical/worker-build-record.json": {
+        "sha256": "9f079dec1e36d4f7f374629360c043a518499dc61c845c7925763dac962cb6b3",
+        "bytes": 823
+      },
+      "canonical/worker-build.log": {
+        "sha256": "8a5998202bf21cd9f0cf552660ed7d0eb664d6d7483a884b7dee8077a5e64a71",
+        "bytes": 73737
+      },
+      "canonical/worker-check-run.log": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "canonical/worker-checks-complete.json": {
+        "sha256": "fcd48e2e0c44cb0146f80d41149f6fb81d0981b1b18a1bfe90fa9d64eb67673c",
+        "bytes": 2507
+      },
+      "canonical/worker-cyclonedx-scan.log": {
+        "sha256": "b4609ff77a19adaa86c6298280579bd0464214a28a28238a67c86f5462f7b850",
+        "bytes": 609
+      },
+      "canonical/worker-decision.json": {
+        "sha256": "26d5706cc5fd121e9d5885e6bc6eeafdd26ec72055d2876d636e56e76ea77bc0",
+        "bytes": 18950
+      },
+      "canonical/worker-identity.json": {
+        "sha256": "bf1aec6d4576685515b6056ae7e0b9c9ab99d1de40cdc0dcef9401450c7f993c",
+        "bytes": 5510
+      },
+      "canonical/worker-image-inspect.json": {
+        "sha256": "e814186e18dab1435ec58810783b4863e01a9cc4a42192b05e9f853856a3e7c1",
+        "bytes": 3830
+      },
+      "canonical/worker-json-scan.log": {
+        "sha256": "2b1b8a0c4e16dbd6e3696320dd0db8efdc94334f3d30432c4511109c3d40d8ba",
+        "bytes": 779
+      },
+      "canonical/worker-layout/blobs/sha256/07f686b78d3614cd357170e66e3d9a0b7d6d80a8f65a6885e5318f73ca8e4869": {
+        "sha256": "07f686b78d3614cd357170e66e3d9a0b7d6d80a8f65a6885e5318f73ca8e4869",
+        "bytes": 856
+      },
+      "canonical/worker-layout/blobs/sha256/1298f2772ba75c1431e8c7f808899d3cd51f2b9fecaa751b683d361952b6bdb8": {
+        "sha256": "1298f2772ba75c1431e8c7f808899d3cd51f2b9fecaa751b683d361952b6bdb8",
+        "bytes": 30133
+      },
+      "canonical/worker-layout/blobs/sha256/329c34bc659837ee6ec1bff1765d0323df0c8e5a99bfdc18c8fe3fd5eee91583": {
+        "sha256": "329c34bc659837ee6ec1bff1765d0323df0c8e5a99bfdc18c8fe3fd5eee91583",
+        "bytes": 4670923
+      },
+      "canonical/worker-layout/blobs/sha256/41d772e42cf3860f853cb445c6abc2b95d582f8db5589921d188c38588c228c2": {
+        "sha256": "41d772e42cf3860f853cb445c6abc2b95d582f8db5589921d188c38588c228c2",
+        "bytes": 841
+      },
+      "canonical/worker-layout/blobs/sha256/594291979d77470859a2e4aa6b790b8a5a16b2f95a4cd259a26946acf716165e": {
+        "sha256": "594291979d77470859a2e4aa6b790b8a5a16b2f95a4cd259a26946acf716165e",
+        "bytes": 2195
+      },
+      "canonical/worker-layout/blobs/sha256/c2975865ee8b0a260a0978c3b6fa9c50459edf353dd6c2e281f1cec79decb672": {
+        "sha256": "c2975865ee8b0a260a0978c3b6fa9c50459edf353dd6c2e281f1cec79decb672",
+        "bytes": 241
+      },
+      "canonical/worker-layout/blobs/sha256/d78e447724ebe39d0790bfd2339799410a07829986dd41c6c6c41de1295ec887": {
+        "sha256": "d78e447724ebe39d0790bfd2339799410a07829986dd41c6c6c41de1295ec887",
+        "bytes": 9940
+      },
+      "canonical/worker-layout/index.json": {
+        "sha256": "ad7029a9eee95ecd8324de477819a4f3373a09d401a84d294747f6ef1fa135e4",
+        "bytes": 445
+      },
+      "canonical/worker-layout/oci-layout": {
+        "sha256": "18f0797eab35a4597c1e9624aa4f15fd91f6254e5538c1e0d193b2a95dd4acc6",
+        "bytes": 30
+      },
+      "canonical/worker-load.log": {
+        "sha256": "ddec438a677e8a4f1ecd8b3b15f441a16d69725805bfe010e61e374bb3c8499f",
+        "bytes": 52
+      },
+      "canonical/worker-packaged-sqlite.json": {
+        "sha256": "d3d96fc9477d3c2128d9c5be490b09435c9b9c9f0379a76c10b6f913d4f84b4e",
+        "bytes": 14266
+      },
+      "canonical/worker-packaged-sqlite.stderr": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "canonical/worker-scan-finished.txt": {
+        "sha256": "f9fc3a5ebaf6dd7f580aed1c3a59d050811cec6665293322f628a2779c7d5d0c",
+        "bytes": 21
+      },
+      "canonical/worker-scan-started.txt": {
+        "sha256": "5c0ed5dbe75b8c18cfda339c196f05e09c5c46e3d5164a261c03d93d0c75169a",
+        "bytes": 21
+      },
+      "evidence/app-decision-before-policy.json": {
+        "sha256": "6a635ed97cbc49a2d2e497519ad9d6c1204a14cbf16194ee0d4c2f57e945ea16",
+        "bytes": 78851
+      },
+      "evidence/app-legacy_compatibility.stderr": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "evidence/app-legacy_compatibility.txt": {
+        "sha256": "077d10f5ef09b15ce7c4ab0030342676fd24661df5b1b0dad99d1ed81eead807",
+        "bytes": 65
+      },
+      "evidence/app-package-verification.stderr": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "evidence/app-package-verification.txt": {
+        "sha256": "e202242d39a0277c747cbe57165deb8a0235c79acc365af12d17f87b945f033f",
+        "bytes": 381
+      },
+      "evidence/app-runtime_binding.stderr": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "evidence/app-runtime_binding.txt": {
+        "sha256": "731e1acf36d765db7ddc0473b560f3b3fd3304640861d0e8f76dc590e98f8287",
+        "bytes": 2081
+      },
+      "evidence/app-verify_sqlite_runtime.stderr": {
+        "sha256": "5f6a8fbf2a5dc0cc6683a76e94101040edd9dcce879744b72a91917e00893572",
+        "bytes": 897
+      },
+      "evidence/app-verify_sqlite_runtime.txt": {
+        "sha256": "1dd3be0608cb50f085e57d0cdc5b490cfebe7ccc708f0bfc049d10476a12eaa4",
+        "bytes": 95
+      },
+      "evidence/audio-worker-decision-before-policy.json": {
+        "sha256": "59a1adde5fc46cd7327f144a59e308e20a445b065496d64a274fcb9477ff3d4d",
+        "bytes": 78860
+      },
+      "evidence/audio-worker-legacy_compatibility.stderr": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "evidence/audio-worker-legacy_compatibility.txt": {
+        "sha256": "077d10f5ef09b15ce7c4ab0030342676fd24661df5b1b0dad99d1ed81eead807",
+        "bytes": 65
+      },
+      "evidence/audio-worker-package-verification.stderr": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "evidence/audio-worker-package-verification.txt": {
+        "sha256": "e202242d39a0277c747cbe57165deb8a0235c79acc365af12d17f87b945f033f",
+        "bytes": 381
+      },
+      "evidence/audio-worker-runtime_binding.stderr": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "evidence/audio-worker-runtime_binding.txt": {
+        "sha256": "736e644d6276b0bb39d314044d6d4d21baa6d874cfc0c655dea75e10599e3e1c",
+        "bytes": 2081
+      },
+      "evidence/audio-worker-verify_sqlite_runtime.stderr": {
+        "sha256": "e0438458c3cd8dc0909f96685b9b057f2963651718ab2d1a416cac62f9844412",
+        "bytes": 897
+      },
+      "evidence/audio-worker-verify_sqlite_runtime.txt": {
+        "sha256": "37d30f80d3594b50b8ea6fbbf10e968ab536188d3e59994049e3e8a5f705ac5f",
+        "bytes": 95
+      },
       "evidence/backlog-prebuild.txt": {
         "sha256": "7ccb5a7ddde601fc4fdf5ef9d4f9fb927ccf0a3c67a2677282fd6051d151db6e",
         "bytes": 3432
@@ -207,6 +606,50 @@
       "evidence/build-guard-bandit.json": {
         "sha256": "bd21fc857b1b0d6167c6bfacd617387f58c7c31819c723491c669041048f4ed3",
         "bytes": 2410
+      },
+      "evidence/canonical-after-policy.json": {
+        "sha256": "6be8d16f257fbe095191c9371f07460b13e1bc620940fe8c0479efe82f46beb6",
+        "bytes": 11854
+      },
+      "evidence/canonical-before-policy.json": {
+        "sha256": "6a1276f9a5ddfbc9115369cd88de26ff0d7df31b875f4bd86463e2acdba4faa8",
+        "bytes": 11854
+      },
+      "evidence/canonical-check-helpers-bandit-review.md": {
+        "sha256": "a316df9579e3e7591efb8c7e7a66db40fc40b4640b099622337daf7b094ce665",
+        "bytes": 458
+      },
+      "evidence/canonical-check-helpers-bandit.json": {
+        "sha256": "b8733ec3d5a71f4f9a33e8bc59932be96f0eeec2ca474635f8c715d0ec6d4901",
+        "bytes": 2767
+      },
+      "evidence/canonical-evidence-pre-review.md": {
+        "sha256": "31c174d3d43f66ef6bda0939a0d886777dab7cf8780dbc6bf368727db655ec94",
+        "bytes": 4704
+      },
+      "evidence/canonical-policy-final-review-details.json": {
+        "sha256": "8231c39791a30428ab152c2f93ea0c54c1928b965604f6ff443733653ffe7f59",
+        "bytes": 1696
+      },
+      "evidence/canonical-policy-final-review.md": {
+        "sha256": "ee265e4ff396dd107e19cc1e3864a069e424fdb6b566d194cc029dd50905be6b",
+        "bytes": 3754
+      },
+      "evidence/canonical-receipt-review-controls.json": {
+        "sha256": "705a69e99e9d6a51ab56751ebf295e45617569d0d51c312226d888f7c6ccd99e",
+        "bytes": 1432
+      },
+      "evidence/canonical-receipt-review.md": {
+        "sha256": "463b32c5bc04c2710bda40863d9b30061f4e592adff38707f5aa54484c4b8dd6",
+        "bytes": 2600
+      },
+      "evidence/canonical-runtime-review-details.json": {
+        "sha256": "015d99462cb104c65653c246adf7aa487a45769d29d65d2bf0fd865d572d6f7a",
+        "bytes": 2348
+      },
+      "evidence/canonical-runtime-review.md": {
+        "sha256": "51dcad4f8ab21d33a2ec6fc2a53ddfe299704843641667edd68e1a1fc6aa0bbc",
+        "bytes": 3838
       },
       "evidence/code-review.md": {
         "sha256": "7f222d8810ecfa52c1ef0a766f3d0ec415f2c829c32c4ff3c430120abd7bce1d",
@@ -284,6 +727,14 @@
         "sha256": "0540de81fef5abb744d9d0ff51bfa1f18f7f1f245d812075a3632afb6681a0a2",
         "bytes": 2542
       },
+      "evidence/final-touched-bandit-review.md": {
+        "sha256": "0820820597695cbf84935c264abd9e01f9557dd1b76d1373663fce1edc1d5e8f",
+        "bytes": 363
+      },
+      "evidence/final-touched-bandit.json": {
+        "sha256": "11aaf9b57f9fb71ed354c537dac2efc81508f6d059cb200256502cb09d0810ac",
+        "bytes": 35691
+      },
       "evidence/first-app-build.log": {
         "sha256": "8b9ac0ac3527858c1eb8a6c3671511cc48acb3f74767ff1d791f517b36a0f947",
         "bytes": 153508
@@ -300,9 +751,17 @@
         "sha256": "fcfc48aaa46b11a1d4579fa0e282cd4fbb3e01c0275c77a69ff49b53df57f9f1",
         "bytes": 340
       },
+      "evidence/focused-pytest-canonical-final.txt": {
+        "sha256": "f58cdb06694cbdbf9e0e3325b19c678d4673bd0901e0344583102314ed5101b9",
+        "bytes": 420
+      },
       "evidence/focused-pytest-final-source.txt": {
         "sha256": "d775c0d87d5c078eec28f73cf44312e358934e4f1b32584aac0267bd51741f9b",
         "bytes": 340
+      },
+      "evidence/focused-pytest-policy-integration-red.txt": {
+        "sha256": "b6d7cc301e89c841c50e1e2ff93725e3f4a397411b0758e8a19490131fb38d10",
+        "bytes": 8215
       },
       "evidence/focused-pytest.txt": {
         "sha256": "0a5a9bb4d00bd916b5d67683c0f23571ecbf503aa7954476f5357c91d328b582",
@@ -384,6 +843,18 @@
         "sha256": "75dd5011aaf0cfb47371b28ef247febe5563634e5776266aa1e79884fe1b0a0a",
         "bytes": 99
       },
+      "evidence/policy-preservation.json": {
+        "sha256": "adfa42235778d1cd7b55427f0d0c0469f13a5635a81025c583d23491bc96948f",
+        "bytes": 527
+      },
+      "evidence/pre-resume-worker-build-record.json": {
+        "sha256": "58c2fcfda1c4e060cdd7c83b5b21608cc4a69d01517b297034c167d634687493",
+        "bytes": 825
+      },
+      "evidence/pre-resume-worker-build.log": {
+        "sha256": "0293b21b93ae8cc38038c0786327c67979662d6d2345d810c8b72c41f98bbb8f",
+        "bytes": 55541
+      },
       "evidence/py311-amd64-build.json": {
         "sha256": "e21db7e59ac715968b71d355d3952fd5930c74bc5a889c24f76134f9d9a92470",
         "bytes": 1957
@@ -464,6 +935,10 @@
         "sha256": "93090db9c4573460fa315ae32deef23eeca1f578a7b458a78c497963eedb6851",
         "bytes": 1479
       },
+      "evidence/resume-verification-preflight.json": {
+        "sha256": "3aea4b564f966b0ccc47b887a6e0520ec1874c83d8a22a479fd376f6f79235cc",
+        "bytes": 404
+      },
       "evidence/retained-task39-image-inventory.json": {
         "sha256": "578ca108bb19ddd22690b995532345692ed777c42c0c50562126edf2d83e20d3",
         "bytes": 11296
@@ -471,6 +946,14 @@
       "evidence/retained-task41-image-inventory.json": {
         "sha256": "a86b47847ba4a4881a7885f9e0bd8fbffd26e0726c924d330cc5cebfa15820f0",
         "bytes": 11296
+      },
+      "evidence/retention-helper-bandit-review.md": {
+        "sha256": "41c6058d3340822d4ba3f7d3720f3ec48f88026ba6308adbfba05b9dea6b47e8",
+        "bytes": 389
+      },
+      "evidence/retention-helper-bandit.json": {
+        "sha256": "78af9de1014a56c1ad93556efe1ed7bffcae4952c8465760c6f2c4ab6b2aa88f",
+        "bytes": 6067
       },
       "evidence/runtime-binding-bandit.json": {
         "sha256": "f4d289f95d62c5178944bfeb8c5ae1d36cb019631e17068e82de7dbf145fc1bf",
@@ -483,6 +966,14 @@
       "evidence/scanner-db-before.sha256": {
         "sha256": "770a7755eed8eb4756e69ca65a56749f2902fa5985bd5577bd3f011304ee7958",
         "bytes": 249
+      },
+      "evidence/scanner-db-canonical-after.txt": {
+        "sha256": "e79803775415edba085d8af56262305b91e6d0e05588775e6c42c36c58943114",
+        "bytes": 125
+      },
+      "evidence/scanner-restored.log": {
+        "sha256": "ac0f40380f0b92668f1a43f1f73f4bd392cfe2a4683ef90238bcdf5bf61002c0",
+        "bytes": 912
       },
       "evidence/scratch-cleanup.json": {
         "sha256": "dc11e20278ce7c73697f762e2dda4108e52b2959944426f000f350787219bb89",
@@ -527,6 +1018,50 @@
       "evidence/task39-worker-build-record.txt": {
         "sha256": "032334089a6e6b0dbdbe7bb2422b88c8ca6a0329c95962684ed58f66d1cc8366",
         "bytes": 1541
+      },
+      "evidence/worker-decision-before-policy.json": {
+        "sha256": "a38df4fbbdd4ccd93619d5b988346c33bc1e992afcce709ac8460015c2f4b81c",
+        "bytes": 18952
+      },
+      "evidence/worker-legacy_compatibility.stderr": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "evidence/worker-legacy_compatibility.txt": {
+        "sha256": "077d10f5ef09b15ce7c4ab0030342676fd24661df5b1b0dad99d1ed81eead807",
+        "bytes": 65
+      },
+      "evidence/worker-package-verification.stderr": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "evidence/worker-package-verification.txt": {
+        "sha256": "e202242d39a0277c747cbe57165deb8a0235c79acc365af12d17f87b945f033f",
+        "bytes": 381
+      },
+      "evidence/worker-runtime_binding.stderr": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "evidence/worker-runtime_binding.txt": {
+        "sha256": "736e644d6276b0bb39d314044d6d4d21baa6d874cfc0c655dea75e10599e3e1c",
+        "bytes": 2081
+      },
+      "evidence/worker-verify_sqlite_runtime.stderr": {
+        "sha256": "ce8eb5f1dc026c15955cfdd9697f5108614ce7d6ee391c27833b03801008670f",
+        "bytes": 897
+      },
+      "evidence/worker-verify_sqlite_runtime.txt": {
+        "sha256": "37d30f80d3594b50b8ea6fbbf10e968ab536188d3e59994049e3e8a5f705ac5f",
+        "bytes": 95
+      },
+      "historical-interim/worker-build-record.json": {
+        "sha256": "58c2fcfda1c4e060cdd7c83b5b21608cc4a69d01517b297034c167d634687493",
+        "bytes": 825
+      },
+      "historical-interim/worker-build.log": {
+        "sha256": "0293b21b93ae8cc38038c0786327c67979662d6d2345d810c8b72c41f98bbb8f",
+        "bytes": 55541
       },
       "packaged-qualification/Dockerfile.app": {
         "sha256": "bb2b9ce3b2642e7ec7b68770a5d96c024eeffed93d4ff3d61df2b693035416b2",
@@ -772,6 +1307,50 @@
         "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "bytes": 0
       },
+      "packages/libsqlite3-0_3.53.4-2_amd64.deb": {
+        "sha256": "bbf13c9326764d05e37e6590debdaa6f33af6bd822e3ca1204789d9d1dc23b11",
+        "bytes": 974044
+      },
+      "packages/libsqlite3-0_3.53.4-2_arm64.deb": {
+        "sha256": "e417fb0642502c090d84a6f5fce1a2e5961dfe18644415ddce77a1a67cd2fc89",
+        "bytes": 900900
+      },
+      "source/.github/supply-chain/vulnerability-exceptions.json": {
+        "sha256": "6c2b09f66cbafe5bc93ca3f5a942125e72e4da62afd77c296197d0029910bf5a",
+        "bytes": 406539
+      },
+      "source/Dockerfiles/Dockerfile.audio_gpu_worker": {
+        "sha256": "0201416d32d11c17cc07bcb73f2349cde2556e72ca7e466098c2f4837d0ee0ac",
+        "bytes": 3003
+      },
+      "source/Dockerfiles/Dockerfile.prod": {
+        "sha256": "29520eef7b5bbd93cf2568f46407fd7e1b147a4a61055f74e0edf9dc36beb181",
+        "bytes": 4681
+      },
+      "source/Dockerfiles/Dockerfile.worker": {
+        "sha256": "c25ef54524dff2cd3b7dbc748aa3ad63bf3a9fc0c00681c57d4bf3610a0846eb",
+        "bytes": 3468
+      },
+      "source/Dockerfiles/tests/verify_sqlite_runtime.py": {
+        "sha256": "bf7704e94665cebaef29061a0dda6a029fb07f25e74f448233f31220cd9a0252",
+        "bytes": 3491
+      },
+      "source/IMPLEMENTATION_PLAN_TASK_13013_7_42_sqlite_runtime.md": {
+        "sha256": "ae197a219f75fccb23d3a47b8a388db9ebcf9faef57419a8a62a1d3f6e79ec5e",
+        "bytes": 3046
+      },
+      "source/tldw_Server_API/tests/Supply_Chain/test_fixed_sqlite_dispositions.py": {
+        "sha256": "1a8550a4c5c27868cf8849e047a0c11ae09c42e7658e61845b3bc4badf2a3868",
+        "bytes": 3610
+      },
+      "source/tldw_Server_API/tests/Supply_Chain/test_fresh_mount_dispositions.py": {
+        "sha256": "5e15b3f258dde020f14f3c9c4bc1c5f95bce06faddb8e83a03383eea6ebc030c",
+        "bytes": 5321
+      },
+      "source/tldw_Server_API/tests/Supply_Chain/test_remaining_applicability_dispositions.py": {
+        "sha256": "380487e414f241875887ce12bf66d2ce37c30a8f338f858d672c2e37149016f5",
+        "bytes": 9071
+      },
       "task/Dockerfile.py311": {
         "sha256": "f378c0eb12d22e7ccb9e71d798deacfb3037602bfea898a813d4b65d153b84d6",
         "bytes": 884
@@ -780,9 +1359,37 @@
         "sha256": "61201d6f1b7575d7976aeb488dfe342c0c68f77e846f0f5388c1b8b317d64b04",
         "bytes": 884
       },
-      "task/source-bindings.json": {
-        "sha256": "0289e8d55566789ea1c6f15e9999ea6886cb7b08318494400a9f51a87d6ff65b",
-        "bytes": 1532
+      "task/build_guarded.py": {
+        "sha256": "f222191ed8bc8f870da4eb286bd75102e4533ce2c933e81c16a3598f3f8007f2",
+        "bytes": 2424
+      },
+      "task/candidate-verification.json": {
+        "sha256": "6be8d16f257fbe095191c9371f07460b13e1bc620940fe8c0479efe82f46beb6",
+        "bytes": 11854
+      },
+      "task/create_final_evidence.py": {
+        "sha256": "869a5a3e199fe2226f2aa852796833ea5caec070e207011a0fe7c198b81a8915",
+        "bytes": 8287
+      },
+      "task/evaluate_candidates.py": {
+        "sha256": "950524d22bf62b707b87446265ca7440c685fb525c359259c57972368a42cd5b",
+        "bytes": 9982
+      },
+      "task/legacy/source.db": {
+        "sha256": "80a56e671b6effc16bafe45d8c93e3b869393bcf1cc62ac6e618933c4e2986a8",
+        "bytes": 28672
+      },
+      "task/legacy_compatibility.py": {
+        "sha256": "566283399ce3b90e073e0d69e89ffc47a7fa1cfa440270681762580fc4fe8874",
+        "bytes": 1466
+      },
+      "task/packaged_sqlite_probe.py": {
+        "sha256": "4715ff76afd1d16e921f7c4b6ecf919dc3352f9e6f97a6a959cbf4d7b221fad4",
+        "bytes": 6811
+      },
+      "task/policy-after.json": {
+        "sha256": "6c2b09f66cbafe5bc93ca3f5a942125e72e4da62afd77c296197d0029910bf5a",
+        "bytes": 406539
       },
       "task/policy-before.json": {
         "sha256": "33c9c0eface2dd7b5c2f82be398197b95f3dcecba4c68effdfbcc21a6e0918a6",
@@ -796,88 +1403,543 @@
         "sha256": "e7fd952116003be842e46f8d1cec54a47aa0f287bb562d09f5f8a506e957d3d5",
         "bytes": 2744
       },
+      "task/run_canonical_checks.py": {
+        "sha256": "f3b629ffc9f893e6bebeb567bebf24eff2ebef27560a7e77d078f47783378b92",
+        "bytes": 2446
+      },
       "task/runtime_binding.py": {
         "sha256": "6a336798e43f984d1604b64bcc9ba4402d28f319278505d977a0c4840afd9c7c",
         "bytes": 1414
       },
-      "task/legacy_compatibility.py": {
-        "sha256": "566283399ce3b90e073e0d69e89ffc47a7fa1cfa440270681762580fc4fe8874",
-        "bytes": 1466
+      "task/scan_candidate.sh": {
+        "sha256": "adad6dd745229c7760b800aac7ff3e345686a86ade470c26edab649fa2510d8b",
+        "bytes": 1531
+      },
+      "task/scanner/db/metadata.json": {
+        "sha256": "36093af1ebaf1db63436786dd5ef9c02c8350f48f2ca6a03cb8db36b1370aaf3",
+        "bytes": 153
+      },
+      "task/source-bindings.json": {
+        "sha256": "0289e8d55566789ea1c6f15e9999ea6886cb7b08318494400a9f51a87d6ff65b",
+        "bytes": 1532
       },
       "task/verify_candidate.sh": {
         "sha256": "1e57eccbe1ecb80d6a820969188b131dae2b87b9a37888332000e572394ef2db",
         "bytes": 1771
       },
-      "task/verify_packaged.sh": {
-        "sha256": "0d080ff67b66b08f22c91c239196d3430a5dcf16d50e388dfd0a6b3245d2463d",
-        "bytes": 1851
-      },
-      "task/verify_sqlite_package.sh": {
-        "sha256": "008784d5ca3da6d782171a0a288894e4dd2b0c3825f38c42b4a051a020288bce",
-        "bytes": 778
-      },
-      "task/packaged_sqlite_probe.py": {
-        "sha256": "4715ff76afd1d16e921f7c4b6ecf919dc3352f9e6f97a6a959cbf4d7b221fad4",
-        "bytes": 6811
-      },
-      "task/verify_packaged_qualification.py": {
-        "sha256": "dd3b4a07e1614a6b7dd5d94d5a156559d64f567fa246429ec2f9e5b763c27a99",
-        "bytes": 7284
-      },
-      "task/build_guarded.py": {
-        "sha256": "f222191ed8bc8f870da4eb286bd75102e4533ce2c933e81c16a3598f3f8007f2",
-        "bytes": 2424
+      "task/verify_layout_controls.py": {
+        "sha256": "c7429a73ff82ad8bdd9190994bad8844cbfc2cfc7c770d441442040f99b89dea",
+        "bytes": 4155
       },
       "task/verify_oci_layout.py": {
         "sha256": "b9dd0230c4bfe6a6c9ac7aa9aa590d996d82a4c8730446f1709a28cfad18ab2d",
         "bytes": 6540
       },
-      "task/verify_layout_controls.py": {
-        "sha256": "c7429a73ff82ad8bdd9190994bad8844cbfc2cfc7c770d441442040f99b89dea",
-        "bytes": 4155
+      "task/verify_packaged.sh": {
+        "sha256": "0d080ff67b66b08f22c91c239196d3430a5dcf16d50e388dfd0a6b3245d2463d",
+        "bytes": 1851
       },
-      "task/worker-build.log": {
-        "sha256": "0293b21b93ae8cc38038c0786327c67979662d6d2345d810c8b72c41f98bbb8f",
-        "bytes": 55541
+      "task/verify_packaged_qualification.py": {
+        "sha256": "dd3b4a07e1614a6b7dd5d94d5a156559d64f567fa246429ec2f9e5b763c27a99",
+        "bytes": 7284
       },
-      "task/worker-build-record.json": {
-        "sha256": "58c2fcfda1c4e060cdd7c83b5b21608cc4a69d01517b297034c167d634687493",
-        "bytes": 825
-      },
-      "packages/libsqlite3-0_3.53.4-2_amd64.deb": {
-        "sha256": "bbf13c9326764d05e37e6590debdaa6f33af6bd822e3ca1204789d9d1dc23b11",
-        "bytes": 974044
-      },
-      "packages/libsqlite3-0_3.53.4-2_arm64.deb": {
-        "sha256": "e417fb0642502c090d84a6f5fce1a2e5961dfe18644415ddce77a1a67cd2fc89",
-        "bytes": 900900
-      },
-      "source/Dockerfiles/Dockerfile.prod": {
-        "sha256": "29520eef7b5bbd93cf2568f46407fd7e1b147a4a61055f74e0edf9dc36beb181",
-        "bytes": 4681
-      },
-      "source/Dockerfiles/Dockerfile.worker": {
-        "sha256": "c25ef54524dff2cd3b7dbc748aa3ad63bf3a9fc0c00681c57d4bf3610a0846eb",
-        "bytes": 3468
-      },
-      "source/Dockerfiles/Dockerfile.audio_gpu_worker": {
-        "sha256": "0201416d32d11c17cc07bcb73f2349cde2556e72ca7e466098c2f4837d0ee0ac",
-        "bytes": 3003
-      },
-      "source/Dockerfiles/tests/verify_sqlite_runtime.py": {
-        "sha256": "bf7704e94665cebaef29061a0dda6a029fb07f25e74f448233f31220cd9a0252",
-        "bytes": 3491
-      },
-      "source/IMPLEMENTATION_PLAN_TASK_13013_7_42_sqlite_runtime.md": {
-        "sha256": "919b0aba7cb8d9e25d5261399c3ed355f75911641dafd557901f1640fc1e5e2c",
-        "bytes": 3028
+      "task/verify_sqlite_package.sh": {
+        "sha256": "008784d5ca3da6d782171a0a288894e4dd2b0c3825f38c42b4a051a020288bce",
+        "bytes": 778
       }
     }
   },
   "limits": [
-    "Compatibility derivatives are not canonical recipe builds.",
+    "Canonical qualification is linux/amd64. Supplemental small runtime tests cover amd64/arm64.",
     "No whole-release admission, full application startup, model workload, or native exploit reproduction is claimed.",
-    "Full derivative images remain local Docker objects; the archive retains their build metadata, diagnostics, and exact reproducible package inputs, not duplicate base-image layers.",
+    "Full canonical OCI layers remain local; complete hashes and small metadata/attestations are archived.",
     "No push, publication, deployment, workflow dispatch, or merge."
-  ]
+  ],
+  "storage_recovery": {
+    "prior_blocker": {
+      "host_free_bytes": 14883688448,
+      "canonical_status": "blocked by host storage",
+      "last_retry_exit_code": 130,
+      "last_retry_stopped_by_agent_before_disk_reserve": true,
+      "space_reclamation_helper": "docker/desktop-reclaim-space@sha256:8b26e45c51632fd78131f3bddca76122bebc1dd8376f16dd26f769c7f33121fd",
+      "space_reclamation_command_exit_code": 0,
+      "space_reclamation_reference": "https://docs.docker.com/desktop/troubleshoot-and-support/faqs/macfaqs/",
+      "notes": [
+        "All recorded prunes use exact task-owned IDs; no global prune.",
+        "All TASK39 and TASK41 OCI layouts remain retained. TASK39 loaded duplicates and its three exported Docker build-history copies were removed.",
+        "Docker cache-reported reclaimed bytes did not produce equivalent host free-space growth. No additional full canonical build attempted."
+      ]
+    },
+    "resolved": true,
+    "result": "All three guarded canonical builds succeeded after requester freed storage."
+  },
+  "canonical_candidates": [
+    {
+      "name": "app",
+      "identity": "sha256:e7365b35623a175c27808e3e33fc8f5d731b808c6faca4be204d0b43cbc7d54c",
+      "config_digest": "sha256:816631a1246dd16e73dd4095c181817f9b304c4d516f3de21e6cea83cd06a354",
+      "sqlite_version": "3.53.4",
+      "probe_cases": 20,
+      "all_severity_rows": 635,
+      "blocking_scanner_rows": 154,
+      "excepted_rows": 80,
+      "unmatched_exception_ids": [],
+      "baseline": {
+        "archive": "Docs/Evidence/TASK-13013.7.39-candidate-reports.zip",
+        "archive_sha256": "9d7bfcda025a3d84e8e651fcb88280c727155c2e3416e3d2d2036c5412162b9d",
+        "member": "trivy-image-app.json",
+        "bytes": 2772174,
+        "sha256": "2c0ed0cd115106dae56ac516478f14c35b1141a3df1f8d7438ae780208c263ad"
+      },
+      "added_scanner_rows": [
+        {
+          "finding": [
+            "CVE-2026-11822",
+            "pkg:deb/debian/libsqlite3-0@3.53.4-2?arch=amd64&distro=debian-13.6",
+            "3.53.4-2",
+            "HIGH"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2026-11824",
+            "pkg:deb/debian/libsqlite3-0@3.53.4-2?arch=amd64&distro=debian-13.6",
+            "3.53.4-2",
+            "HIGH"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2026-39113",
+            "pkg:deb/debian/libsqlite3-0@3.53.4-2?arch=amd64&distro=debian-13.6",
+            "3.53.4-2",
+            "MEDIUM"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2026-50812",
+            "pkg:deb/debian/libsqlite3-0@3.53.4-2?arch=amd64&distro=debian-13.6",
+            "3.53.4-2",
+            "MEDIUM"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2026-50813",
+            "pkg:deb/debian/libsqlite3-0@3.53.4-2?arch=amd64&distro=debian-13.6",
+            "3.53.4-2",
+            "MEDIUM"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2021-45346",
+            "pkg:deb/debian/libsqlite3-0@3.53.4-2?arch=amd64&distro=debian-13.6",
+            "3.53.4-2",
+            "LOW"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2025-70873",
+            "pkg:deb/debian/libsqlite3-0@3.53.4-2?arch=amd64&distro=debian-13.6",
+            "3.53.4-2",
+            "LOW"
+          ],
+          "count": 1
+        }
+      ],
+      "removed_scanner_rows": [
+        {
+          "finding": [
+            "CVE-2026-11822",
+            "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+            "3.46.1-7+deb13u1",
+            "HIGH"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2026-11824",
+            "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+            "3.46.1-7+deb13u1",
+            "HIGH"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2026-39113",
+            "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+            "3.46.1-7+deb13u1",
+            "MEDIUM"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2026-50812",
+            "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+            "3.46.1-7+deb13u1",
+            "MEDIUM"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2026-50813",
+            "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+            "3.46.1-7+deb13u1",
+            "MEDIUM"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2021-45346",
+            "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+            "3.46.1-7+deb13u1",
+            "LOW"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2025-70873",
+            "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+            "3.46.1-7+deb13u1",
+            "LOW"
+          ],
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "worker",
+      "identity": "sha256:07f686b78d3614cd357170e66e3d9a0b7d6d80a8f65a6885e5318f73ca8e4869",
+      "config_digest": "sha256:d78e447724ebe39d0790bfd2339799410a07829986dd41c6c6c41de1295ec887",
+      "sqlite_version": "3.53.4",
+      "probe_cases": 10,
+      "all_severity_rows": 180,
+      "blocking_scanner_rows": 0,
+      "excepted_rows": 59,
+      "unmatched_exception_ids": [],
+      "baseline": {
+        "archive": "Docs/Evidence/TASK-13013.7.39-candidate-reports.zip",
+        "archive_sha256": "9d7bfcda025a3d84e8e651fcb88280c727155c2e3416e3d2d2036c5412162b9d",
+        "member": "trivy-image-worker.json",
+        "bytes": 1073526,
+        "sha256": "8943987a5e19f5d275bb03851c29f23c26be76e1a7a6fe8d085a92b6c9e7f2d0"
+      },
+      "added_scanner_rows": [
+        {
+          "finding": [
+            "CVE-2026-11822",
+            "pkg:deb/debian/libsqlite3-0@3.53.4-2?arch=amd64&distro=debian-13.6",
+            "3.53.4-2",
+            "HIGH"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2026-11824",
+            "pkg:deb/debian/libsqlite3-0@3.53.4-2?arch=amd64&distro=debian-13.6",
+            "3.53.4-2",
+            "HIGH"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2026-39113",
+            "pkg:deb/debian/libsqlite3-0@3.53.4-2?arch=amd64&distro=debian-13.6",
+            "3.53.4-2",
+            "MEDIUM"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2026-50812",
+            "pkg:deb/debian/libsqlite3-0@3.53.4-2?arch=amd64&distro=debian-13.6",
+            "3.53.4-2",
+            "MEDIUM"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2026-50813",
+            "pkg:deb/debian/libsqlite3-0@3.53.4-2?arch=amd64&distro=debian-13.6",
+            "3.53.4-2",
+            "MEDIUM"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2021-45346",
+            "pkg:deb/debian/libsqlite3-0@3.53.4-2?arch=amd64&distro=debian-13.6",
+            "3.53.4-2",
+            "LOW"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2025-70873",
+            "pkg:deb/debian/libsqlite3-0@3.53.4-2?arch=amd64&distro=debian-13.6",
+            "3.53.4-2",
+            "LOW"
+          ],
+          "count": 1
+        }
+      ],
+      "removed_scanner_rows": [
+        {
+          "finding": [
+            "CVE-2026-11822",
+            "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+            "3.46.1-7+deb13u1",
+            "HIGH"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2026-11824",
+            "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+            "3.46.1-7+deb13u1",
+            "HIGH"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2026-39113",
+            "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+            "3.46.1-7+deb13u1",
+            "MEDIUM"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2026-50812",
+            "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+            "3.46.1-7+deb13u1",
+            "MEDIUM"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2026-50813",
+            "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+            "3.46.1-7+deb13u1",
+            "MEDIUM"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2021-45346",
+            "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+            "3.46.1-7+deb13u1",
+            "LOW"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2025-70873",
+            "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+            "3.46.1-7+deb13u1",
+            "LOW"
+          ],
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "audio-worker",
+      "identity": "sha256:b80e9da3ba66bed8aaadbb58c643e3c058b5d2ec23149f23018ee9ac61bccd05",
+      "config_digest": "sha256:ae20343fc235207949e21ea905f686f6a653fc5b01aabc7bc033d53f8880953a",
+      "sqlite_version": "3.53.4",
+      "probe_cases": 10,
+      "all_severity_rows": 635,
+      "blocking_scanner_rows": 154,
+      "excepted_rows": 80,
+      "unmatched_exception_ids": [],
+      "baseline": {
+        "archive": "Docs/Evidence/TASK-13013.7.39-candidate-reports.zip",
+        "archive_sha256": "9d7bfcda025a3d84e8e651fcb88280c727155c2e3416e3d2d2036c5412162b9d",
+        "member": "trivy-image-audio-worker.json",
+        "bytes": 2764740,
+        "sha256": "20ed91d3015f9bf8fea81068b72b8169edbc76e2f8fcecd5823cd50148906239"
+      },
+      "added_scanner_rows": [
+        {
+          "finding": [
+            "CVE-2026-11822",
+            "pkg:deb/debian/libsqlite3-0@3.53.4-2?arch=amd64&distro=debian-13.6",
+            "3.53.4-2",
+            "HIGH"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2026-11824",
+            "pkg:deb/debian/libsqlite3-0@3.53.4-2?arch=amd64&distro=debian-13.6",
+            "3.53.4-2",
+            "HIGH"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2026-39113",
+            "pkg:deb/debian/libsqlite3-0@3.53.4-2?arch=amd64&distro=debian-13.6",
+            "3.53.4-2",
+            "MEDIUM"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2026-50812",
+            "pkg:deb/debian/libsqlite3-0@3.53.4-2?arch=amd64&distro=debian-13.6",
+            "3.53.4-2",
+            "MEDIUM"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2026-50813",
+            "pkg:deb/debian/libsqlite3-0@3.53.4-2?arch=amd64&distro=debian-13.6",
+            "3.53.4-2",
+            "MEDIUM"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2021-45346",
+            "pkg:deb/debian/libsqlite3-0@3.53.4-2?arch=amd64&distro=debian-13.6",
+            "3.53.4-2",
+            "LOW"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2025-70873",
+            "pkg:deb/debian/libsqlite3-0@3.53.4-2?arch=amd64&distro=debian-13.6",
+            "3.53.4-2",
+            "LOW"
+          ],
+          "count": 1
+        }
+      ],
+      "removed_scanner_rows": [
+        {
+          "finding": [
+            "CVE-2026-11822",
+            "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+            "3.46.1-7+deb13u1",
+            "HIGH"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2026-11824",
+            "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+            "3.46.1-7+deb13u1",
+            "HIGH"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2026-39113",
+            "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+            "3.46.1-7+deb13u1",
+            "MEDIUM"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2026-50812",
+            "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+            "3.46.1-7+deb13u1",
+            "MEDIUM"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2026-50813",
+            "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+            "3.46.1-7+deb13u1",
+            "MEDIUM"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2021-45346",
+            "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+            "3.46.1-7+deb13u1",
+            "LOW"
+          ],
+          "count": 1
+        },
+        {
+          "finding": [
+            "CVE-2025-70873",
+            "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+            "3.46.1-7+deb13u1",
+            "LOW"
+          ],
+          "count": 1
+        }
+      ]
+    }
+  ],
+  "canonical_checks": {
+    "import_cases": 40,
+    "sqlite_behavior_cases": 12,
+    "legacy_restores": 3,
+    "package_version": "3.53.4-2",
+    "sqlite_version": "3.53.4",
+    "native_library_sha256": "666b2574049ed1db068b4a70837171d327c1696bf0498e6538913711c1a28370",
+    "all_success_receipts_verified": true
+  },
+  "scanner": {
+    "image": "ghcr.io/aquasecurity/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969",
+    "database": {
+      "Version": 2,
+      "NextUpdate": "2026-09-11T13:49:36.447576545Z",
+      "UpdatedAt": "2026-09-10T13:49:36.447576998Z",
+      "DownloadedAt": "2026-09-10T17:26:15.107866089Z"
+    },
+    "database_hashes_unchanged": true,
+    "offline": true,
+    "all_severities": true,
+    "include_unfixed": true,
+    "json_and_cyclonedx_per_candidate": true
+  }
 }
