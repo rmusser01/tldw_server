@@ -364,7 +364,8 @@ class DatabaseMigrator:
         sql: str,
     ) -> tuple[list[str], list[str], list[str]]:
         """Separate connection PRAGMAs and a legacy outer transaction wrapper."""
-        statements = cls._split_sql_statements(sql)
+        # Normalize only execution input; the original SQL remains the checksum source.
+        statements = cls._split_sql_statements(sql.removeprefix("\ufeff"))
         pre_transaction: list[str] = []
         post_transaction: list[str] = []
 

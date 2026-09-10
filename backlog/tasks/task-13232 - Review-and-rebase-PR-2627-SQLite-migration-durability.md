@@ -4,7 +4,7 @@ title: Review and rebase PR 2627 SQLite migration durability
 status: Done
 assignee: []
 created_date: '2026-09-10 00:43'
-updated_date: '2026-09-10 00:50'
+updated_date: '2026-09-10 01:21'
 labels:
   - db
   - migrations
@@ -55,6 +55,12 @@ Tracking: TASK-13232, created through Backlog CLI with the old PR task history b
 **Success Criteria**: Focused tests, syntax/lint/security checks, independent review; report current CI and human change-summary gate.
 **Tests**: Migration/bootstrap suite, Bandit touched production scope, pre-commit checks, git diff --check, remote SHA/base verification.
 **Status**: Complete
+
+## Stage 4: Qodo follow-up on latest dev
+**Goal**: Resolve all six Qodo findings while preserving original SQL integrity.
+**Success Criteria**: BOM-prefixed wrapped files execute, source/checksum remain unchanged, new tests meet repository conventions, and public SQL effects replace parser call-count assertions.
+**Tests**: Three BOM cases fail before the execution-only normalization and pass after; unit selection, expanded migration/CLI/bootstrap/backup suite, lint/security and independent review.
+**Status**: Complete (171 passed, 7 PostgreSQL-unavailable skips; final remote review/CI are merge gates).
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -74,12 +80,19 @@ Verification: source the project .venv, then python -m pytest tldw_Server_API/te
 Security/style: python -m bandit -r tldw_Server_API/app/core/DB_Management/db_migration.py tldw_Server_API/app/core/DB_Management/media_db/schema/backends/sqlite_helpers.py tldw_Server_API/app/core/DB_Management/test_migrations.py -f json -o /tmp/pr2627-bandit.json => 0 findings over 1297 LOC. Ruff, py_compile, guard_no_nonempty_legacy_complete.py, guard_http_client_patching.py, and git diff --check origin/dev pass. Temporary plan is retained in this task plan section and removed from the working tree at completion.
 Touched: Docs/Database_Migrations.md; db_migration.py; media_db/schema/backends/sqlite_helpers.py; DB_Management/test_migrations.py; tests/DB_Management/test_db_migration_planning.py; tests/DB_Management/test_media_db_migration_missing_scripts_error.py; replacement Backlog record. TASK-12142 on dev is left untouched. No packaged SQL remains changed. Fetch immediately before publication still reports dev 40345571a2cfc8b3a8893545836097d27e4ee86c and PR head 3fae4675ae7e36c3217aea0986d4864685c48ac3, which is the exact force-with-lease expectation.
 Merge assessment: still useful because dev retains the partial-DDL durability defect. Local fixes/review are complete. Fresh remote checks and a requester-owned human-written Change summary are still required before merge; this work does not merge the PR.
+
+2026-09-10 Qodo follow-up: current-head review on c346aea33e reported six actionable items: BOM-prefixed legacy outer wrappers are not recognized; test classification markers, docstrings, shared fixtures, descriptive case IDs, and observable parser behavior need improvement. Reopened for fixes and rebase onto dev 456eafb7a6 (unrelated VZ guest buffering changes). Plan: reproduce BOM failure with file-backed public migration API and verify checksums; remove only the leading BOM from execution input; restructure new tests around shared fixtures/public behavior; run focused and expanded regression checks plus lint/security; reply to all six threads, request final review, then merge only after required checks and final-head review pass. Existing requester-written Change summary remains approved and preserved.
+
+2026-09-10 Qodo remediation verified on dev 456eafb7a603449722ba8db806071a5e2aa5e7d6. Rebase range-diff showed all four prior commits unchanged. Removed one leading BOM only from execution input with str.removeprefix; loader source and checksum calculation remain unchanged. Added on-disk migration regressions for BOM before BEGIN, a comment, and foreign-key PRAGMA; all three failed with not-authorized errors before the fix and passed afterward. They verify original file/up_sql, ledger checksum, schema version, and embedded BOM literal preservation. Existing embedded-BOM COMMIT rejection still passes.
+Addressed the five test-maintenance findings with shared initialized/versioned SQLite fixtures, exactly one unit classification marker and docstrings on each added planning test, descriptive parameter IDs, and public database-effects tests replacing the parser spy and FK extraction assertion. Independent review found all six Qodo findings addressed and no remaining substantive correctness/security issues.
+Validation after activating the project .venv: python -m pytest on the same 11 migration/CLI/bootstrap/backup modules recorded above -q -rs => 171 passed, 7 skipped (PostgreSQL unavailable), 4 warnings in 36.20s. Marker-selected planning and legacy tests => 23 passed, 5 pre-existing unclassified tests deselected. Ruff, py_compile, both repository guards and git diff --check pass; Bandit on the same touched application scope => 0 findings, 1297 LOC. Packaged SQL remains unchanged against latest dev. Results: /tmp/pr2627-qodo-full-tests.log and /tmp/pr2627-qodo-bandit.json.
+The requester supplied the human-written Change summary, now preserved verbatim in the PR description, and explicitly authorized final rebase, Qodo remediation, review replies and merge. Local implementation is complete; a new review covering the published final head and all required GitHub checks remain necessary before merging.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Rebased PR #2627 onto dev 40345571a2, fixed current migration compatibility and transaction-control bypasses without changing shipped checksums, documented legacy recovery, and preserved current idempotent behavior. Final verification: 167 passed, 7 PostgreSQL skips, zero Bandit findings; independent review found no remaining substantive issues. Useful to merge once fresh GitHub checks pass and the requester provides the required human-written Change summary.
+Rebased PR #2627 onto dev 456eafb7a6 and completed Qodo remediation, including BOM-prefixed legacy wrapper support without changing shipped SQL or checksums. Migration SQL, success ledger and schema version remain atomic; legacy recovery and idempotent compatibility are preserved. Verification: 171 passed, 7 PostgreSQL-unavailable skips, zero Bandit findings; independent review confirms all six Qodo findings addressed. The requester-owned Change summary is present. Ready for final-head Qodo review and required GitHub checks before the authorized merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

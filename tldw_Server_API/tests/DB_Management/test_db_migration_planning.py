@@ -1,3 +1,5 @@
+"""Regression coverage for SQLite migration planning and atomic execution."""
+
 import json
 import sqlite3
 from contextlib import contextmanager
@@ -10,6 +12,27 @@ from hypothesis import strategies as st
 
 from tldw_Server_API.app.core.DB_Management import db_migration as db_migration_module
 from tldw_Server_API.app.core.DB_Management.db_migration import DatabaseMigrator, MigrationError
+
+
+@pytest.fixture
+def migration_db(tmp_path: Path) -> tuple[Path, DatabaseMigrator]:
+    """Provide an isolated file-backed database with an initialized migration ledger."""
+    db_path = tmp_path / "app.db"
+    migrator = DatabaseMigrator(str(db_path), str(tmp_path / "migrations"))
+    migrator.initialize_migration_table()
+    return db_path, migrator
+
+
+@pytest.fixture
+def versioned_migration_db(
+    migration_db: tuple[Path, DatabaseMigrator],
+) -> tuple[Path, DatabaseMigrator]:
+    """Add legacy version metadata to the isolated migration database."""
+    db_path, _ = migration_db
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE schema_version (version INTEGER)")
+        conn.execute("INSERT INTO schema_version VALUES (0)")
+    return migration_db
 
 
 def test_migrate_to_version_rejects_missing_intermediate_versions(tmp_path: Path):
@@ -31,15 +54,12 @@ def test_migrate_to_version_rejects_missing_intermediate_versions(tmp_path: Path
         migrator.migrate_to_version(3, create_backup=False)
 
 
-def test_execute_migration_rolls_back_failed_multi_statement_script(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.db"
-    with sqlite3.connect(db_path) as conn:
-        conn.execute("CREATE TABLE schema_version (version INTEGER)")
-        conn.execute("INSERT INTO schema_version VALUES (0)")
-        conn.commit()
-
-    migrator = DatabaseMigrator(str(db_path), str(tmp_path / "migrations"))
-    migrator.initialize_migration_table()
+@pytest.mark.unit
+def test_execute_migration_rolls_back_failed_multi_statement_script(
+    versioned_migration_db: tuple[Path, DatabaseMigrator],
+) -> None:
+    """A failed statement leaves no partial schema or advanced version behind."""
+    db_path, migrator = versioned_migration_db
     migration = db_migration_module.Migration(
         version=1,
         name="partial_failure_demo",
@@ -69,37 +89,43 @@ def test_execute_migration_rolls_back_failed_multi_statement_script(tmp_path: Pa
     assert version == 0
 
 
-def test_prepare_migration_statements_extracts_function_style_foreign_key_pragmas() -> None:
-    pre, main, post = DatabaseMigrator._prepare_migration_statements(
-        """
-        PRAGMA foreign_keys(OFF);
+@pytest.mark.unit
+@pytest.mark.parametrize("enforcement", ["OFF", "ON"], ids=["disabled", "enabled"])
+def test_migration_applies_function_style_foreign_key_pragmas(
+    migration_db: tuple[Path, DatabaseMigrator], enforcement: str,
+) -> None:
+    """Function-style PRAGMAs control foreign key enforcement before migration SQL."""
+    db_path, migrator = migration_db
+    migration = db_migration_module.Migration(1, "foreign_keys", f"""
+        PRAGMA foreign_keys({enforcement});
         CREATE TABLE parent (id INTEGER PRIMARY KEY);
+        CREATE TABLE child (parent_id INTEGER REFERENCES parent(id));
+        INSERT INTO child VALUES (7);
         PRAGMA foreign_keys(ON);
-        """
-    )
+    """)
+    if enforcement == "ON":
+        with pytest.raises(MigrationError, match="FOREIGN KEY constraint failed"):
+            migrator.execute_migration(migration)
+        with sqlite3.connect(db_path) as conn:
+            assert conn.execute("SELECT name FROM sqlite_master WHERE name='child'").fetchall() == []
+    else:
+        migrator.execute_migration(migration)
+        with sqlite3.connect(db_path) as conn:
+            assert conn.execute("SELECT parent_id FROM child").fetchall() == [(7,)]
 
-    assert [statement.strip() for statement in pre] == ["PRAGMA foreign_keys(OFF);"]
-    assert [statement.strip() for statement in main] == [
-        "CREATE TABLE parent (id INTEGER PRIMARY KEY);"
-    ]
-    assert [statement.strip() for statement in post] == ["PRAGMA foreign_keys(ON);"]
 
-
-@pytest.mark.parametrize("wrapped", [False, True])
+@pytest.mark.unit
+@pytest.mark.parametrize("wrapped", [False, True], ids=["unwrapped", "wrapped"])
 def test_migration_bookkeeping_failure_rolls_back_sql_and_allows_retry(
-    tmp_path: Path, wrapped: bool,
+    versioned_migration_db: tuple[Path, DatabaseMigrator], wrapped: bool,
 ) -> None:
     """SQL, successful ledger entry, and schema version share one commit."""
-    db_path = tmp_path / "app.db"
+    db_path, migrator = versioned_migration_db
     with sqlite3.connect(db_path) as conn:
         conn.executescript("""
-            CREATE TABLE schema_version (version INTEGER);
-            INSERT INTO schema_version VALUES (0);
             CREATE TRIGGER reject_version BEFORE UPDATE ON schema_version
             BEGIN SELECT RAISE(ABORT, 'version write failed'); END;
         """)
-    migrator = DatabaseMigrator(str(db_path), str(tmp_path / "migrations"))
-    migrator.initialize_migration_table()
     sql = "CREATE TABLE widgets (id INTEGER); INSERT INTO widgets VALUES (7);"
     if wrapped:
         sql = "PRAGMA foreign_keys=OFF; BEGIN TRANSACTION; " + sql + " COMMIT; PRAGMA foreign_keys=ON;"
@@ -120,19 +146,20 @@ def test_migration_bookkeeping_failure_rolls_back_sql_and_allows_retry(
         assert conn.execute("SELECT version FROM schema_version").fetchone() == (1,)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("control", [
-    "/* boundary */ COMMIT;",
-    "COMMIT /* boundary */;",
-    "END -- boundary\n;",
-    "\ufeffCOMMIT;",
-    "SAVEPOINT 'with spaces';",
-    "PRAGMA main.foreign_keys = 'OFF';",
+    pytest.param("/* boundary */ COMMIT;", id="leading-comment-commit"),
+    pytest.param("COMMIT /* boundary */;", id="inline-comment-commit"),
+    pytest.param("END -- boundary\n;", id="line-comment-end"),
+    pytest.param("\ufeffCOMMIT;", id="embedded-bom-commit"),
+    pytest.param("SAVEPOINT 'with spaces';", id="quoted-savepoint"),
+    pytest.param("PRAGMA main.foreign_keys = 'OFF';", id="qualified-foreign-keys"),
 ])
-def test_migration_body_cannot_escape_owned_transaction(tmp_path: Path, control: str) -> None:
+def test_migration_body_cannot_escape_owned_transaction(
+    migration_db: tuple[Path, DatabaseMigrator], control: str,
+) -> None:
     """SQLite syntax variants must not bypass the migration transaction owner."""
-    db_path = tmp_path / "app.db"
-    migrator = DatabaseMigrator(str(db_path), str(tmp_path / "migrations"))
-    migrator.initialize_migration_table()
+    db_path, migrator = migration_db
     migration = db_migration_module.Migration(
         1, "escape", "CREATE TABLE partial (id INTEGER); " + control,
     )
@@ -143,10 +170,12 @@ def test_migration_body_cannot_escape_owned_transaction(tmp_path: Path, control:
         assert conn.execute("SELECT success FROM schema_migrations").fetchall() == [(0,)]
 
 
-def test_migration_preserves_trigger_bodies_and_semicolons_in_literals(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.db"
-    migrator = DatabaseMigrator(str(db_path), str(tmp_path / "migrations"))
-    migrator.initialize_migration_table()
+@pytest.mark.unit
+def test_migration_preserves_trigger_bodies_and_semicolons_in_literals(
+    migration_db: tuple[Path, DatabaseMigrator],
+) -> None:
+    """Trigger statements and SQL-like literal text survive migration execution."""
+    db_path, migrator = migration_db
     migrator.execute_migration(db_migration_module.Migration(1, "trigger", """
         BEGIN;
         CREATE TABLE widgets (value TEXT);
@@ -165,6 +194,7 @@ def test_migration_preserves_trigger_bodies_and_semicolons_in_literals(tmp_path:
         ]
 
 
+@pytest.mark.unit
 @given(st.lists(st.text(alphabet="abc;'-/*\n", max_size=30), max_size=8))
 def test_split_statements_preserves_sql_literal_values(values: list[str]) -> None:
     """Comment markers, quotes and semicolons in values are not SQL boundaries."""
@@ -181,10 +211,12 @@ def test_split_statements_preserves_sql_literal_values(values: list[str]) -> Non
         ]
 
 
-def test_failed_downgrade_preserves_schema_data_and_success_ledger(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.db"
-    migrator = DatabaseMigrator(str(db_path), str(tmp_path / "migrations"))
-    migrator.initialize_migration_table()
+@pytest.mark.unit
+def test_failed_downgrade_preserves_schema_data_and_success_ledger(
+    migration_db: tuple[Path, DatabaseMigrator],
+) -> None:
+    """A failed downgrade preserves the last successful schema, data, and ledger."""
+    db_path, migrator = migration_db
     migration = db_migration_module.Migration(
         1, "widgets", "CREATE TABLE widgets (id INTEGER); INSERT INTO widgets VALUES (7);",
         "DROP TABLE widgets; INSERT INTO missing VALUES (1);",
@@ -198,10 +230,12 @@ def test_failed_downgrade_preserves_schema_data_and_success_ledger(tmp_path: Pat
         assert conn.execute("SELECT version, success FROM schema_migrations").fetchall() == [(1, 1)]
 
 
-def test_success_ledger_failure_rolls_back_migration_sql(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.db"
-    migrator = DatabaseMigrator(str(db_path), str(tmp_path / "migrations"))
-    migrator.initialize_migration_table()
+@pytest.mark.unit
+def test_success_ledger_failure_rolls_back_migration_sql(
+    migration_db: tuple[Path, DatabaseMigrator],
+) -> None:
+    """Failure to record success rolls back the schema and records a failed attempt."""
+    db_path, migrator = migration_db
     with sqlite3.connect(db_path) as conn:
         conn.executescript("""
             CREATE TRIGGER reject_success BEFORE INSERT ON schema_migrations
@@ -217,30 +251,53 @@ def test_success_ledger_failure_rolls_back_migration_sql(tmp_path: Path) -> None
         assert conn.execute("SELECT version, success FROM schema_migrations").fetchall() == [(1, 0)]
 
 
-def test_split_sql_statements_checks_completeness_only_at_statement_boundaries(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.unit
+def test_migration_executes_statements_after_leading_comments(
+    migration_db: tuple[Path, DatabaseMigrator],
 ) -> None:
-    calls: list[str] = []
+    """Comments before complete statements do not suppress their database effects."""
+    db_path, migrator = migration_db
+    migrator.execute_migration(db_migration_module.Migration(1, "comments", """
+        -- comment without semicolon
+        CREATE TABLE first (id INTEGER);
+        INSERT INTO first VALUES (1);
+    """))
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT id FROM first").fetchall() == [(1,)]
 
-    def _complete_statement(candidate: str) -> bool:
-        calls.append(candidate)
-        return candidate.endswith(";")
 
-    monkeypatch.setattr(db_migration_module.sqlite3, "complete_statement", _complete_statement)
+@pytest.mark.unit
+@pytest.mark.parametrize("header", [
+    pytest.param("", id="before-wrapper"),
+    pytest.param("-- wrapped migration\n", id="before-comment"),
+    pytest.param("PRAGMA foreign_keys(OFF);\n", id="before-pragma"),
+])
+def test_migrate_bom_prefixed_wrapped_file_preserves_source_and_checksum(
+    versioned_migration_db: tuple[Path, DatabaseMigrator], header: str,
+) -> None:
+    """A leading BOM permits legacy wrappers without changing recorded source integrity."""
+    db_path, migrator = versioned_migration_db
+    source_sql = "\ufeff" + header + """BEGIN TRANSACTION;
+CREATE TABLE widgets (value TEXT);
+INSERT INTO widgets VALUES ('keep \ufeff inside literal');
+COMMIT;
+PRAGMA foreign_keys(ON);
+"""
+    source_path = Path(migrator.migrations_dir) / "001_widgets.sql"
+    source_path.write_text(source_sql, encoding="utf-8")
+    original = db_migration_module.Migration(1, "widgets", source_sql)
 
-    sql = """
-    -- comment without semicolon
-    CREATE TABLE first (id INTEGER);
-    INSERT INTO first VALUES (1);
-    """
+    result = migrator.migrate_to_version(1, create_backup=False)
 
-    statements = DatabaseMigrator._split_sql_statements(sql)
-
-    assert [statement.strip() for statement in statements] == [
-        "-- comment without semicolon\n    CREATE TABLE first (id INTEGER);",
-        "INSERT INTO first VALUES (1);",
-    ]
-    assert len(calls) == sql.count(";")
+    assert result["status"] == "success"
+    assert source_path.read_text(encoding="utf-8") == source_sql
+    assert migrator.load_migrations()[0].up_sql == source_sql
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT value FROM widgets").fetchall() == [("keep \ufeff inside literal",)]
+        assert conn.execute("SELECT checksum, success FROM schema_migrations").fetchall() == [
+            (original.checksum, 1),
+        ]
+        assert conn.execute("SELECT version FROM schema_version").fetchone() == (1,)
 
 
 def test_migrate_to_version_rejects_rollback_without_down_sql(

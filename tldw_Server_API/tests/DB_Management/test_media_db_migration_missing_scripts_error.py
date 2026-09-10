@@ -64,7 +64,7 @@ def test_media_db_upgrade_no_migrations_reports_explicit_diagnostics(
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("legacy_version", [1, 8, 21])
+@pytest.mark.parametrize("legacy_version", [1, 8, 21], ids=["oldest-schema", "schema-eight", "below-supported-boundary"])
 def test_media_db_rejects_unsupported_legacy_schema_before_packaged_migrations(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -80,7 +80,10 @@ def test_media_db_rejects_unsupported_legacy_schema_before_packaged_migrations(
         conn.commit()
 
     class _UnexpectedMigrator:
+        """Fail if automatic migration is attempted for an unsupported legacy schema."""
+
         def __init__(self, *_args: object, **_kwargs: object) -> None:
+            """Expose accidental migrator construction as a test failure."""
             raise AssertionError("unsupported legacy schemas must not invoke DatabaseMigrator")
 
     monkeypatch.setattr(sqlite_helpers_module, "DatabaseMigrator", _UnexpectedMigrator)
