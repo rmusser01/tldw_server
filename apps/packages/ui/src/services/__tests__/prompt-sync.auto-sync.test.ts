@@ -137,6 +137,57 @@ const invalidAutoSyncCases = (["create", "update"] as const).flatMap(
     invalidServerIdentityCases.map((testCase) => ({ operation, ...testCase }))
 )
 
+const invalidLocalAutoSyncCases = [
+  {
+    name: "runtime-bearing recipe",
+    expectedError: "invalid_recipe_runtime_values",
+    outerVersion: 2,
+    definition: {
+      ...makeRecipeDefinition(),
+      resolved_values: { topic: "PRIVATE_LOCAL_AUTO_SYNC_SENTINEL" }
+    }
+  },
+  {
+    name: "malformed recipe",
+    expectedError: "invalid_prompt_definition",
+    outerVersion: 2,
+    definition: {
+      ...makeRecipeDefinition(),
+      blocks: [
+        {
+          ...makeRecipeDefinition().blocks[0],
+          id: "",
+          content: "PRIVATE_LOCAL_AUTO_SYNC_SENTINEL"
+        }
+      ]
+    }
+  },
+  {
+    name: "future recipe",
+    expectedError: "unsupported_schema_version",
+    outerVersion: 99,
+    definition: {
+      ...makeRecipeDefinition(),
+      schema_version: 99
+    }
+  },
+  {
+    name: "outer and inner mismatch",
+    expectedError: "invalid_prompt_definition",
+    outerVersion: 1,
+    definition: makeRecipeDefinition()
+  }
+]
+
+const invalidLocalAutoSyncScenarios = (
+  ["would-create-project", "no-resolvable-project"] as const
+).flatMap((projectScenario) =>
+  invalidLocalAutoSyncCases.map((testCase) => ({
+    projectScenario,
+    ...testCase
+  }))
+)
+
 describe("prompt-sync auto-sync defaults", () => {
   beforeEach(() => {
     state.defaults = {
@@ -286,6 +337,80 @@ describe("prompt-sync auto-sync defaults", () => {
       })
     )
   })
+
+  it.each(invalidLocalAutoSyncScenarios)(
+    "rejects $name before auto-sync project resolution ($projectScenario)",
+    async ({
+      name,
+      expectedError,
+      outerVersion,
+      definition,
+      projectScenario
+    }) => {
+      const original = {
+        id: `invalid-local-auto-${projectScenario}-${name}`,
+        title: "Invalid local recipe",
+        name: "Invalid local recipe",
+        content: "PRIVATE_LOCAL_AUTO_SYNC_SENTINEL",
+        is_system: false,
+        user_prompt: "PRIVATE_LOCAL_AUTO_SYNC_SENTINEL",
+        promptFormat: "structured" as const,
+        promptSchemaVersion: outerVersion,
+        structuredPromptDefinition: definition,
+        createdAt: 1,
+        updatedAt: 25,
+        serverId: 707,
+        syncStatus: "conflict" as const
+      }
+      state.prompts.set(original.id, structuredClone(original))
+      const defaultsBefore = structuredClone(state.defaults)
+      const localBefore = structuredClone(state.prompts.get(original.id))
+      if (projectScenario === "no-resolvable-project") {
+        mocks.createProject.mockResolvedValueOnce({ data: { data: null } })
+      }
+      const captured: string[] = []
+      const warn = vi.spyOn(console, "warn").mockImplementation((...items) => {
+        captured.push(items.join(" "))
+      })
+      const error = vi
+        .spyOn(console, "error")
+        .mockImplementation((...items) => {
+          captured.push(items.join(" "))
+        })
+
+      try {
+        const { autoSyncPrompt } = await importPromptSync()
+        const result = await autoSyncPrompt(original.id)
+
+        expect(result).toEqual(
+          expect.objectContaining({
+            success: false,
+            localId: original.id,
+            error: expectedError,
+            syncStatus: "conflict",
+            failureKind: "validation"
+          })
+        )
+      } finally {
+        warn.mockRestore()
+        error.mockRestore()
+      }
+
+      expect(state.prompts.get(original.id)).toEqual(localBefore)
+      expect(state.defaults).toEqual(defaultsBefore)
+      expect(mocks.getPromptStudioDefaults).not.toHaveBeenCalled()
+      expect(mocks.setPromptStudioDefaults).not.toHaveBeenCalled()
+      expect(mocks.listProjects).not.toHaveBeenCalled()
+      expect(mocks.createProject).not.toHaveBeenCalled()
+      expect(mocks.createPrompt).not.toHaveBeenCalled()
+      expect(mocks.updatePrompt).not.toHaveBeenCalled()
+      expect(mocks.getPrompt).not.toHaveBeenCalled()
+      expect(mocks.promptUpdate).not.toHaveBeenCalled()
+      expect(captured.join("\n")).not.toContain(
+        "PRIVATE_LOCAL_AUTO_SYNC_SENTINEL"
+      )
+    }
+  )
 
   it("keeps the legacy pending result when an unlinked server create is empty", async () => {
     state.prompts.set("local-empty-create", {

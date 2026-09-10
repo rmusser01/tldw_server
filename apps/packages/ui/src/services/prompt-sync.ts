@@ -508,6 +508,24 @@ export async function autoSyncPrompt(
     }
   }
 
+  try {
+    parsePromptIdentity(
+      local.structuredPromptDefinition,
+      local.promptFormat,
+      local.promptSchemaVersion
+    )
+  } catch (error: unknown) {
+    return {
+      success: false,
+      localId,
+      ...(local.serverId ? { serverId: local.serverId } : {}),
+      error:
+        error instanceof Error ? error.message : 'invalid_prompt_definition',
+      syncStatus: local.syncStatus || (local.serverId ? 'conflict' : 'local'),
+      failureKind: 'validation'
+    }
+  }
+
   const projectId = await resolveAutoSyncProjectId(
     preferredProjectId ?? local.studioProjectId
   )

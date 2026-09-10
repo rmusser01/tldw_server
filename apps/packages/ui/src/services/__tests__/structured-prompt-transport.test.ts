@@ -65,6 +65,13 @@ type V1TransportCase = {
   input: Record<string, unknown>
   expected: Record<string, unknown>
 }
+type V1IntegerSyncCase = {
+  name: string
+  field: "order" | "max_length"
+  input_value: number | string
+  python_value: number
+  sync_eligible: boolean
+}
 const fixtureRelativePath =
   "Docs/fixtures/single-text-recipes/v1-transport-cases.json"
 const fixturePath = ["", "..", "../..", "../../.."]
@@ -74,6 +81,9 @@ if (!fixturePath) throw new Error("v1 transport fixture not found")
 const v1TransportCases = JSON.parse(
   readFileSync(fixturePath, "utf8")
 ) as V1TransportCase[]
+const v1IntegerSyncCases = JSON.parse(
+  readFileSync(resolve(fixturePath, "..", "v1-integer-sync-cases.json"), "utf8")
+) as V1IntegerSyncCase[]
 
 const invalidRecipeCases: Array<[string, (value: any) => void]> = [
   [
@@ -611,6 +621,40 @@ describe("structured prompt transport validation", () => {
       expect(
         parseStructuredPromptDefinitionForTransport(input, "structured", 1)
       ).toEqual(expected)
+      expect(JSON.stringify(input)).toBe(before)
+    }
+  )
+
+  it.each(v1IntegerSyncCases)(
+    "enforces shared v1 integer sync eligibility: $name",
+    ({
+      field,
+      input_value: inputValue,
+      python_value: pythonValue,
+      sync_eligible: syncEligible
+    }) => {
+      const input = v1Definition()
+      if (field === "order") input.blocks[0].order = inputValue as number
+      else
+        (input.variables[0] as Record<string, unknown>).max_length = inputValue
+      const before = JSON.stringify(input)
+
+      if (syncEligible) {
+        const parsed = parseStructuredPromptDefinitionForTransport(
+          input,
+          "structured",
+          1
+        )
+        const parsedValue =
+          field === "order"
+            ? parsed!.blocks[0].order
+            : parsed!.variables[0].max_length
+        expect(parsedValue).toBe(pythonValue)
+      } else {
+        expect(() =>
+          parseStructuredPromptDefinitionForTransport(input, "structured", 1)
+        ).toThrow("invalid_prompt_definition")
+      }
       expect(JSON.stringify(input)).toBe(before)
     }
   )

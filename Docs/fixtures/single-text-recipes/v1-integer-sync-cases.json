@@ -1,0 +1,128 @@
+[
+  {
+    "name": "order-safe-positive-number",
+    "field": "order",
+    "input_value": 9007199254740991,
+    "python_value": 9007199254740991,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-safe-positive-decimal-string",
+    "field": "order",
+    "input_value": "9007199254740991",
+    "python_value": 9007199254740991,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-unsafe-two-to-53-number",
+    "field": "order",
+    "input_value": 9007199254740992,
+    "python_value": 9007199254740992,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-unsafe-two-to-53-decimal-string",
+    "field": "order",
+    "input_value": "9007199254740992",
+    "python_value": 9007199254740992,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-unsafe-two-to-53-plus-one-number",
+    "field": "order",
+    "input_value": 9007199254740993,
+    "python_value": 9007199254740993,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-unsafe-two-to-53-plus-one-decimal-string",
+    "field": "order",
+    "input_value": "9007199254740993",
+    "python_value": 9007199254740993,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-safe-negative-number",
+    "field": "order",
+    "input_value": -9007199254740991,
+    "python_value": -9007199254740991,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-safe-negative-decimal-string",
+    "field": "order",
+    "input_value": "-9007199254740991",
+    "python_value": -9007199254740991,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-unsafe-negative-two-to-53-number",
+    "field": "order",
+    "input_value": -9007199254740992,
+    "python_value": -9007199254740992,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-unsafe-negative-two-to-53-decimal-string",
+    "field": "order",
+    "input_value": "-9007199254740992",
+    "python_value": -9007199254740992,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-unsafe-negative-two-to-53-minus-one-number",
+    "field": "order",
+    "input_value": -9007199254740993,
+    "python_value": -9007199254740993,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-unsafe-negative-two-to-53-minus-one-decimal-string",
+    "field": "order",
+    "input_value": "-9007199254740993",
+    "python_value": -9007199254740993,
+    "sync_eligible": false
+  },
+  {
+    "name": "max-length-safe-positive-number",
+    "field": "max_length",
+    "input_value": 9007199254740991,
+    "python_value": 9007199254740991,
+    "sync_eligible": true
+  },
+  {
+    "name": "max-length-safe-positive-decimal-string",
+    "field": "max_length",
+    "input_value": "9007199254740991",
+    "python_value": 9007199254740991,
+    "sync_eligible": true
+  },
+  {
+    "name": "max-length-unsafe-two-to-53-number",
+    "field": "max_length",
+    "input_value": 9007199254740992,
+    "python_value": 9007199254740992,
+    "sync_eligible": false
+  },
+  {
+    "name": "max-length-unsafe-two-to-53-decimal-string",
+    "field": "max_length",
+    "input_value": "9007199254740992",
+    "python_value": 9007199254740992,
+    "sync_eligible": false
+  },
+  {
+    "name": "max-length-unsafe-two-to-53-plus-one-number",
+    "field": "max_length",
+    "input_value": 9007199254740993,
+    "python_value": 9007199254740993,
+    "sync_eligible": false
+  },
+  {
+    "name": "max-length-unsafe-two-to-53-plus-one-decimal-string",
+    "field": "max_length",
+    "input_value": "9007199254740993",
+    "python_value": 9007199254740993,
+    "sync_eligible": false
+  }
+]

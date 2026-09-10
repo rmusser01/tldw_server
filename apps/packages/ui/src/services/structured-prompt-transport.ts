@@ -68,6 +68,8 @@ const JSON_MAX_DEPTH = 32
 const JSON_MAX_NODES = 10_000
 const VARIABLE_NAME_PATTERN = /^[A-Za-z0-9_]+$/
 const XML_SECTION_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_.-]*$/
+// Python v1 accepts wider integers, but sync must round-trip exactly through JSON/JS.
+const MAX_SAFE_INTEGER_TEXT = String(Number.MAX_SAFE_INTEGER)
 // Python str.strip() whitespace parity for IDs used by backend duplicate checks.
 const PYTHON_EDGE_WHITESPACE =
   /^[\t\n\v\f\r \u001c-\u001f\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+|[\t\n\v\f\r \u001c-\u001f\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$/g
@@ -163,14 +165,23 @@ const coerceV1Integer = (value: unknown, nullable = false): number | null => {
   if (value === null && nullable) return null
   if (typeof value === "boolean") return value ? 1 : 0
   if (typeof value === "number") {
-    if (!Number.isFinite(value) || !Number.isInteger(value)) return fail()
+    if (!Number.isSafeInteger(value)) return fail()
     return value === 0 ? 0 : value
   }
   if (typeof value === "string") {
     const normalized = value.trim()
     if (!/^[+-]?\d+(?:\.0+)?$/.test(normalized)) return fail()
-    const parsed = Number(normalized)
-    if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) return fail()
+    const integerText = normalized.replace(/\.0+$/, "")
+    const digits = integerText.replace(/^[+-]?0*/, "") || "0"
+    if (
+      digits.length > MAX_SAFE_INTEGER_TEXT.length ||
+      (digits.length === MAX_SAFE_INTEGER_TEXT.length &&
+        digits > MAX_SAFE_INTEGER_TEXT)
+    ) {
+      return fail()
+    }
+    const parsed = Number(integerText)
+    if (!Number.isSafeInteger(parsed)) return fail()
     return parsed === 0 ? 0 : parsed
   }
   return fail()
