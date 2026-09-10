@@ -187,21 +187,19 @@ class TestMigrations(unittest.TestCase):
         self.assertEqual(len(result["migrations_applied"]), 1)
         self.assertEqual(result["migrations_applied"][0]["direction"], "down")
 
-    def test_no_migrations_upgrade_reports_diagnostics(self):
-        """Upgrade with no migration files should expose diagnostic details."""
+    def test_no_migrations_upgrade_rejects_missing_chain(self):
+        """Reject an unavailable upgrade before changing the schema version."""
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER)")
             conn.execute("DELETE FROM schema_version")
             conn.execute("INSERT INTO schema_version (version) VALUES (?)", (8,))
 
-        result = self.migrator.migrate_to_version(20)
+        with self.assertRaises(MigrationError) as error:
+            self.migrator.migrate_to_version(20)
 
-        self.assertEqual(result["status"], "no_migrations")
-        self.assertEqual(result["current_version"], 8)
-        self.assertEqual(result["target_version"], 20)
-        self.assertEqual(result["available_versions"], [])
-        self.assertEqual(result["missing_versions"], list(range(9, 21)))
-        self.assertEqual(Path(result["migrations_dir"]), Path(self.migrations_dir).resolve())
+        self.assertEqual(str(error.exception), f"Missing migration versions: {list(range(9, 21))}")
+        self.assertEqual(self.migrator.get_current_version(), 8)
+        self.assertEqual(self.migrator.get_applied_migrations(), [])
 
     def test_sql_migration_without_down_sql_prevents_downgrade(self):
         """Ensure SQL migrations without down_sql cannot be downgraded."""

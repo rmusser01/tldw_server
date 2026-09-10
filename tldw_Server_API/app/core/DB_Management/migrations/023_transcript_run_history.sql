@@ -2,6 +2,7 @@
 -- description: Add transcript run-history columns and backfill existing transcript/media state
 
 PRAGMA foreign_keys = OFF;
+BEGIN TRANSACTION;
 
 ALTER TABLE Media ADD COLUMN latest_transcription_run_id INTEGER;
 ALTER TABLE Media ADD COLUMN next_transcription_run_id INTEGER NOT NULL DEFAULT 1;
@@ -123,4 +124,5 @@ BEGIN
     WHERE NEW.uuid IS NOT OLD.uuid;
 END;
 
+COMMIT;
 PRAGMA foreign_keys = ON;

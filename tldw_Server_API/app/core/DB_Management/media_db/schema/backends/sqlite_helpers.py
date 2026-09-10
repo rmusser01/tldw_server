@@ -12,17 +12,17 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
     SchemaError,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.schema.features.fts import (
-    ensure_sqlite_fts_structures,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media import (
-    apply_sqlite_core_media_schema,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
+    MEDIA_NONCRITICAL_EXCEPTIONS,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.schema.document_workspace_schema import (
     ensure_sqlite_document_workspace_schema,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
-    MEDIA_NONCRITICAL_EXCEPTIONS,
+from tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media import (
+    apply_sqlite_core_media_schema,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.features.fts import (
+    ensure_sqlite_fts_structures,
 )
 
 try:
@@ -278,8 +278,9 @@ def bootstrap_sqlite_schema(db: SupportsSqlitePostCoreStructures) -> None:
                             f"{current_db_version}; minimum supported automatic "
                             "upgrade version is "
                             f"{MIN_SUPPORTED_SQLITE_MEDIA_DB_MIGRATION_VERSION}. "
-                            "Create a backup and use the documented export/rebuild "
-                            "recovery workflow before starting this server version."
+                            "Create a backup and follow the legacy SQLite Media DB "
+                            "recovery workflow in Docs/Database_Migrations.md "
+                            "before starting this server version."
                         )
 
                     conn.close()

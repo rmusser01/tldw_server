@@ -64,15 +64,19 @@ def test_media_db_upgrade_no_migrations_reports_explicit_diagnostics(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("legacy_version", [1, 8, 21])
 def test_media_db_rejects_unsupported_legacy_schema_before_packaged_migrations(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
+    legacy_version: int,
 ) -> None:
     """Older Media DB schemas should fail explicitly instead of using unrelated package migrations."""
     db_path = tmp_path / "Media_DB_v2.db"
     with sqlite3.connect(db_path) as conn:
         conn.execute("CREATE TABLE schema_version (version INTEGER)")
-        conn.execute("INSERT INTO schema_version (version) VALUES (8)")
+        conn.execute("INSERT INTO schema_version (version) VALUES (?)", (legacy_version,))
+        conn.execute("CREATE TABLE preserved_content (content TEXT)")
+        conn.execute("INSERT INTO preserved_content VALUES ('keep this content')")
         conn.commit()
 
     class _UnexpectedMigrator:
@@ -85,6 +89,10 @@ def test_media_db_rejects_unsupported_legacy_schema_before_packaged_migrations(
         MediaDatabase(db_path=str(db_path), client_id="legacy-boundary-test")
 
     msg = str(exc_info.value)
-    assert "unsupported legacy Media DB schema version 8" in msg
+    assert f"unsupported legacy Media DB schema version {legacy_version}" in msg
     assert "minimum supported automatic upgrade version is 22" in msg
     assert "backup" in msg
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT version FROM schema_version").fetchone() == (legacy_version,)
+        assert conn.execute("SELECT content FROM preserved_content").fetchall() == [("keep this content",)]
+        assert conn.execute("SELECT name FROM sqlite_master WHERE name='schema_migrations'").fetchall() == []

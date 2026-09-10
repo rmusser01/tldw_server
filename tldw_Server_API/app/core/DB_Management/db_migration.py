@@ -101,11 +101,12 @@ class DatabaseMigrator:
         r"^\s*ALTER\s+TABLE\s+(?P<table>[A-Za-z0-9_]+)\s+ADD\s+COLUMN\s+(?P<column>[A-Za-z0-9_]+)\b",
         re.IGNORECASE,
     )
-    _TRANSACTION_CONTROL_RE = re.compile(
-        r"^\s*(?:BEGIN(?:\s+(?:DEFERRED|IMMEDIATE|EXCLUSIVE))?(?:\s+TRANSACTION)?|"
-        r"COMMIT(?:\s+TRANSACTION)?|END(?:\s+TRANSACTION)?|"
-        r"ROLLBACK(?:\s+TRANSACTION)?|SAVEPOINT\s+\S+|"
-        r"RELEASE(?:\s+SAVEPOINT)?\s+\S+)\s*;?\s*$",
+    _BEGIN_TRANSACTION_RE = re.compile(
+        r"^\s*BEGIN(?:\s+(?:DEFERRED|IMMEDIATE|EXCLUSIVE))?(?:\s+TRANSACTION)?\s*;?\s*$",
+        re.IGNORECASE,
+    )
+    _END_TRANSACTION_RE = re.compile(
+        r"^\s*(?:COMMIT|END)(?:\s+TRANSACTION)?\s*;?\s*$",
         re.IGNORECASE,
     )
     _FOREIGN_KEYS_PRAGMA_RE = re.compile(
@@ -160,13 +161,11 @@ class DatabaseMigrator:
 
     @staticmethod
     def _sqlite_table_exists(conn: sqlite3.Connection, table: str) -> bool:
-        try:
-            row = conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-                (table,),
-            ).fetchone()
-        except sqlite3.Error:
-            return False
+        """Check optional schema metadata without suppressing database errors."""
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table,),
+        ).fetchone()
         return row is not None
 
     @staticmethod
@@ -340,6 +339,7 @@ class DatabaseMigrator:
 
     @classmethod
     def _split_sql_statements(cls, sql: str) -> list[str]:
+        """Split at complete SQLite statements, retaining triggers and literals."""
         statements: list[str] = []
         buffer: list[str] = []
 
@@ -363,6 +363,7 @@ class DatabaseMigrator:
         cls,
         sql: str,
     ) -> tuple[list[str], list[str], list[str]]:
+        """Separate connection PRAGMAs and a legacy outer transaction wrapper."""
         statements = cls._split_sql_statements(sql)
         pre_transaction: list[str] = []
         post_transaction: list[str] = []
@@ -379,20 +380,36 @@ class DatabaseMigrator:
                 break
             post_transaction.insert(0, statements.pop())
 
-        for statement in statements:
-            normalized = cls._strip_sql_comments(statement)
-            if cls._TRANSACTION_CONTROL_RE.match(normalized):
-                raise MigrationError(
-                    "Migration SQL must not include transaction control statements; "
-                    "DatabaseMigrator manages migration transactions."
-                )
-            if cls._FOREIGN_KEYS_PRAGMA_RE.match(normalized):
-                raise MigrationError(
-                    "PRAGMA foreign_keys statements must appear before or after "
-                    "the migration body."
-                )
+        # Preserve shipped SQL bytes/checksums while taking ownership of their
+        # transaction. Any remaining transaction control is denied by SQLite.
+        if (
+            len(statements) >= 2
+            and cls._BEGIN_TRANSACTION_RE.match(cls._strip_sql_comments(statements[0]))
+            and cls._END_TRANSACTION_RE.match(cls._strip_sql_comments(statements[-1]))
+        ):
+            statements = statements[1:-1]
 
         return pre_transaction, statements, post_transaction
+
+    @staticmethod
+    def _authorize_migration_statement(
+        action: int,
+        name: Optional[str],
+        value: Optional[str],
+        _database: Optional[str],
+        _trigger: Optional[str],
+    ) -> int:
+        """Let SQLite enforce ownership regardless of SQL comments or spelling."""
+        if action in (sqlite3.SQLITE_TRANSACTION, sqlite3.SQLITE_SAVEPOINT):
+            return sqlite3.SQLITE_DENY
+        if (
+            action == sqlite3.SQLITE_PRAGMA
+            and name
+            and name.lower() == "foreign_keys"
+            and value is not None
+        ):
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
 
     def _execute_migration_statements(
         self,
@@ -401,6 +418,7 @@ class DatabaseMigrator:
         direction: str,
         statements: list[str],
     ) -> None:
+        """Execute complete statements, skipping already-present idempotent columns."""
         for statement in statements:
             executable_statement = self._strip_sql_comments(statement)
             if not executable_statement:
@@ -566,7 +584,11 @@ class DatabaseMigrator:
                         (migration.version,),
                     )
 
-                self._execute_migration_statements(conn, migration, direction, statements)
+                conn.set_authorizer(self._authorize_migration_statement)
+                try:
+                    self._execute_migration_statements(conn, migration, direction, statements)
+                finally:
+                    conn.set_authorizer(None)
 
                 execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
 
