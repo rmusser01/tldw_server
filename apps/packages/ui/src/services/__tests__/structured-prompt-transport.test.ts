@@ -67,9 +67,9 @@ type V1TransportCase = {
 }
 type V1IntegerSyncCase = {
   name: string
-  field: "order" | "max_length"
+  field: "order" | "max_length" | "schema_version"
   input_value: number | string
-  python_value: number
+  python_value: number | null
   sync_eligible: boolean
 }
 const fixtureRelativePath =
@@ -634,7 +634,9 @@ describe("structured prompt transport validation", () => {
       sync_eligible: syncEligible
     }) => {
       const input = v1Definition()
-      if (field === "order") input.blocks[0].order = inputValue as number
+      if (field === "schema_version")
+        input.schema_version = inputValue as number
+      else if (field === "order") input.blocks[0].order = inputValue as number
       else
         (input.variables[0] as Record<string, unknown>).max_length = inputValue
       const before = JSON.stringify(input)
@@ -646,15 +648,37 @@ describe("structured prompt transport validation", () => {
           1
         )
         const parsedValue =
-          field === "order"
-            ? parsed!.blocks[0].order
-            : parsed!.variables[0].max_length
+          field === "schema_version"
+            ? parsed!.schema_version
+            : field === "order"
+              ? parsed!.blocks[0].order
+              : parsed!.variables[0].max_length
         expect(parsedValue).toBe(pythonValue)
       } else {
         expect(() =>
           parseStructuredPromptDefinitionForTransport(input, "structured", 1)
         ).toThrow("invalid_prompt_definition")
       }
+      expect(JSON.stringify(input)).toBe(before)
+    }
+  )
+
+  it.each(["order", "max_length", "schema_version"] as const)(
+    "retains strict v2 rejection of integer strings in %s",
+    (field) => {
+      const input = recipe()
+      if (field === "schema_version") {
+        ;(input as Record<string, unknown>).schema_version = "0_2.00"
+      } else if (field === "order") {
+        ;(input.blocks[0] as Record<string, unknown>).order = "1_0.00"
+      } else {
+        ;(input.variables[0] as Record<string, unknown>).max_length = "1_0.00"
+      }
+      const before = JSON.stringify(input)
+
+      expect(() =>
+        parseStructuredPromptDefinitionForTransport(input, "structured", 2)
+      ).toThrow("invalid_prompt_definition")
       expect(JSON.stringify(input)).toBe(before)
     }
   )

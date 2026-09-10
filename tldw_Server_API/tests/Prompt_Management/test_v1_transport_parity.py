@@ -47,14 +47,26 @@ def test_python_v1_parser_preserves_shared_integer_fixture_exactly(case: dict) -
             }
         ],
     }
-    if case["field"] == "order":
+    if case["field"] == "schema_version":
+        payload["schema_version"] = case["input_value"]
+    elif case["field"] == "order":
         payload["blocks"][0]["order"] = case["input_value"]
     else:
         payload["variables"][0]["max_length"] = case["input_value"]
     before = copy.deepcopy(payload)
 
+    if case["python_value"] is None:
+        with pytest.raises(ValueError):
+            parse_stored_prompt_definition(payload, schema_version=1)
+        assert payload == before
+        return
+
     parsed = parse_stored_prompt_definition(payload, schema_version=1)
-    parsed_value = parsed.blocks[0].order if case["field"] == "order" else parsed.variables[0].max_length
+    parsed_value = {
+        "schema_version": parsed.schema_version,
+        "order": parsed.blocks[0].order,
+        "max_length": parsed.variables[0].max_length,
+    }[case["field"]]
 
     assert parsed_value == case["python_value"]
     assert payload == before

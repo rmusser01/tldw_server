@@ -170,8 +170,8 @@ const coerceV1Integer = (value: unknown, nullable = false): number | null => {
   }
   if (typeof value === "string") {
     const normalized = value.trim()
-    if (!/^[+-]?\d+(?:\.0+)?$/.test(normalized)) return fail()
-    const integerText = normalized.replace(/\.0+$/, "")
+    if (!/^[+-]?\d(?:_?\d)*(?:\.0+)?$/.test(normalized)) return fail()
+    const integerText = normalized.replace(/_/g, "").replace(/\.0+$/, "")
     const digits = integerText.replace(/^[+-]?0*/, "") || "0"
     if (
       digits.length > MAX_SAFE_INTEGER_TEXT.length ||

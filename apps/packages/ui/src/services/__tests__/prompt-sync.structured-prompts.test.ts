@@ -134,9 +134,9 @@ const makeRecipeDefinition = (content = "Explain {{topic}}.") => ({
 
 type V1IntegerSyncCase = {
   name: string
-  field: "order" | "max_length"
+  field: "order" | "max_length" | "schema_version"
   input_value: number | string
-  python_value: number
+  python_value: number | null
   sync_eligible: boolean
 }
 const integerFixtureRelativePath =
@@ -153,7 +153,9 @@ const makeV1IntegerDefinition = (
   testCase: Pick<V1IntegerSyncCase, "field" | "input_value">
 ) => {
   const definition = makeDefinition("Explain {{topic}}.")
-  if (testCase.field === "order") {
+  if (testCase.field === "schema_version") {
+    definition.schema_version = testCase.input_value as number
+  } else if (testCase.field === "order") {
     definition.blocks[0].order = testCase.input_value as number
   } else {
     definition.variables[0].max_length = testCase.input_value as number
@@ -166,16 +168,18 @@ const makeCanonicalV1IntegerDefinition = (
 ) =>
   makeV1IntegerDefinition({
     field: testCase.field,
-    input_value: testCase.python_value
+    input_value: testCase.python_value ?? 1
   })
 
 const getV1IntegerValue = (
   definition: ReturnType<typeof makeDefinition>,
   field: V1IntegerSyncCase["field"]
 ) =>
-  field === "order"
-    ? definition.blocks[0].order
-    : definition.variables[0].max_length
+  field === "schema_version"
+    ? definition.schema_version
+    : field === "order"
+      ? definition.blocks[0].order
+      : definition.variables[0].max_length
 
 describe("prompt-sync structured prompt support", () => {
   beforeEach(() => {
@@ -354,6 +358,7 @@ describe("prompt-sync structured prompt support", () => {
     "push enforces the exact v1 integer sync contract: $name",
     async (testCase) => {
       const definition = makeV1IntegerDefinition(testCase)
+      const definitionBefore = JSON.stringify(definition)
       const original = {
         id: `push-${testCase.name}`,
         title: "V1 integer prompt",
@@ -402,6 +407,12 @@ describe("prompt-sync structured prompt support", () => {
           getV1IntegerValue(payload.prompt_definition, testCase.field)
         ).toBe(testCase.python_value)
         expect(mocks.promptUpdate).toHaveBeenCalledTimes(1)
+        expect(payload.prompt_definition).toEqual(
+          makeCanonicalV1IntegerDefinition(testCase)
+        )
+        expect(
+          state.prompts.get(original.id).structuredPromptDefinition
+        ).toEqual(makeCanonicalV1IntegerDefinition(testCase))
       } else {
         expect(result).toEqual(
           expect.objectContaining({
@@ -416,6 +427,7 @@ describe("prompt-sync structured prompt support", () => {
         expect(mocks.promptUpdate).not.toHaveBeenCalled()
         expect(JSON.stringify(state.prompts.get(original.id))).toBe(before)
       }
+      expect(JSON.stringify(definition)).toBe(definitionBefore)
     }
   )
 
@@ -488,6 +500,7 @@ describe("prompt-sync structured prompt support", () => {
     "pull enforces the exact v1 integer sync contract: $name",
     async (testCase) => {
       const definition = makeV1IntegerDefinition(testCase)
+      const definitionBefore = JSON.stringify(definition)
       mocks.getPrompt.mockResolvedValueOnce({
         data: {
           data: {
@@ -517,6 +530,9 @@ describe("prompt-sync structured prompt support", () => {
           getV1IntegerValue(saved.structuredPromptDefinition, testCase.field)
         ).toBe(testCase.python_value)
         expect(mocks.promptAdd).toHaveBeenCalledTimes(1)
+        expect(saved.structuredPromptDefinition).toEqual(
+          makeCanonicalV1IntegerDefinition(testCase)
+        )
       } else {
         expect(result).toEqual(
           expect.objectContaining({
@@ -528,6 +544,7 @@ describe("prompt-sync structured prompt support", () => {
         expect(mocks.promptUpdate).not.toHaveBeenCalled()
         expect(state.prompts.size).toBe(0)
       }
+      expect(JSON.stringify(definition)).toBe(definitionBefore)
     }
   )
 
@@ -634,6 +651,7 @@ describe("prompt-sync structured prompt support", () => {
     "server conflict validation enforces the exact v1 integer sync contract: $name",
     async (testCase) => {
       const localDefinition = makeDefinition("Explain {{topic}}.")
+      if (testCase.field === "order") localDefinition.blocks[0].order = 42
       const original = {
         id: `server-conflict-${testCase.name}`,
         title: "V1 integer prompt",
@@ -672,10 +690,12 @@ describe("prompt-sync structured prompt support", () => {
       const { getSyncStatus } = await importPromptSync()
       const result = await getSyncStatus(original.id)
 
+      const hasConflict =
+        testCase.sync_eligible && testCase.field !== "schema_version"
       expect(result).toEqual(
         expect.objectContaining({
-          status: testCase.sync_eligible ? "conflict" : "synced",
-          hasConflict: testCase.sync_eligible
+          status: hasConflict ? "conflict" : "synced",
+          hasConflict
         })
       )
       expect(mocks.getPrompt).toHaveBeenCalledTimes(1)

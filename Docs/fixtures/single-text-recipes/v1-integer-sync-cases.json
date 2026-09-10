@@ -124,5 +124,313 @@
     "input_value": "9007199254740993",
     "python_value": 9007199254740993,
     "sync_eligible": false
+  },
+  {
+    "name": "order-underscore",
+    "field": "order",
+    "input_value": "1_000",
+    "python_value": 1000,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-zero-decimal",
+    "field": "order",
+    "input_value": "1_0.0",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-plus",
+    "field": "order",
+    "input_value": "+1_000",
+    "python_value": 1000,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-long-zero-decimal",
+    "field": "order",
+    "input_value": "1_0.00",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-leading-zero",
+    "field": "order",
+    "input_value": "00_1.000",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-safe-boundary",
+    "field": "order",
+    "input_value": "9_007_199_254_740_991.00",
+    "python_value": 9007199254740991,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-unsafe-two-to-53-underscored",
+    "field": "order",
+    "input_value": "9_007_199_254_740_992",
+    "python_value": 9007199254740992,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-unsafe-two-to-53-plus-one-underscored",
+    "field": "order",
+    "input_value": "+9_007_199_254_740_993.00",
+    "python_value": 9007199254740993,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-malformed-1__0",
+    "field": "order",
+    "input_value": "1__0",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-malformed-_10",
+    "field": "order",
+    "input_value": "_10",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-malformed-10_",
+    "field": "order",
+    "input_value": "10_",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-malformed-1.0_0",
+    "field": "order",
+    "input_value": "1.0_0",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-malformed-1_0.1",
+    "field": "order",
+    "input_value": "1_0.1",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-malformed-1_.0",
+    "field": "order",
+    "input_value": "1_.0",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-malformed-1._0",
+    "field": "order",
+    "input_value": "1._0",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "max_length-underscore",
+    "field": "max_length",
+    "input_value": "1_000",
+    "python_value": 1000,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-zero-decimal",
+    "field": "max_length",
+    "input_value": "1_0.0",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-plus",
+    "field": "max_length",
+    "input_value": "+1_000",
+    "python_value": 1000,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-long-zero-decimal",
+    "field": "max_length",
+    "input_value": "1_0.00",
+    "python_value": 10,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-leading-zero",
+    "field": "max_length",
+    "input_value": "00_1.000",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-safe-boundary",
+    "field": "max_length",
+    "input_value": "9_007_199_254_740_991.00",
+    "python_value": 9007199254740991,
+    "sync_eligible": true
+  },
+  {
+    "name": "max_length-unsafe-two-to-53-underscored",
+    "field": "max_length",
+    "input_value": "9_007_199_254_740_992",
+    "python_value": 9007199254740992,
+    "sync_eligible": false
+  },
+  {
+    "name": "max_length-unsafe-two-to-53-plus-one-underscored",
+    "field": "max_length",
+    "input_value": "+9_007_199_254_740_993.00",
+    "python_value": 9007199254740993,
+    "sync_eligible": false
+  },
+  {
+    "name": "max_length-malformed-1__0",
+    "field": "max_length",
+    "input_value": "1__0",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "max_length-malformed-_10",
+    "field": "max_length",
+    "input_value": "_10",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "max_length-malformed-10_",
+    "field": "max_length",
+    "input_value": "10_",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "max_length-malformed-1.0_0",
+    "field": "max_length",
+    "input_value": "1.0_0",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "max_length-malformed-1_0.1",
+    "field": "max_length",
+    "input_value": "1_0.1",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "max_length-malformed-1_.0",
+    "field": "max_length",
+    "input_value": "1_.0",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "max_length-malformed-1._0",
+    "field": "max_length",
+    "input_value": "1._0",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-signed--1_000",
+    "field": "order",
+    "input_value": "-1_000",
+    "python_value": -1000,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-signed--9_007_199_254_740_991.00",
+    "field": "order",
+    "input_value": "-9_007_199_254_740_991.00",
+    "python_value": -9007199254740991,
+    "sync_eligible": true
+  },
+  {
+    "name": "order-signed--9_007_199_254_740_992",
+    "field": "order",
+    "input_value": "-9_007_199_254_740_992",
+    "python_value": -9007199254740992,
+    "sync_eligible": false
+  },
+  {
+    "name": "order-signed--9_007_199_254_740_993.00",
+    "field": "order",
+    "input_value": "-9_007_199_254_740_993.00",
+    "python_value": -9007199254740993,
+    "sync_eligible": false
+  },
+  {
+    "name": "schema-version-0_1",
+    "field": "schema_version",
+    "input_value": "0_1",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema-version-+0_1.00",
+    "field": "schema_version",
+    "input_value": "+0_1.00",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema-version-00_1.000",
+    "field": "schema_version",
+    "input_value": "00_1.000",
+    "python_value": 1,
+    "sync_eligible": true
+  },
+  {
+    "name": "schema-version-invalid-1__0",
+    "field": "schema_version",
+    "input_value": "1__0",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "schema-version-invalid-_1",
+    "field": "schema_version",
+    "input_value": "_1",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "schema-version-invalid-1_",
+    "field": "schema_version",
+    "input_value": "1_",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "schema-version-invalid-1.0_0",
+    "field": "schema_version",
+    "input_value": "1.0_0",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "schema-version-invalid-0_1.1",
+    "field": "schema_version",
+    "input_value": "0_1.1",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "schema-version-invalid--0_1",
+    "field": "schema_version",
+    "input_value": "-0_1",
+    "python_value": null,
+    "sync_eligible": false
+  },
+  {
+    "name": "schema-version-invalid-9_007_199_254_740_993",
+    "field": "schema_version",
+    "input_value": "9_007_199_254_740_993",
+    "python_value": null,
+    "sync_eligible": false
   }
 ]
