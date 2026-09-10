@@ -142,7 +142,7 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
                 type="button"
                 onClick={() => removeVariable(index)}
                 aria-label={`Remove ${variable.label || variable.name || `variable ${index + 1}`}`}
-                className="rounded border border-border p-1 text-danger hover:bg-danger/5"
+                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded border border-border text-danger hover:bg-danger/5"
               >
                 <Trash2 className="size-3" />
               </button>

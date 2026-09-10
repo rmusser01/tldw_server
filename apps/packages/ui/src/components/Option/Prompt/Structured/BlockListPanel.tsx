@@ -124,7 +124,7 @@ export const BlockListPanel: React.FC<BlockListPanelProps> = ({
                   disabled={index === 0}
                   aria-label={`Move ${block.name} up`}
                   data-testid={`structured-block-move-up-${block.id}`}
-                  className="rounded border border-border p-1 text-text-muted disabled:opacity-40"
+                  className="inline-flex min-h-11 min-w-11 items-center justify-center rounded border border-border text-text-muted disabled:opacity-40"
                 >
                   <ArrowUp className="size-3" />
                 </button>
@@ -134,7 +134,7 @@ export const BlockListPanel: React.FC<BlockListPanelProps> = ({
                   disabled={index === blocks.length - 1}
                   aria-label={`Move ${block.name} down`}
                   data-testid={`structured-block-move-down-${block.id}`}
-                  className="rounded border border-border p-1 text-text-muted disabled:opacity-40"
+                  className="inline-flex min-h-11 min-w-11 items-center justify-center rounded border border-border text-text-muted disabled:opacity-40"
                 >
                   <ArrowDown className="size-3" />
                 </button>
@@ -143,7 +143,7 @@ export const BlockListPanel: React.FC<BlockListPanelProps> = ({
                   onClick={() => onRemoveBlock(block.id)}
                   aria-label={`Remove ${block.name}`}
                   data-testid={`structured-block-remove-${block.id}`}
-                  className="rounded border border-border p-1 text-danger hover:bg-danger/5"
+                  className="inline-flex min-h-11 min-w-11 items-center justify-center rounded border border-border text-danger hover:bg-danger/5"
                 >
                   <Trash2 className="size-3" />
                 </button>

@@ -1,9 +1,17 @@
 import React from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import type { SavedRecipeSource } from "../types";
+import { BLANK_RECIPE } from "../built-in-recipes";
 import { SingleFieldRecipeEditor } from "../SingleFieldRecipeEditor";
 
 const savedRecipe = (
@@ -70,8 +78,25 @@ const renderEditor = (
     onSaveAsNew: vi.fn(),
     onUpdate: vi.fn(),
   };
-  render(<SingleFieldRecipeEditor target="system" {...callbacks} {...props} />);
+  render(
+    <SingleFieldRecipeEditor
+      target="system"
+      persistenceAvailable={true}
+      {...callbacks}
+      {...props}
+    />,
+  );
   return callbacks;
+};
+
+const deferred = <Value,>() => {
+  let resolve!: (value: Value | PromiseLike<Value>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<Value>((onResolve, onReject) => {
+    resolve = onResolve;
+    reject = onReject;
+  });
+  return { promise, resolve, reject };
 };
 
 describe("SingleFieldRecipeEditor", () => {
@@ -107,13 +132,200 @@ describe("SingleFieldRecipeEditor", () => {
     await user.click(screen.getByRole("button", { name: "Update recipe" }));
 
     expect(callbacks.onUpdate).toHaveBeenCalledTimes(1);
-    expect(callbacks.onUpdate.mock.calls[0][0].blocks[0].content).toBe(
+    expect(callbacks.onUpdate.mock.calls[0][0]).toBe("saved-greeting");
+    expect(callbacks.onUpdate.mock.calls[0][1].blocks[0].content).toBe(
       "Changed",
     );
     expect(
       (source.definition as { blocks: Array<{ content: string }> }).blocks[0]
         .content,
     ).toBe("Hello {{audience}}");
+  });
+
+  it("recreates a target-locked working copy when the mounted target changes", async () => {
+    const source = savedRecipe();
+    const onApply = vi.fn();
+    const onSaveAsNew = vi.fn();
+    const onUpdate = vi.fn();
+    const user = userEvent.setup();
+    const view = render(
+      <SingleFieldRecipeEditor
+        target="system"
+        initialSource={source}
+        persistenceAvailable={true}
+        onApply={onApply}
+        onSaveAsNew={onSaveAsNew}
+        onUpdate={onUpdate}
+      />,
+    );
+
+    await user.clear(screen.getByRole("textbox", { name: "Block content" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Block content" }),
+      "Working edit",
+    );
+    await user.type(
+      screen.getByRole("textbox", {
+        name: "Current value for Audience (not saved)",
+      }),
+      "Readers",
+    );
+    const variableName = screen.getByRole("textbox", {
+      name: "Variable name",
+    });
+    await user.clear(variableName);
+    await user.type(variableName, "bad name");
+    await user.tab();
+    expect(screen.getByRole("alert")).toHaveTextContent("valid variable name");
+
+    view.rerender(
+      <SingleFieldRecipeEditor
+        target="user_message"
+        initialSource={source}
+        persistenceAvailable={true}
+        onApply={onApply}
+        onSaveAsNew={onSaveAsNew}
+        onUpdate={onUpdate}
+      />,
+    );
+
+    expect(screen.getByText("User message draft")).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Block content" })).toHaveValue(
+      "Hello {{audience}}",
+    );
+    expect(screen.getByRole("textbox", { name: "Variable name" })).toHaveValue(
+      "audience",
+    );
+    expect(
+      screen.getByRole("textbox", {
+        name: "Current value for Audience (not saved)",
+      }),
+    ).toHaveValue("");
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    await user.click(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    );
+    expect(onSaveAsNew.mock.calls[0][0].assembly_config.target_role).toBe(
+      "user",
+    );
+    expect(
+      onSaveAsNew.mock.calls[0][0].blocks.every(
+        (block: { role: string }) => block.role === "user",
+      ),
+    ).toBe(true);
+  });
+
+  it("recreates the working copy when the initial source identity changes", () => {
+    const first = savedRecipe();
+    const second = savedRecipe({ id: "saved-second", name: "Saved second" });
+    (
+      second.definition as {
+        blocks: Array<{ content: string }>;
+        variables: Array<{ default_value: string }>;
+      }
+    ).blocks[0].content = "Goodbye {{audience}}";
+    (
+      second.definition as {
+        blocks: Array<{ content: string }>;
+        variables: Array<{ default_value: string }>;
+      }
+    ).variables[0].default_value = "Readers";
+    const props = {
+      target: "system" as const,
+      persistenceAvailable: true,
+      onApply: vi.fn(),
+      onSaveAsNew: vi.fn(),
+      onUpdate: vi.fn(),
+    };
+    const view = render(
+      <SingleFieldRecipeEditor {...props} initialSource={first} />,
+    );
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Block content" }), {
+      target: { value: "Working edit" },
+    });
+    view.rerender(
+      <SingleFieldRecipeEditor {...props} initialSource={second} />,
+    );
+
+    expect(screen.getByRole("combobox", { name: "Recipe source" })).toHaveValue(
+      "saved:saved-second",
+    );
+    expect(screen.getByRole("textbox", { name: "Block content" })).toHaveValue(
+      "Goodbye {{audience}}",
+    );
+    expect(
+      screen.getByRole("textbox", { name: "Compiled prompt preview" }),
+    ).toHaveValue(
+      "<greeting>Goodbye Readers</greeting>\n\n<rules>Be concise.</rules>",
+    );
+  });
+
+  it("includes source kind in mounted initial-source identity", () => {
+    const savedBlank = savedRecipe({ id: "blank", name: "Saved blank" });
+    const props = {
+      target: "system" as const,
+      persistenceAvailable: true,
+      onApply: vi.fn(),
+      onSaveAsNew: vi.fn(),
+      onUpdate: vi.fn(),
+    };
+    const view = render(
+      <SingleFieldRecipeEditor {...props} initialSource={savedBlank} />,
+    );
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Block content" }), {
+      target: { value: "Working edit" },
+    });
+    view.rerender(
+      <SingleFieldRecipeEditor {...props} initialSource={BLANK_RECIPE} />,
+    );
+
+    expect(screen.getByRole("combobox", { name: "Recipe source" })).toHaveValue(
+      "built_in:blank",
+    );
+    expect(
+      within(screen.getByTestId("structured-block-list")).queryAllByTestId(
+        /structured-block-item-/,
+      ),
+    ).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: "Update recipe" })).toBeNull();
+  });
+
+  it("preserves working edits when equivalent source objects are recreated", () => {
+    const props = {
+      target: "system" as const,
+      persistenceAvailable: true,
+      onApply: vi.fn(),
+      onSaveAsNew: vi.fn(),
+      onUpdate: vi.fn(),
+    };
+    const view = render(
+      <SingleFieldRecipeEditor {...props} initialSource={savedRecipe()} />,
+    );
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Block content" }), {
+      target: { value: "Working edit" },
+    });
+    fireEvent.change(
+      screen.getByRole("textbox", {
+        name: "Current value for Audience (not saved)",
+      }),
+      { target: { value: "Readers" } },
+    );
+    view.rerender(
+      <SingleFieldRecipeEditor {...props} initialSource={savedRecipe()} />,
+    );
+
+    expect(screen.getByRole("textbox", { name: "Block content" })).toHaveValue(
+      "Working edit",
+    );
+    expect(
+      screen.getByRole("textbox", {
+        name: "Current value for Audience (not saved)",
+      }),
+    ).toHaveValue("Readers");
   });
 
   it("clears runtime inputs when switching recipe sources", async () => {
@@ -486,6 +698,161 @@ describe("SingleFieldRecipeEditor", () => {
     expect(callbacks.onApply).not.toHaveBeenCalled();
   });
 
+  it("prevents duplicate Save requests while an asynchronous save is pending", async () => {
+    const pending = deferred<void>();
+    const onSaveAsNew = vi.fn(() => pending.promise);
+    renderEditor({ initialSource: savedRecipe(), onSaveAsNew });
+    const save = screen.getByRole("button", { name: "Save as new recipe" });
+    const update = screen.getByRole("button", { name: "Update recipe" });
+
+    fireEvent.click(save);
+    fireEvent.click(save);
+
+    expect(onSaveAsNew).toHaveBeenCalledTimes(1);
+    expect(save).toBeDisabled();
+    expect(update).toBeDisabled();
+
+    await act(async () => {
+      pending.resolve();
+      await pending.promise;
+    });
+    await waitFor(() => expect(save).toBeEnabled());
+  });
+
+  it("updates the selected saved ID once while an asynchronous update is pending", async () => {
+    const first = savedRecipe();
+    const second = savedRecipe({ id: "saved-second", name: "Saved second" });
+    const pending = deferred<void>();
+    const onUpdate = vi.fn(() => pending.promise);
+    renderEditor({
+      initialSource: first,
+      savedRecipes: [first, second],
+      onUpdate,
+    });
+    const user = userEvent.setup();
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Recipe source" }),
+      "saved:saved-second",
+    );
+    await user.type(
+      screen.getByRole("textbox", {
+        name: "Current value for Audience (not saved)",
+      }),
+      "Readers",
+    );
+    const update = screen.getByRole("button", { name: "Update recipe" });
+
+    fireEvent.click(update);
+    fireEvent.click(update);
+
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    expect(onUpdate.mock.calls[0][0]).toBe("saved-second");
+    expect(onUpdate.mock.calls[0][1]).not.toHaveProperty("runtimeValues");
+    expect(JSON.stringify(onUpdate.mock.calls[0][1])).not.toContain("Readers");
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    ).toBeDisabled();
+    expect(update).toBeDisabled();
+
+    await act(async () => {
+      pending.resolve();
+      await pending.promise;
+    });
+    await waitFor(() => expect(update).toBeEnabled());
+  });
+
+  it("keeps the working copy after Save rejection and clears the stable error on retry", async () => {
+    const onSaveAsNew = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("private server detail"))
+      .mockResolvedValueOnce(undefined);
+    renderEditor({ initialSource: savedRecipe(), onSaveAsNew });
+    const user = userEvent.setup();
+    const content = screen.getByRole("textbox", { name: "Block content" });
+    await user.clear(content);
+    await user.type(content, "Working copy");
+
+    await user.click(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not save the recipe. Try again.",
+    );
+    expect(screen.queryByText("private server detail")).toBeNull();
+    expect(content).toHaveValue("Working copy");
+
+    await user.click(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Could not save the recipe. Try again."),
+      ).toBeNull(),
+    );
+    expect(onSaveAsNew).toHaveBeenCalledTimes(2);
+    expect(content).toHaveValue("Working copy");
+  });
+
+  it("resets pending persistence feedback when prop ownership changes", async () => {
+    const first = savedRecipe();
+    const second = savedRecipe({ id: "saved-second", name: "Saved second" });
+    const pending = deferred<void>();
+    const props = {
+      target: "system" as const,
+      persistenceAvailable: true,
+      onApply: vi.fn(),
+      onSaveAsNew: vi.fn(() => pending.promise),
+      onUpdate: vi.fn(),
+    };
+    const view = render(
+      <SingleFieldRecipeEditor {...props} initialSource={first} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save as new recipe" }));
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    ).toBeDisabled();
+
+    view.rerender(
+      <SingleFieldRecipeEditor {...props} initialSource={second} />,
+    );
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    ).toBeEnabled();
+
+    await act(async () => {
+      pending.reject(new Error("stale request"));
+      await pending.promise.catch(() => undefined);
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("combobox", { name: "Recipe source" })).toHaveValue(
+      "saved:saved-second",
+    );
+  });
+
+  it("fails closed when persistence support is unknown but keeps local Apply available", async () => {
+    const callbacks = renderEditor({
+      initialSource: savedRecipe(),
+      persistenceAvailable: undefined,
+    });
+    const user = userEvent.setup();
+
+    expect(
+      screen.getByText("Recipe saving requires a supported online server."),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Update recipe" }),
+    ).toBeDisabled();
+    await user.click(
+      screen.getByRole("button", { name: "Apply to system prompt" }),
+    );
+    expect(callbacks.onApply).toHaveBeenCalledTimes(1);
+  });
+
   it("disables persistence while offline but keeps local preview and Apply available", async () => {
     const callbacks = renderEditor({
       initialSource: savedRecipe(),
@@ -507,14 +874,30 @@ describe("SingleFieldRecipeEditor", () => {
     expect(callbacks.onApply).toHaveBeenCalledTimes(1);
   });
 
-  it("uses a responsive, overflow-safe shared layout", () => {
-    renderEditor();
+  it("uses effective touch targets and an overflow-safe shared layout", () => {
+    renderEditor({ initialSource: savedRecipe() });
     const editor = screen.getByTestId("single-field-recipe-editor");
+    const workspace = screen.getByTestId("single-field-recipe-workspace");
+    const move = screen.getByRole("button", { name: "Move Greeting down" });
+    const removeBlock = screen.getByRole("button", {
+      name: "Remove Greeting",
+    });
+    const removeVariable = screen.getByRole("button", {
+      name: "Remove Audience",
+    });
 
     expect(editor.className).toContain("min-w-0");
     expect(editor.className).toContain("max-w-full");
+    expect(workspace.className).toContain("min-w-0");
+    expect(workspace.className).toContain("minmax(0,1fr)");
+    for (const control of [move, removeBlock, removeVariable]) {
+      expect(control.className).toContain("min-h-11");
+      expect(control.className).toContain("min-w-11");
+    }
+    expect(move.parentElement?.className).toContain("flex-wrap");
     expect(
-      screen.getByTestId("single-field-recipe-workspace").className,
-    ).toContain("minmax(0,1fr)");
+      screen.getByRole("textbox", { name: "Compiled prompt preview" })
+        .className,
+    ).toContain("min-w-0");
   });
 });

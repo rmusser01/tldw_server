@@ -7,7 +7,13 @@ import {
   SINGLE_TEXT_RECIPE_LIMITS,
   SingleTextRecipeRenderError,
 } from "@/components/Option/Prompt/structured-prompt-utils";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { BUILT_IN_RECIPES, CLEAR_TASK_RECIPE } from "./built-in-recipes";
 import {
@@ -36,8 +42,13 @@ export type SingleFieldRecipeEditorProps = {
   persistenceAvailable?: boolean;
   persistenceUnavailableReason?: string;
   onApply: (compiledText: string) => void;
-  onSaveAsNew?: (definition: SingleTextRecipeDefinition) => void;
-  onUpdate?: (definition: SingleTextRecipeDefinition) => void;
+  onSaveAsNew?: (
+    definition: SingleTextRecipeDefinition,
+  ) => void | Promise<void>;
+  onUpdate?: (
+    savedSourceId: string,
+    definition: SingleTextRecipeDefinition,
+  ) => void | Promise<void>;
 };
 
 const XML_SECTION_KEY = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
@@ -107,12 +118,13 @@ export function SingleFieldRecipeEditor({
   target,
   initialSource = CLEAR_TASK_RECIPE,
   savedRecipes = [],
-  persistenceAvailable = true,
+  persistenceAvailable,
   persistenceUnavailableReason = "Recipe saving requires a supported online server.",
   onApply,
   onSaveAsNew,
   onUpdate,
 }: SingleFieldRecipeEditorProps) {
+  const ownerKey = `${target}\u0000${sourceValue(initialSource)}`;
   const [state, setState] = useState(() =>
     createRecipeWorkingCopy(initialSource, target),
   );
@@ -128,6 +140,13 @@ export function SingleFieldRecipeEditor({
   const pendingFocus = useRef<"editor" | "add" | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
+  const previousOwnerKey = useRef(ownerKey);
+  const persistenceRequest = useRef(0);
+  const persistencePending = useRef(false);
+  const [persistenceAction, setPersistenceAction] = useState<
+    "save" | "update" | null
+  >(null);
+  const [persistenceError, setPersistenceError] = useState<string | null>(null);
 
   const sources = useMemo(() => {
     const all: RecipeSource[] = [...BUILT_IN_RECIPES];
@@ -172,6 +191,29 @@ export function SingleFieldRecipeEditor({
     }
   }, [state.definition, state.runtimeValues]);
 
+  useLayoutEffect(() => {
+    if (previousOwnerKey.current === ownerKey) return;
+    previousOwnerKey.current = ownerKey;
+    persistenceRequest.current += 1;
+    persistencePending.current = false;
+    setPersistenceAction(null);
+    setPersistenceError(null);
+    const next = createRecipeWorkingCopy(initialSource, target);
+    setState(next);
+    setVariableNameDrafts({});
+    setVariableNameErrors({});
+    setSelectedBlockId(next.definition.blocks?.[0]?.id ?? null);
+    pendingFocus.current = next.definition.blocks?.length ? "editor" : "add";
+  }, [initialSource, ownerKey, target]);
+
+  useEffect(
+    () => () => {
+      persistenceRequest.current += 1;
+      persistencePending.current = false;
+    },
+    [],
+  );
+
   useEffect(() => {
     if (!pendingFocus.current) return;
     if (pendingFocus.current === "editor") nameInputRef.current?.focus();
@@ -212,6 +254,10 @@ export function SingleFieldRecipeEditor({
     );
     if (!source) return;
     const next = createRecipeWorkingCopy(source, target);
+    persistenceRequest.current += 1;
+    persistencePending.current = false;
+    setPersistenceAction(null);
+    setPersistenceError(null);
     setState(next);
     setVariableNameDrafts({});
     setVariableNameErrors({});
@@ -371,6 +417,33 @@ export function SingleFieldRecipeEditor({
   const saveDefinition = () =>
     serializeRecipeDefinitionForSave(state.definition);
 
+  const runPersistence = async (
+    action: "save" | "update",
+    persist: () => void | Promise<void>,
+  ) => {
+    if (persistencePending.current) return;
+    persistencePending.current = true;
+    const request = ++persistenceRequest.current;
+    setPersistenceAction(action);
+    setPersistenceError(null);
+    try {
+      await persist();
+    } catch {
+      if (request === persistenceRequest.current) {
+        setPersistenceError(
+          action === "save"
+            ? "Could not save the recipe. Try again."
+            : "Could not update the recipe. Try again.",
+        );
+      }
+    } finally {
+      if (request === persistenceRequest.current) {
+        persistencePending.current = false;
+        setPersistenceAction(null);
+      }
+    }
+  };
+
   const targetLabel =
     target === "system" ? "System prompt" : "User message draft";
   const applyLabel =
@@ -379,12 +452,12 @@ export function SingleFieldRecipeEditor({
     Object.keys(variableNameErrors).length === 0 &&
     !Object.entries(variableNameDrafts).some(([name, value]) => name !== value);
   const saveEnabled =
-    persistenceAvailable &&
+    persistenceAvailable === true &&
     preview.definitionValid &&
     variableNamesReady &&
     Boolean(onSaveAsNew);
   const updateEnabled =
-    persistenceAvailable &&
+    persistenceAvailable === true &&
     preview.definitionValid &&
     variableNamesReady &&
     state.source.source_kind === "saved" &&
@@ -570,9 +643,15 @@ export function SingleFieldRecipeEditor({
         </section>
       </div>
 
-      {!persistenceAvailable ? (
+      {persistenceAvailable !== true ? (
         <p role="status" className="text-sm text-warn">
           {persistenceUnavailableReason}
+        </p>
+      ) : null}
+
+      {persistenceError ? (
+        <p role="alert" className="text-sm text-danger">
+          {persistenceError}
         </p>
       ) : null}
 
@@ -580,8 +659,11 @@ export function SingleFieldRecipeEditor({
         <Button
           variant="outline"
           size="lg"
-          disabled={!saveEnabled}
-          onClick={() => onSaveAsNew?.(saveDefinition())}
+          disabled={!saveEnabled || persistenceAction !== null}
+          onClick={() => {
+            if (!onSaveAsNew) return;
+            void runPersistence("save", () => onSaveAsNew(saveDefinition()));
+          }}
         >
           Save as new recipe
         </Button>
@@ -589,8 +671,14 @@ export function SingleFieldRecipeEditor({
           <Button
             variant="outline"
             size="lg"
-            disabled={!updateEnabled}
-            onClick={() => onUpdate?.(saveDefinition())}
+            disabled={!updateEnabled || persistenceAction !== null}
+            onClick={() => {
+              if (!onUpdate || state.source.source_kind !== "saved") return;
+              const savedSourceId = state.source.id;
+              void runPersistence("update", () =>
+                onUpdate(savedSourceId, saveDefinition()),
+              );
+            }}
           >
             Update recipe
           </Button>
