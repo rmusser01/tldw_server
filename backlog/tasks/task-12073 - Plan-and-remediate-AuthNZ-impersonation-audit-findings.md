@@ -1,10 +1,10 @@
 ---
 id: TASK-12073
 title: Plan and remediate AuthNZ impersonation audit findings
-status: Done
+status: In Progress
 assignee: []
 created_date: '2026-06-30 05:45'
-updated_date: '2026-06-30 22:54'
+updated_date: '2026-09-10 00:35'
 labels:
   - audit
   - remediation
@@ -19,23 +19,13 @@ references:
 documentation:
   - 'https://github.com/rmusser01/tldw_server/pull/2556'
   - Docs/superpowers/reviews/2026-06-27-repo-audit/domains/authnz-admin.md
-modified_files:
-  - Docs/superpowers/plans/2026-06-29-authnz-impersonation-boundary-remediation.md
-  - tldw_Server_API/app/api/v1/endpoints/admin/admin_impersonation.py
-  - tldw_Server_API/app/core/AuthNZ/jwt_service.py
-  - tldw_Server_API/app/core/AuthNZ/User_DB_Handling.py
-  - tldw_Server_API/app/core/AuthNZ/principal_model.py
-  - tldw_Server_API/app/services/admin_audit_service.py
-  - tldw_Server_API/tests/AuthNZ/test_admin_impersonation.py
-  - tldw_Server_API/tests/AuthNZ/unit/test_impersonation_auth_context.py
-  - tldw_Server_API/tests/AuthNZ/unit/test_jwt_service.py
 priority: high
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Track the current-dev remediation of the AuthNZ impersonation audit findings: short impersonation token lifetime, actor-plus-subject attribution propagation, durable audit evidence, and backend-neutral user/role lookups.
+Review PR #2569 against current dev and rebase safely. Preserve newer dev impersonation protections; assess remaining merge value and record focused tests and security validation. Original AUTH-001/002/003 remediation is largely superseded by d2e2f2b180 on dev.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
