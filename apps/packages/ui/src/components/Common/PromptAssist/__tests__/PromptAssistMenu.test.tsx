@@ -19,6 +19,53 @@ vi.mock("react-i18next", () => ({
 }))
 
 describe("PromptAssistMenu", () => {
+  it("adds recipe building as the third PromptAssist action", async () => {
+    const user = userEvent.setup()
+    const onBuildFromRecipe = vi.fn()
+    render(
+      <PromptAssistMenu
+        draft="Draft"
+        capability="supported"
+        modelSelection={{ selected_model: "auto" }}
+        onImproveNow={vi.fn()}
+        onReviewChanges={vi.fn()}
+        onBuildFromRecipe={onBuildFromRecipe}
+      />
+    )
+
+    await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+
+    const actions = screen.getAllByRole("button").slice(1)
+    expect(actions.map((action) => action.textContent)).toEqual([
+      expect.stringContaining("Improve now"),
+      expect.stringContaining("Review changes"),
+      expect.stringContaining("Build from recipe")
+    ])
+    await user.click(screen.getByRole("button", { name: /Build from recipe/ }))
+    expect(onBuildFromRecipe).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps local recipe building available without a model or draft", async () => {
+    const user = userEvent.setup()
+    const onBuildFromRecipe = vi.fn()
+    render(
+      <PromptAssistMenu
+        draft=""
+        capability="unknown"
+        modelSelection={null}
+        onImproveNow={vi.fn()}
+        onReviewChanges={vi.fn()}
+        onBuildFromRecipe={onBuildFromRecipe}
+      />
+    )
+
+    await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+    const recipeAction = screen.getByRole("button", { name: /Build from recipe/ })
+    expect(recipeAction).toBeEnabled()
+    await user.click(recipeAction)
+    expect(onBuildFromRecipe).toHaveBeenCalledTimes(1)
+  })
+
   it("exposes exactly the two Track A actions and discloses an Auto route", async () => {
     const user = userEvent.setup()
     const onImproveNow = vi.fn()

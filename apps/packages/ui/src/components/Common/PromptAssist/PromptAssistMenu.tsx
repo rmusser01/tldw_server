@@ -13,6 +13,7 @@ export type PromptAssistMenuProps = {
   modelDisplayName?: string
   onImproveNow: () => void
   onReviewChanges: () => void
+  onBuildFromRecipe?: () => void
   onSelectModel?: () => void
   disabled?: boolean
 }
@@ -24,6 +25,7 @@ export function PromptAssistMenu({
   modelDisplayName,
   onImproveNow,
   onReviewChanges,
+  onBuildFromRecipe,
   onSelectModel,
   disabled = false
 }: PromptAssistMenuProps) {
@@ -88,6 +90,12 @@ export function PromptAssistMenu({
 
   const runAction = (action: () => void) => {
     if (!actionsEnabled) return
+    setOpen(false)
+    action()
+  }
+
+  const runLocalAction = (action: () => void) => {
+    if (disabled) return
     setOpen(false)
     action()
   }
@@ -167,6 +175,24 @@ export function PromptAssistMenu({
               )}
             </span>
           </Button>
+          {onBuildFromRecipe ? (
+            <Button
+              variant="ghost"
+              size="lg"
+              disabled={disabled}
+              className="w-full flex-col items-start text-left"
+              onClick={() => runLocalAction(onBuildFromRecipe)}>
+              <span className="font-medium">
+                {t("common:promptAssist.buildFromRecipe", "Build from recipe")}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {t(
+                  "common:promptAssist.buildFromRecipeHelp",
+                  "Compile a structured recipe locally into this draft."
+                )}
+              </span>
+            </Button>
+          ) : null}
           {!hasModel &&
           capability === "supported" &&
           hasDraft &&

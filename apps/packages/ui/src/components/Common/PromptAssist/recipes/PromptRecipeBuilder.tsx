@@ -1,0 +1,198 @@
+import { getAllPrompts, savePrompt, updatePrompt } from "@/db/dexie/helpers";
+import type { Prompt } from "@/db/dexie/types";
+import { useServerOnline } from "@/hooks/useServerOnline";
+import {
+  buildRecipePromptFields,
+  classifyPromptRecipe,
+  cloneSavedRecipeSource,
+  getRecipePersistenceState,
+} from "@/components/Option/Prompt/prompt-recipe-library";
+import {
+  autoSyncPrompt,
+  shouldAutoSyncWorkspacePrompts,
+} from "@/services/prompt-sync";
+import type { PromptCapabilities } from "@/services/prompts-api";
+import { isFireFoxPrivateMode } from "@/utils/is-private-mode";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import React from "react";
+import { useTranslation } from "react-i18next";
+
+import { SingleFieldRecipeEditor } from "./SingleFieldRecipeEditor";
+import type { RecipeTarget, SingleTextRecipeDefinition } from "./types";
+
+export type PromptRecipeBuilderProps = {
+  target: RecipeTarget;
+  capabilities: PromptCapabilities | undefined;
+  onApply: (compiledText: string) => void;
+  onBack: () => void;
+};
+
+const acceptSyncResult = (
+  result: Awaited<ReturnType<typeof autoSyncPrompt>>,
+) => {
+  if (result.success) return false;
+  if (result.failureKind === "transient" && result.syncStatus === "pending") {
+    return true;
+  }
+  throw new Error(result.error || "recipe_sync_failed");
+};
+
+export function PromptRecipeBuilder({
+  target,
+  capabilities,
+  onApply,
+  onBack,
+}: PromptRecipeBuilderProps) {
+  const { t } = useTranslation(["common"]);
+  const queryClient = useQueryClient();
+  const isOnline = useServerOnline();
+  const [syncPendingNotice, setSyncPendingNotice] = React.useState(false);
+  const { data: prompts = [] } = useQuery({
+    queryKey: ["getAllPromptsForSelect"],
+    queryFn: getAllPrompts,
+  });
+  const persistence = getRecipePersistenceState(isOnline, capabilities);
+  const persistenceAvailable = persistence.available && !isFireFoxPrivateMode;
+  const persistenceUnavailableReason = isFireFoxPrivateMode
+    ? t(
+        "common:promptAssist.recipePrivateMode",
+        "Recipe saving is unavailable in private browsing. You can still edit, preview, and apply.",
+      )
+    : !isOnline
+      ? t(
+          "common:promptAssist.recipeOffline",
+          "Recipe saving is unavailable offline. You can still edit, preview, and apply this local draft.",
+        )
+      : !capabilities
+        ? t(
+            "common:promptAssist.recipeChecking",
+            "Checking whether this server supports recipe saving. You can still edit, preview, and apply.",
+          )
+        : capabilities.availability === "available"
+          ? t(
+              "common:promptAssist.recipeUnsupported",
+              "This server does not support recipe saving yet. You can still edit, preview, and apply.",
+            )
+          : t(
+              "common:promptAssist.recipeUnknown",
+              "Recipe saving is unavailable because server capabilities could not be confirmed. You can still edit, preview, and apply.",
+            );
+
+  const savedRecipes = React.useMemo(
+    () =>
+      prompts.flatMap((prompt) => {
+        const classification = classifyPromptRecipe(prompt);
+        const expectedTarget = target === "system" ? "system" : "user";
+        if (
+          classification.kind !== "recipe" ||
+          classification.target !== expectedTarget
+        ) {
+          return [];
+        }
+        return [cloneSavedRecipeSource(prompt)];
+      }),
+    [prompts, target],
+  );
+
+  const refreshPromptQueries = React.useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] }),
+      queryClient.invalidateQueries({ queryKey: ["getAllPromptsForSelect"] }),
+    ]);
+  }, [queryClient]);
+
+  const syncIfEnabled = React.useCallback(async (id: string) => {
+    if (!(await shouldAutoSyncWorkspacePrompts())) return false;
+    return acceptSyncResult(await autoSyncPrompt(id));
+  }, []);
+
+  const saveAsNew = React.useCallback(
+    async (definition: SingleTextRecipeDefinition) => {
+      if (!persistenceAvailable) throw new Error("recipe_save_unavailable");
+      setSyncPendingNotice(false);
+      const saved = await savePrompt({
+        title: t("common:promptAssist.untitledRecipe", "Untitled recipe"),
+        ...buildRecipePromptFields(definition),
+      });
+      setSyncPendingNotice(await syncIfEnabled(saved.id));
+      await refreshPromptQueries();
+    },
+    [persistenceAvailable, refreshPromptQueries, syncIfEnabled, t],
+  );
+
+  const updateSaved = React.useCallback(
+    async (savedSourceId: string, definition: SingleTextRecipeDefinition) => {
+      if (!persistenceAvailable) throw new Error("recipe_update_unavailable");
+      setSyncPendingNotice(false);
+      const current = prompts.find(
+        (prompt) => String(prompt.id) === savedSourceId,
+      ) as Prompt | undefined;
+      const classification = classifyPromptRecipe(current);
+      const expectedTarget = target === "system" ? "system" : "user";
+      if (
+        !current ||
+        classification.kind !== "recipe" ||
+        classification.target !== expectedTarget ||
+        current.syncStatus === "conflict"
+      ) {
+        throw new Error("recipe_update_conflict");
+      }
+      const id = await updatePrompt({
+        ...current,
+        ...buildRecipePromptFields(definition),
+        id: savedSourceId,
+      });
+      if (id !== savedSourceId) throw new Error("recipe_identity_changed");
+      setSyncPendingNotice(await syncIfEnabled(savedSourceId));
+      await refreshPromptQueries();
+    },
+    [
+      persistenceAvailable,
+      prompts,
+      refreshPromptQueries,
+      syncIfEnabled,
+      target,
+    ],
+  );
+
+  return (
+    <section
+      aria-label={t("common:promptAssist.recipeRegion", "Recipe builder")}
+      className="min-w-0 space-y-4"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-text">
+            {t("common:promptAssist.recipeTitle", "Build from recipe")}
+          </h2>
+          <p className="text-sm text-text-muted">
+            {t(
+              "common:promptAssist.recipeDescription",
+              "Compile locally, then replace only the current draft when you apply.",
+            )}
+          </p>
+        </div>
+        <button type="button" className="min-h-11 px-3" onClick={onBack}>
+          {t("common:back", "Back")}
+        </button>
+      </div>
+      <SingleFieldRecipeEditor
+        target={target}
+        savedRecipes={savedRecipes}
+        persistenceAvailable={persistenceAvailable}
+        persistenceUnavailableReason={persistenceUnavailableReason}
+        onApply={onApply}
+        onSaveAsNew={saveAsNew}
+        onUpdate={updateSaved}
+      />
+      {syncPendingNotice ? (
+        <p role="status" className="text-sm text-warn">
+          {t(
+            "common:promptAssist.recipeSavedPending",
+            "Recipe saved locally and will sync when the server is available.",
+          )}
+        </p>
+      ) : null}
+    </section>
+  );
+}

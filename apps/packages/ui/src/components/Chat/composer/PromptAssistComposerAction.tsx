@@ -15,6 +15,12 @@ import { useTranslation } from "react-i18next"
 
 import type { ComposerPromptAssistMutation } from "./hooks/useComposerText"
 
+const PromptRecipeBuilder = React.lazy(() =>
+  import("@/components/Common/PromptAssist/recipes/PromptRecipeBuilder").then(
+    ({ PromptRecipeBuilder }) => ({ default: PromptRecipeBuilder })
+  )
+)
+
 type ComposerForm = Pick<
   ReturnType<typeof useSimpleForm<{ message: string; image: string }>>,
   "values" | "setFieldValue"
@@ -57,6 +63,8 @@ export function PromptAssistComposerAction({
   const { t } = useTranslation(["common"])
   const [panelOpen, setPanelOpen] = React.useState(false)
   const [inspectionOpen, setInspectionOpen] = React.useState(false)
+  const [recipeOpen, setRecipeOpen] = React.useState(false)
+  const [recipeUndo, setRecipeUndo] = React.useState<{ draft: string } | null>(null)
   const normalizedBackendKey = promptAssistBackendKey?.trim() || null
   const modelSelectionRef = React.useRef(modelSelection)
   const controllerMutationRef = React.useRef<ControllerMutation | null>(null)
@@ -132,6 +140,8 @@ export function PromptAssistComposerAction({
 
   React.useLayoutEffect(() => {
     pendingDrawerFocusRef.current = false
+    setRecipeOpen(false)
+    setRecipeUndo(null)
 
     return () => {
       pendingDrawerFocusRef.current = false
@@ -152,6 +162,7 @@ export function PromptAssistComposerAction({
       return
     }
     controllerMutationRef.current = null
+    setRecipeUndo(null)
     if (promptAssistMutation.source === "optimistic_reset") {
       if (promptAssistSavedAttemptId === promptAssistMutation.attemptId) {
         pendingResetAttemptRef.current = null
@@ -183,6 +194,7 @@ export function PromptAssistComposerAction({
     }
     pendingResetAttemptRef.current = null
     controllerMutationRef.current = null
+    setRecipeUndo(null)
     notifySendOrSave()
   }, [notifySendOrSave, promptAssistSavedAttemptId])
 
@@ -216,6 +228,7 @@ export function PromptAssistComposerAction({
     pendingDrawerFocusRef.current = true
     setPanelOpen(false)
     setInspectionOpen(false)
+    setRecipeOpen(false)
   }, [dismissPromptAssist, promptAssistState.status])
   const handleDrawerAfterOpenChange = React.useCallback(
     (open: boolean) => {
@@ -226,6 +239,7 @@ export function PromptAssistComposerAction({
     [onReturnFocus]
   )
   const start = React.useCallback((operation: () => Promise<void>) => {
+    setRecipeUndo(null)
     setPanelOpen(true)
     void operation()
   }, [])
@@ -233,6 +247,39 @@ export function PromptAssistComposerAction({
     pendingUndoFocusRef.current = true
     promptAssist.undo()
   }, [promptAssist])
+  const openRecipeBuilder = React.useCallback(() => {
+    dismissPromptAssist()
+    setPanelOpen(false)
+    setInspectionOpen(false)
+    setRecipeOpen(true)
+  }, [dismissPromptAssist])
+  const closeRecipeBuilder = React.useCallback(() => {
+    pendingDrawerFocusRef.current = true
+    setRecipeOpen(false)
+  }, [])
+  const applyRecipe = React.useCallback(
+    (compiledText: string) => {
+      setRecipeUndo({ draft: message })
+      controllerMutationRef.current = {
+        fromRevision: messageRevision,
+        expectedValue: compiledText
+      }
+      setFieldValue("message", compiledText)
+      pendingDrawerFocusRef.current = true
+      setRecipeOpen(false)
+    },
+    [message, messageRevision, setFieldValue]
+  )
+  const undoRecipe = React.useCallback(() => {
+    if (!recipeUndo) return
+    controllerMutationRef.current = {
+      fromRevision: messageRevision,
+      expectedValue: recipeUndo.draft
+    }
+    setFieldValue("message", recipeUndo.draft)
+    setRecipeUndo(null)
+    onReturnFocus?.()
+  }, [messageRevision, onReturnFocus, recipeUndo, setFieldValue])
 
   const panel = (
     <PromptAssistPanel
@@ -264,6 +311,7 @@ export function PromptAssistComposerAction({
         modelSelection={modelSelection}
         onImproveNow={() => start(promptAssist.improveNow)}
         onReviewChanges={() => start(promptAssist.reviewChanges)}
+        onBuildFromRecipe={openRecipeBuilder}
         onSelectModel={onSelectModel}
         disabled={sending || promptAssist.state.status === "analyzing"}
       />
@@ -290,19 +338,53 @@ export function PromptAssistComposerAction({
         </div>
       ) : null}
 
+      {recipeUndo ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span role="status" className="text-xs text-muted-foreground">
+            {t("common:promptAssist.recipeApplied", "Recipe applied.")}
+          </span>
+          <Button variant="outline" size="sm" onClick={undoRecipe}>
+            {t("common:promptAssist.undoRecipe", "Undo recipe")}
+          </Button>
+        </div>
+      ) : null}
+
       <Drawer
         placement="right"
         open={
-          panelOpen &&
-          promptAssist.state.status !== "idle" &&
-          (promptAssist.state.status !== "applied" || inspectionOpen)
+          recipeOpen ||
+          (panelOpen &&
+            promptAssist.state.status !== "idle" &&
+            (promptAssist.state.status !== "applied" || inspectionOpen))
         }
         onClose={closeDrawer}
         afterOpenChange={handleDrawerAfterOpenChange}
         focusable={{ focusTriggerAfterClose: false }}
         size={narrow ? "100%" : 480}
-        title={t("common:promptAssist.region", "Prompt improvement")}>
-        <div onKeyDown={(event) => event.stopPropagation()}>{panel}</div>
+        title={
+          recipeOpen
+            ? t("common:promptAssist.recipeTitle", "Build from recipe")
+            : t("common:promptAssist.region", "Prompt improvement")
+        }>
+        <div onKeyDown={(event) => event.stopPropagation()}>
+          {recipeOpen ? (
+            <React.Suspense
+              fallback={
+                <p role="status">
+                  {t("common:promptAssist.recipeLoading", "Loading recipe builder…")}
+                </p>
+              }>
+              <PromptRecipeBuilder
+                target="user_message"
+                capabilities={promptCapabilities}
+                onApply={applyRecipe}
+                onBack={closeRecipeBuilder}
+              />
+            </React.Suspense>
+          ) : (
+            panel
+          )}
+        </div>
       </Drawer>
     </div>
   )

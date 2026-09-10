@@ -10,6 +10,7 @@ import { useComposerText } from "../hooks/useComposerText"
 
 const mocks = vi.hoisted(() => ({
   fetchPromptCapabilities: vi.fn(),
+  getAllPrompts: vi.fn(),
   improvePrompt: vi.fn()
 }))
 
@@ -50,6 +51,14 @@ vi.mock("@/services/prompts-api", async (importOriginal) => {
     ...original,
     fetchPromptCapabilities: (...args: unknown[]) =>
       mocks.fetchPromptCapabilities(...args)
+  }
+})
+
+vi.mock("@/db/dexie/helpers", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/db/dexie/helpers")>()
+  return {
+    ...original,
+    getAllPrompts: (...args: unknown[]) => mocks.getAllPrompts(...args)
   }
 })
 
@@ -338,9 +347,54 @@ describe("PromptAssistComposerAction entry and request contract", () => {
     vi.clearAllMocks()
     draftBucketMocks.records.clear()
     mocks.fetchPromptCapabilities.mockResolvedValue(availableCapabilities)
+    mocks.getAllPrompts.mockResolvedValue([])
     mocks.improvePrompt.mockImplementation(async (request) =>
       improvementResponse(request.operation_id)
     )
+  })
+
+  it("builds locally without a model and restores an exact whitespace Unicode draft", async () => {
+    const user = userEvent.setup()
+    const original = "  Draft 🧪\n\n"
+    renderHarness({ initialDraft: original, modelSelection: null })
+
+    await openActions(user)
+    const build = screen.getByRole("button", { name: /Build from recipe/ })
+    expect(build).toBeEnabled()
+    await user.click(build)
+    expect(await screen.findByRole("dialog", { name: "Build from recipe" })).toBeInTheDocument()
+    expect(screen.getByLabelText("Committed user draft")).toHaveTextContent("Draft 🧪")
+
+    await user.type(
+      await screen.findByLabelText("Current value for Task (not saved)"),
+      "Explain Unicode safely."
+    )
+    const preview = (screen.getByLabelText("Compiled prompt preview") as HTMLTextAreaElement).value
+    await user.click(screen.getByRole("button", { name: "Apply to user message" }))
+
+    expect(screen.getByLabelText("User draft")).toHaveValue(preview)
+    expect(mocks.improvePrompt).not.toHaveBeenCalled()
+    await user.click(screen.getByRole("button", { name: "Undo recipe" }))
+    expect((screen.getByLabelText("User draft") as HTMLTextAreaElement).value).toBe(original)
+  })
+
+  it("discards unapplied runtime values when the recipe builder closes and reopens", async () => {
+    const user = userEvent.setup()
+    renderHarness({ initialDraft: "" })
+
+    await openActions(user)
+    await user.click(screen.getByRole("button", { name: /Build from recipe/ }))
+    const runtime = await screen.findByLabelText("Current value for Task (not saved)")
+    await user.type(runtime, "Temporary runtime")
+    expect((screen.getByLabelText("User draft") as HTMLTextAreaElement).value).toBe("")
+    await user.click(
+      screen.getByRole("button", { name: "Close prompt improvement drawer" })
+    )
+
+    await openActions(user)
+    await user.click(screen.getByRole("button", { name: /Build from recipe/ }))
+    expect(screen.getByLabelText("Current value for Task (not saved)")).toHaveValue("")
+    expect((screen.getByLabelText("User draft") as HTMLTextAreaElement).value).toBe("")
   })
 
   it("disables both actions for a whitespace-only user draft", async () => {

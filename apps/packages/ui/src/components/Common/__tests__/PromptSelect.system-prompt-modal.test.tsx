@@ -278,6 +278,59 @@ describe("PromptSelect system prompt modal", () => {
     )
   })
 
+  it("applies a local recipe only to the system draft and restores exact value and identity", async () => {
+    const user = userEvent.setup()
+    const original = "  Override 🧪\n\n"
+    const { props } = renderPromptSelect({ systemPrompt: original })
+    await user.click(await screen.findByRole("button", { name: "selectAPrompt" }))
+    await user.click(await screen.findByRole("menuitem", { name: /edit system prompt/i }))
+    expect(await screen.findByLabelText("Enter system prompt")).toHaveValue(original)
+
+    await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+    const build = screen.getByRole("button", { name: /Build from recipe/ })
+    expect(build).toBeEnabled()
+    await user.click(build)
+    expect(await screen.findByRole("region", { name: "Recipe builder" })).toBeInTheDocument()
+    expect(props.setSystemPrompt).not.toHaveBeenCalled()
+    expect(props.setSelectedSystemPrompt).not.toHaveBeenCalled()
+
+    await user.type(
+      screen.getByLabelText("Current value for Task (not saved)"),
+      "Preserve system identity."
+    )
+    const preview = (screen.getByLabelText("Compiled prompt preview") as HTMLTextAreaElement).value
+    await user.click(screen.getByRole("button", { name: "Apply to system prompt" }))
+    expect(props.setSystemPrompt).toHaveBeenLastCalledWith(preview)
+    expect(props.setSelectedSystemPrompt).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole("button", { name: "Undo recipe" }))
+    expect(props.setSystemPrompt).toHaveBeenLastCalledWith(original)
+    expect(props.setSelectedSystemPrompt).toHaveBeenLastCalledWith("prompt-1")
+    expect(screen.getByLabelText("Enter system prompt")).toHaveValue(original)
+  })
+
+  it("returns from recipe mode without changing an empty system draft", async () => {
+    const user = userEvent.setup()
+    const { props } = renderPromptSelect({
+      selectedSystemPrompt: undefined,
+      systemPrompt: undefined,
+      selectedModel: null
+    })
+    await openEditor(user, "")
+
+    await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+    await user.click(screen.getByRole("button", { name: /Build from recipe/ }))
+    await user.type(
+      await screen.findByLabelText("Current value for Task (not saved)"),
+      "Unapplied runtime"
+    )
+    await user.click(screen.getByRole("button", { name: "Back" }))
+
+    expect(screen.getByDisplayValue("")).toBeInTheDocument()
+    expect(props.setSystemPrompt).not.toHaveBeenCalled()
+    expect(props.setSelectedSystemPrompt).not.toHaveBeenCalled()
+  })
+
   it("opens an editor modal with the effective selected template content", async () => {
     const user = userEvent.setup()
     renderPromptSelect()

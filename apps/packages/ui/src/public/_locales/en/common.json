@@ -1636,5 +1636,50 @@
   },
   "knowledgeSidebar_title": {
     "message": "Knowledge history"
+  },
+  "promptAssist_buildFromRecipe": {
+    "message": "Build from recipe"
+  },
+  "promptAssist_buildFromRecipeHelp": {
+    "message": "Compile a structured recipe locally into this draft."
+  },
+  "promptAssist_recipeRegion": {
+    "message": "Recipe builder"
+  },
+  "promptAssist_recipeTitle": {
+    "message": "Build from recipe"
+  },
+  "promptAssist_recipeDescription": {
+    "message": "Compile locally, then replace only the current draft when you apply."
+  },
+  "promptAssist_recipeApplied": {
+    "message": "Recipe applied."
+  },
+  "promptAssist_undoRecipe": {
+    "message": "Undo recipe"
+  },
+  "promptAssist_untitledRecipe": {
+    "message": "Untitled recipe"
+  },
+  "promptAssist_recipeOffline": {
+    "message": "Recipe saving is unavailable offline. You can still edit, preview, and apply this local draft."
+  },
+  "promptAssist_recipeChecking": {
+    "message": "Checking whether this server supports recipe saving. You can still edit, preview, and apply."
+  },
+  "promptAssist_recipeUnsupported": {
+    "message": "This server does not support recipe saving yet. You can still edit, preview, and apply."
+  },
+  "promptAssist_recipeUnknown": {
+    "message": "Recipe saving is unavailable because server capabilities could not be confirmed. You can still edit, preview, and apply."
+  },
+  "promptAssist_recipePrivateMode": {
+    "message": "Recipe saving is unavailable in private browsing. You can still edit, preview, and apply."
+  },
+  "promptAssist_recipeSavedPending": {
+    "message": "Recipe saved locally and will sync when the server is available."
+  },
+  "promptAssist_recipeLoading": {
+    "message": "Loading recipe builder…"
   }
 }
