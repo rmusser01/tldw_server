@@ -50,6 +50,29 @@ describe("apiSend timeout fallback policy", () => {
     delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
   })
 
+  it("does not replay a captured write after ambiguous extension rejection", async () => {
+    mocks.sendMessage.mockRejectedValue(new Error("message channel closed"))
+    mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200 })
+    const { apiSend } = await importApiSend()
+    const result = await apiSend({
+      path: "/api/v1/prompt-studio/prompts/create", method: "POST",
+      capturePersistenceScope: true
+    })
+    expect(mocks.tldwRequest).not.toHaveBeenCalled()
+    expect(result).toMatchObject({ ok: false, persistenceScope: null })
+  })
+
+  it("does not coalesce captured reconciliation with an unowned GET", async () => {
+    let finish!: (value: unknown) => void
+    mocks.sendMessage.mockReturnValue(new Promise(resolve => { finish = resolve }))
+    const { apiSend } = await importApiSend()
+    const first = apiSend({ path: "/api/v1/health", method: "GET" })
+    const second = apiSend({ path: "/api/v1/health", method: "GET", capturePersistenceScope: true })
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+    finish({ ok: true, status: 200 })
+    await Promise.all([first, second])
+  })
+
   it("falls back to direct request for GET timeout", async () => {
     vi.useFakeTimers()
     mocks.sendMessage.mockImplementation(() => new Promise(() => undefined))

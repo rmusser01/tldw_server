@@ -12,6 +12,8 @@ export interface ApiSendPayload<P extends PathOrUrl = PathOrUrl, M extends Allow
   noAuth?: boolean
   timeoutMs?: number
   responseType?: "json" | "text" | "arrayBuffer"
+  capturePersistenceScope?: boolean
+  requirePersistenceScope?: boolean
 }
 
 export interface ApiSendResponse<T = any> {
@@ -21,6 +23,9 @@ export interface ApiSendResponse<T = any> {
   error?: string
   headers?: Record<string, string>
   retryAfterMs?: number | null
+  /** Transport metadata, never supplied by the server response body. */
+  persistenceScope?: string | null
+  requestDispatched?: boolean
 }
 
 const isSafeFallbackMethod = (method?: string): boolean => {
@@ -46,6 +51,8 @@ const getCoalescingKey = (payload: ApiSendPayload): string | null => {
   const method = String(payload.method || "GET").toUpperCase()
   if (
     method !== "GET" ||
+    payload.capturePersistenceScope ||
+    payload.requirePersistenceScope ||
     payload.body ||
     payload.responseType
   ) {
@@ -117,6 +124,19 @@ async function apiSendImpl<T = any, P extends PathOrUrl = PathOrUrl, M extends A
       // If resp is null (timeout), fall through to direct request for safe methods.
     }
   } catch (err) {
+    if (
+      (payload.capturePersistenceScope || payload.requirePersistenceScope) &&
+      !methodIsSafeFallback
+    ) {
+      // The background may already have written. Never replay this mutation or
+      // invent its owner from the page's independently selected connection.
+      return {
+        ok: false,
+        status: 0,
+        error: "Extension request outcome is unknown",
+        persistenceScope: null
+      }
+    }
     const message = err instanceof Error ? err.message.toLowerCase() : String(err || "").toLowerCase()
     if (
       !methodIsSafeFallback &&

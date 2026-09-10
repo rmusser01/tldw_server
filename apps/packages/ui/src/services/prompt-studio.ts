@@ -388,35 +388,43 @@ export async function listPrompts(
 
 export async function createPrompt(
   payload: PromptCreatePayload,
-  idempotencyKey?: string | null
+  idempotencyKey?: string | null,
+  options?: { capturePersistenceScope: boolean; requirePersistenceScope?: boolean }
 ) {
   return await apiSend<StandardResponse<Prompt>>({
     path: "/api/v1/prompt-studio/prompts/create",
     method: "POST",
     body: payload,
-    headers: withIdempotency(idempotencyKey)
+    headers: withIdempotency(idempotencyKey),
+    ...options
   })
 }
 
-export async function getPrompt(promptId: number) {
+export async function getPrompt(
+  promptId: number,
+  options?: { capturePersistenceScope: boolean }
+) {
   return await apiSend<StandardResponse<Prompt>>({
     path: toAllowedPath(
       `/api/v1/prompt-studio/prompts/get/${encodeURIComponent(promptId)}`
     ),
-    method: "GET"
+    method: "GET",
+    ...options
   })
 }
 
 export async function updatePrompt(
   promptId: number,
-  payload: PromptUpdatePayload
+  payload: PromptUpdatePayload,
+  options?: { capturePersistenceScope: boolean; requirePersistenceScope?: boolean }
 ) {
   return await apiSend<StandardResponse<Prompt>>({
     path: toAllowedPath(
       `/api/v1/prompt-studio/prompts/update/${encodeURIComponent(promptId)}`
     ),
     method: "PUT",
-    body: payload
+    body: payload,
+    ...options
   })
 }
 

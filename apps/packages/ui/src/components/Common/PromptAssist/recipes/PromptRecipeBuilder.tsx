@@ -21,6 +21,7 @@ import {
 import {
   isRecipePersistenceUncertain,
   markRecipePersistenceUncertain,
+  markRecipePersistenceOwnerUnknown,
 } from "@/services/recipe-persistence-uncertainty";
 import type { PromptCapabilities } from "@/services/prompts-api";
 import { isFireFoxPrivateMode } from "@/utils/is-private-mode";
@@ -151,7 +152,11 @@ export function PromptRecipeBuilder({
       if (!(await shouldAutoSyncWorkspacePrompts())) return false;
       const result = await autoSyncPrompt(id);
       if (!result.success && result.failureKind === "invalid_server_payload") {
-        markRecipePersistenceUncertain(id, persistenceScope);
+        if (result.localId === id && result.persistenceScope) {
+          markRecipePersistenceUncertain(id, result.persistenceScope);
+        } else {
+          markRecipePersistenceOwnerUnknown(id);
+        }
         try {
           await markPromptSyncError(id);
           // Keep the scoped marker: another backend can overwrite the shared
@@ -165,7 +170,7 @@ export function PromptRecipeBuilder({
       // can differ from this editor's owner if the connection changed mid-save.
       return acceptSyncResult(result);
     },
-    [persistenceScope],
+    [],
   );
 
   const saveAsNew = React.useCallback(

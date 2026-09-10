@@ -118,6 +118,31 @@ const renderBuilder = (
 };
 
 describe("PromptRecipeBuilder", () => {
+  it.each([null, "mismatched-id"])("fails closed across reopen without a trustworthy dispatch owner (%s)", async mismatch => {
+    const user = userEvent.setup();
+    const id = `unknown-owner-${mismatch ?? "missing"}`;
+    mocks.savePrompt.mockImplementation(async fields => {
+      const record = { ...recipeRecord(id, fields.title, "system"), ...fields, syncStatus: "local" };
+      mocks.getAllPrompts.mockResolvedValue([record]);
+      return record;
+    });
+    mocks.shouldAutoSyncWorkspacePrompts.mockResolvedValue(true);
+    mocks.autoSyncPrompt.mockResolvedValue({
+      success: false, localId: mismatch ?? id, syncStatus: "pending",
+      failureKind: "invalid_server_payload", persistenceScope: mismatch ? "backend-b" : null
+    });
+    mocks.markPromptSyncError.mockRejectedValue(new Error("storage unavailable"));
+    const first = renderBuilder();
+    await user.click(screen.getByRole("button", { name: "Save as new recipe" }));
+    await screen.findByText(/server outcome.*not.*verified/i);
+    first.unmount();
+    renderBuilder({ persistenceScope: "backend-b" });
+    await screen.findByRole("option", { name: "Untitled recipe" });
+    await user.selectOptions(screen.getByRole("combobox", { name: "Recipe source" }), `saved:${id}`);
+    expect(screen.getByRole("button", { name: "Save as new recipe" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Update recipe" })).toBeDisabled();
+    expect(mocks.autoSyncPrompt).toHaveBeenCalledTimes(1);
+  });
   afterEach(() => {
     for (const scope of ["backend-a", "backend-b"]) {
       for (const [id] of mocks.markPromptSyncError.mock.calls) {
@@ -146,6 +171,7 @@ describe("PromptRecipeBuilder", () => {
     mocks.autoSyncPrompt.mockResolvedValue({
       success: true,
       localId: "new-exact-id",
+      persistenceScope: "backend-a",
       syncStatus: "synced",
     });
   });
@@ -353,6 +379,7 @@ describe("PromptRecipeBuilder", () => {
     mocks.autoSyncPrompt.mockResolvedValue({
       success: false,
       localId: "new-exact-id",
+      persistenceScope: "backend-a",
       syncStatus: "pending",
       failureKind: "transient",
       error: "temporary",
@@ -376,6 +403,7 @@ describe("PromptRecipeBuilder", () => {
     const sync = createDeferred<{
       success: false;
       localId: string;
+      persistenceScope: string;
       syncStatus: "pending";
       failureKind: "invalid_server_payload";
       error: string;
@@ -404,6 +432,7 @@ describe("PromptRecipeBuilder", () => {
       sync.resolve({
         success: false,
         localId: "new-exact-id",
+        persistenceScope: "backend-a",
         syncStatus: "pending",
         failureKind: "invalid_server_payload",
         error: "missing response identity",
@@ -439,6 +468,7 @@ describe("PromptRecipeBuilder", () => {
     const sync = createDeferred<{
       success: false;
       localId: string;
+      persistenceScope: string;
       syncStatus: "pending";
       failureKind: "invalid_server_payload";
       error: string;
@@ -468,6 +498,7 @@ describe("PromptRecipeBuilder", () => {
       sync.resolve({
         success: false,
         localId: "system-id",
+        persistenceScope: "backend-a",
         syncStatus: "pending",
         failureKind: "invalid_server_payload",
         error: "malformed response",
@@ -520,6 +551,7 @@ describe("PromptRecipeBuilder", () => {
     mocks.autoSyncPrompt.mockResolvedValue({
       success: false,
       localId: "uncertain-new",
+      persistenceScope: "backend-a",
       syncStatus: "pending",
       failureKind: "invalid_server_payload",
       error: "missing response identity",
@@ -575,6 +607,7 @@ describe("PromptRecipeBuilder", () => {
     mocks.autoSyncPrompt.mockResolvedValue({
       success: false,
       localId: "marker-failed-id",
+      persistenceScope: "backend-a",
       syncStatus: "pending",
       failureKind: "invalid_server_payload",
       error: "missing response identity",
@@ -609,6 +642,7 @@ describe("PromptRecipeBuilder", () => {
     mocks.autoSyncPrompt.mockResolvedValueOnce({
       success: true,
       localId: "marker-failed-id",
+      persistenceScope: "backend-a",
       syncStatus: "synced",
     });
     await user.click(screen.getByRole("button", { name: "Update recipe" }));
@@ -674,6 +708,7 @@ describe("PromptRecipeBuilder", () => {
     mocks.autoSyncPrompt.mockResolvedValue({
       success: false,
       localId: record.id,
+      persistenceScope: "backend-a",
       syncStatus: "pending",
       failureKind: "invalid_server_payload",
       error: "missing response identity",
@@ -744,6 +779,7 @@ describe("PromptRecipeBuilder", () => {
     mocks.autoSyncPrompt.mockResolvedValue({
       success: false,
       localId: "system-id",
+      persistenceScope: "backend-a",
       syncStatus: "pending",
       failureKind: "invalid_server_payload",
       error: "malformed response",
@@ -852,6 +888,7 @@ describe("PromptRecipeBuilder", () => {
       .mockResolvedValueOnce({
         success: false,
         localId: "new-1",
+        persistenceScope: "backend-a",
         syncStatus: "pending",
         failureKind: "validation",
         error: "invalid",
@@ -859,6 +896,7 @@ describe("PromptRecipeBuilder", () => {
       .mockResolvedValueOnce({
         success: true,
         localId: "new-2",
+        persistenceScope: "backend-a",
         syncStatus: "synced",
       });
     const { queryClient } = renderBuilder();
@@ -914,6 +952,7 @@ describe("PromptRecipeBuilder", () => {
     mocks.autoSyncPrompt.mockResolvedValue({
       success: false,
       localId: "system-id",
+      persistenceScope: "backend-a",
       syncStatus: "local",
       failureKind: "validation",
       error: "invalid",
@@ -951,6 +990,7 @@ describe("PromptRecipeBuilder", () => {
     mocks.autoSyncPrompt.mockResolvedValue({
       success: false,
       localId: "new-exact-id",
+      persistenceScope: "backend-a",
       syncStatus: "local",
       failureKind: "validation",
       error: "invalid",

@@ -18,6 +18,7 @@ import {
   type AllowlistWarnHooks
 } from "@/utils/absolute-url-guard"
 import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import { recipePersistenceScopeFromConfig } from "@/services/recipe-persistence-uncertainty"
 
 export type TldwRequestPayload = {
   path: PathOrUrl
@@ -28,6 +29,8 @@ export type TldwRequestPayload = {
   timeoutMs?: number
   abortSignal?: AbortSignal
   responseType?: "json" | "text" | "arrayBuffer"
+  capturePersistenceScope?: boolean
+  requirePersistenceScope?: boolean
 }
 
 type TldwConfigLike = Record<string, any> | null | undefined
@@ -287,6 +290,30 @@ export const tldwRequest = async (
   payload: TldwRequestPayload,
   runtime: TldwRequestRuntime
 ): Promise<ApiSendResponse> => {
+  if (!payload.capturePersistenceScope && !payload.requirePersistenceScope) {
+    return performTldwRequest(payload, runtime)
+  }
+  const dispatch = {
+    persistenceScope: null as string | null,
+    requestDispatched: false
+  }
+  try {
+    return { ...(await performTldwRequest(payload, runtime, dispatch)), ...dispatch }
+  } catch (error) {
+    return {
+      ok: false,
+      status: 0,
+      error: formatErrorMessage(error, "Request failed"),
+      ...dispatch
+    }
+  }
+}
+
+const performTldwRequest = async (
+  payload: TldwRequestPayload,
+  runtime: TldwRequestRuntime,
+  dispatch?: { persistenceScope: string | null; requestDispatched: boolean }
+): Promise<ApiSendResponse> => {
   const {
     path,
     method = "GET",
@@ -299,7 +326,8 @@ export const tldwRequest = async (
   } = payload || {}
   const normalizedPath = normalizeKnownPathQuirks(path)
   const fetchFn = runtime.fetchFn || fetch
-  const cfg = await runtime.getConfig()
+  const resolvedConfig = await runtime.getConfig()
+  const cfg = resolvedConfig ? { ...resolvedConfig } : resolvedConfig
   const isAbsolute = typeof normalizedPath === "string" && /^https?:/i.test(normalizedPath)
   const absolutePath = isAbsolute ? String(normalizedPath) : ""
   const transport =
@@ -455,6 +483,34 @@ export const tldwRequest = async (
   }
 
   const controller = new AbortController()
+  const persistenceServerUrl = transport?.kind === "same-origin"
+    ? pageOrigin
+    : transport?.url.endsWith(String(normalizedPath))
+      ? transport.url.slice(0, -String(normalizedPath).length)
+      : null
+  if (dispatch) {
+    // Scope comes from the same URL/auth snapshot as fetch, including overrides.
+    // Hosted cookie principals cannot be inferred from unused local credentials.
+    const effectiveConfig = {
+      ...cfg,
+      serverUrl: persistenceServerUrl ?? undefined,
+      authMode: h["X-API-KEY"] ? ("single-user" as const) : cfg?.authMode,
+      apiKey: cookieSession ? "" : h["X-API-KEY"],
+      accessToken: h.Authorization?.replace(/^Bearer /, "")
+    }
+    const scope =
+      !hostedMode && !shouldSkipAuth && !isAbsolute
+        ? recipePersistenceScopeFromConfig(effectiveConfig)
+        : null
+    if (!scope && payload.requirePersistenceScope) {
+      return {
+        ok: false,
+        status: 412,
+        error: "Request persistence owner is unavailable"
+      }
+    }
+    dispatch.persistenceScope = scope
+  }
   let retryController: AbortController | null = null
   const timeoutMs = deriveRequestTimeout(cfg, normalizedPath, Number(overrideTimeoutMs))
   const onAbort = () => {
@@ -484,6 +540,7 @@ export const tldwRequest = async (
           : JSON.stringify(body)
 
     // lgtm[js/request-forgery]: url is same-origin/configured-server transport or an allowlisted absolute URL checked above.
+    if (dispatch) dispatch.requestDispatched = true
     let resp = await fetchFn(url, {
       method,
       headers: h,
@@ -529,6 +586,25 @@ export const tldwRequest = async (
         throw abortError
       }
       const updated = await runtime.getConfig()
+      if (
+        dispatch?.persistenceScope &&
+        (resolveBrowserRequestTransport({
+          config: updated,
+          path: String(normalizedPath)
+        }).url !== url ||
+          recipePersistenceScopeFromConfig({
+            ...updated,
+            serverUrl: persistenceServerUrl ?? undefined,
+            authMode: updated?.authMode
+          }) !== dispatch.persistenceScope ||
+          updated?.authSource !== cfg?.authSource)
+      ) {
+        return {
+          ok: false,
+          status: 412,
+          error: "Request persistence owner changed before retry"
+        }
+      }
       const retryHeaders = { ...h }
       for (const k of Object.keys(retryHeaders)) {
         const kl = k.toLowerCase()

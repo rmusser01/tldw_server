@@ -37,7 +37,7 @@ import {
   parseStructuredPromptDefinitionForTransport,
   type ParsedStructuredPromptDefinition
 } from '@/services/structured-prompt-transport'
-import { clearRecipePersistenceUncertainty, getRecipePersistenceScope } from '@/services/recipe-persistence-uncertainty'
+import { clearRecipePersistenceUncertainty } from '@/services/recipe-persistence-uncertainty'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -46,6 +46,8 @@ import { clearRecipePersistenceUncertainty, getRecipePersistenceScope } from '@/
 export type SyncResult = {
   success: boolean
   localId: string
+  /** Stable owner reported by the actual transport, or null when unavailable. */
+  persistenceScope: string | null
   serverId?: number
   error?: string
   syncStatus: PromptSyncStatus
@@ -365,6 +367,7 @@ async function createServerCopy(
   local: LocalPrompt,
   projectId: number
 ): Promise<SyncResult> {
+  let persistenceScope: string | null = null
   const failureSyncStatus: PromptSyncStatus = local.serverId
     ? local.syncStatus || 'conflict'
     : 'pending'
@@ -377,19 +380,24 @@ async function createServerCopy(
     return {
       success: false,
       localId,
+      persistenceScope,
       error: error instanceof Error ? error.message : 'Push failed',
       syncStatus: originalSyncStatus,
       failureKind: 'validation'
     }
   }
   let response: Awaited<ReturnType<typeof createServerPrompt>>
-  const persistenceScope = await getRecipePersistenceScope()
   try {
-    response = await createServerPrompt(createPayload)
+    response = await createServerPrompt(createPayload, undefined, {
+      capturePersistenceScope: true,
+      requirePersistenceScope: createPayload.prompt_schema_version === 2
+    })
+    persistenceScope = response.persistenceScope || null
   } catch (error: unknown) {
     return {
       success: false,
       localId,
+      persistenceScope,
       error: error instanceof Error ? error.message : 'Push failed',
       syncStatus: failureSyncStatus,
       failureKind: 'transient'
@@ -400,9 +408,10 @@ async function createServerCopy(
     return {
       success: false,
       localId,
+      persistenceScope,
       error: 'Failed to create server prompt',
       syncStatus: failureSyncStatus,
-      failureKind: 'invalid_server_payload'
+      failureKind: response.requestDispatched === false ? 'validation' : 'invalid_server_payload'
     }
   }
   let updateFields: Partial<LocalPrompt>
@@ -412,6 +421,7 @@ async function createServerCopy(
     return {
       success: false,
       localId,
+      persistenceScope,
       error:
         error instanceof Error ? error.message : 'invalid_prompt_definition',
       syncStatus: originalSyncStatus,
@@ -425,6 +435,7 @@ async function createServerCopy(
     return {
       success: false,
       localId,
+      persistenceScope,
       error: error instanceof Error ? error.message : 'Push failed',
       syncStatus: failureSyncStatus,
       failureKind: 'transient'
@@ -434,6 +445,7 @@ async function createServerCopy(
   return {
     success: true,
     localId,
+    persistenceScope,
     serverId: serverPrompt.id,
     syncStatus: 'synced'
   }
@@ -501,11 +513,13 @@ export async function autoSyncPrompt(
   localId: string,
   preferredProjectId?: number | null
 ): Promise<SyncResult> {
+  const persistenceScope = null
   const local = await db.prompts.get(localId)
   if (!local) {
     return {
       success: false,
       localId,
+      persistenceScope,
       error: 'Local prompt not found',
       syncStatus: 'local'
     }
@@ -521,6 +535,7 @@ export async function autoSyncPrompt(
     return {
       success: false,
       localId,
+      persistenceScope,
       ...(local.serverId ? { serverId: local.serverId } : {}),
       error:
         error instanceof Error ? error.message : 'invalid_prompt_definition',
@@ -541,6 +556,7 @@ export async function autoSyncPrompt(
     return {
       success: false,
       localId,
+      persistenceScope,
       error:
         'No Prompt Studio project available for auto-sync. Configure a default project in Prompt Studio settings.',
       syncStatus: 'pending'
@@ -573,6 +589,7 @@ export async function pushToStudio(
   localId: string,
   projectId: number
 ): Promise<SyncResult> {
+  let persistenceScope: string | null = null
   let local: LocalPrompt | undefined
   try {
     local = await db.prompts.get(localId)
@@ -580,6 +597,7 @@ export async function pushToStudio(
     return {
       success: false,
       localId,
+      persistenceScope,
       error: error instanceof Error ? error.message : 'Push failed',
       syncStatus: 'pending',
       failureKind: 'transient'
@@ -589,6 +607,7 @@ export async function pushToStudio(
     return {
       success: false,
       localId,
+      persistenceScope,
       error: 'Local prompt not found',
       syncStatus: 'local'
     }
@@ -603,6 +622,7 @@ export async function pushToStudio(
       return {
         success: false,
         localId,
+        persistenceScope,
         serverId: local.serverId,
         error: error instanceof Error ? error.message : 'Push failed',
         syncStatus: local.syncStatus || 'local',
@@ -610,13 +630,17 @@ export async function pushToStudio(
       }
     }
     let response: Awaited<ReturnType<typeof updateServerPrompt>>
-    const persistenceScope = await getRecipePersistenceScope()
     try {
-      response = await updateServerPrompt(local.serverId, updatePayload)
+      response = await updateServerPrompt(local.serverId, updatePayload, {
+        capturePersistenceScope: true,
+        requirePersistenceScope: updatePayload.prompt_schema_version === 2
+      })
+      persistenceScope = response.persistenceScope || null
     } catch (error: unknown) {
       return {
         success: false,
         localId,
+        persistenceScope,
         serverId: local.serverId,
         error: error instanceof Error ? error.message : 'Push failed',
         syncStatus: 'pending',
@@ -628,10 +652,11 @@ export async function pushToStudio(
       return {
         success: false,
         localId,
+        persistenceScope,
         serverId: local.serverId,
         error: 'Failed to update server prompt',
         syncStatus: 'pending',
-        failureKind: 'invalid_server_payload'
+        failureKind: response.requestDispatched === false ? 'validation' : 'invalid_server_payload'
       }
     }
     let updateFields: Partial<LocalPrompt>
@@ -641,6 +666,7 @@ export async function pushToStudio(
       return {
         success: false,
         localId,
+        persistenceScope,
         serverId: local.serverId,
         error:
           error instanceof Error ? error.message : 'invalid_prompt_definition',
@@ -654,6 +680,7 @@ export async function pushToStudio(
       return {
         success: false,
         localId,
+        persistenceScope,
         serverId: local.serverId,
         error: error instanceof Error ? error.message : 'Push failed',
         syncStatus: 'pending',
@@ -664,6 +691,7 @@ export async function pushToStudio(
     return {
       success: true,
       localId,
+      persistenceScope,
       serverId: serverPrompt.id,
       syncStatus: 'synced'
     }
@@ -683,15 +711,17 @@ export async function pullFromStudio(
   serverId: number,
   existingLocalId?: string
 ): Promise<SyncResult> {
-  const persistenceScope = await getRecipePersistenceScope()
+  let persistenceScope: string | null = null
   try {
-    const response = await getServerPrompt(serverId)
+    const response = await getServerPrompt(serverId, { capturePersistenceScope: true })
+    persistenceScope = response.persistenceScope || null
     const serverPrompt = unwrapResponseData<ServerPrompt>(response)
 
     if (!serverPrompt) {
       return {
         success: false,
         localId: existingLocalId || '',
+        persistenceScope,
         serverId,
         error: 'Server prompt not found',
         syncStatus: 'local'
@@ -709,6 +739,7 @@ export async function pullFromStudio(
         return {
           success: true,
           localId: existingLocalId,
+          persistenceScope,
           serverId,
           syncStatus: 'synced'
         }
@@ -725,6 +756,7 @@ export async function pullFromStudio(
       return {
         success: true,
         localId: existing.id,
+        persistenceScope,
         serverId,
         syncStatus: 'synced'
       }
@@ -738,6 +770,7 @@ export async function pullFromStudio(
     return {
       success: true,
       localId: newLocal.id,
+      persistenceScope,
       serverId,
       syncStatus: 'synced'
     }
@@ -745,6 +778,7 @@ export async function pullFromStudio(
     return {
       success: false,
       localId: existingLocalId || '',
+      persistenceScope,
       serverId,
       error: error instanceof Error ? error.message : 'Pull failed',
       syncStatus: 'local'
@@ -763,12 +797,14 @@ export async function linkPrompts(
   localId: string,
   serverId: number
 ): Promise<SyncResult> {
+  const persistenceScope = null
   try {
     const local = await db.prompts.get(localId)
     if (!local) {
       return {
         success: false,
         localId,
+        persistenceScope,
         serverId,
         error: 'Local prompt not found',
         syncStatus: 'local'
@@ -783,6 +819,7 @@ export async function linkPrompts(
       return {
         success: false,
         localId,
+        persistenceScope,
         serverId,
         error: 'Server prompt not found',
         syncStatus: 'local'
@@ -804,6 +841,7 @@ export async function linkPrompts(
     return {
       success: true,
       localId,
+      persistenceScope,
       serverId,
       syncStatus: 'pending'
     }
@@ -811,6 +849,7 @@ export async function linkPrompts(
     return {
       success: false,
       localId,
+      persistenceScope,
       serverId,
       error: error instanceof Error ? error.message : 'Link failed',
       syncStatus: 'local'
@@ -822,6 +861,7 @@ export async function linkPrompts(
  * Unlink a local prompt from server (keep local copy).
  */
 export async function unlinkPrompt(localId: string): Promise<SyncResult> {
+  const persistenceScope = null
   let local: LocalPrompt | undefined
   try {
     local = await db.prompts.get(localId)
@@ -829,6 +869,7 @@ export async function unlinkPrompt(localId: string): Promise<SyncResult> {
       return {
         success: false,
         localId,
+        persistenceScope,
         error: 'Local prompt not found',
         syncStatus: 'local'
       }
@@ -847,12 +888,14 @@ export async function unlinkPrompt(localId: string): Promise<SyncResult> {
     return {
       success: true,
       localId,
+      persistenceScope,
       syncStatus: 'local'
     }
   } catch (error: unknown) {
     return {
       success: false,
       localId,
+      persistenceScope,
       error: error instanceof Error ? error.message : 'Unlink failed',
       syncStatus: local?.syncStatus || 'local'
     }
@@ -955,11 +998,13 @@ export async function resolveConflict(
   localId: string,
   resolution: ConflictResolution
 ): Promise<SyncResult> {
+  const persistenceScope = null
   const local = await db.prompts.get(localId)
   if (!local || !local.serverId) {
     return {
       success: false,
       localId,
+      persistenceScope,
       error: 'No conflict to resolve',
       syncStatus: 'local'
     }
@@ -982,6 +1027,7 @@ export async function resolveConflict(
       return {
         success: false,
         localId,
+        persistenceScope,
         error:
           'No valid Prompt Studio project available for keep-both resolution',
         syncStatus: local.syncStatus || 'conflict'
@@ -991,6 +1037,7 @@ export async function resolveConflict(
       return {
         success: false,
         localId,
+        persistenceScope,
         error: 'Invalid resolution',
         syncStatus: 'conflict'
       }

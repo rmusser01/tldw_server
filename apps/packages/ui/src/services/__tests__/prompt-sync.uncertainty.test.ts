@@ -74,15 +74,25 @@ const response = {
   }
 }
 
+const transportResponse = async () => {
+  const dispatchConfig = await mocks.getConfig().catch(() => null)
+  return {
+    ...response,
+    persistenceScope: dispatchConfig
+      ? buildChatSurfaceScopeKeyFromConfig(dispatchConfig)
+      : null
+  }
+}
+
 describe("authoritative prompt sync uncertainty cleanup", () => {
   beforeEach(() => {
     vi.resetModules()
     vi.clearAllMocks()
     mocks.rows.clear()
     mocks.getConfig.mockResolvedValue(owner)
-    mocks.create.mockResolvedValue(response)
-    mocks.update.mockResolvedValue(response)
-    mocks.get.mockResolvedValue(response)
+    mocks.create.mockImplementation(transportResponse)
+    mocks.update.mockImplementation(transportResponse)
+    mocks.get.mockImplementation(transportResponse)
   })
 
   it.each([
@@ -129,7 +139,10 @@ describe("authoritative prompt sync uncertainty cleanup", () => {
                   101,
                   operation === "pull exact" ? id : undefined
                 )
-        expect((await run()).success).toBe(true)
+        expect(await run()).toMatchObject({
+          success: true,
+          persistenceScope: otherScope
+        })
         expect(registry.isRecipePersistenceUncertain(id, ownerScope)).toBe(true)
         expect(registry.isRecipePersistenceUncertain(id, otherScope)).toBe(
           false
@@ -140,7 +153,10 @@ describe("authoritative prompt sync uncertainty cleanup", () => {
 
         // Credential refresh belongs to A, not a new uncertainty namespace.
         mocks.getConfig.mockResolvedValue(config("https://a.test", "alice", 2))
-        expect((await run()).success).toBe(true)
+        expect(await run()).toMatchObject({
+          success: true,
+          persistenceScope: ownerScope
+        })
         expect(registry.isRecipePersistenceUncertain(id, ownerScope)).toBe(
           false
         )
@@ -148,13 +164,16 @@ describe("authoritative prompt sync uncertainty cleanup", () => {
     }
   )
 
-  it("does not clear any owned marker when canonical scope cannot be read", async () => {
+  it("does not clear any owned marker when the transport cannot report its scope", async () => {
     const registry = await import("../recipe-persistence-uncertainty")
     const { pullFromStudio } = await import("../prompt-sync")
     mocks.rows.set("same-id", { id: "same-id" })
     registry.markRecipePersistenceUncertain("same-id", ownerScope)
     mocks.getConfig.mockRejectedValue(new Error("config unavailable"))
-    expect((await pullFromStudio(101, "same-id")).success).toBe(true)
+    expect(await pullFromStudio(101, "same-id")).toMatchObject({
+      success: true,
+      persistenceScope: null
+    })
     expect(registry.isRecipePersistenceUncertain("same-id", ownerScope)).toBe(
       true
     )
@@ -169,10 +188,14 @@ describe("authoritative prompt sync uncertainty cleanup", () => {
     registry.markRecipePersistenceUncertain("same-id", ownerScope)
     registry.markRecipePersistenceUncertain("same-id", otherScope)
     mocks.get.mockImplementationOnce(async () => {
+      const capturedResponse = await transportResponse()
       mocks.getConfig.mockResolvedValue(other)
-      return response
+      return capturedResponse
     })
-    expect((await pullFromStudio(101, "same-id")).success).toBe(true)
+    expect(await pullFromStudio(101, "same-id")).toMatchObject({
+      success: true,
+      persistenceScope: ownerScope
+    })
     expect(registry.isRecipePersistenceUncertain("same-id", ownerScope)).toBe(
       false
     )

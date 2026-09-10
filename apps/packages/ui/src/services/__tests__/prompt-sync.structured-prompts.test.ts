@@ -259,6 +259,7 @@ describe("prompt-sync structured prompt support", () => {
     })
 
     mocks.createPrompt.mockResolvedValue({
+      persistenceScope: null,
       data: {
         data: {
           id: 101,
@@ -297,7 +298,9 @@ describe("prompt-sync structured prompt support", () => {
             config: { tone: "concise" }
           }
         ]
-      })
+      }),
+      undefined,
+      { capturePersistenceScope: true, requirePersistenceScope: false }
     )
   })
 
@@ -333,6 +336,7 @@ describe("prompt-sync structured prompt support", () => {
       syncStatus: "local"
     })
     mocks.createPrompt.mockResolvedValue({
+      persistenceScope: null,
       data: {
         data: {
           id: 102,
@@ -360,7 +364,9 @@ describe("prompt-sync structured prompt support", () => {
         prompt_format: "structured",
         prompt_schema_version: 1,
         prompt_definition: canonicalDefinition
-      })
+      }),
+      undefined,
+      { capturePersistenceScope: true, requirePersistenceScope: false }
     )
   })
 
@@ -388,6 +394,7 @@ describe("prompt-sync structured prompt support", () => {
       if (testCase.sync_eligible) {
         const canonicalDefinition = makeCanonicalV1IntegerDefinition(testCase)
         mocks.createPrompt.mockResolvedValueOnce({
+          persistenceScope: null,
           data: {
             data: {
               id: 810,
@@ -468,6 +475,7 @@ describe("prompt-sync structured prompt support", () => {
       expect(await autoSyncPrompt(original.id)).toEqual({
         success: false,
         localId: original.id,
+        persistenceScope: null,
         serverId: 814,
         error: "invalid_prompt_definition",
         syncStatus: "conflict",
@@ -497,6 +505,7 @@ describe("prompt-sync structured prompt support", () => {
 
   it("pulls structured prompt fields into the local prompt record", async () => {
     mocks.getPrompt.mockResolvedValue({
+      persistenceScope: null,
       data: {
         data: {
           id: 501,
@@ -582,6 +591,7 @@ describe("prompt-sync structured prompt support", () => {
         state.prompts.set(original.id, structuredClone(original))
       }
       mocks.getPrompt.mockResolvedValueOnce({
+        persistenceScope: null,
         data: {
           data: {
             id: 811,
@@ -660,6 +670,7 @@ describe("prompt-sync structured prompt support", () => {
     })
 
     mocks.getPrompt.mockResolvedValue({
+      persistenceScope: null,
       data: {
         data: {
           id: 77,
@@ -708,6 +719,7 @@ describe("prompt-sync structured prompt support", () => {
       }
       state.prompts.set(original.id, structuredClone(original))
       mocks.getPrompt.mockResolvedValueOnce({
+        persistenceScope: null,
         data: {
           data: {
             id: 812,
@@ -762,6 +774,7 @@ describe("prompt-sync structured prompt support", () => {
       }
       state.prompts.set(original.id, structuredClone(original))
       mocks.getPrompt.mockResolvedValueOnce({
+        persistenceScope: null,
         data: {
           data: {
             id: 813,
@@ -828,6 +841,7 @@ describe("prompt-sync structured prompt support", () => {
     })
 
     mocks.getPrompt.mockResolvedValue({
+      persistenceScope: null,
       data: {
         data: {
           id: 88,
@@ -881,6 +895,7 @@ describe("prompt-sync structured prompt support", () => {
       syncStatus: "local"
     })
     mocks.createPrompt.mockResolvedValue({
+      persistenceScope: null,
       data: {
         data: {
           id: 601,
@@ -1011,6 +1026,7 @@ describe("prompt-sync structured prompt support", () => {
     }
     state.prompts.set(original.id, original)
     mocks.getPrompt.mockResolvedValue({
+      persistenceScope: null,
       data: {
         data: {
           id: 701,
@@ -1065,6 +1081,7 @@ describe("prompt-sync structured prompt support", () => {
       state.prompts.set(original.id, structuredClone(original))
       const before = JSON.stringify(state.prompts.get(original.id))
       mocks.getPrompt.mockResolvedValue({
+        persistenceScope: null,
         data: {
           data: {
             id: 704,
@@ -1113,6 +1130,7 @@ describe("prompt-sync structured prompt support", () => {
       lastSyncedAt: 10
     })
     mocks.getPrompt.mockResolvedValue({
+      persistenceScope: null,
       data: {
         data: {
           id: 702,
@@ -1154,6 +1172,7 @@ describe("prompt-sync structured prompt support", () => {
       lastSyncedAt: 10
     })
     mocks.getPrompt.mockResolvedValue({
+      persistenceScope: null,
       data: {
         data: {
           id: 703,

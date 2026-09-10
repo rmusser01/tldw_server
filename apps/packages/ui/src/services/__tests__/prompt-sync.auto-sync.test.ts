@@ -221,6 +221,7 @@ describe("prompt-sync auto-sync defaults", () => {
       data: { data: { id: 17, name: "Workspace Prompts" } }
     })
     mocks.createPrompt.mockResolvedValue({
+      persistenceScope: null,
       data: {
         data: {
           id: 101,
@@ -303,7 +304,9 @@ describe("prompt-sync auto-sync defaults", () => {
     expect(result.syncStatus).toBe("synced")
     expect(mocks.createProject).toHaveBeenCalledTimes(1)
     expect(mocks.createPrompt).toHaveBeenCalledWith(
-      expect.objectContaining({ project_id: 17, name: "Prompt" })
+      expect.objectContaining({ project_id: 17, name: "Prompt" }),
+      undefined,
+      { capturePersistenceScope: true, requirePersistenceScope: false }
     )
     expect(state.prompts.get("local-1")).toEqual(
       expect.objectContaining({
@@ -423,7 +426,10 @@ describe("prompt-sync auto-sync defaults", () => {
       updatedAt: 1,
       syncStatus: "local"
     })
-    mocks.createPrompt.mockResolvedValueOnce({ data: { data: null } })
+    mocks.createPrompt.mockResolvedValueOnce({
+      persistenceScope: null,
+      data: { data: null }
+    })
     const { pushToStudio } = await importPromptSync()
 
     const result = await pushToStudio("local-empty-create", 17)
@@ -464,6 +470,7 @@ describe("prompt-sync auto-sync defaults", () => {
       }
       state.prompts.set(original.id, structuredClone(original))
       const serverResponse = {
+        persistenceScope: null,
         data: {
           data: {
             id: 801,
@@ -571,6 +578,7 @@ describe("prompt-sync auto-sync defaults", () => {
       syncStatus: "conflict"
     })
     mocks.getPrompt.mockResolvedValue({
+      persistenceScope: null,
       data: {
         data: {
           id: 321,
@@ -610,6 +618,7 @@ describe("prompt-sync auto-sync defaults", () => {
       syncStatus: "conflict"
     })
     mocks.updatePrompt.mockResolvedValue({
+      persistenceScope: null,
       data: {
         data: {
           id: 77,
@@ -632,7 +641,8 @@ describe("prompt-sync auto-sync defaults", () => {
       77,
       expect.objectContaining({
         name: "Prompt Local"
-      })
+      }),
+      { capturePersistenceScope: true, requirePersistenceScope: false }
     )
     expect(state.prompts.get("local-keep-local")).toEqual(
       expect.objectContaining({
@@ -655,6 +665,7 @@ describe("prompt-sync auto-sync defaults", () => {
       syncStatus: "conflict"
     })
     mocks.getPrompt.mockResolvedValue({
+      persistenceScope: null,
       data: {
         data: {
           id: 88,
@@ -697,6 +708,7 @@ describe("prompt-sync auto-sync defaults", () => {
       syncStatus: "conflict"
     })
     mocks.createPrompt.mockResolvedValue({
+      persistenceScope: null,
       data: {
         data: {
           id: 199,
@@ -724,7 +736,9 @@ describe("prompt-sync auto-sync defaults", () => {
       expect.objectContaining({
         project_id: 17,
         name: "Prompt Keep Both"
-      })
+      }),
+      undefined,
+      { capturePersistenceScope: true, requirePersistenceScope: false }
     )
     expect(state.prompts.get("local-keep-both")).toEqual(
       expect.objectContaining({
@@ -795,6 +809,7 @@ describe("prompt-sync auto-sync defaults", () => {
       syncStatus: "conflict"
     })
     mocks.createPrompt.mockResolvedValue({
+      persistenceScope: null,
       data: {
         data: {
           id: 399,
@@ -826,7 +841,9 @@ describe("prompt-sync auto-sync defaults", () => {
         prompt_format: "structured",
         prompt_schema_version: 2,
         prompt_definition: definition
-      })
+      }),
+      undefined,
+      { capturePersistenceScope: true, requirePersistenceScope: true }
     )
     expect(state.prompts.get("recipe-keep-both")).toEqual(
       expect.objectContaining({
@@ -876,9 +893,13 @@ describe("prompt-sync auto-sync defaults", () => {
       if (failure === "network") {
         mocks.createPrompt.mockRejectedValueOnce(new Error("network failed"))
       } else if (failure === "empty response") {
-        mocks.createPrompt.mockResolvedValueOnce({ data: { data: null } })
+        mocks.createPrompt.mockResolvedValueOnce({
+          persistenceScope: null,
+          data: { data: null }
+        })
       } else if (failure === "malicious response") {
         mocks.createPrompt.mockResolvedValueOnce({
+          persistenceScope: null,
           data: {
             data: {
               id: 599,
@@ -927,6 +948,7 @@ describe("prompt-sync auto-sync defaults", () => {
       syncStatus: "pending"
     })
     mocks.getPrompt.mockResolvedValue({
+      persistenceScope: null,
       data: {
         data: {
           id: 701,
@@ -963,6 +985,7 @@ describe("prompt-sync auto-sync defaults", () => {
       syncStatus: "pending"
     })
     mocks.getPrompt.mockResolvedValue({
+      persistenceScope: null,
       data: {
         data: {
           id: 702,
@@ -998,6 +1021,7 @@ describe("prompt-sync auto-sync defaults", () => {
       syncStatus: "pending"
     })
     mocks.getPrompt.mockResolvedValue({
+      persistenceScope: null,
       data: {
         data: {
           id: 703,
