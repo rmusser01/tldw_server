@@ -54,3 +54,18 @@ The full Persona Live session remains available in Persona Garden for its existi
 - [Speech setup](../WebUI_Extension/Getting-Started-STT_and_TTS.md)
 - [Independent Buddy API](https://github.com/rmusser01/tldw_server/blob/dev/Docs/API/Buddies.md)
 - [Accepted Buddy turns: operation, failures, and restart](https://github.com/rmusser01/tldw_server/blob/dev/Docs/Operations/Buddy_Turns.md)
+
+
+## Downloaded Buddy packs and credits
+
+Downloaded `.tldw-persona-vpack` files currently use the Persona import API;
+the Buddy manager offers existing Buddies and ready-made artwork, without a
+file-upload control. After importing and reviewing a pack, create an independent
+copy through the [Buddy API](../../API/Buddies.md), leave the optional Persona
+unset if desired, then select the new Buddy and apply its target in management.
+
+Credited packs keep their embedded creator, license, source URL and notices
+through new imports, independent copies and native exports. Older imports may
+have lost those fields; recover them by re-importing the original download and
+making a new Buddy copy. Keep the accompanying license files when the original
+archive did not embed notices. Import jobs currently require SQLite storage.

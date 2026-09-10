@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.DB_Management.Buddy_DB import BuddyRepository
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, NotFoundError
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.exceptions import BuddyNotFoundError
+from tldw_Server_API.app.core.Persona.visual_artwork import ARTWORK_MANIFEST_KEY
 from tldw_Server_API.app.core.Persona.visual_asset_constraints import VISUAL_MIME_EXTENSIONS
 from tldw_Server_API.app.core.Persona.visual_manifest_assets import remap_visual_manifest_assets
 from tldw_Server_API.app.core.Persona.visual_service import MAX_VISUAL_UPLOAD_BYTES, PersonaVisualService
@@ -192,6 +193,8 @@ class BuddyService:
             available_asset_dimensions={asset["id"]: (asset["width"], asset["height"]) for asset in assets},
             require_activatable=True,
         )
+        if ARTWORK_MANIFEST_KEY in validation.manifest:
+            attribution["artwork"] = validation.manifest[ARTWORK_MANIFEST_KEY]
         directory: Path | None = None
         try:
             for asset, (_, content, _) in zip(assets, source_assets, strict=True):

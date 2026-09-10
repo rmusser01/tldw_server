@@ -40,3 +40,25 @@ Schema version 66 adds independent profile, asset, attachment, exact-acknowledge
 The profile deletion flag uses a boolean schema and bound boolean update values on both backends. This matches the ChaCha PostgreSQL adapter, which converts literal deletion comparisons to `FALSE` and `TRUE`.
 
 An explicit provider/model selection in ordinary neutral workspace Chat is merged into that conversation's settings for later replies. This applies only when Chat requests persistence, both values were explicit, and the authenticated principal owns the conversation. Frozen Persona/character behavior keeps its existing policy. Temporary Buddy reply overrides never replace these saved defaults.
+
+
+## Imported artwork credits
+
+Native `source_context.artwork` is a canonical JSON string containing the
+version-1 `creator`, `license`, `source_url` and `notices` record. Import validates
+and stores it in the pack's existing manifest JSON under `tldw/artwork`.
+Independent copies retain it in `attribution.artwork` and their owned manifest,
+including after deletion of the source Persona. These fields are untrusted data;
+source URLs are never fetched and notices do not grant tool permissions.
+
+Native export removes the internal manifest field from an exported copy and
+restores `source_context.artwork`, preserving Chatbook's strict animation schema.
+Credits participate in the export fingerprint. Invalid or conflicting carriers
+are rejected; credit-free packs retain their existing behavior. Field and byte
+limits are recorded in [ADR-006](../../backlog/decisions/006-buddy-artwork-credit-portability.md).
+
+Earlier imports may already have lost their credits. Re-import the credited
+original archive and create a new independent Buddy; existing immutable copies
+are not silently rewritten. Keep original notice files for archives which did
+not embed credits. The existing import-job repository supports SQLite only;
+PostgreSQL artwork snapshot and native export paths preserve the same credits.

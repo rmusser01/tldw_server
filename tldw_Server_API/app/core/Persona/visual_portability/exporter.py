@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.Persona.visual_artwork import ARTWORK_MANIFEST_KEY, encode_native_artwork
 from tldw_Server_API.app.core.Persona.visual_service import VISUAL_STORAGE_PREFIX
 
 from .archive import (
@@ -271,22 +272,27 @@ class PersonaVisualPackExporter:
         return self.staging_root / (f"{safe_title}-{uuid.uuid4().hex[:12]}{PERSONA_VISUAL_PACK_EXTENSION}")
 
     def _export_pack_row(self, row: Mapping[str, Any]) -> dict[str, Any]:
-        return {
+        result = {
             "source_pack_id": row["id"],
             "source_persona_id": row["persona_id"],
             "title": row["title"],
             "renderer_type": row["renderer_type"],
             "status": row["status"],
             "manifest_version": row["manifest_version"],
-            "visual_manifest": row.get("manifest") if isinstance(row.get("manifest"), dict) else {},
+            "visual_manifest": dict(row["manifest"]) if isinstance(row.get("manifest"), dict) else {},
             "parent_pack_id": row.get("parent_pack_id"),
             "revision_number": row.get("revision_number"),
             "provenance": row.get("provenance"),
-            "active_at": row.get("active_at"),
-            "created_at": row.get("created_at"),
-            "last_modified": row.get("last_modified"),
+            "active_at": _export_timestamp(row.get("active_at")),
+            "created_at": _export_timestamp(row.get("created_at")),
+            "last_modified": _export_timestamp(row.get("last_modified")),
             "version": row.get("version"),
         }
+        if ARTWORK_MANIFEST_KEY in result["visual_manifest"]:
+            result["source_context"] = {
+                "artwork": encode_native_artwork(result["visual_manifest"].pop(ARTWORK_MANIFEST_KEY)),
+            }
+        return result
 
     def _export_asset_row(self, row: Mapping[str, Any]) -> dict[str, Any]:
         return {
@@ -303,14 +309,14 @@ class PersonaVisualPackExporter:
             "height": row.get("height"),
             "duration_ms": row.get("duration_ms"),
             "provenance": row.get("provenance"),
-            "created_at": row.get("created_at"),
-            "last_modified": row.get("last_modified"),
+            "created_at": _export_timestamp(row.get("created_at")),
+            "last_modified": _export_timestamp(row.get("last_modified")),
             "version": row.get("version"),
         }
 
     def _readme_payload(self, pack: Mapping[str, Any]) -> bytes:
         title = str(pack.get("title") or "Persona Visual Pack")
-        return (f"# {title}\n\n" "This archive contains a tldw persona visual pack export.\n").encode("utf-8")
+        return (f"# {title}\n\n" "This archive contains a tldw persona visual pack export.\n").encode()
 
     def _progress(
         self,
@@ -374,8 +380,13 @@ def _asset_extension(asset: Mapping[str, Any]) -> str:
     }.get(mime_type, ".bin")
 
 
+def _export_timestamp(value: Any) -> Any:
+    """Keep SQLite text stable and make PostgreSQL timestamps JSON-compatible."""
+    return value.isoformat() if isinstance(value, datetime) else value
+
+
 def _canonical_pack_for_fingerprint(row: Mapping[str, Any]) -> dict[str, Any]:
-    return {
+    result = {
         "title": row.get("title"),
         "renderer_type": row.get("renderer_type"),
         "manifest_version": row.get("manifest_version"),
@@ -383,3 +394,7 @@ def _canonical_pack_for_fingerprint(row: Mapping[str, Any]) -> dict[str, Any]:
         "revision_number": row.get("revision_number"),
         "provenance": row.get("provenance"),
     }
+    context = row.get("source_context")
+    if isinstance(context, dict) and "artwork" in context:
+        result["artwork"] = context["artwork"]
+    return result

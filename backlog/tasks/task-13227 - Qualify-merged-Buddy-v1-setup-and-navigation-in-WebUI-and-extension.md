@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-09 04:32'
-updated_date: '2026-09-09 07:04'
+updated_date: '2026-09-10 14:42'
 labels: []
 dependencies: []
 references:
@@ -61,6 +61,8 @@ PR2934 Qodo follow-up (2026-09-09): verify and resolve seven findings, preservin
 PR2934 review follow-up started after verifying Qodo findings against source. Official MCP task reads were unresponsive and terminated; using the explicitly documented CLI fallback. Historical completion and qualification receipts remain attributed to their original source.
 
 PR2934 Qodo backend findings 1, 3 and 5 follow-up completed. Catalog generation metadata policy now lives in the existing core LLM_Calls/provider_config_resolution.py seam, covering adjacent temperature/streaming fields together with blank-token omission; llm_providers.py delegates the projection. Invalid nonblank limits preserve the existing sanitized error behavior. The optional-metadata test module now has module/function contracts, typed helpers and pytest.mark.unit. The marker negative control selected 0 of 3 tests before the fix; after the fix all 3 pass, including valid temperature/streaming projection. One existing adjacent env-only numbered-provider catalog test also passes, covering missing config sections through the same path. Logs: /private/tmp/server-pr2934-catalog-marker-before.log, server-pr2934-catalog-marker-after.log, server-pr2934-provider-config-adjacent.log. The full scoped follow-up also has 36 Buddy/adjacent and 12 Persona passes, without rerunning a full suite. Scoped Black/compile/whitespace pass, zero new Ruff findings against the exact HEAD baseline, and zero production Bandit findings/errors; existing lint and test-assertion findings are distinguished in server-pr2934-backend-static-summary.log and server-pr2934-contract-and-bandit-summary.log. Original evidence remains historical; root will retain a separate review receipt. No production behavior expansion, provider invocation, commit or push. Native qualification remains open; existing ADR-005 boundary unchanged.
+
+2026-09-10 follow-up published Trenchcoat imported via real authenticated HTTP worker, activated in WebUI, and copied independently by API. This exposed and repaired lost credits in TASK13242. Final HTTP export/reimport and actual Chatbook native importer pass. Native Chrome control blocked by Computer Use permissions; no installed-extension/terminal or physical voice qualification claimed. See Docs/Reviews/2026-09-10-buddy-followup.md; task remains open.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
