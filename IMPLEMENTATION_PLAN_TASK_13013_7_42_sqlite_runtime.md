@@ -14,10 +14,10 @@ Qualification exposed a scanner mapping limitation: Trivy still reports the offi
 **Goal**: Install the exact fixed library in all three backend runtimes.
 **Success Criteria**: Mandatory checksums; temporary package mounts; unchanged locked dependencies and preserved existing policy records.
 **Tests**: Build the actual recipes and run the same compatibility checks plus the existing guarded-import probe.
-**Status**: In Progress — all three recipes updated; 261 focused checks, Ruff, Bandit and independent source review passed. Canonical builds follow the implementation commit.
+**Status**: In Progress — all three recipes updated; 261 focused checks, Ruff, Bandit and independent source review passed. Canonical builds from6da778 failed when host disk filled; the serial4c64af2c46 retry was stopped before another large download. Host free space remains approximately14GiB after bounded task-owned cleanup. Full canonical image qualification remains blocked.
 
 ## Stage 3: Verify and retain evidence
 **Goal**: Record exact candidates, scan outcomes and review.
 **Success Criteria**: Fixed installed package and correct Python binding; no silent suppression; tests and Bandit reviewed; local commit.
 **Tests**: Focused pinning/policy tests, offline scans, evidence hash checks and independent review.
-**Status**: Not Started
+**Status**: In Progress — fixed-library compatibility derivatives of all three exact TASK41 images built;40 installed-code import cases,12 SQLite behavior checks and3 legacy restores pass. Record package/native hashes, review and interim evidence; keep the six proposed dispositions inactive pending canonical qualification.
