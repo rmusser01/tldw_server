@@ -1075,6 +1075,7 @@ _CREATE_AUTHNZ_CORE_TABLES = [
             access_jti VARCHAR(128),
             refresh_jti VARCHAR(128),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
@@ -1085,6 +1086,16 @@ _CREATE_AUTHNZ_CORE_TABLES = [
     ("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS is_revoked BOOLEAN DEFAULT FALSE", ()),
     ("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS access_jti VARCHAR(128)", ()),
     ("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS refresh_jti VARCHAR(128)", ()),
+    ("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_activity TIMESTAMP", ()),
+    (
+        "UPDATE sessions SET last_activity = COALESCE(created_at, CURRENT_TIMESTAMP) "
+        "WHERE last_activity IS NULL",
+        (),
+    ),
+    (
+        "ALTER TABLE sessions ALTER COLUMN last_activity SET DEFAULT CURRENT_TIMESTAMP",
+        (),
+    ),
     ("CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)", ()),

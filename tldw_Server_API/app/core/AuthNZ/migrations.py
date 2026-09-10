@@ -112,6 +112,7 @@ def migration_002_create_sessions_table(conn: sqlite3.Connection) -> None:
             access_jti TEXT,
             refresh_jti TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
@@ -140,6 +141,12 @@ def migration_002_create_sessions_table(conn: sqlite3.Connection) -> None:
         add_col('revoked_at', "revoked_at TIMESTAMP")
         add_col('revoked_by', "revoked_by INTEGER")
         add_col('revoke_reason', "revoke_reason TEXT")
+        add_col('last_activity', "last_activity TIMESTAMP")
+        conn.execute(
+            "UPDATE sessions "
+            "SET last_activity = COALESCE(created_at, CURRENT_TIMESTAMP) "
+            "WHERE last_activity IS NULL"
+        )
     except _AUTHNZ_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
         pass
 
@@ -6517,6 +6524,11 @@ def get_authnz_migrations() -> list[Migration]:
             "Backfill NULL users.uuid values",
             migration_097_backfill_user_uuid,
         ),
+        Migration(
+            98,
+            "Add and backfill sessions.last_activity",
+            migration_098_add_session_last_activity,
+        ),
     ]
 
 
@@ -6551,6 +6563,29 @@ def migration_097_backfill_user_uuid(conn: sqlite3.Connection) -> None:
         WHERE uuid IS NULL OR trim(uuid) = ''
         """
     )
+
+
+def migration_098_add_session_last_activity(conn: sqlite3.Connection) -> None:
+    """Add and backfill the session activity timestamp for legacy databases."""
+    if not _sqlite_table_exists(conn, "sessions"):
+        return
+
+    columns = {
+        str(row[1]) for row in conn.execute("PRAGMA table_info(sessions)").fetchall()
+    }
+    if "last_activity" not in columns:
+        conn.execute("ALTER TABLE sessions ADD COLUMN last_activity TIMESTAMP")
+    if "created_at" in columns:
+        conn.execute(
+            "UPDATE sessions "
+            "SET last_activity = COALESCE(created_at, CURRENT_TIMESTAMP) "
+            "WHERE last_activity IS NULL"
+        )
+    else:
+        conn.execute(
+            "UPDATE sessions SET last_activity = CURRENT_TIMESTAMP "
+            "WHERE last_activity IS NULL"
+        )
 
 
 def apply_authnz_migrations(db_path: Path, target_version: int = None) -> None:
