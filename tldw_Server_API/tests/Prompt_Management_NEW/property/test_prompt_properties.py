@@ -675,7 +675,7 @@ def _recipe_definition(blocks: list, variables: list | None = None) -> dict:
 
 @pytest.mark.property
 @given(
-    orders=st.lists(st.integers(), max_size=20),
+    orders=st.lists(st.integers(min_value=-9007199254740991, max_value=9007199254740991), max_size=20),
     label=st.text(min_size=1, max_size=200),
     content=st.text(max_size=1000),
     separator=st.text(max_size=20),
@@ -748,4 +748,24 @@ def test_recipe_future_schema_is_rejected_without_mutation(version: int) -> None
     original = deepcopy(payload)
     issues = structured_prompts.validate_prompt_definition(payload)
     assert [(issue.code, issue.path) for issue in issues] == [("unsupported_schema_version", "schema_version")]
+    assert payload == original
+
+
+@pytest.mark.property
+@given(order=st.integers())
+@example(order=-9007199254740992)
+@example(order=9007199254740992)
+@example(order=-9007199254740991)
+@example(order=9007199254740991)
+def test_recipe_orders_have_lossless_javascript_integer_representation(order: int) -> None:
+    """Every accepted v2 order round-trips through JavaScript's number domain."""
+    payload = _recipe_definition([{"id": "a", "name": "A", "role": "user", "order": order, "content": ""}])
+    original = deepcopy(payload)
+    issues = structured_prompts.validate_prompt_definition(payload)
+    if abs(order) <= 9007199254740991:
+        assert issues == []
+        assert structured_prompts.parse_prompt_definition(payload).blocks[0].order == order
+    else:
+        code = "less_than_equal" if order > 0 else "greater_than_equal"
+        assert [(issue.code, issue.path) for issue in issues] == [(code, "blocks[0].order")]
     assert payload == original

@@ -39,6 +39,34 @@ def valid_recipe() -> dict:
     }
 
 
+@pytest.mark.parametrize("order", [-9007199254740991, 9007199254740991])
+def test_v2_accepts_exact_safe_order_boundaries(order):
+    payload = valid_recipe()
+    payload["blocks"][0]["order"] = order
+    assert structured_prompts.parse_prompt_definition(payload).blocks[0].order == order
+
+
+@pytest.mark.parametrize(
+    "order,code",
+    [
+        (9007199254740992, "less_than_equal"),
+        (-9007199254740992, "greater_than_equal"),
+        (1.5, "int_type"),
+        ("1", "int_type"),
+        (True, "int_type"),
+    ],
+)
+def test_v2_rejects_unsafe_or_noninteger_orders_without_mutation(order, code):
+    payload = valid_recipe()
+    payload["blocks"][0]["order"] = order
+    original = deepcopy(payload)
+    issues = validate_prompt_definition(payload)
+    assert [(issue.code, issue.path) for issue in issues] == [(code, "blocks[0].order")]
+    with pytest.raises(ValidationError):
+        structured_prompts.parse_prompt_definition(payload)
+    assert payload == original
+
+
 @pytest.mark.parametrize("target", ["system", "user"])
 @pytest.mark.parametrize("render_format", ["xml", "markdown", "freeform"])
 def test_accepts_each_target_and_render_format(target: str, render_format: str) -> None:
@@ -232,7 +260,7 @@ def test_v2_cannot_parse_as_v1_even_after_removing_recipe_fields() -> None:
         structured_prompts.PromptDefinition.model_validate({"schema_version": 2})
 
 
-@pytest.mark.parametrize("version", [3, 99, "2", 2.0, True, None])
+@pytest.mark.parametrize("version", [3, 3.0, 99, "2", 2.5, True, None, float("inf"), float("nan")])
 def test_parser_rejects_unknown_or_noninteger_schema_versions(version: object) -> None:
     payload = valid_recipe()
     payload["schema_version"] = version
@@ -255,11 +283,40 @@ def test_recipe_does_not_coerce_fields_before_semantic_validation(field: str, va
     assert issues[0].path == f"blocks[0].{field}"
 
 
-def test_recipe_model_rejects_float_schema_version() -> None:
+@pytest.mark.parametrize("order", [1.0, -0.0, 9007199254740991.0, -9007199254740991.0])
+def test_recipe_json_integral_numbers_normalize_without_mutating_input(order) -> None:
     payload = valid_recipe()
     payload["schema_version"] = 2.0
-    with pytest.raises(ValidationError):
-        structured_prompts.SingleTextRecipeDefinitionV2.model_validate(payload)
+    payload["blocks"][0]["order"] = order
+    original = deepcopy(payload)
+    assert validate_prompt_definition(payload) == []
+    for parsed in (
+        structured_prompts.SingleTextRecipeDefinitionV2.model_validate(payload),
+        structured_prompts.parse_prompt_definition(payload),
+    ):
+        assert type(parsed.schema_version) is int
+        assert type(parsed.blocks[0].order) is int
+        assert parsed.blocks[0].order == order
+    assert payload == original
+    assert type(payload["schema_version"]) is float
+    assert type(payload["blocks"][0]["order"]) is float
+
+
+@pytest.mark.parametrize(
+    "order,code",
+    [
+        (float("nan"), "int_type"),
+        (float("inf"), "int_type"),
+        (float("-inf"), "int_type"),
+        (9007199254740992.0, "less_than_equal"),
+        (-9007199254740992.0, "greater_than_equal"),
+    ],
+)
+def test_recipe_rejects_nonfinite_and_unsafe_float_orders(order, code):
+    payload = valid_recipe()
+    payload["blocks"][0]["order"] = order
+    issues = validate_prompt_definition(payload)
+    assert [(issue.code, issue.path) for issue in issues] == [(code, "blocks[0].order")]
 
 
 @pytest.mark.parametrize("block_id", [" ", "   ", "\t", "\n", "\u00a0", "\u2003", "\x1c", "\x1f", "\t \u00a0"])

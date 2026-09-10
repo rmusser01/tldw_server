@@ -1,9 +1,121 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+import { readFileSync } from "node:fs"
+import * as utils from "../structured-prompt-utils"
 import {
   convertLegacyPromptToStructuredDefinition,
   renderStructuredPromptLegacySnapshot,
   stableSerializePromptSnapshot
 } from "../structured-prompt-utils"
+
+type Repeat = { text: string; count: number; prefix?: string; suffix?: string }
+type RenderCase = {
+  name: string
+  definition: Parameters<typeof utils.renderSingleTextRecipe>[0]
+  runtimeValues?: Record<string, unknown>
+  runtime_repeats?: Record<string, Repeat>
+  expected_text?: string
+  expected_legacy?: { system_prompt: string; user_prompt: string }
+  expected_repeat?: Repeat
+  expected_error_code?: string
+}
+const fixtureUrl = new URL("../../../../../../../../Docs/fixtures/single-text-recipes/", import.meta.url)
+const readCases = (name: string): RenderCase[] =>
+  JSON.parse(readFileSync(new URL(name, fixtureUrl), "utf8"))
+const renderCases = readCases("render-cases.json")
+const errorCases = readCases("error-cases.json")
+const runtimeValues = (testCase: RenderCase) => ({
+  ...testCase.runtimeValues,
+  ...Object.fromEntries(
+    Object.entries(testCase.runtime_repeats ?? {}).map(([name, repeat]) => [
+      name, repeat.text.repeat(repeat.count)
+    ])
+  )
+})
+
+describe("single-text recipe shared fixtures", () => {
+  it.each([true, "2", 2.5, 3, NaN, Infinity])("rejects invalid runtime schema versions %s", (version) => {
+    const definition = { ...renderCases[0].definition, schema_version: version } as unknown as utils.SingleTextRecipeDefinitionV2
+    expect(() => utils.renderSingleTextRecipe(definition)).toThrowError(
+      expect.objectContaining({ code: "unsupported_schema_version" })
+    )
+  })
+
+  it.each([NaN, Infinity, -Infinity])("rejects nonfinite runtime order %s", (order) => {
+    const definition: utils.SingleTextRecipeDefinitionV2 = {
+      ...renderCases[0].definition,
+      blocks: [{ id: "a", name: "A", role: "system", order, content: "" }]
+    }
+    expect(() => utils.renderSingleTextRecipe(definition)).toThrowError(
+      expect.objectContaining({ code: "int_type" })
+    )
+  })
+
+  it.each([false, true])("checks the budget before materializing repeated values (default=%s)", (useDefault) => {
+    const content = "{{x}}".repeat(50)
+    const value = "😀".repeat(10000)
+    const definition: utils.SingleTextRecipeDefinitionV2 = {
+      ...renderCases[0].definition,
+      blocks: [{ id: "a", name: "A", role: "system", order: 0, content, is_template: true }],
+      variables: [{ name: "x", default_value: useDefault ? value : null }]
+    }
+    const originalReplace = String.prototype.replace
+    const guard = vi.spyOn(String.prototype, "replace").mockImplementation(function (this: string, pattern, replacement) {
+      if (String(this) === content) throw new Error("Oversized substitution was materialized")
+      return Reflect.apply(originalReplace, this, [pattern, replacement])
+    })
+    try {
+      expect(() => utils.renderSingleTextRecipe(definition, useDefault ? {} : { x: value }))
+        .toThrowError(expect.objectContaining({ code: "rendered_output_too_large" }))
+    } finally {
+      guard.mockRestore()
+    }
+  })
+
+  it("routes the existing legacy snapshot helper through v2 rendering", () => {
+    const testCase = renderCases.find((item) => item.name === "xml-style-preserves-content-and-unicode")!
+    expect(utils.renderStructuredPromptLegacySnapshot(testCase.definition)).toEqual({
+      systemPrompt: testCase.expected_text, userPrompt: "",
+      content: testCase.expected_text
+    })
+  })
+
+  it.each(renderCases)("$name", (testCase) => {
+    const values = runtimeValues(testCase)
+    const original = JSON.stringify([testCase.definition, values])
+    const repeat = testCase.expected_repeat
+    const text = repeat
+      ? repeat.prefix + repeat.text.repeat(repeat.count) + repeat.suffix
+      : testCase.expected_text
+    const legacy = testCase.expected_legacy ?? {
+      system_prompt: testCase.definition.assembly_config.target_role === "system" ? text : "",
+      user_prompt: testCase.definition.assembly_config.target_role === "user" ? text : ""
+    }
+    expect(utils.renderSingleTextRecipe).toBeTypeOf("function")
+    expect(utils.renderSingleTextRecipe(testCase.definition, values)).toEqual({
+      definition_kind: "single_text_recipe", rendered_text: text, legacy
+    })
+    expect(JSON.stringify([testCase.definition, values])).toBe(original)
+  })
+
+  it.each(errorCases)("$name", (testCase) => {
+    const values = runtimeValues(testCase)
+    const original = JSON.stringify([testCase.definition, values])
+    expect(utils.renderSingleTextRecipe).toBeTypeOf("function")
+    expect(() => utils.renderSingleTextRecipe(testCase.definition, values)).toThrowError(
+      expect.objectContaining({ code: testCase.expected_error_code })
+    )
+    expect(JSON.stringify([testCase.definition, values])).toBe(original)
+  })
+
+  it("does not read undeclared inherited runtime properties", () => {
+    const testCase = renderCases.find((item) => item.name === "prototype-shaped-variable-is-ordinary-declaration")!
+    expect(utils.renderSingleTextRecipe).toBeTypeOf("function")
+    expect(utils.renderSingleTextRecipe(testCase.definition, {})).toEqual({
+      definition_kind: "single_text_recipe", rendered_text: "/",
+      legacy: { system_prompt: "/", user_prompt: "" }
+    })
+  })
+})
 
 describe("structured-prompt-utils", () => {
   it("converts legacy prompts into the backend-canonical structured shape", () => {

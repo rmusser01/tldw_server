@@ -15,6 +15,8 @@ SINGLE_TEXT_RECIPE_LIMITS: Mapping[str, int] = MappingProxyType(
         "max_key_length": 128,
         "max_content_length": 20000,
         "max_separator_length": 20,
+        # V2 ordering must round-trip exactly through JavaScript numbers.
+        "max_abs_order": 9007199254740991,
         # Enforced after substitution by the single-text renderer, not schema validation.
         "max_rendered_output_length": 100000,
     }
@@ -109,7 +111,25 @@ class SingleTextRecipeBlock(PromptBlock):
     id: str = Field(..., min_length=1, max_length=SINGLE_TEXT_RECIPE_LIMITS["max_key_length"])
     name: str = Field(..., min_length=1, max_length=SINGLE_TEXT_RECIPE_LIMITS["max_label_length"])
     content: str = Field(..., max_length=SINGLE_TEXT_RECIPE_LIMITS["max_content_length"])
+    order: int = Field(
+        ...,
+        ge=-SINGLE_TEXT_RECIPE_LIMITS["max_abs_order"],
+        le=SINGLE_TEXT_RECIPE_LIMITS["max_abs_order"],
+    )
     section_key: str | None = Field(default=None, max_length=SINGLE_TEXT_RECIPE_LIMITS["max_key_length"])
+
+    @field_validator("order", mode="before")
+    @classmethod
+    def normalize_json_integer_order(cls, value: Any) -> Any:
+        """JSON 1 and 1.0 are equivalent; never coerce strings or booleans."""
+        if type(value) is float and value.is_integer():
+            limit = SINGLE_TEXT_RECIPE_LIMITS["max_abs_order"]
+            if value > limit:
+                raise PydanticCustomError("less_than_equal", "Order must be at most {le}.", {"le": limit})
+            if value < -limit:
+                raise PydanticCustomError("greater_than_equal", "Order must be at least {ge}.", {"ge": -limit})
+            return int(value)
+        return value
 
     @field_validator("id")
     @classmethod
@@ -152,12 +172,22 @@ class SingleTextRecipeDefinitionV2(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def require_integer_version(cls, value: Any) -> Any:
-        """Literal identity must remain exact even when callers bypass the union."""
+        """Preserve JSON numeric identity even when callers bypass the union."""
         return _require_integer_schema_version(value)
 
 
+def normalize_recipe_schema_version(value: Any) -> Any:
+    """Copy the v2 JSON numeric equivalent 2.0 to 2 without mutating callers."""
+    if isinstance(value, Mapping):
+        version = value.get("schema_version")
+        if type(version) is float and version == 2.0:
+            return {**value, "schema_version": 2}
+    return value
+
+
 def _require_integer_schema_version(value: Any) -> Any:
-    """Prevent JSON floats, booleans, and strings from selecting a schema branch."""
+    """Allow the v2 JSON numeric equivalent, never bool/string coercion."""
+    value = normalize_recipe_schema_version(value)
     version = value.get("schema_version") if isinstance(value, Mapping) else getattr(value, "schema_version", None)
     if type(version) is not int:
         raise ValueError("schema_version must be an integer")

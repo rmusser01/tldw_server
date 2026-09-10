@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from .models import PromptDefinition, SingleTextRecipeDefinitionV2, ValidationIssue
+from .models import PromptDefinition, SingleTextRecipeDefinitionV2, ValidationIssue, normalize_recipe_schema_version
 
 SUPPORTED_SCHEMA_VERSION = 1
 VALID_BLOCK_ROLES = {"system", "developer", "user", "assistant"}
@@ -24,7 +24,7 @@ def validate_prompt_definition(
     definition: dict[str, Any] | PromptDefinition | SingleTextRecipeDefinitionV2,
 ) -> list[ValidationIssue]:
     """Return stable structural/semantic issues without modifying either schema."""
-    payload = _as_mapping(definition)
+    payload = normalize_recipe_schema_version(_as_mapping(definition))
     issues: list[ValidationIssue] = []
     declared_variable_names: set[str] = set()
 
