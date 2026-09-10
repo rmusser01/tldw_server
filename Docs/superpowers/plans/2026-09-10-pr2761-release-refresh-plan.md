@@ -11,9 +11,9 @@
 
 | Item | Recorded state |
 | --- | --- |
-| Integrated release code and verified blocker fixes | `0cec0bb409ddbd2de0089e1909b4b6b718823de3` |
+| Integrated release code and verified blocker fixes | `50dcf5453b1ba10b0eabb505ff32b831f47f8185` |
 | Latest pushed candidate at this update | `30338ef7de` (Research readiness fix and refreshed protected-source record) |
-| Protected source snapshot | `d1af177bf3f55d05231ebec79ee6e7f2528a55e3`, 7,099 files |
+| Protected source snapshot | `50dcf5453b1ba10b0eabb505ff32b831f47f8185`, 7,099 files |
 | PR branch / target | `codex/release-main-0.1.42` → `main` |
 | PR state at inspection | Draft; no merge or publication performed |
 | Remote CI snapshot | On `30338ef7de`, backend/security/coverage/container/E2E/license/docs and seven frontend shards pass. Shard 5 reminder validation failed; the complete repaired suite passes 50 tests locally. CodeQL remains unresolved. Image startup separately exposed a missing package despite the passing build gate. |
@@ -240,3 +240,5 @@ Final metadata verification: **36 passed, 1 host-limited docs test deselected, 4
 - Actual owner-scoped Jobs receipts are verified separately from low-level create deduplication: **90 SQLite/PostgreSQL tests passed, zero skips**, including owner isolation, rollback, corrupt correlation, archive behavior and concurrency. The low-level scenario's owner claim was inaccurate; the documented boundary is `(domain, queue, job_type, idempotency_key)`. A temporary assertion demanding an incompatible fifth owner dimension failed on both backends and was removed after contract review. Only its docstring was corrected. This was not evidence of a new public cross-tenant exploit. Logs: `/tmp/pr2761-jobs-receipts.log`, `/tmp/pr2761-jobs-receipts.xml`.
 - Release Backlog integrity rerun passes: **13 release nodes, 4 historical records**.
 - TASK-12116 remaining strictness baseline is now measured: separate flag runs produce **948 noImplicitAny diagnostics in 252 files** and **664 strictNullChecks diagnostics in 177 files**. A 328-file hook sample adds **25 diagnostics in 14 files** under the seven disabled compiler rules. Five shared runtime dependency-major mismatches remain. Enabling all these gates is substantial uncompleted work, not a passing current baseline.
+
+Package/reminder source commit: **`50dcf5453b1ba10b0eabb505ff32b831f47f8185`**. Protected manifest regenerated across **7,099 files**, SHA-256 **`2e495751c4c3ad02842881167da31ab15a4e0f665f0f872c5906590dc213b099`**; legal/date bytes unchanged. Local image uses clean `0cec0bb409` plus the identical Dockerfile fix; later changes are evidence, metadata and tests. This diagnostic artifact is not the final published artifact or full supply-chain certification.
