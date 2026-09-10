@@ -1,12 +1,18 @@
-import { getAllPrompts, savePrompt, updatePrompt } from "@/db/dexie/helpers";
-import type { Prompt } from "@/db/dexie/types";
-import { useServerOnline } from "@/hooks/useServerOnline";
 import {
   buildRecipePromptFields,
   classifyPromptRecipe,
   cloneSavedRecipeSource,
   getRecipePersistenceState,
 } from "@/components/Option/Prompt/prompt-recipe-library";
+import {
+  getAllPrompts,
+  permanentlyDeletePrompt,
+  restorePromptSnapshot,
+  savePrompt,
+  updatePrompt,
+} from "@/db/dexie/helpers";
+import type { Prompt } from "@/db/dexie/types";
+import { useServerOnline } from "@/hooks/useServerOnline";
 import {
   autoSyncPrompt,
   shouldAutoSyncWorkspacePrompts,
@@ -37,6 +43,9 @@ const acceptSyncResult = (
   throw new Error(result.error || "recipe_sync_failed");
 };
 
+const rollbackFailure = (action: "save" | "update") =>
+  new Error(`recipe_${action}_rollback_failed`);
+
 export function PromptRecipeBuilder({
   target,
   capabilities,
@@ -52,7 +61,17 @@ export function PromptRecipeBuilder({
     queryFn: getAllPrompts,
   });
   const persistence = getRecipePersistenceState(isOnline, capabilities);
-  const persistenceAvailable = persistence.available && !isFireFoxPrivateMode;
+  const basePersistenceAvailable =
+    persistence.available && !isFireFoxPrivateMode;
+  const savePersistenceAvailable =
+    basePersistenceAvailable &&
+    capabilities?.prompt_persistence?.create_authorized === true;
+  const updatePersistenceAvailable =
+    basePersistenceAvailable &&
+    capabilities?.prompt_persistence?.update_authorized === true;
+  const persistenceAuthorizationDenied =
+    capabilities?.prompt_persistence?.create_authorized === false ||
+    capabilities?.prompt_persistence?.update_authorized === false;
   const persistenceUnavailableReason = isFireFoxPrivateMode
     ? t(
         "common:promptAssist.recipePrivateMode",
@@ -68,14 +87,23 @@ export function PromptRecipeBuilder({
             "common:promptAssist.recipeChecking",
             "Checking whether this server supports recipe saving. You can still edit, preview, and apply.",
           )
-        : capabilities.availability === "available"
-          ? t(
-              "common:promptAssist.recipeUnsupported",
-              "This server does not support recipe saving yet. You can still edit, preview, and apply.",
-            )
+        : !persistence.available
+          ? capabilities.availability === "available"
+            ? t(
+                "common:promptAssist.recipeUnsupported",
+                "This server does not support recipe saving yet. You can still edit, preview, and apply.",
+              )
+            : t(
+                "common:promptAssist.recipeUnknown",
+                "Recipe saving is unavailable because server capabilities could not be confirmed. You can still edit, preview, and apply.",
+              )
           : t(
-              "common:promptAssist.recipeUnknown",
-              "Recipe saving is unavailable because server capabilities could not be confirmed. You can still edit, preview, and apply.",
+              persistenceAuthorizationDenied
+                ? "common:promptAssist.recipeAuthorizationDenied"
+                : "common:promptAssist.recipeAuthorizationUnavailable",
+              persistenceAuthorizationDenied
+                ? "Recipe saving or updating is unavailable because this account is not authorized. You can still edit, preview, and apply."
+                : "Recipe saving or updating is unavailable because authorization could not be confirmed. You can still edit, preview, and apply.",
             );
 
   const savedRecipes = React.useMemo(
@@ -95,7 +123,7 @@ export function PromptRecipeBuilder({
   );
 
   const refreshPromptQueries = React.useCallback(async () => {
-    await Promise.all([
+    await Promise.allSettled([
       queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] }),
       queryClient.invalidateQueries({ queryKey: ["getAllPromptsForSelect"] }),
     ]);
@@ -108,21 +136,35 @@ export function PromptRecipeBuilder({
 
   const saveAsNew = React.useCallback(
     async (definition: SingleTextRecipeDefinition) => {
-      if (!persistenceAvailable) throw new Error("recipe_save_unavailable");
+      if (!savePersistenceAvailable) throw new Error("recipe_save_unavailable");
       setSyncPendingNotice(false);
-      const saved = await savePrompt({
-        title: t("common:promptAssist.untitledRecipe", "Untitled recipe"),
-        ...buildRecipePromptFields(definition),
-      });
-      setSyncPendingNotice(await syncIfEnabled(saved.id));
-      await refreshPromptQueries();
+      try {
+        const saved = await savePrompt({
+          title: t("common:promptAssist.untitledRecipe", "Untitled recipe"),
+          ...buildRecipePromptFields(definition),
+        });
+        try {
+          setSyncPendingNotice(await syncIfEnabled(saved.id));
+        } catch (error) {
+          try {
+            await permanentlyDeletePrompt(saved.id);
+          } catch {
+            throw rollbackFailure("save");
+          }
+          throw error;
+        }
+      } finally {
+        await refreshPromptQueries();
+      }
     },
-    [persistenceAvailable, refreshPromptQueries, syncIfEnabled, t],
+    [refreshPromptQueries, savePersistenceAvailable, syncIfEnabled, t],
   );
 
   const updateSaved = React.useCallback(
     async (savedSourceId: string, definition: SingleTextRecipeDefinition) => {
-      if (!persistenceAvailable) throw new Error("recipe_update_unavailable");
+      if (!updatePersistenceAvailable) {
+        throw new Error("recipe_update_unavailable");
+      }
       setSyncPendingNotice(false);
       const current = prompts.find(
         (prompt) => String(prompt.id) === savedSourceId,
@@ -137,21 +179,32 @@ export function PromptRecipeBuilder({
       ) {
         throw new Error("recipe_update_conflict");
       }
-      const id = await updatePrompt({
-        ...current,
-        ...buildRecipePromptFields(definition),
-        id: savedSourceId,
-      });
-      if (id !== savedSourceId) throw new Error("recipe_identity_changed");
-      setSyncPendingNotice(await syncIfEnabled(savedSourceId));
-      await refreshPromptQueries();
+      const snapshot = structuredClone(current);
+      try {
+        const id = await updatePrompt({
+          ...current,
+          ...buildRecipePromptFields(definition),
+          id: savedSourceId,
+        });
+        if (id !== savedSourceId) throw new Error("recipe_identity_changed");
+        setSyncPendingNotice(await syncIfEnabled(savedSourceId));
+      } catch (error) {
+        try {
+          await restorePromptSnapshot(snapshot);
+        } catch {
+          throw rollbackFailure("update");
+        }
+        throw error;
+      } finally {
+        await refreshPromptQueries();
+      }
     },
     [
-      persistenceAvailable,
       prompts,
       refreshPromptQueries,
       syncIfEnabled,
       target,
+      updatePersistenceAvailable,
     ],
   );
 
@@ -179,7 +232,8 @@ export function PromptRecipeBuilder({
       <SingleFieldRecipeEditor
         target={target}
         savedRecipes={savedRecipes}
-        persistenceAvailable={persistenceAvailable}
+        savePersistenceAvailable={savePersistenceAvailable}
+        updatePersistenceAvailable={updatePersistenceAvailable}
         persistenceUnavailableReason={persistenceUnavailableReason}
         onApply={onApply}
         onSaveAsNew={saveAsNew}

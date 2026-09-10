@@ -956,7 +956,8 @@ def test_stable_error_mapping_never_exposes_internal_exception_text(
         assert "retry_after_seconds" not in body
 
 
-def test_capabilities_enable_track_a_with_centralized_limits_and_keep_recipe_disabled():
+def test_capabilities_enable_track_a_with_centralized_limits_and_keep_recipe_disabled(monkeypatch):
+    monkeypatch.delenv("PROMPTS_REQUIRE_ADMIN", raising=False)
     with _isolated_prompt_client() as (client, _app, _route):
         response = client.get("/api/v1/prompts/capabilities")
 
@@ -995,6 +996,43 @@ def test_capabilities_enable_track_a_with_centralized_limits_and_keep_recipe_dis
             "supported": False,
             "limits": dict(prompts.SINGLE_TEXT_RECIPE_LIMITS),
         },
+        "prompt_persistence": {
+            "create_authorized": True,
+            "update_authorized": True,
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("roles", "permissions", "expected"),
+    [
+        (["admin"], [], True),
+        (["user"], ["system.configure"], True),
+        (["user"], [], False),
+    ],
+)
+def test_capabilities_apply_the_prompt_write_admin_rule(
+    monkeypatch,
+    roles,
+    permissions,
+    expected,
+):
+    monkeypatch.setenv("PROMPTS_REQUIRE_ADMIN", "true")
+    principal = AuthPrincipal(
+        kind="user",
+        user_id=7,
+        subject="capability-user",
+        roles=roles,
+        permissions=permissions,
+    )
+    with _isolated_prompt_client() as (client, app, _route):
+        app.dependency_overrides[get_auth_principal] = lambda: principal
+        response = client.get("/api/v1/prompts/capabilities")
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert response.json()["prompt_persistence"] == {
+        "create_authorized": expected,
+        "update_authorized": expected,
     }
 
 

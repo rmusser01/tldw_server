@@ -248,6 +248,15 @@ class PromptRecipeCapability(BaseModel):
     limits: dict[str, int] = Field(default_factory=lambda: dict(SINGLE_TEXT_RECIPE_LIMITS))
 
 
+class PromptPersistenceAuthorization(BaseModel):
+    """Authorization for prompt persistence operations."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    create_authorized: bool
+    update_authorized: bool
+
+
 class PromptCapabilitiesResponse(BaseModel):
     """Versioned prompt feature discovery response."""
 
@@ -255,6 +264,7 @@ class PromptCapabilitiesResponse(BaseModel):
 
     prompt_improvement_v1: PromptImprovementCapability
     single_text_recipe_v2: PromptRecipeCapability
+    prompt_persistence: PromptPersistenceAuthorization
 
 
 # --- Keyword Schemas ---

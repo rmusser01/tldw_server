@@ -3,9 +3,9 @@ import { BlockEditorPanel } from "@/components/Option/Prompt/Structured/BlockEdi
 import { BlockListPanel } from "@/components/Option/Prompt/Structured/BlockListPanel";
 import { VariableEditorPanel } from "@/components/Option/Prompt/Structured/VariableEditorPanel";
 import {
-  renderSingleTextRecipe,
   SINGLE_TEXT_RECIPE_LIMITS,
   SingleTextRecipeRenderError,
+  renderSingleTextRecipe,
 } from "@/components/Option/Prompt/structured-prompt-utils";
 import React, {
   useEffect,
@@ -14,6 +14,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 
 import { BUILT_IN_RECIPES, CLEAR_TASK_RECIPE } from "./built-in-recipes";
 import {
@@ -40,6 +41,8 @@ export type SingleFieldRecipeEditorProps = {
   initialSource?: RecipeSource;
   savedRecipes?: readonly SavedRecipeSource[];
   persistenceAvailable?: boolean;
+  savePersistenceAvailable?: boolean;
+  updatePersistenceAvailable?: boolean;
   persistenceUnavailableReason?: string;
   onApply: (compiledText: string) => void;
   onSaveAsNew?: (
@@ -119,11 +122,14 @@ export function SingleFieldRecipeEditor({
   initialSource = CLEAR_TASK_RECIPE,
   savedRecipes = [],
   persistenceAvailable,
+  savePersistenceAvailable = persistenceAvailable,
+  updatePersistenceAvailable = persistenceAvailable,
   persistenceUnavailableReason = "Recipe saving requires a supported online server.",
   onApply,
   onSaveAsNew,
   onUpdate,
 }: SingleFieldRecipeEditorProps) {
+  const { t } = useTranslation(["common"]);
   const ownerKey = `${target}\u0000${sourceValue(initialSource)}`;
   const [state, setState] = useState(() =>
     createRecipeWorkingCopy(initialSource, target),
@@ -428,12 +434,25 @@ export function SingleFieldRecipeEditor({
     setPersistenceError(null);
     try {
       await persist();
-    } catch {
+    } catch (error) {
       if (request === persistenceRequest.current) {
+        const rollbackFailed =
+          error instanceof Error &&
+          error.message === `recipe_${action}_rollback_failed`;
         setPersistenceError(
-          action === "save"
-            ? "Could not save the recipe. Try again."
-            : "Could not update the recipe. Try again.",
+          rollbackFailed
+            ? action === "save"
+              ? t(
+                  "common:promptAssist.recipeSaveRollbackFailed",
+                  "Could not save the recipe, and its local rollback also failed. Refresh the prompt library before retrying.",
+                )
+              : t(
+                  "common:promptAssist.recipeUpdateRollbackFailed",
+                  "Could not update the recipe, and its local rollback also failed. Refresh the prompt library before retrying.",
+                )
+            : action === "save"
+              ? "Could not save the recipe. Try again."
+              : "Could not update the recipe. Try again.",
         );
       }
     } finally {
@@ -452,7 +471,7 @@ export function SingleFieldRecipeEditor({
     Object.keys(variableNameErrors).length === 0 &&
     !Object.entries(variableNameDrafts).some(([name, value]) => name !== value);
   const saveEnabled =
-    persistenceAvailable === true &&
+    savePersistenceAvailable === true &&
     preview.definitionValid &&
     variableNamesReady &&
     Boolean(onSaveAsNew);
@@ -472,7 +491,7 @@ export function SingleFieldRecipeEditor({
     state.source.source_kind === "saved" &&
     liveSelectedSyncStatus === "conflict";
   const updateEnabled =
-    persistenceAvailable === true &&
+    updatePersistenceAvailable === true &&
     preview.definitionValid &&
     variableNamesReady &&
     state.source.source_kind === "saved" &&
@@ -659,7 +678,9 @@ export function SingleFieldRecipeEditor({
         </section>
       </div>
 
-      {persistenceAvailable !== true ? (
+      {savePersistenceAvailable !== true ||
+      (state.source.source_kind === "saved" &&
+        updatePersistenceAvailable !== true) ? (
         <p role="status" className="text-sm text-warn">
           {persistenceUnavailableReason}
         </p>

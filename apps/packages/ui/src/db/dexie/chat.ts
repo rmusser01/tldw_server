@@ -524,6 +524,13 @@ export class PageAssistDatabase {
     await db.prompts.delete(id);
   }
 
+  async restorePromptSnapshot(snapshot: Prompt) {
+    if (!(await db.prompts.get(snapshot.id))) {
+      throw new Error('prompt_snapshot_target_missing');
+    }
+    await db.prompts.put(structuredClone(snapshot));
+  }
+
   async restorePrompt(id: string) {
     // Restore from trash: clear deletedAt
     const now = Date.now();

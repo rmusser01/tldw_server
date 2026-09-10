@@ -1681,5 +1681,17 @@
   },
   "promptAssist_recipeLoading": {
     "message": "Loading recipe builder…"
+  },
+  "promptAssist_recipeAuthorizationUnavailable": {
+    "message": "Recipe saving or updating is unavailable because authorization could not be confirmed. You can still edit, preview, and apply."
+  },
+  "promptAssist_recipeAuthorizationDenied": {
+    "message": "Recipe saving or updating is unavailable because this account is not authorized. You can still edit, preview, and apply."
+  },
+  "promptAssist_recipeSaveRollbackFailed": {
+    "message": "Could not save the recipe, and its local rollback also failed. Refresh the prompt library before retrying."
+  },
+  "promptAssist_recipeUpdateRollbackFailed": {
+    "message": "Could not update the recipe, and its local rollback also failed. Refresh the prompt library before retrying."
   }
 }

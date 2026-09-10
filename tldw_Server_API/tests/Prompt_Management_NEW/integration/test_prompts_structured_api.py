@@ -213,6 +213,10 @@ def test_recipe_capability_advertises_centralized_limits_without_enablement(test
     response = test_client.get("/api/v1/prompts/capabilities", headers=auth_headers)
     assert response.status_code == 200, response.text
     assert response.json()["single_text_recipe_v2"] == {"supported": False, "limits": dict(SINGLE_TEXT_RECIPE_LIMITS)}
+    assert response.json()["prompt_persistence"] == {
+        "create_authorized": True,
+        "update_authorized": True,
+    }
 
 
 def test_recipe_preview_openapi_exposes_optional_rendered_text(test_client):

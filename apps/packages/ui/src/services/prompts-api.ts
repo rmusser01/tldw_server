@@ -124,12 +124,20 @@ export type PromptCapabilities = {
   single_text_recipe_v2: {
     supported: boolean
   }
+  prompt_persistence?: {
+    create_authorized: boolean | null
+    update_authorized: boolean | null
+  }
 }
 
 const unavailablePromptCapabilities = (): PromptCapabilities => ({
   availability: "unavailable",
   prompt_improvement_v1: { supported: false, limits: null },
-  single_text_recipe_v2: { supported: false }
+  single_text_recipe_v2: { supported: false },
+  prompt_persistence: {
+    create_authorized: null,
+    update_authorized: null
+  }
 })
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -174,6 +182,7 @@ const parsePromptCapabilities = (value: unknown): PromptCapabilities | null => {
   if (!isRecord(value)) return null
   const improvement = value.prompt_improvement_v1
   const recipe = value.single_text_recipe_v2
+  const persistence = value.prompt_persistence
   if (!isRecord(improvement) || !isRecord(recipe)) return null
   if (
     typeof improvement.supported !== "boolean" ||
@@ -190,7 +199,19 @@ const parsePromptCapabilities = (value: unknown): PromptCapabilities | null => {
       supported: improvement.supported,
       limits
     },
-    single_text_recipe_v2: { supported: recipe.supported }
+    single_text_recipe_v2: { supported: recipe.supported },
+    prompt_persistence: {
+      create_authorized:
+        isRecord(persistence) &&
+        typeof persistence.create_authorized === "boolean"
+          ? persistence.create_authorized
+          : null,
+      update_authorized:
+        isRecord(persistence) &&
+        typeof persistence.update_authorized === "boolean"
+          ? persistence.update_authorized
+          : null
+    }
   }
 }
 
@@ -265,7 +286,9 @@ export async function exportPromptsServer(
   )
 }
 
-export async function listPromptCollectionsServer(): Promise<PromptCollection[]> {
+export async function listPromptCollectionsServer(): Promise<
+  PromptCollection[]
+> {
   const response = await apiSend<PromptCollectionListResponse>({
     path: toAllowedPath("/api/v1/prompts/collections"),
     method: "GET"
@@ -334,7 +357,9 @@ export async function fetchPromptCapabilities(): Promise<PromptCapabilities> {
       method: "GET"
     })
     if (!response.ok) return unavailablePromptCapabilities()
-    return parsePromptCapabilities(response.data) ?? unavailablePromptCapabilities()
+    return (
+      parsePromptCapabilities(response.data) ?? unavailablePromptCapabilities()
+    )
   } catch {
     return unavailablePromptCapabilities()
   }

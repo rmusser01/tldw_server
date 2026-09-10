@@ -26,6 +26,7 @@ import {
   deletePromptByIdFB,
   getAllPromptsFB,
   getPromptByIdFB,
+  restorePromptSnapshotFB,
   savePromptFB,
   updatePromptFB
 } from ".."
@@ -604,6 +605,14 @@ export const permanentlyDeletePrompt = async (id: string) => {
   await db.permanentlyDeletePrompt(id)
   await deletePromptByIdFB(id)
   return id
+}
+
+export const restorePromptSnapshot = async (snapshot: Prompt) => {
+  const restored = structuredClone(snapshot)
+  const db = new PageAssistDatabase()
+  await db.restorePromptSnapshot(restored)
+  await restorePromptSnapshotFB(restored)
+  return restored.id
 }
 
 export const restorePrompt = async (id: string) => {

@@ -415,6 +415,18 @@ export class PageAssitDatabase {
     this.db.set({ prompts: newPrompts })
   }
 
+  async restorePromptSnapshot(snapshot: Prompt) {
+    const prompts = await this.getAllPrompts()
+    if (!prompts.some((prompt) => prompt.id === snapshot.id)) {
+      throw new Error("prompt_snapshot_target_missing")
+    }
+    await this.db.set({
+      prompts: prompts.map((prompt) =>
+        prompt.id === snapshot.id ? structuredClone(snapshot) : prompt
+      )
+    })
+  }
+
   async updatePrompt(
     id: string,
     updates: Partial<Prompt> & {
@@ -800,6 +812,12 @@ export const updatePromptFB = async (
     keywords: mergedKeywords ?? updates.keywords ?? updates.tags
   })
   return updates.id
+}
+
+export const restorePromptSnapshotFB = async (snapshot: Prompt) => {
+  const db = new PageAssitDatabase()
+  await db.restorePromptSnapshot(snapshot)
+  return snapshot.id
 }
 
 export const getPromptById = async (id: string) => {

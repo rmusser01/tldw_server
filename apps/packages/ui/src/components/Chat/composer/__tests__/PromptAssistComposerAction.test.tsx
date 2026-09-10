@@ -397,6 +397,30 @@ describe("PromptAssistComposerAction entry and request contract", () => {
     expect((screen.getByLabelText("User draft") as HTMLTextAreaElement).value).toBe("")
   })
 
+  it("closes recipe mode on Escape from a recipe input and restores draft, runtime, and focus", async () => {
+    const user = userEvent.setup()
+    const original = "  Exact draft 🧪\n\n"
+    renderHarness({ initialDraft: original })
+
+    await openActions(user)
+    await user.click(screen.getByRole("button", { name: /Build from recipe/ }))
+    const runtime = await screen.findByLabelText("Current value for Task (not saved)")
+    await user.type(runtime, "Temporary runtime")
+    expect(runtime).toHaveFocus()
+    await user.keyboard("{Escape}")
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Build from recipe" })).not.toBeInTheDocument()
+    )
+    expect(screen.getByLabelText("User draft")).toHaveValue(original)
+    expect(screen.getByLabelText("User draft")).toHaveFocus()
+
+    await openActions(user)
+    await user.click(screen.getByRole("button", { name: /Build from recipe/ }))
+    expect(await screen.findByLabelText("Current value for Task (not saved)")).toHaveValue("")
+    expect(screen.getByLabelText("User draft")).toHaveValue(original)
+  })
+
   it("disables both actions for a whitespace-only user draft", async () => {
     const user = userEvent.setup()
     renderHarness({ initialDraft: "   " })

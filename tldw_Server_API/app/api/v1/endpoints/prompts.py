@@ -490,7 +490,7 @@ async def _resolve_prompts_auth_user(
     return user
 
 
-def _is_prompts_admin_user(user: Optional[User]) -> bool:
+def _is_prompts_admin_user(user: Optional[User | AuthPrincipal]) -> bool:
     if user is None:
         return False
     try:
@@ -513,6 +513,12 @@ def _is_prompts_admin_user(user: Optional[User]) -> bool:
     except _PROMPTS_LOOKUP_EXCEPTIONS:
         return False
     return False
+
+
+def _is_prompt_persistence_authorized(user: Optional[User | AuthPrincipal]) -> bool:
+    """Apply the same write rule enforced by ``verify_prompts_user``."""
+
+    return not env_flag_enabled("PROMPTS_REQUIRE_ADMIN") or _is_prompts_admin_user(user)
 
 async def verify_prompts_auth(
     request: Request,
@@ -557,8 +563,7 @@ async def verify_prompts_user(
         x_api_key=x_api_key,
         Authorization=Authorization,
     )
-    require_admin = env_flag_enabled("PROMPTS_REQUIRE_ADMIN")
-    if require_admin and not _is_prompts_admin_user(user):
+    if not _is_prompt_persistence_authorized(user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied. Required role(s): admin",
@@ -736,11 +741,12 @@ async def _run_prompt_improvement_post_validation_gates(
     summary="Discover prompt feature capabilities",
     tags=["prompts"],
     dependencies=[
-        Depends(get_auth_principal),
         Depends(rbac_rate_limit("prompts.capabilities")),
     ],
 )
-async def get_prompt_capabilities() -> schemas.PromptCapabilitiesResponse:
+async def get_prompt_capabilities(
+    principal: AuthPrincipal = Depends(get_auth_principal),
+) -> schemas.PromptCapabilitiesResponse:
     """Return fail-closed Track A/Track B flags and centralized limits."""
 
     return schemas.PromptCapabilitiesResponse(
@@ -751,6 +757,10 @@ async def get_prompt_capabilities() -> schemas.PromptCapabilitiesResponse:
             ),
         ),
         single_text_recipe_v2=schemas.PromptRecipeCapability(supported=False, limits=dict(SINGLE_TEXT_RECIPE_LIMITS)),
+        prompt_persistence=schemas.PromptPersistenceAuthorization(
+            create_authorized=_is_prompt_persistence_authorized(principal),
+            update_authorized=_is_prompt_persistence_authorized(principal),
+        ),
     )
 
 

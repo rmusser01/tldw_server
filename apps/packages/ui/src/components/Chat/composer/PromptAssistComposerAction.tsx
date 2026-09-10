@@ -366,7 +366,14 @@ export function PromptAssistComposerAction({
             ? t("common:promptAssist.recipeTitle", "Build from recipe")
             : t("common:promptAssist.region", "Prompt improvement")
         }>
-        <div onKeyDown={(event) => event.stopPropagation()}>
+        <div
+          onKeyDown={(event) => {
+            if (recipeOpen && event.key === "Escape") {
+              event.preventDefault()
+              closeDrawer()
+            }
+            event.stopPropagation()
+          }}>
           {recipeOpen ? (
             <React.Suspense
               fallback={
