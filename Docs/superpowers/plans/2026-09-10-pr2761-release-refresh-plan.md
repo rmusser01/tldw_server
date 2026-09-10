@@ -11,9 +11,9 @@
 
 | Item | Recorded state |
 | --- | --- |
-| Integrated release code and verified blocker fixes | `28ddb8ad8c99fa8d253e1d300a26cd7eb1f4e8cf` |
-| Latest executable-fix/metadata push | `c97cb2a1ab7a5177e64bba597ba3e1aa418fedac` (source `28ddb8ad8c`); fresh CI is running |
-| Protected source snapshot | `28ddb8ad8c99fa8d253e1d300a26cd7eb1f4e8cf`, 7,106 files |
+| Integrated release code and verified blocker fixes | `eeb69d440fdf8204c9e560b8b89b94112c094c8d` |
+| Last observed CI head before the final closure batch | `c97cb2a1ab7a5177e64bba597ba3e1aa418fedac`; backend/security/docs pass, remaining lanes run and CodeQL remains failed. The source above and its metadata companion require fresh-head CI. |
+| Protected source snapshot | `eeb69d440fdf8204c9e560b8b89b94112c094c8d`, 7,106 files |
 | PR branch / target | `codex/release-main-0.1.42` → `main` |
 | PR state at inspection | Draft; no merge or publication performed |
 | Remote CI snapshot | On `d5ba8b5be7`, backend/security/coverage/container/E2E/license/docs and all eight frontend shards pass, including all five container builds. The frontend aggregate remains running at inspection. Completed CodeQL scans report 445 open instances (7 critical); the three targeted exception alerts and the TTS service finding are absent from the open PR inventory. |
