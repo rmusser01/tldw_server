@@ -367,7 +367,7 @@ def evaluate_trivy_report(
         matches = tuple(
             item
             for item in scoped_exceptions
-            if item.expires_on >= today
+            if item.created_on <= today <= item.expires_on
             and item.vulnerability_id == finding.vulnerability_id
             and item.purl == finding.purl
             and item.installed_version == finding.installed_version
