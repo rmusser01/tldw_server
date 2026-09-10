@@ -1,0 +1,358 @@
+{
+  "approval": {
+    "author": "rmusser01",
+    "body_exact_readback_verified": true,
+    "body_sha256": "7c5b0bcec1e3ef57a0622484c0736f19dc6de65484629c835fdee599fccc308b",
+    "canonical_policy_url": "https://github.com/rmusser01/tldw_server/pull/2869",
+    "comment_id": 5613359176,
+    "comment_url": "https://github.com/rmusser01/tldw_server/pull/2869#issuecomment-5613359176",
+    "created_at": "2026-09-10T04:51:01Z",
+    "source": "Explicit requester approval in this task, posted by Codex at their direction."
+  },
+  "boundary_checks": [
+    {
+      "field": "installed_version",
+      "id": "TASK-13013.7.23-OS-01",
+      "result": "rejected"
+    },
+    {
+      "field": "purl",
+      "id": "TASK-13013.7.23-OS-01",
+      "result": "rejected"
+    },
+    {
+      "field": "severity",
+      "id": "TASK-13013.7.23-OS-01",
+      "result": "rejected"
+    },
+    {
+      "field": "vulnerability_id",
+      "id": "TASK-13013.7.23-OS-01",
+      "result": "rejected"
+    },
+    {
+      "field": "component",
+      "id": "TASK-13013.7.23-OS-01",
+      "result": "rejected"
+    },
+    {
+      "field": "installed_version",
+      "id": "TASK-13013.7.23-OS-02",
+      "result": "rejected"
+    },
+    {
+      "field": "purl",
+      "id": "TASK-13013.7.23-OS-02",
+      "result": "rejected"
+    },
+    {
+      "field": "severity",
+      "id": "TASK-13013.7.23-OS-02",
+      "result": "rejected"
+    },
+    {
+      "field": "vulnerability_id",
+      "id": "TASK-13013.7.23-OS-02",
+      "result": "rejected"
+    },
+    {
+      "field": "component",
+      "id": "TASK-13013.7.23-OS-02",
+      "result": "rejected"
+    },
+    {
+      "field": "installed_version",
+      "id": "TASK-13013.7.23-OS-03",
+      "result": "rejected"
+    },
+    {
+      "field": "purl",
+      "id": "TASK-13013.7.23-OS-03",
+      "result": "rejected"
+    },
+    {
+      "field": "severity",
+      "id": "TASK-13013.7.23-OS-03",
+      "result": "rejected"
+    },
+    {
+      "field": "vulnerability_id",
+      "id": "TASK-13013.7.23-OS-03",
+      "result": "rejected"
+    },
+    {
+      "field": "component",
+      "id": "TASK-13013.7.23-OS-03",
+      "result": "rejected"
+    },
+    {
+      "field": "installed_version",
+      "id": "TASK-13013.7.23-OS-04",
+      "result": "rejected"
+    },
+    {
+      "field": "purl",
+      "id": "TASK-13013.7.23-OS-04",
+      "result": "rejected"
+    },
+    {
+      "field": "severity",
+      "id": "TASK-13013.7.23-OS-04",
+      "result": "rejected"
+    },
+    {
+      "field": "vulnerability_id",
+      "id": "TASK-13013.7.23-OS-04",
+      "result": "rejected"
+    },
+    {
+      "field": "component",
+      "id": "TASK-13013.7.23-OS-04",
+      "result": "rejected"
+    },
+    {
+      "field": "installed_version",
+      "id": "TASK-13013.7.23-OS-05",
+      "result": "rejected"
+    },
+    {
+      "field": "purl",
+      "id": "TASK-13013.7.23-OS-05",
+      "result": "rejected"
+    },
+    {
+      "field": "severity",
+      "id": "TASK-13013.7.23-OS-05",
+      "result": "rejected"
+    },
+    {
+      "field": "vulnerability_id",
+      "id": "TASK-13013.7.23-OS-05",
+      "result": "rejected"
+    },
+    {
+      "field": "component",
+      "id": "TASK-13013.7.23-OS-05",
+      "result": "rejected"
+    }
+  ],
+  "components": {
+    "image-admin-ui": {
+      "after_blocking": 55,
+      "before_blocking": 56,
+      "excepted": [
+        {
+          "installed_version": "1:1.2.13.dfsg-1",
+          "purl": "pkg:deb/debian/zlib1g@1.2.13.dfsg-1?arch=amd64&distro=debian-12.15&epoch=1",
+          "severity": "CRITICAL",
+          "target": "/input@sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de (debian 12.15)",
+          "vulnerability_id": "CVE-2023-45853"
+        }
+      ],
+      "unmatched_exception_ids": []
+    },
+    "image-app": {
+      "after_blocking": 233,
+      "before_blocking": 234,
+      "excepted": [
+        {
+          "installed_version": "5.40.1-6",
+          "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+          "severity": "CRITICAL",
+          "target": "/input@sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f (debian 13.6)",
+          "vulnerability_id": "CVE-2026-8376"
+        }
+      ],
+      "unmatched_exception_ids": []
+    },
+    "image-audio-worker": {
+      "after_blocking": 233,
+      "before_blocking": 234,
+      "excepted": [
+        {
+          "installed_version": "5.40.1-6",
+          "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+          "severity": "CRITICAL",
+          "target": "/input@sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034 (debian 13.6)",
+          "vulnerability_id": "CVE-2026-8376"
+        }
+      ],
+      "unmatched_exception_ids": []
+    },
+    "image-webui": {
+      "after_blocking": 55,
+      "before_blocking": 56,
+      "excepted": [
+        {
+          "installed_version": "1:1.2.13.dfsg-1",
+          "purl": "pkg:deb/debian/zlib1g@1.2.13.dfsg-1?arch=amd64&distro=debian-12.15&epoch=1",
+          "severity": "CRITICAL",
+          "target": "/input@sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1 (debian 12.15)",
+          "vulnerability_id": "CVE-2023-45853"
+        }
+      ],
+      "unmatched_exception_ids": []
+    },
+    "image-worker": {
+      "after_blocking": 58,
+      "before_blocking": 59,
+      "excepted": [
+        {
+          "installed_version": "5.40.1-6",
+          "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+          "severity": "CRITICAL",
+          "target": "/input@sha256:240d731cb10be3b21dec0f35b1bc6687dbe1fd3062a30f830fe2c14111cc8e25 (debian 13.6)",
+          "vulnerability_id": "CVE-2026-8376"
+        }
+      ],
+      "unmatched_exception_ids": []
+    },
+    "source-admin-ui": {
+      "after_blocking": 0,
+      "before_blocking": 0,
+      "excepted": [],
+      "unmatched_exception_ids": []
+    },
+    "source-apps-workspace": {
+      "after_blocking": 0,
+      "before_blocking": 0,
+      "excepted": [],
+      "unmatched_exception_ids": []
+    },
+    "source-python-root": {
+      "after_blocking": 5,
+      "before_blocking": 5,
+      "excepted": [],
+      "unmatched_exception_ids": []
+    }
+  },
+  "document_kind": "approved-os-exception-activation",
+  "evaluation_date_utc": "2026-09-10",
+  "expiry": {
+    "2026-09-17": "accepted",
+    "2026-09-18": "rejected"
+  },
+  "local_base_head": "71fc7caa4d12f7bb2e6b0144dddca70378b11826",
+  "local_verification_artifacts": {
+    "/private/tmp/task-13013-7-24-activation.6x5NMf/approval-comment-api.json": "e90dcd74f54a98d48e0e351317b09dd3dbb0bc9e60c5057a2e808ec8757a18e3",
+    "/private/tmp/task-13013-7-24-activation.6x5NMf/approval-comment.md": "7c5b0bcec1e3ef57a0622484c0736f19dc6de65484629c835fdee599fccc308b",
+    "/private/tmp/task-13013-7-24-activation.6x5NMf/bandit.json": "e4334df7ff40fc79964489299264c96d27d783edda3e8ed13ab58af7ace85f9a",
+    "/private/tmp/task-13013-7-24-activation.6x5NMf/policy-contract-tests.log": "d242c76e00e5c7b6c64b57a180af09b6a4d20251210b5504ea78fdf4ac373f1d",
+    "/private/tmp/task-13013-7-24-activation.6x5NMf/replay-green.log": "8930b3ba0c0b179997a0fff93a599f8cc9b528fc6e02b0178aac28847ba6e8c9",
+    "/private/tmp/task-13013-7-24-activation.6x5NMf/replay-red.log": "e5914fed805f081fb55a181047db4daeb152663e6dee3106b6d08bf478ed1cca",
+    "/private/tmp/task-13013-7-24-activation.6x5NMf/verify_activation.py": "577d1cb2b68110131396e000ed719eda46d52f4e7f393c4182f95e73b6ce840b"
+  },
+  "new_scan_or_runtime_execution": false,
+  "policy_before_sha256": "81a515050e5d312ac4a453fa1bdaa999cfc11ad6a652659776bf5747c6b69168",
+  "policy_sha256": "276cde3ef9b039cabdd3d6d1688def838213e8ea1d8bff00e990a78cb3b99f00",
+  "remaining_scope": {
+    "chroma_exceptions_activated": 0,
+    "commits_pushed": false,
+    "conditional_chroma_records": 16,
+    "fresh_ci_completed_for_this_policy": false,
+    "release_admission": "blocked",
+    "unresolved_findings_remain_blocking": true
+  },
+  "review_packet_sha256": "d0fcaff69d7f248628ddb1d199ef016b3d45797ac1062d4ecd9ca6544d0ac039",
+  "reviewed_scan_head": "78c3f92228c6411ee4637b9d2df9aa3b50aacdc8",
+  "task": "TASK-13013.7.24",
+  "unchanged_repo_input_sha256": {
+    ".github/supply-chain/vulnerability-exceptions.schema.json": "0f36741f71d326f86d675eaf97984a69fd03cc66b8d8380f6234ceeae30a1eed",
+    ".github/workflows/container-build-check.yml": "6ef7df0646b7778b6d3a93a13b58eeda1597df877985c819b74bfd883a0f8b6a",
+    ".github/workflows/publish-docker.yml": "8522ce4014e2e5c635c2072a201ef67ac4c56689e752dbe4d3c9f447d93e6266",
+    ".github/workflows/sbom.yml": "5dad2bd88b20ee009412c9aed8ec25558bf52dc5f9ce0b7aa78d043cadd87634",
+    ".github/workflows/security-required.yml": "d42556a34c9c1212e64fc227972751e79ba877489f751aba72dabdb6200d05ca",
+    "Helper_Scripts/Supply_Chain/exception_policy.py": "9bf192fa6c8c4e48c22a816d82229de0177f9b3ae54711fe0596f1d43eb6ed96",
+    "Helper_Scripts/Supply_Chain/runtime_probe.py": "decdde660b68345f1d51a3350724bfc337bf30c6cfd36860c2c549058c4c624b",
+    "tldw_Server_API/app/core/Embeddings/ChromaDB_Library.py": "afcf6bf12095a59663bf20dd13cdb0d099e0210cb7b80a67172621f27b1a05fa",
+    "uv.lock": "54a87906885483eac91ce27990f1a0be4035996d2040942b66c2920db83ae07a"
+  },
+  "verification": {
+    "bandit": {
+      "errors": 0,
+      "exit_code": 0,
+      "findings": 0,
+      "paths": [
+        "Helper_Scripts/Supply_Chain/exception_policy.py",
+        "/private/tmp/task-13013-7-24-activation.6x5NMf/verify_activation.py"
+      ]
+    },
+    "black": {
+      "line_length": 120,
+      "result": "passed after formatting"
+    },
+    "canonical_json_schema": "passed",
+    "evidence_hashes_and_documentation_links": "passed",
+    "git_diff_check": "passed",
+    "green": "All eight retained reports passed approved counts, five excepted rows and zero unmatched records.",
+    "independent_review": {
+      "result": "no actionable findings; ready for scoped local commit",
+      "reviewer": "os_activation_review",
+      "verified": [
+        "exact five-record approved policy",
+        "unchanged original review packet",
+        "retained approval body and provenance",
+        "seven archives and 43 member hashes",
+        "eight report counts, five exceptions, zero unmatched",
+        "September 17/18 expiry boundary",
+        "recorded tests/security checks and documentation limits"
+      ]
+    },
+    "policy_and_workflow_contract_tests": {
+      "command": "python -m pytest tldw_Server_API/tests/Supply_Chain/test_exception_policy.py tldw_Server_API/tests/CI/test_release_workflow_contracts.py -q --basetemp=/private/tmp/task-13013-7-24-activation.6x5NMf/pytest -o 'addopts=--import-mode=importlib --strict-markers --tb=short'",
+      "environment": "/private/tmp/task-13013-7-19-passlib-kqd0vzjm/proposal/.venv",
+      "exit_code": 0,
+      "passed": 82,
+      "paths": [
+        "tldw_Server_API/tests/Supply_Chain/test_exception_policy.py",
+        "tldw_Server_API/tests/CI/test_release_workflow_contracts.py"
+      ]
+    },
+    "red": "Expected acceptance failure with empty policy: image-app expected 233 blockers, got 234."
+  },
+  "verification_script_sha256": "577d1cb2b68110131396e000ed719eda46d52f4e7f393c4182f95e73b6ce840b",
+  "verified_artifacts": [
+    {
+      "id": 10109529322,
+      "name": "container-admission-app",
+      "sha256": "7acf62766a675e54b8f721419a4d80371c31ca15056e57aabf2e3a0b5ce23ef8",
+      "verified_members": 6
+    },
+    {
+      "id": 10109884293,
+      "name": "container-admission-worker",
+      "sha256": "f1833864ecde4526276884702b0eb74c81126f76fd1873ea2c169afafd92a4ea",
+      "verified_members": 6
+    },
+    {
+      "id": 10109943070,
+      "name": "container-admission-audio-worker",
+      "sha256": "7611c8f6b54a928a5e72af991aeaec602c8044bbf94ae2a638ac8e6a27fe5fea",
+      "verified_members": 6
+    },
+    {
+      "id": 10109080595,
+      "name": "container-admission-webui",
+      "sha256": "ff2488f2b32aad8027a33a90984446b19985e91f4a2390e749f09203951e261a",
+      "verified_members": 5
+    },
+    {
+      "id": 10108713427,
+      "name": "container-admission-admin-ui",
+      "sha256": "81f84f323c2760399e2ba1c3a43e64712a210fcab3602bccf39de688c064bed2",
+      "verified_members": 5
+    },
+    {
+      "id": 10108780400,
+      "name": "source-sbom-aggregate",
+      "sha256": "04961ac46cf289d207e7a7ca497974621226dd7232bf6b86e01d12778871959e",
+      "verified_members": 6
+    },
+    {
+      "id": 10108803808,
+      "name": "source-sbom-scans",
+      "sha256": "06b887a22906577f7eef1aa6459bf45b654313286e7f69f3226e50e196000053",
+      "verified_members": 9
+    }
+  ]
+}
