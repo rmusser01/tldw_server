@@ -17,7 +17,10 @@ Published release notes entry point.
 - Worker images now include their local packages and configuration, with backend
   import checks in CI. Erasure honors SQLite foreign keys; ACP health, embedding
   requeue warnings and erasure logs exclude private exception details. Shared
-  frontend dependency majors are aligned, with strict URL/API-key guard checks.
+  frontend dependency majors are aligned, with strict URL/API-key guard and
+  timeout checks. Shared hook enforcement covers corrected moderation/workflow
+  clocks. Local model and audio input validation rejects symlink aliases before
+  resolution; manual CI comparisons honor the selected base commit.
 - Verify installed artifact digests: repository rollups 0.1.39–0.1.41 do not
   establish publication. At preparation, GitHub/GHCR app latest was 0.1.38
   and public PyPI listed 0.1.32.

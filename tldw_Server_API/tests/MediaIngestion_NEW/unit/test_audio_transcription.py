@@ -1,19 +1,18 @@
+import importlib
 import json
 import os
 from pathlib import Path
 
 import pytest
-import importlib
 
+import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import (
-    ConversionError,
-    perform_transcription,
-    speech_to_text,
     convert_to_wav,
     is_transcription_error_message,
+    perform_transcription,
+    speech_to_text,
     strip_whisper_metadata_header,
 )
-import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
 
 
 def _patch_transcript_cache_root(monkeypatch, tmp_path) -> Path:
@@ -88,12 +87,12 @@ def test_convert_to_wav_includes_duration(monkeypatch, tmp_path):
 def test_convert_to_wav_rejects_invalid_range(tmp_path):
     invalid_clip = tmp_path / "clip.mp4"
     invalid_clip.write_bytes(b"\x00" * 2048)
-    with pytest.raises(ConversionError):
+    with pytest.raises(atlib.ConversionError, match="must be greater than offset"):
         convert_to_wav(str(invalid_clip), offset=10, end_time=9)
 
 
 @pytest.mark.unit
-def test_convert_to_wav_rejects_symlink_input(tmp_path):
+def test_convert_to_wav_rejects_symlink_input(monkeypatch, tmp_path):
     target = tmp_path / "real.mp3"
     target.write_bytes(b"\x00" * 2048)
     link = tmp_path / "link.mp3"
@@ -102,7 +101,11 @@ def test_convert_to_wav_rejects_symlink_input(tmp_path):
     except OSError:
         pytest.skip("symlinks not supported on this platform")
 
-    with pytest.raises(ConversionError):
+    def unexpected_ffmpeg():
+        pytest.fail("symlink input must be rejected before FFmpeg discovery")
+
+    monkeypatch.setattr(atlib, "_find_ffmpeg", unexpected_ffmpeg)
+    with pytest.raises(atlib.ConversionError, match="symlinks"):
         convert_to_wav(str(link), overwrite=True)
 
 
@@ -542,9 +545,94 @@ def test_validate_qwen2audio_model_identifier_allows_local_path_under_base(monke
     base_root = tmp_path / "models" / "Whisper"
     model_path = base_root / "qwen-local"
     model_path.mkdir(parents=True, exist_ok=True)
+    for name in (
+        "config.json", "preprocessor_config.json", "tokenizer.json", "model.safetensors"
+    ):
+        (model_path / name).write_bytes(b"model-fixture")
     monkeypatch.setattr(atlib, "WHISPER_MODEL_BASE_DIR", base_root)
 
     assert validate_qwen2audio_model_identifier(str(model_path)) == str(model_path.resolve(strict=False))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("provider", ["whisper", "qwen2audio"])
+@pytest.mark.parametrize("identifier", ["local-model", "organization/local-model"])
+def test_model_identifier_rejects_existing_relative_directory_outside_root(
+    monkeypatch, tmp_path, provider, identifier
+):
+    model_root = tmp_path / "approved-models"
+    model_root.mkdir()
+    (tmp_path / identifier).mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(atlib, "WHISPER_MODEL_BASE_DIR", model_root)
+    normalize = getattr(atlib, f"_normalize_{provider}_model_identifier")
+
+    with pytest.raises(ValueError, match="must resolve under"):
+        normalize(identifier)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("provider", ["whisper", "qwen2audio"])
+def test_model_identifier_resolves_existing_relative_directory_under_root(
+    monkeypatch, tmp_path, provider
+):
+    model_path = tmp_path / "organization" / "local-model"
+    model_path.mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(atlib, "WHISPER_MODEL_BASE_DIR", tmp_path)
+    normalize = getattr(atlib, f"_normalize_{provider}_model_identifier")
+
+    assert normalize("organization/local-model") == str(model_path.resolve())
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("provider", ["whisper", "qwen2audio"])
+@pytest.mark.parametrize("absolute", [False, True])
+def test_model_identifier_rejects_directory_symlink(
+    monkeypatch, tmp_path, provider, absolute
+):
+    model_path = tmp_path / "actual-model"
+    model_path.mkdir()
+    alias = tmp_path / "organization" / "local-model"
+    alias.parent.mkdir()
+    alias.symlink_to(model_path, target_is_directory=True)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(atlib, "WHISPER_MODEL_BASE_DIR", tmp_path)
+    normalize = getattr(atlib, f"_normalize_{provider}_model_identifier")
+
+    with pytest.raises(ValueError, match="symlinks"):
+        normalize(str(alias) if absolute else "organization/local-model")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("provider", ["whisper", "qwen2audio"])
+def test_model_identifier_preserves_nonlocal_hub_id(monkeypatch, tmp_path, provider):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(atlib, "WHISPER_MODEL_BASE_DIR", tmp_path)
+    normalize = getattr(atlib, f"_normalize_{provider}_model_identifier")
+
+    assert normalize("organization/remote-model") == "organization/remote-model"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("provider", ["whisper", "qwen2audio"])
+def test_model_identifier_checks_relative_local_artifact_completeness(
+    monkeypatch, tmp_path, provider
+):
+    (tmp_path / "organization" / "local-model").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(atlib, "WHISPER_MODEL_BASE_DIR", tmp_path)
+    validate = getattr(atlib, f"validate_{provider}_model_identifier")
+
+    with pytest.raises(ValueError, match="artifact is incomplete"):
+        validate("organization/local-model")
+
+
+@pytest.mark.unit
+def test_whisper_model_identifier_preserves_nonlocal_alias(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+
+    assert atlib._normalize_whisper_model_identifier("tiny.en") == "tiny.en"
 
 
 @pytest.mark.unit
@@ -617,6 +705,7 @@ def test_transcribe_audio_uses_safe_default_provider(monkeypatch):
     # STT-Settings/default_transcriber, transcribe_audio falls back to
     # faster-whisper instead of raising KeyError.
     import numpy as np
+
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
 
     # Return an empty config to simulate missing STT-Settings section
@@ -751,6 +840,7 @@ def test_speech_to_text_qwen2audio_disabled_skips_audio_decode(monkeypatch, tmp_
 
     import sys
     import types
+
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
 
     monkeypatch.setattr(
@@ -991,6 +1081,7 @@ def test_speech_to_text_parakeet_mlx_uses_buffered_chunking_when_long(monkeypatc
     audio_file.write_bytes(b"\x00" * 2048)
 
     import librosa
+
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Buffered_Transcription as buffered_mod
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_MLX as mlx_mod
@@ -1048,6 +1139,7 @@ def test_speech_to_text_parakeet_mlx_passes_chunk_duration_when_short(monkeypatc
     audio_file.write_bytes(b"\x00" * 2048)
 
     import librosa
+
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Buffered_Transcription as buffered_mod
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_MLX as mlx_mod
@@ -1092,6 +1184,7 @@ def test_speech_to_text_parakeet_mlx_uses_structured_timing_when_available(monke
     audio_file.write_bytes(b"\x00" * 2048)
 
     import librosa
+
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_MLX as mlx_mod
 
@@ -1165,6 +1258,7 @@ def test_speech_to_text_parakeet_mlx_buffered_prefers_structured_merge_output(mo
     audio_file.write_bytes(b"\x00" * 2048)
 
     import librosa
+
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Buffered_Transcription as buffered_mod
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_MLX as mlx_mod
@@ -1223,6 +1317,7 @@ def test_speech_to_text_parakeet_mlx_uses_buffered_chunking_when_duration_unknow
     audio_file.write_bytes(b"\x00" * 2048)
 
     import librosa
+
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Buffered_Transcription as buffered_mod
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_MLX as mlx_mod
@@ -1270,6 +1365,7 @@ def test_speech_to_text_parakeet_mlx_falls_back_on_invalid_buffered_settings(mon
     audio_file.write_bytes(b"\x00" * 2048)
 
     import librosa
+
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Buffered_Transcription as buffered_mod
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_MLX as mlx_mod
@@ -1311,6 +1407,7 @@ def test_speech_to_text_parakeet_mlx_defaults_when_chunk_duration_missing(monkey
     audio_file.write_bytes(b"\x00" * 2048)
 
     import librosa
+
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Buffered_Transcription as buffered_mod
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_MLX as mlx_mod
@@ -1347,6 +1444,7 @@ def test_speech_to_text_parakeet_mlx_disables_chunking_when_zero(monkeypatch, tm
     audio_file.write_bytes(b"\x00" * 2048)
 
     import librosa
+
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Buffered_Transcription as buffered_mod
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_MLX as mlx_mod

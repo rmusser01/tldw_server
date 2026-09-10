@@ -642,6 +642,11 @@ jobs:
         working-directory: apps/tldw-frontend
         run: bun run typecheck --incremental false
 
+      - name: Run shared UI hook enforcement
+        if: needs.changes.outputs.tldw_frontend_changed == 'true'
+        working-directory: apps/tldw-frontend
+        run: bun scripts/check-shared-hooks.mjs
+
       - name: Run strict shared-boundary typecheck
         if: needs.changes.outputs.tldw_frontend_changed == 'true'
         working-directory: apps/tldw-frontend

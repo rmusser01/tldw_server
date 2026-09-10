@@ -101,3 +101,66 @@ None of the four targeted alerts is claimed fixed by GitHub until a new analysis
 The remaining inventory is not wholly an external/manual blocker. In particular, **151 path-injection alerts** still require source/sink-specific boundary investigation, and **238 cache-poisoning alerts** span mixed-event workflows and composite actions. Separating privileged/manual execution from PR execution is a possible source-level remediation, but is a substantial workflow change that must preserve admission, exact commit selection, cache ownership, and required gate behavior. The observed cross-event modeling limitation does not justify blanket dismissal or imply that all cache-writing paths are safe. The separate trusted-license checkout alert also remains unresolved.
 
 The bounded MIME validation behind alert 2598 already rejects inputs longer than 255 characters; the remaining two exponential-regex alerts occur in deliberate adversarial regex tests. The seven critical transport/XPath/browser findings retain the guarded/intentional-expression assessments above. Those observations support focused review, not a clean security verdict. Current-head analyzer execution is external evidence; security disposition requires individual review. Further source remediation remains agent work where a bypass or inadequate boundary is demonstrated.
+
+## Frontend Actions follow-up: event and tooling constraints
+
+All 25 findings whose sink is `frontend-required.yml` explicitly combine `workflow_dispatch` with checkout alternatives sourced from PR/admission metadata. On dispatch those alternatives are absent and checkout falls through to the selected `github.sha`. No exploitable cross-event write was demonstrated by this inspection. This conclusion is limited to the examined flows, not all 238 cache findings.
+
+The workflow has actual managed-cache writers: `setup-bun@v2` caches its executable by default, and both Python setup calls enable pip caching outside `workflow_run`. `setup-uv@v3` defaults its cache to disabled; `setup-node@v6` automatically enables caching only for npm package-manager metadata. Removing those features solely to reduce alerts would not prove that untrusted code cannot invoke the cache API itself.
+
+[GitHub's current cache reference](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#cache-access-for-low-trust-workflow-triggers) documents default-branch read-only cache access for low-trust triggers, including `workflow_run`, and preserves PR cache isolation under the merge ref. The [workflow syntax reference](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#cache-mode) additionally documents `cache-mode` enforced through scoped cache tokens. However, a minimal stdin probe against the project's pinned Actionlint **1.7.12** rejects `cache-mode: read` as an unexpected workflow key. Probe output: `/tmp/pr2761-cache-mode-actionlint-probe.log`. The inspected [CodeQL cache-access implementation](https://github.com/github/codeql/blob/main/actions/ql/lib/codeql/actions/security/CachePoisoningQuery.qll) derives access from trigger events and does not model `cache-mode`. Consequently that property is not currently a verified, gate-compatible remediation here; no syntax exception or analyzer suppression was added.
+
+A future separation would retain PR/admitted execution in `frontend-required.yml` and move manual execution to a diagnostic-only workflow. It must preserve exact PR-head checkout, immutable admission, shard failure handling, ratchet digests, and the distinct `frontend-required`/`frontend-required-diagnostic` contexts. Extracting and digest-pinning the two large ratchet scripts would avoid duplicating approximately 900 workflow lines. Simply wrapping a shared reusable workflow is not a demonstrated analyzer solution because CodeQL associates its jobs with their callers' combined trigger events. Existing frontend workflow, admission, and ratchet tests plus Actionlint and actual remote context/scan verification are required before claiming success. No schedule is currently configured to migrate.
+
+The inspection also found a separate diagnostic limitation: manual dispatch requires `base_sha` for ratchet comparisons, but the change-classification action fell back to `HEAD^` instead of using that input. The shared action now reads the manual base through an environment variable, requires a 40-character commit SHA when supplied, and preserves PR, push and absent-base behavior. Temporary Git-history tests demonstrate the missed frontend change and invalid-base acceptance before the fix (2 failures, 5 passes against the unchanged action), then pass afterward. The comparison remains read-only; no cache permissions or event triggers changed. The detector, admission and workflow contract suites pass **39 tests**, and Actionlint passes. Logs: `/tmp/pr2761-dispatch-base-confirmed-red.log`, `/tmp/pr2761-second-workflow-final.log`.
+
+## Audio model and input validation follow-up
+
+Existing relative directories could be classified as remote Hub IDs (or Whisper
+aliases) before the local model-root policy ran. The model loaders prefer an
+existing working-directory path, so validation and loading disagreed. Both
+normalizers now recognize that local directory first, reject symlinks,
+and pass its absolute path through the existing containment and artifact checks.
+Nonlocal Hub IDs and standard Whisper aliases retain their existing behavior.
+No model downloads or inference are required by the regression tests.
+
+Eight temporary-directory regression cases failed before this fix; three remote
+ID/alias controls passed. The tests cover out-of-root directories, allowed local
+directories, relative symlinks and public artifact-completeness enforcement.
+The existing Qwen local-artifact fixture was stale: its empty directory did not
+satisfy the public validator's already-required files. It now contains inert
+fixture files; the production completeness rule is unchanged.
+
+The broader suite also exposed a weak symlink test: it accepted an unrelated
+FFmpeg failure after resolution had already erased the link. It now requires
+the symlink error and fails if FFmpeg discovery is reached. Input validation
+checks the unresolved path before canonicalization, enforcing the documented
+no-symlink policy. Tests that reload the module now reference its current
+`ConversionError` class instead of a stale imported class.
+
+Independent review additionally reproduced an absolute in-root model symlink
+being accepted. The same pre-resolution guard now covers both absolute and
+relative local directories; both added absolute cases failed before that change.
+The complete audio test file passes **65 tests** after the fixes and import
+sorting. Ruff passes for both touched files. Bandit finds the same six existing
+low-severity subprocess findings as the unchanged production source, with zero
+new production findings and no test findings other than assertions. Logs:
+`/tmp/pr2761-model-normalizer-red.log`, `/tmp/pr2761-audio-link-red.log`,
+`/tmp/pr2761-audio-dispatch-final.log` (65 audio + 7 detector tests),
+`/tmp/pr2761-audio-bandit.json` and
+`/tmp/pr2761-audio-bandit-baseline.json`. This evidence establishes the repaired
+validation behavior; it does not classify every remaining path alert or claim
+that filesystem race conditions are eliminated.
+
+At the partial `d5ba8b5be7` scan observation, the PR inventory still contains
+448 open instances: 276 are on the new head and 172 Python instances remain on
+`decdf9db77` while Python analysis runs. No current JavaScript finding points to
+`services/tts.ts`; the three exception-disclosure alerts still have stale Python
+instances and cannot yet be called closed. Snapshot:
+`/tmp/pr2761-codeql-d5ba-pr-open.json`. No alert was dismissed.
+
+The subsequent completed scan reports **445 open instances**, all on
+`d5ba8b5be7a9b74e8b7f74a63b2b7fccd6079135`: 7 critical, 435 high and 3 medium.
+Alerts **2119, 2120 and 2121** are no longer open on this PR; no open finding
+points to `services/tts.ts`. This confirms the targeted scan result while the
+aggregate remains failed. Snapshot: `/tmp/pr2761-codeql-d5ba-complete-open.json`.

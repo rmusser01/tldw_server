@@ -21,14 +21,14 @@ function report(stats = { expected: 1, flaky: 0, skipped: 0, unexpected: 0 }) {
 }
 
 function harness<Overrides extends Record<string, unknown> = Record<never, never>>(
-  overrides?: Overrides
+  overrides: Overrides = {} as Overrides
 ) {
   const calls: string[] = [];
   const files = new Map<string, unknown>();
   const registry = {
     spawn: vi.fn((command: HarnessCommand, _logPath?: string) => ({ command })),
     stop: vi.fn(async (_record: HarnessRecord) => undefined),
-    teardown: vi.fn(async () => undefined),
+    teardown: vi.fn(async (): Promise<void> => undefined),
     wait: vi.fn(async (_record: HarnessRecord) => ({ code: 0, signal: null })),
   };
   const evidence = {
@@ -1033,8 +1033,8 @@ describe('Skills certification runner', () => {
   });
 
   it('retains SIGINT through deferred teardown before removing handlers', async () => {
-    let onSignal: () => void;
-    let releaseTeardown: () => void;
+    let onSignal!: () => void;
+    let releaseTeardown!: () => void;
     const events: string[] = [];
     const test = harness({
       installHandlers: vi.fn(({ onSignal: captured }) => {
@@ -1060,8 +1060,8 @@ describe('Skills certification runner', () => {
   });
 
   it('re-finalizes an interrupted summary when SIGTERM arrives during finalization', async () => {
-    let onSignal: () => void;
-    let releaseFinalizer: () => void;
+    let onSignal!: () => void;
+    let releaseFinalizer!: () => void;
     const test = harness({
       installHandlers: vi.fn(({ onSignal: captured }) => {
         onSignal = captured;
@@ -1096,8 +1096,8 @@ describe('Skills certification runner', () => {
   });
 
   it('does not re-finalize removed artifact-failing evidence after a signal', async () => {
-    let onSignal: () => void;
-    let release: () => void;
+    let onSignal!: () => void;
+    let release!: () => void;
     const test = harness({
       installHandlers: vi.fn(({ onSignal: captured }) => {
         onSignal = captured;
@@ -1125,8 +1125,8 @@ describe('Skills certification runner', () => {
   });
 
   it('uses marker-safe cleanup when an interrupted refresh finalizer rejects', async () => {
-    let onSignal: () => void;
-    let release: () => void;
+    let onSignal!: () => void;
+    let release!: () => void;
     const test = harness({
       removeRuntime: vi.fn(() => true),
       removeEvidence: vi.fn(() => true),

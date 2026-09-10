@@ -36,7 +36,10 @@ complete grouped rollup and the release-refresh plan for outstanding gates.
   Erasure now honors SQLite foreign keys and keeps private exception details out
   of logs; ACP health and embedding requeue warnings also redact raw errors.
 - Aligned shared frontend dependency majors and added an incremental strict
-  TypeScript check for URL and API-key guards.
+  TypeScript check for URL/API-key guards and request timeout selection. Restored
+  shared UI hook enforcement and corrected moderation expiry/workflow clocks.
+- Validate local model directories before loading and reject audio input
+  symlinks before path resolution. Manual CI comparisons honor the selected base.
 - Repository rollups 0.1.39–0.1.41 are not published-artifact evidence. At
   candidate preparation, GitHub and GHCR app `latest` were 0.1.38; public PyPI
   listed 0.1.32. Identify the installed digest before choosing a rollback baseline.

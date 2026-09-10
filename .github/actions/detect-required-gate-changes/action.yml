@@ -32,11 +32,19 @@ runs:
   steps:
     - id: classify
       shell: bash
+      env:
+        DISPATCH_BASE_SHA: ${{ github.event.inputs.base_sha }}
       run: |
         set -euo pipefail
 
         if [[ "${{ github.event_name }}" == "pull_request" ]]; then
           BASE_SHA="${{ github.event.pull_request.base.sha }}"
+        elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          BASE_SHA="${DISPATCH_BASE_SHA:-}"
+          if [[ -n "$BASE_SHA" && ! "$BASE_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "Manual comparison base_sha must be an exact 40-character commit SHA" >&2
+            exit 1
+          fi
         else
           BASE_SHA="${{ github.event.before }}"
         fi

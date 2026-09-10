@@ -158,3 +158,18 @@ def test_container_backend_smoke_uses_the_built_image_and_isolated_imports() -> 
     assert "--network none" in smoke["run"]
     assert "--read-only" in smoke["run"]
     assert not smoke.get("continue-on-error", False)
+
+
+def test_frontend_required_enforces_shared_hooks_and_preserves_full_lint() -> None:
+    """Shared UI must reach the hook gate even though frontend lint runs locally."""
+    workflow = _load(".github/workflows/frontend-required.yml")
+    steps = workflow["jobs"]["frontend-required"]["steps"]
+    lint = _get_step(steps, "Run frontend lint")
+    hooks = _get_step(steps, "Run shared UI hook enforcement")
+
+    assert lint["run"] == "bun run lint"
+    assert lint["working-directory"] == "apps/tldw-frontend"
+    assert hooks["if"] == lint["if"]
+    assert hooks["working-directory"] == "apps/tldw-frontend"
+    assert hooks["run"] == "bun scripts/check-shared-hooks.mjs"
+    assert not hooks.get("continue-on-error", False)

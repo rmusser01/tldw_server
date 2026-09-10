@@ -110,6 +110,18 @@ interface ThemeAdvancedEditorProps {
   activeTheme?: ThemeDefinition
 }
 
+const ResetButton = ({ onClick }: { onClick: () => void }) => (
+  <Button
+    size="small"
+    type="text"
+    icon={<RotateCcw className="h-3 w-3" />}
+    onClick={onClick}
+    className="text-text-muted"
+  >
+    Reset to defaults
+  </Button>
+)
+
 export function ThemeAdvancedEditor({
   open,
   onClose,
@@ -372,22 +384,6 @@ export function ThemeAdvancedEditor({
       })
     }
   }, [editingTheme, editingThemeId, onDelete, isDark, activeTheme, onClose])
-
-  // ---- Reset button shared component ----
-  const ResetButton = useCallback(
-    ({ onClick }: { onClick: () => void }) => (
-      <Button
-        size="small"
-        type="text"
-        icon={<RotateCcw className="h-3 w-3" />}
-        onClick={onClick}
-        className="text-text-muted"
-      >
-        Reset to defaults
-      </Button>
-    ),
-    [],
-  )
 
   // ---- Tab content ----
   const tabItems = useMemo(() => [
@@ -901,7 +897,6 @@ export function ThemeAdvancedEditor({
     handleLayoutChange, handleDensityChange,
     handleButtonStyleChange, handleInputStyleChange, handleCardStyleChange, handleAnimationChange,
     handleResetColors, handleResetTypography, handleResetShape, handleResetLayout, handleResetComponents,
-    ResetButton,
   ])
 
   return (

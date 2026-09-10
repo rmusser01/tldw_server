@@ -4,7 +4,7 @@ title: 'Re-enable frontend type-safety and lint gates, harden persisted stores'
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-09-10 19:27'
+updated_date: '2026-09-10 20:05'
 labels:
   - tech-debt
   - high
@@ -54,4 +54,20 @@ Verified all9 named persisted Zustand stores already declare version1 plus ident
 Continuing requester-authorized release blocker closure. Investigating shared dependency major alignment and individually justified React compiler hook rules while current-head typecheck awaits frontend test repair; no gate suppression or wholesale strictness claim.
 
 Aligned five shared runtime dependency majors and peer ranges; frozen install resolves identical zustand5.0.10/dexie-react-hooks4.2.0/marked17.0.1/d3-dsv3.0.1/property-information7.1.0 in extension/WebUI/UI. 28 persistence-Markdown plus10Dexie-TTS tests pass; full WebUI and existing extension strict compile pass. Added required strict project for four shared security/error utilities; actual compiler rejects implicit-any and null probes. Re-enabled use-memo after fixing two Timeline dependency expressions. Other strictness/hooks criteria remain open; detailed scope and full baseline in Docs/Evidence/PR2761-frontend-hardening.md.
+
+PR2761 follow-up after source910c526/metadata d5ba8b5: narrow React purity/static-components enforcement authorized. Inventory19 diagnostics across12 shared component/hook files. Plan: RED tests for actual undo-expiry/execution-clock bugs and stable generated values; fix eager clock/init and render-created components; document/test only genuine event/registry false positives; enable both rules; run focused runtime and full lint checks. Scope excludes dependency/supply-chain files; dedicated evidence Docs/Evidence/PR2761-hooks-enforcement.md. No commits or licensing manifest edits in this delegated work.
+
+Next incremental strictness repair: normalize optional config reads in deriveRequestTimeout. Existing guarded numeric reads are runtime-safe but do not narrow nullable config for TypeScript; use consistent optional access, preserve request timeout behavior, run existing timeout/refresh regressions and strictNullChecks baseline.
+
+Repairing strict-null inference in existing Skills runner test harness: preserve generic override members when defaults are used, type async teardown as void, and describe synchronous promise/callback capture initialization. Existing47 lifecycle tests remain behavioral verification; no test assertions disabled.
+
+To enforce timeout selection under the new strict gate, move its dependency-free calculation into existing utils/request-timeout.ts while keeping the public request-core wrapper and normalization unchanged. Extend existing timeout tests across endpoint defaults and override precedence before extraction. This avoids pulling the entire API client import graph into the incremental strict project.
+
+PR2761 shared-hook enforcement follow-up: extend the existing frontend-required job with a dedicated checker covering shared packages/ui/src and WebUI pages using the existing shared ESLint configuration. Preserve the full existing frontend lint step. Checker must fail purity/static-components/use-memo diagnostics and configuration/parser failures; add behavioral checker regressions. Parent authorized ownership of the new checker/tests, workflow step, and relevant CI contract assertions.
+
+The shared-hook checker uncovered two pre-existing unknown-rule errors in the SplashOverlay inline jsx-a11y disable directive: the named rules are unavailable in the shared configuration. Parent approved removal of this ineffective directive without changing behavior or rule severity. Keep unrelated nonfatal unused-disable warnings outside the bounded gate; parser/configuration errors and ignored-source coverage still fail.
+
+PR2761 bounded hook batch verified: fixed 19 purity/static findings, enabled both rules as errors, and added required shared-hook CI checker for shared UI src plus WebUI pages using existing configuration. Parent enabled use-memo separately. Runtime regressions/characterizations 52 tests pass; checker behavioral tests 12 pass; CI contracts 10 pass; Actionlint both frontend-required/container workflows pass; final WebUI tsc exits 0; existing full frontend lint 793 files/0 errors/169 warnings. Actual final shared-hook command exits 0 across5158 files with0 gate failures and1379 explicitly unrelated ESLint errors. Three documented single-line event/registry false-positive dispositions remain with runtime tests; ineffective unknown-rule directive removed from SplashOverlay. Evidence: Docs/Evidence/PR2761-hooks-enforcement.md. Remaining403 compiler-rule findings and unrelated lint debt remain open; no blanket suppression, manifests, commits, or pushes performed in this delegated batch. Bandit: frontend has no Python input; Python contract scope only47 ordinary pytest B101 low assertions. All source edits frozen for parent integration.
+
+Parent follow-up verified strict timeout extraction: public normalization preserved, endpoint defaults/overrides/floors 22 tests pass and strict project passes; 11 nullable configuration diagnostics removed. Skills test harness generic/callback types repaired, 47 tests plus scoped strict-null compile and lint pass. Full WebUI typecheck passes after shared-hook batch. This is incremental enforcement; AC2/AC3 remain open, with 403 remaining disabled-hook findings and unresolved whole-WebUI strictness.
 <!-- SECTION:NOTES:END -->

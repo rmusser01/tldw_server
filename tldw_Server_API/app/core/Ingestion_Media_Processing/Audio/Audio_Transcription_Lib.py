@@ -656,6 +656,8 @@ def _resolve_safe_input_path(path: Path, *, base_dir: Optional[Path], label: str
     if base_dir is None:
         base_dir = _select_allowed_base_dir_for_path(path, label=label)
     base_resolved = _resolve_allowed_base_dir(base_dir, label=f"{label} base directory")
+    # Resolving first erases the symlink components that this policy rejects.
+    _assert_no_symlink(path if path.is_absolute() else base_resolved / path, label=label)
     safe_path = resolve_safe_local_path(path, base_resolved)
     if safe_path is None:
         raise ValueError(f"{label} must resolve under {base_resolved}")
@@ -693,6 +695,13 @@ def _normalize_whisper_model_identifier(
     raw = str(model_name or "").strip()
     if not raw:
         raise ValueError("Whisper model identifier cannot be empty")
+
+    # The model loader gives existing CWD directories precedence over Hub IDs
+    # and aliases. Apply the local-root policy to that same directory first.
+    local_path = Path(raw)
+    if local_path.is_dir():
+        _assert_no_symlink(local_path, label="Whisper model path")
+        raw = str(local_path.absolute())
 
     # If this looks like a Hugging Face Hub model id and *not* a local path,
     # return it directly. We avoid interpreting it as a filesystem path.
@@ -763,7 +772,14 @@ def _normalize_qwen2audio_model_identifier(model_id: str) -> str:
     if not raw:
         raise ValueError("Qwen2Audio model identifier cannot be empty")
 
-    # Prefer canonical Hub identifiers when possible.
+    # Match from_pretrained's preference for an existing local directory before
+    # deciding that a syntactically valid organization/model is a Hub ID.
+    local_path = Path(raw)
+    if local_path.is_dir():
+        _assert_no_symlink(local_path, label="Qwen2Audio model path")
+        raw = str(local_path.absolute())
+
+    # Prefer canonical Hub identifiers when no local directory shadows them.
     if _is_hf_model_id(raw):
         return raw
 

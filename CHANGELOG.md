@@ -80,7 +80,9 @@ and this project adheres to Some kind of Versioning
   backend image import checks. Enforced SQLite foreign keys during erasure and
   removed raw exception details from DSR logs, ACP health, and embedding requeue
   warnings. Aligned shared frontend dependency majors and added strict checks
-  for URL/API-key guards.
+  for URL/API-key guards and request timeout selection. Restored shared UI hook
+  enforcement, corrected moderation/workflow clocks, validated local model
+  directories before loading, and honored manual CI comparison base commits.
 
 - **Authentication And Data Integrity** — Hardened trusted-proxy identity and
   login lockout isolation, embeddings authentication/metrics access, SQLite

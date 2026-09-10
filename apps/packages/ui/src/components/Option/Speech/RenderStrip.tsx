@@ -303,7 +303,7 @@ export const RenderStrip: React.FC<RenderStripProps> = ({
           label={`${providerLabel} ${config.voice} audio`}
           compact
           format={config.format}
-          downloadFilename={`tts-${config.provider}-${config.voice}-${Date.now()}`}
+          downloadFilename={`tts-${config.provider}-${config.voice}-${id}`}
           forcePaused={forcePaused}
           onPlay={() => onPlay?.(id)}
           onPause={() => onPause?.(id)}

@@ -12,12 +12,12 @@
 | Item | Recorded state |
 | --- | --- |
 | Integrated release code and verified blocker fixes | `910c526513a03b305b2976fec6f1dee73bacc1e9` |
-| Latest executable-fix/metadata push | `decdf9db77` (source `50dcf5453b`); blocker closure below is in progress |
+| Latest executable-fix/metadata push | `d5ba8b5be7a9b74e8b7f74a63b2b7fccd6079135` (source `910c526513`); subsequent closure batch below is in progress |
 | Protected source snapshot | `910c526513a03b305b2976fec6f1dee73bacc1e9`, 7,100 files |
 | PR branch / target | `codex/release-main-0.1.42` → `main` |
 | PR state at inspection | Draft; no merge or publication performed |
-| Remote CI snapshot | On `decdf9db77`, backend/security/coverage/container/E2E/license/docs and seven frontend shards pass. Shard 6 has one failing Flashcard cloze-template assertion (538 shared-UI tests pass in that shard); the prior reminder and Research failures pass. CodeQL remains unresolved. |
-| Latest metadata checks | 36 passed, one local docs-build test deselected due host multiprocessing failure; unchanged standard test/build passes remotely. Other scoped verification is recorded below. |
+| Remote CI snapshot | On `d5ba8b5be7`, backend/security/coverage/container/E2E/license/docs and all eight frontend shards pass, including all five container builds. The frontend aggregate remains running at inspection. Completed CodeQL scans report 445 open instances (7 critical); the three targeted exception alerts and the TTS service finding are absent from the open PR inventory. |
+| Latest metadata checks | 37 passed, one local docs-build test deselected due host multiprocessing failure; unchanged standard test/build passes remotely. Other scoped verification is recorded below. |
 | Standard docs evidence | Unchanged standard build and docs suite pass in CI [run 34491682436](https://github.com/rmusser01/tldw_server/actions/runs/34491682436/job/102919740634). |
 | Latest observed GitHub publication | v0.1.38; no remote v0.1.39–v0.1.42 tags |
 | Primary checkout | `dev`, unchanged; its local `a27ecb12f0` tracking commit is outside this release freeze |
@@ -79,17 +79,28 @@ tracked in the existing owning tasks; no release scope exception was granted.
   persistence/Markdown/Dexie tests and both client typechecks passing. A required
   strict TypeScript project covers four shared URL/API-key/error utilities;
   use-memo is re-enabled after repairing Timeline dependency expressions.
-  Whole-WebUI strictness and the remaining six compiler-era hook rules stay open.
+  Timeout selection is now included in the strict project (22 focused tests),
+  and the Skills runner harness passes 47 tests and a scoped strict-null compile.
+  [Hooks follow-up](../../Evidence/PR2761-hooks-enforcement.md) repairs and enforces
+  purity/static-components in the shared UI scope. Whole-WebUI strictness and
+  403 findings across the remaining four disabled compiler-era rules stay open.
 - [CodeQL fixes](../../Evidence/PR2761-critical-CodeQL-assessment.md): three
   reproduced raw-exception disclosures repaired in ACP and embedding requeue
   responses; credential reads separated from the TTS preference tuple.
-  31 backend and 42 frontend tests pass. Alert closure awaits the next scan;
+  31 backend and 42 frontend tests pass. The completed `d5ba8b5be7` scan confirms
+  the three targeted exception alerts are no longer open on the PR;
   path-injection and Actions findings still need individual investigation.
+  Follow-up audio validation now distinguishes existing local directories from
+  remote model IDs and checks input symlinks before canonicalization; the
+  audio suite now passes 65 tests. This is a concrete boundary fix, not blanket
+  alert closure. Manual CI change detection now honors the requested base commit;
+  39 detector/admission/workflow tests pass and Actionlint passes.
 - [Worker packaging](../../Evidence/PR2761-worker-packaging.md): both workers
   include canonical config/local packages/license inputs; the container gate
   builds all five images and checks backend imports in isolated containers.
-  40 contracts pass and both workflow files pass Actionlint. Worker images still
-  require actual fresh CI builds. Four ChromaDB advisories have no published
+  40 contracts pass and both workflow files pass Actionlint. Both worker images
+  and all three other images now pass fresh CI builds on `d5ba8b5be7`.
+  Four ChromaDB advisories have no published
   patched version; no speculative upgrade or exception was added.
 - [Lifecycle recovery](../../Evidence/PR2761-dsr-erasure.md): DSR honors SQLite
   foreign keys and excludes raw error text; 26 tests pass. Real Sync object GC
@@ -100,6 +111,14 @@ tracked in the existing owning tasks; no release scope exception was granted.
   measured production capacity envelope, supply-chain vulnerability disposition
   and final human review remain explicit prerequisites. Passing candidate
   same-image restoration does not replace them.
+- Capacity evidence is being gathered from a clean `910c526513` production
+  image in an isolated, resource-capped Docker environment. The supported
+  profile uses multi-user PostgreSQL AuthNZ and SQLite content, with one
+  disposable actor and real pool/queue/storage measurements. Single-user mode
+  cannot provide a production PostgreSQL pool because it selects SQLite.
+  Image build and measured steady/overload/recovery phases must finish before
+  any capacity conclusion; this diagnostic will not certify the final artifact
+  or an unspecified deployed production profile.
 
 ### 4.1 Current-head CI and local docs failure — agent
 
