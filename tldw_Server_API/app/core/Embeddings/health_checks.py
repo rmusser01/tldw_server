@@ -331,7 +331,10 @@ class HealthChecker:
             start = time.time()
             client = chromadb.PersistentClient(
                 path="./Databases/ChromaDB_v2",
-                settings=Settings(anonymized_telemetry=False)
+                settings=Settings(
+                    chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
+                    anonymized_telemetry=False,
+                )
             )
 
             # Try to list collections
