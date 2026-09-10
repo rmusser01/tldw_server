@@ -4,7 +4,7 @@ title: Review and rebase PR 2627 SQLite migration durability
 status: Done
 assignee: []
 created_date: '2026-09-10 00:43'
-updated_date: '2026-09-10 03:04'
+updated_date: '2026-09-10 03:29'
 labels:
   - db
   - migrations
@@ -72,6 +72,7 @@ Injected-pool compatibility follow-up: provide invalidate_connection through the
 Pool contract completion: delegate PostgreSQL invalidation to existing discard bookkeeping and document all implementations with ownership, return and error behavior. Complete: both PostgreSQL modes reproduced bookkeeping loss before the override, 19 focused tests and 237 expanded tests pass afterward, with 12 unavailable-PostgreSQL integration skips; security/review pass.
 Final fallback-test maintenance: replace private-container assertions with observable return/reuse behavior so storage refactors remain possible and the lost-capacity regression stays detectable. Complete: close-only mutation fails on replacement closure; restored code passes all 19 focused tests, lint/security and review.
 Reborrow contract follow-up: verify an open reborrowed handle and explicitly return it without requiring object identity. Complete: close-only mutation remains red; 19 focused tests pass, production code is unchanged, and independent review has no findings.
+Transaction-scope maintenance: use native SQLite connection contexts for migration commit/rollback and separate failure recording. Complete: commit-time deferred-FK failure characterization and retry pass before/after, all 238 expanded tests pass, security and independent review clear.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -134,12 +135,20 @@ Independent review confirmed the public replacement return/reuse assertions dete
 2026-09-10 final merge refresh: Qodo completed review of 5817166aa8 with zero bugs, rule violations or skill insights and all threads resolved. Dev advanced to 6b61b5074cc4c388fe90270b3f40d28dc2731115 by merging the audio.cpp TTS provider; the 23 changed files do not overlap this PR. Rebase the existing patches, confirm unchanged code range-diff and run affected migration/pool checks before publishing the refreshed head.
 
 2026-09-10 rebased onto dev 6b61b5074cc4c388fe90270b3f40d28dc2731115 after Qodo cleared 5817166aa8 with zero findings. Rebase had no conflicts; all eleven patches matched in range-diff and all migration production/test/docs files remain byte-identical to the reviewed head. Fresh expanded 15-module suite: 237 passed, 12 PostgreSQL-unavailable skips, 4 warnings. Ruff, compilation, repository guards, whitespace and unchanged packaged SQL checks pass; fresh Bandit over six application modules reports zero findings. Logs: /tmp/pr2627-final-rebase-tests.log and /tmp/pr2627-final-rebase-bandit.json. Only this task record is amended for new verification; request final-head Qodo and await required CI before merging.
+
+2026-09-10 Qodo review on b20ef99da9 reports one transaction-scope maintenance rule. Plan: use the native sqlite3.Connection context manager around explicit BEGIN IMMEDIATE, migration body and successful ledger/version writes, retaining authorizer cleanup in finally. Keep FK boundary PRAGMAs outside the scope; log failures in a separate native transaction only after rollback. Add a real deferred-FK commit-failure characterization to protect commit-time rollback and retry; run existing atomicity and expanded validation. No custom transaction abstraction is needed.
+
+2026-09-10 transaction-scope follow-up on b20ef99da9: replaced manual migration commit/rollback with native sqlite3.Connection context management around explicit BEGIN IMMEDIATE, migration SQL and successful ledger/version writes. Authorizer cleanup stays in its inner finally before the native context commits or rolls back. Failure-ledger recording uses a separate context after rollback; pre/post FK PRAGMAs remain outside, and their no-op commit calls are removed. This uses the standard library with no custom transaction helper. Added a real deferred-foreign-key characterization that reaches commit-time failure, verifies no partial schema or version, checks the failed ledger and succeeds on retry. It passes before and after this behavior-preserving refactor; 40 planning tests pass after. Independent review found no actionable issues. Expanded 15-module verification: 238 passed, 12 PostgreSQL-unavailable skips, 4 warnings. Ruff, compilation, repository guards, whitespace and packaged-SQL equality pass. Fresh Bandit over six application modules has zero findings. Logs: /tmp/pr2627-transaction-scope-before.log, /tmp/pr2627-transaction-scope-focused.log, /tmp/pr2627-transaction-scope-full.log and /tmp/pr2627-transaction-scope-bandit.json. Cancelled old license audit has a successful replacement and trusted/dev policy is green. Dev remains 6b61b5074c. Await final-head Qodo and CI before merge.
+
+2026-09-10 Qodo completed 6d0c88683a with zero bugs, rule violations and skill insights (summary updated 03:24:51Z, confirmation comment 5612168038), and all threads are resolved. Dev advanced to 751563a966a331ce0eba3622df95610518098943 by merging media original-file cleanup PR #2612. Its sixteen changed files do not overlap this migration PR. Refresh the rebase, verify unchanged patches and rerun migration/backend/bootstrap validation before publication.
+
+2026-09-10 refreshed onto dev 751563a966a331ce0eba3622df95610518098943 after Qodo cleared 6d0c88683a. All twelve patches rebased without conflicts and matched exactly in range-diff; all ten changed Python files and migration guidance remain byte-identical to the reviewed head. Fresh expanded validation: 238 passed, 12 PostgreSQL-unavailable skips, 4 warnings. Ruff, compilation, repository guards, whitespace, unchanged shipped SQL and Bandit (zero findings) pass. Logs: /tmp/pr2627-media-rebase-tests.log and /tmp/pr2627-media-rebase-bandit.json. Amend this verification into the existing last commit, publish with exact force-with-lease, and await final-head Qodo/required CI before authorized merge.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Rebased PR #2627 onto latest dev 6b61b5074c with unchanged implementation patches. All fourteen Qodo findings through 5817166aa8 are resolved, and Qodo completed that head with zero findings. Atomic migration execution, unchanged SQL/checksums, compatibility, recovery guidance and backend-neutral invalidation remain useful. Fresh post-rebase expanded validation: 237 passed, 12 PostgreSQL-unavailable skips, zero Bandit findings; lint/guards pass. Human Change summary remains present. Await review and required CI on the republished head before the authorized merge.
+Rebased PR #2627 onto latest dev 751563a966 with all twelve implementation patches unchanged. All fifteen Qodo findings are resolved and Qodo cleared 6d0c88683a with zero findings. Atomic migrations, native transaction scopes, unchanged SQL/checksums, compatibility and recovery guidance remain useful. Fresh post-rebase validation: 238 passed, 12 PostgreSQL-unavailable skips; zero Bandit findings, clean lint/guards. Human Change summary is preserved. Await final-head Qodo and required CI before authorized merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

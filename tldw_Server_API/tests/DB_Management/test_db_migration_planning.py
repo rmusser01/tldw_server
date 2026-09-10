@@ -252,6 +252,41 @@ def test_success_ledger_failure_rolls_back_migration_sql(
 
 
 @pytest.mark.unit
+def test_migration_commit_failure_rolls_back_bookkeeping_and_allows_retry(
+    versioned_migration_db: tuple[Path, DatabaseMigrator],
+) -> None:
+    """Deferred constraints roll back body and metadata before failure recording."""
+    db_path, migrator = versioned_migration_db
+    sql = """
+        PRAGMA foreign_keys=ON;
+        CREATE TABLE parent (id INTEGER PRIMARY KEY);
+        CREATE TABLE child (
+            parent_id INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED
+        );
+        INSERT INTO child VALUES (7);
+    """
+    with pytest.raises(MigrationError, match="FOREIGN KEY constraint failed"):
+        migrator.execute_migration(db_migration_module.Migration(1, "deferred_fk", sql))
+
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT name FROM sqlite_master WHERE name IN ('parent', 'child')"
+        ).fetchall() == []
+        assert conn.execute("SELECT version FROM schema_version").fetchone() == (0,)
+        assert conn.execute(
+            "SELECT version, success, error_message FROM schema_migrations"
+        ).fetchall() == [(1, 0, "FOREIGN KEY constraint failed")]
+
+    migrator.execute_migration(db_migration_module.Migration(
+        1, "deferred_fk", sql + "INSERT INTO parent VALUES (7);",
+    ))
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT parent_id FROM child").fetchall() == [(7,)]
+        assert conn.execute("SELECT version FROM schema_version").fetchone() == (1,)
+        assert conn.execute("SELECT version, success FROM schema_migrations").fetchall() == [(1, 1)]
+
+
+@pytest.mark.unit
 def test_migration_executes_statements_after_leading_comments(
     migration_db: tuple[Path, DatabaseMigrator],
 ) -> None:

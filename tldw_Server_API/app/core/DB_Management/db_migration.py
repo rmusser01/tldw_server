@@ -576,51 +576,50 @@ class DatabaseMigrator:
                 for statement in pre_transaction:
                     conn.execute(statement)
 
-                conn.execute("BEGIN IMMEDIATE")
+                with conn:
+                    conn.execute("BEGIN IMMEDIATE")
 
-                if direction == "up":
-                    # Clean up any prior failed attempt for this version so retries work
-                    conn.execute(
-                        "DELETE FROM schema_migrations WHERE version = ? AND success = 0",
-                        (migration.version,),
-                    )
-
-                conn.set_authorizer(self._authorize_migration_statement)
-                try:
-                    self._execute_migration_statements(conn, migration, direction, statements)
-                finally:
-                    conn.set_authorizer(None)
-
-                execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
-
-                # Record successful migration
-                if direction == "up":
-                    conn.execute("""
-                        INSERT INTO schema_migrations
-                        (version, name, checksum, applied_at, execution_time, success)
-                        VALUES (?, ?, ?, ?, ?, 1)
-                    """, (
-                        migration.version,
-                        migration.name,
-                        migration.checksum,
-                        datetime.now(timezone.utc),
-                        execution_time
-                    ))
-                else:
-                    # Remove migration record on rollback
-                    conn.execute("""
-                        DELETE FROM schema_migrations WHERE version = ?
-                    """, (migration.version,))
-
-                # Update schema_version table if it exists (for compatibility with MediaDB)
-                if self._sqlite_table_exists(conn, "schema_version"):
                     if direction == "up":
-                        conn.execute("UPDATE schema_version SET version = ? WHERE 1=1", (migration.version,))
-                    else:
-                        # On downgrade, set to previous version
-                        conn.execute("UPDATE schema_version SET version = ? WHERE 1=1", (migration.version - 1,))
+                        # Clean up any prior failed attempt for this version so retries work
+                        conn.execute(
+                            "DELETE FROM schema_migrations WHERE version = ? AND success = 0",
+                            (migration.version,),
+                        )
 
-                conn.commit()
+                    conn.set_authorizer(self._authorize_migration_statement)
+                    try:
+                        self._execute_migration_statements(conn, migration, direction, statements)
+                    finally:
+                        conn.set_authorizer(None)
+
+                    execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
+
+                    # Record successful migration
+                    if direction == "up":
+                        conn.execute("""
+                            INSERT INTO schema_migrations
+                            (version, name, checksum, applied_at, execution_time, success)
+                            VALUES (?, ?, ?, ?, ?, 1)
+                        """, (
+                            migration.version,
+                            migration.name,
+                            migration.checksum,
+                            datetime.now(timezone.utc),
+                            execution_time
+                        ))
+                    else:
+                        # Remove migration record on rollback
+                        conn.execute("""
+                            DELETE FROM schema_migrations WHERE version = ?
+                        """, (migration.version,))
+
+                    # Update schema_version table if it exists (for compatibility with MediaDB)
+                    if self._sqlite_table_exists(conn, "schema_version"):
+                        if direction == "up":
+                            conn.execute("UPDATE schema_version SET version = ? WHERE 1=1", (migration.version,))
+                        else:
+                            # On downgrade, set to previous version
+                            conn.execute("UPDATE schema_version SET version = ? WHERE 1=1", (migration.version - 1,))
 
                 for statement in post_transaction:
                     try:
@@ -630,8 +629,6 @@ class DatabaseMigrator:
                             "Failed to restore migration connection PRAGMA after success: {}",
                             pragma_err,
                         )
-                if post_transaction:
-                    conn.commit()
 
                 logger.info(
                     f"Executed migration {migration.name} ({direction}) "
@@ -641,11 +638,9 @@ class DatabaseMigrator:
                 return execution_time
 
             except Exception as e:
-                conn.rollback()
                 for statement in post_transaction:
                     try:
                         conn.execute(statement)
-                        conn.commit()
                     except sqlite3.Error as pragma_err:
                         logger.debug(
                             "Failed to restore migration connection PRAGMA after error: {}",
@@ -655,20 +650,20 @@ class DatabaseMigrator:
                 # Record failed migration
                 if direction == "up":
                     try:
-                        conn.execute("""
-                            INSERT OR REPLACE INTO schema_migrations
-                            (version, name, checksum, applied_at, execution_time,
-                             success, error_message)
-                            VALUES (?, ?, ?, ?, ?, 0, ?)
-                        """, (
-                            migration.version,
-                            migration.name,
-                            migration.checksum,
-                            datetime.now(timezone.utc),
-                            (datetime.now(timezone.utc) - start_time).total_seconds(),
-                            str(e)
-                        ))
-                        conn.commit()
+                        with conn:
+                            conn.execute("""
+                                INSERT OR REPLACE INTO schema_migrations
+                                (version, name, checksum, applied_at, execution_time,
+                                 success, error_message)
+                                VALUES (?, ?, ?, ?, ?, 0, ?)
+                            """, (
+                                migration.version,
+                                migration.name,
+                                migration.checksum,
+                                datetime.now(timezone.utc),
+                                (datetime.now(timezone.utc) - start_time).total_seconds(),
+                                str(e)
+                            ))
                     except Exception as log_err:
                         logger.debug(f"Failed to log migration failure: migration={migration.name}, error={log_err}")
 
