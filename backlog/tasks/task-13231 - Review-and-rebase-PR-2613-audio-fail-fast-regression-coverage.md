@@ -4,7 +4,7 @@ title: Review and rebase PR 2613 audio fail-fast regression coverage
 status: Done
 assignee: []
 created_date: '2026-09-10 00:41'
-updated_date: '2026-09-10 01:06'
+updated_date: '2026-09-10 01:16'
 labels:
   - audit
   - media
@@ -49,6 +49,8 @@ Published the rebase with explicit force-with-lease. GitHub confirms the PR is m
 Qodo review follow-up: PR marked ready for review and human Change summary supplied. Qodo raised two items: (1) alleged coupling to fake response counter, evaluated as a false positive because it observes the injected downloader interface and a mutation experiment proves early body consumption is detected; (2) duplicated archived FINAL_SUMMARY boundaries, reproduced in the archived TASK-13001 record after legacy CLI serialization. Fix the malformed task serialization through supported Backlog tooling, preserve historical notes and unrelated UserProfiles records, verify parsed content and focused tests, then reply to and resolve both Qodo threads.
 
 Qodo follow-up verified: the archived audit task now has one matching marker pair per section; all three PR task records parse without nested marker content. Historical notes, the September paragraph and unrelated UserProfiles task/child are unchanged. Repaired through installed Backlog-py configured-editor scratch workflow on an isolated original revision, then cherry-picked. The counter objection was answered with the existing dependency-boundary contract and controlled mutation evidence, and its thread was resolved. Independent re-review accepts both dispositions with no actionable findings. Focused suite: 3 passed, 4 warnings; Ruff and diff checks pass; Bandit remains seven LOW B101 pytest assertion warnings, zero errors. Human summary is supplied and PR is non-draft. Final thread resolutions and any later Qodo review results are recorded on PR #2613.
+
+Final merge request: user explicitly authorized rebasing onto latest dev, addressing subsequent Qodo feedback, and merging PR #2613. Rebased all nine commits onto origin/dev 456eafb7a603449722ba8db806071a5e2aa5e7d6 without conflicts; git range-diff confirms every patch is unchanged. Fresh focused validation on this base: 3 tests pass with four warnings; Ruff, compile and diff checks pass; Bandit is limited to the same seven LOW B101 pytest assertions with zero errors. The human-written Change summary remains intact. Final Qodo review and required CI must be clear before executing the authorized merge; the PR is the source of truth for the final merge outcome.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
