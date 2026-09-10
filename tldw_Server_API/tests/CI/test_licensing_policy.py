@@ -83,7 +83,7 @@ def test_release_0_1_42_has_completed_source_record() -> None:
     assert record["release_id"] == "0.1.42"
     assert record["product_version"] == "0.1.42"
     assert record["repository"] == "https://github.com/rmusser01/tldw_server"
-    assert record["protected_source_revision"] == "0cec0bb409ddbd2de0089e1909b4b6b718823de3"
+    assert record["protected_source_revision"] == "d1af177bf3f55d05231ebec79ee6e7f2528a55e3"
     assert record["release_date"] == "2026-09-10"
     assert record["countdown_start"] == "2028-09-10T12:00:00Z"
     assert record["protected_paths"] == PROTECTED_PATHS
@@ -98,7 +98,7 @@ def test_release_0_1_42_has_completed_source_record() -> None:
     assert record["artifact_verification"]["protected_source_snapshot"] == {
         "manifest": "LICENSES/releases/0.1.42/protected-files.sha256",
         "result": "verified",
-        "source_revision": "0cec0bb409ddbd2de0089e1909b4b6b718823de3",
+        "source_revision": "d1af177bf3f55d05231ebec79ee6e7f2528a55e3",
     }
     assert record["artifact_verification"]["protected_binaries"] == {
         "published": False,

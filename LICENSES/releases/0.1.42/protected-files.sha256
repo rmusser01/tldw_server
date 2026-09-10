@@ -6343,7 +6343,7 @@ baed6bb3be4b9462aa98d39d87f7a23bd8688e9154ad2426fc86b84e829827a2  apps/tldw-fron
 3d2288d8ce1e0b7e737eaee8a1683f7d6c0af31b5d56aeba96e912a618bd176e  apps/tldw-frontend/__tests__/pages/notifications.test.tsx
 f10cebb63f882e493410ebe212aeb65002378c432a53eb18b790e56865b1649d  apps/tldw-frontend/__tests__/pages/public-segment-pages.test.tsx
 8ab6d7bcdaa5bf42a82f8698a4551d64e979a1a95d14514ba502b7c126dc73fa  apps/tldw-frontend/__tests__/pages/repo2txt.test.tsx
-64b1ea1f18bbf8e4d0474a36c9fc073626d2900857f4054d8ba825455fc22cfa  apps/tldw-frontend/__tests__/pages/research-run-console.test.tsx
+1ddf392e76787bc82bd469821f6c3f921ae83343b38c95991136034fa530e784  apps/tldw-frontend/__tests__/pages/research-run-console.test.tsx
 fac30f2f3eed376324cbde0b15b6bbad71ccc74764eb368da7584122f61316de  apps/tldw-frontend/__tests__/pages/researchers-page.test.tsx
 02d512034e67151e2784d906eec76bb928a53bf10a8165a6ccee43afee51ae91  apps/tldw-frontend/__tests__/pages/search-feedback.test.tsx
 49ca6560e925be815e4953e9612bdbb889f3fe1fdd8019db2e8a5577a439fce2  apps/tldw-frontend/__tests__/pages/settings-image-gen-route.test.tsx
