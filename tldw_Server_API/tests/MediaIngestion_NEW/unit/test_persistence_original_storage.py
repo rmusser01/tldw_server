@@ -73,6 +73,9 @@ class _FakeDB:
     def insert_media_file(self, **kwargs: Any) -> None:
         self.insert_calls.append(kwargs)
 
+    def get_media_files(self, media_id: int, *, include_deleted: bool = False) -> list[dict[str, Any]]:
+        return []
+
 
 class _FailingMediaFileDB(_FakeDB):
     def __init__(self, error: BaseException | None = None) -> None:
@@ -503,11 +506,12 @@ async def test_original_storage_cleanup_failure_is_logged_without_masking_regist
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-@pytest.mark.parametrize("registration_fails", [False, True])
+@pytest.mark.parametrize("failure_stage", [None, "registration", "cleanup", "snapshot"])
 @pytest.mark.parametrize("previous_filename", ["original.pdf", "original-previous.pdf"])
-async def test_original_storage_preserves_registered_blob_on_reupload(
-    monkeypatch, tmp_path, registration_fails, previous_filename
+async def test_original_storage_replaces_binary_and_preserves_plaintext_history(
+    monkeypatch, tmp_path, failure_stage, previous_filename
 ):
+    registration_fails = failure_stage == "registration"
     storage = FileSystemStorage(base_path=tmp_path / "storage")
     db = create_media_database(db_path=str(tmp_path / "media.db"), client_id="original-storage-test")
     try:
@@ -516,8 +520,13 @@ async def test_original_storage_preserves_registered_blob_on_reupload(
         )
         previous_path = await storage.store("1", media_id, previous_filename, b"previous original")
         db.insert_media_file(media_id, "original", previous_path)
+        db.create_document_version(media_id=media_id, content="updated plaintext")
+        plaintext_versions = db.get_all_document_versions(media_id, include_content=True)
+        assert len(plaintext_versions) == 2
+        upload_dirs = []
 
         async def save_uploads(_files, temp_dir, **_kwargs):
+            upload_dirs.append(Path(temp_dir))
             source = Path(temp_dir) / "upload.pdf"
             source.write_bytes(b"new original")
             return [{"path": source, "original_filename": "source.pdf"}], []
@@ -534,12 +543,21 @@ async def test_original_storage_preserves_registered_blob_on_reupload(
         def fail_registration(**_kwargs):
             raise RuntimeError("media file registration failed")
 
+        async def fail_cleanup(*_args, **_kwargs):
+            raise RuntimeError("cleanup unavailable")
+
         monkeypatch.setattr(input_sourcing, "save_uploaded_files", save_uploads)
         monkeypatch.setattr(ingestion_persistence, "process_document_like_item", process_document)
         monkeypatch.setattr(Storage, "get_storage_backend", lambda: storage)
         monkeypatch.setattr(storage_quota_service, "StorageQuotaService", _FakeQuotaService)
         if registration_fails:
             monkeypatch.setattr(db, "insert_media_file", fail_registration)
+        delete = storage.delete
+        cleanup = ingestion_persistence._cleanup_superseded_original_files
+        if failure_stage == "cleanup":
+            monkeypatch.setattr(storage, "delete", fail_cleanup)
+        elif failure_stage == "snapshot":
+            monkeypatch.setattr(ingestion_persistence, "_cleanup_superseded_original_files", fail_cleanup)
 
         response = await ingestion_persistence.add_media_orchestrate(
             background_tasks=BackgroundTasks(),
@@ -551,15 +569,26 @@ async def test_original_storage_preserves_registered_blob_on_reupload(
             usage_log=SimpleNamespace(log_event=lambda *_args, **_kwargs: None),
         )
 
-        assert (storage.base_path / previous_path).read_bytes() == b"previous original"
+        if failure_stage:
+            assert (storage.base_path / previous_path).read_bytes() == b"previous original"
+        else:
+            assert not (storage.base_path / previous_path).exists()
         result = json.loads(response.body)["results"][0]
         assert result["original_file_stored"] is not registration_fails
         current = db.get_media_file(media_id, "original")
         expected = b"previous original" if registration_fails else b"new original"
         assert (storage.base_path / current["storage_path"]).read_bytes() == expected
+        if failure_stage in {"cleanup", "snapshot"}:
+            assert any("cleanup" in warning for warning in result["warnings"])
+            assert len(db.get_media_files(media_id, include_deleted=True)) == 2
+            monkeypatch.setattr(storage, "delete", delete)
+            assert await cleanup(db, storage, media_id) == []
         registered_paths = {record["storage_path"] for record in db.get_media_files(media_id)}
         actual_paths = {str(path.relative_to(storage.base_path)) for path in storage.base_path.rglob("*.pdf")}
         assert actual_paths == registered_paths
+        assert len(registered_paths) == 1
+        assert db.get_all_document_versions(media_id, include_content=True) == plaintext_versions
+        assert all(not directory.exists() for directory in upload_dirs)
     finally:
         db.close_connection()
 

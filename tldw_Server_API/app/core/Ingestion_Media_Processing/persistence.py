@@ -2605,6 +2605,51 @@ def determine_add_media_final_status(results: list[dict[str, Any]]) -> int:
     return status.HTTP_207_MULTI_STATUS
 
 
+async def _cleanup_superseded_original_files(
+    db: Any, storage: Any, media_id: int, *, user_id: str | None = None,
+) -> list[str]:
+    """Remove older original blobs after registration; retain failed cleanup rows for retry."""
+    files = db.get_media_files(media_id, include_deleted=True)
+    active_originals = [row for row in files if row["file_type"] == "original" and not row["deleted"]]
+    if not active_originals:
+        return []
+
+    # Use the newest committed registration, even if this upload committed out of order.
+    current_id = max(row["id"] for row in active_originals)
+    obsolete: dict[str, list[dict[str, Any]]] = {}
+    retained_paths = set()
+    for row in files:
+        if row["file_type"] == "original" and row["id"] < current_id:
+            obsolete.setdefault(row["storage_path"], []).append(row)
+        else:
+            retained_paths.add(row["storage_path"])
+
+    warnings = []
+    for path, rows in obsolete.items():
+        try:
+            if path and path not in retained_paths:
+                delete_storage = storage
+                if path.startswith("imported_media/"):
+                    # Chatbook originals are relative to this user's data directory.
+                    parts = FilePath(path).parts
+                    if user_id is None or len(parts) != 3 or parts[:2] != ("imported_media", f"media_{media_id}"):
+                        raise ValueError("Imported original path is outside this media's directory")
+                    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+                    from tldw_Server_API.app.core.Storage.filesystem_storage import FileSystemStorage
+
+                    delete_storage = FileSystemStorage(DatabasePaths.resolve_user_base_directory(user_id))
+                # False means already absent, including overlapping cleanup attempts.
+                await delete_storage.delete(path)
+            for row in rows:
+                db.soft_delete_media_file(row["id"], hard_delete=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - retirement must not invalidate a committed replacement
+            logger.warning("Failed to clean up superseded original {} for media_id={}: {}", path, media_id, exc)
+            warnings.append("Original stored, but cleanup of an older original failed.")
+    return warnings
+
+
 async def add_media_orchestrate(
     background_tasks: BackgroundTasks,
     form_data: Any,
@@ -2764,7 +2809,8 @@ async def add_media_orchestrate(
 
     results: list[dict[str, Any]] = []
     temp_dir_manager = TempDirManagerCls(  # type: ignore[call-arg]
-        cleanup=not form_data.keep_original_file,
+        # Document originals are stored permanently; their staging copies are disposable.
+        cleanup=not form_data.keep_original_file or form_data.media_type in {"pdf", "document", "ebook"},
     )
     temp_dir_path: FilePath | None = None
     loop = asyncio.get_running_loop()
@@ -3354,6 +3400,21 @@ async def add_media_orchestrate(
 
                             logger.info(f"Stored original file for media_id={media_id}: {storage_path}")
                             result["original_file_stored"] = True
+                            try:
+                                cleanup_warnings = await _cleanup_superseded_original_files(
+                                    db, storage, media_id, user_id=user_id_str,
+                                )
+                                if cleanup_warnings:
+                                    _ensure_warnings_list(result).extend(cleanup_warnings)
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception as cleanup_err:  # noqa: BLE001 - preserve committed replacement on cleanup errors
+                                logger.warning(
+                                    "Failed to clean up superseded originals for media_id={}: {}", media_id, cleanup_err,
+                                )
+                                _ensure_warnings_list(result).append(
+                                    "Original stored, but cleanup of older originals failed."
+                                )
 
                         except asyncio.CancelledError:
                             raise

@@ -117,7 +117,8 @@ class MediaFilesRepository:
     def has_original_file(self, media_id: int) -> bool:
         return self.get_for_media(media_id, "original", include_deleted=False) is not None
 
-    def soft_delete(self, file_id: int) -> None:
+    def soft_delete(self, file_id: int, *, hard_delete: bool = False) -> None:
+        """Delete one file registration, preserving other files and plaintext history."""
         db = self.session
         try:
             with db.transaction() as conn:
@@ -132,6 +133,16 @@ class MediaFilesRepository:
                 file_uuid = row.get("uuid")
                 current_version = int(row.get("version") or 1)
                 new_version = current_version + 1
+                if hard_delete:
+                    cursor = db._execute_with_connection(
+                        conn, "DELETE FROM MediaFiles WHERE id = :id", {"id": file_id},
+                    )
+                    if cursor.rowcount:
+                        db._log_sync_event(
+                            conn, "MediaFiles", file_uuid, "delete", new_version,
+                            {"file_id": file_id, "hard_delete": True},
+                        )
+                    return
                 now = datetime.now(timezone.utc).isoformat()
 
                 db._execute_with_connection(
