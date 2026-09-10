@@ -57,10 +57,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         /usr/local/lib/python*/site-packages/setuptools \
         /usr/local/lib/python*/site-packages/setuptools-*.dist-info
 
-RUN --mount=type=bind,from=builder,source=/sqlite-packages,target=/sqlite-packages \
-    dpkg -i "/sqlite-packages/$(dpkg --print-architecture).deb" \
-    && python -I -c "import sqlite3; assert sqlite3.sqlite_version_info >= (3, 53, 2), sqlite3.sqlite_version"
-
 WORKDIR /app
 
 # Bring in the exact locked environment from the builder image.
@@ -82,6 +78,11 @@ COPY Dockerfiles/entrypoints/tldw-app-first-run.sh /usr/local/bin/tldw-app-first
 RUN mkdir -p /app/Databases && \
     chown appuser:appuser /app/Databases && \
     chmod +x /usr/local/bin/tldw-app-first-run
+# Keep the library update after the large, unchanged environment copy.
+RUN --mount=type=bind,from=builder,source=/sqlite-packages,target=/sqlite-packages \
+    dpkg -i "/sqlite-packages/$(dpkg --print-architecture).deb" \
+    && python -I -S -c "import sqlite3; assert sqlite3.sqlite_version_info >= (3, 53, 2), sqlite3.sqlite_version"
+
 USER appuser
 
 ARG HOST=0.0.0.0

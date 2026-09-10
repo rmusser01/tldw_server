@@ -48,16 +48,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         /usr/local/lib/python*/site-packages/setuptools \
         /usr/local/lib/python*/site-packages/setuptools-*.dist-info
 
-RUN --mount=type=bind,from=builder,source=/sqlite-packages,target=/sqlite-packages \
-    dpkg -i "/sqlite-packages/$(dpkg --print-architecture).deb" \
-    && python -I -c "import sqlite3; assert sqlite3.sqlite_version_info >= (3, 53, 2), sqlite3.sqlite_version"
-
 WORKDIR /app
 
 COPY --from=builder /opt/tldw-venv /opt/tldw-venv
 COPY tldw_Server_API/Config_Files /app/Config_Files
 
 RUN mkdir -p /app/Databases/user_databases /app/Models /app/logs
+
+# Keep the library update after the large, unchanged environment copy.
+RUN --mount=type=bind,from=builder,source=/sqlite-packages,target=/sqlite-packages \
+    dpkg -i "/sqlite-packages/$(dpkg --print-architecture).deb" \
+    && python -I -S -c "import sqlite3; assert sqlite3.sqlite_version_info >= (3, 53, 2), sqlite3.sqlite_version"
 
 ENV PATH="/opt/tldw-venv/bin:${PATH}" \
     PYTHONPATH=/app \
