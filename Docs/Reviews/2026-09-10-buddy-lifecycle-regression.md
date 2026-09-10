@@ -12,7 +12,7 @@ voice-controller output fields are overridden. The host uses `root="sidepanel"`
 without WebLayout, ServerReadinessGate or Fast Refresh. It verifies that all
 five voice states and the tool signal actually reach the published route context.
 
-Across 24 state transitions at 250 ms intervals, plus transcript updates and
+Across 24 state transitions at controlled 250 ms intervals, plus transcript updates and
 runtime diagnostic changes, requests remain at one pack list, one pack detail and
 one session list. The host remains present and its pack remains loaded. The
 positive control explicitly takes the route offline and back: the host disappears,
@@ -30,8 +30,12 @@ installation. No physical microphone, provider, installed extension or native
 terminal acceptance is claimed. DOM host/pack assertions do not prove rendered
 image pixels or real audio playback.
 
-Final focused run passed one test in 8.20 seconds; the corrected historical replay
-passed in 7.98 seconds, and all four current source files were restored byte-for-byte.
+The initial focused run passed one test in 8.20 seconds; the corrected historical
+replay passed in 7.98 seconds, and all four current source files were restored
+byte-for-byte. Qodo review then replaced the repeated-update loop's real sleeps
+with a fixed Vitest clock and explicit timer advancement. The check asserts exactly
+six seconds of simulated updates and restores real timers before reconnect checks
+and in failure cleanup. The revised focused test passed in 0.97 seconds.
 Review corrected the WebSocket fixture to use the real URL/protocol envelope and
 ready-state transitions, plus cleanup on failure. ESLint reported no code findings;
 its shared-package invocation emitted the existing Next pages-directory diagnostic.

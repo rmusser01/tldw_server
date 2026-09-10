@@ -4,7 +4,7 @@ title: Investigate repeated Buddy visual pack loads during live UAT
 status: In Progress
 assignee: []
 created_date: 2026-09-06 16:57
-updated_date: 2026-09-10 15:27
+updated_date: 2026-09-10 16:24
 labels: []
 dependencies: []
 references:
@@ -44,6 +44,7 @@ Voice follow-up PR created against dev: https://github.com/rmusser01/tldw_server
 
 2026-09-10 controlled browser diagnostics: 1280px mount, 1023px cleanup, 1024px remount with two development pack-list calls and one session-list call. Confirms breakpoint source of paired reloads, not original rapid loop. No initiating trigger or 429 reproduced; all original AC remain open. Source-bound details/timestamps in Docs/Reviews/2026-09-10-buddy-followup.md. Temporary probes not shipped; viewport restored.
 Recovered incident frontend73640bbb89aed7d878d254bd622ca68f79923ad8 from the separate local tldw_server checkout. The real route/context/host/live-control integration kept exactly one pack-list, detail and session-list across24 simulated voice/tool transitions at250ms; deliberately taking the route offline and back creates exactly one additional request set. Replaying the four historical source files also stayed stable. This is a bounded lifecycle regression, not an established initiating cause or physical voice acceptance. No production behavior was changed; AC1/AC3 remain open. Details and executable check in Docs/Reviews/2026-09-10-buddy-lifecycle-regression.md.
+PR #2941 Qodo review: replace the 24 real-time waits with a fixed Vitest clock and explicit 250 ms advancement, assert exactly 6000 ms elapsed, and restore real timers before reconnect checks plus failure cleanup. The focused test passes in 0.97 seconds; this is deterministic bounded-load coverage, with no new claim about the historical trigger.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 

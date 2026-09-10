@@ -359,9 +359,13 @@ describe("SidepanelPersona", () => {
   })
 
   afterEach(() => {
-    cleanup()
-    for (const client of queryClients.splice(0)) client.clear()
-    for (const portal of portalRoots.splice(0)) portal.remove()
+    try {
+      cleanup()
+      for (const client of queryClients.splice(0)) client.clear()
+      for (const portal of portalRoots.splice(0)) portal.remove()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   afterAll(() => {
@@ -561,6 +565,11 @@ describe("SidepanelPersona", () => {
       "error",
       "idle"
     ]
+    // Control the repeated-update interval without coupling route bootstrap's
+    // Testing Library waits to a fake clock.
+    vi.useFakeTimers()
+    const startedAt = new Date("2026-09-10T00:00:00Z").getTime()
+    vi.setSystemTime(startedAt)
     for (let i = 0; i < 24; i++) {
       mocks.voiceState = voiceStates[i % voiceStates.length]
       mocks.toolName = i % 2 ? "knowledge.search" : ""
@@ -583,9 +592,10 @@ describe("SidepanelPersona", () => {
       )
       view.rerender(<SidepanelPersona shell="options" />)
       await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 250))
+        await vi.advanceTimersByTimeAsync(250)
       })
     }
+    expect(Date.now() - startedAt).toBe(6000)
     const publishedVoiceStates = new Set(
       mocks.buddyShellContextSnapshots
         .filter(Boolean)
@@ -604,6 +614,7 @@ describe("SidepanelPersona", () => {
     expect(
       usePersonaVisualRuntimeStore.getState().runtimeDiagnostics?.packLoadStatus
     ).toBe("loaded")
+    vi.useRealTimers()
     // A real route availability change is the positive control: it must unmount
     // the host and then load exactly one replacement when connectivity returns.
     mocks.isOnline = false
