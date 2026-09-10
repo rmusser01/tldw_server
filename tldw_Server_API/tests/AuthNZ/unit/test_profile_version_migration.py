@@ -252,9 +252,12 @@ def test_current_sqlite_schema_fails_startup_on_profile_metadata_drift(
         ensure_authnz_tables(db_path)
 
 
+@pytest.mark.parametrize("target_version", [91, None], ids=["profile-migration", "latest"])
 def test_sqlite_upgrade_preserves_custom_users_schema_objects_and_foreign_keys(
     tmp_path: Path,
+    target_version: int | None,
 ) -> None:
+    """Preserve custom schema through the profile rebuild and later upgrades."""
     db_path = tmp_path / "custom-schema.db"
     with sqlite3.connect(db_path) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
@@ -318,7 +321,10 @@ def test_sqlite_upgrade_preserves_custom_users_schema_objects_and_foreign_keys(
             """
         )
 
-    ensure_authnz_tables(db_path)
+    if target_version is None:
+        ensure_authnz_tables(db_path)
+    else:
+        apply_authnz_migrations(db_path, target_version=target_version)
 
     with sqlite3.connect(db_path) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
@@ -421,7 +427,7 @@ def test_sqlite_upgrade_preserves_custom_users_schema_objects_and_foreign_keys(
             "SELECT COUNT(*) FROM user_children WHERE user_id = 7"
         ).fetchone()[0]
 
-    assert columns == [
+    preserved_columns = [
         "id",
         "username",
         "email",
@@ -431,6 +437,8 @@ def test_sqlite_upgrade_preserves_custom_users_schema_objects_and_foreign_keys(
         "display_name",
         "profile_version",
     ]
+    # Later migrations may append columns without changing the preserved schema.
+    assert columns[: len(preserved_columns)] == preserved_columns
     assert row == (
         7,
         3,

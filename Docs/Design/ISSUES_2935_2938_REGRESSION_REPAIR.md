@@ -12,9 +12,12 @@ Chat metrics may label an absent model unknown, but execution must retain absenc
 
 ## Work and verification record
 
-Tracked in TASK-13235, TASK-13236, and TASK-13237, based on fetched dev commit
-`751563a966`. The task-owned implementation plan is removed when work is complete;
-this note retains the design, audit, and verification record.
+Tracked in TASK-13235, TASK-13236, and TASK-13237, initially based on fetched dev
+commit `751563a966`. TASK-13238 tracks the migration-test follow-up and PR
+publication. Before publication, the branch was rebased onto dev commit
+`177d58ac6fee87678d65ce3a9db0216021b6b68e` without conflicts. The task-owned
+implementation plan is removed when work is complete; this note retains the
+design, audit, and verification record.
 
 ## Related-pattern audit
 
@@ -73,6 +76,9 @@ keys use the normalized model rather than falling back to the raw request.
 - Combined auth/profile suite: 86 passed, including the new PostgreSQL session
   and array integration tests, session migration/read/refresh coverage, override
   readiness, and SQLite compatibility.
+- Final PR verification on the rebased branch expanded that suite with the
+  API-key, lockout-scope, and usage-truthiness migration tests: 100 passed.
+  The profile-version migration file passed separately with 22 tests.
 - Session worker checks: 24 focused unit tests and 4 PostgreSQL tests passed.
   The older session integration tests now seed through UsersDB and the standard
   isolated fixture, allowing their existing refresh/revocation checks to run
@@ -91,16 +97,18 @@ Final chat verification:
 | Scope | Result |
 | --- | --- |
 | Provider/model resolution, target defaults, default provider, payload construction | 146 passed |
-| Omitted/blank/configured/explicit endpoint cases in both streaming modes | 20 passed |
+| Full simplified endpoint file, including omitted/blank/configured/explicit models in both streaming modes | 215 passed, 1 existing skip |
 | Messages usage | 209 passed |
 | Messages endpoints, overrides, defaults, native errors | 111 passed |
 | Character prechecks and Notes suggestion providers | 30 passed |
 | Chat macros | 7 passed |
 
-The full simplified chat endpoint file passed 203 tests with one existing skip
-before the final whitespace follow-up. All affected endpoint cases were rerun
-afterward. The existing skip is the older streaming test marked as hanging with
-TestClient; the new streaming payload regressions ran successfully.
+After the whitespace follow-up and rebase onto dev, the resolver/default/payload
+tests and full simplified endpoint file passed 361 tests combined, with one
+existing skip. That skip is the older streaming test marked as hanging with
+TestClient; the new streaming payload regressions ran successfully. The four
+focused UI middleware/auth files also passed again on the rebased branch
+(11 tests).
 
 Bandit reports no findings or scan errors across all twelve touched backend
 production files. Python compilation, repository test guards, and git whitespace
@@ -110,15 +118,46 @@ on the original base. Existing whole-file Black drift was left outside the
 behavioral repair. Independent review identified the malformed-algorithm and
 blank-model cases, then cleared all fixes after follow-up.
 
-## Known verification limits
+## Migration-test follow-up
 
 The broader SQLite/AuthNZ migration run passed 52 tests and failed
 `test_sqlite_upgrade_preserves_custom_users_schema_objects_and_foreign_keys` in
-`tests/AuthNZ/unit/test_profile_version_migration.py`. Its exact users-column
-expectation omits seven columns added by the existing migration path, starting
-with uuid. Running that single test in a detached worktree at the original base
-`751563a966` reproduced the identical failure with migrations 91–97. Migration 98
-does not alter users. This pre-existing test failure remains outside this repair.
+`tests/AuthNZ/unit/test_profile_version_migration.py`. Running that single test in
+a detached worktree at the original base `751563a966` reproduced the identical
+failure with migrations 91–97. Migration 98 does not alter users.
+
+The follow-up isolated the stale expectation: migration 91 preserves the custom
+users schema and appends profile_version, while migration 93 legitimately appends
+uuid, is_active, is_superuser, email_verified, is_verified, storage_quota_mb, and
+storage_used_mb. No production migration change is needed. The regression now
+checks the preserved column prefix and runs both migration 91 alone and the full
+startup upgrade. All existing row, default, constraint, index, trigger, sequence,
+and parent/child foreign-key checks remain intact.
+
+Before the assertion repair, the migration-91 case passed and the latest-upgrade
+case reproduced the failure. After repair, all 22 tests in the profile migration
+file pass. Independent review found no outstanding issues. Ruff, compilation,
+and whitespace checks pass. Bandit reports no findings or scan errors in the
+changed test file with the expected test assertions excluded via B101.
+
+The wider auth run also exposed an order-dependent Hypothesis generation health
+check in the new array property regression. Two wider runs passed 99 tests and
+failed that check, while the same property seed passed alone. Profiling a smaller
+reproduction traced 1.324 seconds of a draw to Hypothesis's first scan of constants
+from 2,159 imported modules. The tested array binding itself was not slow.
+Independent review recommended a test-local, finite 1,000 ms deadline: in the
+installed Hypothesis 6.138.2, this allows five seconds for generation health
+checks. The positive-integer array strategy, length bound, example count, and
+assertion are unchanged, and no health checks are suppressed. This avoids
+patching Hypothesis internals or reducing coverage.
+
+The final wider run passed all 100 tests using the original test-order seed
+`182453889` and Hypothesis seed `219652731782752022987833063022846811844`.
+Hypothesis completed 100 passing examples with typical runtimes below 1 ms.
+Both follow-up test files pass Ruff, compilation, and Bandit with only expected
+test assertions excluded via B101; the array test file also passes Black.
+
+## Known verification limits
 
 The full backend and admin UI suites were not run. PostgreSQL verification uses
 the repository's standard local isolated fixture; it does not measure migration

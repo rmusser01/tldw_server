@@ -7,7 +7,7 @@ from datetime import datetime
 from unittest.mock import AsyncMock
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, _flatten_params
@@ -141,6 +141,8 @@ async def test_scoped_listing_counts_preserve_an_array_as_the_only_filter(postgr
     assert connection.fetchval.await_args.args[1:] == (() if ids is None else (ids,))
 
 
+# Allow Hypothesis's one-time scan of imported module constants in large suites.
+@settings(deadline=1000)
 @given(st.lists(st.integers(min_value=1, max_value=2**31 - 1), max_size=100))
 def test_explicit_single_array_parameter_preserves_values(ids):
     """Nested parameter sequences distinguish an array from variadic arguments."""
