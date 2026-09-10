@@ -1,11 +1,11 @@
 ---
 id: TASK-13242
 title: Preserve imported Buddy artwork credits through server copies and exports
-status: In Progress
+status: Done
 assignee:
 - '@codex'
 created_date: 2026-09-10 14:16
-updated_date: 2026-09-10 15:01
+updated_date: 2026-09-10 15:27
 labels:
 - buddy
 - persona
@@ -56,13 +56,21 @@ Implemented ADR-006: native credit validation/storage, independent attribution s
 
 Published PR https://github.com/rmusser01/tldw_server/pull/2940 against freshly fetched dev50c1f68957. Implementation commit0e72f25515, no behind-dev commits at publication. Collection installation guidance in tldw-stuff PR18 links the source-bound verification and recovery instructions. Task remains In Progress pending PR review/merge.
 PR2940 Qodo follow-up: documented helper contracts, typed/documented tests, central ValueError-compatible artwork exception, repaired mixed-CLI nested task markers without losing notes. Nine invalid-record tests RED on generic exceptions;44 SQLite portability cases pass after domain type. Ruff/Black/Bandit pass. Fixed curated-site API link from actual docs CI failure; local exact docs gate blocked before build by macOS SemLock ENOSPC, Linux CI pending. Collection PR18 merged75a800815f51aa220c82da7778d17f8a1e292a42.
+PR2940 merged f45bdca7b0ad06b29cad8f98d87e5025158cbde4 on2026-09-10 after all current-head CI checks passed and all six Qodo findings were resolved. Implementation and merge complete; collection guide PR18 is merged. Separate physical/native qualification and the historical lifecycle investigation remain tracked in their own tasks.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Preserved bounded native artwork credits across server import, independent copies and compatible export; fixed PostgreSQL timestamp serialization. Targeted storage/HTTP/native roundtrip verification and required CI passed. Merged PR2940. ADR006 extends the existing independent ownership contract without a migration.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
