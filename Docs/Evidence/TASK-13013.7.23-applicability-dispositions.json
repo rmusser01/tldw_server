@@ -1,0 +1,994 @@
+{
+  "active": false,
+  "approval_status": "pending_repository_visible_human_approval",
+  "artifacts": [
+    {
+      "digest": "sha256:7acf62766a675e54b8f721419a4d80371c31ca15056e57aabf2e3a0b5ce23ef8",
+      "id": 10109529322,
+      "member_sha256": {
+        "SHA256SUMS-image-app": "5d2f52ec6c5140b97d1a360d70f51452430e2bfd91d251190bf199040da837a3",
+        "oci-subject-app.json": "22ab9f0e25fac9a6926aa3422e5824c31e571d2efef9e601339b25292d93a247",
+        "runtime-image-app.json": "0c2173091753a31b2eec3c10a2603f5d685509e2dd1e2a9a112e467197394a5e",
+        "sbom-image-app.cdx.json": "9563c805c26a6295b167353800fa3d6679a5a36014b1b6fc4add8ae0a8860477",
+        "scan-decision-image-app.json": "50f5651699b55d0cc80a2105edc42872ea962a7d30d6b350a212484026fe7bb5",
+        "trivy-image-app.json": "f88d77cf89a0f1b8a9a7e91b2eb58970b64e8094f593cf01e0252bfa825802da"
+      },
+      "name": "container-admission-app",
+      "run_id": 34362968533
+    },
+    {
+      "digest": "sha256:f1833864ecde4526276884702b0eb74c81126f76fd1873ea2c169afafd92a4ea",
+      "id": 10109884293,
+      "member_sha256": {
+        "SHA256SUMS-image-worker": "f44b94549c835e830cd934859148e00c5dfa893c423c2cde1269e77bb043bc1d",
+        "oci-subject-worker.json": "89c425ecee26d37e29449306f5679b07d9d8942c1855f434099f6327463f0380",
+        "runtime-image-worker.json": "8b7d6ebfa66a325506f6e6782cb3f3285848196f82165c31ec749969a651d7eb",
+        "sbom-image-worker.cdx.json": "ec67416c996ba6d8097217be0e4b513032ca767cfa66da5fd9024ff9bd8c6bda",
+        "scan-decision-image-worker.json": "fd93478c160b420e34ac6f6d7bbf5724211d583ff7ac97644755145821a70871",
+        "trivy-image-worker.json": "8899e5580af6b7fefc061d972a1f63f10e93d57235edaedaf9e5f572c8cc3bf3"
+      },
+      "name": "container-admission-worker",
+      "run_id": 34362968533
+    },
+    {
+      "digest": "sha256:7611c8f6b54a928a5e72af991aeaec602c8044bbf94ae2a638ac8e6a27fe5fea",
+      "id": 10109943070,
+      "member_sha256": {
+        "SHA256SUMS-image-audio-worker": "09311f765bebaa3f361bccb5bbc284153a3ac0fe5faf5a624cde8025b4d80361",
+        "oci-subject-audio-worker.json": "c2c3c7c0fd015e04d875e3dea64eae2f31dd57941c7d4623ac19e76a8ba47aee",
+        "runtime-image-audio-worker.json": "943ea84005766f3f0309439a228aa3859de513e0d738b8e87dbe2e867ef24e9d",
+        "sbom-image-audio-worker.cdx.json": "d1d4479aef9c3953400773d051cbbca417d15061c90d5d61d897cdc5d3b4a866",
+        "scan-decision-image-audio-worker.json": "93e691703289a35e01077d0c6eb2192502a9556dcbe062fee477d3943d0b4388",
+        "trivy-image-audio-worker.json": "4c01e656130515310e5396aec02a2de5fc974c495591d4b90a033496920c81f6"
+      },
+      "name": "container-admission-audio-worker",
+      "run_id": 34362968533
+    },
+    {
+      "digest": "sha256:ff2488f2b32aad8027a33a90984446b19985e91f4a2390e749f09203951e261a",
+      "id": 10109080595,
+      "member_sha256": {
+        "SHA256SUMS-image-webui": "190a4703e6d5ce6c55d1578cb567047b12c954a532134019f63be9bf3c184d73",
+        "oci-subject-webui.json": "583873c0f0408f1947efbeb5a5c22dd10df325a60dfaaf5eafe382b19c40575a",
+        "sbom-image-webui.cdx.json": "6bf3ab88a9c5ef2d822736b5c4fefd48a5fe0fa0535b6ceb65282423f2bc218f",
+        "scan-decision-image-webui.json": "d8347470af794a6f7d1ee5a5b321a937bb003ab8b34cfe3ffa4d469354bf20c0",
+        "trivy-image-webui.json": "f1e0e15a4966175f8fd08c682f75c02143bf2fd17748a8ff36e5c2b8cf668869"
+      },
+      "name": "container-admission-webui",
+      "run_id": 34362968533
+    },
+    {
+      "digest": "sha256:81f84f323c2760399e2ba1c3a43e64712a210fcab3602bccf39de688c064bed2",
+      "id": 10108713427,
+      "member_sha256": {
+        "SHA256SUMS-image-admin-ui": "e5853454a08adf54463e17941f9b634a4da9cd09928ca2b99c391eb6ab98f1bd",
+        "oci-subject-admin-ui.json": "012ae5aa2cd8255ca9f14c32830ece37fd2ddd0efa354032976032c6ff6c4fb1",
+        "sbom-image-admin-ui.cdx.json": "b6a39fb6fb56e345c6a4777888ea80d6d39fce46984e0dd455db4ec5fbf4020e",
+        "scan-decision-image-admin-ui.json": "bebf2116ac1773202b10b18d2ac085a7109fe722c7a2cb0990d4310448e6484e",
+        "trivy-image-admin-ui.json": "f238929e5ace33d170f37cebd0faaf8418b96fb89b0ebc517d5f2f629be51d26"
+      },
+      "name": "container-admission-admin-ui",
+      "run_id": 34362968533
+    },
+    {
+      "digest": "sha256:04961ac46cf289d207e7a7ca497974621226dd7232bf6b86e01d12778871959e",
+      "id": 10108780400,
+      "member_sha256": {
+        "SHA256SUMS.source": "8b0f602ca7ac02ded39af163b6f380956a641c3ec84107ad7386fb9c860664e6",
+        "sbom-admin-ui.cdx.json": "6630aaf45776c72f279f8e35001437e330a03f9bf9b85e24157a4f1cc2a0b508",
+        "sbom-apps-workspace.cdx.json": "ea53548e048f419cd6985f035d7cc3b9eee58cbc8dadfaca1eb837ef2ef93b95",
+        "sbom-python-root.cdx.json": "c5d0e8393b4d30e033372f6510c09944388ac663cfeb58d9725dbd5ee453ef50",
+        "sbom-source-aggregate.cdx.json": "f256259e051373cd1f6cddddff687c62ea9f43c1713563d507f3442bc7340c4b",
+        "source-component-counts.json": "086103dd0615f73dda0cac361157c7ea5a192571c7fdf353809ea73353bb6da2"
+      },
+      "name": "source-sbom-aggregate",
+      "run_id": 34362968663
+    },
+    {
+      "digest": "sha256:06b887a22906577f7eef1aa6459bf45b654313286e7f69f3226e50e196000053",
+      "id": 10108803808,
+      "member_sha256": {
+        "SHA256SUMS.scan": "ae3410fc1ed6788113cab12f1c3c884cb6893dd8b4c83a365f586c7d6ae2468f",
+        "scan-decision-source-admin-ui.json": "bc811ee0df123757a753cb6edb3e295cc49ec9f9f3172ecaf9ce89ddf430143b",
+        "scan-decision-source-apps-workspace.json": "06421ad684ab4f44362b64623ce891d8c1977d447324ed982fadb38d9d9a98bc",
+        "scan-decision-source-python-root.json": "6c1d40117214521a5c882ba66cdf393e27d6495bcc9195bb6ed34e7df180232f",
+        "trivy-db-metadata.json": "940cecc4ccb849f843ede6587241c3ec3b9fdbdf49816c61830406d192e49ea5",
+        "trivy-source-admin-ui.json": "f3b2d0cbd7f87b1d3d8dad3e6b1afd8b4320f20fdff57052436b4e31f63fd0b7",
+        "trivy-source-apps-workspace.json": "a26319262f82d9f6e809a858e3c3140527cd1b6ef731ebfaa09be27b102a614b",
+        "trivy-source-python-root.json": "914a6c3ea35734da3df35b79ba2e55aa05969d480d59062ecdb95ea6b4a232bb",
+        "trivy-version.txt": "41e22ed321a4c139a4fae57e92d8fa971cf7e91a8c1c4444d9a948c52a72c73a"
+      },
+      "name": "source-sbom-scans",
+      "run_id": 34362968663
+    }
+  ],
+  "components": {
+    "image-admin-ui": {
+      "blocking_rows": 56,
+      "blocking_severity_counts": {
+        "CRITICAL": 4,
+        "HIGH": 52
+      },
+      "conditional_chroma_rows": 0,
+      "proposed_supported_rows": 1,
+      "remaining_if_supported_and_conditional_approved": 55,
+      "remaining_if_supported_approved": 55,
+      "remaining_supported_by_package": {
+        "pkg:deb/debian/bsdutils": 5,
+        "pkg:deb/debian/gzip": 1,
+        "pkg:deb/debian/libacl1": 1,
+        "pkg:deb/debian/libblkid1": 5,
+        "pkg:deb/debian/libmount1": 5,
+        "pkg:deb/debian/libsmartcols1": 5,
+        "pkg:deb/debian/libsystemd0": 1,
+        "pkg:deb/debian/libtinfo6": 1,
+        "pkg:deb/debian/libudev1": 1,
+        "pkg:deb/debian/libuuid1": 5,
+        "pkg:deb/debian/mount": 5,
+        "pkg:deb/debian/ncurses-base": 1,
+        "pkg:deb/debian/ncurses-bin": 1,
+        "pkg:deb/debian/perl-base": 8,
+        "pkg:deb/debian/util-linux": 5,
+        "pkg:deb/debian/util-linux-extra": 5
+      },
+      "runtime": null,
+      "subject_digest": "sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de",
+      "unique_vulnerability_ids": 18
+    },
+    "image-app": {
+      "blocking_rows": 234,
+      "blocking_severity_counts": {
+        "CRITICAL": 9,
+        "HIGH": 225
+      },
+      "conditional_chroma_rows": 4,
+      "proposed_supported_rows": 1,
+      "remaining_if_supported_and_conditional_approved": 229,
+      "remaining_if_supported_approved": 233,
+      "remaining_supported_by_package": {
+        "pkg:deb/debian/bsdutils": 4,
+        "pkg:deb/debian/ffmpeg": 17,
+        "pkg:deb/debian/gzip": 1,
+        "pkg:deb/debian/libacl1": 1,
+        "pkg:deb/debian/libavcodec61": 17,
+        "pkg:deb/debian/libavdevice61": 17,
+        "pkg:deb/debian/libavfilter10": 17,
+        "pkg:deb/debian/libavformat61": 17,
+        "pkg:deb/debian/libavutil59": 17,
+        "pkg:deb/debian/libblkid1": 4,
+        "pkg:deb/debian/libcjson1": 4,
+        "pkg:deb/debian/libexpat1": 2,
+        "pkg:deb/debian/libglib2.0-0t64": 7,
+        "pkg:deb/debian/liblastlog2-2": 4,
+        "pkg:deb/debian/libmbedcrypto16": 4,
+        "pkg:deb/debian/libmount1": 4,
+        "pkg:deb/debian/libncursesw6": 1,
+        "pkg:deb/debian/libpostproc58": 17,
+        "pkg:deb/debian/libsmartcols1": 4,
+        "pkg:deb/debian/libsndfile1": 1,
+        "pkg:deb/debian/libsqlite3-0": 2,
+        "pkg:deb/debian/libswresample5": 17,
+        "pkg:deb/debian/libswscale8": 17,
+        "pkg:deb/debian/libsystemd0": 1,
+        "pkg:deb/debian/libtiff6": 2,
+        "pkg:deb/debian/libtinfo6": 1,
+        "pkg:deb/debian/libudev1": 1,
+        "pkg:deb/debian/libuuid1": 4,
+        "pkg:deb/debian/libxml2": 2,
+        "pkg:deb/debian/login": 4,
+        "pkg:deb/debian/mount": 4,
+        "pkg:deb/debian/ncurses-base": 1,
+        "pkg:deb/debian/ncurses-bin": 1,
+        "pkg:deb/debian/perl-base": 7,
+        "pkg:deb/debian/util-linux": 4,
+        "pkg:pypi/chromadb": 4,
+        "pkg:pypi/nltk": 1
+      },
+      "runtime": {
+        "checks": {
+          "foreign_collection_uuid_isolation": true,
+          "no_tcp_listeners": true,
+          "per_user_collection_and_query_isolation": true
+        },
+        "chroma_backend": "chromadb.api.rust",
+        "config_digest": "sha256:12cc83ac9519a1be9b4838ac38edae799e257cfd6f36cfbf16197d378b9326aa",
+        "jwt_ec_backend": "cryptography.hazmat.bindings._rust.openssl.ec",
+        "lock_sha256": "54a87906885483eac91ce27990f1a0be4035996d2040942b66c2920db83ae07a",
+        "os_facts": {
+          "perl": {
+            "ivsize": 8,
+            "path": "/usr/bin/perl",
+            "ptrsize": 8,
+            "status": "observed"
+          },
+          "systemd_homed": {
+            "paths": {
+              "/lib/systemd/systemd-homed": false,
+              "/usr/lib/systemd/systemd-homed": false
+            }
+          }
+        },
+        "scope": "isolated embedded-client probe; not application startup or a vulnerability waiver",
+        "subject_digest": "sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f",
+        "versions": {
+          "chromadb": "1.5.9",
+          "cryptography": "50.0.1",
+          "pyjwt": "2.13.0"
+        }
+      },
+      "subject_digest": "sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f",
+      "unique_vulnerability_ids": 62
+    },
+    "image-audio-worker": {
+      "blocking_rows": 234,
+      "blocking_severity_counts": {
+        "CRITICAL": 9,
+        "HIGH": 225
+      },
+      "conditional_chroma_rows": 4,
+      "proposed_supported_rows": 1,
+      "remaining_if_supported_and_conditional_approved": 229,
+      "remaining_if_supported_approved": 233,
+      "remaining_supported_by_package": {
+        "pkg:deb/debian/bsdutils": 4,
+        "pkg:deb/debian/ffmpeg": 17,
+        "pkg:deb/debian/gzip": 1,
+        "pkg:deb/debian/libacl1": 1,
+        "pkg:deb/debian/libavcodec61": 17,
+        "pkg:deb/debian/libavdevice61": 17,
+        "pkg:deb/debian/libavfilter10": 17,
+        "pkg:deb/debian/libavformat61": 17,
+        "pkg:deb/debian/libavutil59": 17,
+        "pkg:deb/debian/libblkid1": 4,
+        "pkg:deb/debian/libcjson1": 4,
+        "pkg:deb/debian/libexpat1": 2,
+        "pkg:deb/debian/libglib2.0-0t64": 7,
+        "pkg:deb/debian/liblastlog2-2": 4,
+        "pkg:deb/debian/libmbedcrypto16": 4,
+        "pkg:deb/debian/libmount1": 4,
+        "pkg:deb/debian/libncursesw6": 1,
+        "pkg:deb/debian/libpostproc58": 17,
+        "pkg:deb/debian/libsmartcols1": 4,
+        "pkg:deb/debian/libsndfile1": 1,
+        "pkg:deb/debian/libsqlite3-0": 2,
+        "pkg:deb/debian/libswresample5": 17,
+        "pkg:deb/debian/libswscale8": 17,
+        "pkg:deb/debian/libsystemd0": 1,
+        "pkg:deb/debian/libtiff6": 2,
+        "pkg:deb/debian/libtinfo6": 1,
+        "pkg:deb/debian/libudev1": 1,
+        "pkg:deb/debian/libuuid1": 4,
+        "pkg:deb/debian/libxml2": 2,
+        "pkg:deb/debian/login": 4,
+        "pkg:deb/debian/mount": 4,
+        "pkg:deb/debian/ncurses-base": 1,
+        "pkg:deb/debian/ncurses-bin": 1,
+        "pkg:deb/debian/perl-base": 7,
+        "pkg:deb/debian/util-linux": 4,
+        "pkg:pypi/chromadb": 4,
+        "pkg:pypi/nltk": 1
+      },
+      "runtime": {
+        "checks": {
+          "foreign_collection_uuid_isolation": true,
+          "no_tcp_listeners": true,
+          "per_user_collection_and_query_isolation": true
+        },
+        "chroma_backend": "chromadb.api.rust",
+        "config_digest": "sha256:1f89376a525efd5b7c7290982d0c19e7f8d9bd6772718c3f605e85099b0f9fe1",
+        "jwt_ec_backend": "cryptography.hazmat.bindings._rust.openssl.ec",
+        "lock_sha256": "54a87906885483eac91ce27990f1a0be4035996d2040942b66c2920db83ae07a",
+        "os_facts": {
+          "perl": {
+            "ivsize": 8,
+            "path": "/usr/bin/perl",
+            "ptrsize": 8,
+            "status": "observed"
+          },
+          "systemd_homed": {
+            "paths": {
+              "/lib/systemd/systemd-homed": false,
+              "/usr/lib/systemd/systemd-homed": false
+            }
+          }
+        },
+        "scope": "isolated embedded-client probe; not application startup or a vulnerability waiver",
+        "subject_digest": "sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034",
+        "versions": {
+          "chromadb": "1.5.9",
+          "cryptography": "50.0.1",
+          "pyjwt": "2.13.0"
+        }
+      },
+      "subject_digest": "sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034",
+      "unique_vulnerability_ids": 62
+    },
+    "image-webui": {
+      "blocking_rows": 56,
+      "blocking_severity_counts": {
+        "CRITICAL": 4,
+        "HIGH": 52
+      },
+      "conditional_chroma_rows": 0,
+      "proposed_supported_rows": 1,
+      "remaining_if_supported_and_conditional_approved": 55,
+      "remaining_if_supported_approved": 55,
+      "remaining_supported_by_package": {
+        "pkg:deb/debian/bsdutils": 5,
+        "pkg:deb/debian/gzip": 1,
+        "pkg:deb/debian/libacl1": 1,
+        "pkg:deb/debian/libblkid1": 5,
+        "pkg:deb/debian/libmount1": 5,
+        "pkg:deb/debian/libsmartcols1": 5,
+        "pkg:deb/debian/libsystemd0": 1,
+        "pkg:deb/debian/libtinfo6": 1,
+        "pkg:deb/debian/libudev1": 1,
+        "pkg:deb/debian/libuuid1": 5,
+        "pkg:deb/debian/mount": 5,
+        "pkg:deb/debian/ncurses-base": 1,
+        "pkg:deb/debian/ncurses-bin": 1,
+        "pkg:deb/debian/perl-base": 8,
+        "pkg:deb/debian/util-linux": 5,
+        "pkg:deb/debian/util-linux-extra": 5
+      },
+      "runtime": null,
+      "subject_digest": "sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1",
+      "unique_vulnerability_ids": 18
+    },
+    "image-worker": {
+      "blocking_rows": 59,
+      "blocking_severity_counts": {
+        "CRITICAL": 5,
+        "HIGH": 54
+      },
+      "conditional_chroma_rows": 4,
+      "proposed_supported_rows": 1,
+      "remaining_if_supported_and_conditional_approved": 54,
+      "remaining_if_supported_approved": 58,
+      "remaining_supported_by_package": {
+        "pkg:deb/debian/bsdutils": 4,
+        "pkg:deb/debian/gzip": 1,
+        "pkg:deb/debian/libacl1": 1,
+        "pkg:deb/debian/libblkid1": 4,
+        "pkg:deb/debian/liblastlog2-2": 4,
+        "pkg:deb/debian/libmount1": 4,
+        "pkg:deb/debian/libncursesw6": 1,
+        "pkg:deb/debian/libsmartcols1": 4,
+        "pkg:deb/debian/libsqlite3-0": 2,
+        "pkg:deb/debian/libsystemd0": 1,
+        "pkg:deb/debian/libtinfo6": 1,
+        "pkg:deb/debian/libudev1": 1,
+        "pkg:deb/debian/libuuid1": 4,
+        "pkg:deb/debian/login": 4,
+        "pkg:deb/debian/mount": 4,
+        "pkg:deb/debian/ncurses-base": 1,
+        "pkg:deb/debian/ncurses-bin": 1,
+        "pkg:deb/debian/perl-base": 7,
+        "pkg:deb/debian/util-linux": 4,
+        "pkg:pypi/chromadb": 4,
+        "pkg:pypi/nltk": 1
+      },
+      "runtime": {
+        "checks": {
+          "foreign_collection_uuid_isolation": true,
+          "no_tcp_listeners": true,
+          "per_user_collection_and_query_isolation": true
+        },
+        "chroma_backend": "chromadb.api.rust",
+        "config_digest": "sha256:0844fd633cb47d4d5fed93e46692ce9cfd00eb51c66539b5b18c155f2a4758cc",
+        "jwt_ec_backend": "cryptography.hazmat.bindings._rust.openssl.ec",
+        "lock_sha256": "54a87906885483eac91ce27990f1a0be4035996d2040942b66c2920db83ae07a",
+        "os_facts": {
+          "perl": {
+            "ivsize": 8,
+            "path": "/usr/bin/perl",
+            "ptrsize": 8,
+            "status": "observed"
+          },
+          "systemd_homed": {
+            "paths": {
+              "/lib/systemd/systemd-homed": false,
+              "/usr/lib/systemd/systemd-homed": false
+            }
+          }
+        },
+        "scope": "isolated embedded-client probe; not application startup or a vulnerability waiver",
+        "subject_digest": "sha256:240d731cb10be3b21dec0f35b1bc6687dbe1fd3062a30f830fe2c14111cc8e25",
+        "versions": {
+          "chromadb": "1.5.9",
+          "cryptography": "50.0.1",
+          "pyjwt": "2.13.0"
+        }
+      },
+      "subject_digest": "sha256:240d731cb10be3b21dec0f35b1bc6687dbe1fd3062a30f830fe2c14111cc8e25",
+      "unique_vulnerability_ids": 23
+    },
+    "source-admin-ui": {
+      "blocking_rows": 0,
+      "blocking_severity_counts": {},
+      "conditional_chroma_rows": 0,
+      "proposed_supported_rows": 0,
+      "remaining_if_supported_and_conditional_approved": 0,
+      "remaining_if_supported_approved": 0,
+      "remaining_supported_by_package": {},
+      "runtime": null,
+      "subject_digest": null,
+      "unique_vulnerability_ids": 0
+    },
+    "source-apps-workspace": {
+      "blocking_rows": 0,
+      "blocking_severity_counts": {},
+      "conditional_chroma_rows": 0,
+      "proposed_supported_rows": 0,
+      "remaining_if_supported_and_conditional_approved": 0,
+      "remaining_if_supported_approved": 0,
+      "remaining_supported_by_package": {},
+      "runtime": null,
+      "subject_digest": null,
+      "unique_vulnerability_ids": 0
+    },
+    "source-python-root": {
+      "blocking_rows": 5,
+      "blocking_severity_counts": {
+        "CRITICAL": 2,
+        "HIGH": 3
+      },
+      "conditional_chroma_rows": 4,
+      "proposed_supported_rows": 0,
+      "remaining_if_supported_and_conditional_approved": 1,
+      "remaining_if_supported_approved": 5,
+      "remaining_supported_by_package": {
+        "pkg:pypi/chromadb": 4,
+        "pkg:pypi/nltk": 1
+      },
+      "runtime": null,
+      "subject_digest": null,
+      "unique_vulnerability_ids": 5
+    }
+  },
+  "conditional_chroma_records": [
+    {
+      "component": "image-app",
+      "installed_version": "1.5.9",
+      "purl": "pkg:pypi/chromadb@1.5.9",
+      "reason": "Embedded deployment evidence supports non-exposure of the advisory paths; the current policy cannot enforce that deployment scope across source, PR, and release workflows.",
+      "required_before_activation": "Approve a deployment-scoped disposition and enforce the embedded runtime/application assumptions in every consumer. Do not activate a package-wide source or advisory-only exception.",
+      "severity": "CRITICAL",
+      "subject_digest": "sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f",
+      "target": "Python",
+      "vulnerability_id": "CVE-2026-45829"
+    },
+    {
+      "component": "image-app",
+      "installed_version": "1.5.9",
+      "purl": "pkg:pypi/chromadb@1.5.9",
+      "reason": "Embedded deployment evidence supports non-exposure of the advisory paths; the current policy cannot enforce that deployment scope across source, PR, and release workflows.",
+      "required_before_activation": "Approve a deployment-scoped disposition and enforce the embedded runtime/application assumptions in every consumer. Do not activate a package-wide source or advisory-only exception.",
+      "severity": "CRITICAL",
+      "subject_digest": "sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f",
+      "target": "Python",
+      "vulnerability_id": "CVE-2026-45833"
+    },
+    {
+      "component": "image-app",
+      "installed_version": "1.5.9",
+      "purl": "pkg:pypi/chromadb@1.5.9",
+      "reason": "Embedded deployment evidence supports non-exposure of the advisory paths; the current policy cannot enforce that deployment scope across source, PR, and release workflows.",
+      "required_before_activation": "Approve a deployment-scoped disposition and enforce the embedded runtime/application assumptions in every consumer. Do not activate a package-wide source or advisory-only exception.",
+      "severity": "HIGH",
+      "subject_digest": "sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f",
+      "target": "Python",
+      "vulnerability_id": "CVE-2026-45830"
+    },
+    {
+      "component": "image-app",
+      "installed_version": "1.5.9",
+      "purl": "pkg:pypi/chromadb@1.5.9",
+      "reason": "Embedded deployment evidence supports non-exposure of the advisory paths; the current policy cannot enforce that deployment scope across source, PR, and release workflows.",
+      "required_before_activation": "Approve a deployment-scoped disposition and enforce the embedded runtime/application assumptions in every consumer. Do not activate a package-wide source or advisory-only exception.",
+      "severity": "HIGH",
+      "subject_digest": "sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f",
+      "target": "Python",
+      "vulnerability_id": "CVE-2026-45831"
+    },
+    {
+      "component": "image-worker",
+      "installed_version": "1.5.9",
+      "purl": "pkg:pypi/chromadb@1.5.9",
+      "reason": "Embedded deployment evidence supports non-exposure of the advisory paths; the current policy cannot enforce that deployment scope across source, PR, and release workflows.",
+      "required_before_activation": "Approve a deployment-scoped disposition and enforce the embedded runtime/application assumptions in every consumer. Do not activate a package-wide source or advisory-only exception.",
+      "severity": "CRITICAL",
+      "subject_digest": "sha256:240d731cb10be3b21dec0f35b1bc6687dbe1fd3062a30f830fe2c14111cc8e25",
+      "target": "Python",
+      "vulnerability_id": "CVE-2026-45829"
+    },
+    {
+      "component": "image-worker",
+      "installed_version": "1.5.9",
+      "purl": "pkg:pypi/chromadb@1.5.9",
+      "reason": "Embedded deployment evidence supports non-exposure of the advisory paths; the current policy cannot enforce that deployment scope across source, PR, and release workflows.",
+      "required_before_activation": "Approve a deployment-scoped disposition and enforce the embedded runtime/application assumptions in every consumer. Do not activate a package-wide source or advisory-only exception.",
+      "severity": "CRITICAL",
+      "subject_digest": "sha256:240d731cb10be3b21dec0f35b1bc6687dbe1fd3062a30f830fe2c14111cc8e25",
+      "target": "Python",
+      "vulnerability_id": "CVE-2026-45833"
+    },
+    {
+      "component": "image-worker",
+      "installed_version": "1.5.9",
+      "purl": "pkg:pypi/chromadb@1.5.9",
+      "reason": "Embedded deployment evidence supports non-exposure of the advisory paths; the current policy cannot enforce that deployment scope across source, PR, and release workflows.",
+      "required_before_activation": "Approve a deployment-scoped disposition and enforce the embedded runtime/application assumptions in every consumer. Do not activate a package-wide source or advisory-only exception.",
+      "severity": "HIGH",
+      "subject_digest": "sha256:240d731cb10be3b21dec0f35b1bc6687dbe1fd3062a30f830fe2c14111cc8e25",
+      "target": "Python",
+      "vulnerability_id": "CVE-2026-45830"
+    },
+    {
+      "component": "image-worker",
+      "installed_version": "1.5.9",
+      "purl": "pkg:pypi/chromadb@1.5.9",
+      "reason": "Embedded deployment evidence supports non-exposure of the advisory paths; the current policy cannot enforce that deployment scope across source, PR, and release workflows.",
+      "required_before_activation": "Approve a deployment-scoped disposition and enforce the embedded runtime/application assumptions in every consumer. Do not activate a package-wide source or advisory-only exception.",
+      "severity": "HIGH",
+      "subject_digest": "sha256:240d731cb10be3b21dec0f35b1bc6687dbe1fd3062a30f830fe2c14111cc8e25",
+      "target": "Python",
+      "vulnerability_id": "CVE-2026-45831"
+    },
+    {
+      "component": "image-audio-worker",
+      "installed_version": "1.5.9",
+      "purl": "pkg:pypi/chromadb@1.5.9",
+      "reason": "Embedded deployment evidence supports non-exposure of the advisory paths; the current policy cannot enforce that deployment scope across source, PR, and release workflows.",
+      "required_before_activation": "Approve a deployment-scoped disposition and enforce the embedded runtime/application assumptions in every consumer. Do not activate a package-wide source or advisory-only exception.",
+      "severity": "CRITICAL",
+      "subject_digest": "sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034",
+      "target": "Python",
+      "vulnerability_id": "CVE-2026-45829"
+    },
+    {
+      "component": "image-audio-worker",
+      "installed_version": "1.5.9",
+      "purl": "pkg:pypi/chromadb@1.5.9",
+      "reason": "Embedded deployment evidence supports non-exposure of the advisory paths; the current policy cannot enforce that deployment scope across source, PR, and release workflows.",
+      "required_before_activation": "Approve a deployment-scoped disposition and enforce the embedded runtime/application assumptions in every consumer. Do not activate a package-wide source or advisory-only exception.",
+      "severity": "CRITICAL",
+      "subject_digest": "sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034",
+      "target": "Python",
+      "vulnerability_id": "CVE-2026-45833"
+    },
+    {
+      "component": "image-audio-worker",
+      "installed_version": "1.5.9",
+      "purl": "pkg:pypi/chromadb@1.5.9",
+      "reason": "Embedded deployment evidence supports non-exposure of the advisory paths; the current policy cannot enforce that deployment scope across source, PR, and release workflows.",
+      "required_before_activation": "Approve a deployment-scoped disposition and enforce the embedded runtime/application assumptions in every consumer. Do not activate a package-wide source or advisory-only exception.",
+      "severity": "HIGH",
+      "subject_digest": "sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034",
+      "target": "Python",
+      "vulnerability_id": "CVE-2026-45830"
+    },
+    {
+      "component": "image-audio-worker",
+      "installed_version": "1.5.9",
+      "purl": "pkg:pypi/chromadb@1.5.9",
+      "reason": "Embedded deployment evidence supports non-exposure of the advisory paths; the current policy cannot enforce that deployment scope across source, PR, and release workflows.",
+      "required_before_activation": "Approve a deployment-scoped disposition and enforce the embedded runtime/application assumptions in every consumer. Do not activate a package-wide source or advisory-only exception.",
+      "severity": "HIGH",
+      "subject_digest": "sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034",
+      "target": "Python",
+      "vulnerability_id": "CVE-2026-45831"
+    },
+    {
+      "component": "source-python-root",
+      "installed_version": "1.5.9",
+      "purl": "pkg:pypi/chromadb@1.5.9",
+      "reason": "Embedded deployment evidence supports non-exposure of the advisory paths; the current policy cannot enforce that deployment scope across source, PR, and release workflows.",
+      "required_before_activation": "Approve a deployment-scoped disposition and enforce the embedded runtime/application assumptions in every consumer. Do not activate a package-wide source or advisory-only exception.",
+      "severity": "CRITICAL",
+      "subject_digest": null,
+      "target": "Python",
+      "vulnerability_id": "CVE-2026-45829"
+    },
+    {
+      "component": "source-python-root",
+      "installed_version": "1.5.9",
+      "purl": "pkg:pypi/chromadb@1.5.9",
+      "reason": "Embedded deployment evidence supports non-exposure of the advisory paths; the current policy cannot enforce that deployment scope across source, PR, and release workflows.",
+      "required_before_activation": "Approve a deployment-scoped disposition and enforce the embedded runtime/application assumptions in every consumer. Do not activate a package-wide source or advisory-only exception.",
+      "severity": "CRITICAL",
+      "subject_digest": null,
+      "target": "Python",
+      "vulnerability_id": "CVE-2026-45833"
+    },
+    {
+      "component": "source-python-root",
+      "installed_version": "1.5.9",
+      "purl": "pkg:pypi/chromadb@1.5.9",
+      "reason": "Embedded deployment evidence supports non-exposure of the advisory paths; the current policy cannot enforce that deployment scope across source, PR, and release workflows.",
+      "required_before_activation": "Approve a deployment-scoped disposition and enforce the embedded runtime/application assumptions in every consumer. Do not activate a package-wide source or advisory-only exception.",
+      "severity": "HIGH",
+      "subject_digest": null,
+      "target": "Python",
+      "vulnerability_id": "CVE-2026-45830"
+    },
+    {
+      "component": "source-python-root",
+      "installed_version": "1.5.9",
+      "purl": "pkg:pypi/chromadb@1.5.9",
+      "reason": "Embedded deployment evidence supports non-exposure of the advisory paths; the current policy cannot enforce that deployment scope across source, PR, and release workflows.",
+      "required_before_activation": "Approve a deployment-scoped disposition and enforce the embedded runtime/application assumptions in every consumer. Do not activate a package-wide source or advisory-only exception.",
+      "severity": "HIGH",
+      "subject_digest": null,
+      "target": "Python",
+      "vulnerability_id": "CVE-2026-45831"
+    }
+  ],
+  "document_kind": "draft-applicability-disposition-review",
+  "explicitly_deferred_records": [
+    {
+      "component": "image-app",
+      "installed_version": "257.13-1~deb13u1",
+      "purl": "pkg:deb/debian/libsystemd0@257.13-1~deb13u1?arch=amd64&distro=debian-13.6",
+      "reason": "Only two standard homed paths were checked in backend probes; frontend runtime evidence and broader installed affected-component inventory are incomplete.",
+      "severity": "HIGH",
+      "subject_digest": "sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f",
+      "target": "/input@sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f (debian 13.6)",
+      "vulnerability_id": "CVE-2026-16742"
+    },
+    {
+      "component": "image-app",
+      "installed_version": "257.13-1~deb13u1",
+      "purl": "pkg:deb/debian/libudev1@257.13-1~deb13u1?arch=amd64&distro=debian-13.6",
+      "reason": "Only two standard homed paths were checked in backend probes; frontend runtime evidence and broader installed affected-component inventory are incomplete.",
+      "severity": "HIGH",
+      "subject_digest": "sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f",
+      "target": "/input@sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f (debian 13.6)",
+      "vulnerability_id": "CVE-2026-16742"
+    },
+    {
+      "component": "image-app",
+      "installed_version": "3.10.3",
+      "purl": "pkg:pypi/nltk@3.10.3",
+      "reason": "Optional NLTK runtime applicability and installed candidate qualification remain incomplete; restricted testing remains out of scope.",
+      "severity": "HIGH",
+      "subject_digest": "sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f",
+      "target": "Python",
+      "vulnerability_id": "CVE-2026-81726"
+    },
+    {
+      "component": "image-worker",
+      "installed_version": "257.13-1~deb13u1",
+      "purl": "pkg:deb/debian/libsystemd0@257.13-1~deb13u1?arch=amd64&distro=debian-13.6",
+      "reason": "Only two standard homed paths were checked in backend probes; frontend runtime evidence and broader installed affected-component inventory are incomplete.",
+      "severity": "HIGH",
+      "subject_digest": "sha256:240d731cb10be3b21dec0f35b1bc6687dbe1fd3062a30f830fe2c14111cc8e25",
+      "target": "/input@sha256:240d731cb10be3b21dec0f35b1bc6687dbe1fd3062a30f830fe2c14111cc8e25 (debian 13.6)",
+      "vulnerability_id": "CVE-2026-16742"
+    },
+    {
+      "component": "image-worker",
+      "installed_version": "257.13-1~deb13u1",
+      "purl": "pkg:deb/debian/libudev1@257.13-1~deb13u1?arch=amd64&distro=debian-13.6",
+      "reason": "Only two standard homed paths were checked in backend probes; frontend runtime evidence and broader installed affected-component inventory are incomplete.",
+      "severity": "HIGH",
+      "subject_digest": "sha256:240d731cb10be3b21dec0f35b1bc6687dbe1fd3062a30f830fe2c14111cc8e25",
+      "target": "/input@sha256:240d731cb10be3b21dec0f35b1bc6687dbe1fd3062a30f830fe2c14111cc8e25 (debian 13.6)",
+      "vulnerability_id": "CVE-2026-16742"
+    },
+    {
+      "component": "image-worker",
+      "installed_version": "3.10.3",
+      "purl": "pkg:pypi/nltk@3.10.3",
+      "reason": "Optional NLTK runtime applicability and installed candidate qualification remain incomplete; restricted testing remains out of scope.",
+      "severity": "HIGH",
+      "subject_digest": "sha256:240d731cb10be3b21dec0f35b1bc6687dbe1fd3062a30f830fe2c14111cc8e25",
+      "target": "Python",
+      "vulnerability_id": "CVE-2026-81726"
+    },
+    {
+      "component": "image-audio-worker",
+      "installed_version": "257.13-1~deb13u1",
+      "purl": "pkg:deb/debian/libsystemd0@257.13-1~deb13u1?arch=amd64&distro=debian-13.6",
+      "reason": "Only two standard homed paths were checked in backend probes; frontend runtime evidence and broader installed affected-component inventory are incomplete.",
+      "severity": "HIGH",
+      "subject_digest": "sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034",
+      "target": "/input@sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034 (debian 13.6)",
+      "vulnerability_id": "CVE-2026-16742"
+    },
+    {
+      "component": "image-audio-worker",
+      "installed_version": "257.13-1~deb13u1",
+      "purl": "pkg:deb/debian/libudev1@257.13-1~deb13u1?arch=amd64&distro=debian-13.6",
+      "reason": "Only two standard homed paths were checked in backend probes; frontend runtime evidence and broader installed affected-component inventory are incomplete.",
+      "severity": "HIGH",
+      "subject_digest": "sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034",
+      "target": "/input@sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034 (debian 13.6)",
+      "vulnerability_id": "CVE-2026-16742"
+    },
+    {
+      "component": "image-audio-worker",
+      "installed_version": "3.10.3",
+      "purl": "pkg:pypi/nltk@3.10.3",
+      "reason": "Optional NLTK runtime applicability and installed candidate qualification remain incomplete; restricted testing remains out of scope.",
+      "severity": "HIGH",
+      "subject_digest": "sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034",
+      "target": "Python",
+      "vulnerability_id": "CVE-2026-81726"
+    },
+    {
+      "component": "image-webui",
+      "installed_version": "252.39-1~deb12u2",
+      "purl": "pkg:deb/debian/libsystemd0@252.39-1~deb12u2?arch=amd64&distro=debian-12.15",
+      "reason": "Only two standard homed paths were checked in backend probes; frontend runtime evidence and broader installed affected-component inventory are incomplete.",
+      "severity": "HIGH",
+      "subject_digest": "sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1",
+      "target": "/input@sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1 (debian 12.15)",
+      "vulnerability_id": "CVE-2026-16742"
+    },
+    {
+      "component": "image-webui",
+      "installed_version": "252.39-1~deb12u2",
+      "purl": "pkg:deb/debian/libudev1@252.39-1~deb12u2?arch=amd64&distro=debian-12.15",
+      "reason": "Only two standard homed paths were checked in backend probes; frontend runtime evidence and broader installed affected-component inventory are incomplete.",
+      "severity": "HIGH",
+      "subject_digest": "sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1",
+      "target": "/input@sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1 (debian 12.15)",
+      "vulnerability_id": "CVE-2026-16742"
+    },
+    {
+      "component": "image-webui",
+      "installed_version": "5.36.0-7+deb12u3",
+      "purl": "pkg:deb/debian/perl-base@5.36.0-7%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "No Perl width observation is present in this frontend CI artifact; backend observations are not transferred to this image.",
+      "severity": "CRITICAL",
+      "subject_digest": "sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1",
+      "target": "/input@sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1 (debian 12.15)",
+      "vulnerability_id": "CVE-2026-8376"
+    },
+    {
+      "component": "image-admin-ui",
+      "installed_version": "252.39-1~deb12u2",
+      "purl": "pkg:deb/debian/libsystemd0@252.39-1~deb12u2?arch=amd64&distro=debian-12.15",
+      "reason": "Only two standard homed paths were checked in backend probes; frontend runtime evidence and broader installed affected-component inventory are incomplete.",
+      "severity": "HIGH",
+      "subject_digest": "sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de",
+      "target": "/input@sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de (debian 12.15)",
+      "vulnerability_id": "CVE-2026-16742"
+    },
+    {
+      "component": "image-admin-ui",
+      "installed_version": "252.39-1~deb12u2",
+      "purl": "pkg:deb/debian/libudev1@252.39-1~deb12u2?arch=amd64&distro=debian-12.15",
+      "reason": "Only two standard homed paths were checked in backend probes; frontend runtime evidence and broader installed affected-component inventory are incomplete.",
+      "severity": "HIGH",
+      "subject_digest": "sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de",
+      "target": "/input@sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de (debian 12.15)",
+      "vulnerability_id": "CVE-2026-16742"
+    },
+    {
+      "component": "image-admin-ui",
+      "installed_version": "5.36.0-7+deb12u3",
+      "purl": "pkg:deb/debian/perl-base@5.36.0-7%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "No Perl width observation is present in this frontend CI artifact; backend observations are not transferred to this image.",
+      "severity": "CRITICAL",
+      "subject_digest": "sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de",
+      "target": "/input@sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de (debian 12.15)",
+      "vulnerability_id": "CVE-2026-8376"
+    },
+    {
+      "component": "source-python-root",
+      "installed_version": "3.10.3",
+      "purl": "pkg:pypi/nltk@3.10.3",
+      "reason": "Optional NLTK runtime applicability and installed candidate qualification remain incomplete; restricted testing remains out of scope.",
+      "severity": "HIGH",
+      "subject_digest": null,
+      "target": "Python",
+      "vulnerability_id": "CVE-2026-81726"
+    }
+  ],
+  "limits": [
+    "No whole-image vulnerability clearance.",
+    "Runtime probes are isolated embedded clients, not full application startup.",
+    "Frontend Perl and homed observations are unavailable in these artifacts.",
+    "Chroma source and image records remain conditional; no deployment-scoped enforcement currently exists in the policy.",
+    "The published release workflow does not run the PR runtime probe.",
+    "No restricted NLTK or FFmpeg operation was run."
+  ],
+  "new_scan_or_runtime_execution": false,
+  "projection_method": "Exact existing CI finding identities; arithmetic only, not a valid or activated exception policy. Canonical empty-policy decisions replayed with the unchanged evaluator.",
+  "proposed_policy": {
+    "exceptions": [
+      {
+        "approval": null,
+        "component": "image-app",
+        "created_on": "2026-09-10",
+        "expires_on": "2026-09-17",
+        "id": "TASK-13013.7.23-OS-01",
+        "installed_version": "5.40.1-6",
+        "mitigation": "Limited to the named linux/amd64 image and exact distribution package identity. Reassess after any package/build/architecture change. Evidence and limits: Docs/Evidence/TASK-13013.7.23-applicability-dispositions.md.",
+        "owner": "rmusser01",
+        "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+        "rationale": "Advisory requires a 32-bit Perl build; exact-image /usr/bin/perl reports 8-byte integer and pointer sizes.",
+        "severity": "CRITICAL",
+        "supersedes": null,
+        "vulnerability_id": "CVE-2026-8376"
+      },
+      {
+        "approval": null,
+        "component": "image-worker",
+        "created_on": "2026-09-10",
+        "expires_on": "2026-09-17",
+        "id": "TASK-13013.7.23-OS-02",
+        "installed_version": "5.40.1-6",
+        "mitigation": "Limited to the named linux/amd64 image and exact distribution package identity. Reassess after any package/build/architecture change. Evidence and limits: Docs/Evidence/TASK-13013.7.23-applicability-dispositions.md.",
+        "owner": "rmusser01",
+        "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+        "rationale": "Advisory requires a 32-bit Perl build; exact-image /usr/bin/perl reports 8-byte integer and pointer sizes.",
+        "severity": "CRITICAL",
+        "supersedes": null,
+        "vulnerability_id": "CVE-2026-8376"
+      },
+      {
+        "approval": null,
+        "component": "image-audio-worker",
+        "created_on": "2026-09-10",
+        "expires_on": "2026-09-17",
+        "id": "TASK-13013.7.23-OS-03",
+        "installed_version": "5.40.1-6",
+        "mitigation": "Limited to the named linux/amd64 image and exact distribution package identity. Reassess after any package/build/architecture change. Evidence and limits: Docs/Evidence/TASK-13013.7.23-applicability-dispositions.md.",
+        "owner": "rmusser01",
+        "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+        "rationale": "Advisory requires a 32-bit Perl build; exact-image /usr/bin/perl reports 8-byte integer and pointer sizes.",
+        "severity": "CRITICAL",
+        "supersedes": null,
+        "vulnerability_id": "CVE-2026-8376"
+      },
+      {
+        "approval": null,
+        "component": "image-webui",
+        "created_on": "2026-09-10",
+        "expires_on": "2026-09-17",
+        "id": "TASK-13013.7.23-OS-04",
+        "installed_version": "1:1.2.13.dfsg-1",
+        "mitigation": "Limited to the named linux/amd64 image and exact distribution package identity. Reassess after any package/build/architecture change. Evidence and limits: Docs/Evidence/TASK-13013.7.23-applicability-dispositions.md.",
+        "owner": "rmusser01",
+        "purl": "pkg:deb/debian/zlib1g@1.2.13.dfsg-1?arch=amd64&distro=debian-12.15&epoch=1",
+        "rationale": "Debian states vulnerable contrib/minizip is not built into this Bookworm zlib binary package.",
+        "severity": "CRITICAL",
+        "supersedes": null,
+        "vulnerability_id": "CVE-2023-45853"
+      },
+      {
+        "approval": null,
+        "component": "image-admin-ui",
+        "created_on": "2026-09-10",
+        "expires_on": "2026-09-17",
+        "id": "TASK-13013.7.23-OS-05",
+        "installed_version": "1:1.2.13.dfsg-1",
+        "mitigation": "Limited to the named linux/amd64 image and exact distribution package identity. Reassess after any package/build/architecture change. Evidence and limits: Docs/Evidence/TASK-13013.7.23-applicability-dispositions.md.",
+        "owner": "rmusser01",
+        "purl": "pkg:deb/debian/zlib1g@1.2.13.dfsg-1?arch=amd64&distro=debian-12.15&epoch=1",
+        "rationale": "Debian states vulnerable contrib/minizip is not built into this Bookworm zlib binary package.",
+        "severity": "CRITICAL",
+        "supersedes": null,
+        "vulnerability_id": "CVE-2023-45853"
+      }
+    ],
+    "schema_version": 1
+  },
+  "raw_evidence_sha256": {
+    "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-artifacts.json": "9a2b430ab96f3e2d450ef543b3b745ad3fdf55be40d17bb9db3df812561b0bc5",
+    "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-audio-worker.zip": "7611c8f6b54a928a5e72af991aeaec602c8044bbf94ae2a638ac8e6a27fe5fea",
+    "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-run.json": "483b3119b0ee0f05366ae9950e91d75d63aaba44aa51024c7eb2727d84237ff3",
+    "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-webui.zip": "ff2488f2b32aad8027a33a90984446b19985e91f4a2390e749f09203951e261a",
+    "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-worker.zip": "f1833864ecde4526276884702b0eb74c81126f76fd1873ea2c169afafd92a4ea",
+    "/private/tmp/task-13013-7-23-dispositions.3bRfyp/dependency-review-action.json": "380a538289c5cab7ee7b7863306e9b072c6501abae73914554a59c2169e9a6a1",
+    "/private/tmp/task-13013-7-23-dispositions.3bRfyp/dependency-review-action.yml": "d3d61129dda7147f5ac50059a4016cfaf9a7175865a7ed102ecb105f87e3ba43",
+    "/private/tmp/task-13013-7-23-dispositions.3bRfyp/reconcile.py": "4c8228a728b945848f11d161353d524e1a9ab93a8b4f3f4470b2ae5d257fc824",
+    "/private/tmp/task-13013-7-current-ci.bvZLBs/container-admin.zip": "81f84f323c2760399e2ba1c3a43e64712a210fcab3602bccf39de688c064bed2",
+    "/private/tmp/task-13013-7-current-ci.bvZLBs/container-app.zip": "7acf62766a675e54b8f721419a4d80371c31ca15056e57aabf2e3a0b5ce23ef8",
+    "/private/tmp/task-13013-7-current-ci.bvZLBs/source-aggregate.zip": "04961ac46cf289d207e7a7ca497974621226dd7232bf6b86e01d12778871959e",
+    "/private/tmp/task-13013-7-current-ci.bvZLBs/source-artifacts-final.json": "5d27ee1a8b5cef0c26c673cd532be4167d5031427b662cd11f9b6599ebcc36b8",
+    "/private/tmp/task-13013-7-current-ci.bvZLBs/source-run.json": "40f63d6071dd4f17167686e4b8c357e349bdafcc148c01548d98df3116cb358c",
+    "/private/tmp/task-13013-7-current-ci.bvZLBs/source-scans.zip": "06b887a22906577f7eef1aa6459bf45b654313286e7f69f3226e50e196000053"
+  },
+  "repo_input_sha256": {
+    ".github/supply-chain/vulnerability-exceptions.json": "81a515050e5d312ac4a453fa1bdaa999cfc11ad6a652659776bf5747c6b69168",
+    ".github/supply-chain/vulnerability-exceptions.schema.json": "0f36741f71d326f86d675eaf97984a69fd03cc66b8d8380f6234ceeae30a1eed",
+    ".github/workflows/container-build-check.yml": "6ef7df0646b7778b6d3a93a13b58eeda1597df877985c819b74bfd883a0f8b6a",
+    ".github/workflows/publish-docker.yml": "8522ce4014e2e5c635c2072a201ef67ac4c56689e752dbe4d3c9f447d93e6266",
+    ".github/workflows/sbom.yml": "5dad2bd88b20ee009412c9aed8ec25558bf52dc5f9ce0b7aa78d043cadd87634",
+    ".github/workflows/security-required.yml": "d42556a34c9c1212e64fc227972751e79ba877489f751aba72dabdb6200d05ca",
+    "Helper_Scripts/Supply_Chain/exception_policy.py": "9bf192fa6c8c4e48c22a816d82229de0177f9b3ae54711fe0596f1d43eb6ed96",
+    "Helper_Scripts/Supply_Chain/runtime_probe.py": "decdde660b68345f1d51a3350724bfc337bf30c6cfd36860c2c549058c4c624b",
+    "tldw_Server_API/app/core/Embeddings/ChromaDB_Library.py": "afcf6bf12095a59663bf20dd13cdb0d099e0210cb7b80a67172621f27b1a05fa",
+    "uv.lock": "54a87906885483eac91ce27990f1a0be4035996d2040942b66c2920db83ae07a"
+  },
+  "review_date_utc": "2026-09-10",
+  "reviewed_head": "78c3f92228c6411ee4637b9d2df9aa3b50aacdc8",
+  "scan_date_utc": "2026-09-09",
+  "supported_os_proposals": [
+    {
+      "approval": null,
+      "component": "image-app",
+      "evidence_url": "https://security-tracker.debian.org/tracker/CVE-2026-8376",
+      "id": "TASK-13013.7.23-OS-01",
+      "installed_version": "5.40.1-6",
+      "proposed_created_on": "2026-09-10",
+      "proposed_expires_on": "2026-09-17",
+      "proposed_owner": "rmusser01",
+      "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+      "reason": "Advisory requires a 32-bit Perl build; exact-image /usr/bin/perl reports 8-byte integer and pointer sizes.",
+      "severity": "CRITICAL",
+      "subject_digest": "sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f",
+      "target": "/input@sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f (debian 13.6)",
+      "vulnerability_id": "CVE-2026-8376"
+    },
+    {
+      "approval": null,
+      "component": "image-worker",
+      "evidence_url": "https://security-tracker.debian.org/tracker/CVE-2026-8376",
+      "id": "TASK-13013.7.23-OS-02",
+      "installed_version": "5.40.1-6",
+      "proposed_created_on": "2026-09-10",
+      "proposed_expires_on": "2026-09-17",
+      "proposed_owner": "rmusser01",
+      "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+      "reason": "Advisory requires a 32-bit Perl build; exact-image /usr/bin/perl reports 8-byte integer and pointer sizes.",
+      "severity": "CRITICAL",
+      "subject_digest": "sha256:240d731cb10be3b21dec0f35b1bc6687dbe1fd3062a30f830fe2c14111cc8e25",
+      "target": "/input@sha256:240d731cb10be3b21dec0f35b1bc6687dbe1fd3062a30f830fe2c14111cc8e25 (debian 13.6)",
+      "vulnerability_id": "CVE-2026-8376"
+    },
+    {
+      "approval": null,
+      "component": "image-audio-worker",
+      "evidence_url": "https://security-tracker.debian.org/tracker/CVE-2026-8376",
+      "id": "TASK-13013.7.23-OS-03",
+      "installed_version": "5.40.1-6",
+      "proposed_created_on": "2026-09-10",
+      "proposed_expires_on": "2026-09-17",
+      "proposed_owner": "rmusser01",
+      "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+      "reason": "Advisory requires a 32-bit Perl build; exact-image /usr/bin/perl reports 8-byte integer and pointer sizes.",
+      "severity": "CRITICAL",
+      "subject_digest": "sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034",
+      "target": "/input@sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034 (debian 13.6)",
+      "vulnerability_id": "CVE-2026-8376"
+    },
+    {
+      "approval": null,
+      "component": "image-webui",
+      "evidence_url": "https://security-tracker.debian.org/tracker/CVE-2023-45853",
+      "id": "TASK-13013.7.23-OS-04",
+      "installed_version": "1:1.2.13.dfsg-1",
+      "proposed_created_on": "2026-09-10",
+      "proposed_expires_on": "2026-09-17",
+      "proposed_owner": "rmusser01",
+      "purl": "pkg:deb/debian/zlib1g@1.2.13.dfsg-1?arch=amd64&distro=debian-12.15&epoch=1",
+      "reason": "Debian states vulnerable contrib/minizip is not built into this Bookworm zlib binary package.",
+      "severity": "CRITICAL",
+      "subject_digest": "sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1",
+      "target": "/input@sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1 (debian 12.15)",
+      "vulnerability_id": "CVE-2023-45853"
+    },
+    {
+      "approval": null,
+      "component": "image-admin-ui",
+      "evidence_url": "https://security-tracker.debian.org/tracker/CVE-2023-45853",
+      "id": "TASK-13013.7.23-OS-05",
+      "installed_version": "1:1.2.13.dfsg-1",
+      "proposed_created_on": "2026-09-10",
+      "proposed_expires_on": "2026-09-17",
+      "proposed_owner": "rmusser01",
+      "purl": "pkg:deb/debian/zlib1g@1.2.13.dfsg-1?arch=amd64&distro=debian-12.15&epoch=1",
+      "reason": "Debian states vulnerable contrib/minizip is not built into this Bookworm zlib binary package.",
+      "severity": "CRITICAL",
+      "subject_digest": "sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de",
+      "target": "/input@sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de (debian 12.15)",
+      "vulnerability_id": "CVE-2023-45853"
+    }
+  ],
+  "verified_internal_checksums": 36
+}
