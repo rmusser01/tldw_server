@@ -468,6 +468,23 @@ def test_exception_matches_only_exact_component_package_and_version(
 
 
 @pytest.mark.parametrize(
+    ("today", "active"),
+    [(date(2026, 8, 30), False), (date(2026, 8, 31), True), (date(2026, 9, 7), True), (date(2026, 9, 8), False)],
+)
+def test_exception_applies_only_during_its_inclusive_approved_interval(
+    tmp_path: Path, trivy_report: dict[str, object], today: date, active: bool
+) -> None:
+    """A future-dated approval must not suppress a finding before its start date."""
+    policy = load_policy(
+        _write_policy(tmp_path, [_valid_record(created_on="2026-08-31", expires_on="2026-09-07")]),
+        today=TODAY,
+    )
+    decision = evaluate_trivy_report(trivy_report, component="image-app", policy=policy, today=today)
+    assert (len(decision.excepted), len(decision.blocking)) == ((1, 0) if active else (0, 1))
+    assert decision.unmatched_exception_ids == (() if active else ("VEX-2026-1000",))
+
+
+@pytest.mark.parametrize(
     ("component", "changes", "expected_unmatched"),
     (
         ("image-worker", {}, ()),
