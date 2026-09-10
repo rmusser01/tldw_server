@@ -65,6 +65,176 @@ def db_state(db):
 
 @pytest.mark.parametrize(
     "identity",
+    [
+        "v2",
+        "future",
+        "mistagged",
+        "schema_version",
+        "definition_kind",
+        "assembly_config",
+        "assembly_mode",
+        "target_role",
+        "render_format",
+        "section_key",
+        "blocks",
+        "format",
+        "misplaced",
+        "misplaced_outer",
+        "misplaced_variables",
+    ],
+)
+@pytest.mark.parametrize("operation", ["post", "post_slash", "put", "db_update"])
+def test_misplaced_identity_rejected_before_field_dropping(boundary_client, identity, operation):
+    client, db = boundary_client
+    prompt_id, _, _ = db.add_prompt("Good", None, None, system_prompt="Keep")
+    before = db_state(db)
+    definition = recipe()["prompt_definition"]
+    if identity in {"v2", "future", "mistagged"}:
+        definition["schema_version"] = {"v2": 2, "future": 99, "mistagged": 1}[identity]
+        misplaced = definition
+    elif identity == "misplaced":
+        misplaced = {"unknown_wrapper": [definition]}
+    elif identity == "misplaced_outer":
+        misplaced = {"unknown_wrapper": {"prompt_schema_version": 99}}
+    elif identity == "misplaced_variables":
+        misplaced = {"variables": {"schema_version": 99}}
+    else:
+        misplaced = {identity: definition.get(identity, "PRIVATE_RECIPE_BODY")}
+    payload = {"name": "New", "system_prompt": "PRIVATE_RECIPE_BODY", **misplaced}
+    original = deepcopy(payload)
+    messages = []
+    sink = logger.add(messages.append, format="{message}")
+    try:
+        if operation == "db_update":
+            with pytest.raises(prompts.InputError, match="^invalid_prompt_definition$"):
+                db.update_prompt_by_id(prompt_id, payload)
+        else:
+            response = (
+                client.put(f"/api/v1/prompts/{prompt_id}", json=payload)
+                if operation == "put"
+                else client.post("/api/v1/prompts/" if operation == "post_slash" else "/api/v1/prompts", json=payload)
+            )
+            assert response.status_code == 400, response.text
+            assert response.json() == {"detail": "invalid_prompt_definition"}
+    finally:
+        logger.remove(sink)
+    assert "PRIVATE_RECIPE_BODY" not in "".join(str(message) for message in messages)
+    assert db_state(db) == before
+    assert payload == original
+
+
+def test_authored_identity_words_remain_opaque_legacy_text(boundary_client):
+    client, _ = boundary_client
+    content = json.dumps(recipe()["prompt_definition"])
+    response = client.post("/api/v1/prompts", json={"name": "Authored", "system_prompt": content})
+    assert response.status_code == 201, response.text
+    assert response.json()["system_prompt"] == content
+
+
+def test_preview_allows_declared_identity_named_runtime_variable(boundary_client):
+    client, db = boundary_client
+    payload = recipe()
+    payload["prompt_definition"]["variables"] = [{"name": "schema_version", "required": True}]
+    payload["prompt_definition"]["blocks"][0].update(content="{{schema_version}}", is_template=True)
+    payload["variables"] = {"schema_version": "Preview only"}
+    response = client.post("/api/v1/prompts/preview", json=payload)
+    assert response.status_code == 200, response.text
+    assert response.json()["rendered_text"] == "Preview only"
+    assert db_state(db) == ([], [])
+
+
+@pytest.mark.parametrize("outer_version", [2, 99])
+@pytest.mark.parametrize("inner_error", ["duplicate_id", "invalid_role", "implicit_v1", "json_definition"])
+@pytest.mark.parametrize("operation", ["post", "put", "preview", "db_add", "db_overwrite", "db_update"])
+def test_outer_identity_mismatch_precedes_private_inner_v1_errors(
+    boundary_client, outer_version, inner_error, operation
+):
+    client, db = boundary_client
+    prompt_id, _, _ = db.add_prompt("Good", None, None, system_prompt="Keep")
+    before = db_state(db)
+    block = {"id": "PRIVATE_BLOCK_NAME", "name": "N", "role": "system", "content": "PRIVATE_RECIPE_BODY", "order": 0}
+    definition = {"schema_version": 1, "blocks": [block, deepcopy(block)]}
+    if inner_error == "invalid_role":
+        definition["blocks"] = [{**block, "role": {"PRIVATE_RECIPE_BODY": "PRIVATE_BLOCK_NAME"}}]
+    elif inner_error == "implicit_v1":
+        definition.pop("schema_version")
+    if inner_error == "json_definition":
+        definition = json.dumps(definition)
+    payload = {
+        "name": "Good" if operation == "db_overwrite" else "New",
+        "prompt_format": "structured",
+        "prompt_schema_version": outer_version,
+        "prompt_definition": definition,
+    }
+    original = deepcopy(payload)
+    messages = []
+    sink = logger.add(messages.append, format="{message}")
+    try:
+        if operation.startswith("db_"):
+            with pytest.raises(prompts.InputError) as caught:
+                if operation == "db_update":
+                    db.update_prompt_by_id(prompt_id, payload)
+                else:
+                    db.add_prompt(author=None, details=None, overwrite=operation == "db_overwrite", **payload)
+            error = str(caught.value)
+        else:
+            response = (
+                client.put(f"/api/v1/prompts/{prompt_id}", json=payload)
+                if operation == "put"
+                else client.post(
+                    "/api/v1/prompts/preview" if operation == "preview" else "/api/v1/prompts", json=payload
+                )
+            )
+            assert response.status_code == 400, response.text
+            error = response.json()["detail"]
+        assert error in {
+            "prompt_schema_version must match prompt_definition.schema_version.",
+            "invalid_prompt_definition",
+        }
+    finally:
+        logger.remove(sink)
+    for sentinel in ("PRIVATE_BLOCK_NAME", "PRIVATE_RECIPE_BODY"):
+        assert sentinel not in error + "".join(str(message) for message in messages)
+    assert db_state(db) == before
+    assert payload == original
+
+
+@pytest.mark.parametrize("path", ["", "/", "/preview", "/create", "/import"])
+@pytest.mark.parametrize(
+    "shape", ["array", "nested_array", "scalar", "stringified", "number", "null", "malformed_batch", "malformed_item"]
+)
+def test_malformed_root_shapes_are_content_free_before_request_models(boundary_client, path, shape):
+    client, db = boundary_client
+    db.add_prompt("Good", None, None, system_prompt="Keep")
+    before = db_state(db)
+    payload = recipe()
+    payload["prompt_definition"]["blocks"][0]["content"] = "PRIVATE_RECIPE_BODY"
+    payload = {
+        "array": [payload],
+        "nested_array": [[payload]],
+        "scalar": "PRIVATE_RECIPE_BODY",
+        "stringified": json.dumps(payload),
+        "number": 42,
+        "null": None,
+        "malformed_batch": {"prompts": payload},
+        "malformed_item": {"prompts": [{"name": "Earlier", "content": "Never commit"}, [payload]]},
+    }[shape]
+    messages = []
+    sink = logger.add(messages.append, format="{message}")
+    try:
+        response = client.post(
+            "/api/v1/prompts" + path, content=json.dumps(payload), headers={"Content-Type": "application/json"}
+        )
+    finally:
+        logger.remove(sink)
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] in {"invalid_prompt_definition", "structured_prompt_not_supported_on_legacy_route"}
+    assert "PRIVATE_RECIPE_BODY" not in response.text + "".join(str(message) for message in messages)
+    assert db_state(db) == before
+
+
+@pytest.mark.parametrize(
+    "identity",
     ["v2", "future", "mistagged", "kind_only", "version_only", "json_definition", "config_only", "format_only"],
 )
 def test_legacy_import_rejects_entire_structured_batch_before_mutation(boundary_client, identity):
@@ -95,7 +265,19 @@ def test_legacy_import_rejects_entire_structured_batch_before_mutation(boundary_
     assert body == original
 
 
-@pytest.mark.parametrize("marker", ["section_key", "assembly_mode", "target_role", "render_format", "definition_kind"])
+@pytest.mark.parametrize(
+    "marker",
+    [
+        "section_key",
+        "assembly_mode",
+        "target_role",
+        "render_format",
+        "definition_kind",
+        "prompt_schema_version",
+        "prompt_definition",
+        "prompt_format",
+    ],
+)
 @pytest.mark.parametrize("value", ["SECRET_KEY", {"secret": "SECRET_KEY"}, ["SECRET_KEY"]])
 @pytest.mark.parametrize("operation", ["create", "update", "preview"])
 def test_recipe_marker_errors_are_content_free_and_never_500(boundary_client, marker, value, operation):

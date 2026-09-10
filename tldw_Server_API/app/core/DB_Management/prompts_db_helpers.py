@@ -24,6 +24,8 @@ from tldw_Server_API.app.core.Prompt_Management.structured_prompts.validator imp
 
 _RUNTIME_VALUE_KEYS = frozenset({"runtime_values", "variable_values", "resolved_values"})
 _RECIPE_MARKER_KEYS = frozenset({"definition_kind", "assembly_mode", "target_role", "render_format", "section_key"})
+_PROMPT_ENVELOPE_FIELDS = frozenset({"prompt_definition", "prompt_schema_version", "prompt_format"})
+_DEFINITION_IDENTITY_KEYS = _RECIPE_MARKER_KEYS | {"schema_version", "assembly_config", "blocks"}
 _LEGACY_SCHEMA_VERSION = TypeAdapter(int)
 # Bound every save envelope/definition walk, including direct Python callers.
 # Repeated containers are rejected (not skipped): JSON would expand aliases.
@@ -93,12 +95,51 @@ def reject_recipe_runtime_values(value: Any) -> None:
 def has_recipe_markers(value: Any) -> bool:
     """Recognize recipe-only keys regardless of their values or missing identity."""
     return any(
-        isinstance(item, Mapping) and any(key in item for key in _RECIPE_MARKER_KEYS)
+        isinstance(item, Mapping) and any(key in item for key in _RECIPE_MARKER_KEYS | _PROMPT_ENVELOPE_FIELDS)
         for item in _walk_prompt_containers(value)
     )
 
 
-def parse_stored_prompt_definition(value: Any) -> PromptDefinition | SingleTextRecipeDefinitionV2:
+def has_prompt_identity(value: Mapping) -> bool:
+    """Recognize schema/transport identity without interpreting authored strings."""
+    return any(key in value for key in _DEFINITION_IDENTITY_KEYS | {"prompt_definition", "prompt_schema_version"}) or (
+        any(key in value and value[key] != "legacy" for key in ("format", "prompt_format"))
+    )
+
+
+def reject_malformed_prompt_envelope(value: Any) -> None:
+    """Reject root/batch shape errors before framework validation can echo input."""
+    if not isinstance(value, Mapping):
+        raise ValueError("invalid_prompt_definition")
+    if "prompts" in value and (
+        not isinstance(value["prompts"], list) or any(not isinstance(item, Mapping) for item in value["prompts"])
+    ):
+        raise ValueError("invalid_prompt_definition")
+
+
+def reject_misplaced_prompt_identity(value: Mapping, *, allow_preview_variables: bool = False) -> None:
+    """Only prompt_definition may carry schema identity in a prompt envelope."""
+    reject_malformed_prompt_envelope(value)
+    allowed_fields = set(_PROMPT_ENVELOPE_FIELDS)
+    if allow_preview_variables:
+        allowed_fields.add("variables")
+    outside_definition = {key: item for key, item in value.items() if key not in allowed_fields}
+    for item in _walk_prompt_containers(outside_definition):
+        if isinstance(item, Mapping) and has_prompt_identity(item):
+            raise ValueError("invalid_prompt_definition")
+
+
+def reject_legacy_prompt_identity(value: Any) -> None:
+    """Fail closed on unsupported identity anywhere in a legacy-only envelope."""
+    reject_malformed_prompt_envelope(value)
+    for item in _walk_prompt_containers(value):
+        if isinstance(item, Mapping) and has_prompt_identity(item):
+            raise ValueError("structured_prompt_not_supported_on_legacy_route")
+
+
+def parse_stored_prompt_definition(
+    value: Any, *, schema_version: Any = None
+) -> PromptDefinition | SingleTextRecipeDefinitionV2:
     """Parse/validate a storage definition without leaking recipe content in errors."""
     if isinstance(value, str):
         try:
@@ -128,6 +169,10 @@ def parse_stored_prompt_definition(value: Any) -> PromptDefinition | SingleTextR
         issues = validate_prompt_definition(value)
         if issues:
             raise ValueError(issues[0].code)
+    # Non-v1 validation above has content-free codes (including future versions).
+    # Resolve the outer identity before any value-rich v1 parse/semantic errors.
+    if schema_version is not None and schema_version != version:
+        raise ValueError("prompt_schema_version must match prompt_definition.schema_version.")
     try:
         definition = parse_prompt_definition(value)
     except ValidationError as error:
@@ -158,7 +203,7 @@ def prepare_recipe_storage_fields(
         if schema_version not in (None, 1):
             raise ValueError("invalid_prompt_definition")
         return {}
-    parsed = parse_stored_prompt_definition(definition)
+    parsed = parse_stored_prompt_definition(definition, schema_version=schema_version)
     validate_prompt_text_fields(system_prompt, user_prompt, is_recipe=True)
     if isinstance(parsed, PromptDefinition):
         if schema_version not in (None, 1):

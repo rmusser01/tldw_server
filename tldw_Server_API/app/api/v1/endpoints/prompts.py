@@ -54,6 +54,9 @@ from tldw_Server_API.app.core.DB_Management.Prompts_DB import (
 )
 from tldw_Server_API.app.core.DB_Management.prompts_db_helpers import (
     parse_stored_prompt_definition,
+    reject_legacy_prompt_identity,
+    reject_malformed_prompt_envelope,
+    reject_misplaced_prompt_identity,
     reject_recipe_runtime_values,
     render_v1_authored_snapshot,
     validate_prompt_text_fields,
@@ -246,7 +249,7 @@ def _coerce_structured_definition(
     if not isinstance(prompt_definition_payload, dict):
         raise InputError("Structured prompts require prompt_definition.")
     try:
-        definition = parse_stored_prompt_definition(prompt_definition_payload)
+        definition = parse_stored_prompt_definition(prompt_definition_payload, schema_version=prompt_schema_version)
     except ValueError as exc:
         raise InputError(str(exc)) from exc
 
@@ -297,6 +300,7 @@ def _prepare_prompt_storage_payload(
 
     try:
         reject_recipe_runtime_values(payload)
+        reject_misplaced_prompt_identity(payload)
     except ValueError as error:
         raise InputError(str(error)) from error
 
@@ -1200,11 +1204,18 @@ def _validate_request_text(system_prompt: Any, user_prompt: Any, *, is_recipe: b
 
 def _validate_structured_transport(payload: Any, request_model: type[BaseModel]) -> None:
     """Avoid value-rich framework errors when validating a structured envelope."""
+    try:
+        reject_malformed_prompt_envelope(payload)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from None
     if isinstance(payload, dict):
         try:
+            reject_misplaced_prompt_identity(
+                payload, allow_preview_variables=request_model is schemas.StructuredPromptPreviewRequest
+            )
             validate_prompt_text_fields(payload.get("system_prompt"), payload.get("user_prompt"), is_recipe=True)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="invalid_prompt_text") from None
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from None
     if isinstance(payload, dict) and (
         "prompt_definition" in payload
         or "prompt_schema_version" in payload
@@ -1229,28 +1240,13 @@ async def _prevalidate_prompt_preview(request: Request) -> None:
 async def _reject_structured_legacy_input(request: Request) -> None:
     """Reject unsupported identity before legacy models discard it or a batch writes."""
     payload = await request.json()
+    try:
+        reject_legacy_prompt_identity(payload)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from None
     items = [payload]
     if isinstance(payload, dict) and isinstance(payload.get("prompts"), list):
         items.extend(payload["prompts"])
-    identity_keys = {
-        "prompt_schema_version",
-        "prompt_definition",
-        "schema_version",
-        "definition_kind",
-        "assembly_config",
-        "assembly_mode",
-        "target_role",
-        "render_format",
-        "section_key",
-        "blocks",
-    }
-    for item in items:
-        if isinstance(item, dict) and (
-            identity_keys.intersection(item)
-            or ("prompt_format" in item and item["prompt_format"] != "legacy")
-            or ("format" in item and item["format"] != "legacy")
-        ):
-            raise HTTPException(status_code=400, detail="structured_prompt_not_supported_on_legacy_route")
     for item in items:
         if isinstance(item, dict):
             try:

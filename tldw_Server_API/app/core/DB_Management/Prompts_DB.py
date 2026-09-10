@@ -52,6 +52,7 @@ from tldw_Server_API.app.core.DB_Management.prompts_db_helpers import (
     normalize_keyword,
     normalize_text_for_search,
     prepare_recipe_storage_fields,
+    reject_misplaced_prompt_identity,
     reject_recipe_runtime_values,
     serialize_prompt_definition,
 )
@@ -1617,6 +1618,7 @@ class PromptsDatabase:
 
         try:
             reject_recipe_runtime_values(update_data)
+            reject_misplaced_prompt_identity(update_data)
         except ValueError as error:
             raise InputError(str(error)) from error
         update_data = dict(update_data)

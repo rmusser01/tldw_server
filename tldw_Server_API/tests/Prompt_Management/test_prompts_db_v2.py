@@ -7,8 +7,9 @@ import os
 import re
 import signal
 import sqlite3
+import subprocess
+import sys
 import uuid
-from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import FrozenInstanceError
 from pathlib import Path
@@ -54,20 +55,35 @@ TEST_CLIENT_ID = "test_db_client"
 SENSITIVE_SQLITE_ERROR = "PROMPT_BODY_MUST_NOT_APPEAR /private/DB_PATH_MUST_NOT_APPEAR.db"
 
 
-@contextmanager
-def _bounded_structural_check():
-    """Interrupt an accidentally unbounded guard, restoring the process timer."""
+def _run_structural_probe(kind, operation, db_path=":memory:"):
+    """Bound even a hung validator with a portable, isolated subprocess deadline."""
+    script = """
+import runpy
+import signal
+import sys
 
-    def expired(_signum, _frame):
-        raise TimeoutError("Structural validation did not terminate")
-
-    previous = signal.signal(signal.SIGALRM, expired)
-    old_timer = signal.setitimer(signal.ITIMER_REAL, 0.5)
+# Exercise the same absence of POSIX timers as on Windows, on every host.
+for name in ("SIGALRM", "ITIMER_REAL", "setitimer"):
+    if hasattr(signal, name):
+        delattr(signal, name)
+namespace = runpy.run_path(sys.argv[1])
+if sys.argv[2] == "shared":
+    namespace["_check_shared_containers"]()
+else:
+    database = namespace["PromptsDatabase"](sys.argv[4], client_id="portable-probe")
     try:
-        yield
+        namespace["_check_structural_input"](database, sys.argv[2], sys.argv[3])
     finally:
-        signal.setitimer(signal.ITIMER_REAL, *old_timer)
-        signal.signal(signal.SIGALRM, previous)
+        database.close_connection()
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, __file__, kind, operation, str(db_path)],
+        timeout=10,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def _hostile_structure(kind):
@@ -101,6 +117,10 @@ def _hostile_structure(kind):
 )
 @pytest.mark.parametrize("operation", ["create", "overwrite", "update", "serialize", "parse"])
 def test_structural_inputs_are_bounded_and_never_mutate_storage(memory_db, kind, operation):
+    _run_structural_probe(kind, operation, memory_db.db_path)
+
+
+def _check_structural_input(memory_db, kind, operation):
     from tldw_Server_API.app.core.DB_Management.prompts_db_helpers import (
         parse_stored_prompt_definition,
         serialize_prompt_definition,
@@ -110,7 +130,7 @@ def test_structural_inputs_are_bounded_and_never_mutate_storage(memory_db, kind,
     before = memory_db.get_prompt_by_id(prompt_id)
     events = memory_db.get_sync_log_entries()
     definition = _hostile_structure(kind)
-    with _bounded_structural_check(), pytest.raises(ValueError) as caught:
+    with pytest.raises(ValueError) as caught:
         if operation == "serialize":
             serialize_prompt_definition(definition)
         elif operation == "parse":
@@ -138,11 +158,21 @@ def test_structural_inputs_are_bounded_and_never_mutate_storage(memory_db, kind,
 
 
 def test_guard_rejects_shared_containers_even_without_a_cycle():
+    _run_structural_probe("shared", "guard")
+
+
+def _check_shared_containers():
     from tldw_Server_API.app.core.DB_Management.prompts_db_helpers import reject_recipe_runtime_values
 
     shared = {"safe": "authored"}
-    with _bounded_structural_check(), pytest.raises(ValueError, match="^invalid_prompt_definition_structure$"):
+    with pytest.raises(ValueError, match="^invalid_prompt_definition_structure$"):
         reject_recipe_runtime_values([shared, shared])
+
+
+def test_structural_probe_runs_without_posix_timer_apis(memory_db, monkeypatch):
+    for name in ("SIGALRM", "ITIMER_REAL", "setitimer"):
+        monkeypatch.delattr(signal, name, raising=False)
+    test_structural_inputs_are_bounded_and_never_mutate_storage(memory_db, "dag", "update")
 
 
 def _recipe_definition(target="system"):
