@@ -15,8 +15,9 @@ Implementation is not release certification: current source and image findings
 still block admission. The committed image inventory records exact candidates,
 not an approval to deploy them. Certification requires fresh passing evidence
 or narrowly scoped, human-approved exceptions. As of September 10, 2026 UTC,
-the canonical policy contains 252 native-package applicability exceptions and sixteen
-Chroma exceptions for the supported embedded deployment, owned by `rmusser01`
+the canonical policy contains 252 native-package applicability exceptions, sixteen
+Chroma exceptions for the supported embedded deployment, and four NLTK current-use
+exceptions, owned by `rmusser01`
 and valid through September 17 UTC. Exact scope and authorization are recorded
 in the [initial OS activation](../Evidence/TASK-13013.7.24-os-exception-activation.md),
 [Chroma disposition](../Evidence/TASK-13013.7.28-chroma-exclusions.md), and
@@ -26,6 +27,9 @@ The latest 175 records distinguish absent affected code/features (153), current
 librist dependency usage despite shipped affected code (10), current first-party
 Perl usage despite shipped core code (10), and Expat's compiled parser entropy
 path despite an unused helper remaining in the library (2).
+The [NLTK usage disposition](../Evidence/TASK-13013.7.32-nltk-applicability.md)
+covers the reviewed text/corpus callers and all direct locked consumers; it
+does not claim a patched package or completed model-path qualification.
 All other scanner matches remain subject to the admission gate. An unexcepted
 scanner match is not proof of exploitable impact in the supported deployment.
 
@@ -253,6 +257,11 @@ Another 175 exact native-package records are documented in
 the prior 93 records. Current librist usage exclusions require reassessment when
 native consumers or direct library calls change; Perl usage exclusions similarly
 require reassessment for new Perl subprocesses or services. Neither claims absent code.
+Four exact NLTK current-use records are documented in
+[TASK-13013.7.32](../Evidence/TASK-13013.7.32-nltk-applicability.md). Their source
+record also drives the existing dependency-review adapter; any uncovered added
+occurrence prevents that advisory allowance. Reassess new model-management paths
+or changed consumers. Prior candidate qualification remains incomplete.
 The old OS-only comment does not authorize these later records; the linked
 evidence records the conversation authorization and the PR review location.
 Loading this policy

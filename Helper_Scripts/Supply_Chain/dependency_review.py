@@ -1,4 +1,4 @@
-"""Project canonical Chroma exceptions into safely scoped dependency-review allowances.
+"""Project canonical package exceptions into safely scoped dependency-review allowances.
 
 The action accepts advisory-wide allowances. Every added occurrence of an advisory
 must therefore match an exact, active source approval before the advisory is passed
@@ -17,11 +17,12 @@ from pathlib import Path
 from Helper_Scripts.Supply_Chain.exception_policy import ExceptionPolicy, PolicyError, load_policy
 
 # Identity aliases only: none authorizes an exception without the canonical policy.
-_GHSA_CVES = {
-    "GHSA-f4j7-r4q5-qw2c": "CVE-2026-45829",
-    "GHSA-36p7-vc44-83pf": "CVE-2026-45833",
-    "GHSA-2wm9-hf6c-p5cr": "CVE-2026-45830",
-    "GHSA-xph7-9rjv-w5fr": "CVE-2026-45831",
+_ADVISORY_IDENTITIES = {
+    "GHSA-f4j7-r4q5-qw2c": ("CVE-2026-45829", "chromadb", "1.5.9"),
+    "GHSA-36p7-vc44-83pf": ("CVE-2026-45833", "chromadb", "1.5.9"),
+    "GHSA-2wm9-hf6c-p5cr": ("CVE-2026-45830", "chromadb", "1.5.9"),
+    "GHSA-xph7-9rjv-w5fr": ("CVE-2026-45831", "chromadb", "1.5.9"),
+    "GHSA-8mgp-746c-j5xp": ("CVE-2026-81726", "nltk", "3.10.3"),
 }
 _GHSA_PATTERN = re.compile(r"GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}")
 _MANIFESTS = frozenset({"pyproject.toml", "uv.lock"})
@@ -81,19 +82,20 @@ def derive_allow_ghsas(changes: object, *, policy: ExceptionPolicy, today: date)
                 raise PolicyError("dependency review: invalid advisory_ghsa_id")
             if severity not in ("critical", "high", "moderate", "low"):
                 raise PolicyError("dependency review: invalid severity")
-            if change["change_type"] != "added" or ghsa not in _GHSA_CVES:
+            if change["change_type"] != "added" or ghsa not in _ADVISORY_IDENTITIES:
                 continue
+            cve, name, version = _ADVISORY_IDENTITIES[ghsa]
             seen.add(ghsa)
             matches = [
                 item
                 for item in policy.exceptions
                 if change["manifest"] in _MANIFESTS
                 and change["ecosystem"] == "pip"
-                and change["name"] == "chromadb"
-                and change["package_url"] == item.purl == "pkg:pypi/chromadb@1.5.9"
-                and change["version"] == item.installed_version == "1.5.9"
+                and change["name"] == name
+                and change["package_url"] == item.purl == f"pkg:pypi/{name}@{version}"
+                and change["version"] == item.installed_version == version
                 and item.component == "source-python-root"
-                and item.vulnerability_id == _GHSA_CVES[ghsa]
+                and item.vulnerability_id == cve
                 and item.severity == severity.upper()
                 and item.created_on <= today <= item.expires_on
             ]
