@@ -1,10 +1,10 @@
 ---
 id: TASK-13233
 title: Review and rebase PR 2612 original-file cleanup safely onto current dev
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-10 00:49'
-updated_date: '2026-09-10 02:29'
+updated_date: '2026-09-10 03:01'
 labels:
   - media
   - storage
@@ -28,7 +28,7 @@ Refresh PR #2612 onto current dev, verify continued applicability, and resolve s
 - [x] #3 Focused and adjacent tests, no-new-lint comparison, Bandit, pre-commit checks, and independent review pass.
 - [x] #4 Existing PR branch is updated with a lease-protected push; current CI and human Change summary merge gates are reported.
 - [x] #5 Failed registration preserves the previous original; successful replacement selects the latest original and safely retires superseded binaries while preserving plaintext history.
-- [ ] #6 Latest dev rebase, all current Qodo feedback, and required CI are resolved before merging the user-authorized PR.
+- [x] #6 Latest dev rebase, all current Qodo feedback, and required CI are resolved before merging the user-authorized PR.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -55,12 +55,16 @@ Qodo posted nine findings in issuecomment-5611521549. Validating each rather tha
 Qodo remediation reproduced and corrected shared references, slow synchronous DB work, traceback loss, and deterministic OpenWebUI path reuse; all new tests annotated/documented and cleanup exposed as a supported public operation. Disputed stale-cleaner data-loss claim and missing-blob retry claim have behavior/contract evidence. Follow-up review found shared-path retirement orphaning and UUID failed-attempt leaks; all three new regressions failed before correction, and focused replacement/hydration suite now passes 46 tests. Final adjacent suite and independent review pending.
 
 Final Qodo correction validation: 190 targeted/adjacent tests passed with 8 existing warnings (81.43 seconds); Bandit 0 findings/0 errors over all five production files; Ruff no new diagnostics against dev; AST audit found no missing annotations/docstrings in added functions; Black, applicable pre-commit, syntax, and diff checks pass. Independent final review found no remaining actionable findings and recommends publishing. All nine Qodo dispositions are ready to post, including evidence-backed rebuttals of findings 1 and 9. Final-head CI and merge remain pending.
+
+All nine Qodo threads were answered and resolved on code commit e82ca9b95bf41d54d3079b5b0ad11ded53645b71; independent final review found no actionable issues. GitHub verification completed at 2026-09-10T02:50Z: all seven required checks passed, including backend/security/coverage/frontend/e2e/container/license; CodeQL and both Linux/macOS smoke jobs passed, with no failed or unfinished checks. The prior Linux research-stream timeout did not recur. Dev remains f0248aaa00047d2ffcc3bde295d9fbb8296add8a. This documentation-only closure records completed review and validation; the authorized merge must still use normal repository gates and an exact final-head match.
+
+Dev advanced during final documentation CI when PR 2599 merged. Rebased all 12 PR commits without conflicts onto 6b61b5074cc4c388fe90270b3f40d28dc2731115; range-diff marks all 12 commits unchanged, and the five touched production files are byte-identical to the already-reviewed version. Fresh post-rebase verification: 190 tests passed with 8 existing warnings (92.63 seconds), Bandit 0 findings/errors, Black, applicable pre-commit, syntax and diff checks pass. No Qodo code changes were needed. Publish this rebase with an explicit lease against 846bf7d44ea76d48e45d03afee71791149d2c1c0, then require the final rebased head to pass normal GitHub merge gates.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Qodo code corrections are complete and independently reviewed. All 190 targeted/adjacent tests pass, Bandit is clean, and no new lint diagnostics were introduced. Latest dev remains f0248aaa00047d2ffcc3bde295d9fbb8296add8a. Publishing corrections and resolving review threads precedes final-head CI and the already-authorized merge.
+Review and Qodo remediation are complete on latest dev 6b61b5074c. All 12 PR commits rebased unchanged; fresh validation passes 190 tests, Bandit, formatting and applicable hooks. All nine Qodo threads are resolved and independent review approved. The code passed all required and broader CI checks before the nonoverlapping TTS update to dev; the rebased final head must pass normal required checks before the already-authorized merge. Latest-only binaries and plaintext DB history are implemented; pre-existing quota-root accounting remains TASK-13233.2.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
