@@ -13798,7 +13798,7 @@ requires-dist = [
     { name = "cachetools", specifier = ">=5.0.0" },
     { name = "certifi", specifier = ">=2024.2.2" },
     { name = "chardet", specifier = ">=5.0.0" },
-    { name = "chromadb", specifier = ">=0.4.0" },
+    { name = "chromadb", specifier = ">=1.5.9" },
     { name = "click", specifier = ">=8.0.0" },
     { name = "click-completion", specifier = ">=0.5.2" },
     { name = "cryptography", specifier = ">=41.0.0" },

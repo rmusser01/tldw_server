@@ -166,6 +166,7 @@ class EmbeddingShardManager:
             client = chromadb.PersistentClient(
                 path=str(shard_path),
                 settings=Settings(
+                    chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
                     anonymized_telemetry=False,
                     allow_reset=True
                 )
@@ -364,6 +365,7 @@ class EmbeddingShardManager:
         new_client = chromadb.PersistentClient(
             path=str(new_shard_path),
             settings=Settings(
+                chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
                 anonymized_telemetry=False,
                 allow_reset=True
             )
