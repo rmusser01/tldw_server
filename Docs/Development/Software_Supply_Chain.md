@@ -15,7 +15,7 @@ Implementation is not release certification: current source and image findings
 still block admission. The committed image inventory records exact candidates,
 not an approval to deploy them. Certification requires fresh passing evidence
 or narrowly scoped, human-approved exceptions. As of September 10, 2026 UTC,
-the canonical policy contains 287 native-package applicability exceptions, sixteen
+the canonical policy contains 289 native-package applicability exceptions, sixteen
 Chroma exceptions for the supported embedded deployment, and four NLTK current-use
 exceptions, owned by `rmusser01`
 and valid through September 17 UTC. Exact scope and authorization are recorded
@@ -30,6 +30,9 @@ path despite an unused helper remaining in the library (2).
 The [native consumer review](../Evidence/TASK-13013.7.34-native-consumers.md)
 adds 35 scoped GLib/Expat, mount/nsenter, gzip, infocmp and frontend ACL records.
 Backend privileged mount and ACL prerequisites remain unresolved and gated.
+The [remaining evidence review](../Evidence/TASK-13013.7.37-remaining-dispositions.md)
+adds two MbedCrypto RNG records for the unenabled SRP/EAP caller path and records
+the unresolved native bindings and release verification requirements.
 The [NLTK usage disposition](../Evidence/TASK-13013.7.32-nltk-applicability.md)
 covers the reviewed text/corpus callers and all direct locked consumers; it
 does not claim a patched package or completed model-path qualification.
