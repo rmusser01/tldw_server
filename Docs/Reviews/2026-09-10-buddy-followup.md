@@ -98,3 +98,32 @@ Installed-extension and native-terminal fresh/upgraded journeys remain open.
 Physical voice qualification also remains open; no capture was started here.
 The direct downloaded-pack upload option in independent Buddy management is a
 remaining UX opportunity; this repair documents the current supported API route.
+
+
+## PR #2940 review follow-up
+
+Qodo requested explicit helper contracts and typed/documented credit tests. Those
+are now present. A framework-neutral central `PersonaArtworkValidationError`
+retains `ValueError` compatibility and stable messages; it is re-exported from
+central exceptions without importing FastAPI into the artwork validator. Nine
+invalid-record cases first failed when required to raise the domain type, then
+all 44 SQLite portability cases passed after the change. Ruff, Black and touched
+Bandit checks passed with no findings.
+
+Qodo's task-marker report exposed mixed Backlog implementations: the installed
+JavaScript CLI emits `SECTION:NOTES`; the Python MCP/CLI accepts that alias and
+emits `SECTION:IMPLEMENTATION_NOTES`. The supported Python editor normalized the
+two actually damaged tasks (13211/13227), and every historical notes line was
+verified retained. Task13242's original single NOTES section was already valid.
+
+The docs CI failure was a relative link to an API page excluded from the curated
+site. The link now uses its existing public GitHub destination. Local exact docs
+gate retries hit a macOS multiprocessing semaphore allocation failure before
+building pages (`SemLock: ENOSPC`, with 290 GiB disk available), including outside
+the sandbox. This is not evidence of a passing strict build; the Linux CI gate
+must verify it. The cancelled license-audit run had no executable steps/log, so
+no license policy was weakened or changed.
+
+The earlier source-hashed HTTP/native receipt remains tied to its recorded
+implementation. These review changes preserve successful data/animation behavior
+and tighten exception typing; they do not retroactively replace its source hashes.

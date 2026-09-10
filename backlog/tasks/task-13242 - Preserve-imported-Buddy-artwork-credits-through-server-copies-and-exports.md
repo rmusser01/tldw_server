@@ -3,13 +3,13 @@ id: TASK-13242
 title: Preserve imported Buddy artwork credits through server copies and exports
 status: In Progress
 assignee:
-  - '@codex'
-created_date: '2026-09-10 14:16'
-updated_date: '2026-09-10 14:45'
+- '@codex'
+created_date: 2026-09-10 14:16
+updated_date: 2026-09-10 15:01
 labels:
-  - buddy
-  - persona
-  - portability
+- buddy
+- persona
+- portability
 dependencies: []
 priority: high
 ---
@@ -45,7 +45,7 @@ Reason: Optional bounded metadata bridge extends ADR-005 ownership, with no migr
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Reproduced 2026-09-10 using authenticated HTTP plus the standard Persona portability worker in a disposable profile. Original archive SHA256620f06958112d9be1dce0d6592842f47ada9c8c4d9f359c0ed92d878af4ab80f. Import preview and commit completed; independent POST /api/v1/buddies returned201; exported archive downloaded200. Creator absent in copied attribution and all exported metadata. Evidence under /private/tmp/buddy-v1-followup-n4shbp3q/attribution-result.json. Related ADR005 requires independent artwork attribution ownership; persistence design must be checked before implementation.
 
 Focused run: 111 passed; PostgreSQL journey reproduced a pre-existing native export failure because metadata pack/asset timestamp values are datetime objects. Repair will normalize only the exported timestamp fields to ISO text, preserving SQLite string behavior and the existing storage schema. SQLite published Trenchcoat HTTP import/copy/export/re-import now preserves the exact 11,654-byte notices and original PNG bytes.
@@ -55,8 +55,8 @@ PostgreSQL portability import-job storage explicitly raises NotImplementedError 
 Implemented ADR-006: native credit validation/storage, independent attribution snapshots, native-compatible export with credit-sensitive fingerprints, and narrow PostgreSQL timestamp normalization. Resolved both independent-review findings (Chatbook strict-root compatibility and legacy credit-free context). Final portability:45 passed including supported PostgreSQL copy/export; adjacent ownership/manifest/asset tests:72 passed. Ruff/Black passed; Bandit zero findings. Final published Trenchcoat HTTP roundtrip and actual Chatbook importer preserve exact credits and PNG bytes. See Docs/Reviews/2026-09-10-buddy-followup.md and its source-hashed receipt. PostgreSQL import jobs remain unsupported; native terminal/installed extension and physical voice qualification stay open. PR review/merge pending.
 
 Published PR https://github.com/rmusser01/tldw_server/pull/2940 against freshly fetched dev50c1f68957. Implementation commit0e72f25515, no behind-dev commits at publication. Collection installation guidance in tldw-stuff PR18 links the source-bound verification and recovery instructions. Task remains In Progress pending PR review/merge.
-<!-- SECTION:NOTES:END -->
-
+PR2940 Qodo follow-up: documented helper contracts, typed/documented tests, central ValueError-compatible artwork exception, repaired mixed-CLI nested task markers without losing notes. Nine invalid-record tests RED on generic exceptions;44 SQLite portability cases pass after domain type. Ruff/Black/Bandit pass. Fixed curated-site API link from actual docs CI failure; local exact docs gate blocked before build by macOS SemLock ENOSPC, Linux CI pending. Collection PR18 merged75a800815f51aa220c82da7778d17f8a1e292a42.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed

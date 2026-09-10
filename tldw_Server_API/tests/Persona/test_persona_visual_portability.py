@@ -4,12 +4,15 @@ import io
 import json
 import zipfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 from PIL import Image
 
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.exception_types import PersonaArtworkValidationError
 from tldw_Server_API.app.core.Persona.visual_portability.archive import (
     DEFAULT_MAX_MEMBER_SIZE_BYTES,
     validate_archive_members,
@@ -1360,7 +1363,16 @@ def test_import_preview_rejects_unsupported_renderer_type_in_visual_manifest(
         )
 
 
-def _credited_archive(db, tmp_path, monkeypatch, artwork, *, extension=None, carrier=None, context=...):
+def _credited_archive(
+    db: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    artwork: dict[str, Any],
+    *,
+    extension: dict[str, Any] | None = None,
+    carrier: str | None = None,
+    context: object = ...,
+) -> Path:
     """Build a native archive with the same credit carrier as collection packs."""
     persona_id, pack, _ = _create_pack_with_asset(
         db,
@@ -1394,7 +1406,8 @@ def _credited_archive(db, tmp_path, monkeypatch, artwork, *, extension=None, car
     return path
 
 
-def _commit_archive(db, archive_path, persona_id):
+def _commit_archive(db: CharactersRAGDB, archive_path: Path, persona_id: str) -> dict[str, Any]:
+    """Preview and commit a credited native archive into a new SQLite draft pack."""
     from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import PersonaVisualPortabilityRepository
     from tldw_Server_API.app.core.Persona.visual_portability.importer import PersonaVisualPackImporter
 
@@ -1431,10 +1444,11 @@ def _commit_archive(db, archive_path, persona_id):
 
 
 def test_artwork_credits_survive_import_copy_source_deletion_and_export(
-    db_instance,
-    tmp_path,
-    monkeypatch,
-):
+    db_instance: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preserve exact credits and bytes across import, owned copy and native export."""
     from tldw_Server_API.app.api.v1.schemas.buddies import BuddyCreate
     from tldw_Server_API.app.core.Buddy.service import BuddyService
 
@@ -1490,9 +1504,12 @@ def test_artwork_credits_survive_import_copy_source_deletion_and_export(
         {"source_url": "https://127.0.0.1/art"},
     ],
 )
-def test_import_preview_rejects_invalid_artwork_credits(db_instance, tmp_path, monkeypatch, changes):
+def test_import_preview_rejects_invalid_artwork_credits(
+    db_instance: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changes: dict[str, Any]
+) -> None:
+    """Reject unsupported or unsafe records before a pack can be imported."""
     archive = _credited_archive(db_instance, tmp_path, monkeypatch, {**ARTWORK_CREDITS, **changes})
-    with pytest.raises(ValueError, match="artwork"):
+    with pytest.raises(PersonaArtworkValidationError, match="artwork"):
         PersonaVisualPackImportPreviewer().create_preview(
             archive_path=archive,
             owner_user_id="user-1",
@@ -1503,9 +1520,12 @@ def test_import_preview_rejects_invalid_artwork_credits(db_instance, tmp_path, m
 @pytest.mark.parametrize(
     "carrier", ["{}", "not JSON", "[]", " " + _json_bytes(ARTWORK_CREDITS).decode(), "x" * (512 * 1024 + 1)]
 )
-def test_import_preview_rejects_malformed_artwork_carrier(db_instance, tmp_path, monkeypatch, carrier):
+def test_import_preview_rejects_malformed_artwork_carrier(
+    db_instance: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, carrier: str
+) -> None:
+    """Reject malformed and oversized canonical credit carriers."""
     archive = _credited_archive(db_instance, tmp_path, monkeypatch, ARTWORK_CREDITS, carrier=carrier)
-    with pytest.raises(ValueError, match="artwork"):
+    with pytest.raises(PersonaArtworkValidationError, match="artwork"):
         PersonaVisualPackImportPreviewer().create_preview(
             archive_path=archive,
             owner_user_id="user-1",
@@ -1513,7 +1533,10 @@ def test_import_preview_rejects_malformed_artwork_carrier(db_instance, tmp_path,
         )
 
 
-def test_import_preview_rejects_conflicting_artwork_carriers(db_instance, tmp_path, monkeypatch):
+def test_import_preview_rejects_conflicting_artwork_carriers(
+    db_instance: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reject contradictory credit claims in otherwise valid carriers."""
     archive = _credited_archive(
         db_instance,
         tmp_path,
@@ -1521,7 +1544,7 @@ def test_import_preview_rejects_conflicting_artwork_carriers(db_instance, tmp_pa
         ARTWORK_CREDITS,
         extension={**ARTWORK_CREDITS, "creator": "different creator"},
     )
-    with pytest.raises(ValueError, match="artwork_attribution_conflict"):
+    with pytest.raises(PersonaArtworkValidationError, match="artwork_attribution_conflict"):
         PersonaVisualPackImportPreviewer().create_preview(
             archive_path=archive,
             owner_user_id="user-1",
@@ -1529,7 +1552,8 @@ def test_import_preview_rejects_conflicting_artwork_carriers(db_instance, tmp_pa
         )
 
 
-def test_manifest_edits_cannot_bypass_artwork_validation():
+def test_manifest_edits_cannot_bypass_artwork_validation() -> None:
+    """Apply the artwork contract to direct visual-manifest edits as well as imports."""
     from tldw_Server_API.app.core.Persona.visuals import PersonaVisualManifestError, validate_visual_manifest
 
     manifest = {**_valid_manifest("asset"), "tldw/artwork": {**ARTWORK_CREDITS, "policy": "run"}}
@@ -1538,14 +1562,20 @@ def test_manifest_edits_cannot_bypass_artwork_validation():
 
 
 @pytest.mark.parametrize("context", [None, [], "legacy context", {"unrelated": "context"}])
-def test_credit_free_legacy_source_context_remains_importable(db_instance, tmp_path, monkeypatch, context):
+def test_credit_free_legacy_source_context_remains_importable(
+    db_instance: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, context: object
+) -> None:
+    """Keep unrelated legacy source context from preventing credit-free imports."""
     archive = _credited_archive(db_instance, tmp_path, monkeypatch, ARTWORK_CREDITS, context=context)
     target = db_instance.create_persona_profile({"user_id": "user-1", "name": "Credit-free import"})
     pack = _commit_archive(db_instance, archive, target)
     assert "tldw/artwork" not in pack["manifest"]
 
 
-def test_export_fingerprint_includes_artwork_credits(db_instance, tmp_path, monkeypatch):
+def test_export_fingerprint_includes_artwork_credits(
+    db_instance: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Change export identity when only the authored credits change."""
     archive = _credited_archive(db_instance, tmp_path, monkeypatch, ARTWORK_CREDITS)
     target = db_instance.create_persona_profile({"user_id": "user-1", "name": "Credited fingerprint"})
     pack = _commit_archive(db_instance, archive, target)
@@ -1563,7 +1593,12 @@ def test_export_fingerprint_includes_artwork_credits(db_instance, tmp_path, monk
 
 
 @pytest.mark.integration
-def test_postgres_artwork_snapshot_and_native_export(pg_database_config, tmp_path, monkeypatch):
+def test_postgres_artwork_snapshot_and_native_export(
+    pg_database_config: DatabaseConfig,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retain PostgreSQL snapshot credits and export JSON-compatible timestamps."""
     from tldw_Server_API.app.api.v1.schemas.buddies import BuddyCreate
     from tldw_Server_API.app.core.Buddy.service import BuddyService
     from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
