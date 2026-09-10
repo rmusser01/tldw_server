@@ -4,7 +4,7 @@ title: Review and rebase PR 2627 SQLite migration durability
 status: Done
 assignee: []
 created_date: '2026-09-10 00:43'
-updated_date: '2026-09-10 01:37'
+updated_date: '2026-09-10 01:56'
 labels:
   - db
   - migrations
@@ -62,11 +62,12 @@ Tracking: TASK-13232, created through Backlog CLI with the old PR task history b
 **Tests**: Three BOM cases fail before the execution-only normalization and pass after; unit selection, expanded migration/CLI/bootstrap/backup suite, lint/security and independent review.
 **Status**: Complete (171 passed, 7 PostgreSQL-unavailable skips; final remote review/CI are merge gates).
 
-## Stage 5: Commented boundary compatibility
+## Stage 5: Boundary compatibility and legacy failure cleanup
 **Goal**: Accept comments on legacy wrappers and FK boundaries while retaining transaction ownership.
 **Success Criteria**: SQL comments outside quoted tokens normalize for classification; body SQL and checksum source stay original; modified internal test participates in unit selection.
 **Tests**: Eight public file migration cases for comment locations with commit/rollback, seven lexer output cases, expanded migration/CLI/bootstrap/backup suite and independent SQLite comparisons.
 **Status**: Complete (186 passed, 7 PostgreSQL-unavailable skips; after unrelated latest-dev rebase, 39 selected unit tests pass).
+Legacy rejection follow-up: use the existing pool invalidation API to close/remove only the rejected startup thread connection. Real factory-backed regressions verify empty pool stats, closed old handle, fresh usable acquisition, and preserved data/version. Complete: three failures before the fix; four legacy tests and 186 expanded tests pass afterward, with seven PostgreSQL-unavailable skips.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -99,12 +100,17 @@ The requester supplied the human-written Change summary, now preserved verbatim 
 2026-09-10 boundary-comment follow-up: Qodo review on 6e5fefe258 had two findings. Added the unit marker to the modified internal missing-chain regression. Replaced full-line-only comment stripping with quote-aware comment normalization for classification: quoted strings/identifiers remain intact, comments become whitespace, and original SQL still executes and supplies checksums. Added eight public file-backed cases for leading/embedded block comments and inline comments before/after semicolons on outer BEGIN/COMMIT and FK PRAGMAs. Each comment mode verifies success or forced schema-version-write rollback, ledger/version consistency and original source/checksum integrity. Seven lexer output cases protect single/double/backtick/bracket quoting and escaped quotes. Red run: 13 failed, 2 passed; green unit selection: 39 passed, 16 pre-existing unclassified tests deselected.
 Expanded 11-module migration/CLI/bootstrap/backup suite (same command above) => 186 passed, 7 PostgreSQL-unavailable skips, 4 warnings in 35.15s. Ruff, compilation, repository guards and whitespace checks pass. Bandit touched application scope => 0 findings over 1299 LOC. Logs: /tmp/pr2627-comments-full-tests.log and /tmp/pr2627-comments-bandit.json. Independent review found no substantive issues and confirmed SQLite semantics with eight executed quote/comment comparisons.
 Dev advanced to f0248aaa00047d2ffcc3bde295d9fbb8296add8a (audio test and task records only). Rebased with no conflicts; range-diff preserves all five prior patches. Post-rebase unit selection again passes 39 tests, with 16 pre-existing unclassified tests deselected; whitespace and shipped-SQL equality checks pass. Log: /tmp/pr2627-comments-rebased-unit.log. Human Change summary remains accepted and unchanged. Publish fixes and resolve both findings, then require completed final-head Qodo review and required GitHub gates before authorized merge.
+
+2026-09-10 Qodo review on 23f6ee25e5 reported one actionable legacy-startup cleanup issue: unsupported-version rejection leaves the current thread connection in the shared SQLite pool. Plan: extend the real legacy rejection regression to observe pool statistics, closed connection behavior and fresh acquisition; reproduce first, then use the existing clear_thread_local_connection API only on this rejection path, preserving successful/in-memory bootstrap ownership; run focused/full validation and independent review before publication.
+
+2026-09-10 legacy-pool cleanup: Qodo review on 23f6ee25e5 identified a retained connection on unsupported legacy rejection. Extended the existing real 1/8/21 cases through the shared backend factory: all three failed before the change with one active connection remaining. The rejection branch now uses SQLiteConnectionPool.clear_thread_local_connection(), which closes and invalidates only the current thread handle while leaving the pool reusable. Tests verify active count zero, ProgrammingError on the old closed handle, a distinct usable replacement, preserved version/data and no migrator invocation. Four focused legacy tests pass. Successful migration and in-memory lifecycles are untouched; independent review found no actionable issues.
+Fresh expanded migration/CLI/bootstrap/backup validation (same 11-module command above): 186 passed, 7 PostgreSQL-unavailable skips, 4 warnings in 35.64s. Ruff, py_compile, repository guards, whitespace and shipped-SQL equality checks pass. Bandit touched application scope: zero findings over 1303 LOC. Logs: /tmp/pr2627-cleanup-red.log, /tmp/pr2627-cleanup-green.log, /tmp/pr2627-cleanup-full-tests.log, /tmp/pr2627-cleanup-bandit.json. Remote dev remains f0248aaa00047d2ffcc3bde295d9fbb8296add8a and observed PR head is 23f6ee25e53f28e098f59c8c1df40706440da860. The human Change summary is preserved; final-head Qodo review and required checks remain merge gates.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Rebased PR #2627 onto dev f0248aaa00 and addressed Qodo findings through the review on 6e5fefe258: BOM/commented legacy wrappers are compatible, SQL/checksums and transaction ownership remain intact, and tests meet classification/documentation conventions. Expanded validation: 186 passed, 7 PostgreSQL-unavailable skips; post-rebase selected unit tests: 39 passed; zero Bandit findings and no substantive independent-review issues. The requester-owned Change summary is present. Final-head Qodo review and required GitHub checks remain merge gates.
+Rebased PR #2627 onto dev f0248aaa00 and addressed Qodo findings through reviewed head 23f6ee25e5, including closing/invalidation of pooled connections on legacy rejection. Migration execution/bookkeeping stay atomic, BOM/commented wrappers remain compatible, SQL/checksums are preserved, and regression tests cover rollback, retries, quoting and cleanup. Latest expanded verification: 186 passed, 7 PostgreSQL-unavailable skips; zero Bandit findings and no substantive independent-review issues. The requester-owned Change summary is present. Await completed final-head Qodo review and required GitHub checks before the authorized merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

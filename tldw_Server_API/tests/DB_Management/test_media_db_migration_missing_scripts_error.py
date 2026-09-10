@@ -2,10 +2,13 @@
 
 import pathlib
 import sqlite3
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
+from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteConnectionPool
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.DB_Management.media_db.schema.backends import (
@@ -70,7 +73,7 @@ def test_media_db_rejects_unsupported_legacy_schema_before_packaged_migrations(
     monkeypatch: pytest.MonkeyPatch,
     legacy_version: int,
 ) -> None:
-    """Older Media DB schemas should fail explicitly instead of using unrelated package migrations."""
+    """Legacy rejection preserves data and releases the shared pool's thread connection."""
     db_path = tmp_path / "Media_DB_v2.db"
     with sqlite3.connect(db_path) as conn:
         conn.execute("CREATE TABLE schema_version (version INTEGER)")
@@ -88,8 +91,23 @@ def test_media_db_rejects_unsupported_legacy_schema_before_packaged_migrations(
 
     monkeypatch.setattr(sqlite_helpers_module, "DatabaseMigrator", _UnexpectedMigrator)
 
-    with pytest.raises(DatabaseError) as exc_info:
-        MediaDatabase(db_path=str(db_path), client_id="legacy-boundary-test")
+    backend = DatabaseBackendFactory.create_backend(
+        DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=str(db_path)),
+    )
+    pool = cast(SQLiteConnectionPool, backend.get_pool())
+    original_conn = pool.get_connection()
+    try:
+        with pytest.raises(DatabaseError) as exc_info:
+            MediaDatabase(db_path=str(db_path), client_id="legacy-boundary-test")
+
+        assert pool.get_stats()["active_connections"] == 0
+        with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+            original_conn.execute("SELECT 1")
+        replacement = pool.get_connection()
+        assert replacement is not original_conn
+        assert replacement.execute("SELECT version FROM schema_version").fetchone()[0] == legacy_version
+    finally:
+        pool.clear_thread_local_connection()
 
     msg = str(exc_info.value)
     assert f"unsupported legacy Media DB schema version {legacy_version}" in msg
