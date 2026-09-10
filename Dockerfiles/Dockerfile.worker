@@ -28,6 +28,11 @@ COPY packages/tldw_profile_core /app/packages/tldw_profile_core
 RUN --mount=type=cache,id=tldw-uv-cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable --extra multiplayer
 
+# Trixie has no fixed SQLite package yet (TASK-13013.7.42). Keep the
+# official Debian update checksum-bound and out of the runtime layers.
+ADD --checksum=sha256:bbf13c9326764d05e37e6590debdaa6f33af6bd822e3ca1204789d9d1dc23b11 https://deb.debian.org/debian/pool/main/s/sqlite3/libsqlite3-0_3.53.4-2_amd64.deb /sqlite-packages/amd64.deb
+ADD --checksum=sha256:e417fb0642502c090d84a6f5fce1a2e5961dfe18644415ddce77a1a67cd2fc89 https://deb.debian.org/debian/pool/main/s/sqlite3/libsqlite3-0_3.53.4-2_arm64.deb /sqlite-packages/arm64.deb
+
 
 FROM python:3.11.16-slim-trixie@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534 AS runtime
 
@@ -42,6 +47,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         /usr/local/lib/python*/site-packages/pkg_resources \
         /usr/local/lib/python*/site-packages/setuptools \
         /usr/local/lib/python*/site-packages/setuptools-*.dist-info
+
+RUN --mount=type=bind,from=builder,source=/sqlite-packages,target=/sqlite-packages \
+    dpkg -i "/sqlite-packages/$(dpkg --print-architecture).deb" \
+    && python -I -c "import sqlite3; assert sqlite3.sqlite_version_info >= (3, 53, 2), sqlite3.sqlite_version"
 
 WORKDIR /app
 
