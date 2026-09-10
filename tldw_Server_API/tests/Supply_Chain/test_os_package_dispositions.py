@@ -20,10 +20,14 @@ NATIVE_EVIDENCE = json.loads(Path("Docs/Evidence/TASK-13013.7.30-native-applicab
 NATIVE_RECORDS = NATIVE_EVIDENCE["supported_dispositions"]
 CONSUMER_EVIDENCE = json.loads(Path("Docs/Evidence/TASK-13013.7.34-native-consumers.json").read_text())
 CONSUMER_RECORDS = CONSUMER_EVIDENCE["supported_dispositions"]
+RNG_EVIDENCE = json.loads(Path("Docs/Evidence/TASK-13013.7.37-remaining-dispositions.json").read_text())
+RNG_RECORDS = RNG_EVIDENCE["supported_dispositions"]
 TODAY = date(2026, 9, 10)
 
 
-@pytest.mark.parametrize("record", RECORDS + NATIVE_RECORDS + CONSUMER_RECORDS, ids=lambda record: record["id"])
+@pytest.mark.parametrize(
+    "record", RECORDS + NATIVE_RECORDS + CONSUMER_RECORDS + RNG_RECORDS, ids=lambda record: record["id"]
+)
 def test_verified_package_match_is_excepted_without_hiding_other_findings(record: dict) -> None:
     finding = {
         "VulnerabilityID": record["vulnerability_id"],
@@ -154,3 +158,19 @@ def test_unresolved_backend_privileged_path_cases_remain_gated(record: dict) -> 
         report, component=record["component"], policy=load_policy(POLICY, today=TODAY), today=TODAY
     )
     assert len(decision.blocking) == 1 and not decision.excepted
+
+
+def test_rng_dispositions_preserve_prior_policy_and_expiry() -> None:
+    policy = json.loads(POLICY.read_text())
+    added = [r for r in policy["exceptions"] if r["id"].startswith("TASK-13013.7.37-")]
+    assert added == RNG_RECORDS and len(added) == 2
+    assert all(r["created_on"] == "2026-09-10" and r["expires_on"] == "2026-09-17" for r in added)
+    policy["exceptions"] = [r for r in policy["exceptions"] if r["id"] in RNG_EVIDENCE["baseline_record_ids"]]
+    serialized = (json.dumps(policy, indent=2, sort_keys=True) + "\n").encode()
+    assert len(policy["exceptions"]) == 307
+    assert hashlib.sha256(serialized).hexdigest() == RNG_EVIDENCE["baseline_policy_sha256"]
+
+
+@pytest.mark.parametrize("record", RNG_EVIDENCE["retained_other_native"])
+def test_xml_and_tiff_matches_are_not_waived_by_rng_review(record: dict) -> None:
+    test_unresolved_backend_privileged_path_cases_remain_gated(record)
