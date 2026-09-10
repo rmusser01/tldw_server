@@ -137,6 +137,7 @@ vi.mock("antd", async () => {
       return (
         <div data-testid={props["data-testid"] || "mock-table"}>
           <div data-testid="table-row-count">{rows.length}</div>
+          <div data-testid="table-total">{props?.pagination?.total ?? rows.length}</div>
           <div data-testid="table-selected-count">{selectedRowKeys.length}</div>
           {rows.map((row: any, index: number) => {
             const rowId = row?.id || row?.key || `row-${index}`
@@ -769,6 +770,7 @@ describe("PromptBody server search and pagination", () => {
       })
     )
     expect(screen.getByTestId("table-row-count")).toHaveTextContent("2")
+    expect(screen.getByTestId("table-total")).toHaveTextContent("3")
 
     fireEvent.click(screen.getByTestId("table-next-page"))
 
@@ -849,6 +851,86 @@ describe("PromptBody server search and pagination", () => {
         "Pending recipe"
       ])
     )
+  })
+
+  it("paginates a local recipe overlay as one stable unique result set", async () => {
+    const syncedRecipes = Array.from({ length: 21 }, (_, index) =>
+      savedRecipeRecord({
+        id: `recipe-synced-${index + 1}`,
+        name: `Overlay recipe ${String(index + 1).padStart(2, "0")}`,
+        title: `Overlay recipe ${String(index + 1).padStart(2, "0")}`,
+        serverId: 301 + index,
+        syncStatus: "synced",
+        createdAt: 1_000 - index
+      })
+    )
+    const localOnly = savedRecipeRecord({
+      id: "recipe-overlay-local",
+      name: "Overlay recipe local only",
+      title: "Overlay recipe local only",
+      serverId: null,
+      syncStatus: "local",
+      createdAt: 2
+    })
+    const pending = savedRecipeRecord({
+      id: "recipe-overlay-pending",
+      name: "Overlay recipe pending edit",
+      title: "Overlay recipe pending edit",
+      serverId: 399,
+      syncStatus: "pending",
+      createdAt: 1
+    })
+    state.prompts = [...syncedRecipes, localOnly, pending]
+    mocks.getAllPrompts.mockResolvedValue(state.prompts)
+    mocks.searchPromptsServer.mockImplementation(async (params: any) => ({
+      items:
+        params.page === 1
+          ? syncedRecipes.slice(0, 20).map((prompt) => ({
+              id: prompt.serverId,
+              uuid: `server-${prompt.serverId}`,
+              name: prompt.name
+            }))
+          : syncedRecipes.slice(20).map((prompt) => ({
+              id: prompt.serverId,
+              uuid: `server-${prompt.serverId}`,
+              name: prompt.name
+            })),
+      total_matches: 21,
+      page: params.page,
+      per_page: 20
+    }))
+
+    renderPromptBody()
+    fireEvent.change(
+      await screen.findByRole("textbox", { name: "Search prompts..." }),
+      { target: { value: "overlay recipe" } }
+    )
+    await new Promise((resolve) => setTimeout(resolve, 320))
+
+    await waitFor(() =>
+      expect(screen.getByTestId("table-row-count")).toHaveTextContent("20")
+    )
+    expect(screen.getByTestId("table-total")).toHaveTextContent("23")
+    const firstPage = getVisibleRowNames()
+    expect(new Set(firstPage).size).toBe(20)
+
+    fireEvent.click(screen.getByTestId("table-next-page"))
+    await waitFor(() =>
+      expect(mocks.searchPromptsServer).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 2 })
+      )
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    await waitFor(() =>
+      expect(screen.getByTestId("table-row-count")).toHaveTextContent("3")
+    )
+    const secondPage = getVisibleRowNames()
+    expect(secondPage).toEqual([
+      "Overlay recipe 21",
+      "Overlay recipe local only",
+      "Overlay recipe pending edit"
+    ])
+    expect(new Set([...firstPage, ...secondPage]).size).toBe(23)
   })
 
   it("falls back to local filtering when offline", async () => {

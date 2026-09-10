@@ -263,45 +263,42 @@ export function usePromptFilteredData(deps: UsePromptFilteredDataDeps) {
     return mapServerSearchItemsToLocalPrompts(serverSearchData.items, baseFilteredData)
   }, [baseFilteredData, serverSearchData, serverSearchStatus, shouldUseServerSearch])
 
-  const serverSearchDataWithLocalRecipes = useMemo(() => {
-    if (currentPage !== 1) return serverSearchMappedData
+  const localRecipeSearchData = useMemo(
+    () =>
+      localSearchFilteredData.filter(
+        (prompt: any) => classifyPromptRecipe(prompt).kind === "recipe"
+      ),
+    [localSearchFilteredData]
+  )
 
-    const seenLocalIds = new Set(
-      serverSearchMappedData.map((prompt: any) => String(prompt?.id ?? ""))
-    )
-    const seenServerIds = new Set(
-      serverSearchMappedData.flatMap((prompt: any) =>
-        typeof prompt?.serverId === "number" ? [prompt.serverId] : []
-      )
-    )
-    const localRecipeMatches = localSearchFilteredData.filter((prompt: any) => {
-      const syncStatus = prompt?.syncStatus ?? "local"
-      if (
-        classifyPromptRecipe(prompt).kind !== "recipe" ||
-        (syncStatus !== "local" && syncStatus !== "pending")
-      ) {
-        return false
-      }
-      return (
-        !seenLocalIds.has(String(prompt?.id ?? "")) &&
-        (typeof prompt?.serverId !== "number" ||
-          !seenServerIds.has(prompt.serverId))
-      )
-    })
-    return [...serverSearchMappedData, ...localRecipeMatches]
-  }, [currentPage, localSearchFilteredData, serverSearchMappedData])
+  const hasLocalRecipeSearchOverlay = useMemo(
+    () =>
+      shouldUseServerSearch &&
+      localRecipeSearchData.some((prompt: any) => {
+        const syncStatus = prompt?.syncStatus ?? "local"
+        return syncStatus === "local" || syncStatus === "pending"
+      }),
+    [localRecipeSearchData, shouldUseServerSearch]
+  )
 
   const useServerSearchResults =
-    shouldUseServerSearch && serverSearchStatus === "success"
+    shouldUseServerSearch &&
+    serverSearchStatus === "success" &&
+    !hasLocalRecipeSearchOverlay
 
   const filteredData = useMemo(() => {
     if (useServerSearchResults) {
-      return serverSearchDataWithLocalRecipes
+      return serverSearchMappedData
+    }
+    if (hasLocalRecipeSearchOverlay) {
+      return localRecipeSearchData
     }
     return localSearchFilteredData
   }, [
+    hasLocalRecipeSearchOverlay,
+    localRecipeSearchData,
     localSearchFilteredData,
-    serverSearchDataWithLocalRecipes,
+    serverSearchMappedData,
     useServerSearchResults
   ])
 

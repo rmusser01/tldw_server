@@ -328,6 +328,48 @@ describe("SingleFieldRecipeEditor", () => {
     ).toHaveValue("Readers");
   });
 
+  it("hides Update on a live conflict refresh without discarding working edits", () => {
+    const initialSource = savedRecipe({ syncStatus: "synced" });
+    const props = {
+      target: "system" as const,
+      initialSource,
+      persistenceAvailable: true,
+      onApply: vi.fn(),
+      onSaveAsNew: vi.fn(),
+      onUpdate: vi.fn(),
+    };
+    const view = render(
+      <SingleFieldRecipeEditor {...props} savedRecipes={[initialSource]} />,
+    );
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Block content" }), {
+      target: { value: "Unsaved working edit" },
+    });
+    fireEvent.change(
+      screen.getByRole("textbox", {
+        name: "Current value for Audience (not saved)",
+      }),
+      { target: { value: "Readers" } },
+    );
+
+    view.rerender(
+      <SingleFieldRecipeEditor
+        {...props}
+        savedRecipes={[savedRecipe({ syncStatus: "conflict" })]}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Update recipe" })).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Block content" })).toHaveValue(
+      "Unsaved working edit",
+    );
+    expect(
+      screen.getByRole("textbox", {
+        name: "Current value for Audience (not saved)",
+      }),
+    ).toHaveValue("Readers");
+  });
+
   it("clears runtime inputs when switching recipe sources", async () => {
     renderEditor();
     const user = userEvent.setup();

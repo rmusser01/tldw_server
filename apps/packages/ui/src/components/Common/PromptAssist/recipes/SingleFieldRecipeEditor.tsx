@@ -456,9 +456,21 @@ export function SingleFieldRecipeEditor({
     preview.definitionValid &&
     variableNamesReady &&
     Boolean(onSaveAsNew);
+  const refreshedSavedSource =
+    state.source.source_kind === "saved"
+      ? savedRecipes.find(
+          (source) => sourceValue(source) === sourceValue(state.source),
+        )
+      : undefined;
+  const liveSelectedSyncStatus = refreshedSavedSource
+    ? refreshedSavedSource.syncStatus
+    : initialSource.source_kind === "saved" &&
+        sourceValue(initialSource) === sourceValue(state.source)
+      ? initialSource.syncStatus
+      : state.source.syncStatus;
   const sourceHasConflict =
     state.source.source_kind === "saved" &&
-    state.source.syncStatus === "conflict";
+    liveSelectedSyncStatus === "conflict";
   const updateEnabled =
     persistenceAvailable === true &&
     preview.definitionValid &&
