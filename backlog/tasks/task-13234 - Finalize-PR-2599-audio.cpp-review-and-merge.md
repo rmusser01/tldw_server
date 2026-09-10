@@ -4,7 +4,7 @@ title: Finalize PR 2599 audio.cpp review and merge
 status: In Progress
 assignee: []
 created_date: '2026-09-10 01:19'
-updated_date: '2026-09-10 01:20'
+updated_date: '2026-09-10 01:47'
 labels: []
 dependencies: []
 references:
@@ -42,6 +42,8 @@ Follow-up authorized by requester: address newly posted Qodo review 5611102940 b
 Qodo follow-up 5611102940 addressed: startup retries confirmed bind collisions only within the configured range (including port_probe_max=0), exhausted ranges record backoff, health requires explicit positive status in the client/supervisor/adapter, and installer YAML replacement is atomic with permissions, ownership and symlink-target preservation. Regression red runs: 14 original follow-up failures, one exhausted-port/backoff failure, two ownership failures; all fixed. Final focused/adjacent suite: 147 passed, 4 existing warnings (8.82s). Ruff, compileall and git diff --check pass. Bandit touched production scope has zero findings/errors. Real CPU synthesis and forced-crash restart smoke passed again: 119084-byte 24kHz mono WAV and 69120-byte raw PCM after restart. Independent review found no remaining actionable blockers. Existing inline review threads were replied to and resolved; another Qodo review and fresh CI will run after publishing. Repository human-owned rationale remains required before merge. Follow-up working plan completed locally and removed; task retains verification and pending external merge gates.
 
 Latest rebase: 456eafb7a603449722ba8db806071a5e2aa5e7d6. All ten commits replayed cleanly and git range-diff showed identical patches. The new dev changes only affect VZ guest Go code and its Backlog record. Qodo /agentic_review reported no code changes since its last review after the follow-up push.
+
+2026-09-10 01:45 UTC follow-up: all GitHub checks passed on head 87c8690003c42ff17e0bf07e2ec3640164431bdd and Qodo posted no new findings. Dev advanced to f0248aaa00047d2ffcc3bde295d9fbb8296add8a (PR 2613 audio-download test/docs). Rebased all eleven commits cleanly; git range-diff shows identical patches and production TTS/test files are unchanged. Focused/adjacent suite rerun on latest dev: 147 passed, 4 existing warnings. Prior Bandit evidence remains applicable to identical production scope. Latest requester summary was posted verbatim but still lacks the human-owned implementation rationale required by repository policy; final merge awaits that input and fresh rebased-head CI.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
