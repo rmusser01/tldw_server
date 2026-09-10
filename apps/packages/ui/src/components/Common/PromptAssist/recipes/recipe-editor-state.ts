@@ -12,10 +12,49 @@ import type {
   RecipeSource,
   RecipeTarget,
   SingleTextRecipeDefinition,
+  SingleTextRecipeVariable,
 } from "./types";
 
 export const recipeTargetRole = (target: RecipeTarget): RecipeRole =>
   target === "system" ? "system" : "user";
+
+const canonicalizeRecipeDefinition = (
+  definition: SingleTextRecipeDefinition,
+): SingleTextRecipeDefinition => ({
+  schema_version: 2,
+  format: "structured",
+  definition_kind: "single_text_recipe",
+  assembly_config: {
+    assembly_mode: "single_text",
+    target_role: definition.assembly_config.target_role,
+    render_format: definition.assembly_config.render_format,
+    block_separator: definition.assembly_config.block_separator ?? "\n\n",
+  },
+  variables: (definition.variables ?? []).map((variable) => ({
+    name: variable.name,
+    label: variable.label ?? null,
+    description: variable.description ?? null,
+    required: variable.required ?? false,
+    default_value: structuredClone(
+      variable.default_value === undefined ? null : variable.default_value,
+    ),
+    input_type: variable.input_type ?? "text",
+    options:
+      variable.options == null ? null : structuredClone(variable.options),
+    max_length: variable.max_length ?? null,
+  })),
+  blocks: (definition.blocks ?? []).map((recipeBlock) => ({
+    id: recipeBlock.id,
+    name: recipeBlock.name,
+    role: recipeBlock.role,
+    kind: recipeBlock.kind ?? null,
+    content: recipeBlock.content,
+    enabled: recipeBlock.enabled ?? true,
+    order: recipeBlock.order,
+    is_template: recipeBlock.is_template ?? false,
+    section_key: recipeBlock.section_key ?? null,
+  })),
+});
 
 export const parseRecipeDefinition = (
   value: unknown,
@@ -27,7 +66,7 @@ export const parseRecipeDefinition = (
   );
   if (parsed?.schema_version !== 2)
     throw new Error("invalid_prompt_definition");
-  return parsed;
+  return canonicalizeRecipeDefinition(parsed);
 };
 
 export const proposeRecipeSectionKey = (
@@ -49,14 +88,27 @@ export const proposeRecipeSectionKey = (
   );
   if (!usedKeys.has(base)) return base;
 
-  let suffix = 2;
-  while (usedKeys.has(`${base}_${suffix}`)) suffix += 1;
-  const suffixText = `_${suffix}`;
-  return `${base.slice(
-    0,
-    SINGLE_TEXT_RECIPE_LIMITS.max_key_length - suffixText.length,
-  )}${suffixText}`;
+  for (let suffix = 2; ; suffix += 1) {
+    const suffixText = `_${suffix}`;
+    const candidate = `${base.slice(
+      0,
+      SINGLE_TEXT_RECIPE_LIMITS.max_key_length - suffixText.length,
+    )}${suffixText}`;
+    if (!usedKeys.has(candidate)) return candidate;
+  }
 };
+
+const orderRecipeBlocks = <Block extends { order: number }>(
+  blocks: readonly Block[],
+): Block[] =>
+  blocks
+    .map((recipeBlock, index) => ({ recipeBlock, index }))
+    .sort(
+      (left, right) =>
+        left.recipeBlock.order - right.recipeBlock.order ||
+        left.index - right.index,
+    )
+    .map(({ recipeBlock }) => recipeBlock);
 
 export const createRecipeWorkingCopy = (
   source: RecipeSource,
@@ -108,7 +160,10 @@ export const recipeEditorReducer = (
   switch (action.type) {
     case "block_added": {
       const blocks = state.definition.blocks ?? [];
-      if (blocks.some((recipeBlock) => recipeBlock.id === action.block.id)) {
+      if (
+        blocks.length >= SINGLE_TEXT_RECIPE_LIMITS.max_blocks ||
+        blocks.some((recipeBlock) => recipeBlock.id === action.block.id)
+      ) {
         return state;
       }
       const usedKeys = new Set(
@@ -120,10 +175,21 @@ export const recipeEditorReducer = (
         (highest, recipeBlock) => Math.max(highest, recipeBlock.order),
         0,
       );
+      const requiresSafeRenormalization =
+        highestOrder > SINGLE_TEXT_RECIPE_LIMITS.max_abs_order - 10;
+      const existingBlocks = requiresSafeRenormalization
+        ? orderRecipeBlocks(blocks).map((recipeBlock, index) => ({
+            ...recipeBlock,
+            order: (index + 1) * 10,
+          }))
+        : blocks;
+      const nextOrder = requiresSafeRenormalization
+        ? (existingBlocks.length + 1) * 10
+        : highestOrder + 10;
       return withDefinition(state, {
         ...state.definition,
         blocks: [
-          ...blocks,
+          ...existingBlocks,
           {
             id: action.block.id,
             name: action.block.name,
@@ -135,7 +201,7 @@ export const recipeEditorReducer = (
             kind: action.block.kind ?? null,
             content: action.block.content ?? "",
             enabled: true,
-            order: highestOrder + 10,
+            order: nextOrder,
             is_template: action.block.isTemplate === true,
           },
         ],
@@ -166,14 +232,7 @@ export const recipeEditorReducer = (
         : state;
     }
     case "block_reordered": {
-      const ordered = (state.definition.blocks ?? [])
-        .map((recipeBlock, index) => ({ recipeBlock, index }))
-        .sort(
-          (left, right) =>
-            left.recipeBlock.order - right.recipeBlock.order ||
-            left.index - right.index,
-        )
-        .map(({ recipeBlock }) => recipeBlock);
+      const ordered = orderRecipeBlocks(state.definition.blocks ?? []);
       const fromIndex = ordered.findIndex(
         (recipeBlock) => recipeBlock.id === action.blockId,
       );
@@ -219,6 +278,63 @@ export const recipeEditorReducer = (
         ...state.definition,
         variables: [...variables, structuredClone(action.variable)],
       });
+    }
+    case "variable_updated": {
+      const variables = state.definition.variables ?? [];
+      const variableIndex = variables.findIndex(
+        (variable) => variable.name === action.variableName,
+      );
+      if (variableIndex < 0) return state;
+
+      const nextVariable = {
+        ...variables[variableIndex],
+        ...structuredClone(action.changes),
+      };
+      const renamed = nextVariable.name !== action.variableName;
+      if (
+        renamed &&
+        Object.prototype.hasOwnProperty.call(
+          state.runtimeValues,
+          nextVariable.name,
+        )
+      ) {
+        return state;
+      }
+
+      const candidateVariables = variables.map((variable, index) =>
+        index === variableIndex ? nextVariable : variable,
+      );
+      let validatedVariables: SingleTextRecipeVariable[];
+      try {
+        validatedVariables =
+          parseRecipeDefinition({
+            ...state.definition,
+            variables: candidateVariables,
+            blocks: [],
+          }).variables ?? [];
+      } catch {
+        return state;
+      }
+
+      const runtimeValues = { ...state.runtimeValues };
+      if (renamed) {
+        if (
+          Object.prototype.hasOwnProperty.call(
+            runtimeValues,
+            action.variableName,
+          )
+        ) {
+          runtimeValues[nextVariable.name] = runtimeValues[action.variableName];
+        }
+        delete runtimeValues[action.variableName];
+      }
+      return {
+        ...withDefinition(state, {
+          ...state.definition,
+          variables: validatedVariables,
+        }),
+        runtimeValues,
+      };
     }
     case "variable_removed": {
       const variables = state.definition.variables ?? [];

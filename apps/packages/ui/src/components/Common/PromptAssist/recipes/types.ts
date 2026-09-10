@@ -66,6 +66,20 @@ export type RecipeBlockChanges = Partial<
   >
 >;
 
+export type RecipeVariableChanges = Partial<
+  Pick<
+    SingleTextRecipeVariable,
+    | "name"
+    | "label"
+    | "description"
+    | "required"
+    | "default_value"
+    | "input_type"
+    | "options"
+    | "max_length"
+  >
+>;
+
 export type RecipeEditorAction =
   | { type: "block_added"; block: NewRecipeBlock }
   | { type: "block_removed"; blockId: string }
@@ -74,6 +88,11 @@ export type RecipeEditorAction =
   | { type: "block_toggled"; blockId: string }
   | { type: "format_changed"; renderFormat: RecipeRenderFormat }
   | { type: "variable_added"; variable: SingleTextRecipeVariable }
+  | {
+      type: "variable_updated";
+      variableName: string;
+      changes: RecipeVariableChanges;
+    }
   | { type: "variable_removed"; variableName: string }
   | {
       type: "runtime_value_changed";
