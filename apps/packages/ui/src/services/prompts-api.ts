@@ -87,6 +87,7 @@ export type StructuredPromptPreviewRequest = {
 export type StructuredPromptPreviewResponse = {
   prompt_format: "legacy" | "structured"
   prompt_schema_version?: number | null
+  rendered_text?: string | null
   assembled_messages: Array<{
     role: string
     content: string

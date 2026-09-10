@@ -7,6 +7,7 @@ import os
 import re
 import sqlite3
 import uuid
+from copy import deepcopy
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
@@ -49,6 +50,175 @@ from tldw_Server_API.app.core.Prompt_Management.service_prompts import (
 
 TEST_CLIENT_ID = "test_db_client"
 SENSITIVE_SQLITE_ERROR = "PROMPT_BODY_MUST_NOT_APPEAR /private/DB_PATH_MUST_NOT_APPEAR.db"
+
+
+def _recipe_definition(target="system"):
+    return {
+        "schema_version": 2,
+        "format": "structured",
+        "definition_kind": "single_text_recipe",
+        "assembly_config": {"assembly_mode": "single_text", "target_role": target, "render_format": "xml"},
+        "variables": [{"name": "topic", "required": True}],
+        "blocks": [
+            {
+                "id": "task",
+                "name": "Task",
+                "section_key": "task",
+                "role": target,
+                "content": "Explain {{ topic }}",
+                "order": 1,
+                "is_template": True,
+            }
+        ],
+    }
+
+
+@pytest.mark.parametrize("target", ["system", "user"])
+@pytest.mark.parametrize("as_json", [False, True])
+def test_recipe_db_round_trip_reopen_update_search_and_delete(tmp_path, target, as_json):
+    path = tmp_path / "recipes.db"
+    definition = _recipe_definition(target)
+    original = deepcopy(definition)
+    db = PromptsDatabase(db_path=path, client_id=TEST_CLIENT_ID)
+    try:
+        prompt_id, _, _ = db.add_prompt(
+            "Recipe",
+            None,
+            None,
+            prompt_format="structured",
+            prompt_schema_version=2,
+            prompt_definition=json.dumps(definition) if as_json else definition,
+            system_prompt="UNTRUSTED",
+            user_prompt="UNTRUSTED",
+        )
+    finally:
+        db.close_connection()
+    db = PromptsDatabase(db_path=path, client_id=TEST_CLIENT_ID)
+    try:
+        stored = db.get_prompt_by_id(prompt_id)
+        assert stored[f"{target}_prompt"] == "<task>Explain {{ topic }}</task>"
+        assert stored[f"{'user' if target == 'system' else 'system'}_prompt"] == ""
+        assert stored["prompt_definition"]["definition_kind"] == "single_text_recipe"
+        assert definition == original
+        definition["blocks"][0]["content"] = "Uniquerecipeterm {{topic}}"
+        update = {"prompt_definition": definition}
+        update_original = deepcopy(update)
+        db.update_prompt_by_id(prompt_id, update)
+        assert update == update_original
+        assert db.get_prompt_by_id(prompt_id)[f"{target}_prompt"] == "<task>Uniquerecipeterm {{topic}}</task>"
+        assert db.search_prompts("Uniquerecipeterm")[1] == 1
+        assert db.soft_delete_prompt(prompt_id)
+        assert db.search_prompts("Uniquerecipeterm")[1] == 0
+    finally:
+        db.close_connection()
+
+
+@pytest.mark.parametrize("operation", ["create", "overwrite", "update"])
+@pytest.mark.parametrize("key", ["runtime_values", "variable_values", "resolved_values"])
+@pytest.mark.parametrize("as_json", [False, True])
+def test_recipe_db_rejects_nested_runtime_values_without_any_write(memory_db, operation, key, as_json):
+    prompt_id, _, _ = memory_db.add_prompt("Good", None, None, system_prompt="Keep")
+    before = memory_db.get_prompt_by_id(prompt_id)
+    events = memory_db.get_sync_log_entries()
+    definition = _recipe_definition()
+    definition["variables"][0]["default_value"] = [{"embedded": {key: {"topic": "SECRET"}}}]
+    original = deepcopy(definition)
+    payload = json.dumps(definition) if as_json else definition
+    with pytest.raises(InputError, match="^invalid_recipe_runtime_values$"):
+        if operation == "update":
+            memory_db.update_prompt_by_id(
+                prompt_id, {"prompt_definition": payload, "prompt_format": "structured", "prompt_schema_version": 2}
+            )
+        else:
+            memory_db.add_prompt(
+                "New" if operation == "create" else "Good",
+                None,
+                None,
+                prompt_format="structured",
+                prompt_schema_version=2,
+                prompt_definition=payload,
+                overwrite=operation == "overwrite",
+            )
+    assert memory_db.get_prompt_by_id(prompt_id) == before
+    assert memory_db.get_prompt_by_name("New") is None
+    assert memory_db.get_sync_log_entries() == events
+    assert definition == original
+
+
+@pytest.mark.parametrize("failure", ["future", "mismatch", "role", "format", "snapshot_only", "envelope"])
+def test_recipe_db_rejects_invalid_partial_updates_without_corruption(memory_db, failure):
+    definition = _recipe_definition()
+    prompt_id, _, _ = memory_db.add_prompt(
+        "Recipe", None, None, prompt_format="structured", prompt_schema_version=2, prompt_definition=definition
+    )
+    before = memory_db.get_prompt_by_id(prompt_id)
+    update = {}
+    if failure == "future":
+        definition["schema_version"] = 99
+        update = {"prompt_definition": definition}
+    elif failure == "mismatch":
+        update = {"prompt_schema_version": 1}
+    elif failure == "role":
+        definition["blocks"][0]["role"] = "user"
+        update = {"prompt_definition": definition}
+    elif failure == "format":
+        update = {"prompt_format": "legacy"}
+    elif failure == "envelope":
+        update = {"runtime_values": {"topic": "SECRET"}}
+    else:
+        update = {"system_prompt": "INSTANCE SHOULD NOT BE SAVED"}
+    if failure == "snapshot_only":
+        memory_db.update_prompt_by_id(prompt_id, update)
+        assert memory_db.get_prompt_by_id(prompt_id)["system_prompt"] == "<task>Explain {{ topic }}</task>"
+    else:
+        with pytest.raises(InputError):
+            memory_db.update_prompt_by_id(prompt_id, update)
+        assert memory_db.get_prompt_by_id(prompt_id) == before
+
+
+def test_recipe_db_authored_strings_are_not_runtime_maps(memory_db):
+    definition = _recipe_definition()
+    definition["blocks"][0]["content"] = '{"runtime_values": {"variable_values": "resolved_values"}}'
+    definition["variables"][0]["default_value"] = '{"runtime_values": "authored"}'
+    prompt_id, _, _ = memory_db.add_prompt(
+        "Words", None, None, prompt_format="structured", prompt_schema_version=2, prompt_definition=definition
+    )
+    assert (
+        memory_db.get_prompt_by_id(prompt_id)["system_prompt"]
+        == '<task>{"runtime_values": {"variable_values": "resolved_values"}}</task>'
+    )
+
+
+def test_mistagged_recipe_validation_does_not_echo_authored_fields(memory_db):
+    definition = _recipe_definition()
+    definition["schema_version"] = 1
+    definition["blocks"][0]["section_key"] = "PRIVATE_SENTINEL"
+    with pytest.raises(InputError) as caught:
+        memory_db.add_prompt(
+            "Mistagged", None, None, prompt_format="structured", prompt_schema_version=1, prompt_definition=definition
+        )
+    assert str(caught.value) == "invalid_prompt_definition"
+    assert memory_db.get_prompt_by_name("Mistagged") is None
+
+
+@pytest.mark.parametrize("version", [1, 1.0, True, "1", "1.0", "01", "+1"])
+def test_v1_definition_json_bytes_and_legacy_snapshots_survive_metadata_update(memory_db, version):
+    raw = ' { "schema_version": ' + json.dumps(version) + ', "blocks": [] } '
+    prompt_id, _, _ = memory_db.add_prompt(
+        "Old record",
+        None,
+        None,
+        prompt_format="structured",
+        prompt_schema_version=1,
+        prompt_definition=raw,
+        system_prompt="  Legacy system  ",
+        user_prompt="\nLegacy user\n",
+    )
+    memory_db.update_prompt_by_id(prompt_id, {"author": "Updated"})
+    row = memory_db.execute_query("SELECT * FROM Prompts WHERE id = ?", (prompt_id,)).fetchone()
+    assert row["prompt_definition_json"] == raw
+    assert row["system_prompt"] == "  Legacy system  "
+    assert row["user_prompt"] == "\nLegacy user\n"
 
 
 @pytest.fixture

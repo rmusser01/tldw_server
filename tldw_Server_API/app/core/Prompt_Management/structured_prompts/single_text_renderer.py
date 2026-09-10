@@ -30,6 +30,25 @@ class SingleTextRecipeRenderError(ValueError):
         self.variable_name = variable_name
 
 
+def render_single_text_recipe_template(definition: SingleTextRecipeDefinitionV2) -> SingleTextRecipeRenderResult:
+    """Format authored template text for storage, never a filled runtime instance.
+
+    Validate the original declarations/references first, then reuse the exact
+    bounded formatter with substitution disabled on copies. Required variables
+    need no defaults to save, and authored token whitespace remains untouched.
+    """
+    issues = validate_prompt_definition(definition)
+    if issues:
+        raise SingleTextRecipeRenderError(issues[0].code)
+    template = definition.model_copy(
+        update={
+            "variables": [],
+            "blocks": [block.model_copy(update={"is_template": False}) for block in definition.blocks],
+        }
+    )
+    return render_single_text_recipe(template)
+
+
 def render_single_text_recipe(
     definition: SingleTextRecipeDefinitionV2,
     runtime_values: Mapping[str, Any] | None = None,

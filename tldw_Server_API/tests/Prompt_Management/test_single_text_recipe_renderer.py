@@ -15,6 +15,43 @@ RENDER_CASES = json.loads((FIXTURES / "render-cases.json").read_text())
 ERROR_CASES = json.loads((FIXTURES / "error-cases.json").read_text())
 
 
+@pytest.mark.parametrize(
+    ("format_name", "expected"),
+    [
+        ("xml", "<task>  {{ topic }}  </task>"),
+        ("markdown", "## Task\n\n  {{ topic }}  "),
+        ("freeform", "  {{ topic }}  "),
+    ],
+)
+def test_authored_template_snapshot_preserves_tokens_without_resolving_required_values(format_name, expected):
+    payload = {
+        "schema_version": 2,
+        "format": "structured",
+        "definition_kind": "single_text_recipe",
+        "assembly_config": {"assembly_mode": "single_text", "target_role": "user", "render_format": format_name},
+        "variables": [{"name": "topic", "required": True}],
+        "blocks": [
+            {
+                "id": "task",
+                "name": "Task",
+                "section_key": "task",
+                "role": "user",
+                "content": "  {{ topic }}  ",
+                "order": 0,
+                "is_template": True,
+            }
+        ],
+    }
+    definition = parse_prompt_definition(payload)
+    before = definition.model_dump()
+    render = getattr(single_text_renderer, "render_single_text_recipe_template", None)
+    assert callable(render), "Persistence needs an authored-template rendering path"
+    result = render(definition)
+    assert result.rendered_text == expected
+    assert result.legacy.model_dump() == {"system_prompt": "", "user_prompt": expected}
+    assert definition.model_dump() == before
+
+
 def runtime_values(case):
     """Expand compact repeat descriptors without using renderer logic."""
     values = copy.deepcopy(case.get("runtimeValues", {}))

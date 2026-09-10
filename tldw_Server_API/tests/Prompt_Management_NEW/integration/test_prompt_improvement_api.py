@@ -991,7 +991,10 @@ def test_capabilities_enable_track_a_with_centralized_limits_and_keep_recipe_dis
                 ),
             },
         },
-        "single_text_recipe_v2": {"supported": False},
+        "single_text_recipe_v2": {
+            "supported": False,
+            "limits": dict(prompts.SINGLE_TEXT_RECIPE_LIMITS),
+        },
     }
 
 

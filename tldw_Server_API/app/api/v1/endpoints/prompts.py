@@ -52,6 +52,10 @@ from tldw_Server_API.app.core.DB_Management.Prompts_DB import (
     InputError,
     PromptsDatabase,
 )
+from tldw_Server_API.app.core.DB_Management.prompts_db_helpers import (
+    parse_stored_prompt_definition,
+    reject_recipe_runtime_values,
+)
 from tldw_Server_API.app.core.LLM_Calls.routing import InMemoryRoutingDecisionStore
 from tldw_Server_API.app.core.Prompt_Management.prompt_improvement import (
     PROMPT_IMPROVEMENT_LIMITS,
@@ -79,7 +83,15 @@ from tldw_Server_API.app.core.Prompt_Management.structured_prompts import (
     convert_legacy_prompt_to_definition,
     extract_legacy_prompt_variables,
     render_legacy_snapshot,
-    validate_prompt_definition,
+)
+from tldw_Server_API.app.core.Prompt_Management.structured_prompts.models import (
+    SINGLE_TEXT_RECIPE_LIMITS,
+    SingleTextRecipeDefinitionV2,
+)
+from tldw_Server_API.app.core.Prompt_Management.structured_prompts.single_text_renderer import (
+    SingleTextRecipeRenderError,
+    SingleTextRecipeRenderResult,
+    render_single_text_recipe_template,
 )
 from tldw_Server_API.app.core.testing import env_flag_enabled
 
@@ -213,7 +225,13 @@ def _render_template(template: str, variables: dict[str, Any]) -> str:
     return _TEMPLATE_VAR_RE.sub(repl, template)
 
 
-def _render_definition_legacy_fields(definition: PromptDefinition) -> tuple[str, str]:
+def _render_definition_legacy_fields(definition: PromptDefinition | SingleTextRecipeDefinitionV2) -> tuple[str, str]:
+    if isinstance(definition, SingleTextRecipeDefinitionV2):
+        try:
+            legacy = render_single_text_recipe_template(definition).legacy
+        except SingleTextRecipeRenderError as error:
+            raise InputError(error.code) from error
+        return legacy.system_prompt, legacy.user_prompt
     messages = [
         {"role": block.role, "content": block.content}
         for block in sorted(definition.blocks, key=lambda item: item.order)
@@ -226,18 +244,15 @@ def _render_definition_legacy_fields(definition: PromptDefinition) -> tuple[str,
 def _coerce_structured_definition(
     prompt_schema_version: int | None,
     prompt_definition_payload: dict[str, Any] | None,
-) -> tuple[PromptDefinition, int]:
+) -> tuple[PromptDefinition | SingleTextRecipeDefinitionV2, int]:
     if prompt_schema_version is None:
         raise InputError("Structured prompts require prompt_schema_version.")
     if not isinstance(prompt_definition_payload, dict):
         raise InputError("Structured prompts require prompt_definition.")
     try:
-        definition = PromptDefinition.model_validate(prompt_definition_payload)
-    except ValidationError as exc:
-        raise InputError(f"Invalid prompt_definition: {exc}") from exc
-    issues = validate_prompt_definition(definition)
-    if issues:
-        raise InputError(issues[0].message)
+        definition = parse_stored_prompt_definition(prompt_definition_payload)
+    except ValueError as exc:
+        raise InputError(str(exc)) from exc
 
     definition_schema_version = int(definition.schema_version)
     if int(prompt_schema_version) != definition_schema_version:
@@ -255,7 +270,7 @@ def _coerce_preview_definition(
     *,
     system_prompt: str | None,
     user_prompt: str | None,
-) -> tuple[PromptDefinition, str, int | None]:
+) -> tuple[PromptDefinition | SingleTextRecipeDefinitionV2, str, int | None]:
     if prompt_format == "structured":
         definition, definition_schema_version = _coerce_structured_definition(
             prompt_schema_version,
@@ -279,6 +294,11 @@ def _prepare_prompt_storage_payload(
         payload = prompt_data.model_dump()
     else:
         payload = dict(prompt_data)
+
+    try:
+        reject_recipe_runtime_values(payload)
+    except ValueError as error:
+        raise InputError(str(error)) from error
 
     prompt_format = payload.get("prompt_format") or (
         existing_prompt.get("prompt_format") if existing_prompt else "legacy"
@@ -708,7 +728,7 @@ async def get_prompt_capabilities() -> schemas.PromptCapabilitiesResponse:
                 **asdict(PROMPT_IMPROVEMENT_LIMITS)
             ),
         ),
-        single_text_recipe_v2=schemas.PromptRecipeCapability(supported=False),
+        single_text_recipe_v2=schemas.PromptRecipeCapability(supported=False, limits=dict(SINGLE_TEXT_RECIPE_LIMITS)),
     )
 
 
@@ -1160,13 +1180,21 @@ async def export_keywords_api(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error during keyword export") from e
 
 
+async def _reject_persisted_recipe_runtime_values(request: Request) -> None:
+    """Inspect the raw envelope before request models can discard unknown keys."""
+    try:
+        reject_recipe_runtime_values(await request.json())
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail="invalid_recipe_runtime_values") from error
+
+
 # === Import Endpoints ===
 
 @router.post(
     "/import",
     response_model=schemas.PromptImportResponse,
     summary="Import prompts from JSON",
-    dependencies=[Depends(verify_prompts_user)]
+    dependencies=[Depends(verify_prompts_user), Depends(_reject_persisted_recipe_runtime_values)]
 )
 async def import_prompts_api(
     payload: schemas.PromptImportRequest = Body(...),
@@ -1281,6 +1309,7 @@ async def render_template_api(
 @router.post(
     "/preview",
     response_model=schemas.StructuredPromptPreviewResponse,
+    response_model_exclude_unset=True,
     summary="Preview assembled prompt messages",
     dependencies=[Depends(verify_prompts_user)],
 )
@@ -1309,6 +1338,15 @@ async def preview_prompt_api(
             detail=str(e),
         ) from e
 
+    if isinstance(assembly, SingleTextRecipeRenderResult):
+        return schemas.StructuredPromptPreviewResponse(
+            prompt_format=prompt_format,
+            prompt_schema_version=prompt_schema_version,
+            assembled_messages=[],
+            rendered_text=assembly.rendered_text,
+            legacy_system_prompt=assembly.legacy.system_prompt,
+            legacy_user_prompt=assembly.legacy.user_prompt,
+        )
     return schemas.StructuredPromptPreviewResponse(
         prompt_format=prompt_format,
         prompt_schema_version=prompt_schema_version,
@@ -1442,7 +1480,7 @@ async def bulk_update_prompt_keywords(
     "/create",
     summary="Create a prompt (legacy payload)",
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(verify_prompts_user)]
+    dependencies=[Depends(verify_prompts_user), Depends(_reject_persisted_recipe_runtime_values)]
 )
 async def legacy_create_prompt(
     payload: schemas.LegacyPromptCreateRequest = Body(...),
@@ -1479,14 +1517,14 @@ async def legacy_create_prompt(
     response_model=schemas.PromptResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new prompt",
-    dependencies=[Depends(verify_prompts_user)]
+    dependencies=[Depends(verify_prompts_user), Depends(_reject_persisted_recipe_runtime_values)]
 )
 @router.post(
     "",
     response_model=schemas.PromptResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new prompt [no-slash alias]",
-    dependencies=[Depends(verify_prompts_user)]
+    dependencies=[Depends(verify_prompts_user), Depends(_reject_persisted_recipe_runtime_values)]
 )
 async def create_prompt(
     prompt_data: schemas.PromptCreate,
@@ -1737,7 +1775,7 @@ async def get_prompt(
     "/{prompt_identifier}",
     response_model=schemas.PromptResponse,
     summary="Update an existing prompt (or create if name matches and overwrite=true logic used)",
-    dependencies=[Depends(verify_prompts_user)]
+    dependencies=[Depends(verify_prompts_user), Depends(_reject_persisted_recipe_runtime_values)]
 )
 async def update_prompt(
     prompt_identifier: Union[int, str],

@@ -17,6 +17,7 @@ from tldw_Server_API.app.api.v1.schemas.pagination import (
 from tldw_Server_API.app.core.Prompt_Management.prompt_improvement import (
     PROMPT_IMPROVEMENT_LIMITS,
 )
+from tldw_Server_API.app.core.Prompt_Management.structured_prompts.models import SINGLE_TEXT_RECIPE_LIMITS
 
 #
 # Third-party Imports
@@ -244,6 +245,7 @@ class PromptRecipeCapability(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     supported: bool
+    limits: dict[str, int] = Field(default_factory=lambda: dict(SINGLE_TEXT_RECIPE_LIMITS))
 
 
 class PromptCapabilitiesResponse(BaseModel):
@@ -312,6 +314,9 @@ class PromptUpdate(BaseModel):  # For partial updates if we add a PATCH endpoint
 
 
 class PromptResponse(PromptBase):
+    # Recipe snapshots can exceed the authored per-block/request text limit.
+    system_prompt: Optional[str] = Field(None, max_length=SINGLE_TEXT_RECIPE_LIMITS["max_rendered_output_length"])
+    user_prompt: Optional[str] = Field(None, max_length=SINGLE_TEXT_RECIPE_LIMITS["max_rendered_output_length"])
     id: int
     uuid: UUID
     last_modified: datetime
@@ -443,6 +448,7 @@ class StructuredPromptPreviewRequest(BaseModel):
 class StructuredPromptPreviewResponse(BaseModel):
     prompt_format: Literal["legacy", "structured"]
     prompt_schema_version: Optional[int] = None
+    rendered_text: Optional[str] = None
     assembled_messages: list[dict[str, str]] = Field(default_factory=list)
     legacy_system_prompt: str = ""
     legacy_user_prompt: str = ""

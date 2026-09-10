@@ -51,6 +51,8 @@ from tldw_Server_API.app.core.DB_Management.prompts_db_helpers import (
     deserialize_prompt_record,
     normalize_keyword,
     normalize_text_for_search,
+    prepare_recipe_storage_fields,
+    reject_recipe_runtime_values,
     serialize_prompt_definition,
 )
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
@@ -1352,7 +1354,16 @@ class PromptsDatabase:
 
         current_time = self._get_current_utc_timestamp_str()
         client_id = self.client_id
-        prompt_definition_json = self._serialize_prompt_definition(prompt_definition)
+        try:
+            recipe_fields = prepare_recipe_storage_fields(prompt_format, prompt_schema_version, prompt_definition)
+            if recipe_fields:
+                prompt_definition = recipe_fields["prompt_definition"]
+                prompt_schema_version = recipe_fields["prompt_schema_version"]
+                system_prompt = recipe_fields["system_prompt"]
+                user_prompt = recipe_fields["user_prompt"]
+            prompt_definition_json = self._serialize_prompt_definition(prompt_definition)
+        except ValueError as error:
+            raise InputError(str(error)) from error
 
         try:
             with self.transaction() as conn:
@@ -1598,6 +1609,12 @@ class PromptsDatabase:
         if 'name' in update_data and (not update_data['name'] or not update_data['name'].strip()):
             raise InputError("Prompt name cannot be empty if provided for update.")  # noqa: TRY003
 
+        try:
+            reject_recipe_runtime_values(update_data)
+        except ValueError as error:
+            raise InputError(str(error)) from error
+        update_data = dict(update_data)
+
         current_time = self._get_current_utc_timestamp_str()
         client_id = self.client_id
 
@@ -1605,11 +1622,23 @@ class PromptsDatabase:
             with self.transaction() as conn:
                 cursor = conn.cursor()
                 # Get current state of the prompt being updated
-                cursor.execute("SELECT uuid, name, version, deleted FROM Prompts WHERE id = ?", (prompt_id,))
+                cursor.execute("SELECT * FROM Prompts WHERE id = ?", (prompt_id,))
                 existing_prompt_state = cursor.fetchone()
 
                 if not existing_prompt_state:
                     return None, f"Prompt with ID {prompt_id} not found."  # Or raise InputError("Prompt not found")
+
+                existing_definition = existing_prompt_state["prompt_definition_json"]
+                try:
+                    update_data.update(
+                        prepare_recipe_storage_fields(
+                            update_data.get("prompt_format", existing_prompt_state["prompt_format"]),
+                            update_data.get("prompt_schema_version", existing_prompt_state["prompt_schema_version"]),
+                            update_data.get("prompt_definition", existing_definition),
+                        )
+                    )
+                except ValueError as error:
+                    raise InputError(str(error)) from error
 
                 original_uuid = existing_prompt_state['uuid']
                 original_name = existing_prompt_state['name']
