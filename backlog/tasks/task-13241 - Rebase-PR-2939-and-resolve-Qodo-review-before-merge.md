@@ -4,7 +4,7 @@ title: Rebase PR 2939 and resolve Qodo review before merge
 status: In Progress
 assignee: []
 created_date: '2026-09-10 06:30'
-updated_date: '2026-09-10 06:59'
+updated_date: '2026-09-10 07:22'
 labels: []
 dependencies: []
 references:
@@ -44,7 +44,19 @@ Macro RED: 16 failures and 6 explicit-model passes; GREEN: 28 macro tests. Confi
 Fresh combined Auth/Profile: 76 passed, no skips, with PostgreSQL required through the standard fixtures. Full simplified-chat plus target/provider resolution: 260 passed, one existing TestClient streaming skip. Admin auth/middleware: 28 passed on Node 20.19.5. Compilation, scoped lint, and Bandit show no new issues; inherited findings documented in the review report. Independent Qodo-remediation review found no correctness issues. All completed test processes exited successfully.
 
 Investigating the original-head frontend webhook E2E failure; the canceled license audit was superseded by success. Publication, current-head remote checks/review, and merge remain. The repository requires a human-written Change summary explaining what changed and why; requested from the user asynchronously and still pending.
+
+Published rebased review repairs as 475a4900356b17a651d0430cd00e029b3577ab63 with a lease pinned to the verified original remote head. All seven Qodo comments have individual evidence replies and resolved threads. Qodo independently updated its report at 07:03:50 UTC to this exact head with zero bugs/rule violations, before our replies/resolution. Current-head backend, security, container-build, shard, and trusted-license checks pass; frontend, coverage, and e2e remain running.
+
+Browser reproduction identified an inherited webhook status mismatch: backend adds delivery metadata, while admin client exact-key validation permits only the seven older fields. Existing mocks lacked delivery. A minimal API-client compatibility fix with real-response-shaped regressions is in progress; the real-backend acceptance test stays unchanged. Effective dev rules allow only a merge commit. Scheduled same-task follow-up finish-pr-2939-review-and-merge checks every 15 minutes, continues repairs, and merges only after all checks and the pending human Change summary are satisfied.
+
+Webhook compatibility follow-up complete: only admin-ui/lib/api-client.ts and its webhook client test changed. The response is copied and only unused delivery metadata is removed before existing strict validation; UI-consumed fields and unrelated-extra-key rejection remain intact. New canonical/legacy regressions failed before the fix (2 failed, 21 passed); after repair all 73 webhook client/page/URL cases pass. Scoped ESLint, full admin typecheck, and the production real-backend build pass on Node 20.19.5. The unchanged real-backend Chromium JWT webhook spec passes all 3 tests with no retries. Independent review found no issues; temporary services stopped. Latest remote dev remains 9da94ebcb4, and PR head before publishing this follow-up is 475a490035. Current-head CI and Qodo must re-run after push; the human Change summary is still pending.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Rebased PR2939 onto current dev with original patches preserved, resolved all seven Qodo findings with behavioral regressions and individual review responses, repaired CI shard assignments and the inherited admin webhook delivery-metadata contract failure, and recorded fresh local verification. Qodo independently cleared the rebased backend head. Remaining work is final-head remote checks/review plus the required human-owned Change summary, followed by an authorized merge commit into dev. The thread follow-up continues those steps.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

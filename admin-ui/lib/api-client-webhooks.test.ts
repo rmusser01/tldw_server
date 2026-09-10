@@ -110,6 +110,49 @@ const STATUS: WebhookStatus = {
   },
 };
 
+// Sanitized delivery metadata returned by the real backend with delivery off.
+const DELIVERY_STATUS = {
+  canonical_schema_version: 1,
+  schema_ready: true,
+  delivery_schema_ready: true,
+  migration_complete: false,
+  key_ready: false,
+  key_primary_match: false,
+  jobs_database_ready: false,
+  queue_ready: false,
+  job_type_ready: false,
+  jobs_backend: 'unavailable',
+  worker: {
+    component: 'worker',
+    ready: false,
+    reason_code: 'worker_unavailable',
+    heartbeat_age_seconds: null,
+  },
+  reconciler: {
+    component: 'reconciler',
+    ready: false,
+    reason_code: 'reconciler_unavailable',
+    heartbeat_age_seconds: null,
+  },
+  retention: {
+    component: 'retention',
+    ready: false,
+    reason_code: 'retention_unavailable',
+    heartbeat_age_seconds: null,
+  },
+  backlog: {
+    pending: 0,
+    enqueue_claimed: 0,
+    queued: 0,
+    processing: 0,
+    retry_wait: 0,
+  },
+  oldest_nonterminal_age_seconds: null,
+  acquisition_ready: false,
+  acquisition_reason_code: 'mode_off',
+  delivery_capability_ready: false,
+};
+
 describe('canonical webhook API client', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -259,9 +302,25 @@ describe('webhook API detection and compatibility isolation', () => {
   });
 
   it.each([
+    ['canonical', canonicalWebhookApi],
+    ['legacy', legacyWebhookApi],
+  ] as const)('accepts additive delivery metadata for the %s client without exposing it', async (routeSelection, client) => {
+    const status = { ...STATUS, route_selection: routeSelection };
+    httpMocks.requestJson.mockResolvedValue({ ...status, delivery: DELIVERY_STATUS });
+
+    await expect(detectWebhookApi()).resolves.toEqual({
+      kind: routeSelection,
+      status,
+      client,
+    });
+  });
+
+  it.each([
     { ...STATUS, route_selection: 'unknown' },
     { ...STATUS, migration: { ...STATUS.migration, legacy_file_restore_permitted: 'yes' } },
     { ...STATUS, migration: { ...STATUS.migration, rollback_window_expires_at: '2026-08-22 12:00:00' } },
+    { ...STATUS, delivery: DELIVERY_STATUS, schema_ready: 'yes' },
+    { ...STATUS, delivery: DELIVERY_STATUS, unexpected: true },
     { route_selection: 'legacy' },
   ])('rejects a malformed successful status response without probing legacy CRUD', async (body) => {
     httpMocks.requestJson.mockResolvedValue(body);
