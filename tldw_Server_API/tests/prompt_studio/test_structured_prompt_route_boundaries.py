@@ -66,6 +66,15 @@ def _create_payload(project_id: int, marker: str = "route-boundary") -> dict:
     }
 
 
+def _v1_definition() -> dict:
+    return {
+        "schema_version": 1,
+        "format": "structured",
+        "variables": [],
+        "blocks": [],
+    }
+
+
 @pytest.fixture
 def route_client(
     isolated_db: PromptStudioDatabase,
@@ -164,15 +173,19 @@ def test_prompt_studio_update_route_rejects_raw_runtime_maps_before_mutation(
     assert marker not in "\n".join(captured)
 
 
+@pytest.mark.parametrize("runtime_key", ["runtime_values", "variable_values", "resolved_values"])
 @pytest.mark.parametrize("operation", ["create", "update"])
-def test_prompt_studio_save_routes_reject_nested_runtime_maps_in_dropped_extras(
+def test_prompt_studio_save_routes_reject_runtime_maps_inside_prompt_definition(
     route_client: tuple[TestClient, PromptStudioDatabase, int],
+    runtime_key: str,
     operation: str,
 ) -> None:
     client, db, project_id = route_client
-    marker = f"SECRET_NESTED_RAW_{operation}"
+    marker = f"SECRET_DEFINITION_{operation}_{runtime_key}"
     payload = _create_payload(project_id, marker)
-    payload["unknown_extension"] = {"items": [{"runtime_values": {"topic": marker}}]}
+    payload["prompt_definition"]["variables"][0]["default_value"] = {
+        "domain": [{runtime_key: {"topic": marker}}]
+    }
     before = _mutation_state(db)
     captured: list[str] = []
     sink_id = logger.add(captured.append, format="{message}")
@@ -198,6 +211,78 @@ def test_prompt_studio_save_routes_reject_nested_runtime_maps_in_dropped_extras(
     assert response.status_code == 400
     assert response.json() == {"detail": "invalid_recipe_runtime_values"}
     assert _mutation_state(db) == before
+    assert marker not in "\n".join(captured)
+
+
+@pytest.mark.parametrize("runtime_key", ["runtime_values", "variable_values", "resolved_values"])
+@pytest.mark.parametrize("location", ["inputs", "outputs", "config"])
+@pytest.mark.parametrize("operation", ["create", "update"])
+def test_prompt_studio_v1_arbitrary_maps_may_use_runtime_key_names(
+    route_client: tuple[TestClient, PromptStudioDatabase, int],
+    runtime_key: str,
+    location: str,
+    operation: str,
+) -> None:
+    client, db, project_id = route_client
+    marker = f"V1_DOMAIN_{operation}_{location}_{runtime_key}"
+    payload = {
+        "project_id": project_id,
+        "name": "V1 arbitrary maps",
+        "prompt_format": "structured",
+        "prompt_schema_version": 1,
+        "prompt_definition": _v1_definition(),
+        "system_prompt": "",
+        "user_prompt": "",
+    }
+    if location == "config":
+        payload["modules_config"] = [
+            {
+                "type": "domain-data",
+                "enabled": True,
+                "config": {runtime_key: marker},
+            }
+        ]
+    else:
+        payload["few_shot_examples"] = [
+            {
+                "inputs": {runtime_key: marker} if location == "inputs" else {},
+                "outputs": {runtime_key: marker} if location == "outputs" else {},
+            }
+        ]
+
+    if operation == "update":
+        existing = db.create_prompt(
+            project_id=project_id,
+            name="V1 arbitrary maps",
+            prompt_format="structured",
+            prompt_schema_version=1,
+            prompt_definition=_v1_definition(),
+            client_id="boundary-test",
+        )
+        prompt_id = existing["id"]
+        payload.pop("project_id")
+        payload["change_description"] = "Preserve v1 arbitrary map"
+    before = _mutation_state(db)
+    captured: list[str] = []
+    sink_id = logger.add(captured.append, format="{message}")
+    try:
+        if operation == "create":
+            response = client.post("/api/v1/prompt-studio/prompts/create", json=payload)
+        else:
+            response = client.put(
+                f"/api/v1/prompt-studio/prompts/update/{prompt_id}",
+                json=payload,
+            )
+    finally:
+        logger.remove(sink_id)
+
+    assert response.status_code == (201 if operation == "create" else 200)
+    assert _mutation_state(db) != before
+    data = response.json()["data"]
+    if location == "config":
+        assert data["modules_config"][0]["config"][runtime_key] == marker
+    else:
+        assert data["few_shot_examples"][0][location][runtime_key] == marker
     assert marker not in "\n".join(captured)
 
 

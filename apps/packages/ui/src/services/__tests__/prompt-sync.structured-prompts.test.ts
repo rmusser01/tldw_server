@@ -68,8 +68,13 @@ const makeDefinition = (content: string) => ({
   variables: [
     {
       name: "topic",
+      label: null,
+      description: null,
       required: true,
-      input_type: "text"
+      default_value: null,
+      input_type: "text",
+      options: null,
+      max_length: null
     }
   ],
   blocks: [
@@ -77,12 +82,18 @@ const makeDefinition = (content: string) => ({
       id: "task",
       name: "Task",
       role: "user",
+      kind: null,
       content,
       enabled: true,
       order: 10,
       is_template: true
     }
-  ]
+  ],
+  assembly_config: {
+    legacy_system_roles: ["system", "developer"],
+    legacy_user_roles: ["user"],
+    block_separator: "\n\n"
+  }
 })
 
 const makeRecipeDefinition = (content = "Explain {{topic}}.") => ({
@@ -225,6 +236,69 @@ describe("prompt-sync structured prompt support", () => {
             config: { tone: "concise" }
           }
         ]
+      })
+    )
+  })
+
+  it("pushes a Python-valid sparse v1 definition in canonical wire form", async () => {
+    const sparseDefinition = {
+      schema_version: 1,
+      variables: [],
+      blocks: []
+    }
+    const canonicalDefinition = {
+      schema_version: 1,
+      format: "structured",
+      variables: [],
+      blocks: [],
+      assembly_config: {
+        legacy_system_roles: ["system", "developer"],
+        legacy_user_roles: ["user"],
+        block_separator: "\n\n"
+      }
+    }
+    state.prompts.set("local-sparse-v1", {
+      id: "local-sparse-v1",
+      title: "Sparse v1",
+      name: "Sparse v1",
+      content: "legacy snapshot",
+      is_system: false,
+      user_prompt: "legacy snapshot",
+      promptFormat: "structured",
+      promptSchemaVersion: 1,
+      structuredPromptDefinition: sparseDefinition,
+      createdAt: 1,
+      updatedAt: 1,
+      syncStatus: "local"
+    })
+    mocks.createPrompt.mockResolvedValue({
+      data: {
+        data: {
+          id: 102,
+          project_id: 42,
+          name: "Sparse v1",
+          system_prompt: "",
+          user_prompt: "legacy snapshot",
+          prompt_format: "structured",
+          prompt_schema_version: 1,
+          prompt_definition: canonicalDefinition,
+          version_number: 1,
+          updated_at: "2026-03-10T00:00:00Z"
+        }
+      }
+    })
+
+    const { pushToStudio } = await importPromptSync()
+    const result = await pushToStudio("local-sparse-v1", 42)
+
+    expect(result).toEqual(
+      expect.objectContaining({ success: true, syncStatus: "synced" })
+    )
+    expect(mocks.createPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt_format: "structured",
+        prompt_schema_version: 1,
+        prompt_definition: canonicalDefinition
       })
     )
   })

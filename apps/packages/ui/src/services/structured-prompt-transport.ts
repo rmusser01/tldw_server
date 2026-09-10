@@ -10,35 +10,37 @@ export type { SingleTextRecipeDefinitionV2 }
 
 type PromptVariableDefinitionV1 = {
   name: string
-  label?: string | null
-  description?: string | null
-  required?: boolean
-  default_value?: unknown
-  input_type?: string
-  options?: string[] | null
-  max_length?: number | null
+  label: string | null
+  description: string | null
+  required: boolean
+  default_value: unknown
+  input_type: string
+  options: string[] | null
+  max_length: number | null
 }
+
+type PromptBlockRoleV1 = "system" | "developer" | "user" | "assistant"
 
 type PromptBlockDefinitionV1 = {
   id: string
   name: string
-  role: "system" | "developer" | "user" | "assistant"
-  kind?: string | null
+  role: PromptBlockRoleV1
+  kind: string | null
   content: string
-  enabled?: boolean
+  enabled: boolean
   order: number
-  is_template?: boolean
+  is_template: boolean
 }
 
 export type MultiMessagePromptDefinitionV1 = {
   schema_version: 1
   format: "structured"
-  variables?: PromptVariableDefinitionV1[]
-  blocks?: PromptBlockDefinitionV1[]
-  assembly_config?: {
-    legacy_system_roles?: string[]
-    legacy_user_roles?: string[]
-    block_separator?: string
+  variables: PromptVariableDefinitionV1[]
+  blocks: PromptBlockDefinitionV1[]
+  assembly_config: {
+    legacy_system_roles: string[]
+    legacy_user_roles: string[]
+    block_separator: string
   }
 }
 
@@ -88,6 +90,9 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
 const requireRecord = (value: unknown): Record<string, unknown> =>
   isRecord(value) ? value : fail()
 
+const requireArray = (value: unknown): unknown[] =>
+  Array.isArray(value) ? value : fail()
+
 const requireAllowedKeys = (
   value: Record<string, unknown>,
   allowed: ReadonlySet<string>
@@ -132,6 +137,66 @@ const requireInteger = (value: unknown, minimum?: number): number => {
   }
   if (minimum !== undefined && value < minimum) return fail()
   return value
+}
+
+const coerceV1Boolean = (value: unknown, defaultValue: boolean): boolean => {
+  if (value === undefined) return defaultValue
+  if (typeof value === "boolean") return value
+  if (typeof value === "number" && Number.isFinite(value)) {
+    if (value === 0) return false
+    if (value === 1) return true
+    return fail()
+  }
+  if (typeof value === "string") {
+    const normalized = value.toLowerCase()
+    if (["0", "off", "f", "false", "n", "no"].includes(normalized)) {
+      return false
+    }
+    if (["1", "on", "t", "true", "y", "yes"].includes(normalized)) {
+      return true
+    }
+  }
+  return fail()
+}
+
+const coerceV1Integer = (value: unknown, nullable = false): number | null => {
+  if (value === null && nullable) return null
+  if (typeof value === "boolean") return value ? 1 : 0
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || !Number.isInteger(value)) return fail()
+    return value === 0 ? 0 : value
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim()
+    if (!/^[+-]?\d+(?:\.0+)?$/.test(normalized)) return fail()
+    const parsed = Number(normalized)
+    if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) return fail()
+    return parsed === 0 ? 0 : parsed
+  }
+  return fail()
+}
+
+const requireV1Role = (value: unknown): PromptBlockRoleV1 => {
+  switch (value) {
+    case "system":
+    case "developer":
+    case "user":
+    case "assistant":
+      return value
+    default:
+      return fail()
+  }
+}
+
+const v1NullableString = (value: unknown): string | null =>
+  value === undefined ? null : requireString(value, { nullable: true })
+
+const v1StringArray = (value: unknown, fallback: string[]): string[] => {
+  if (value === undefined) return [...fallback]
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    return fail()
+  }
+  return value.map((item) => String(item))
 }
 
 const requireOptionalStringArray = (value: unknown, nullable = true): void => {
@@ -230,28 +295,73 @@ const validateV1 = (
       "assembly_config"
     ])
   )
-  if (definition.format !== "structured") fail()
-  if (
-    definition.variables !== undefined &&
-    !Array.isArray(definition.variables)
-  ) {
+  if (definition.format !== undefined && definition.format !== "structured") {
     fail()
   }
-  if (definition.blocks !== undefined && !Array.isArray(definition.blocks)) {
-    fail()
-  }
-
-  const variables = definition.variables ?? []
-  const blocks = definition.blocks ?? []
+  const variables =
+    definition.variables === undefined ? [] : requireArray(definition.variables)
+  const blocks =
+    definition.blocks === undefined ? [] : requireArray(definition.blocks)
   const declared = new Set<string>()
-  for (const value of variables as unknown[]) {
-    const name = pythonStrip(validateVariable(value, false))
-    if (name && declared.has(name)) fail("duplicate_variable_name")
-    if (name) declared.add(name)
+  const parsedVariables: PromptVariableDefinitionV1[] = []
+  for (const value of variables) {
+    const variable = requireRecord(value)
+    requireAllowedKeys(
+      variable,
+      new Set([
+        "name",
+        "label",
+        "description",
+        "required",
+        "default_value",
+        "input_type",
+        "options",
+        "max_length"
+      ])
+    )
+    const name = requireString(variable.name, { min: 1 })!
+    const normalizedName = pythonStrip(name)
+    if (normalizedName && declared.has(normalizedName)) {
+      fail("duplicate_variable_name")
+    }
+    if (normalizedName) declared.add(normalizedName)
+    const options = variable.options
+    if (
+      options !== undefined &&
+      options !== null &&
+      (!Array.isArray(options) ||
+        options.some((item) => typeof item !== "string"))
+    ) {
+      fail()
+    }
+    const maxLength =
+      variable.max_length === undefined
+        ? null
+        : coerceV1Integer(variable.max_length, true)
+    if (maxLength !== null && maxLength < 1) fail()
+    parsedVariables.push({
+      name,
+      label: v1NullableString(variable.label),
+      description: v1NullableString(variable.description),
+      required: coerceV1Boolean(variable.required, false),
+      default_value:
+        variable.default_value === undefined
+          ? null
+          : structuredClone(variable.default_value),
+      input_type:
+        variable.input_type === undefined
+          ? "text"
+          : requireString(variable.input_type)!,
+      options: Array.isArray(options)
+        ? options.map((item) => String(item))
+        : null,
+      max_length: maxLength
+    })
   }
 
   const blockIds = new Set<string>()
-  for (const value of blocks as unknown[]) {
+  const parsedBlocks: PromptBlockDefinitionV1[] = []
+  for (const value of blocks) {
     const block = requireRecord(value)
     requireAllowedKeys(
       block,
@@ -267,38 +377,63 @@ const validateV1 = (
       ])
     )
     const id = requireString(block.id, { min: 1 })!
-    requireString(block.name, { min: 1 })
-    if (
-      !["system", "developer", "user", "assistant"].includes(String(block.role))
-    ) {
-      fail()
-    }
-    requireOptionalString(block.kind, { nullable: true })
+    const name = requireString(block.name, { min: 1 })!
+    const role = requireV1Role(block.role)
+    const kind = v1NullableString(block.kind)
     const content = requireString(block.content)!
-    requireOptionalBoolean(block.enabled)
-    requireInteger(block.order)
-    requireOptionalBoolean(block.is_template)
+    const enabled = coerceV1Boolean(block.enabled, true)
+    const order = coerceV1Integer(block.order)
+    const isTemplate = coerceV1Boolean(block.is_template, false)
     const normalizedId = pythonStrip(id)
     if (normalizedId && blockIds.has(normalizedId)) fail("duplicate_block_id")
     if (normalizedId) blockIds.add(normalizedId)
-    if (block.is_template === true) {
+    if (isTemplate) {
       for (const name of extractSingleTextRecipeTemplateVariables(content)) {
         if (!declared.has(name)) fail("unknown_variable_reference")
       }
     }
+    parsedBlocks.push({
+      id,
+      name,
+      role,
+      kind,
+      content,
+      enabled,
+      order: order!,
+      is_template: isTemplate
+    })
   }
 
+  let legacySystemRoles = ["system", "developer"]
+  let legacyUserRoles = ["user"]
+  let blockSeparator = "\n\n"
   if (definition.assembly_config !== undefined) {
     const config = requireRecord(definition.assembly_config)
     requireAllowedKeys(
       config,
       new Set(["legacy_system_roles", "legacy_user_roles", "block_separator"])
     )
-    requireOptionalStringArray(config.legacy_system_roles, false)
-    requireOptionalStringArray(config.legacy_user_roles, false)
-    requireOptionalString(config.block_separator)
+    legacySystemRoles = v1StringArray(
+      config.legacy_system_roles,
+      legacySystemRoles
+    )
+    legacyUserRoles = v1StringArray(config.legacy_user_roles, legacyUserRoles)
+    blockSeparator =
+      config.block_separator === undefined
+        ? blockSeparator
+        : requireString(config.block_separator)!
   }
-  return { ...definition, schema_version: 1 } as MultiMessagePromptDefinitionV1
+  return {
+    schema_version: 1,
+    format: "structured",
+    variables: parsedVariables,
+    blocks: parsedBlocks,
+    assembly_config: {
+      legacy_system_roles: legacySystemRoles,
+      legacy_user_roles: legacyUserRoles,
+      block_separator: blockSeparator
+    }
+  }
 }
 
 const validateV2 = (
@@ -462,10 +597,13 @@ export const parseStructuredPromptDefinitionForTransport = (
     fail("unsupported_schema_version")
   }
   const definition = requireRecord(value)
-  const rawVersion = definition.schema_version ?? 1
-  const version = rawVersion === 1 || rawVersion === "1" ? 1 : rawVersion
-  if (version !== promptSchemaVersion) fail()
-  if (version === 1) return validateV1(definition)
-  if (version === 2) return validateV2(definition)
+  const rawVersion =
+    definition.schema_version === undefined ? 1 : definition.schema_version
+  if (promptSchemaVersion === 1) {
+    if (coerceV1Integer(rawVersion) !== 1) fail()
+    return validateV1(definition)
+  }
+  if (rawVersion !== 2) fail()
+  if (promptSchemaVersion === 2) return validateV2(definition)
   return fail("unsupported_schema_version")
 }

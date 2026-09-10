@@ -118,10 +118,21 @@ router = APIRouter(
 
 
 async def _reject_persisted_recipe_runtime_values(request: Request) -> None:
-    """Inspect raw saves before request models can discard unknown keys."""
+    """Inspect persistence-reserved fields before models discard unknown keys."""
     payload = await request.json()
     try:
-        reject_recipe_runtime_values(payload)
+        if isinstance(payload, dict):
+            reserved = {
+                key: payload[key]
+                for key in (
+                    "runtime_values",
+                    "variable_values",
+                    "resolved_values",
+                    "prompt_definition",
+                )
+                if key in payload
+            }
+            reject_recipe_runtime_values(reserved)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from None
 

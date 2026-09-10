@@ -29,7 +29,10 @@ import {
 } from '@/services/prompt-studio'
 import type { ApiSendResponse } from '@/services/api-send'
 import { unwrapApiResponseData } from '@/services/response-envelope'
-import { getPromptStudioDefaults, setPromptStudioDefaults } from '@/services/prompt-studio-settings'
+import {
+  getPromptStudioDefaults,
+  setPromptStudioDefaults
+} from '@/services/prompt-studio-settings'
 import {
   parseStructuredPromptDefinitionForTransport,
   type ParsedStructuredPromptDefinition
@@ -45,6 +48,7 @@ export type SyncResult = {
   serverId?: number
   error?: string
   syncStatus: PromptSyncStatus
+  failureKind?: 'validation' | 'invalid_server_payload' | 'transient'
 }
 
 export type ConflictInfo = {
@@ -75,7 +79,10 @@ type ComparablePromptPayload = {
 }
 
 const isValidProjectId = (value: unknown): value is number =>
-  typeof value === 'number' && Number.isFinite(value) && value > 0
+  typeof value === 'number' &&
+  Number.isFinite(value) &&
+  Number.isInteger(value) &&
+  value > 0
 
 /**
  * Unwrap the nested `ApiSendResponse<StandardResponse<T>>` envelope.
@@ -90,7 +97,8 @@ const unwrapResponseData = <T>(
   return unwrapApiResponseData<T>(response?.data) ?? null
 }
 
-const toText = (value: unknown): string => (typeof value === 'string' ? value : '')
+const toText = (value: unknown): string =>
+  typeof value === 'string' ? value : ''
 const toArrayOrNull = <T>(value: unknown): T[] | null =>
   Array.isArray(value) ? (value as T[]) : null
 
@@ -169,7 +177,9 @@ const promptPayloadHash = (payload: ComparablePromptPayload): string => {
   return hash.toString(16).padStart(8, '0')
 }
 
-const getLocalPromptComparablePayload = (local: LocalPrompt): ComparablePromptPayload => {
+const getLocalPromptComparablePayload = (
+  local: LocalPrompt
+): ComparablePromptPayload => {
   const localText = getLocalPromptTextsForConflict(local)
   const identity = parsePromptIdentity(
     local.structuredPromptDefinition,
@@ -191,7 +201,9 @@ const getLocalPromptComparablePayload = (local: LocalPrompt): ComparablePromptPa
   }
 }
 
-const getServerPromptComparablePayload = (server: ServerPrompt): ComparablePromptPayload => {
+const getServerPromptComparablePayload = (
+  server: ServerPrompt
+): ComparablePromptPayload => {
   const serverText = getServerPromptTextsForConflict(server)
   const identity = parsePromptIdentity(
     server.prompt_definition,
@@ -213,7 +225,10 @@ const getServerPromptComparablePayload = (server: ServerPrompt): ComparablePromp
   }
 }
 
-const hasPromptContentConflict = (local: LocalPrompt, server: ServerPrompt): boolean => {
+const hasPromptContentConflict = (
+  local: LocalPrompt,
+  server: ServerPrompt
+): boolean => {
   const localPayload = getLocalPromptComparablePayload(local)
   const serverPayload = getServerPromptComparablePayload(server)
   return promptPayloadHash(localPayload) !== promptPayloadHash(serverPayload)
@@ -226,7 +241,10 @@ const hasPromptContentConflict = (local: LocalPrompt, server: ServerPrompt): boo
 /**
  * Convert a local prompt to server create payload.
  */
-function localToServerPayload(local: LocalPrompt, projectId: number): PromptCreatePayload {
+function localToServerPayload(
+  local: LocalPrompt,
+  projectId: number
+): PromptCreatePayload {
   const identity = parsePromptIdentity(
     local.structuredPromptDefinition,
     local.promptFormat,
@@ -349,34 +367,72 @@ async function createServerCopy(
   const failureSyncStatus: PromptSyncStatus = local.serverId
     ? local.syncStatus || 'conflict'
     : 'pending'
+  const originalSyncStatus: PromptSyncStatus =
+    local.syncStatus || (local.serverId ? 'conflict' : 'local')
+  let createPayload: PromptCreatePayload
   try {
-    const createPayload = localToServerPayload(local, projectId)
-    const response = await createServerPrompt(createPayload)
-    const serverPrompt = unwrapResponseData<ServerPrompt>(response)
-    if (!serverPrompt) {
-      return {
-        success: false,
-        localId,
-        error: 'Failed to create server prompt',
-        syncStatus: failureSyncStatus
-      }
-    }
-    const updateFields = serverToLocalFields(serverPrompt)
-    updateFields.studioProjectId = projectId
-    await db.prompts.update(localId, updateFields)
-    return {
-      success: true,
-      localId,
-      serverId: serverPrompt.id,
-      syncStatus: 'synced'
-    }
+    createPayload = localToServerPayload(local, projectId)
   } catch (error: unknown) {
     return {
       success: false,
       localId,
       error: error instanceof Error ? error.message : 'Push failed',
-      syncStatus: failureSyncStatus
+      syncStatus: originalSyncStatus,
+      failureKind: 'validation'
     }
+  }
+  let response: Awaited<ReturnType<typeof createServerPrompt>>
+  try {
+    response = await createServerPrompt(createPayload)
+  } catch (error: unknown) {
+    return {
+      success: false,
+      localId,
+      error: error instanceof Error ? error.message : 'Push failed',
+      syncStatus: failureSyncStatus,
+      failureKind: 'transient'
+    }
+  }
+  const serverPrompt = unwrapResponseData<ServerPrompt>(response)
+  if (!serverPrompt) {
+    return {
+      success: false,
+      localId,
+      error: 'Failed to create server prompt',
+      syncStatus: failureSyncStatus,
+      failureKind: 'invalid_server_payload'
+    }
+  }
+  let updateFields: Partial<LocalPrompt>
+  try {
+    updateFields = serverToLocalFields(serverPrompt)
+  } catch (error: unknown) {
+    return {
+      success: false,
+      localId,
+      error:
+        error instanceof Error ? error.message : 'invalid_prompt_definition',
+      syncStatus: originalSyncStatus,
+      failureKind: 'invalid_server_payload'
+    }
+  }
+  updateFields.studioProjectId = projectId
+  try {
+    await db.prompts.update(localId, updateFields)
+  } catch (error: unknown) {
+    return {
+      success: false,
+      localId,
+      error: error instanceof Error ? error.message : 'Push failed',
+      syncStatus: failureSyncStatus,
+      failureKind: 'transient'
+    }
+  }
+  return {
+    success: true,
+    localId,
+    serverId: serverPrompt.id,
+    syncStatus: 'synced'
   }
 }
 
@@ -402,7 +458,9 @@ export async function resolveAutoSyncProjectId(
   }
 
   const projects = await getAvailableProjects()
-  const firstProjectId = projects.find((project) => isValidProjectId(project.id))?.id
+  const firstProjectId = projects.find((project) =>
+    isValidProjectId(project.id)
+  )?.id
 
   if (isValidProjectId(firstProjectId)) {
     await setPromptStudioDefaults({ defaultProjectId: firstProjectId })
@@ -427,7 +485,10 @@ export async function resolveAutoSyncProjectId(
 
   // Avoid repeated failed create attempts in the same session by caching "no default".
   defaults = await getPromptStudioDefaults()
-  if (defaults.defaultProjectId !== null && defaults.defaultProjectId !== undefined) {
+  if (
+    defaults.defaultProjectId !== null &&
+    defaults.defaultProjectId !== undefined
+  ) {
     await setPromptStudioDefaults({ defaultProjectId: null })
   }
   return null
@@ -447,7 +508,9 @@ export async function autoSyncPrompt(
     }
   }
 
-  const projectId = await resolveAutoSyncProjectId(preferredProjectId ?? local.studioProjectId)
+  const projectId = await resolveAutoSyncProjectId(
+    preferredProjectId ?? local.studioProjectId
+  )
 
   if (!isValidProjectId(projectId)) {
     await db.prompts.update(localId, {
@@ -464,7 +527,7 @@ export async function autoSyncPrompt(
   }
 
   const result = await pushToStudio(localId, projectId)
-  if (!result.success) {
+  if (!result.success && result.failureKind === 'transient') {
     await db.prompts.update(localId, {
       syncStatus: 'pending',
       studioProjectId: projectId,
@@ -485,54 +548,105 @@ export async function autoSyncPrompt(
  * @param projectId - Target Prompt Studio project ID
  * @returns Sync result
  */
-export async function pushToStudio(localId: string, projectId: number): Promise<SyncResult> {
+export async function pushToStudio(
+  localId: string,
+  projectId: number
+): Promise<SyncResult> {
+  let local: LocalPrompt | undefined
   try {
-    const local = await db.prompts.get(localId)
-    if (!local) {
-      return {
-        success: false,
-        localId,
-        error: 'Local prompt not found',
-        syncStatus: 'local'
-      }
-    }
-
-    // If already linked, update existing server prompt
-    if (local.serverId) {
-      const updatePayload = localToServerUpdatePayload(local)
-      const response = await updateServerPrompt(local.serverId, updatePayload)
-      const serverPrompt = unwrapResponseData<ServerPrompt>(response)
-
-      if (!serverPrompt) {
-        return {
-          success: false,
-          localId,
-          serverId: local.serverId,
-          error: 'Failed to update server prompt',
-          syncStatus: 'pending'
-        }
-      }
-
-      const updateFields = serverToLocalFields(serverPrompt)
-      await db.prompts.update(localId, updateFields)
-
-      return {
-        success: true,
-        localId,
-        serverId: serverPrompt.id,
-        syncStatus: 'synced'
-      }
-    }
-
-    return await createServerCopy(localId, local, projectId)
+    local = await db.prompts.get(localId)
   } catch (error: unknown) {
     return {
       success: false,
       localId,
       error: error instanceof Error ? error.message : 'Push failed',
-      syncStatus: 'pending'
+      syncStatus: 'pending',
+      failureKind: 'transient'
     }
   }
+  if (!local) {
+    return {
+      success: false,
+      localId,
+      error: 'Local prompt not found',
+      syncStatus: 'local'
+    }
+  }
+
+  // If already linked, update existing server prompt
+  if (local.serverId) {
+    let updatePayload: PromptUpdatePayload
+    try {
+      updatePayload = localToServerUpdatePayload(local)
+    } catch (error: unknown) {
+      return {
+        success: false,
+        localId,
+        serverId: local.serverId,
+        error: error instanceof Error ? error.message : 'Push failed',
+        syncStatus: local.syncStatus || 'local',
+        failureKind: 'validation'
+      }
+    }
+    let response: Awaited<ReturnType<typeof updateServerPrompt>>
+    try {
+      response = await updateServerPrompt(local.serverId, updatePayload)
+    } catch (error: unknown) {
+      return {
+        success: false,
+        localId,
+        serverId: local.serverId,
+        error: error instanceof Error ? error.message : 'Push failed',
+        syncStatus: 'pending',
+        failureKind: 'transient'
+      }
+    }
+    const serverPrompt = unwrapResponseData<ServerPrompt>(response)
+    if (!serverPrompt) {
+      return {
+        success: false,
+        localId,
+        serverId: local.serverId,
+        error: 'Failed to update server prompt',
+        syncStatus: 'pending',
+        failureKind: 'invalid_server_payload'
+      }
+    }
+    let updateFields: Partial<LocalPrompt>
+    try {
+      updateFields = serverToLocalFields(serverPrompt)
+    } catch (error: unknown) {
+      return {
+        success: false,
+        localId,
+        serverId: local.serverId,
+        error:
+          error instanceof Error ? error.message : 'invalid_prompt_definition',
+        syncStatus: local.syncStatus || 'local',
+        failureKind: 'invalid_server_payload'
+      }
+    }
+    try {
+      await db.prompts.update(localId, updateFields)
+    } catch (error: unknown) {
+      return {
+        success: false,
+        localId,
+        serverId: local.serverId,
+        error: error instanceof Error ? error.message : 'Push failed',
+        syncStatus: 'pending',
+        failureKind: 'transient'
+      }
+    }
+    return {
+      success: true,
+      localId,
+      serverId: serverPrompt.id,
+      syncStatus: 'synced'
+    }
+  }
+
+  return await createServerCopy(localId, local, projectId)
 }
 
 /**
@@ -618,7 +732,10 @@ export async function pullFromStudio(
  * @param serverId - Server prompt ID
  * @returns Sync result
  */
-export async function linkPrompts(localId: string, serverId: number): Promise<SyncResult> {
+export async function linkPrompts(
+  localId: string,
+  serverId: number
+): Promise<SyncResult> {
   try {
     const local = await db.prompts.get(localId)
     if (!local) {
@@ -755,9 +872,11 @@ export async function getSyncStatus(localId: string): Promise<{
 
     const serverUpdatedAt = serverPrompt.updated_at
     const serverVersionChanged = local.serverUpdatedAt !== serverUpdatedAt
-    const localHasUnsyncedChanges = (local.updatedAt || 0) > (local.lastSyncedAt || 0)
+    const localHasUnsyncedChanges =
+      (local.updatedAt || 0) > (local.lastSyncedAt || 0)
     const contentChanged = hasPromptContentConflict(local, serverPrompt)
-    const hasConflict = serverVersionChanged && localHasUnsyncedChanges && contentChanged
+    const hasConflict =
+      serverVersionChanged && localHasUnsyncedChanges && contentChanged
 
     return {
       status: hasConflict ? 'conflict' : local.syncStatus || 'synced',
@@ -778,7 +897,9 @@ export async function getSyncStatus(localId: string): Promise<{
 /**
  * Get detailed conflict information.
  */
-export async function getConflictInfo(localId: string): Promise<ConflictInfo | null> {
+export async function getConflictInfo(
+  localId: string
+): Promise<ConflictInfo | null> {
   const local = await db.prompts.get(localId)
   if (!local || !local.serverId) return null
 
@@ -828,13 +949,15 @@ export async function resolveConflict(
 
     case 'keep_both':
       // Validate/create first; preserve the existing link until one final update.
-      if (local.studioProjectId) {
+      if (isValidProjectId(local.studioProjectId)) {
         return await createServerCopy(localId, local, local.studioProjectId)
       }
       return {
-        success: true,
+        success: false,
         localId,
-        syncStatus: 'local'
+        error:
+          'No valid Prompt Studio project available for keep-both resolution',
+        syncStatus: local.syncStatus || 'conflict'
       }
 
     default:
@@ -874,7 +997,9 @@ export async function getAllPromptsWithSyncStatus(): Promise<
 /**
  * Get all prompts linked to a specific project.
  */
-export async function getPromptsByProject(projectId: number): Promise<LocalPrompt[]> {
+export async function getPromptsByProject(
+  projectId: number
+): Promise<LocalPrompt[]> {
   return await db.prompts
     .where('studioProjectId')
     .equals(projectId)

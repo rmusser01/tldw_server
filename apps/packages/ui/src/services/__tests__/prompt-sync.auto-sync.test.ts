@@ -94,6 +94,49 @@ const makeRecipeDefinition = () => ({
   }
 })
 
+const invalidServerIdentityCases = [
+  {
+    name: "runtime map",
+    outerVersion: 2,
+    definition: {
+      ...makeRecipeDefinition(),
+      resolved_values: { topic: "PRIVATE_AUTO_SYNC_SENTINEL" }
+    }
+  },
+  {
+    name: "malformed block",
+    outerVersion: 2,
+    definition: {
+      ...makeRecipeDefinition(),
+      blocks: [
+        {
+          ...makeRecipeDefinition().blocks[0],
+          id: "",
+          content: "PRIVATE_AUTO_SYNC_SENTINEL"
+        }
+      ]
+    }
+  },
+  {
+    name: "future version",
+    outerVersion: 99,
+    definition: {
+      ...makeRecipeDefinition(),
+      schema_version: 99
+    }
+  },
+  {
+    name: "outer mismatch",
+    outerVersion: 1,
+    definition: makeRecipeDefinition()
+  }
+]
+
+const invalidAutoSyncCases = (["create", "update"] as const).flatMap(
+  (operation) =>
+    invalidServerIdentityCases.map((testCase) => ({ operation, ...testCase }))
+)
+
 describe("prompt-sync auto-sync defaults", () => {
   beforeEach(() => {
     state.defaults = {
@@ -264,6 +307,131 @@ describe("prompt-sync auto-sync defaults", () => {
     expect(result.syncStatus).toBe("pending")
     expect(mocks.promptUpdate).not.toHaveBeenCalled()
   })
+
+  it.each(invalidAutoSyncCases)(
+    "quarantines invalid $operation response identity: $name",
+    async ({ operation, outerVersion, definition }) => {
+      const sentinel = "PRIVATE_AUTO_SYNC_SENTINEL"
+      const original = {
+        id: `invalid-auto-${operation}-${outerVersion}`,
+        title: "Good local recipe",
+        name: "Good local recipe",
+        content: "Safe local snapshot",
+        is_system: false,
+        system_prompt: "",
+        user_prompt: "Safe local snapshot",
+        promptFormat: "structured" as const,
+        promptSchemaVersion: 2,
+        structuredPromptDefinition: makeRecipeDefinition(),
+        createdAt: 1,
+        updatedAt: 25,
+        studioProjectId: 17,
+        syncStatus:
+          operation === "create" ? ("local" as const) : ("synced" as const),
+        ...(operation === "update"
+          ? {
+              serverId: 701,
+              studioPromptId: 701,
+              lastSyncedAt: 20,
+              serverUpdatedAt: "2026-03-10T00:00:00Z"
+            }
+          : {})
+      }
+      state.prompts.set(original.id, structuredClone(original))
+      const serverResponse = {
+        data: {
+          data: {
+            id: 801,
+            project_id: 17,
+            name: sentinel,
+            system_prompt: "",
+            user_prompt: sentinel,
+            prompt_format: "structured",
+            prompt_schema_version: outerVersion,
+            prompt_definition: definition,
+            version_number: 2,
+            updated_at: "2026-03-10T01:00:00Z"
+          }
+        }
+      }
+      if (operation === "create") {
+        mocks.createPrompt.mockResolvedValueOnce(serverResponse)
+      } else {
+        mocks.updatePrompt.mockResolvedValueOnce(serverResponse)
+      }
+      const captured: string[] = []
+      const warn = vi.spyOn(console, "warn").mockImplementation((...items) => {
+        captured.push(items.join(" "))
+      })
+      const error = vi
+        .spyOn(console, "error")
+        .mockImplementation((...items) => {
+          captured.push(items.join(" "))
+        })
+      try {
+        const { autoSyncPrompt } = await importPromptSync()
+        const result = await autoSyncPrompt(original.id, 17)
+
+        expect(result).toEqual(
+          expect.objectContaining({
+            success: false,
+            syncStatus: original.syncStatus
+          })
+        )
+        expect(result.error).not.toContain(sentinel)
+      } finally {
+        warn.mockRestore()
+        error.mockRestore()
+      }
+
+      expect(state.prompts.get(original.id)).toEqual(original)
+      expect(mocks.promptUpdate).not.toHaveBeenCalled()
+      expect(captured.join("\n")).not.toContain(sentinel)
+    }
+  )
+
+  it.each(["create", "update"] as const)(
+    "retains pending-state behavior for transient $operation failures",
+    async (operation) => {
+      const original = {
+        id: `transient-auto-${operation}`,
+        title: "Transient prompt",
+        name: "Transient prompt",
+        content: "Safe local snapshot",
+        is_system: false,
+        user_prompt: "Safe local snapshot",
+        createdAt: 1,
+        updatedAt: 25,
+        studioProjectId: 17,
+        syncStatus:
+          operation === "create" ? ("local" as const) : ("synced" as const),
+        ...(operation === "update"
+          ? { serverId: 702, studioPromptId: 702 }
+          : {})
+      }
+      state.prompts.set(original.id, structuredClone(original))
+      if (operation === "create") {
+        mocks.createPrompt.mockRejectedValueOnce(new Error("offline"))
+      } else {
+        mocks.updatePrompt.mockRejectedValueOnce(new Error("offline"))
+      }
+
+      const { autoSyncPrompt } = await importPromptSync()
+      const result = await autoSyncPrompt(original.id, 17)
+
+      expect(result).toEqual(
+        expect.objectContaining({ success: false, syncStatus: "pending" })
+      )
+      expect(state.prompts.get(original.id)).toEqual(
+        expect.objectContaining({
+          syncStatus: "pending",
+          studioProjectId: 17,
+          updatedAt: expect.any(Number)
+        })
+      )
+      expect(mocks.promptUpdate).toHaveBeenCalledTimes(1)
+    }
+  )
 
   it("returns conflict details with both local and server prompts", async () => {
     state.prompts.set("local-conflict-info", {
@@ -440,6 +608,47 @@ describe("prompt-sync auto-sync defaults", () => {
       })
     )
   })
+
+  it.each([
+    ["missing", undefined],
+    ["null", null],
+    ["zero", 0],
+    ["negative", -1],
+    ["fractional", 1.5],
+    ["non-finite", Number.NaN],
+    ["string", "17"]
+  ])(
+    "resolveConflict keep_both fails without mutation for an %s project id",
+    async (_name, projectId) => {
+      const original: Record<string, unknown> = {
+        id: `keep-both-invalid-project-${_name}`,
+        title: "Prompt Keep Both",
+        name: "Prompt Keep Both",
+        content: "keep both content",
+        user_prompt: "keep both user",
+        createdAt: 1,
+        updatedAt: 12,
+        serverId: 99,
+        studioPromptId: 99,
+        syncStatus: "conflict"
+      }
+      if (projectId !== undefined) original.studioProjectId = projectId
+      state.prompts.set(String(original.id), structuredClone(original))
+
+      const { resolveConflict } = await importPromptSync()
+      const result = await resolveConflict(String(original.id), "keep_both")
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          success: false,
+          syncStatus: "conflict"
+        })
+      )
+      expect(state.prompts.get(String(original.id))).toEqual(original)
+      expect(mocks.createPrompt).not.toHaveBeenCalled()
+      expect(mocks.promptUpdate).not.toHaveBeenCalled()
+    }
+  )
 
   it("resolveConflict keep_both preserves recipe identity in the new server copy", async () => {
     const definition = makeRecipeDefinition()

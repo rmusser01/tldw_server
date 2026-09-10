@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest"
+import { existsSync, readFileSync } from "node:fs"
+import { resolve } from "node:path"
 
 import { parseStructuredPromptDefinitionForTransport } from "@/services/structured-prompt-transport"
 
@@ -57,6 +59,21 @@ const v1Definition = () => ({
 })
 
 const clone = <T>(value: T): T => structuredClone(value)
+
+type V1TransportCase = {
+  name: string
+  input: Record<string, unknown>
+  expected: Record<string, unknown>
+}
+const fixtureRelativePath =
+  "Docs/fixtures/single-text-recipes/v1-transport-cases.json"
+const fixturePath = ["", "..", "../..", "../../.."]
+  .map((prefix) => resolve(process.cwd(), prefix, fixtureRelativePath))
+  .find(existsSync)
+if (!fixturePath) throw new Error("v1 transport fixture not found")
+const v1TransportCases = JSON.parse(
+  readFileSync(fixturePath, "utf8")
+) as V1TransportCase[]
 
 const invalidRecipeCases: Array<[string, (value: any) => void]> = [
   [
@@ -586,6 +603,18 @@ const invalidV1Cases: Array<[string, (value: any) => void]> = [
 ]
 
 describe("structured prompt transport validation", () => {
+  it.each(v1TransportCases)(
+    "canonicalizes shared Python-compatible v1 case: $name",
+    ({ input, expected }) => {
+      const before = JSON.stringify(input)
+
+      expect(
+        parseStructuredPromptDefinitionForTransport(input, "structured", 1)
+      ).toEqual(expected)
+      expect(JSON.stringify(input)).toBe(before)
+    }
+  )
+
   it.each(["system", "user"] as const)(
     "accepts a complete %s-target recipe without mutating it",
     (targetRole) => {
@@ -648,7 +677,39 @@ describe("structured prompt transport validation", () => {
         "structured",
         1
       )
-    ).toEqual(v1Definition())
+    ).toEqual({
+      schema_version: 1,
+      format: "structured",
+      variables: [
+        {
+          name: "topic",
+          label: null,
+          description: null,
+          required: true,
+          default_value: null,
+          input_type: "text",
+          options: null,
+          max_length: null
+        }
+      ],
+      blocks: [
+        {
+          id: "task",
+          name: "Task",
+          role: "user",
+          kind: null,
+          content: "Explain {{topic}}.",
+          enabled: true,
+          order: 10,
+          is_template: true
+        }
+      ],
+      assembly_config: {
+        legacy_system_roles: ["system", "developer"],
+        legacy_user_roles: ["user"],
+        block_separator: "\n\n"
+      }
+    })
   })
 
   it("treats structural key words inside authored strings as opaque", () => {

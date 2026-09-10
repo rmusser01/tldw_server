@@ -291,10 +291,17 @@ class MCPPromptFormatter:
             try:
                 if prompt_format not in (None, "structured"):
                     raise ValueError("invalid_prompt_definition")
-                return parse_stored_prompt_definition(
+                definition = parse_stored_prompt_definition(
                     raw_definition,
                     schema_version=schema_version,
                 )
+                if isinstance(definition, SingleTextRecipeDefinitionV2) and (
+                    prompt_format != "structured"
+                    or type(schema_version) is not int
+                    or schema_version != 2
+                ):
+                    raise ValueError("invalid_prompt_definition")
+                return definition
             except ValueError as exc:
                 raise PromptCatalogError(
                     "invalid_prompt_definition",

@@ -54,6 +54,7 @@ from tldw_Server_API.app.core.DB_Management.prompts_db_helpers import (
     parse_stored_prompt_definition,
     reject_recipe_runtime_values,
 )
+from tldw_Server_API.app.core.Prompt_Management.structured_prompts import SingleTextRecipeDefinitionV2
 
 #
 #######################################################################################################################
@@ -389,21 +390,27 @@ class PromptsInteropService:
         """Validate and copy optional structured identity without runtime values."""
         try:
             reject_recipe_runtime_values(record)
+            prompt_format = record.get("prompt_format") or "legacy"
+            if prompt_format != "structured":
+                if (
+                    record.get("prompt_definition") is not None
+                    or record.get("prompt_schema_version") is not None
+                ):
+                    raise ValueError("invalid_recipe_prompt_format")
+                return {}
+            schema_version = record.get("prompt_schema_version")
+            definition = parse_stored_prompt_definition(
+                record.get("prompt_definition"),
+                schema_version=schema_version,
+            )
+            if isinstance(definition, SingleTextRecipeDefinitionV2) and (
+                record.get("prompt_format") != "structured"
+                or type(schema_version) is not int
+                or schema_version != 2
+            ):
+                raise ValueError("invalid_prompt_definition")
         except ValueError as error:
             raise InputError(str(error)) from None
-        prompt_format = record.get("prompt_format") or "legacy"
-        if prompt_format != "structured":
-            if (
-                record.get("prompt_definition") is not None
-                or record.get("prompt_schema_version") is not None
-            ):
-                raise ValueError("invalid_recipe_prompt_format")
-            return {}
-        schema_version = record.get("prompt_schema_version")
-        definition = parse_stored_prompt_definition(
-            record.get("prompt_definition"),
-            schema_version=schema_version,
-        )
         return {
             "prompt_format": "structured",
             "prompt_schema_version": int(definition.schema_version),

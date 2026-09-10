@@ -76,6 +76,14 @@ def _make_recipe_definition() -> dict:
     }
 
 
+def _make_v1_definition() -> dict:
+    return {
+        "schema_version": 1,
+        "variables": [],
+        "blocks": [],
+    }
+
+
 @pytest.fixture(scope="function")  # function scope to ensure clean init/shutdown for each test
 def interop_manager(tmp_path):
     """Manages initialization and shutdown of the interop layer for tests."""
@@ -372,6 +380,109 @@ def test_interop_json_import_rejects_recipe_without_identity_metadata(tmp_path):
             )
 
         assert service.list_prompts() == []
+    finally:
+        service.close()
+
+
+@pytest.mark.parametrize(
+    "identity_case",
+    [
+        "missing_format",
+        "missing_schema",
+        "missing_both",
+        "legacy_format",
+        "schema_mismatch",
+        "future_schema",
+    ],
+)
+@pytest.mark.parametrize("unsafe_index", [0, 1])
+def test_interop_json_import_requires_exact_v2_outer_identity_before_any_write(
+    tmp_path,
+    identity_case: str,
+    unsafe_index: int,
+) -> None:
+    service = PromptsInteropService(
+        str(tmp_path / f"v2-identity-{identity_case}-{unsafe_index}"),
+        "interop-v2-identity",
+    )
+    try:
+        service.create_prompt(name="Good Local", content="Preserve me", author="Interop")
+        marker = f"PRIVATE_INTEROP_IDENTITY_{identity_case}_{unsafe_index}"
+        invalid = {
+            "name": "Invalid recipe identity",
+            "content": marker,
+            "author": "Interop",
+            "keywords": [],
+            "prompt_format": "structured",
+            "prompt_schema_version": 2,
+            "prompt_definition": _make_recipe_definition(),
+            "system_prompt": marker,
+            "user_prompt": marker,
+        }
+        if identity_case in {"missing_format", "missing_both"}:
+            invalid.pop("prompt_format")
+        if identity_case in {"missing_schema", "missing_both"}:
+            invalid.pop("prompt_schema_version")
+        if identity_case == "legacy_format":
+            invalid["prompt_format"] = "legacy"
+        if identity_case == "schema_mismatch":
+            invalid["prompt_schema_version"] = 1
+        if identity_case == "future_schema":
+            invalid["prompt_schema_version"] = 99
+            invalid["prompt_definition"]["schema_version"] = 99
+
+        records = [
+            {
+                "name": "Good import",
+                "content": "Good content",
+                "author": "Interop",
+                "keywords": [],
+            },
+            invalid,
+        ]
+        if unsafe_index == 0:
+            records.reverse()
+        before = _interop_state(service)
+        captured: list[str] = []
+        sink_id = logger.add(captured.append, format="{message}")
+        try:
+            with pytest.raises(InputError) as excinfo:
+                service.import_prompts({"version": "1.0", "prompts": records})
+        finally:
+            logger.remove(sink_id)
+
+        assert _interop_state(service) == before
+        assert marker not in str(excinfo.value)
+        assert marker not in "\n".join(captured)
+    finally:
+        service.close()
+
+
+def test_interop_json_import_retains_supported_v1_missing_outer_schema(tmp_path) -> None:
+    service = PromptsInteropService(str(tmp_path / "v1-identity"), "interop-v1-identity")
+    try:
+        result = service.import_prompts(
+            {
+                "version": "1.0",
+                "prompts": [
+                    {
+                        "name": "Compatible v1",
+                        "content": "Legacy content",
+                        "author": "Interop",
+                        "keywords": [],
+                        "prompt_format": "structured",
+                        "prompt_definition": _make_v1_definition(),
+                    }
+                ],
+            }
+        )
+
+        imported = service.get_prompt(result["prompt_ids"][0])
+        assert imported["prompt_format"] == "structured"
+        assert imported["prompt_schema_version"] == 1
+        assert imported["prompt_definition"] == parse_stored_prompt_definition(
+            _make_v1_definition()
+        ).model_dump()
     finally:
         service.close()
 

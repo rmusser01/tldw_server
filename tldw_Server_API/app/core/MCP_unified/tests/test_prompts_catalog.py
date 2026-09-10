@@ -417,6 +417,10 @@ def test_formatter_rejects_recipe_runtime_values_without_echoing_content() -> No
         ("structured", 99, None),
         ("structured", 99, {"schema_version": 99}),
         ("structured", 1, _recipe_row()["prompt_definition"]),
+        ("structured", None, _recipe_row()["prompt_definition"]),
+        (None, 2, _recipe_row()["prompt_definition"]),
+        (None, None, _recipe_row()["prompt_definition"]),
+        ("legacy", None, _recipe_row()["prompt_definition"]),
         ("legacy", 2, None),
         (None, 2, None),
         ("legacy", 1, None),
@@ -456,6 +460,52 @@ def test_formatter_never_falls_back_when_structured_identity_is_present_but_fals
     assert excinfo.value.code == "invalid_prompt_definition"
     assert marker not in str(excinfo.value)
     assert marker not in "\n".join(captured)
+
+
+@pytest.mark.parametrize(
+    ("prompt_format", "outer_schema"),
+    [
+        (None, None),
+        (None, 1),
+        ("structured", None),
+        ("structured", 1),
+    ],
+)
+@pytest.mark.parametrize("operation", ["list", "render"])
+def test_formatter_retains_supported_v1_outer_identity_forms(
+    prompt_format: object,
+    outer_schema: object,
+    operation: str,
+) -> None:
+    row = {
+        **_recipe_row(),
+        "prompt_format": prompt_format,
+        "prompt_schema_version": outer_schema,
+        "prompt_definition": {
+            "schema_version": 1,
+            "variables": [],
+            "blocks": [
+                {
+                    "id": "task",
+                    "name": "Task",
+                    "role": "user",
+                    "content": "Compatible v1",
+                    "order": 10,
+                }
+            ],
+        },
+        "system_prompt": "",
+        "user_prompt": "Compatible v1",
+    }
+    formatter = MCPPromptFormatter(max_rendered_chars=10_000)
+
+    if operation == "list":
+        result = formatter.library_prompt_definition(row)
+        assert result["arguments"] == []
+        assert result["_meta"]["tldw"]["source"] == "library"
+    else:
+        result = formatter.render_library_prompt(row, {})
+        assert result["messages"][0]["content"]["text"] == "Compatible v1"
 
 
 def test_formatter_explicit_genuinely_legacy_identity_retains_legacy_projection() -> None:
