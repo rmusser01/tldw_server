@@ -23,6 +23,7 @@ import { ComparisonSplit } from "@/components/Review/ComparisonSplit"
 import type { MediaReviewState, MediaReviewActions, MediaDetail } from "@/components/Review/media-review-types"
 import { getContent, MINIMAP_COLLAPSE_THRESHOLD } from "@/components/Review/media-review-types"
 import { scrollSectionIntoView } from "@/components/Review/reading-pane-section-navigation"
+import { extractMediaDetailAnalysis } from "@/utils/media-detail-content"
 
 interface MediaReviewReadingPaneProps {
   state: MediaReviewState
@@ -129,12 +130,7 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
     const content = shouldHideTranscriptTimings
       ? stripLeadingTranscriptTimings(rawContent)
       : rawContent
-    const analysisText =
-      d.summary ||
-      (d as any)?.analysis ||
-      (d as any)?.analysis_content ||
-      (d as any)?.analysisContent ||
-      ""
+    const analysisText = extractMediaDetailAnalysis(d)
     const hasAnalysis = analysisText.trim().length > 0
     const analysisIsLong = analysisText.length > 1600
     const contentExpanded = contentExpandedIds.has(key)

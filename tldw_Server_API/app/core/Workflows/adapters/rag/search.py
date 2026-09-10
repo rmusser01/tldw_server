@@ -403,7 +403,7 @@ async def run_web_search_adapter(config: dict[str, Any], context: dict[str, Any]
 
         fetch_summary: dict[str, Any] | None = None
         if fetch_content and formatted_results:
-            from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import scrape_article
+            from tldw_Server_API.app.core.Web_Scraping.orchestration import scrape_article
 
             async def _fetch_one(idx: int, item: dict[str, Any]) -> tuple[int, str | None, str | None]:
                 link = str(item.get("link") or "").strip()

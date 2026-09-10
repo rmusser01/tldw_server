@@ -227,7 +227,7 @@ volumes:
 - Use **least-connections** or **round-robin** balancing for stateless REST endpoints.
 - Enable **sticky sessions** (IP hash or cookie-based) if clients rely on WebSocket connections or SSE streams, since the event broadcaster is per-instance.
 - Set appropriate health check paths: `GET /api/v1/config/quickstart` or a dedicated `/health` endpoint.
-- Forward the original client IP via `X-Forwarded-For` and configure `RG_CLIENT_IP_HEADER` and `RG_TRUSTED_PROXIES` so the Resource Governor sees real client IPs.
+- Forward the original client IP via `X-Forwarded-For`. Forwarded identity is opt-in and is trusted only when the physical peer is a valid IP in the subsystem's trusted-proxy host/CIDR list.
 
 ### nginx example
 
@@ -263,15 +263,21 @@ server {
 
 ### Trusted proxy configuration
 
-Set these environment variables on each app instance so the Resource Governor resolves client IPs correctly behind a reverse proxy:
+Set these environment variables on each app instance when forwarding is enabled. If both AuthNZ and Resource Governor use forwarded identity, their trusted-proxy sets must be equivalent and their headers compatible so login lockouts and request governance derive the same client identity:
 
 ```bash
-# Header containing the real client IP
+# Resource Governor: header and trusted proxy CIDRs
 RG_CLIENT_IP_HEADER=X-Forwarded-For
-
-# CIDR ranges of trusted proxies (comma-separated)
 RG_TRUSTED_PROXIES=172.16.0.0/12,10.0.0.0/8
+
+# AuthNZ: explicit opt-in and equivalent trusted proxy CIDRs
+AUTH_TRUST_X_FORWARDED_FOR=true
+AUTH_TRUSTED_PROXY_IPS=172.16.0.0/12,10.0.0.0/8
 ```
+
+- `X-Forwarded-For` is parsed as a complete chain from the trusted edge inward (right-to-left); malformed chains fall back to the physical peer. Other `RG_CLIENT_IP_HEADER` values must contain one plain IP literal.
+- Invalid physical peers resolve to the safe `unknown` sentinel. Leaving the AuthNZ opt-in or either RG setting unset uses the physical peer.
+- Rollout no longer consults legacy raw-IP password-login buckets; account-wide lockout and Resource Governor protections remain active.
 
 ## Monitoring
 

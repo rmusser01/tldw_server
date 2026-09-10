@@ -1,6 +1,6 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -219,6 +219,68 @@ describe("AssistantSelect behavior", () => {
       name: "Alpha",
       avatar_url: "https://example.com/alpha-full.png",
       system_prompt: "Character full prompt"
+    })
+  })
+
+  it("stages a controlled selection without changing the active chat or stored assistant", async () => {
+    const user = userEvent.setup()
+    const onSelectionChange = vi.fn()
+    state.option.serverChatAssistantKind = "character"
+    state.option.serverChatCharacterId = "char-1"
+    mocks.selectedAssistant.value = { kind: "character", id: "char-1", name: "Alpha" }
+    const { rerenderAssistantSelect } = renderAssistantSelect({
+      selection: null,
+      onSelectionChange
+    })
+
+    await user.click(screen.getByRole("button", { name: "Select character or persona" }))
+    await user.click(await screen.findByRole("tab", { name: "Personas" }))
+    await user.click(await screen.findByRole("button", { name: "Guide Persona" }))
+
+    expect(onSelectionChange).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "persona",
+      id: "persona-1",
+      name: "Guide Persona",
+      metadata: { selectionMode: "tracked" }
+    }))
+    expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
+    expect(mocks.updateSettings).not.toHaveBeenCalled()
+    expect(state.option.setHistoryId).not.toHaveBeenCalled()
+    expect(state.option.setMessages).not.toHaveBeenCalled()
+    rerenderAssistantSelect({
+      selection: { kind: "persona", id: "persona-1", name: "Guide Persona" },
+      onSelectionChange
+    })
+    expect(screen.getByTestId("character-select")).toHaveAccessibleName("Guide Persona")
+  })
+
+  it("does not load dropdown catalogs until the selector opens", async () => {
+    const user = userEvent.setup()
+    renderAssistantSelect()
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(mocks.listAllCharacters).not.toHaveBeenCalled()
+    expect(mocks.listPersonaProfiles).not.toHaveBeenCalled()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Select character or persona" })
+    )
+
+    await waitFor(() => {
+      expect(mocks.listAllCharacters).toHaveBeenCalledTimes(1)
+      expect(mocks.listPersonaProfiles).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it("loads catalogs immediately for an inline selector", async () => {
+    renderAssistantSelect({ variant: "inline" })
+
+    await waitFor(() => {
+      expect(mocks.listAllCharacters).toHaveBeenCalledTimes(1)
+      expect(mocks.listPersonaProfiles).toHaveBeenCalledTimes(1)
     })
   })
 
@@ -818,6 +880,34 @@ describe("AssistantSelect behavior", () => {
     expect(mocks.updateSettings).not.toHaveBeenCalled()
   })
 
+  it("switches the mounted picker to the latest requested initial tab", async () => {
+    const user = userEvent.setup()
+    const { rerenderAssistantSelect } = renderAssistantSelect({
+      initialTab: "character",
+      labelOverride: "Apply assistant"
+    })
+
+    await user.click(
+      await screen.findByRole("button", { name: "Apply assistant" })
+    )
+    expect(await screen.findByRole("tab", { name: "Characters" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
+
+    rerenderAssistantSelect({
+      initialTab: "persona",
+      labelOverride: "Apply assistant"
+    })
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "Personas" })).toHaveAttribute(
+        "aria-selected",
+        "true"
+      )
+    })
+  })
+
   it("uses the prop-driven overlay selection path and custom label without requiring an open event", async () => {
     const user = userEvent.setup()
     renderAssistantSelect({
@@ -944,4 +1034,5 @@ describe("AssistantSelect behavior", () => {
       })
     )
   })
+
 })

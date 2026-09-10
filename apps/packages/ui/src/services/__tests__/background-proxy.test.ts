@@ -1,19 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
 
 const mocks = vi.hoisted(() => ({
+  runtimeId: "test-extension" as string | null,
   sendMessage: vi.fn(),
   connect: vi.fn(),
   tldwRequest: vi.fn(),
   getRuntimeSingleUserApiKeyOverride: vi.fn(),
   storageGet: vi.fn(async (_key?: string) => null),
   sessionStorageGet: vi.fn(async (_key?: string) => null),
-  storageSet: vi.fn(async () => undefined)
+  storageSet: vi.fn(async () => undefined),
+  storageRemove: vi.fn(async () => undefined)
 }))
 
 vi.mock("wxt/browser", () => ({
   browser: {
     runtime: {
-      id: "test-extension",
+      get id() {
+        return mocks.runtimeId
+      },
       sendMessage: (...args: unknown[]) =>
         (mocks.sendMessage as (...args: unknown[]) => unknown)(...args),
       connect: (...args: unknown[]) =>
@@ -40,7 +45,9 @@ vi.mock("@/utils/safe-storage", () => ({
         ? (mocks.sessionStorageGet as (...args: unknown[]) => unknown)(...args)
         : (mocks.storageGet as (...args: unknown[]) => unknown)(...args)),
     set: (...args: unknown[]) =>
-      (mocks.storageSet as (...args: unknown[]) => unknown)(...args)
+      (mocks.storageSet as (...args: unknown[]) => unknown)(...args),
+    remove: (...args: unknown[]) =>
+      (mocks.storageRemove as (...args: unknown[]) => unknown)(...args)
   })
 }))
 
@@ -56,6 +63,7 @@ describe("background proxy fallback safety", () => {
   beforeEach(() => {
     vi.resetModules()
     vi.useRealTimers()
+    mocks.runtimeId = "test-extension"
     mocks.sendMessage.mockReset()
     mocks.connect.mockReset()
     mocks.tldwRequest.mockReset()
@@ -63,10 +71,12 @@ describe("background proxy fallback safety", () => {
     mocks.storageGet.mockReset()
     mocks.sessionStorageGet.mockReset()
     mocks.storageSet.mockReset()
+    mocks.storageRemove.mockReset()
     mocks.getRuntimeSingleUserApiKeyOverride.mockReturnValue(null)
     mocks.storageGet.mockResolvedValue(null)
     mocks.sessionStorageGet.mockResolvedValue(null)
     mocks.storageSet.mockResolvedValue(undefined)
+    mocks.storageRemove.mockResolvedValue(undefined)
   })
 
   it("does not fall back to direct request when background returns non-2xx", async () => {
@@ -79,6 +89,163 @@ describe("background proxy fallback safety", () => {
       bgRequest({ path: "/api/v1/health", method: "GET" })
     ).rejects.toMatchObject({ status: 500 })
     expect(mocks.tldwRequest).not.toHaveBeenCalled()
+  })
+
+  it("does not replay a scoped POST when the response port closes ambiguously", async () => {
+    mocks.sendMessage.mockRejectedValue(
+      new Error("The message port closed before a response was received.")
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 201,
+      data: { id: "duplicate-chat" }
+    })
+    const { bgRequest } = await importProxy()
+
+    await expect(bgRequest({
+      path: "/api/v1/chats/",
+      method: "POST",
+      body: { title: "One chat" },
+      servicePromptConfig: {
+        serverUrl: "https://api.example.com",
+        authMode: "multi-user",
+        expectedUserId: 7
+      }
+    })).rejects.toThrow(/message port closed/i)
+
+    expect(mocks.tldwRequest).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    {
+      name: "target",
+      current: {
+        serverUrl: "https://other.example.com",
+        authMode: "multi-user",
+        authSource: "manual",
+        accessToken: "current-access",
+        refreshToken: "old-refresh"
+      }
+    },
+    {
+      name: "refresh lineage",
+      current: {
+        serverUrl: "https://api.example.com",
+        authMode: "multi-user",
+        authSource: "manual",
+        accessToken: "other-access",
+        refreshToken: "other-refresh"
+      }
+    }
+  ])("does not directly dispatch a captured refresh after $name drift", async ({ current }) => {
+    mocks.storageGet.mockImplementation(async (key: string) =>
+      key === "tldwConfig" ? current : null
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { access_token: "unexpected" }
+    })
+    const { bgRequest } = await importProxy()
+
+    await expect(bgRequest({
+      path: "/api/v1/auth/refresh",
+      method: "POST",
+      body: { refresh_token: "old-refresh" },
+      preferDirect: true,
+      servicePromptConfig: {
+        serverUrl: "https://api.example.com",
+        authMode: "multi-user",
+        authSource: "manual",
+        expectedRefreshToken: "old-refresh"
+      }
+    })).rejects.toMatchObject({
+      status: 412,
+      details: { detail: { code: "request_config_scope_changed" } }
+    })
+
+    expect(mocks.tldwRequest).not.toHaveBeenCalled()
+  })
+
+  it("does not directly dispatch after a same-target single-user API-key change", async () => {
+    const current = {
+      serverUrl: "https://api.example.com",
+      authMode: "single-user",
+      authSource: "manual",
+      credentialSource: "manual",
+      apiKeyPersistence: "device",
+      apiKeyServerOrigin: "https://api.example.com",
+      apiKey: "current-account-key"
+    }
+    mocks.storageGet.mockImplementation(async (key: string) =>
+      key === "tldwConfig" ? current : null
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { id: "wrong-account-write" }
+    })
+    const { bgRequest } = await importProxy()
+
+    await expect(bgRequest({
+      path: "/api/v1/service-prompts/chat.rag.answer",
+      method: "PUT",
+      body: { parts: {}, expected_revision: null },
+      preferDirect: true,
+      servicePromptConfig: {
+        serverUrl: "https://api.example.com",
+        authMode: "single-user",
+        authSource: "manual",
+        expectedSingleUserApiKeyScope: "key:captured-account"
+      }
+    })).rejects.toMatchObject({
+      status: 412,
+      details: { detail: { code: "request_config_scope_changed" } }
+    })
+
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(mocks.tldwRequest).not.toHaveBeenCalled()
+  })
+
+  it("directly dispatches with the same captured single-user API-key scope", async () => {
+    const apiKey = "same-account-key"
+    const current = {
+      serverUrl: "https://api.example.com",
+      authMode: "single-user",
+      authSource: "manual",
+      credentialSource: "manual",
+      apiKeyPersistence: "device",
+      apiKeyServerOrigin: "https://api.example.com",
+      apiKey
+    }
+    mocks.storageGet.mockImplementation(async (key: string) =>
+      key === "tldwConfig" ? current : null
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { revision: "same-account" }
+    })
+    const { bgRequest } = await importProxy()
+
+    await expect(bgRequest({
+      path: "/api/v1/service-prompts/chat.rag.answer",
+      method: "GET",
+      preferDirect: true,
+      servicePromptConfig: {
+        serverUrl: "https://api.example.com",
+        authMode: "single-user",
+        authSource: "manual",
+        expectedSingleUserApiKeyScope:
+          deriveSingleUserApiKeyCredentialScope("single-user", apiKey)!
+      }
+    })).resolves.toEqual({ revision: "same-account" })
+
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+    expect(mocks.tldwRequest.mock.calls[0]?.[1]).toMatchObject({
+      useRuntimeAuthOverride: false
+    })
   })
 
   it("does not warn for expected response statuses", async () => {
@@ -381,6 +548,83 @@ describe("background proxy fallback safety", () => {
     expect(diagnostics).toContain("provider_unavailable")
     expect(diagnostics).not.toMatch(
       /RAW_(?:BODY|ERROR|KEY|PATH)_(?:ALPHA|BETA)_SENTINEL/
+    )
+  })
+
+  it("preserves Service Prompt reset metadata while redacting proxy errors", async () => {
+    mocks.sendMessage.mockResolvedValue({
+      ok: false,
+      status: 500,
+      error: "Saved override is corrupt.",
+      data: {
+        detail: {
+          code: "service_prompt_corrupt_override",
+          revision: "revision-corrupt",
+          current_revision: "revision-current",
+          can_reset: true,
+          internal_path: "/private/prompts.db"
+        }
+      }
+    })
+
+    const { bgRequest } = await importProxy()
+
+    const rejection = await bgRequest({
+      path: "/api/v1/service-prompts/chat.rag.answer",
+      method: "GET",
+      expectedStatuses: [500]
+    }).catch((error) => error)
+
+    expect(rejection.details).toEqual({
+      detail: {
+        code: "service_prompt_corrupt_override",
+        revision: "revision-corrupt",
+        current_revision: "revision-current",
+        can_reset: true,
+        internal_path: "[REDACTED]"
+      }
+    })
+  })
+
+  it("preserves a scoped RAG rejection while redacting provider diagnostics", async () => {
+    mocks.sendMessage.mockResolvedValue({
+      ok: false,
+      status: 412,
+      error: "RAW_SCOPE_ERROR_SENTINEL",
+      data: {
+        detail: {
+          code: "request_config_scope_changed",
+          message: "RAW_SCOPE_BODY_SENTINEL",
+          api_key: "RAW_SCOPE_KEY_SENTINEL",
+        },
+      },
+    })
+
+    const { bgRequest } = await importProxy()
+    const rejection = await bgRequest({
+      path: "/api/v1/rag/search",
+      method: "POST",
+      body: { query: "scoped request" },
+      sanitizeRagProviderError: true,
+      servicePromptConfig: {
+        serverUrl: "https://api.example.com",
+        authMode: "multi-user",
+        expectedUserId: 7,
+      },
+    }).catch((error) => error)
+
+    expect(rejection).toMatchObject({
+      status: 412,
+      details: {
+        detail: {
+          code: "request_config_scope_changed",
+          message:
+            "The server or authenticated account changed before the request was sent.",
+        },
+      },
+    })
+    expect(JSON.stringify(rejection)).not.toMatch(
+      /RAW_SCOPE_(?:ERROR|BODY|KEY)_SENTINEL/,
     )
   })
 
@@ -753,6 +997,42 @@ describe("background proxy fallback safety", () => {
     })
   })
 
+  it("preserves code-only cancellation identity without diagnostics or outage events", async () => {
+    mocks.sendMessage.mockRejectedValue(
+      new Error("Could not establish connection. Receiving end does not exist.")
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: false,
+      status: 0,
+      code: "REQUEST_ABORTED",
+      error: "request stopped"
+    })
+    const eventSpy = vi.fn()
+    window.addEventListener("tldw:backend-unreachable", eventSpy as EventListener)
+
+    try {
+      const { bgRequest } = await importProxy()
+
+      await expect(
+        bgRequest({
+          path: "/api/v1/chats/?limit=200&offset=0&ordering=-updated_at",
+          method: "GET"
+        })
+      ).rejects.toMatchObject({
+        name: "AbortError",
+        status: 0,
+        code: "REQUEST_ABORTED"
+      })
+    } finally {
+      window.removeEventListener("tldw:backend-unreachable", eventSpy as EventListener)
+    }
+
+    expect(eventSpy).not.toHaveBeenCalled()
+    expect(
+      mocks.storageSet.mock.calls.some(([key]) => key === "__tldwLastRequestError")
+    ).toBe(false)
+  })
+
   it("falls back to direct request on GET extension timeout", async () => {
     vi.useFakeTimers()
     mocks.sendMessage.mockImplementation(() => new Promise(() => undefined))
@@ -972,6 +1252,89 @@ describe("background proxy fallback safety", () => {
     expect(mocks.tldwRequest).not.toHaveBeenCalled()
   })
 
+  it("cancels a scoped worker request when the caller aborts after dispatch", async () => {
+    let resolveWorkerRequest!: (value: unknown) => void
+    mocks.sendMessage.mockImplementation((message: { type?: string }) => {
+      if (message.type === "tldw:cancel-request") {
+        return Promise.resolve({ ok: true, cancelled: true })
+      }
+      return new Promise((resolve) => {
+        resolveWorkerRequest = resolve
+      })
+    })
+    const controller = new AbortController()
+    const { bgRequest } = await importProxy()
+    const pending = bgRequest({
+      path: "/api/v1/service-prompts/chat.rag.answer",
+      method: "PUT",
+      body: { parts: {}, expected_revision: null },
+      abortSignal: controller.signal,
+      servicePromptConfig: {
+        serverUrl: "https://api.example.com",
+        authMode: "multi-user"
+      }
+    })
+    const rejection = expect(pending).rejects.toMatchObject({
+      name: "AbortError",
+      code: "REQUEST_ABORTED"
+    })
+
+    await Promise.resolve()
+    const requestMessage = mocks.sendMessage.mock.calls.find(
+      ([message]) => message?.type === "tldw:request"
+    )?.[0]
+    controller.abort()
+    await rejection
+
+    expect(requestMessage?.payload?.requestId).toEqual(expect.any(String))
+    expect(requestMessage?.payload).not.toHaveProperty("abortSignal")
+    expect(mocks.sendMessage).toHaveBeenCalledWith({
+      type: "tldw:cancel-request",
+      payload: { requestId: requestMessage.payload.requestId }
+    })
+    resolveWorkerRequest({ ok: true, status: 200, data: { revision: "late" } })
+    await Promise.resolve()
+    expect(mocks.tldwRequest).not.toHaveBeenCalled()
+  })
+
+  it("cancels a scoped worker request when its runtime response times out", async () => {
+    vi.useFakeTimers()
+    mocks.sendMessage.mockImplementation((message: { type?: string }) =>
+      message.type === "tldw:cancel-request"
+        ? Promise.resolve({ ok: true, cancelled: true })
+        : new Promise(() => undefined)
+    )
+    const controller = new AbortController()
+    const { bgRequest } = await importProxy()
+    const pending = bgRequest({
+      path: "/api/v1/service-prompts/chat.rag.answer",
+      method: "PUT",
+      body: { parts: {}, expected_revision: null },
+      timeoutMs: 100,
+      abortSignal: controller.signal,
+      servicePromptConfig: {
+        serverUrl: "https://api.example.com",
+        authMode: "multi-user"
+      }
+    })
+    const rejection = expect(pending).rejects.toThrow(
+      "Extension messaging timeout"
+    )
+    await Promise.resolve()
+    const requestMessage = mocks.sendMessage.mock.calls.find(
+      ([message]) => message?.type === "tldw:request"
+    )?.[0]
+
+    await vi.advanceTimersByTimeAsync(5001)
+    await rejection
+
+    expect(mocks.sendMessage).toHaveBeenCalledWith({
+      type: "tldw:cancel-request",
+      payload: { requestId: requestMessage.payload.requestId }
+    })
+    expect(mocks.tldwRequest).not.toHaveBeenCalled()
+  })
+
   it("does not fall back to direct upload when background returns non-2xx", async () => {
     mocks.sendMessage.mockResolvedValue({
       ok: false,
@@ -989,6 +1352,31 @@ describe("background proxy fallback safety", () => {
         fields: { title: "example" }
       })
     ).rejects.toMatchObject({ status: 400 })
+    expect(mocks.tldwRequest).not.toHaveBeenCalled()
+  })
+
+  it("does not replay a scoped upload when the response port closes ambiguously", async () => {
+    mocks.sendMessage.mockRejectedValue(
+      new Error("The message port closed before a response was received.")
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { id: "duplicate-ingest" }
+    })
+    const { bgUpload } = await importProxy()
+
+    await expect(bgUpload({
+      path: "/api/v1/media/add",
+      method: "POST",
+      fields: { urls: ["https://example.com"] },
+      servicePromptConfig: {
+        serverUrl: "https://api.example.com",
+        authMode: "multi-user",
+        expectedUserId: 7
+      }
+    })).rejects.toThrow(/message port closed/i)
+
     expect(mocks.tldwRequest).not.toHaveBeenCalled()
   })
 
@@ -1302,6 +1690,212 @@ describe("background proxy fallback safety", () => {
     expect(mocks.tldwRequest).not.toHaveBeenCalled()
   })
 
+  it("forwards captured scope controls through extension upload messaging", async () => {
+    mocks.sendMessage.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+    const controller = new AbortController()
+    const servicePromptConfig = {
+      serverUrl: "https://api.example.com",
+      authMode: "multi-user" as const
+    }
+
+    const { bgUpload } = await importProxy()
+    await bgUpload({
+      path: "/api/v1/media/add",
+      method: "POST",
+      fields: { urls: ["https://example.com"] },
+      headers: { "X-TLDW-Expected-User-ID": "42" },
+      abortSignal: controller.signal,
+      servicePromptConfig
+    })
+
+    expect(mocks.sendMessage).toHaveBeenCalledWith({
+      type: "tldw:upload",
+      payload: expect.objectContaining({
+        path: "/api/v1/media/add",
+        method: "POST",
+        headers: { "X-TLDW-Expected-User-ID": "42" },
+        servicePromptConfig
+      })
+    })
+    expect(mocks.sendMessage.mock.calls[0]?.[0]?.payload).not.toHaveProperty(
+      "abortSignal"
+    )
+  })
+
+  it.each([
+    "/api/v1/chats/%2e%2e/messages",
+    "/api/v1/chats/chat%2fid/messages",
+    "/api/v1/chats/chat%5cid/messages"
+  ])("does not dispatch a scoped upload to ambiguous pathname %s", async (path) => {
+    const { bgUpload } = await importProxy()
+
+    await expect(bgUpload({
+      path: path as "/api/v1/media/add",
+      method: "POST",
+      servicePromptConfig: {
+        serverUrl: "https://api.example.com",
+        authMode: "multi-user"
+      }
+    })).rejects.toThrow(/Service Prompt config/i)
+
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(mocks.tldwRequest).not.toHaveBeenCalled()
+  })
+
+  it("cancels a scoped worker upload while waiting for its response", async () => {
+    let resolveWorkerUpload!: (value: unknown) => void
+    mocks.sendMessage.mockImplementation((message: { type?: string }) => {
+      if (message.type === "tldw:cancel-request") {
+        return Promise.resolve({ ok: true, cancelled: true })
+      }
+      return new Promise((resolve) => {
+        resolveWorkerUpload = resolve
+      })
+    })
+    const controller = new AbortController()
+
+    const { bgUpload } = await importProxy()
+    const pending = bgUpload({
+      path: "/api/v1/media/add",
+      method: "POST",
+      fields: { urls: ["https://example.com"] },
+      abortSignal: controller.signal,
+      servicePromptConfig: {
+        serverUrl: "https://api.example.com",
+        authMode: "multi-user"
+      }
+    })
+    const rejection = expect(pending).rejects.toMatchObject({
+      name: "AbortError",
+      code: "REQUEST_ABORTED"
+    })
+    await Promise.resolve()
+    const uploadMessage = mocks.sendMessage.mock.calls.find(
+      ([message]) => message?.type === "tldw:upload"
+    )?.[0]
+    controller.abort()
+
+    await rejection
+    expect(uploadMessage?.payload?.requestId).toEqual(expect.any(String))
+    expect(uploadMessage?.payload).not.toHaveProperty("abortSignal")
+    expect(mocks.sendMessage).toHaveBeenCalledWith({
+      type: "tldw:cancel-request",
+      payload: { requestId: uploadMessage.payload.requestId }
+    })
+    resolveWorkerUpload({ ok: true, status: 200, data: { persisted: true } })
+    await Promise.resolve()
+    expect(mocks.tldwRequest).not.toHaveBeenCalled()
+  })
+
+  it("cancels a scoped worker upload when its runtime response times out", async () => {
+    vi.useFakeTimers()
+    mocks.sendMessage.mockImplementation((message: { type?: string }) =>
+      message.type === "tldw:cancel-request"
+        ? Promise.resolve({ ok: true, cancelled: true })
+        : new Promise(() => undefined)
+    )
+    const controller = new AbortController()
+    const { bgUpload } = await importProxy()
+    const pending = bgUpload({
+      path: "/api/v1/media/add",
+      method: "POST",
+      fields: { urls: ["https://example.com"] },
+      timeoutMs: 100,
+      abortSignal: controller.signal,
+      servicePromptConfig: {
+        serverUrl: "https://api.example.com",
+        authMode: "multi-user"
+      }
+    })
+    const rejection = expect(pending).rejects.toThrow(
+      "Extension messaging timeout"
+    )
+    await Promise.resolve()
+    const uploadMessage = mocks.sendMessage.mock.calls.find(
+      ([message]) => message?.type === "tldw:upload"
+    )?.[0]
+
+    await vi.advanceTimersByTimeAsync(5001)
+    await rejection
+
+    expect(mocks.sendMessage).toHaveBeenCalledWith({
+      type: "tldw:cancel-request",
+      payload: { requestId: uploadMessage.payload.requestId }
+    })
+    expect(mocks.tldwRequest).not.toHaveBeenCalled()
+  })
+
+  it("does not dispatch an extension upload for an already-aborted scope", async () => {
+    const controller = new AbortController()
+    controller.abort()
+
+    const { bgUpload } = await importProxy()
+    await expect(bgUpload({
+      path: "/api/v1/media/add",
+      method: "POST",
+      fields: { urls: ["https://example.com"] },
+      abortSignal: controller.signal
+    })).rejects.toMatchObject({
+      name: "AbortError",
+      code: "REQUEST_ABORTED"
+    })
+
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(mocks.tldwRequest).not.toHaveBeenCalled()
+  })
+
+  it("forwards captured scope controls to direct uploads", async () => {
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+    mocks.storageGet.mockImplementation(async (key: string) =>
+      key === "tldwConfig"
+        ? {
+            serverUrl: "https://api.example.com",
+            authMode: "multi-user",
+            accessToken: "current-token"
+          }
+        : null
+    )
+    const controller = new AbortController()
+    const servicePromptConfig = {
+      serverUrl: "https://api.example.com",
+      authMode: "multi-user" as const
+    }
+
+    const { bgUpload } = await importProxy()
+    await bgUpload({
+      path: "/api/v1/media/add",
+      method: "POST",
+      fields: { urls: ["https://example.com"] },
+      headers: { "X-TLDW-Expected-User-ID": "42" },
+      abortSignal: controller.signal,
+      servicePromptConfig,
+      preferDirect: true
+    })
+
+    expect(mocks.tldwRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/add",
+        method: "POST",
+        headers: { "X-TLDW-Expected-User-ID": "42" },
+        abortSignal: controller.signal
+      }),
+      expect.objectContaining({ getConfig: expect.any(Function) })
+    )
+    const runtime = mocks.tldwRequest.mock.calls[0]?.[1]
+    await expect(runtime.getConfig()).resolves.toMatchObject({
+      serverUrl: "https://api.example.com",
+      accessToken: "current-token"
+    })
+  })
+
   it("does not fall back to direct upload on POST extension timeout", async () => {
     vi.useFakeTimers()
     mocks.sendMessage.mockImplementation(() => new Promise(() => undefined))
@@ -1319,6 +1913,49 @@ describe("background proxy fallback safety", () => {
 
     await assertion
     expect(mocks.tldwRequest).not.toHaveBeenCalled()
+  })
+
+  it("does not directly upload after a same-target single-user API-key change", async () => {
+    mocks.storageGet.mockImplementation(async (key: string) =>
+      key === "tldwConfig"
+        ? {
+            serverUrl: "https://api.example.com",
+            authMode: "single-user",
+            authSource: "manual",
+            credentialSource: "manual",
+            apiKeyPersistence: "device",
+            apiKeyServerOrigin: "https://api.example.com",
+            apiKey: "changed-account-key"
+          }
+        : null
+    )
+    mocks.tldwRequest.mockImplementation(async (_request, runtime) => {
+      await runtime.getConfig()
+      return { ok: true, status: 200, data: { id: "wrong-account-write" } }
+    })
+    const { bgUpload } = await importProxy()
+
+    await expect(bgUpload({
+      path: "/api/v1/media/add",
+      method: "POST",
+      fields: { urls: ["https://example.com"] },
+      preferDirect: true,
+      servicePromptConfig: {
+        serverUrl: "https://api.example.com",
+        authMode: "single-user",
+        authSource: "manual",
+        expectedSingleUserApiKeyScope: deriveSingleUserApiKeyCredentialScope(
+          "single-user",
+          "captured-account-key"
+        )!
+      }
+    })).rejects.toMatchObject({
+      status: 412,
+      details: { detail: { code: "request_config_scope_changed" } }
+    })
+
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
   })
 
   it("sanitizes opted-in RAG direct-stream non-2xx failures before throwing", async () => {
@@ -2560,6 +3197,7 @@ describe("background proxy fallback safety", () => {
       configurable: true
     })
     mocks.sendMessage.mockResolvedValue(null)
+    let refreshRotation: unknown = null
     mocks.storageGet.mockImplementation(async (key: string) => {
       if (key === "tldwConfig") {
         return {
@@ -2568,7 +3206,11 @@ describe("background proxy fallback safety", () => {
           refreshToken: "refresh-token"
         }
       }
+      if (key === "tldwRefreshRotation") return refreshRotation
       return null
+    })
+    mocks.storageSet.mockImplementation(async (key: string, value: unknown) => {
+      if (key === "tldwRefreshRotation") refreshRotation = value
     })
     const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
@@ -2601,8 +3243,9 @@ describe("background proxy fallback safety", () => {
           status: 200,
           headers: { "content-type": "text/event-stream" }
         }
-      )
-    })
+    )
+  })
+
     vi.stubGlobal("fetch", fetchSpy as any)
 
     const { bgStream } = await importProxy()
@@ -2696,31 +3339,24 @@ describe("background proxy fallback safety", () => {
     }
   })
 
-  it("persists rotated refresh token during direct stream refresh retry", async () => {
+  it("persists guarded token rotation during direct stream refresh retry", async () => {
     mocks.sendMessage.mockResolvedValue({ ok: false })
-    let storageReadCount = 0
+    let refreshRotation: unknown = null
+    const storedConfig = {
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "multi-user",
+      accessToken: "expired-access",
+      refreshToken: "old-refresh",
+      orgId: 1,
+      customFlag: true
+    }
     mocks.storageGet.mockImplementation(async (key: string) => {
-      if (key === "tldwConfig") {
-        storageReadCount += 1
-        if (storageReadCount === 1) {
-          return {
-            serverUrl: "http://127.0.0.1:8000",
-            authMode: "multi-user",
-            accessToken: "expired-access",
-            refreshToken: "old-refresh",
-            orgId: 1
-          }
-        }
-        return {
-          serverUrl: "http://127.0.0.1:8000",
-          authMode: "multi-user",
-          accessToken: "expired-access",
-          refreshToken: "old-refresh",
-          orgId: 99,
-          customFlag: true
-        }
-      }
+      if (key === "tldwConfig") return storedConfig
+      if (key === "tldwRefreshRotation") return refreshRotation
       return null
+    })
+    mocks.storageSet.mockImplementation(async (key: string, value: unknown) => {
+      if (key === "tldwRefreshRotation") refreshRotation = value
     })
     const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
@@ -2771,15 +3407,100 @@ describe("background proxy fallback safety", () => {
     }
 
     expect(mocks.storageSet).toHaveBeenCalledWith(
-      "tldwConfig",
+      "tldwRefreshRotation",
       expect.objectContaining({
         accessToken: "new-access",
         refreshToken: "new-refresh",
-        orgId: 99,
-        customFlag: true
+        orgId: 1,
+        sourceRefreshToken: "old-refresh"
       })
     )
+    expect(storedConfig).toMatchObject({
+      accessToken: "expired-access",
+      refreshToken: "old-refresh",
+      customFlag: true
+    })
     expect(chunks.some((chunk) => chunk.includes('"event":"run_started"'))).toBe(true)
+  })
+
+  it("does not overwrite or retry a direct stream under an account selected during refresh", async () => {
+    mocks.sendMessage.mockResolvedValue({ ok: false })
+    let signalRefreshStarted!: () => void
+    let releaseRefresh!: () => void
+    const refreshStarted = new Promise<void>((resolve) => {
+      signalRefreshStarted = resolve
+    })
+    const refreshGate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve
+    })
+    let storedConfig = {
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "multi-user",
+      accessToken: "expired-access",
+      refreshToken: "old-refresh"
+    }
+    let refreshRotation: unknown = null
+    mocks.storageGet.mockImplementation(async (key: string) => {
+      if (key === "tldwConfig") return storedConfig
+      if (key === "tldwRefreshRotation") return refreshRotation
+      return null
+    })
+    mocks.storageSet.mockImplementation(async (key: string, value: unknown) => {
+      if (key === "tldwRefreshRotation") refreshRotation = value
+    })
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/api/v1/auth/refresh")) {
+        signalRefreshStarted()
+        await refreshGate
+        return new Response(JSON.stringify({
+          access_token: "new-access",
+          refresh_token: "new-refresh"
+        }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      }
+      const authorization = new Headers(init?.headers).get("Authorization")
+      return authorization === "Bearer expired-access"
+        ? new Response("unauthorized", { status: 401 })
+        : new Response(
+            'data: {"event":"run_started"}\n\ndata: [DONE]\n\n',
+            {
+              status: 200,
+              headers: { "content-type": "text/event-stream" }
+            }
+          )
+    })
+    vi.stubGlobal("fetch", fetchSpy as any)
+
+    const { bgStream } = await importProxy()
+    const consume = async () => {
+      for await (const _chunk of bgStream({
+        path: "/api/v1/chat/completions",
+        method: "POST",
+        body: { stream: true, messages: [] }
+      })) {
+        // no-op
+      }
+    }
+    const result = expect(consume()).rejects.toMatchObject({
+      status: 412,
+      details: { detail: { code: "request_config_scope_changed" } }
+    })
+
+    await refreshStarted
+    const replacement = {
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "multi-user",
+      accessToken: "other-account-access",
+      refreshToken: "other-account-refresh"
+    }
+    storedConfig = replacement
+    releaseRefresh()
+    await result
+
+    expect(storedConfig).toEqual(replacement)
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
   })
 
   it("falls back directly when runtime ping preflight times out", async () => {
@@ -2983,14 +3704,413 @@ describe("background proxy fallback safety", () => {
 })
 
 describe("background proxy GET coalescing", () => {
+  const ownerToken = "a.eyJzdWIiOiJvd25lciJ9.z"
+  const memberToken = "a.eyJzdWIiOiJtZW1iZXIifQ.z"
+
   beforeEach(() => {
     vi.resetModules()
+    mocks.runtimeId = null
     mocks.sendMessage.mockReset()
     mocks.tldwRequest.mockReset()
     mocks.storageGet.mockReset()
     mocks.storageSet.mockReset()
-    mocks.storageGet.mockResolvedValue(null)
+    mocks.storageGet.mockImplementation(async (key) =>
+      key === "tldwConfig"
+        ? {
+            accessToken: ownerToken,
+            authMode: "multi-user",
+            serverUrl: "https://server.example.test"
+          }
+        : null
+    )
     mocks.storageSet.mockResolvedValue(undefined)
+  })
+
+  it("uses one immutable direct config snapshot for both reuse scope and execution", async () => {
+    mocks.runtimeId = null
+    const firstConfig = {
+      serverUrl: "https://snapshot-a.example.test",
+      authMode: "multi-user",
+      accessToken: ownerToken
+    }
+    const laterConfig = {
+      serverUrl: "https://snapshot-b.example.test",
+      authMode: "multi-user",
+      accessToken: memberToken
+    }
+    let configReads = 0
+    mocks.storageGet.mockImplementation(async (key) => {
+      if (key !== "tldwConfig") return null
+      configReads += 1
+      return configReads === 1 ? firstConfig : laterConfig
+    })
+    mocks.tldwRequest.mockImplementation(
+      async (
+        _payload: unknown,
+        runtime: { getConfig: () => Promise<Record<string, unknown>> }
+      ) => ({
+        ok: true,
+        status: 200,
+        data: await runtime.getConfig()
+      })
+    )
+    const { bgRequest } = await importProxy()
+
+    await expect(
+      bgRequest({ path: "/api/v1/config/providers", method: "GET" })
+    ).resolves.toMatchObject({
+      serverUrl: firstConfig.serverUrl,
+      accessToken: ownerToken
+    })
+  })
+
+  it("does not coalesce requests owned by extension runtime messaging", async () => {
+    mocks.runtimeId = "test-extension"
+    mocks.sendMessage.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { via: "runtime" }
+    })
+    const { bgRequest } = await importProxy()
+
+    await Promise.all([
+      bgRequest({ path: "/api/v1/config/providers", method: "GET" }),
+      bgRequest({ path: "/api/v1/config/providers", method: "GET" })
+    ])
+
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    {
+      label: "missing config",
+      config: null
+    },
+    {
+      label: "anonymous multi-user config",
+      config: {
+        serverUrl: "https://server.example.test",
+        authMode: "multi-user"
+      }
+    },
+    {
+      label: "cookie-session config",
+      config: {
+        serverUrl: "https://server.example.test",
+        authMode: "multi-user",
+        authSource: "cookie-session",
+        accessToken: ownerToken
+      }
+    }
+  ])("does not coalesce $label requests", async ({ config }) => {
+    mocks.runtimeId = null
+    mocks.storageGet.mockImplementation(async (key) =>
+      key === "tldwConfig" ? config : null
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+    const { bgRequest } = await importProxy()
+
+    await Promise.all([
+      bgRequest({ path: "/api/v1/config/providers", method: "GET" }),
+      bgRequest({ path: "/api/v1/config/providers", method: "GET" })
+    ])
+
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(2)
+  })
+
+  it("allows an explicitly noAuth direct request to coalesce without a principal", async () => {
+    mocks.runtimeId = null
+    const anonymousConfig = {
+      serverUrl: "https://server.example.test",
+      authMode: "multi-user"
+    }
+    mocks.storageGet.mockImplementation(async (key) =>
+      key === "tldwConfig" ? anonymousConfig : null
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+    const { bgRequest } = await importProxy()
+
+    await Promise.all([
+      bgRequest({ path: "/api/v1/health", method: "GET", noAuth: true }),
+      bgRequest({ path: "/api/v1/health", method: "GET", noAuth: true })
+    ])
+
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it("coalesces identical requests that use the same direct snapshot", async () => {
+    mocks.runtimeId = null
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+    const { bgRequest } = await importProxy()
+
+    await Promise.all([
+      bgRequest({ path: "/api/v1/config/providers", method: "GET" }),
+      bgRequest({ path: "/api/v1/config/providers", method: "GET" })
+    ])
+
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it("uses refreshed credentials without reusing the old principal's in-flight result", async () => {
+    mocks.runtimeId = null
+    let refreshRotation: unknown = null
+    const storedConfig = {
+      serverUrl: "https://server.example.test",
+      authMode: "multi-user",
+      accessToken: ownerToken,
+      refreshToken: "owner-refresh"
+    }
+    mocks.storageGet.mockImplementation(async (key) => {
+      if (key === "tldwConfig") return storedConfig
+      if (key === "tldwRefreshRotation") return refreshRotation
+      return null
+    })
+    mocks.storageSet.mockImplementation(async (key, value) => {
+      if (key === "tldwRefreshRotation") refreshRotation = value
+    })
+    let releaseFirst: () => void = () => {}
+    const firstPending = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    let firstRefreshed: () => void = () => {}
+    const refreshed = new Promise<void>((resolve) => {
+      firstRefreshed = resolve
+    })
+    let profileCalls = 0
+    mocks.tldwRequest.mockImplementation(async (
+      payload: { path: string },
+      runtime: {
+        getConfig: () => Promise<Record<string, unknown>>
+        refreshAuth: () => Promise<void>
+      }
+    ) => {
+      if (payload.path === "/api/v1/auth/refresh") {
+        return {
+          ok: true,
+          status: 200,
+          data: {
+            access_token: memberToken,
+            refresh_token: "member-refresh"
+          }
+        }
+      }
+      profileCalls += 1
+      const initialConfig = await runtime.getConfig()
+      if (profileCalls === 1) {
+        await runtime.refreshAuth()
+        const refreshedConfig = await runtime.getConfig()
+        firstRefreshed()
+        await firstPending
+        return {
+          ok: true,
+          status: 200,
+          data: {
+            initialToken: initialConfig.accessToken,
+            refreshedToken: refreshedConfig.accessToken
+          }
+        }
+      }
+      return {
+        ok: true,
+        status: 200,
+        data: { initialToken: initialConfig.accessToken }
+      }
+    })
+    const { bgRequest } = await importProxy()
+
+    const first = bgRequest({ path: "/api/v1/persona/profiles", method: "GET" })
+    await refreshed
+    const second = bgRequest({ path: "/api/v1/persona/profiles", method: "GET" })
+    await vi.waitFor(() => expect(profileCalls).toBe(2))
+    releaseFirst()
+
+    await expect(first).resolves.toEqual({
+      initialToken: ownerToken,
+      refreshedToken: memberToken
+    })
+    await expect(second).resolves.toEqual({ initialToken: memberToken })
+  })
+
+  it("does not put raw token material into the direct reuse key", async () => {
+    mocks.runtimeId = null
+    const firstToken = `${ownerToken}.first-secret-material`
+    const secondToken = `${ownerToken}.second-secret-material`
+    const firstConfig = {
+      serverUrl: "https://server.example.test",
+      authMode: "multi-user",
+      accessToken: firstToken
+    }
+    const secondConfig = { ...firstConfig, accessToken: secondToken }
+    mocks.storageGet
+      .mockResolvedValueOnce(firstConfig)
+      .mockResolvedValueOnce(secondConfig)
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+    const { bgRequest } = await importProxy()
+
+    await Promise.all([
+      bgRequest({ path: "/api/v1/config/providers", method: "GET" }),
+      bgRequest({ path: "/api/v1/config/providers", method: "GET" })
+    ])
+
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not build a reuse key from caller-provided secret header values", async () => {
+    mocks.runtimeId = null
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+    const { bgRequest } = await importProxy()
+    const headers = { Authorization: "Bearer header-secret-material" }
+
+    await Promise.all([
+      bgRequest({ path: "/api/v1/config/providers", method: "GET", headers }),
+      bgRequest({ path: "/api/v1/config/providers", method: "GET", headers })
+    ])
+
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(2)
+  })
+
+  it("partitions concurrent identical GETs by resolved server", async () => {
+    const firstConfig = {
+      serverUrl: "https://server-a.example.test",
+      authMode: "multi-user",
+      accessToken: ownerToken
+    }
+    const secondConfig = {
+      ...firstConfig,
+      serverUrl: "https://server-b.example.test"
+    }
+    mocks.storageGet
+      .mockResolvedValueOnce(firstConfig)
+      .mockResolvedValueOnce(secondConfig)
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+    const { bgRequest } = await importProxy()
+
+    const first = bgRequest({
+      path: "/api/v1/config/providers",
+      method: "GET"
+    })
+    const second = bgRequest({
+      path: "/api/v1/config/providers",
+      method: "GET"
+    })
+
+    await Promise.all([first, second])
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(2)
+  })
+
+  it("partitions concurrent identical GETs by resolved principal", async () => {
+    const firstConfig = {
+      serverUrl: "https://server.example.test",
+      authMode: "multi-user",
+      accessToken: ownerToken
+    }
+    const secondConfig = { ...firstConfig, accessToken: memberToken }
+    mocks.storageGet
+      .mockResolvedValueOnce(firstConfig)
+      .mockResolvedValueOnce(secondConfig)
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+    const { bgRequest } = await importProxy()
+
+    const first = bgRequest({
+      path: "/api/v1/config/providers",
+      method: "GET"
+    })
+    const second = bgRequest({
+      path: "/api/v1/config/providers",
+      method: "GET"
+    })
+
+    await Promise.all([first, second])
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps same-scope GET coalescing after resolving configuration", async () => {
+    const currentConfig = {
+      serverUrl: "https://server.example.test",
+      authMode: "multi-user",
+      accessToken: ownerToken
+    }
+    mocks.storageGet.mockImplementation(async (key) =>
+      key === "tldwConfig" ? currentConfig : null
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+    const { bgRequest } = await importProxy()
+
+    await Promise.all([
+      bgRequest({
+        path: "/api/v1/chats/chat-1/settings",
+        method: "GET",
+        expectedStatuses: [409, 404, 404]
+      }),
+      bgRequest({
+        path: "/api/v1/chats/chat-1/settings",
+        method: "GET",
+        expectedStatuses: [404, 409]
+      })
+    ])
+
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not reuse a principal's 429 cooldown for another principal", async () => {
+    let currentConfig = {
+      serverUrl: "https://server.example.test",
+      authMode: "multi-user",
+      accessToken: ownerToken
+    }
+    mocks.storageGet.mockImplementation(async (key) =>
+      key === "tldwConfig" ? currentConfig : null
+    )
+    mocks.tldwRequest
+      .mockResolvedValueOnce({ ok: false, status: 429, error: "rate_limited" })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        data: { principal: "member" }
+      })
+    const { bgRequest } = await importProxy()
+
+    await expect(
+      bgRequest({ path: "/api/v1/persona/profiles", method: "GET" })
+    ).rejects.toMatchObject({ status: 429 })
+    currentConfig = { ...currentConfig, accessToken: memberToken }
+
+    await expect(
+      bgRequest({ path: "/api/v1/persona/profiles", method: "GET" })
+    ).resolves.toEqual({ principal: "member" })
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(2)
   })
 
   it("coalesces concurrent identical GETs into a single underlying request", async () => {
@@ -2998,7 +4118,7 @@ describe("background proxy GET coalescing", () => {
     const pending = new Promise((resolve) => {
       resolveSend = resolve
     })
-    mocks.sendMessage.mockReturnValue(pending)
+    mocks.tldwRequest.mockReturnValue(pending)
 
     const { bgRequest } = await importProxy()
 
@@ -3012,12 +4132,12 @@ describe("background proxy GET coalescing", () => {
     await b1
 
     // Identical pair shares one underlying call; the different path makes its own.
-    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(2)
     expect(ra1).toBe(ra2)
   })
 
   it("coalesces serialized returnResponse GETs", async () => {
-    mocks.sendMessage.mockResolvedValue({
+    mocks.tldwRequest.mockResolvedValue({
       ok: true,
       status: 200,
       data: [{ id: "persona-1" }]
@@ -3037,12 +4157,96 @@ describe("background proxy GET coalescing", () => {
       })
     ])
 
-    expect(mocks.sendMessage).toHaveBeenCalledTimes(1)
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
     expect(first).toBe(second)
   })
 
+  it("coalesces equivalent normalized expected-status contracts", async () => {
+    let resolveSend: (value: unknown) => void = () => {}
+    mocks.tldwRequest.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSend = resolve
+      })
+    )
+    const { bgRequest } = await importProxy()
+
+    const first = bgRequest({
+      path: "/api/v1/chats/chat-1/settings",
+      method: "GET",
+      expectedStatuses: [409, 404, 404]
+    })
+    const second = bgRequest({
+      path: "/api/v1/chats/chat-1/settings",
+      method: "GET",
+      expectedStatuses: [404, 409]
+    })
+    resolveSend({ ok: true, status: 200, data: { settings: {} } })
+
+    const [firstResult, secondResult] = await Promise.all([first, second])
+
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+    expect(firstResult).toBe(secondResult)
+  })
+
+  it("does not coalesce different expected-status contracts", async () => {
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { settings: {} }
+    })
+    const { bgRequest } = await importProxy()
+
+    await Promise.all([
+      bgRequest({
+        path: "/api/v1/chats/chat-1/settings",
+        method: "GET",
+        expectedStatuses: [404]
+      }),
+      bgRequest({
+        path: "/api/v1/chats/chat-1/settings",
+        method: "GET",
+        expectedStatuses: [404, 409]
+      })
+    ])
+
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(2)
+  })
+
+  it("coalesces expected-status errors without changing rejection behavior", async () => {
+    let resolveSend: (value: unknown) => void = () => {}
+    mocks.tldwRequest.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSend = resolve
+      })
+    )
+    const { bgRequest } = await importProxy()
+    const init = {
+      path: "/api/v1/chats/chat-1/settings" as const,
+      method: "GET" as const,
+      expectedStatuses: [404]
+    }
+
+    const first = bgRequest(init)
+    const second = bgRequest(init)
+    resolveSend({ ok: false, status: 404, error: "Chat settings not found" })
+
+    const results = await Promise.allSettled([first, second])
+
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+    expect(results).toEqual([
+      expect.objectContaining({
+        status: "rejected",
+        reason: expect.objectContaining({ status: 404 })
+      }),
+      expect.objectContaining({
+        status: "rejected",
+        reason: expect.objectContaining({ status: 404 })
+      })
+    ])
+  })
+
   it("does not coalesce returnResponse GETs with data-only GETs", async () => {
-    mocks.sendMessage.mockResolvedValue({
+    mocks.tldwRequest.mockResolvedValue({
       ok: true,
       status: 200,
       data: { ok: true }
@@ -3058,11 +4262,11 @@ describe("background proxy GET coalescing", () => {
       bgRequest({ path: "/api/v1/persona/profiles", method: "GET" })
     ])
 
-    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(2)
   })
 
   it("reuses a recent rate-limited GET failure instead of bursting", async () => {
-    mocks.sendMessage.mockResolvedValue({
+    mocks.tldwRequest.mockResolvedValue({
       ok: false,
       status: 429,
       error: "rate_limited"
@@ -3076,11 +4280,11 @@ describe("background proxy GET coalescing", () => {
       bgRequest({ path: "/api/v1/persona/profiles", method: "GET" })
     ).rejects.toMatchObject({ status: 429 })
 
-    expect(mocks.sendMessage).toHaveBeenCalledTimes(1)
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
   })
 
   it("does not coalesce POST requests", async () => {
-    mocks.sendMessage.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
+    mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
     const { bgRequest } = await importProxy()
 
     await Promise.all([
@@ -3088,11 +4292,11 @@ describe("background proxy GET coalescing", () => {
       bgRequest({ path: "/api/v1/users/me/profile", method: "POST", body: { a: 1 } })
     ])
 
-    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(2)
   })
 
   it("does not coalesce GETs with different timeoutMs", async () => {
-    mocks.sendMessage.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
+    mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
     const { bgRequest } = await importProxy()
 
     await Promise.all([
@@ -3100,11 +4304,11 @@ describe("background proxy GET coalescing", () => {
       bgRequest({ path: "/api/v1/config/providers", method: "GET", timeoutMs: 30000 })
     ])
 
-    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(2)
   })
 
   it("does not coalesce absolute-URL GETs that differ only by noAuth omitted vs false", async () => {
-    mocks.sendMessage.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
+    mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
     const { bgRequest } = await importProxy()
 
     await Promise.all([
@@ -3112,6 +4316,6 @@ describe("background proxy GET coalescing", () => {
       bgRequest({ path: "https://api.example.com/api/v1/health", method: "GET", noAuth: false })
     ])
 
-    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(2)
   })
 })

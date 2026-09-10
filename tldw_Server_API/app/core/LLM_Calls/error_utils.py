@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 from loguru import logger
@@ -10,6 +13,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
     ChatAuthenticationError,
     ChatBadRequestError,
+    ChatConfigurationError,
     ChatProviderError,
     ChatRateLimitError,
 )
@@ -29,6 +33,28 @@ _ERROR_UTILS_NONCRITICAL_EXCEPTIONS = (
     ValueError,
     re.error,
 )
+
+_PRIVACY_SAFE_PROVIDER_ERRORS: ContextVar[bool] = ContextVar(
+    "privacy_safe_provider_errors",
+    default=False,
+)
+
+
+@contextmanager
+def provider_error_privacy_scope(enabled: bool) -> Iterator[None]:
+    """Temporarily select metadata-only provider error handling for this call."""
+
+    token = _PRIVACY_SAFE_PROVIDER_ERRORS.set(bool(enabled))
+    try:
+        yield
+    finally:
+        _PRIVACY_SAFE_PROVIDER_ERRORS.reset(token)
+
+
+def provider_errors_are_privacy_safe() -> bool:
+    """Return whether the current provider call must avoid upstream detail."""
+
+    return _PRIVACY_SAFE_PROVIDER_ERRORS.get()
 
 
 def _bounded_log_label(value: Any) -> str:
@@ -243,6 +269,77 @@ def log_http_400_body(provider: str, exc: Exception, parsed_body: Any = None, ma
     if max_chars is not None and len(metadata_text) > max_chars:
         metadata_text = metadata_text[:max_chars] + "...(truncated)"
     logger.warning(f"{provider or 'unknown'}: upstream 400 response metadata: {metadata_text}")
+
+
+def log_provider_failure_metadata(
+    provider: str,
+    exc: Exception,
+    *,
+    phase: str = "request",
+) -> None:
+    """Log an upstream failure without response or exception text."""
+
+    try:
+        status = get_http_status_from_exception(exc)
+    except _ERROR_UTILS_NONCRITICAL_EXCEPTIONS:
+        status = None
+    logger.error(
+        "{} provider {} failed: status={} error_type={}",
+        provider or "unknown",
+        phase,
+        status,
+        type(exc).__name__,
+    )
+
+
+def privacy_safe_chat_error(provider: str, exc: Exception) -> ChatAPIError:
+    """Return a typed provider error containing no upstream body or exception text."""
+
+    resolved_provider = str(getattr(exc, "provider", None) or provider or "unknown")
+    status_code = get_http_status_from_exception(exc)
+    if isinstance(exc, ChatAuthenticationError) or status_code in {401, 403}:
+        safe: ChatAPIError = ChatAuthenticationError(
+            provider=resolved_provider,
+            message="Provider authentication failed.",
+        )
+    elif isinstance(exc, ChatRateLimitError) or status_code == 429:
+        safe = ChatRateLimitError(
+            provider=resolved_provider,
+            message="Provider rate limit exceeded.",
+        )
+    elif isinstance(exc, ChatBadRequestError) or status_code in {400, 404, 422}:
+        safe = ChatBadRequestError(
+            provider=resolved_provider,
+            message="Provider rejected the request.",
+        )
+    elif isinstance(exc, ChatConfigurationError):
+        safe = ChatConfigurationError(
+            provider=resolved_provider,
+            message="Provider configuration is unavailable.",
+        )
+    elif isinstance(exc, ChatProviderError) or (
+        status_code is not None and status_code >= 500
+    ):
+        safe = ChatProviderError(
+            provider=resolved_provider,
+            message="Provider request failed.",
+            status_code=status_code or 502,
+        )
+    else:
+        safe = ChatAPIError(
+            provider=resolved_provider,
+            message="Provider request failed.",
+            status_code=status_code or 500,
+        )
+
+    retry_after = getattr(exc, "retry_after", None)
+    if retry_after is None:
+        headers = getattr(getattr(exc, "response", None), "headers", None)
+        if isinstance(headers, Mapping):
+            retry_after = headers.get("Retry-After") or headers.get("retry-after")
+    if retry_after is not None:
+        safe.retry_after = retry_after
+    return safe
 
 
 def raise_chat_error_from_http(

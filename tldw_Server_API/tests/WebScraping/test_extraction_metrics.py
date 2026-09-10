@@ -1,4 +1,8 @@
+import dataclasses
+
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
+from tldw_Server_API.app.core.Web_Scraping.extraction import pipeline
+from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import build_default_dependencies
 
 
 def test_extraction_metrics_emits_success_status(monkeypatch):
@@ -7,7 +11,11 @@ def test_extraction_metrics_emits_success_status(monkeypatch):
     def fake_log_counter(name, labels=None):
         calls.append((name, labels or {}))
 
-    monkeypatch.setattr(ael, "log_counter", fake_log_counter)
+    monkeypatch.setattr(
+        pipeline,
+        "build_default_dependencies",
+        lambda: dataclasses.replace(build_default_dependencies(), log_counter=fake_log_counter),
+    )
 
     html = "<html><body>Email: demo@example.com</body></html>"
     result = ael.extract_article_with_pipeline(
@@ -32,7 +40,11 @@ def test_extraction_metrics_emits_failed_status(monkeypatch):
     def fake_log_counter(name, labels=None):
         calls.append((name, labels or {}))
 
-    monkeypatch.setattr(ael, "log_counter", fake_log_counter)
+    monkeypatch.setattr(
+        pipeline,
+        "build_default_dependencies",
+        lambda: dataclasses.replace(build_default_dependencies(), log_counter=fake_log_counter),
+    )
 
     result = ael.extract_article_with_pipeline(
         "",

@@ -1,20 +1,20 @@
 """
 Integration tests for login lockouts routed via AuthGovernor.
 
-These tests focus on the HTTP surface of `/api/v1/auth/login` while
-exercising the AuthGovernor lockout facade through a stubbed rate
-limiter dependency. The underlying database remains Postgres via the
-`isolated_test_environment` fixture.
+These tests focus on the HTTP surface of `/api/v1/auth/login`. Precise call
+sequencing uses a stubbed limiter, while the durable-state regression uses the
+production RateLimiter and LockoutTracker against isolated Postgres.
 """
 
+import re
 from datetime import datetime, timedelta, timezone
 
 import asyncpg
 import pytest
 import pytest_asyncio
 
-from tldw_Server_API.tests.helpers.pg_env import get_pg_env
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
+from tldw_Server_API.tests.helpers.pg_env import get_pg_env
 
 pytestmark = pytest.mark.integration
 
@@ -39,8 +39,12 @@ class _StubLimiter:
         self.threshold = threshold
         self._attempts: dict[str, int] = {}
         self._locked_ids: set[str] = set()
+        self.checked_identifiers: list[str] = []
+        self.failed_identifiers: list[str] = []
+        self.reset_identifiers: list[str] = []
 
     async def check_lockout(self, identifier: str):
+        self.checked_identifiers.append(identifier)
         if identifier in self._locked_ids:
             # Provide a synthetic expiry time for HTTP 429 headers
             return True, datetime.now(timezone.utc) + timedelta(minutes=15)
@@ -49,6 +53,7 @@ class _StubLimiter:
     async def record_failed_attempt(self, *, identifier: str, attempt_type: str):
         # Track attempts per identifier; lock when threshold reached.
         _ = attempt_type
+        self.failed_identifiers.append(identifier)
         count = self._attempts.get(identifier, 0) + 1
         self._attempts[identifier] = count
         is_locked = count >= self.threshold
@@ -60,6 +65,12 @@ class _StubLimiter:
             "remaining_attempts": remaining,
             "is_locked": is_locked,
         }
+
+    async def reset_failed_attempts(self, identifier: str, attempt_type: str):
+        _ = attempt_type
+        self.reset_identifiers.append(identifier)
+        self._attempts.pop(identifier, None)
+        self._locked_ids.discard(identifier)
 
     def clear_all_locks(self) -> None:
 
@@ -120,8 +131,8 @@ class TestAuthLoginLockoutViaAuthGovernor:
             await conn.close()
 
         # Override the rate limiter dependency to provide a deterministic stub
-        from tldw_Server_API.app.main import app as _app
         from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+        from tldw_Server_API.app.main import app as _app
 
         limiter = _StubLimiter(threshold=3)
 
@@ -198,3 +209,181 @@ class TestAuthLoginLockoutViaAuthGovernor:
         payload = success.json()
         assert payload.get("token_type") == "bearer"
         assert "access_token" in payload
+
+    def test_client_login_lockout_does_not_cross_login_identifiers(self):
+        for _ in range(3):
+            response = self.client.post(
+                "/api/v1/auth/login",
+                data={"username": self.username, "password": "WrongPassword1!"},
+            )
+        assert response.status_code == 429
+
+        other_identifier = self.client.post(
+            "/api/v1/auth/login",
+            data={"username": "other_identifier", "password": "WrongPassword1!"},
+        )
+
+        assert other_identifier.status_code == 401
+        client_identifiers = self.limiter.checked_identifiers + self.limiter.failed_identifiers
+        assert client_identifiers
+        assert all(
+            re.fullmatch(r"login-client-v1:[0-9a-f]{64}", identifier)
+            for identifier in client_identifiers
+            if identifier != self.username
+        )
+        assert "testclient" not in client_identifiers
+
+
+@pytest.mark.asyncio
+async def test_production_limiter_persists_isolates_and_resets_login_buckets(
+    isolated_test_environment,
+):
+    client, db_name = isolated_test_environment
+    username = "lockout_user"
+    password = "Lockout@Pass#2025"
+    expected_client_key = (
+        "login-client-v1:d8c8452748a212e653073905b9b063f35c116cc0315f5f395f093efbfbb3142a"
+    )
+    other_client_key = (
+        "login-client-v1:38ab9c29623460391659117c61288e80587871f39d52535c6fa9cf689c5f76c8"
+    )
+
+    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+    from tldw_Server_API.app.main import app
+
+    assert get_rate_limiter_dep not in app.dependency_overrides
+
+    conn = await asyncpg.connect(
+        host=TEST_DB_HOST,
+        port=TEST_DB_PORT,
+        user=TEST_DB_USER,
+        password=TEST_DB_PASSWORD,
+        database=db_name,
+    )
+    try:
+        await conn.execute(
+            """
+            INSERT INTO users (
+                uuid,
+                username,
+                email,
+                password_hash,
+                role,
+                is_active,
+                is_verified,
+                storage_quota_mb,
+                storage_used_mb
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            """,
+            "00000000-0000-0000-0000-000000000001",
+            username,
+            "lockout@example.com",
+            PasswordService().hash_password(password),
+            "user",
+            True,
+            True,
+            5120,
+            0.0,
+        )
+    finally:
+        await conn.close()
+
+    threshold = get_settings().MAX_LOGIN_ATTEMPTS
+    for _ in range(threshold):
+        response = client.post(
+            "/api/v1/auth/login",
+            data={"username": username, "password": "WrongPassword1!"},
+        )
+    assert response.status_code == 429
+
+    other_response = client.post(
+        "/api/v1/auth/login",
+        data={"username": "other_identifier", "password": "WrongPassword1!"},
+    )
+    assert other_response.status_code == 401
+
+    conn = await asyncpg.connect(
+        host=TEST_DB_HOST,
+        port=TEST_DB_PORT,
+        user=TEST_DB_USER,
+        password=TEST_DB_PASSWORD,
+        database=db_name,
+    )
+    try:
+        failed_rows = await conn.fetch(
+            """
+            SELECT identifier, attempt_count
+            FROM failed_attempts
+            WHERE attempt_type = 'login'
+            ORDER BY identifier
+            """
+        )
+        lockout_rows = await conn.fetch(
+            """
+            SELECT identifier
+            FROM account_lockouts
+            WHERE attempt_type = 'login'
+            ORDER BY identifier
+            """
+        )
+
+        assert {row["identifier"]: row["attempt_count"] for row in failed_rows} == {
+            expected_client_key: threshold,
+            username: threshold,
+            other_client_key: 1,
+        }
+        assert {row["identifier"] for row in lockout_rows} == {
+            expected_client_key,
+            username,
+        }
+
+        await conn.execute(
+            """
+            UPDATE account_lockouts
+            SET locked_until = CURRENT_TIMESTAMP - INTERVAL '1 minute'
+            WHERE identifier = ANY($1::text[]) AND attempt_type = 'login'
+            """,
+            [expected_client_key, username],
+        )
+    finally:
+        await conn.close()
+
+    success = client.post(
+        "/api/v1/auth/login",
+        data={"username": username, "password": password},
+    )
+    assert success.status_code == 200
+
+    conn = await asyncpg.connect(
+        host=TEST_DB_HOST,
+        port=TEST_DB_PORT,
+        user=TEST_DB_USER,
+        password=TEST_DB_PASSWORD,
+        database=db_name,
+    )
+    try:
+        remaining_failed_rows = await conn.fetch(
+            """
+            SELECT identifier, attempt_count
+            FROM failed_attempts
+            WHERE attempt_type = 'login'
+            ORDER BY identifier
+            """
+        )
+        remaining_lockout_rows = await conn.fetch(
+            """
+            SELECT identifier
+            FROM account_lockouts
+            WHERE attempt_type = 'login'
+            ORDER BY identifier
+            """
+        )
+    finally:
+        await conn.close()
+
+    assert [dict(row) for row in remaining_failed_rows] == [
+        {"identifier": other_client_key, "attempt_count": 1}
+    ]
+    assert remaining_lockout_rows == []

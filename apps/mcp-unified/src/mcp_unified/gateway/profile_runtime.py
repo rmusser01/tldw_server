@@ -7,6 +7,7 @@ import hashlib
 from collections import OrderedDict
 from collections.abc import Sequence
 from copy import deepcopy
+from dataclasses import replace
 from typing import Any, Protocol
 
 from loguru import logger
@@ -903,12 +904,7 @@ def _context_with_effective_policy(
         return context
     metadata = dict(context.metadata or {})
     metadata[EFFECTIVE_POLICY_METADATA_KEY] = _json_safe_model(policy)
-    return GatewayRequestContext(
-        request_id=context.request_id,
-        client_id=context.client_id,
-        user_id=context.user_id,
-        metadata=metadata,
-    )
+    return replace(context, metadata=metadata)
 
 
 def _policy_with_ttl_path_grants(
@@ -962,12 +958,7 @@ def _context_with_metadata_value(
 
     metadata = dict(context.metadata or {})
     metadata[key] = value
-    return GatewayRequestContext(
-        request_id=context.request_id,
-        client_id=context.client_id,
-        user_id=context.user_id,
-        metadata=metadata,
-    )
+    return replace(context, metadata=metadata)
 
 
 def _context_with_bridge_tool_use_metadata(
@@ -991,12 +982,7 @@ def _context_with_bridge_tool_use_metadata(
 
     metadata = dict(context.metadata or {})
     metadata.update(side_channel)
-    return GatewayRequestContext(
-        request_id=context.request_id,
-        client_id=context.client_id,
-        user_id=context.user_id,
-        metadata=metadata,
-    )
+    return replace(context, metadata=metadata)
 
 
 def _bridge_tool_use_metadata(context: GatewayRequestContext) -> dict[str, Any]:

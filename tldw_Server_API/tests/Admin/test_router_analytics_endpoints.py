@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import uuid
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,16 +16,12 @@ def _setup_env(tmp_path) -> None:
 
 async def _seed_router_rows() -> None:
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+    from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
     pool = await get_db_pool()
-    await pool.execute(
-        "INSERT OR IGNORE INTO users (uuid, username, email, password_hash, is_active) VALUES (?,?,?,?,1)",
-        str(uuid.uuid4()),
-        "router_endpoints_user",
-        "router_endpoints_user@example.com",
-        "x",
+    user_id = await ensure_test_user(
+        pool, "router_endpoints_user", "router_endpoints_user@example.com"
     )
-    user_id = int(await pool.fetchval("SELECT id FROM users WHERE username = ?", "router_endpoints_user"))
 
     await pool.execute(
         """

@@ -7,11 +7,13 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.endpoints.audio import audio_presets
 from tldw_Server_API.app.api.v1.endpoints.audio.audio import router as audio_router
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+from tldw_Server_API.app.core.TTS.gateway_config import normalize_gateway_specs
 
 
 @dataclass
@@ -268,3 +270,102 @@ def test_audio_presets_reject_unknown_kind_and_secret_config_keys(
         ),
     )
     assert secret_aliases.status_code == 422
+
+
+@pytest.mark.unit
+def test_gateway_tts_preset_round_trips_config_resolved_identity(
+    preset_client: PresetClient,
+    monkeypatch,
+):
+    specs = normalize_gateway_specs(
+        {},
+        {
+            "company": {
+                "enabled": True,
+                "allow_user_api_key": True,
+                "base_url": "https://speech.example.test/v1",
+                "speech_path": "audio/speech",
+                "default_model": "Vendor/Exact-TTS",
+                "default_voice": "narrator",
+                "allowed_models": ["Vendor/Exact-TTS"],
+                "capability_defaults": {"formats": ["mp3"]},
+            }
+        },
+    )
+    monkeypatch.setattr(
+        audio_presets,
+        "get_tts_config_manager",
+        lambda: type("Manager", (), {"get_gateway_specs": lambda self: specs})(),
+    )
+
+    response = preset_client.client.post(
+        "/api/v1/audio/presets",
+        json=_tts_payload(
+            name="Company narrator",
+            config={
+                "backend": "company",
+                "provider": "openai",
+                "model": "Vendor/Exact-TTS",
+                "response_format": "mp3",
+                "allow_fallback": True,
+                "streaming": False,
+                "response_splitting": "sentence",
+                "normalization_options": {"normalize_unicode": True},
+                "emotion": "warm",
+            },
+        ),
+    )
+
+    assert response.status_code == 201
+    assert response.json()["config"] == {
+        "backend": "gateway:company",
+        "provider": "openai",
+        "model": "Vendor/Exact-TTS",
+        "voice": "narrator",
+        "response_format": "mp3",
+        "allow_fallback": False,
+        "streaming": False,
+        "response_splitting": "sentence",
+        "normalization_options": {"normalize_unicode": True},
+        "emotion": "warm",
+    }
+
+
+@pytest.mark.unit
+def test_gateway_tts_preset_rejects_route_authority_fields(
+    preset_client: PresetClient,
+    monkeypatch,
+):
+    specs = normalize_gateway_specs(
+        {},
+        {
+            "company": {
+                "enabled": True,
+                "allow_user_api_key": True,
+                "base_url": "https://speech.example.test/v1",
+                "speech_path": "audio/speech",
+                "default_model": "Vendor/Exact-TTS",
+                "default_voice": "narrator",
+                "allowed_models": ["Vendor/Exact-TTS"],
+            }
+        },
+    )
+    monkeypatch.setattr(
+        audio_presets,
+        "get_tts_config_manager",
+        lambda: type("Manager", (), {"get_gateway_specs": lambda self: specs})(),
+    )
+
+    response = preset_client.client.post(
+        "/api/v1/audio/presets",
+        json=_tts_payload(
+            name="Unsafe gateway preset",
+            config={
+                "backend": "company",
+                "model": "Vendor/Exact-TTS",
+                "base_url": "https://attacker.invalid/v1",
+            },
+        ),
+    )
+
+    assert response.status_code == 422

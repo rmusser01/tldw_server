@@ -19,6 +19,12 @@ const mocks = vi.hoisted(() => ({
   getScheduledTaskDefinition: vi.fn(),
   listScheduledTaskPreviews: vi.fn(),
   listScheduledTaskDefinitionAudit: vi.fn(),
+  listScheduledTaskRuns: vi.fn(),
+  createScheduledTaskRun: vi.fn(),
+  listScheduledTaskResults: vi.fn(),
+  updateScheduledTaskResultReview: vi.fn(),
+  markScheduledTaskDefinitionSolved: vi.fn(),
+  reopenScheduledTaskDefinition: vi.fn(),
   pauseScheduledTaskDefinition: vi.fn(),
   resumeScheduledTaskDefinition: vi.fn(),
   archiveScheduledTaskDefinition: vi.fn(),
@@ -49,6 +55,18 @@ vi.mock("@/services/scheduled-tasks-control-plane", () => ({
     mocks.listScheduledTaskPreviews(...args),
   listScheduledTaskDefinitionAudit: (...args: unknown[]) =>
     mocks.listScheduledTaskDefinitionAudit(...args),
+  listScheduledTaskRuns: (...args: unknown[]) =>
+    mocks.listScheduledTaskRuns(...args),
+  createScheduledTaskRun: (...args: unknown[]) =>
+    mocks.createScheduledTaskRun(...args),
+  listScheduledTaskResults: (...args: unknown[]) =>
+    mocks.listScheduledTaskResults(...args),
+  updateScheduledTaskResultReview: (...args: unknown[]) =>
+    mocks.updateScheduledTaskResultReview(...args),
+  markScheduledTaskDefinitionSolved: (...args: unknown[]) =>
+    mocks.markScheduledTaskDefinitionSolved(...args),
+  reopenScheduledTaskDefinition: (...args: unknown[]) =>
+    mocks.reopenScheduledTaskDefinition(...args),
   pauseScheduledTaskDefinition: (...args: unknown[]) =>
     mocks.pauseScheduledTaskDefinition(...args),
   resumeScheduledTaskDefinition: (...args: unknown[]) =>
@@ -244,6 +262,54 @@ describe("ScheduledTasksPage", () => {
       offset: 0,
       has_more: false
     })
+    mocks.listScheduledTaskRuns.mockResolvedValue({
+      items: [],
+      total: 0,
+      limit: 10,
+      offset: 0,
+      has_more: false
+    })
+    mocks.listScheduledTaskResults.mockResolvedValue({
+      items: [],
+      total: 0,
+      limit: 50,
+      offset: 0,
+      has_more: false
+    })
+    mocks.createScheduledTaskRun.mockResolvedValue({
+      id: "run_1",
+      definition_id: "definition_1",
+      definition_version: 1,
+      trigger_reason: "manual",
+      status: "queued",
+      outcome: "none",
+      scope_snapshot: {},
+      finding_policy_snapshot: {},
+      rag_request_snapshot: {},
+      run_summary: {},
+      evidence_summary: {}
+    })
+    mocks.updateScheduledTaskResultReview.mockResolvedValue({
+      id: "result_1",
+      definition_id: "definition_1",
+      run_id: "run_1",
+      kind: "finding",
+      title: "Possible answer found",
+      summary: "One relevant source matched.",
+      answer: null,
+      answer_mode: "evidence_only",
+      confidence: {},
+      source_refs: [],
+      dedupe_key: "result_1",
+      visibility_destination: { home: true, results: true },
+      review_state: "read"
+    })
+    mocks.markScheduledTaskDefinitionSolved.mockResolvedValue(
+      definitionResponse({ resolution_state: "solved" })
+    )
+    mocks.reopenScheduledTaskDefinition.mockResolvedValue(
+      definitionResponse({ resolution_state: "open", lifecycle: "paused" })
+    )
     mocks.pauseScheduledTaskDefinition.mockResolvedValue(definitionResponse({ lifecycle: "paused" }))
     mocks.resumeScheduledTaskDefinition.mockResolvedValue(definitionResponse({ lifecycle: "configured" }))
     mocks.archiveScheduledTaskDefinition.mockResolvedValue(definitionResponse({ lifecycle: "archived" }))
@@ -426,6 +492,153 @@ describe("ScheduledTasksPage", () => {
     expect(screen.getByText("Found 3 results from Release feed.")).toBeInTheDocument()
   })
 
+  it("uses normalized results API rows when the server advertises results support", async () => {
+    const user = userEvent.setup()
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        paths: {
+          "/api/v1/scheduled-tasks": { get: {} },
+          "/api/v1/scheduled-tasks/results": { get: {} },
+          "/api/v1/scheduled-tasks/results/{result_id}/review": { post: {} }
+        }
+      })
+    })
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [automationTask()],
+      total: 1,
+      partial: false,
+      errors: []
+    })
+    mocks.listScheduledTaskResults.mockResolvedValue({
+      items: [
+        {
+          id: "result_1",
+          definition_id: "definition_1",
+          run_id: "run_1",
+          kind: "finding",
+          title: "Possible answer found",
+          summary: "One relevant source matched.",
+          answer: "The answer is now present in the library.",
+          answer_mode: "synthesized",
+          confidence: { label: "medium" },
+          source_refs: [
+            {
+              source_id: "media_1",
+              title: "Research note",
+              snippet: "Short redacted evidence."
+            }
+          ],
+          dedupe_key: "rq:definition_1:run_1:media_1",
+          visibility_destination: { home: true, results: true },
+          review_state: "unread",
+          created_at: "2030-01-01T09:00:00Z"
+        }
+      ],
+      total: 1,
+      limit: 50,
+      offset: 0,
+      has_more: false
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=results")
+
+    expect(await screen.findByText("Possible answer found")).toBeInTheDocument()
+    expect(screen.getByText("Review state comes from the scheduled-task results API.")).toBeInTheDocument()
+    expect(mocks.listScheduledTaskResults).toHaveBeenCalledTimes(1)
+
+    await user.click(screen.getByRole("button", { name: "Open signal for Possible answer found" }))
+
+    expect(await screen.findByText("The answer is now present in the library.")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Mark reviewed" }))
+
+    await waitFor(() => {
+      expect(mocks.updateScheduledTaskResultReview).toHaveBeenCalledWith(
+        "result_1",
+        { review_state: "read" }
+      )
+    })
+  })
+
+  it("marks an automation definition solved with the latest normalized result", async () => {
+    const user = userEvent.setup()
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        paths: {
+          "/api/v1/scheduled-tasks": { get: {} },
+          "/api/v1/scheduled-tasks/results": { get: {} },
+          "/api/v1/scheduled-tasks/results/{result_id}/review": { post: {} }
+        }
+      })
+    })
+    mocks.getScheduledTaskCapabilities.mockResolvedValue(availableAutomationCapabilities)
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [automationTask()],
+      total: 1,
+      partial: false,
+      errors: []
+    })
+    mocks.getScheduledTaskDefinition.mockResolvedValue(
+      definitionResponse({ resolution_state: "open" })
+    )
+    mocks.listScheduledTaskResults.mockResolvedValue({
+      items: [
+        {
+          id: "result_old",
+          definition_id: "definition_1",
+          run_id: "run_old",
+          kind: "finding",
+          title: "Older answer",
+          summary: "Older evidence.",
+          answer: "Old answer",
+          answer_mode: "synthesized",
+          confidence: { label: "medium" },
+          source_refs: [],
+          dedupe_key: "rq:old",
+          visibility_destination: { home: true, results: true },
+          review_state: "unread",
+          created_at: "2030-01-01T09:00:00Z",
+          updated_at: "2030-01-01T09:00:00Z"
+        },
+        {
+          id: "result_new",
+          definition_id: "definition_1",
+          run_id: "run_new",
+          kind: "finding",
+          title: "Latest answer",
+          summary: "Newer evidence.",
+          answer: "New answer",
+          answer_mode: "synthesized",
+          confidence: { label: "high" },
+          source_refs: [],
+          dedupe_key: "rq:new",
+          visibility_destination: { home: true, results: true },
+          review_state: "unread",
+          created_at: "2030-01-02T09:00:00Z",
+          updated_at: "2030-01-02T09:00:00Z"
+        }
+      ],
+      total: 2,
+      limit: 100,
+      offset: 0,
+      has_more: false
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
+
+    await user.click(await screen.findByRole("button", { name: "Inspect Track answer" }))
+    expect(await screen.findByRole("dialog", { name: /Track answer/i })).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Mark solved" }))
+
+    await waitFor(() => {
+      expect(mocks.markScheduledTaskDefinitionSolved).toHaveBeenCalledWith(
+        "definition_1",
+        { resolved_result_id: "result_new" }
+      )
+    })
+  })
+
   it("opens the Results tab from the alias path and opens the result drawer", async () => {
     mocks.listScheduledTasks.mockResolvedValue({
       items: [
@@ -595,7 +808,7 @@ describe("ScheduledTasksPage", () => {
 
     expect(await screen.findByText("Create Recurring question")).toBeInTheDocument()
     expect(mocks.getScheduledTaskCapabilities).toHaveBeenCalledTimes(1)
-    expect(screen.getByLabelText("Question")).toBeInTheDocument()
+    expect(screen.getByLabelText("Question or prompt")).toBeInTheDocument()
   })
 
   it("creates a Recurring Question definition through preview and create APIs", async () => {
@@ -634,7 +847,7 @@ describe("ScheduledTasksPage", () => {
       "/scheduled-tasks?tab=create&template=recurring_question"
     )
 
-    await user.type(await screen.findByLabelText("Question"), "Has the answer appeared?")
+    await user.type(await screen.findByLabelText("Question or prompt"), "Has the answer appeared?")
     await user.click(screen.getByRole("button", { name: "Preview" }))
     expect(await screen.findByText("Preview ready")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Save definition" }))
@@ -718,7 +931,7 @@ describe("ScheduledTasksPage", () => {
 
     await user.click(await screen.findByRole("button", { name: "Edit Track answer" }))
     expect(await screen.findByText("Update Recurring question")).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText("Question"), {
+    fireEvent.change(screen.getByLabelText("Question or prompt"), {
       target: { value: "Has the answer appeared now?" }
     })
     await user.click(screen.getByRole("button", { name: "Preview" }))

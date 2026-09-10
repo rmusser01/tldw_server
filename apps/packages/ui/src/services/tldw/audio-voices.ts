@@ -69,6 +69,7 @@ const extractVoices = (source: unknown): TldwVoice[] => {
 
 type FetchTldwVoicesOptions = {
   throwOnError?: boolean
+  model?: string
 }
 
 export const fetchTldwVoices = async (
@@ -95,9 +96,12 @@ export const fetchTldwVoiceCatalog = async (
 ): Promise<TldwVoice[]> => {
   const p = String(provider || "").trim()
   if (!p) return []
+  const model = String(options?.model || "").trim()
   try {
     const res = await bgRequestClient<any>({
-      path: `/api/v1/audio/voices/catalog?provider=${encodeURIComponent(p)}`,
+      path: `/api/v1/audio/voices/catalog?provider=${encodeURIComponent(p)}${
+        model ? `&model=${encodeURIComponent(model)}` : ""
+      }`,
       method: "GET"
     })
     if (!res) return []

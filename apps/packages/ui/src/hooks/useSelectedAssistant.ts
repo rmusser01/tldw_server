@@ -24,6 +24,12 @@ import {
 type Subscriber = (value: AssistantSelection | null) => void
 
 const selectedAssistantSubscribers = new Set<Subscriber>()
+let selectedAssistantOperationRevision = 0
+let selectedAssistantCommitChain: Promise<void> = Promise.resolve()
+
+export type SelectedAssistantCommitOptions = {
+  isCurrent?: () => boolean
+}
 
 const notifySelectedAssistantSubscribers = (value: AssistantSelection | null) => {
   selectedAssistantSubscribers.forEach((subscriber) => {
@@ -118,7 +124,10 @@ export const useSelectedAssistant = (
   }, [])
 
   const setSelectedAssistantWithBroadcast = React.useCallback(
-    async (next: AssistantSelection | null) => {
+    async (
+      next: AssistantSelection | null,
+      options: SelectedAssistantCommitOptions = {}
+    ) => {
       const normalizedCurrent = normalizeAssistantSelection(
         parseSelectedAssistantValue(latestSelectedAssistantRef.current)
       )
@@ -126,20 +135,50 @@ export const useSelectedAssistant = (
         normalizeAssistantSelection(next),
         normalizedCurrent
       )
-      if (!normalizedNext) {
-        latestSelectedAssistantRef.current = null
-        await syncLegacyCharacterSelectionMirror(null)
+      const operationRevision = ++selectedAssistantOperationRevision
+      const isOperationCurrent = () =>
+        operationRevision === selectedAssistantOperationRevision
+      const isCallerCurrent = () => options.isCurrent?.() ?? true
+
+      const persistSelection = async (
+        selection: AssistantSelection | null,
+        shouldContinue: () => boolean
+      ): Promise<boolean> => {
+        latestSelectedAssistantRef.current = selection
+        if (!selection) {
+          await syncLegacyCharacterSelectionMirror(null)
+          if (!shouldContinue()) return false
+          await clearAssistantSyncSelection()
+          if (!shouldContinue()) return false
+          await setSelectedAssistant(null)
+          if (!shouldContinue()) return false
+          notifySelectedAssistantSubscribers(null)
+          return true
+        }
+
+        await setSelectedAssistant(selection)
+        if (!shouldContinue()) return false
         await clearAssistantSyncSelection()
-        await setSelectedAssistant(null)
-        notifySelectedAssistantSubscribers(null)
-        return
+        if (!shouldContinue()) return false
+        await syncLegacyCharacterSelectionMirror(selection)
+        if (!shouldContinue()) return false
+        notifySelectedAssistantSubscribers(selection)
+        return true
       }
 
-      latestSelectedAssistantRef.current = normalizedNext
-      await setSelectedAssistant(normalizedNext)
-      await clearAssistantSyncSelection()
-      await syncLegacyCharacterSelectionMirror(normalizedNext)
-      notifySelectedAssistantSubscribers(normalizedNext)
+      const commit = async () => {
+        if (!isOperationCurrent() || !isCallerCurrent()) return
+        const committed = await persistSelection(
+          normalizedNext,
+          () => isOperationCurrent() && isCallerCurrent()
+        )
+        if (committed || !isOperationCurrent() || isCallerCurrent()) return
+
+        await persistSelection(normalizedCurrent, isOperationCurrent)
+      }
+      const operation = selectedAssistantCommitChain.then(commit, commit)
+      selectedAssistantCommitChain = operation.catch(() => undefined)
+      await operation
     },
     [setSelectedAssistant]
   )

@@ -6,6 +6,7 @@
 import bz2
 import contextlib
 import gzip
+import hashlib
 import json
 import os
 import re
@@ -27,8 +28,7 @@ import yaml
 from loguru import logger as _base_logger
 
 from tldw_Server_API.app.core.config import settings
-from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_repository
-from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
+from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_repository, managed_media_database
 
 #
 # Local Imports
@@ -321,12 +321,18 @@ def sanitize_wiki_name(wiki_name: str) -> str:
     return safe_name
 
 
-def get_safe_checkpoint_path(wiki_name: str, checkpoint_dir: Optional[Path] = None) -> Path:
+def get_safe_checkpoint_path(
+    wiki_name: str,
+    checkpoint_dir: Optional[Path] = None,
+    *,
+    identity_scope: Optional[str] = None,
+) -> Path:
     """Generate safe checkpoint file path.
 
     Args:
         wiki_name: Wiki name for checkpoint
         checkpoint_dir: Directory for checkpoint files (default: current directory)
+        identity_scope: Optional request identity used to isolate resumable state
 
     Returns:
         Safe Path object for checkpoint file
@@ -343,7 +349,12 @@ def get_safe_checkpoint_path(wiki_name: str, checkpoint_dir: Optional[Path] = No
         base_dir.mkdir(exist_ok=True)
 
     # Construct checkpoint filename
-    checkpoint_filename = f"{safe_wiki_name}_import_checkpoint.json"
+    scope_suffix = ""
+    normalized_scope = str(identity_scope).strip() if identity_scope is not None else ""
+    if normalized_scope:
+        scope_digest = hashlib.sha256(normalized_scope.encode("utf-8")).hexdigest()[:16]
+        scope_suffix = f"_{scope_digest}"
+    checkpoint_filename = f"{safe_wiki_name}{scope_suffix}_import_checkpoint.json"
     checkpoint_path = base_dir / checkpoint_filename
 
     # Verify the path is within the expected directory using secure method
@@ -602,6 +613,7 @@ def _store_mediawiki_chunks_in_vector_db(
     revision_id: Optional[int],
     api_name_vector_db: Optional[str],
     api_key_vector_db: Optional[str],
+    vector_user_id: Optional[str] = None,
 ) -> tuple[bool, str]:
     if ChromaDBManager is None or create_embeddings_batch is None:
         return False, "Embeddings dependencies unavailable."
@@ -622,10 +634,14 @@ def _store_mediawiki_chunks_in_vector_db(
         "embedding_config": embedding_config,
     }
 
-    vector_user_id = settings.get("SINGLE_USER_FIXED_ID", 1)
+    resolved_vector_user_id = (
+        str(vector_user_id).strip() if vector_user_id is not None else ""
+    )
+    if not resolved_vector_user_id:
+        resolved_vector_user_id = str(settings.get("SINGLE_USER_FIXED_ID", 1))
     try:
         manager = ChromaDBManager(
-            user_id=str(vector_user_id),
+            user_id=resolved_vector_user_id,
             user_embedding_config=user_embedding_config,
         )
     except MEDIAWIKI_EMBEDDING_EXCEPTIONS as exc:
@@ -702,6 +718,7 @@ def process_single_item(
         api_name_vector_db: Optional[str] = None,
         api_key_vector_db: Optional[str] = None,
         media_writer: Any | None = None,
+        vector_user_id: Optional[str] = None,
 ) -> dict[str, Any]:
     try:
         logging.debug(
@@ -800,6 +817,7 @@ def process_single_item(
                 revision_id=item.get("revision_id"),
                 api_name_vector_db=api_name_vector_db,
                 api_key_vector_db=api_key_vector_db,
+                vector_user_id=vector_user_id,
             )
             if success:
                 processed_data["message"] += f" {message}"
@@ -943,6 +961,9 @@ def import_mediawiki_dump(
         api_name_vector_db: Optional[str] = None,
         api_key_vector_db: Optional[str] = None,
         allowed_dir: Optional[Path] = None,
+        media_writer: Any | None = None,
+        vector_user_id: Optional[str] = None,
+        checkpoint_identity_scope: Optional[str] = None,
 ) -> Iterator[dict[str, Any]]:
     try:
         # Sanitize wiki_name and validate file_path
@@ -957,7 +978,22 @@ def import_mediawiki_dump(
         final_chunk_options = chunk_options_override if chunk_options_override else cfg.get('chunking', {})
 
         # Get safe checkpoint path
-        checkpoint_file = get_safe_checkpoint_path(safe_wiki_name)
+        normalized_vector_user_id = (
+            str(vector_user_id).strip() if vector_user_id is not None else ""
+        )
+        normalized_checkpoint_scope = (
+            str(checkpoint_identity_scope).strip()
+            if checkpoint_identity_scope is not None
+            else normalized_vector_user_id
+        )
+        checkpoint_file = (
+            get_safe_checkpoint_path(
+                safe_wiki_name,
+                identity_scope=normalized_checkpoint_scope,
+            )
+            if normalized_checkpoint_scope
+            else get_safe_checkpoint_path(safe_wiki_name)
+        )
         last_processed_id = 0
         if store_to_db:  # Checkpoints only make sense if we are saving progress to DB
             last_processed_id = load_checkpoint(str(checkpoint_file))
@@ -975,8 +1011,8 @@ def import_mediawiki_dump(
                "message": f"Found {total_pages} pages to process for '{wiki_name}'."}
 
         with contextlib.ExitStack() as stack:
-            shared_media_writer = None
-            if store_to_db:
+            shared_media_writer = media_writer
+            if store_to_db and shared_media_writer is None:
                 db_instance = stack.enter_context(
                     managed_media_database(client_id="mediawiki_import")
                 )
@@ -1013,6 +1049,7 @@ def import_mediawiki_dump(
                     api_name_vector_db=api_name_vector_db,
                     api_key_vector_db=api_key_vector_db,
                     media_writer=shared_media_writer,
+                    vector_user_id=vector_user_id,
                 )
 
                 if store_to_db and processed_item_details.get("status") == "Success" and processed_item_details.get(

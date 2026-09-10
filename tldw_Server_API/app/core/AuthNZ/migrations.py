@@ -4,6 +4,7 @@
 # Imports
 import contextlib
 import json
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any, Optional
@@ -15,6 +16,20 @@ from loguru import logger
 #
 # Local imports
 from tldw_Server_API.app.core.AuthNZ.admin_webhook_secrets import encrypt_admin_webhook_secret
+from tldw_Server_API.app.core.AuthNZ.profile_candidate_schema import (
+    SQLITE_PROFILE_CANDIDATE_TABLE_STATEMENTS,
+    validate_sqlite_profile_candidate_schema,
+)
+from tldw_Server_API.app.core.AuthNZ.sqlite_profile_version_schema import (
+    _leading_schema_identifier,
+    _table_definition_spans,
+    rebuild_sqlite_users_with_profile_version,
+    validate_sqlite_profile_version_readiness,
+)
+from tldw_Server_API.app.core.DB_Management.authnz_session_schema import (
+    create_sqlite_sessions_table,
+    ensure_sqlite_session_last_activity,
+)
 from tldw_Server_API.app.core.DB_Management.migrations import Migration, MigrationManager
 from tldw_Server_API.app.core.Infrastructure.distributed_lock import acquire_migration_lock
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime as _is_explicit_pytest_runtime
@@ -53,6 +68,7 @@ def migration_001_create_users_table(conn: sqlite3.Connection) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            uuid TEXT UNIQUE DEFAULT (lower(hex(randomblob(16)))),
             username TEXT UNIQUE NOT NULL,
             email TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
@@ -79,31 +95,7 @@ def migration_001_create_users_table(conn: sqlite3.Connection) -> None:
 
 def migration_002_create_sessions_table(conn: sqlite3.Connection) -> None:
     """Create the sessions table for session management"""
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS sessions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            token_hash TEXT NOT NULL,
-            refresh_token_hash TEXT,
-            encrypted_token TEXT,
-            encrypted_refresh TEXT,
-            expires_at TIMESTAMP NOT NULL,
-            refresh_expires_at TIMESTAMP,
-            ip_address TEXT,
-            user_agent TEXT,
-            device_id TEXT,
-            is_active INTEGER DEFAULT 1,
-            is_revoked INTEGER DEFAULT 0,
-            revoked_at TIMESTAMP,
-            revoked_by INTEGER,
-            revoke_reason TEXT,
-            access_jti TEXT,
-            refresh_jti TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        )
-    """)
+    create_sqlite_sessions_table(conn)
 
     # Create indexes
     try:
@@ -128,6 +120,7 @@ def migration_002_create_sessions_table(conn: sqlite3.Connection) -> None:
         add_col('revoked_at', "revoked_at TIMESTAMP")
         add_col('revoked_by', "revoked_by INTEGER")
         add_col('revoke_reason', "revoke_reason TEXT")
+        ensure_sqlite_session_last_activity(conn)
     except _AUTHNZ_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
         pass
 
@@ -1092,6 +1085,1110 @@ def migration_090_seed_notification_permissions(conn: sqlite3.Connection) -> Non
 
     conn.commit()
     logger.info("Migration 090: Seeded notification permissions and role memberships")
+
+
+def migration_091_add_user_profile_version(conn: sqlite3.Connection) -> None:
+    """Add and strictly backfill the durable user profile-version anchor."""
+    if not _sqlite_table_exists(conn, "users"):
+        raise RuntimeError("AuthNZ users table is missing required columns: profile_version")
+    rebuild_sqlite_users_with_profile_version(conn)
+    validate_sqlite_profile_version_readiness(conn)
+    logger.info("Migration 091: Added and validated users.profile_version")
+
+
+_CANDIDATE_TIMESTAMP_COLUMNS = {
+    "organizations": ("updated_at", "created_at"),
+    "teams": ("updated_at", "created_at"),
+    "org_members": ("added_at", None),
+    "team_members": ("added_at", None),
+    "user_config_overrides": ("updated_at", "created_at"),
+    "org_config_overrides": ("updated_at", "created_at"),
+    "team_config_overrides": ("updated_at", "created_at"),
+}
+
+
+def _add_not_null_to_sqlite_column(
+    create_sql: str,
+    column_name: str,
+) -> str:
+    _body_open, _body_close, spans = _table_definition_spans(create_sql)
+    for start, end in spans:
+        definition = create_sql[start:end]
+        if _leading_schema_identifier(definition) != column_name:
+            continue
+        if re.search(r"\bNOT\s+NULL\b", definition, re.IGNORECASE):
+            return create_sql
+        default_match = re.search(r"\bDEFAULT\b", definition, re.IGNORECASE)
+        insertion = default_match.start() if default_match else len(definition)
+        hardened = (
+            definition[:insertion].rstrip()
+            + " NOT NULL "
+            + definition[insertion:].lstrip()
+        ).rstrip()
+        return create_sql[:start] + hardened + create_sql[end:]
+    raise RuntimeError(
+        f"AuthNZ candidate timestamp migration is missing {column_name}"
+    )
+
+
+def _rebuild_sqlite_candidate_timestamp(
+    conn: sqlite3.Connection,
+    *,
+    table_name: str,
+    column_name: str,
+    fallback_column: str | None,
+) -> None:
+    table_row = conn.execute(
+        "SELECT sql FROM main.sqlite_master WHERE type = 'table' AND name = ?",
+        (table_name,),
+    ).fetchone()
+    if table_row is None or not table_row[0]:
+        raise RuntimeError(
+            f"AuthNZ candidate timestamp migration is missing {table_name}"
+        )
+    table_info = conn.execute(
+        f'PRAGMA main.table_info("{table_name}")'  # nosec B608
+    ).fetchall()
+    column_metadata = {str(row[1]): row for row in table_info}
+    if column_name not in column_metadata:
+        raise RuntimeError(
+            f"AuthNZ candidate timestamp migration is missing {table_name}.{column_name}"
+        )
+
+    quoted_table = table_name.replace('"', '""')
+    quoted_column = column_name.replace('"', '""')
+    fallback = (
+        f'"{fallback_column.replace(chr(34), chr(34) * 2)}", CURRENT_TIMESTAMP'
+        if fallback_column
+        else "CURRENT_TIMESTAMP"
+    )
+    conn.execute(
+        f'UPDATE "{quoted_table}" SET "{quoted_column}" = '  # nosec B608
+        f'COALESCE("{quoted_column}", {fallback}) '
+        f'WHERE "{quoted_column}" IS NULL'
+    )
+    if bool(column_metadata[column_name][3]):
+        return
+
+    schema_objects = conn.execute(
+        "SELECT type, name, sql FROM main.sqlite_master "
+        "WHERE tbl_name = ? AND type IN ('index', 'trigger') AND sql IS NOT NULL",
+        (table_name,),
+    ).fetchall()
+    create_sql = _add_not_null_to_sqlite_column(str(table_row[0]), column_name)
+    body_open, _body_close, _spans = _table_definition_spans(create_sql)
+    rebuild_name = f"__authnz_{table_name}_candidate_v92"
+    if _sqlite_table_exists(conn, rebuild_name):
+        raise RuntimeError(
+            "AuthNZ candidate timestamp migration found an unsafe rebuild table"
+        )
+    quoted_rebuild = rebuild_name.replace('"', '""')
+    conn.execute(f'CREATE TABLE "{quoted_rebuild}" ' + create_sql[body_open:])  # nosec B608
+
+    columns = [str(row[1]) for row in table_info]
+    column_list = ", ".join(
+        f'"{column.replace(chr(34), chr(34) * 2)}"' for column in columns
+    )
+    conn.execute(
+        f'INSERT INTO "{quoted_rebuild}" ({column_list}) '  # nosec B608
+        f'SELECT {column_list} FROM "{quoted_table}"'
+    )
+    conn.execute(f'DROP TABLE "{quoted_table}"')  # nosec B608
+    conn.execute(
+        f'ALTER TABLE "{quoted_rebuild}" RENAME TO "{quoted_table}"'  # nosec B608
+    )
+    for _object_type, _object_name, object_sql in schema_objects:
+        conn.execute(str(object_sql))
+
+
+def migration_092_harden_profile_candidate_timestamps(
+    conn: sqlite3.Connection,
+) -> None:
+    """Backfill and require every profile candidate version-source timestamp."""
+    for statement in SQLITE_PROFILE_CANDIDATE_TABLE_STATEMENTS:
+        conn.execute(statement)
+    for table_name, (column_name, fallback_column) in (
+        _CANDIDATE_TIMESTAMP_COLUMNS.items()
+    ):
+        _rebuild_sqlite_candidate_timestamp(
+            conn,
+            table_name=table_name,
+            column_name=column_name,
+            fallback_column=fallback_column,
+        )
+    foreign_key_errors = conn.execute("PRAGMA main.foreign_key_check").fetchall()
+    if foreign_key_errors:
+        raise RuntimeError(
+            "AuthNZ candidate timestamp migration found invalid foreign keys"
+        )
+    validate_sqlite_profile_candidate_schema(conn)
+    logger.info("Migration 092: Hardened profile candidate timestamps")
+
+
+def migration_093_harmonize_users_write_columns(conn: sqlite3.Connection) -> None:
+    """Ensure legacy users tables satisfy the canonical UsersDB write contract."""
+    logger.info("Migration 093: START harmonize users write columns")
+
+    if not _sqlite_table_exists(conn, "users"):
+        logger.info("Migration 093: users table missing; skipping write-column harmonization")
+        return
+
+    columns = {
+        str(row[1])
+        for row in conn.execute("PRAGMA table_info(users)").fetchall()
+    }
+    required_columns = (
+        ("uuid", "ALTER TABLE users ADD COLUMN uuid TEXT"),
+        ("is_active", "ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1"),
+        ("is_superuser", "ALTER TABLE users ADD COLUMN is_superuser INTEGER DEFAULT 0"),
+        ("email_verified", "ALTER TABLE users ADD COLUMN email_verified INTEGER DEFAULT 0"),
+        ("is_verified", "ALTER TABLE users ADD COLUMN is_verified INTEGER DEFAULT 0"),
+        (
+            "storage_quota_mb",
+            "ALTER TABLE users ADD COLUMN storage_quota_mb INTEGER DEFAULT 5120",
+        ),
+        ("storage_used_mb", "ALTER TABLE users ADD COLUMN storage_used_mb INTEGER DEFAULT 0"),
+    )
+
+    for column_name, statement in required_columns:
+        if column_name not in columns:
+            conn.execute(statement)
+
+    conn.execute(
+        "UPDATE users SET uuid = lower(hex(randomblob(16))) WHERE uuid IS NULL OR uuid = ''"
+    )
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_uuid ON users(uuid)")
+    conn.commit()
+    logger.info("Migration 093: Harmonized users write columns")
+CANONICAL_ADMIN_WEBHOOK_SQLITE_DDL = (
+    """
+    CREATE TABLE IF NOT EXISTS admin_webhook_sequences (
+        name TEXT PRIMARY KEY
+            CHECK (length(name) BETWEEN 1 AND 64),
+        next_value INTEGER NOT NULL
+            CHECK (next_value BETWEEN 1 AND 9223372036854775807)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS admin_webhook_registrations (
+        id INTEGER PRIMARY KEY
+            CHECK (id BETWEEN 1 AND 9223372036854775807),
+        description TEXT NOT NULL DEFAULT ''
+            CHECK (length(description) <= 500),
+        target_ciphertext_json TEXT NOT NULL
+            CHECK (
+                json_valid(target_ciphertext_json)
+                AND json_type(target_ciphertext_json) = 'object'
+                AND length(CAST(target_ciphertext_json AS BLOB)) <= 8192
+            ),
+        target_key_id TEXT NOT NULL
+            CHECK (length(target_key_id) BETWEEN 1 AND 128),
+        target_hostname TEXT NOT NULL
+            CHECK (length(target_hostname) BETWEEN 1 AND 253),
+        target_display TEXT NOT NULL
+            CHECK (length(CAST(target_display AS BLOB)) BETWEEN 1 AND 512),
+        event_types_json TEXT NOT NULL
+            CHECK (
+                json_valid(event_types_json)
+                AND json_type(event_types_json) = 'array'
+                AND length(CAST(event_types_json AS BLOB)) BETWEEN 2 AND 4096
+            ),
+        active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0, 1)),
+        timeout_seconds INTEGER NOT NULL DEFAULT 10
+            CHECK (timeout_seconds BETWEEN 1 AND 30),
+        delivery_config_version INTEGER NOT NULL DEFAULT 1
+            CHECK (delivery_config_version >= 1),
+        target_version INTEGER NOT NULL DEFAULT 1
+            CHECK (target_version >= 1),
+        secret_ciphertext_json TEXT NOT NULL
+            CHECK (
+                json_valid(secret_ciphertext_json)
+                AND json_type(secret_ciphertext_json) = 'object'
+                AND length(CAST(secret_ciphertext_json AS BLOB)) <= 8192
+            ),
+        secret_key_id TEXT NOT NULL
+            CHECK (length(secret_key_id) BETWEEN 1 AND 128),
+        secret_version INTEGER NOT NULL DEFAULT 1
+            CHECK (secret_version >= 1),
+        secret_rotation_required INTEGER NOT NULL DEFAULT 0
+            CHECK (secret_rotation_required IN (0, 1)),
+        revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+        created_by_user_id INTEGER NOT NULL CHECK (created_by_user_id >= 1),
+        updated_by_user_id INTEGER NOT NULL CHECK (updated_by_user_id >= 1),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        deleted_at TEXT,
+        deleted_by_user_id INTEGER CHECK (deleted_by_user_id IS NULL OR deleted_by_user_id >= 1),
+        CHECK (
+            (deleted_at IS NULL AND deleted_by_user_id IS NULL)
+            OR (deleted_at IS NOT NULL AND deleted_by_user_id IS NOT NULL)
+        )
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS admin_webhook_events (
+        id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 128),
+        event_type TEXT NOT NULL CHECK (length(event_type) BETWEEN 1 AND 64),
+        api_version TEXT NOT NULL CHECK (length(api_version) BETWEEN 1 AND 32),
+        source_kind TEXT NOT NULL CHECK (source_kind IN ('aggregate', 'command')),
+        aggregate_type TEXT CHECK (aggregate_type IS NULL OR length(aggregate_type) BETWEEN 1 AND 64),
+        aggregate_id TEXT CHECK (aggregate_id IS NULL OR length(aggregate_id) BETWEEN 1 AND 255),
+        aggregate_version TEXT CHECK (aggregate_version IS NULL OR length(aggregate_version) BETWEEN 1 AND 255),
+        source_command_id TEXT CHECK (source_command_id IS NULL OR length(source_command_id) BETWEEN 1 AND 255),
+        source_component TEXT NOT NULL CHECK (length(source_component) BETWEEN 1 AND 64),
+        source_request_id TEXT CHECK (source_request_id IS NULL OR length(source_request_id) BETWEEN 1 AND 128),
+        body_ciphertext_json TEXT NOT NULL
+            CHECK (
+                json_valid(body_ciphertext_json)
+                AND json_type(body_ciphertext_json) = 'object'
+                AND length(CAST(body_ciphertext_json AS BLOB)) <= 131072
+            ),
+        body_key_id TEXT NOT NULL CHECK (length(body_key_id) BETWEEN 1 AND 128),
+        body_size_bytes INTEGER NOT NULL CHECK (body_size_bytes BETWEEN 0 AND 65536),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK (
+            (
+                source_kind = 'aggregate'
+                AND aggregate_type IS NOT NULL
+                AND aggregate_id IS NOT NULL
+                AND aggregate_version IS NOT NULL
+                AND source_command_id IS NULL
+            )
+            OR (
+                source_kind = 'command'
+                AND aggregate_type IS NULL
+                AND aggregate_id IS NULL
+                AND aggregate_version IS NULL
+                AND source_command_id IS NOT NULL
+            )
+        )
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS admin_webhook_deliveries (
+        id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 128),
+        event_id TEXT NOT NULL REFERENCES admin_webhook_events(id) ON DELETE RESTRICT,
+        webhook_id INTEGER NOT NULL REFERENCES admin_webhook_registrations(id) ON DELETE RESTRICT,
+        kind TEXT NOT NULL CHECK (kind IN ('automatic', 'manual', 'test')),
+        delivery_config_version INTEGER NOT NULL CHECK (delivery_config_version >= 1),
+        secret_version INTEGER NOT NULL CHECK (secret_version >= 1),
+        jobs_job_id TEXT CHECK (jobs_job_id IS NULL OR length(jobs_job_id) BETWEEN 1 AND 255),
+        enqueue_claim_token TEXT CHECK (enqueue_claim_token IS NULL OR length(enqueue_claim_token) BETWEEN 1 AND 255),
+        enqueue_claim_expires_at TEXT,
+        state TEXT NOT NULL CHECK (
+            state IN (
+                'pending', 'enqueue_claimed', 'queued', 'processing',
+                'retry_wait', 'succeeded', 'dead', 'canceled', 'superseded'
+            )
+        ),
+        attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count BETWEEN 0 AND 4),
+        current_attempt_id TEXT CHECK (current_attempt_id IS NULL OR length(current_attempt_id) BETWEEN 1 AND 128),
+        status_code INTEGER CHECK (status_code IS NULL OR status_code BETWEEN 100 AND 599),
+        latency_ms INTEGER CHECK (latency_ms IS NULL OR latency_ms >= 0),
+        reason_code TEXT CHECK (reason_code IS NULL OR length(reason_code) BETWEEN 1 AND 128),
+        pending_jobs_disposition TEXT CHECK (
+            pending_jobs_disposition IS NULL
+            OR pending_jobs_disposition IN ('complete', 'retry', 'fail', 'cancel', 'defer')
+        ),
+        pending_jobs_disposition_delay_seconds INTEGER CHECK (
+            pending_jobs_disposition_delay_seconds IS NULL
+            OR pending_jobs_disposition_delay_seconds BETWEEN 1 AND 1800
+        ),
+        jobs_disposition_applied INTEGER NOT NULL DEFAULT 0
+            CHECK (jobs_disposition_applied IN (0, 1)),
+        completed_after_config_change INTEGER NOT NULL DEFAULT 0
+            CHECK (completed_after_config_change IN (0, 1)),
+        terminal_at TEXT,
+        expires_at TEXT NOT NULL,
+        redelivery_of_id TEXT REFERENCES admin_webhook_deliveries(id) ON DELETE RESTRICT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK (
+            (enqueue_claim_token IS NULL AND enqueue_claim_expires_at IS NULL)
+            OR (enqueue_claim_token IS NOT NULL AND enqueue_claim_expires_at IS NOT NULL)
+        ),
+        CHECK (
+            (pending_jobs_disposition = 'retry' AND pending_jobs_disposition_delay_seconds IS NOT NULL)
+            OR (
+                pending_jobs_disposition IS NOT 'retry'
+                AND pending_jobs_disposition_delay_seconds IS NULL
+            )
+        ),
+        CHECK (jobs_disposition_applied = 0 OR pending_jobs_disposition IS NOT NULL),
+        CHECK (
+            (
+                state IN ('succeeded', 'dead', 'canceled', 'superseded')
+                AND terminal_at IS NOT NULL
+            )
+            OR (
+                state NOT IN ('succeeded', 'dead', 'canceled', 'superseded')
+                AND terminal_at IS NULL
+            )
+        ),
+        CHECK (kind != 'automatic' OR redelivery_of_id IS NULL),
+        CHECK (redelivery_of_id IS NULL OR redelivery_of_id != id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS admin_webhook_delivery_attempts (
+        id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 128),
+        delivery_id TEXT NOT NULL REFERENCES admin_webhook_deliveries(id) ON DELETE CASCADE,
+        attempt_number INTEGER NOT NULL CHECK (attempt_number BETWEEN 1 AND 4),
+        jobs_job_id TEXT CHECK (jobs_job_id IS NULL OR length(jobs_job_id) BETWEEN 1 AND 255),
+        jobs_lease_id TEXT CHECK (jobs_lease_id IS NULL OR length(jobs_lease_id) BETWEEN 1 AND 255),
+        test_attempt_token TEXT CHECK (test_attempt_token IS NULL OR length(test_attempt_token) BETWEEN 1 AND 255),
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        state TEXT NOT NULL CHECK (
+            state IN (
+                'processing', 'succeeded', 'retryable', 'failed',
+                'canceled', 'superseded', 'outcome_unknown'
+            )
+        ),
+        status_code INTEGER CHECK (status_code IS NULL OR status_code BETWEEN 100 AND 599),
+        latency_ms INTEGER CHECK (latency_ms IS NULL OR latency_ms >= 0),
+        reason_code TEXT CHECK (reason_code IS NULL OR length(reason_code) BETWEEN 1 AND 128),
+        requested_retry_delay_seconds INTEGER CHECK (
+            requested_retry_delay_seconds IS NULL
+            OR requested_retry_delay_seconds BETWEEN 1 AND 1800
+        ),
+        jobs_disposition_applied INTEGER NOT NULL DEFAULT 0
+            CHECK (jobs_disposition_applied IN (0, 1)),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (delivery_id, attempt_number),
+        CHECK (
+            (
+                jobs_job_id IS NOT NULL
+                AND jobs_lease_id IS NOT NULL
+                AND test_attempt_token IS NULL
+            )
+            OR (
+                jobs_job_id IS NULL
+                AND jobs_lease_id IS NULL
+                AND test_attempt_token IS NOT NULL
+            )
+        ),
+        CHECK (
+            (state = 'processing' AND finished_at IS NULL)
+            OR (state != 'processing' AND finished_at IS NOT NULL)
+        ),
+        CHECK (
+            (state = 'retryable' AND requested_retry_delay_seconds IS NOT NULL)
+            OR (state != 'retryable' AND requested_retry_delay_seconds IS NULL)
+        )
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS admin_webhook_idempotency (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        lookup_digest TEXT NOT NULL UNIQUE CHECK (
+            length(lookup_digest) = 71
+            AND lookup_digest GLOB 'sha256:*'
+            AND substr(lookup_digest, 8) NOT GLOB '*[^0-9a-f]*'
+        ),
+        actor_id TEXT NOT NULL CHECK (length(actor_id) BETWEEN 1 AND 128),
+        operation TEXT NOT NULL CHECK (length(operation) BETWEEN 1 AND 64),
+        route TEXT NOT NULL CHECK (length(route) BETWEEN 1 AND 512),
+        webhook_id INTEGER CHECK (webhook_id IS NULL OR webhook_id >= 1),
+        delivery_id TEXT CHECK (delivery_id IS NULL OR length(delivery_id) BETWEEN 1 AND 128),
+        request_fingerprint TEXT NOT NULL CHECK (
+            length(request_fingerprint) = 76
+            AND request_fingerprint GLOB 'hmac-sha256:*'
+            AND substr(request_fingerprint, 13) NOT GLOB '*[^0-9a-f]*'
+        ),
+        state TEXT NOT NULL CHECK (state IN ('in_progress', 'completed')),
+        resource_id INTEGER CHECK (resource_id IS NULL OR resource_id >= 1),
+        resource_version INTEGER CHECK (resource_version IS NULL OR resource_version >= 1),
+        secret_version INTEGER CHECK (secret_version IS NULL OR secret_version >= 1),
+        replay_secret_ciphertext_json TEXT CHECK (
+            replay_secret_ciphertext_json IS NULL
+            OR (
+                json_valid(replay_secret_ciphertext_json)
+                AND json_type(replay_secret_ciphertext_json) = 'object'
+                AND length(CAST(replay_secret_ciphertext_json AS BLOB)) <= 8192
+            )
+        ),
+        replay_secret_key_id TEXT CHECK (
+            replay_secret_key_id IS NULL OR length(replay_secret_key_id) BETWEEN 1 AND 128
+        ),
+        test_delivery_id TEXT CHECK (test_delivery_id IS NULL OR length(test_delivery_id) BETWEEN 1 AND 128),
+        test_attempt_id TEXT CHECK (test_attempt_id IS NULL OR length(test_attempt_id) BETWEEN 1 AND 128),
+        response_status INTEGER CHECK (response_status IS NULL OR response_status BETWEEN 100 AND 599),
+        response_metadata_json TEXT CHECK (
+            response_metadata_json IS NULL
+            OR (
+                json_valid(response_metadata_json)
+                AND json_type(response_metadata_json) = 'object'
+                AND length(CAST(response_metadata_json AS BLOB)) <= 16384
+            )
+        ),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        expires_at TEXT NOT NULL,
+        CHECK (
+            (replay_secret_ciphertext_json IS NULL AND replay_secret_key_id IS NULL)
+            OR (replay_secret_ciphertext_json IS NOT NULL AND replay_secret_key_id IS NOT NULL)
+        ),
+        CHECK (
+            (test_delivery_id IS NULL AND test_attempt_id IS NULL)
+            OR (test_delivery_id IS NOT NULL AND test_attempt_id IS NOT NULL)
+        )
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS admin_webhook_migration_state (
+        singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+        schema_version INTEGER NOT NULL CHECK (schema_version = 1),
+        state_revision INTEGER NOT NULL DEFAULT 1 CHECK (state_revision >= 1),
+        phase TEXT NOT NULL CHECK (
+            phase IN (
+                'migration_pending', 'artifacts_pending', 'artifacts_ready',
+                'database_committed', 'complete'
+            )
+        ),
+        import_operation_id TEXT CHECK (import_operation_id IS NULL OR length(import_operation_id) BETWEEN 1 AND 128),
+        import_operator_id INTEGER CHECK (import_operator_id IS NULL OR import_operator_id >= 1),
+        import_started_at TEXT,
+        import_approved_at TEXT,
+        artifacts_ready_at TEXT,
+        database_committed_at TEXT,
+        fingerprint_key_id TEXT CHECK (fingerprint_key_id IS NULL OR length(fingerprint_key_id) BETWEEN 1 AND 128),
+        active_primary_key_id TEXT CHECK (active_primary_key_id IS NULL OR length(active_primary_key_id) BETWEEN 1 AND 128),
+        system_ops_webhook_fingerprint TEXT CHECK (
+            system_ops_webhook_fingerprint IS NULL
+            OR (
+                length(system_ops_webhook_fingerprint) = 76
+                AND system_ops_webhook_fingerprint GLOB 'hmac-sha256:*'
+                AND substr(system_ops_webhook_fingerprint, 13) NOT GLOB '*[^0-9a-f]*'
+            )
+        ),
+        legacy_table_fingerprint TEXT CHECK (
+            legacy_table_fingerprint IS NULL
+            OR (
+                length(legacy_table_fingerprint) = 76
+                AND legacy_table_fingerprint GLOB 'hmac-sha256:*'
+                AND substr(legacy_table_fingerprint, 13) NOT GLOB '*[^0-9a-f]*'
+            )
+        ),
+        source_mapping_json TEXT NOT NULL DEFAULT '{}' CHECK (
+            json_valid(source_mapping_json)
+            AND json_type(source_mapping_json) = 'object'
+            AND length(CAST(source_mapping_json AS BLOB)) <= 1048576
+        ),
+        redacted_report_digest TEXT CHECK (
+            redacted_report_digest IS NULL
+            OR (
+                length(redacted_report_digest) = 71
+                AND redacted_report_digest GLOB 'sha256:*'
+                AND substr(redacted_report_digest, 8) NOT GLOB '*[^0-9a-f]*'
+            )
+        ),
+        protected_backup_ciphertext_digest TEXT CHECK (
+            protected_backup_ciphertext_digest IS NULL
+            OR (
+                length(protected_backup_ciphertext_digest) = 71
+                AND protected_backup_ciphertext_digest GLOB 'sha256:*'
+                AND substr(protected_backup_ciphertext_digest, 8) NOT GLOB '*[^0-9a-f]*'
+            )
+        ),
+        source_rejections_json TEXT NOT NULL DEFAULT '[]' CHECK (
+            json_valid(source_rejections_json)
+            AND json_type(source_rejections_json) = 'array'
+            AND length(CAST(source_rejections_json AS BLOB)) <= 1048576
+        ),
+        completed_at TEXT,
+        active_report_path TEXT CHECK (active_report_path IS NULL OR length(CAST(active_report_path AS BLOB)) BETWEEN 1 AND 4096),
+        active_backup_path TEXT CHECK (active_backup_path IS NULL OR length(CAST(active_backup_path AS BLOB)) BETWEEN 1 AND 4096),
+        active_key_path TEXT CHECK (active_key_path IS NULL OR length(CAST(active_key_path AS BLOB)) BETWEEN 1 AND 4096),
+        staging_report_path TEXT CHECK (staging_report_path IS NULL OR length(CAST(staging_report_path AS BLOB)) BETWEEN 1 AND 4096),
+        staging_backup_path TEXT CHECK (staging_backup_path IS NULL OR length(CAST(staging_backup_path AS BLOB)) BETWEEN 1 AND 4096),
+        staging_key_path TEXT CHECK (staging_key_path IS NULL OR length(CAST(staging_key_path AS BLOB)) BETWEEN 1 AND 4096),
+        report_owner_id INTEGER CHECK (report_owner_id IS NULL OR report_owner_id >= 0),
+        report_group_id INTEGER CHECK (report_group_id IS NULL OR report_group_id >= 0),
+        report_mode INTEGER CHECK (report_mode IS NULL OR report_mode = 384),
+        report_file_identity TEXT CHECK (report_file_identity IS NULL OR length(report_file_identity) BETWEEN 1 AND 255),
+        backup_owner_id INTEGER CHECK (backup_owner_id IS NULL OR backup_owner_id >= 0),
+        backup_group_id INTEGER CHECK (backup_group_id IS NULL OR backup_group_id >= 0),
+        backup_mode INTEGER CHECK (backup_mode IS NULL OR backup_mode = 384),
+        backup_file_identity TEXT CHECK (backup_file_identity IS NULL OR length(backup_file_identity) BETWEEN 1 AND 255),
+        rollback_key_owner_id INTEGER CHECK (rollback_key_owner_id IS NULL OR rollback_key_owner_id >= 0),
+        rollback_key_group_id INTEGER CHECK (rollback_key_group_id IS NULL OR rollback_key_group_id >= 0),
+        rollback_key_mode INTEGER CHECK (rollback_key_mode IS NULL OR rollback_key_mode = 384),
+        rollback_key_file_identity TEXT CHECK (rollback_key_file_identity IS NULL OR length(rollback_key_file_identity) BETWEEN 1 AND 255),
+        rollback_expires_at TEXT,
+        rollback_retirement_phase TEXT NOT NULL DEFAULT 'not_applicable' CHECK (
+            rollback_retirement_phase IN (
+                'not_applicable', 'retained',
+                'rollback_retirement_in_progress', 'retired'
+            )
+        ),
+        rollback_retirement_operator_id INTEGER CHECK (
+            rollback_retirement_operator_id IS NULL OR rollback_retirement_operator_id >= 1
+        ),
+        rollback_retirement_started_at TEXT,
+        rollback_retirement_completed_at TEXT,
+        expected_ciphertext_digest TEXT CHECK (
+            expected_ciphertext_digest IS NULL
+            OR (
+                length(expected_ciphertext_digest) = 71
+                AND expected_ciphertext_digest GLOB 'sha256:*'
+                AND substr(expected_ciphertext_digest, 8) NOT GLOB '*[^0-9a-f]*'
+            )
+        ),
+        first_canonical_activity_at TEXT,
+        first_canonical_activity_kind TEXT CHECK (
+            first_canonical_activity_kind IS NULL
+            OR first_canonical_activity_kind IN (
+                'registration_mutation', 'event_capture', 'delivery_attempt'
+            )
+        ),
+        rotation_operation_id TEXT CHECK (rotation_operation_id IS NULL OR length(rotation_operation_id) BETWEEN 1 AND 128),
+        rotation_source_key_id TEXT CHECK (rotation_source_key_id IS NULL OR length(rotation_source_key_id) BETWEEN 1 AND 128),
+        rotation_target_key_id TEXT CHECK (rotation_target_key_id IS NULL OR length(rotation_target_key_id) BETWEEN 1 AND 128),
+        rotation_phase TEXT CHECK (
+            rotation_phase IS NULL
+            OR rotation_phase IN (
+                'rewriting', 'verifying', 'awaiting_primary_cutover', 'complete'
+            )
+        ),
+        rotation_table_cursor TEXT CHECK (rotation_table_cursor IS NULL OR length(rotation_table_cursor) BETWEEN 1 AND 128),
+        rotation_key_cursor TEXT CHECK (rotation_key_cursor IS NULL OR length(rotation_key_cursor) BETWEEN 1 AND 255),
+        rotation_processed_count INTEGER NOT NULL DEFAULT 0 CHECK (rotation_processed_count >= 0),
+        rotation_verified_count INTEGER NOT NULL DEFAULT 0 CHECK (rotation_verified_count >= 0),
+        rotation_started_at TEXT,
+        rotation_completed_at TEXT,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK (
+            (first_canonical_activity_at IS NULL AND first_canonical_activity_kind IS NULL)
+            OR (first_canonical_activity_at IS NOT NULL AND first_canonical_activity_kind IS NOT NULL)
+        ),
+        CHECK (
+            system_ops_webhook_fingerprint IS NULL
+            OR fingerprint_key_id IS NOT NULL
+        ),
+        CHECK (legacy_table_fingerprint IS NULL OR fingerprint_key_id IS NOT NULL),
+        CHECK (
+            (
+                phase = 'migration_pending'
+                AND import_operation_id IS NULL
+                AND import_operator_id IS NULL
+                AND import_started_at IS NULL
+                AND import_approved_at IS NULL
+                AND artifacts_ready_at IS NULL
+                AND database_committed_at IS NULL
+                AND fingerprint_key_id IS NULL
+                AND active_primary_key_id IS NULL
+                AND system_ops_webhook_fingerprint IS NULL
+                AND legacy_table_fingerprint IS NULL
+                AND redacted_report_digest IS NULL
+                AND protected_backup_ciphertext_digest IS NULL
+                AND completed_at IS NULL
+                AND active_report_path IS NULL
+                AND active_backup_path IS NULL
+                AND active_key_path IS NULL
+                AND staging_report_path IS NULL
+                AND staging_backup_path IS NULL
+                AND staging_key_path IS NULL
+                AND report_owner_id IS NULL
+                AND report_group_id IS NULL
+                AND report_mode IS NULL
+                AND report_file_identity IS NULL
+                AND backup_owner_id IS NULL
+                AND backup_group_id IS NULL
+                AND backup_mode IS NULL
+                AND backup_file_identity IS NULL
+                AND rollback_key_owner_id IS NULL
+                AND rollback_key_group_id IS NULL
+                AND rollback_key_mode IS NULL
+                AND rollback_key_file_identity IS NULL
+                AND rollback_expires_at IS NULL
+                AND rollback_retirement_phase = 'not_applicable'
+                AND expected_ciphertext_digest IS NULL
+            )
+            OR (
+                phase != 'migration_pending'
+                AND length(import_operation_id) = 38
+                AND substr(import_operation_id, 1, 6) = 'whmig_'
+                AND substr(import_operation_id, 7) NOT GLOB '*[^0-9a-f]*'
+                AND import_operator_id IS NOT NULL
+                AND import_started_at IS NOT NULL
+                AND import_approved_at IS NOT NULL
+                AND fingerprint_key_id IS NOT NULL
+                AND active_primary_key_id IS NOT NULL
+                AND system_ops_webhook_fingerprint IS NOT NULL
+                AND legacy_table_fingerprint IS NOT NULL
+                AND redacted_report_digest IS NOT NULL
+                AND active_report_path IS NOT NULL
+                AND staging_report_path IS NOT NULL
+                AND report_owner_id IS NOT NULL
+                AND report_group_id IS NOT NULL
+                AND report_mode = 384
+                AND report_file_identity IS NOT NULL
+            )
+        ),
+        CHECK (
+            (
+                active_backup_path IS NULL
+                AND active_key_path IS NULL
+                AND staging_backup_path IS NULL
+                AND staging_key_path IS NULL
+                AND backup_owner_id IS NULL
+                AND backup_group_id IS NULL
+                AND backup_mode IS NULL
+                AND backup_file_identity IS NULL
+                AND rollback_key_owner_id IS NULL
+                AND rollback_key_group_id IS NULL
+                AND rollback_key_mode IS NULL
+                AND rollback_key_file_identity IS NULL
+                AND protected_backup_ciphertext_digest IS NULL
+                AND expected_ciphertext_digest IS NULL
+            )
+            OR (
+                active_backup_path IS NOT NULL
+                AND active_key_path IS NOT NULL
+                AND staging_backup_path IS NOT NULL
+                AND staging_key_path IS NOT NULL
+                AND backup_owner_id IS NOT NULL
+                AND backup_group_id IS NOT NULL
+                AND backup_mode = 384
+                AND backup_file_identity IS NOT NULL
+                AND rollback_key_owner_id IS NOT NULL
+                AND rollback_key_group_id IS NOT NULL
+                AND rollback_key_mode = 384
+                AND rollback_key_file_identity IS NOT NULL
+            )
+        ),
+        CHECK (
+            (phase != 'artifacts_ready')
+            OR (
+                active_backup_path IS NOT NULL
+                AND artifacts_ready_at IS NOT NULL
+                AND protected_backup_ciphertext_digest IS NOT NULL
+                AND expected_ciphertext_digest IS NOT NULL
+            )
+        ),
+        CHECK (
+            artifacts_ready_at IS NULL
+            OR (
+                active_backup_path IS NOT NULL
+                AND protected_backup_ciphertext_digest IS NOT NULL
+                AND expected_ciphertext_digest IS NOT NULL
+            )
+        ),
+        CHECK (
+            (
+                phase IN ('database_committed', 'complete')
+                AND database_committed_at IS NOT NULL
+            )
+            OR (
+                phase NOT IN ('database_committed', 'complete')
+                AND database_committed_at IS NULL
+            )
+        ),
+        CHECK (
+            (phase = 'complete' AND completed_at IS NOT NULL)
+            OR (phase != 'complete' AND completed_at IS NULL)
+        ),
+        CHECK (
+            phase = 'complete'
+            OR rotation_phase IS NULL
+            OR rotation_phase = 'complete'
+        ),
+        CHECK (
+            (
+                rotation_phase IS NULL
+                AND rotation_operation_id IS NULL
+                AND rotation_source_key_id IS NULL
+                AND rotation_target_key_id IS NULL
+                AND rotation_table_cursor IS NULL
+                AND rotation_key_cursor IS NULL
+                AND rotation_processed_count = 0
+                AND rotation_verified_count = 0
+                AND rotation_started_at IS NULL
+                AND rotation_completed_at IS NULL
+            )
+            OR (
+                rotation_phase IS NOT NULL
+                AND rotation_operation_id IS NOT NULL
+                AND rotation_source_key_id IS NOT NULL
+                AND rotation_target_key_id IS NOT NULL
+                AND rotation_source_key_id != rotation_target_key_id
+                AND rotation_started_at IS NOT NULL
+                AND (
+                    (rotation_phase = 'complete' AND rotation_completed_at IS NOT NULL)
+                    OR (rotation_phase != 'complete' AND rotation_completed_at IS NULL)
+                )
+            )
+        ),
+        CHECK (
+            (
+                rollback_retirement_phase IN ('not_applicable', 'retained')
+                AND rollback_retirement_operator_id IS NULL
+                AND rollback_retirement_started_at IS NULL
+                AND rollback_retirement_completed_at IS NULL
+            )
+            OR (
+                rollback_retirement_phase = 'rollback_retirement_in_progress'
+                AND
+                rollback_retirement_operator_id IS NOT NULL
+                AND rollback_retirement_started_at IS NOT NULL
+                AND rollback_retirement_completed_at IS NULL
+            )
+            OR (
+                rollback_retirement_phase = 'retired'
+                AND rollback_retirement_operator_id IS NOT NULL
+                AND rollback_retirement_started_at IS NOT NULL
+                AND rollback_retirement_completed_at IS NOT NULL
+            )
+        ),
+        CHECK (
+            active_backup_path IS NOT NULL
+            OR rollback_retirement_phase = 'not_applicable'
+        ),
+        CHECK (
+            phase != 'complete'
+            OR active_backup_path IS NULL
+            OR (
+                rollback_expires_at IS NOT NULL
+                AND rollback_retirement_phase IN (
+                    'retained', 'rollback_retirement_in_progress', 'retired'
+                )
+            )
+        )
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_webhook_registrations_active
+    ON admin_webhook_registrations(active, id DESC)
+    WHERE deleted_at IS NULL
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_admin_webhook_events_aggregate_source
+    ON admin_webhook_events(event_type, aggregate_type, aggregate_id, aggregate_version)
+    WHERE source_kind = 'aggregate'
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_admin_webhook_events_command_source
+    ON admin_webhook_events(event_type, source_command_id)
+    WHERE source_kind = 'command'
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_admin_webhook_deliveries_automatic
+    ON admin_webhook_deliveries(event_id, webhook_id)
+    WHERE kind = 'automatic'
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_webhook_deliveries_state
+    ON admin_webhook_deliveries(state, expires_at, created_at)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_webhook_deliveries_webhook
+    ON admin_webhook_deliveries(webhook_id, created_at DESC)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_webhook_delivery_attempts_delivery
+    ON admin_webhook_delivery_attempts(delivery_id, attempt_number)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_webhook_idempotency_expiry
+    ON admin_webhook_idempotency(expires_at)
+    """,
+)
+
+
+def migration_094_create_canonical_admin_webhook_tables(
+    conn: sqlite3.Connection,
+) -> None:
+    """Create the additive canonical admin-webhook schema atomically."""
+    for statement in CANONICAL_ADMIN_WEBHOOK_SQLITE_DDL:
+        conn.execute(statement)
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO admin_webhook_sequences (name, next_value)
+        VALUES (?, ?)
+        """,
+        ("registration", 1),
+    )
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO admin_webhook_migration_state (
+            singleton_id, schema_version, state_revision, phase
+        ) VALUES (?, ?, ?, ?)
+        """,
+        (1, 1, 1, "migration_pending"),
+    )
+    logger.info("Migration 094: Created canonical admin webhook tables")
+
+
+def migration_095_seed_notes_graph_suggestion_permissions(conn: sqlite3.Connection) -> None:
+    """Seed suggestion review permissions for Notes-writing roles only."""
+
+    logger.info("Migration 095: START seed Notes graph suggestion permissions")
+    required = ("roles", "permissions", "role_permissions")
+    if not all(_sqlite_table_exists(conn, table_name) for table_name in required):
+        logger.info("Migration 095: RBAC tables missing; skipping Notes graph suggestion seed")
+        return
+    permissions = (
+        ("notes.graph.suggest", "Generate and review Notes graph suggestions", "notes"),
+        ("notes.link_keyword", "Accept Notes keyword-link suggestions", "notes"),
+        ("keywords.create", "Create keywords while accepting suggestions", "keywords"),
+    )
+    conn.executemany(
+        "INSERT OR IGNORE INTO permissions (name, description, category) VALUES (?, ?, ?)",
+        permissions,
+    )
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT r.id, p.id
+        FROM roles r
+        CROSS JOIN permissions p
+        WHERE r.name IN (?, ?, ?)
+          AND p.name IN (?, ?, ?)
+        """,
+        (
+            "admin",
+            "user",
+            "moderator",
+            "notes.graph.suggest",
+            "notes.link_keyword",
+            "keywords.create",
+        ),
+    )
+    conn.commit()
+    logger.info("Migration 095: Seeded Notes graph suggestion permissions")
+
+
+_ADMIN_WEBHOOK_DELIVERY_ATTEMPTS_SQLITE_V96 = """
+    CREATE TABLE admin_webhook_delivery_attempts_v96 (
+        id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 128),
+        delivery_id TEXT NOT NULL REFERENCES admin_webhook_deliveries(id) ON DELETE CASCADE,
+        attempt_number INTEGER NOT NULL CHECK (attempt_number BETWEEN 1 AND 4),
+        jobs_job_id TEXT CHECK (jobs_job_id IS NULL OR length(jobs_job_id) BETWEEN 1 AND 255),
+        jobs_lease_id TEXT CHECK (jobs_lease_id IS NULL OR length(jobs_lease_id) BETWEEN 1 AND 255),
+        test_attempt_token TEXT CHECK (test_attempt_token IS NULL OR length(test_attempt_token) BETWEEN 1 AND 255),
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        state TEXT NOT NULL CHECK (
+            state IN (
+                'processing', 'succeeded', 'retryable', 'failed',
+                'canceled', 'superseded', 'outcome_unknown'
+            )
+        ),
+        status_code INTEGER CHECK (status_code IS NULL OR status_code BETWEEN 100 AND 599),
+        latency_ms INTEGER CHECK (latency_ms IS NULL OR latency_ms >= 0),
+        reason_code TEXT CHECK (reason_code IS NULL OR length(reason_code) BETWEEN 1 AND 128),
+        requested_retry_delay_seconds INTEGER CHECK (
+            requested_retry_delay_seconds IS NULL
+            OR requested_retry_delay_seconds BETWEEN 1 AND 1800
+        ),
+        jobs_disposition_applied INTEGER NOT NULL DEFAULT 0
+            CHECK (jobs_disposition_applied IN (0, 1)),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        request_timeout_seconds INTEGER CHECK (
+            request_timeout_seconds BETWEEN 1 AND 30
+        ),
+        UNIQUE (delivery_id, attempt_number),
+        CHECK (
+            (
+                jobs_job_id IS NOT NULL
+                AND jobs_lease_id IS NOT NULL
+                AND test_attempt_token IS NULL
+            )
+            OR (
+                jobs_job_id IS NULL
+                AND jobs_lease_id IS NULL
+                AND test_attempt_token IS NOT NULL
+            )
+        ),
+        CHECK (
+            (state = 'processing' AND finished_at IS NULL)
+            OR (state != 'processing' AND finished_at IS NOT NULL)
+        ),
+        CHECK (
+            (state = 'retryable' AND requested_retry_delay_seconds IS NOT NULL)
+            OR (
+                state = 'outcome_unknown'
+                AND (
+                    requested_retry_delay_seconds IS NULL
+                    OR requested_retry_delay_seconds BETWEEN 1 AND 1800
+                )
+            )
+            OR (
+                state NOT IN ('retryable', 'outcome_unknown')
+                AND requested_retry_delay_seconds IS NULL
+            )
+        )
+    )
+"""
+
+
+def _sqlite_attempt_retry_delay_constraint_ready(
+    conn: sqlite3.Connection,
+) -> bool:
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master "
+        "WHERE type = 'table' AND name = 'admin_webhook_delivery_attempts'"
+    ).fetchone()
+    normalized = "".join(str(row[0] if row else "").lower().split())
+    return (
+        "state='outcome_unknown'and(requested_retry_delay_secondsisnullor"
+        "requested_retry_delay_secondsbetween1and1800)" in normalized
+        and "statenotin('retryable','outcome_unknown')" in normalized
+    )
+
+
+def _upgrade_sqlite_attempt_retry_delay_constraint(
+    conn: sqlite3.Connection,
+) -> None:
+    if _sqlite_attempt_retry_delay_constraint_ready(conn):
+        return
+    if _sqlite_table_exists(conn, "admin_webhook_delivery_attempts_v96"):
+        raise RuntimeError(
+            "Admin webhook attempt migration found an unsafe rebuild table"
+        )
+    schema_objects = conn.execute(
+        "SELECT sql FROM sqlite_master "
+        "WHERE tbl_name = 'admin_webhook_delivery_attempts' "
+        "AND type IN ('index', 'trigger') AND sql IS NOT NULL"
+    ).fetchall()
+    conn.execute(_ADMIN_WEBHOOK_DELIVERY_ATTEMPTS_SQLITE_V96)
+    conn.execute(
+        """
+        INSERT INTO admin_webhook_delivery_attempts_v96 (
+            id, delivery_id, attempt_number, jobs_job_id, jobs_lease_id,
+            test_attempt_token, started_at, finished_at, state, status_code,
+            latency_ms, reason_code, requested_retry_delay_seconds,
+            jobs_disposition_applied, created_at, request_timeout_seconds
+        )
+        SELECT
+            id, delivery_id, attempt_number, jobs_job_id, jobs_lease_id,
+            test_attempt_token, started_at, finished_at, state, status_code,
+            latency_ms, reason_code, requested_retry_delay_seconds,
+            jobs_disposition_applied, created_at, request_timeout_seconds
+        FROM admin_webhook_delivery_attempts
+        """
+    )
+    conn.execute("DROP TABLE admin_webhook_delivery_attempts")
+    conn.execute(
+        "ALTER TABLE admin_webhook_delivery_attempts_v96 "
+        "RENAME TO admin_webhook_delivery_attempts"
+    )
+    for (statement,) in schema_objects:
+        conn.execute(str(statement))
+    if conn.execute(
+        "PRAGMA foreign_key_check(admin_webhook_delivery_attempts)"
+    ).fetchall():
+        raise RuntimeError(
+            "Admin webhook attempt migration found invalid foreign keys"
+        )
+
+
+def migration_096_add_admin_webhook_delivery_recovery(
+    conn: sqlite3.Connection,
+) -> None:
+    """Add the canonical delivery recovery and runtime-heartbeat extension."""
+    delivery_columns = {
+        str(row[1])
+        for row in conn.execute("PRAGMA table_info(admin_webhook_deliveries)").fetchall()
+    }
+    required_delivery_columns = (
+        (
+            "pending_jobs_disposition_token",
+            "ALTER TABLE admin_webhook_deliveries "
+            "ADD COLUMN pending_jobs_disposition_token TEXT CHECK ("
+            "pending_jobs_disposition_token IS NULL "
+            "OR (length(pending_jobs_disposition_token) = 64 "
+            "AND pending_jobs_disposition_token NOT GLOB '*[^0-9a-f]*'))",
+        ),
+        (
+            "pending_jobs_disposition_not_before_at",
+            "ALTER TABLE admin_webhook_deliveries "
+            "ADD COLUMN pending_jobs_disposition_not_before_at TEXT",
+        ),
+    )
+    for column, statement in required_delivery_columns:
+        if column not in delivery_columns:
+            conn.execute(statement)
+
+    attempt_columns = {
+        str(row[1])
+        for row in conn.execute(
+            "PRAGMA table_info(admin_webhook_delivery_attempts)"
+        ).fetchall()
+    }
+    if "request_timeout_seconds" not in attempt_columns:
+        conn.execute(
+            "ALTER TABLE admin_webhook_delivery_attempts "
+            "ADD COLUMN request_timeout_seconds INTEGER "
+            "CHECK (request_timeout_seconds BETWEEN 1 AND 30)"
+        )
+    _upgrade_sqlite_attempt_retry_delay_constraint(conn)
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS admin_webhook_runtime_heartbeats (
+            component TEXT NOT NULL CHECK (
+                component IN ('worker', 'reconciler', 'retention')
+            ),
+            instance_id TEXT NOT NULL CHECK (length(instance_id) BETWEEN 1 AND 128),
+            ready INTEGER NOT NULL CHECK (ready IN (0, 1)),
+            reason_code TEXT CHECK (
+                (ready = 1 AND reason_code IS NULL)
+                OR (
+                    ready = 0
+                    AND reason_code IS NOT NULL
+                    AND reason_code IN (
+                        'mode_off',
+                        'mode_migrate',
+                        'schema_unready',
+                        'migration_pending',
+                        'key_unavailable',
+                        'key_configuration_mismatch',
+                        'jobs_unavailable',
+                        'database_unavailable',
+                        'worker_unavailable',
+                        'reconciler_unavailable',
+                        'retention_unavailable',
+                        'heartbeat_stale'
+                    )
+                )
+            ),
+            heartbeat_at TEXT NOT NULL,
+            last_success_at TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (component, instance_id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_admin_webhook_deliveries_recovery
+        ON admin_webhook_deliveries(
+            state, enqueue_claim_expires_at, expires_at, created_at
+        )
+        WHERE state IN ('pending', 'enqueue_claimed')
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_admin_webhook_deliveries_disposition_recovery
+        ON admin_webhook_deliveries(
+            jobs_disposition_applied,
+            pending_jobs_disposition_not_before_at,
+            updated_at
+        )
+        WHERE pending_jobs_disposition IS NOT NULL
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_admin_webhook_runtime_heartbeats_freshness
+        ON admin_webhook_runtime_heartbeats(component, ready, heartbeat_at DESC)
+        """
+    )
+    logger.info("Migration 096: Added admin webhook delivery recovery schema")
 
 
 def rollback_086_drop_prototype_workspace_tables(conn: sqlite3.Connection) -> None:
@@ -4855,10 +5952,11 @@ def migration_082_harden_admin_webhooks_and_create_admin_settings(conn: sqlite3.
 
     migrated_rows: list[tuple[Any, ...]] = []
     for row in rows:
-        secret_encrypted = row["secret_encrypted"] if "secret_encrypted" in row.keys() else None
-        secret_key_id = row["secret_key_id"] if "secret_key_id" in row.keys() else None
+        row_values = dict(row)
+        secret_encrypted = row_values.get("secret_encrypted")
+        secret_key_id = row_values.get("secret_key_id")
         if not secret_encrypted:
-            plaintext_secret = row["secret"] if "secret" in row.keys() else None
+            plaintext_secret = row_values.get("secret")
             if not plaintext_secret:
                 raise ValueError(f"Admin webhook {row['id']} is missing a secret for migration")
             encrypted = encrypt_admin_webhook_secret(str(plaintext_secret))
@@ -5365,7 +6463,93 @@ def get_authnz_migrations() -> list[Migration]:
             "Seed notification permissions and role memberships",
             migration_090_seed_notification_permissions,
         ),
+        Migration(
+            91,
+            "Add durable user profile version anchor",
+            migration_091_add_user_profile_version,
+        ),
+        Migration(
+            92,
+            "Harden profile candidate version timestamps",
+            migration_092_harden_profile_candidate_timestamps,
+        ),
+        Migration(
+            93,
+            "Harmonize users write columns",
+            migration_093_harmonize_users_write_columns,
+        ),
+        Migration(
+            94,
+            "Create canonical admin webhook tables",
+            migration_094_create_canonical_admin_webhook_tables,
+        ),
+        Migration(
+            95,
+            "Seed Notes graph suggestion permissions",
+            migration_095_seed_notes_graph_suggestion_permissions,
+        ),
+        Migration(
+            96,
+            "Add admin webhook delivery recovery schema",
+            migration_096_add_admin_webhook_delivery_recovery,
+        ),
+        Migration(
+            97,
+            "Backfill NULL users.uuid values",
+            migration_097_backfill_user_uuid,
+        ),
+        Migration(
+            98,
+            "Add and backfill sessions.last_activity",
+            migration_098_add_session_last_activity,
+        ),
     ]
+
+
+def migration_097_backfill_user_uuid(conn: sqlite3.Connection) -> None:
+    """Backfill NULL/blank users.uuid values with generated identifiers.
+
+    The packaged SQLite schema (Databases/SQLite/Schema/sqlite_users.sql)
+    declares users.uuid as NOT NULL with a randomblob-hex default, but the
+    migrations path added the column via ALTER TABLE as nullable with no
+    default — so databases created through migrations could carry NULL uuids
+    (the single-user bootstrap row did until 2026-09). API responses expect a
+    uuid per user, and a NULL row used to 500 the admin users list.
+
+    This migration backfills existing NULL/blank values using the same format
+    as the packaged default. The column is deliberately NOT retro-tightened to
+    NOT NULL: that would require a users-table rebuild, which would drop the
+    profile-version anchor triggers and indexes attached to the table. New
+    rows are covered by the column default (migration 001, packaged schema)
+    and by explicit uuid assignment in the application write paths.
+    """
+    user_columns = {
+        str(row[1]) for row in conn.execute("PRAGMA table_info(users)").fetchall()
+    }
+    if "uuid" not in user_columns:
+        # ALTER TABLE cannot attach the non-constant default; the backfill
+        # below covers existing rows and application writes cover new ones.
+        conn.execute("ALTER TABLE users ADD COLUMN uuid TEXT")
+    conn.execute(
+        """
+        UPDATE users
+        SET uuid = lower(hex(randomblob(16)))
+        WHERE uuid IS NULL OR trim(uuid) = ''
+        """
+    )
+
+
+def migration_098_add_session_last_activity(conn: sqlite3.Connection) -> None:
+    """Add and backfill the session activity timestamp for legacy databases.
+
+    Args:
+        conn: SQLite connection supplied by the AuthNZ migration runner.
+
+    Returns:
+        None. Existing activity values and missing session tables are unchanged;
+        the migration runner owns the transaction and its commit or rollback.
+    """
+    ensure_sqlite_session_last_activity(conn)
 
 
 def apply_authnz_migrations(db_path: Path, target_version: int = None) -> None:
@@ -5484,6 +6668,10 @@ def ensure_authnz_tables(db_path: Path) -> None:
         apply_authnz_migrations(db_path)
     else:
         logger.debug("AuthNZ tables are up to date")
+
+    with sqlite3.connect(db_path) as conn:
+        validate_sqlite_profile_version_readiness(conn)
+        validate_sqlite_profile_candidate_schema(conn)
 
 
 #

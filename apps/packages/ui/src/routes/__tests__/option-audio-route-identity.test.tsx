@@ -67,8 +67,12 @@ vi.mock("@/components/Option/Speech/SpeechPlaygroundPage", () => ({
   )
 }))
 
-vi.mock("~/components/Option/AudiobookStudio/AudiobookStudioPage", () => ({
-  AudiobookStudioPage: () => <div data-testid="audiobook-studio-page">Audiobook Studio</div>
+vi.mock("@/components/Option/AudioStudio/CompatibilityRedirect", () => ({
+  CompatibilityRedirect: () => (
+    <div data-testid="audiobook-compatibility-redirect">
+      Audiobook compatibility redirect
+    </div>
+  )
 }))
 
 describe("audio option routes", () => {
@@ -113,7 +117,10 @@ describe("audio option routes", () => {
     expect(screen.queryByTestId("stt-playground")).not.toBeInTheDocument()
   })
 
-  it("keeps /audiobook-studio route mapped to the long-form studio inside its route boundary", () => {
+  it("keeps /audiobook-studio route mapped to the Audio Studio compatibility redirect inside its route boundary", () => {
+    // /audiobook-studio is a legacy alias for /audio-studio?workflow=narration;
+    // the route mounts CompatibilityRedirect (migration + redirect), covered in
+    // src/components/Option/AudioStudio/__tests__/CompatibilityRedirect.test.tsx.
     render(<OptionAudiobookStudio />)
 
     const boundary = screen.getByTestId("route-boundary")
@@ -121,7 +128,7 @@ describe("audio option routes", () => {
     expect(screen.getByTestId("option-layout")).toBeVisible()
     expect(boundary).toHaveAttribute("data-route-id", "audiobook-studio")
     expect(boundary).toHaveAttribute("data-route-label", "Audiobook Studio")
-    expect(screen.getByTestId("audiobook-studio-page")).toBeVisible()
+    expect(screen.getByTestId("audiobook-compatibility-redirect")).toBeVisible()
     expect(screen.queryByTestId("speech-playground")).not.toBeInTheDocument()
     expect(screen.queryByTestId("tts-playground")).not.toBeInTheDocument()
     expect(screen.queryByTestId("stt-playground")).not.toBeInTheDocument()

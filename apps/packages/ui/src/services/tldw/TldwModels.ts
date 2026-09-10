@@ -390,12 +390,8 @@ export class TldwModelsService {
     }
 
     const fetchPromise = fetchFromServer().catch(async (error) => {
-      if (isAbortLikeModelFetchError(error) && !this.cachedModels) {
-        try {
-          return await fetchFromServer()
-        } catch (retryError) {
-          error = retryError
-        }
+      if (isAbortLikeModelFetchError(error)) {
+        return this.cachedModels || []
       }
 
       if (!import.meta.env?.DEV) {

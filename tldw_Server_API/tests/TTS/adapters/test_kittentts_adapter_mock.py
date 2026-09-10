@@ -1,10 +1,10 @@
 from types import SimpleNamespace
+from typing import Any
 
 import numpy as np
 import pytest
 
 from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, TTSRequest
-
 
 pytestmark = pytest.mark.unit
 
@@ -85,12 +85,8 @@ async def test_kittentts_generate_non_stream(monkeypatch, tmp_path):
     assert response.provider == "kitten_tts"
     assert response.voice_used == "Bella"
     assert response.model == "KittenML/kitten-tts-nano-0.8-fp32"
-    assert download_calls == [
-        ("KittenML/kitten-tts-nano-0.8-fp32", str(tmp_path / "cache"), False, "deadbeef1")
-    ]
-    assert FakeRuntime.instances[0].calls == [
-        ("Hello from Kitten", "Bella", 1.1, True)
-    ]
+    assert download_calls == [("KittenML/kitten-tts-nano-0.8-fp32", str(tmp_path / "cache"), False, "deadbeef1")]
+    assert FakeRuntime.instances[0].calls == [("Hello from Kitten", "Bella", 1.1, True)]
 
 
 @pytest.mark.asyncio
@@ -178,3 +174,22 @@ async def test_kittentts_runtime_load_uses_revision_for_requested_model(monkeypa
     assert download_calls == [
         ("KittenML/kitten-tts-mini-0.8", None, True, mod.resolve_model_revision("KittenML/kitten-tts-mini-0.8"))
     ]
+
+
+@pytest.mark.asyncio
+async def test_kittentts_override_preserves_configured_default_revision(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.TTS.adapters import kitten_tts_adapter as mod
+
+    downloads: list[tuple[str, str | None]] = []
+
+    def load(model_name: str, *, revision: str | None = None, **kwargs: Any) -> SimpleNamespace:
+        downloads.append((model_name, revision))
+        return SimpleNamespace(repo_id=model_name, revision=revision)
+
+    monkeypatch.setattr(mod, "download_model_assets", load)
+    monkeypatch.setattr(mod, "KittenRuntime", lambda assets: SimpleNamespace(assets=assets))
+    adapter = mod.KittenTTSAdapter({"model": "KittenML/kitten-tts-nano-0.8-fp32", "model_revision": "deadbeef12345678"})
+    await adapter._load_runtime_for_model("KittenML/kitten-tts-mini-0.8")
+    await adapter._load_runtime_for_model("KittenML/kitten-tts-nano-0.8-fp32")
+
+    assert downloads[-1] == ("KittenML/kitten-tts-nano-0.8-fp32", "deadbeef12345678")

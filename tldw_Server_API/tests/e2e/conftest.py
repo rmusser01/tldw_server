@@ -224,10 +224,13 @@ def _ensure_inprocess_admin_bearer(disable_rate_limiting, _ensure_inprocess_sing
     api_client = APIClient()
     try:
         try:
-            health = api_client.health_check()
+            liveness = api_client.client.get("/health")
+            liveness.raise_for_status()
+            if liveness.json() != {"status": "ok"}:
+                raise RuntimeError("public liveness response did not match the minimal contract")
         except Exception as exc:
             pytest.fail(f"❌ Failed to initialize in-process API for admin token minting: {exc}")
-        auth_mode = str(health.get("auth_mode") or os.getenv("AUTH_MODE", "")).lower()
+        auth_mode = str(os.getenv("AUTH_MODE", "")).lower()
         if auth_mode not in {"multi_user", "multi-user", "multiuser"}:
             yield
             return

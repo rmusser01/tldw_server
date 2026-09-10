@@ -40,15 +40,13 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_engine import (
     ClaimsEngine,
     ClaimVerification,
 )
-from tldw_Server_API.app.core.RAG.rag_service.types import (
-    Document,
-    VerificationStatus,
-)
 from tldw_Server_API.app.core.Claims_Extraction.falsification import (
     FalsificationDecision,
     should_trigger_falsification,
 )
-
+from tldw_Server_API.app.core.RAG.rag_service.types import (
+    Document,
+)
 
 # Metrics integration - graceful fallback if not available
 try:
@@ -298,8 +296,6 @@ class FVAPipeline:
                                         "to_status": final_verification.status.value,
                                     },
                                 )
-                        else:
-                            increment_counter("fva_wasted_falsification_total")
 
                             # Record adjudication scores
                             observe_histogram(
@@ -317,6 +313,8 @@ class FVAPipeline:
                                 adjudication.contestation_score,
                                 labels={"score_type": "contestation"},
                             )
+                        else:
+                            increment_counter("fva_wasted_falsification_total")
 
                     except asyncio.TimeoutError:
                         logger.warning(

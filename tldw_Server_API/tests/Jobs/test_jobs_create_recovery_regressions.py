@@ -54,6 +54,7 @@ class _RecoveryCursor:
                     "trace_id": None,
                     "effective_retry_count": 0,
                     "effective_max_retries": 3,
+                    "effective_expired_lease_policy": "consume_retry",
                 },
                 {
                     "id": 2,
@@ -66,6 +67,7 @@ class _RecoveryCursor:
                     "trace_id": None,
                     "effective_retry_count": 0,
                     "effective_max_retries": 3,
+                    "effective_expired_lease_policy": "consume_retry",
                 },
                 {
                     "id": 3,
@@ -78,6 +80,7 @@ class _RecoveryCursor:
                     "trace_id": None,
                     "effective_retry_count": 0,
                     "effective_max_retries": 3,
+                    "effective_expired_lease_policy": "consume_retry",
                 },
             ]
             return

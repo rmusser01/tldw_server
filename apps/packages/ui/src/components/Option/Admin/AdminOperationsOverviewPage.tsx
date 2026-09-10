@@ -1,152 +1,252 @@
 import React from "react"
-import {
-  getOperationsRouteJob,
-  type OperationsRouteJob
-} from "@/routes/operations-route-jobs"
 import { PageShell } from "@/components/Common/PageShell"
+import { useConnectionState } from "@/hooks/useConnectionState"
+import {
+  ADMIN_MODULE_GROUPS,
+  ADMIN_MODULES,
+  type AdminModuleGroup
+} from "./admin-modules"
+import {
+  loadAdminModuleSignals,
+  type AdminModuleSignal
+} from "./admin-module-signals"
+import {
+  loadAdminFirstSteps,
+  type AdminFirstStep
+} from "./admin-first-steps"
 
-type AdminOverviewModule = {
-  route: string
-  fallbackLabel: string
-  summary: string
-  status: "Route ready" | "Needs module configuration"
-  statusDescription: string
+const groupedModules = ADMIN_MODULE_GROUPS.map((group: AdminModuleGroup) => ({
+  group,
+  modules: ADMIN_MODULES.filter((module) => module.group === group)
+})).filter((entry) => entry.modules.length > 0)
+
+const SIGNAL_DOT_COLOR: Record<AdminModuleSignal["state"], string> = {
+  healthy: "var(--state-ready, #2f9e6e)",
+  attention: "var(--state-degraded, #d98324)",
+  unavailable: "var(--state-unavailable, #8a8fa3)",
+  // "off" is a deliberate state (module not configured), quieter than an
+  // outage so it never reads as something to fix (#2894).
+  off: "var(--state-off, #5c6170)"
 }
 
-const ADMIN_MODULES: AdminOverviewModule[] = [
-  {
-    route: "/admin/server",
-    fallbackLabel: "Server Admin",
-    summary: "Server health, users, roles, storage, sessions, and media budget diagnostics.",
-    status: "Route ready",
-    statusDescription: "Open the module to load live server health and user data."
-  },
-  {
-    route: "/admin/integrations",
-    fallbackLabel: "Workspace Integrations",
-    summary: "Workspace integration policy for Slack, Discord, Telegram, and linked actors.",
-    status: "Route ready",
-    statusDescription: "Open the module to load workspace policy and provider state."
-  },
-  {
-    route: "/admin/sources",
-    fallbackLabel: "Admin Sources",
-    summary: "Administrative view of ingestion source availability, sync state, and setup.",
-    status: "Route ready",
-    statusDescription: "Open the module to load source capability and sync state."
-  },
-  {
-    route: "/admin/monitoring",
-    fallbackLabel: "Monitoring",
-    summary: "Monitoring metrics, alerts, runtime diagnostics, and operations telemetry.",
-    status: "Route ready",
-    statusDescription: "Open the module to load metrics, alerts, and diagnostic state."
-  }
-]
-
-const labelForJob = (
-  job: OperationsRouteJob | undefined,
-  fallbackLabel: string
-): string => job?.label ?? fallbackLabel
-
-const ModuleDiagnostics: React.FC<{
-  job: OperationsRouteJob | undefined
-  module: AdminOverviewModule
-}> = ({ job, module }) => {
+const ModuleSignalBadge: React.FC<{
+  signal: AdminModuleSignal | undefined
+  route: string
+}> = ({ signal, route }) => {
+  if (!signal) return null
   return (
-    <details className="mt-4 rounded-md border border-border bg-surface2 px-3 py-2 text-xs text-text-muted">
-      <summary className="cursor-pointer font-medium text-text">Diagnostics</summary>
-      <dl className="mt-3 grid gap-2">
-        <div>
-          <dt className="font-semibold text-text-muted">Route</dt>
-          <dd>
-            <code className="rounded bg-surface px-1 py-0.5">{module.route}</code>
-          </dd>
-        </div>
-        <div>
-          <dt className="font-semibold text-text-muted">Capability source</dt>
-          <dd>{job?.capabilityMode ?? "frontend_state"}</dd>
-        </div>
-        <div>
-          <dt className="font-semibold text-text-muted">Owner</dt>
-          <dd>{job?.implementationOwner ?? "shared_route"}</dd>
-        </div>
-      </dl>
-    </details>
+    <p
+      className="mt-2 flex items-center gap-1.5 text-xs text-text-muted"
+      data-testid="admin-module-signal"
+    >
+      <span
+        aria-hidden="true"
+        className="inline-block h-2 w-2 shrink-0 rounded-full"
+        style={{ backgroundColor: SIGNAL_DOT_COLOR[signal.state] }}
+      />
+      {/* The status is the reason to visit the module - make it the link. */}
+      <a className="hover:text-text hover:underline" href={route}>
+        {signal.detail}
+      </a>
+    </p>
   )
 }
 
 export const AdminOperationsOverviewPage: React.FC = () => {
-  const adminJob = getOperationsRouteJob("/admin")
+  const [signals, setSignals] = React.useState<
+    Record<string, AdminModuleSignal>
+  >({})
+  const { serverUrl } = useConnectionState()
+  const [firstSteps, setFirstSteps] = React.useState<AdminFirstStep[]>([])
+  // Dismissal is scoped per server, like the resume-setup banner: a new
+  // connection gets its own first-session checklist.
+  const firstStepsDismissKey = `__tldw_admin_first_steps_dismissed::${
+    serverUrl || "unconfigured"
+  }`
+  const [dismissedKeys, setDismissedKeys] = React.useState<ReadonlySet<string>>(
+    () => new Set()
+  )
+  const firstStepsDismissed = React.useMemo(() => {
+    if (dismissedKeys.has(firstStepsDismissKey)) return true
+    if (typeof window === "undefined") return false
+    try {
+      return window.localStorage.getItem(firstStepsDismissKey) === "1"
+    } catch {
+      // Best-effort frontend-only state: blocked storage (private mode,
+      // partitioned iframes) degrades to showing the checklist again, which
+      // is the safe direction for a dismissible hint.
+      return false
+    }
+  }, [firstStepsDismissKey, dismissedKeys])
+  const dismissFirstSteps = () => {
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem(firstStepsDismissKey, "1")
+      } catch {
+        // Dismissal is best-effort frontend-only state.
+      }
+    }
+    setDismissedKeys((prev) => new Set(prev).add(firstStepsDismissKey))
+  }
+
+  // Reload signals and checklist whenever the connection target changes -
+  // an overview kept mounted across a server switch must not show the old
+  // server's results, and late-arriving responses from the previous server
+  // are dropped via the cancelled guard.
+  React.useEffect(() => {
+    let cancelled = false
+    setSignals({})
+    setFirstSteps([])
+    if (!serverUrl) return
+    void loadAdminModuleSignals().then((loaded) => {
+      if (!cancelled) setSignals(loaded)
+    })
+    void loadAdminFirstSteps().then((steps) => {
+      if (!cancelled) setFirstSteps(steps)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [serverUrl])
+
+  // The card earns its place only while something is left to do; a finished
+  // (or dismissed, or unconnected) checklist renders nothing.
+  const showFirstSteps =
+    Boolean(serverUrl) &&
+    !firstStepsDismissed &&
+    firstSteps.some((step) => !step.done)
 
   return (
     <PageShell maxWidthClassName="max-w-6xl" className="py-8">
+      {!serverUrl ? (
+        <div
+          role="status"
+          data-testid="admin-not-connected-banner"
+          className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface px-4 py-3"
+        >
+          <p className="m-0 text-sm text-text">
+            Not connected to a tldw server, so module signals are unavailable.
+            Connect to a server to administer it.
+          </p>
+          <a
+            className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primaryStrong"
+            href="/setup"
+          >
+            Connect
+          </a>
+        </div>
+      ) : null}
       <header className="space-y-3">
         <p className="text-sm font-semibold uppercase tracking-wide text-text-muted">
           Admin
         </p>
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h1 className="text-3xl font-semibold text-text">Admin Operations</h1>
-            <p className="mt-2 max-w-3xl text-sm text-text-muted">
-              Review the available admin modules before opening a drill-down page.
-              Live health, users, policies, sources, and monitoring data load inside
-              each module.
-            </p>
-          </div>
-          <a
-            href="/admin/server"
-            className="inline-flex w-fit rounded-md bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primaryStrong"
-          >
-            Open server admin
-          </a>
+        <div>
+          <h1 className="text-3xl font-semibold text-text">Admin Operations</h1>
+          <p className="mt-2 max-w-3xl text-sm text-text-muted">
+            Everything you can administer on this server, in one place. Open a
+            module to load its live data.
+          </p>
         </div>
       </header>
 
-      <section
-        className="mt-8 grid gap-4 md:grid-cols-2"
-        data-testid="admin-operations-modules"
-      >
-        {ADMIN_MODULES.map((module) => {
-          const job = getOperationsRouteJob(module.route)
-          const label = labelForJob(job, module.fallbackLabel)
-
-          return (
-            <article
-              key={module.route}
-              className="rounded-lg border border-border bg-surface p-5 shadow-sm"
-              data-testid={`admin-module-${module.route}`}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-semibold text-text">
-                    <a className="hover:text-primary" href={module.route}>
-                      {label}
-                    </a>
-                  </h2>
-                  <p className="mt-2 text-sm text-text-muted">{module.summary}</p>
-                </div>
-                <span className="shrink-0 rounded-full border border-border bg-surface2 px-2 py-1 text-xs font-medium text-text">
-                  {module.status}
-                </span>
-              </div>
-
-              <p className="mt-4 text-sm text-text-muted">
-                {module.statusDescription}
+      {showFirstSteps ? (
+        <section
+          aria-labelledby="admin-first-steps-title"
+          data-testid="admin-first-steps"
+          className="mt-6 rounded-lg border border-border bg-surface p-4 shadow-sm"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2
+                id="admin-first-steps-title"
+                className="text-sm font-semibold uppercase tracking-wide text-text-muted"
+              >
+                First steps
+              </h2>
+              <p className="mt-1 text-sm text-text-muted">
+                A few one-time setups most servers want before day-to-day
+                operation.
               </p>
+            </div>
+            <button
+              type="button"
+              className="rounded-md px-2.5 py-1 text-sm text-text-muted hover:bg-surface2"
+              onClick={dismissFirstSteps}
+            >
+              Dismiss
+            </button>
+          </div>
+          <ul className="mt-3 space-y-1.5">
+            {firstSteps.map((step) => (
+              <li
+                key={step.key}
+                className="flex items-center gap-2 text-sm"
+                data-testid={`admin-first-step-${step.key}`}
+              >
+                <span
+                  aria-hidden="true"
+                  className={
+                    step.done
+                      ? "text-[color:var(--state-ready,#2f9e6e)]"
+                      : "text-text-muted"
+                  }
+                >
+                  {step.done ? "☑" : "☐"}
+                </span>
+                {step.done ? (
+                  <span className="text-text-muted line-through">
+                    {step.label}
+                  </span>
+                ) : (
+                  <a className="text-text hover:underline" href={step.route}>
+                    {step.label}
+                  </a>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
-              <ModuleDiagnostics job={job} module={module} />
-            </article>
-          )
-        })}
-      </section>
-
-      <section className="mt-6 rounded-lg border border-border bg-surface p-4 text-sm text-text-muted">
-        <p>
-          {adminJob?.primaryJob ??
-            "Review operations status and choose an admin module."}
-        </p>
-      </section>
+      <div className="mt-8 space-y-8" data-testid="admin-operations-modules">
+        {groupedModules.map(({ group, modules }) => (
+          <section key={group} aria-labelledby={`admin-group-${group}`}>
+            <h2
+              id={`admin-group-${group}`}
+              className="text-sm font-semibold uppercase tracking-wide text-text-muted"
+            >
+              {group}
+            </h2>
+            <div className="mt-3 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {modules.map((module) => (
+                <article
+                  key={module.route}
+                  className="rounded-lg border border-border bg-surface p-4 shadow-sm"
+                  data-testid={`admin-module-${module.route}`}
+                >
+                  <h3 className="text-base font-semibold text-text">
+                    <a className="hover:text-primary" href={module.route}>
+                      {module.label}
+                    </a>
+                    {module.comingSoon ? (
+                      <span className="ml-2 rounded-full border border-border px-2 py-0.5 align-middle text-[10px] font-medium uppercase tracking-wide text-text-muted">
+                        Coming soon
+                      </span>
+                    ) : null}
+                  </h3>
+                  <p className="mt-1.5 text-sm text-text-muted">
+                    {module.description}
+                  </p>
+                  <ModuleSignalBadge
+                    signal={signals[module.route]}
+                    route={module.route}
+                  />
+                </article>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
     </PageShell>
   )
 }

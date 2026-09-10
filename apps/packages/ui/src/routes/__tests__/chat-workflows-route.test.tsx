@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
+import { getRouteMetadata } from "../route-metadata"
 
 const routeRegistryPathCandidates = [
   "src/routes/route-registry.tsx",
@@ -23,8 +24,9 @@ describe("chat workflows route wiring", () => {
     expect(routeRegistrySource).toMatch(
       /const OptionChatWorkflows = lazy\(\(\) => import\("\.\/option-chat-workflows"\)\)/
     )
-    expect(routeRegistrySource).toMatch(
-      /(?=.*path:\s*"\/chat-workflows")(?=.*group:\s*"workspace")(?=.*labelToken:\s*"option:header.chatWorkflows")(?=.*order:\s*10\.5)/s
-    )
+    const metadata = getRouteMetadata("/chat-workflows")
+    expect(metadata?.label).toBe("Chat Workflows")
+    expect(metadata?.group).toBe("chat")
+    expect(metadata?.surface).toBe("advanced_self_hosted")
   })
 })

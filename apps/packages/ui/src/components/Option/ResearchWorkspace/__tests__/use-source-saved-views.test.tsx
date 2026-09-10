@@ -89,10 +89,16 @@ const setup = (
   workspaceId: string | null = "ws-a",
   state = localState(),
   onApplyState = vi.fn(),
+  workspaceExists = true,
 ) =>
   renderHook(
     ({ workspaceId, state }) =>
-      useSourceSavedViews(workspaceId, state, onApplyState),
+      useSourceSavedViews(
+        workspaceId,
+        workspaceExists,
+        state,
+        onApplyState,
+      ),
     { initialProps: { workspaceId, state } },
   );
 
@@ -111,6 +117,54 @@ describe("useSourceSavedViews", () => {
     expect(api.listWorkspaceSourceViews).not.toHaveBeenCalled();
   });
 
+  it("waits for matching server workspace readiness before listing saved views", async () => {
+    const { result, rerender } = renderHook(
+      ({ workspaceExists }) =>
+        useSourceSavedViews(
+          "workspace-new",
+          workspaceExists,
+          localState(),
+          vi.fn(),
+        ),
+      { initialProps: { workspaceExists: false } },
+    );
+
+    expect(result.current.available).toBe(false);
+    expect(api.listWorkspaceSourceViews).not.toHaveBeenCalled();
+
+    rerender({ workspaceExists: true });
+
+    await waitFor(() =>
+      expect(api.listWorkspaceSourceViews).toHaveBeenCalledWith(
+        "workspace-new",
+      ),
+    );
+    expect(result.current.available).toBe(true);
+  });
+
+  it("blocks saved-view mutations while the server workspace is not ready", async () => {
+    const onApplyState = vi.fn();
+    const { result } = setup("workspace-new", localState(), onApplyState, false);
+    const view = validView({ workspace_id: "workspace-new" });
+
+    await act(async () => {
+      result.current.applyView(view);
+      await result.current.createView("Blocked create");
+      await result.current.replaceView(view);
+      await result.current.resetView(view);
+      await result.current.deleteView(view);
+      await result.current.retry();
+      await result.current.retryMutation();
+      await result.current.retryVersionConflict();
+    });
+
+    expect(onApplyState).not.toHaveBeenCalled();
+    expect(api.listWorkspaceSourceViews).not.toHaveBeenCalled();
+    expect(api.createWorkspaceSourceView).not.toHaveBeenCalled();
+    expect(api.updateWorkspaceSourceView).not.toHaveBeenCalled();
+    expect(api.deleteWorkspaceSourceView).not.toHaveBeenCalled();
+  });
+
   it("does not let an abandoned workspace render invalidate committed requests", async () => {
     const listA = deferred<{ items: ReturnType<typeof validView>[] }>();
     const never = new Promise<void>(() => undefined);
@@ -118,7 +172,12 @@ describe("useSourceSavedViews", () => {
     api.listWorkspaceSourceViews.mockReturnValue(listA.promise);
 
     const Harness = ({ workspaceId, suspend }: { workspaceId: string; suspend: boolean }) => {
-      const controller = useSourceSavedViews(workspaceId, localState(), vi.fn());
+      const controller = useSourceSavedViews(
+        workspaceId,
+        true,
+        localState(),
+        vi.fn(),
+      );
       if (workspaceId === "ws-b" && suspend) {
         throw never;
       }
@@ -164,7 +223,7 @@ describe("useSourceSavedViews", () => {
     api.listWorkspaceSourceViews.mockResolvedValue({ items: [validView()] });
     const { result, rerender } = renderHook(
       ({ workspaceId }) =>
-        useSourceSavedViews(workspaceId, localState(), vi.fn()),
+        useSourceSavedViews(workspaceId, true, localState(), vi.fn()),
       {
         initialProps: { workspaceId: "ws-a" },
         wrapper: StrictModeWrapper,

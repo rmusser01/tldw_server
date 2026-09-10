@@ -9,11 +9,10 @@ import importlib
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
+from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from tldw_Server_API.app.core.AuthNZ.settings import reset_settings, get_settings
-from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
-
 
 pytestmark = pytest.mark.integration
 
@@ -37,7 +36,7 @@ def client_with_graph_db(tmp_path, monkeypatch):
 
     # Real temp ChaChaNotes DB
     db_path = tmp_path / "graph_edges.db"
-    db = CharactersRAGDB(str(db_path), client_id="integration_user")
+    db = CharactersRAGDB(str(db_path), client_id="1")
 
     async def override_user():
         return User(
@@ -50,8 +49,8 @@ def client_with_graph_db(tmp_path, monkeypatch):
         )
 
     # Inject per-user DB via dependency override
-    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
     from tldw_Server_API.app import main as app_main
+    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 
     def override_db_dep():
 
@@ -190,3 +189,151 @@ def test_self_loop_rejected(client_with_graph_db: TestClient):
     resp = client.post(f"/api/v1/notes/{nid}/links", json={"to_note_id": nid, "directed": False}, headers=headers)
     assert resp.status_code == 400
     assert "self" in resp.json().get("detail", "").lower()
+
+
+def test_inactive_link_lifecycle_and_legacy_metadata_label(client_with_graph_db: TestClient):
+    client = client_with_graph_db
+    token = _make_token(scope="notes")
+    headers = {"Authorization": f"Bearer {token}"}
+    source = client.post(
+        "/api/v1/notes/",
+        json={"title": "Lifecycle source", "content": "A"},
+        headers=headers,
+    ).json()["id"]
+    target = client.post(
+        "/api/v1/notes/",
+        json={"title": "Lifecycle target", "content": "B"},
+        headers=headers,
+    ).json()["id"]
+
+    created_response = client.post(
+        f"/api/v1/notes/{source}/links",
+        json={
+            "to_note_id": target,
+            "metadata": {"label": "related", "origin": "legacy"},
+        },
+        headers=headers,
+    )
+    assert created_response.status_code == 200, created_response.text
+    created = created_response.json()["edge"]
+    edge_id = created["edge_id"]
+    assert created["label"] == "related"
+    assert created["properties"] == {"origin": "legacy"}
+
+    detail = client.get(f"/api/v1/notes/links/{edge_id}", headers=headers)
+    listing = client.get("/api/v1/notes/links", headers=headers)
+    assert detail.status_code == 200 and detail.json()["version"] == 1
+    assert [item["edge_id"] for item in listing.json()["links"]] == [edge_id]
+
+    updated_response = client.patch(
+        f"/api/v1/notes/links/{edge_id}",
+        json={"weight": 2.0, "metadata": {"label": "strong", "rank": 2}},
+        headers=headers,
+    )
+    assert updated_response.status_code == 200, updated_response.text
+    assert updated_response.json()["version"] == 2
+    assert updated_response.json()["label"] == "strong"
+
+    deleted = client.delete(f"/api/v1/notes/links/{edge_id}", headers=headers)
+    assert deleted.status_code == 200 and deleted.json()["deleted"] is True
+    tombstone = client.get(f"/api/v1/notes/links/{edge_id}", headers=headers).json()
+    assert tombstone["deleted"] is True and tombstone["version"] == 3
+
+    restored = client.post(
+        f"/api/v1/notes/links/{edge_id}/restore",
+        json={},
+        headers=headers,
+    )
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["edge"]["deleted"] is False
+    assert restored.json()["edge"]["version"] == 4
+
+
+def test_link_listing_is_keyset_paginated_and_uses_bounded_summaries(
+    client_with_graph_db: TestClient,
+) -> None:
+    client = client_with_graph_db
+    token = _make_token(scope="notes")
+    headers = {"Authorization": f"Bearer {token}"}
+    note_ids = [
+        client.post(
+            "/api/v1/notes/",
+            json={"title": f"Page {index}", "content": "plain"},
+            headers=headers,
+        ).json()["id"]
+        for index in range(3)
+    ]
+    for target in note_ids[1:]:
+        response = client.post(
+            f"/api/v1/notes/{note_ids[0]}/links",
+            json={"to_note_id": target, "properties": {"private": "detail-only"}},
+            headers=headers,
+        )
+        assert response.status_code == 200, response.text
+
+    first = client.get("/api/v1/notes/links", params={"limit": 1}, headers=headers)
+    assert first.status_code == 200, first.text
+    first_payload = first.json()
+    assert len(first_payload["links"]) == 1
+    assert first_payload["has_more"] is True
+    assert first_payload["next_cursor"]
+    assert "properties" not in first_payload["links"][0]
+    assert "metadata" not in first_payload["links"][0]
+
+    second = client.get(
+        "/api/v1/notes/links",
+        params={"limit": 1, "cursor": first_payload["next_cursor"]},
+        headers=headers,
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["links"][0]["edge_id"] != first_payload["links"][0]["edge_id"]
+
+
+def test_orphans_endpoint_ignores_tag_membership_and_is_keyset_paginated(
+    client_with_graph_db: TestClient,
+) -> None:
+    client = client_with_graph_db
+    token = _make_token(scope="notes")
+    headers = {"Authorization": f"Bearer {token}"}
+    first = client.post(
+        "/api/v1/notes/",
+        json={"title": "Orphan A", "content": "plain"},
+        headers=headers,
+    ).json()["id"]
+    second = client.post(
+        "/api/v1/notes/",
+        json={"title": "Orphan B", "content": "plain"},
+        headers=headers,
+    ).json()["id"]
+    keyword_response = client.post(
+        "/api/v1/notes/keywords/",
+        json={"keyword": "orphan-tag"},
+        headers=headers,
+    )
+    assert keyword_response.status_code == 201, keyword_response.text
+    keyword_id = keyword_response.json()["id"]
+    tag_response = client.post(
+        f"/api/v1/notes/{first}/keywords/{keyword_id}",
+        headers=headers,
+    )
+    assert tag_response.status_code == 200, tag_response.text
+
+    page_one = client.get(
+        "/api/v1/notes/graph/orphans",
+        params={"limit": 1},
+        headers=headers,
+    )
+    assert page_one.status_code == 200, page_one.text
+    payload = page_one.json()
+    assert len(payload["notes"]) == 1
+    assert payload["has_more"] is True
+    assert payload["next_cursor"]
+
+    page_two = client.get(
+        "/api/v1/notes/graph/orphans",
+        params={"limit": 1, "cursor": payload["next_cursor"]},
+        headers=headers,
+    )
+    assert page_two.status_code == 200, page_two.text
+    returned = {payload["notes"][0]["id"], page_two.json()["notes"][0]["id"]}
+    assert returned == {first, second}

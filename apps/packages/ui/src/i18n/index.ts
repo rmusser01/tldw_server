@@ -68,11 +68,9 @@ const normalizeLanguage = (lng: string) => {
     return "en"
 }
 
-// import.meta.glob is Vite-only; use empty object in Next.js/non-Vite environments
+// Vite replaces this literal call with the packaged locale loader map.
 const localeModules: Record<string, () => Promise<unknown>> =
-    typeof import.meta.glob === "function"
-        ? import.meta.glob("../assets/locale/*/*.json")
-        : {}
+    import.meta.glob("../assets/locale/*/*.json")
 const loadingNamespaces = new Map<string, Promise<void>>()
 
 const resolveLocalePath = (lng: string, ns: Namespace) =>

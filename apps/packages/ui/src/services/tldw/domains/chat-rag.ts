@@ -10,6 +10,10 @@ import { normalizeChatRole } from '@/utils/normalize-chat-role'
 import { parseRagStreamLine } from '@/services/rag/stream-contract'
 import { sanitizeRagProviderFailure } from '@/services/rag/provider-error-contract'
 import { DEFAULT_RAG_SETTINGS } from '@/services/rag/unified-rag'
+import {
+  requestScopeFields,
+  type ServicePromptRequestScope
+} from './service-prompts'
 import type {
   ChatCompletionRequestOptions,
   ChatCompletionStreamOptions,
@@ -25,6 +29,7 @@ import type {
   OpenWebUIHydrationRequest,
   WorldBookProcessResponse,
 } from '../TldwApiClient'
+import { isRequestConfigScopeChangedError } from '../service-prompt-scope-error'
 
 const CHAT_MESSAGES_CACHE_TTL_MS = 60 * 1000
 
@@ -392,13 +397,17 @@ export const chatRagMethods = {
       body: request,
       metadata: options?.debugMetadata
     })
+    const scopeFields = requestScopeFields(options?.requestScope)
     const res = await bgRequest<Response>({
       path: '/api/v1/chat/completions',
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...scopeFields.headers },
       body: request,
       timeoutMs: options?.timeoutMs,
-      abortSignal: options?.signal
+      abortSignal: options?.signal,
+      ...(scopeFields.servicePromptConfig
+        ? { servicePromptConfig: scopeFields.servicePromptConfig }
+        : {})
     })
     // bgRequest returns parsed data; for non-streaming chat we expect a JSON structure or text. To keep existing consumers happy, wrap as Response-like
     // For simplicity, return a minimal object with json() and text()
@@ -419,7 +428,21 @@ export const chatRagMethods = {
       body: request,
       metadata: options?.debugMetadata
     })
-    for await (const line of bgStream({ path: '/api/v1/chat/completions', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: request, abortSignal: options?.signal, streamIdleTimeoutMs: options?.streamIdleTimeoutMs })) {
+    const scopeFields = requestScopeFields(options?.requestScope)
+    for await (const line of bgStream({
+      path: '/api/v1/chat/completions',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...scopeFields.headers
+      },
+      body: request,
+      abortSignal: options?.signal,
+      streamIdleTimeoutMs: options?.streamIdleTimeoutMs,
+      ...(scopeFields.servicePromptConfig
+        ? { servicePromptConfig: scopeFields.servicePromptConfig }
+        : {})
+    })) {
       try {
         const parsed = JSON.parse(line)
         yield parsed
@@ -446,20 +469,46 @@ export const chatRagMethods = {
   },
 
   async ragSearch(this: TldwApiClientCore, query: string, options?: any): Promise<any> {
-    const { timeoutMs, signal, ...rest } = options || {}
+    const {
+      timeoutMs,
+      signal,
+      requestScope,
+      ...rest
+    }: {
+      timeoutMs?: number
+      signal?: AbortSignal
+      requestScope?: ServicePromptRequestScope
+      [key: string]: unknown
+    } = options || {}
     const normalizedQuery = this.normalizeRagQuery(query)
     const body = buildSanitizedRagRequestBody(normalizedQuery, rest)
+    const scopeFields = requestScopeFields(requestScope)
     try {
-      return await this.requestWithCurrentConfig<any>({
-        path: '/api/v1/rag/search',
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body,
-        timeoutMs,
-        abortSignal: signal,
-        sanitizeRagProviderError: true
-      })
+      return await (requestScope
+        ? bgRequest<any>({
+          path: '/api/v1/rag/search',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...scopeFields.headers
+          },
+          body,
+          timeoutMs,
+          abortSignal: signal,
+          servicePromptConfig: scopeFields.servicePromptConfig,
+          sanitizeRagProviderError: true
+        })
+        : this.requestWithCurrentConfig<any>({
+          path: '/api/v1/rag/search',
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+          timeoutMs,
+          abortSignal: signal,
+          sanitizeRagProviderError: true
+        }))
     } catch (error) {
+      if (isRequestConfigScopeChangedError(error)) throw error
       const message = error instanceof Error ? error.message : String(error ?? '')
       const aborted =
         (error as { name?: string } | null)?.name === 'AbortError' ||
@@ -501,14 +550,31 @@ export const chatRagMethods = {
 
   // Research / Web search
   async webSearch(this: TldwApiClientCore, options: any): Promise<any> {
-    const { timeoutMs, signal, ...rest } = options || {}
+    const {
+      timeoutMs,
+      signal,
+      requestScope,
+      ...rest
+    }: {
+      timeoutMs?: number
+      signal?: AbortSignal
+      requestScope?: ServicePromptRequestScope
+      [key: string]: unknown
+    } = options || {}
+    const scopeFields = requestScopeFields(requestScope)
     return await bgRequest<any>({
       path: "/api/v1/research/websearch",
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...scopeFields.headers
+      },
       body: rest,
       timeoutMs,
-      abortSignal: signal
+      abortSignal: signal,
+      ...(scopeFields.servicePromptConfig
+        ? { servicePromptConfig: scopeFields.servicePromptConfig }
+        : {})
     })
   },
 
@@ -638,12 +704,25 @@ export const chatRagMethods = {
     }
   },
 
-  async createChat(this: TldwApiClientCore, payload: Record<string, any>, options?: { scope?: ChatScope }): Promise<ServerChatSummary> {
-    const res = await this.requestWithCurrentConfig<any>({
+  async createChat(
+    this: TldwApiClientCore,
+    payload: Record<string, any>,
+    options?: {
+      scope?: ChatScope
+      signal?: AbortSignal
+      requestScope?: ServicePromptRequestScope
+    }
+  ): Promise<ServerChatSummary> {
+    const scopeFields = requestScopeFields(options?.requestScope)
+    const res = await bgRequest<any>({
       path: "/api/v1/chats/",
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: { ...payload, ...toChatScopeParams(options?.scope) }
+      headers: { "Content-Type": "application/json", ...scopeFields.headers },
+      body: { ...payload, ...toChatScopeParams(options?.scope) },
+      abortSignal: options?.signal,
+      ...(scopeFields.servicePromptConfig
+        ? { servicePromptConfig: scopeFields.servicePromptConfig }
+        : {})
     })
     return this.normalizeChatSummary(res)
   },
@@ -1138,15 +1217,24 @@ export const chatRagMethods = {
     this: TldwApiClientCore,
     chat_id: string | number,
     payload: Record<string, any>,
-    options?: { scope?: ChatScope }
+    options?: {
+      scope?: ChatScope
+      signal?: AbortSignal
+      requestScope?: ServicePromptRequestScope
+    }
   ): Promise<ServerChatMessage> {
     const cid = String(chat_id)
     const query = buildQuery(toChatScopeParams(options?.scope))
+    const scopeFields = requestScopeFields(options?.requestScope)
     const res = await bgRequest<ServerChatMessage>({
       path: appendPathQuery(`/api/v1/chats/${cid}/messages`, query),
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payload
+      headers: { "Content-Type": "application/json", ...scopeFields.headers },
+      body: payload,
+      abortSignal: options?.signal,
+      ...(scopeFields.servicePromptConfig
+        ? { servicePromptConfig: scopeFields.servicePromptConfig }
+        : {})
     })
     this.invalidateChatMessagesCache(cid)
     return res

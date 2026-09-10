@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 from fastapi import HTTPException
+from loguru import logger
 from starlette.requests import Request
 
 import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_endpoint
@@ -103,6 +104,7 @@ async def test_authenticated_convenience_endpoint_passes_one_real_runtime_and_cl
 ) -> None:
     runtime = _CountingRuntime()
     captured: list[ProviderCredentialRuntime] = []
+    logs: list[str] = []
     _install_endpoint_fakes(monkeypatch, runtime)
 
     async def provider_boundary(*_args: Any, **kwargs: Any) -> Any:
@@ -116,26 +118,33 @@ async def test_authenticated_convenience_endpoint_passes_one_real_runtime_and_cl
 
     monkeypatch.setattr(rag_endpoint, f"{endpoint_name}_search", provider_boundary)
 
-    if endpoint_name == "simple":
-        response = await rag_endpoint.simple_search_endpoint(
-            request=_request("/api/v1/rag/simple"),
-            query="credential runtime",
-            current_user=_user(),
-            media_db=_db("media.db"),
-            chacha_db=_db("notes.db"),
-        )
-    else:
-        response = await rag_endpoint.advanced_search_endpoint(
-            request=_request("/api/v1/rag/advanced"),
-            query="credential runtime",
-            current_user=_user(),
-            media_db=_db("media.db"),
-            chacha_db=_db("notes.db"),
-        )
+    sink_id = logger.add(logs.append, format="{message}")
+    try:
+        if endpoint_name == "simple":
+            response = await rag_endpoint.simple_search_endpoint(
+                request=_request("/api/v1/rag/simple"),
+                query="credential runtime",
+                current_user=_user(),
+                media_db=_db("media.db"),
+                chacha_db=_db("notes.db"),
+            )
+        else:
+            response = await rag_endpoint.advanced_search_endpoint(
+                request=_request("/api/v1/rag/advanced"),
+                query="credential runtime",
+                current_user=_user(),
+                media_db=_db("media.db"),
+                chacha_db=_db("notes.db"),
+            )
+    finally:
+        logger.remove(sink_id)
 
     assert captured == [runtime]  # nosec B101
     assert runtime.close_calls == 1  # nosec B101
     assert _SENTINEL not in repr(response)  # nosec B101
+    rendered_logs = "".join(logs)
+    assert "credential runtime" not in rendered_logs  # nosec B101
+    assert "query_len=18" in rendered_logs  # nosec B101
 
 
 @pytest.mark.asyncio

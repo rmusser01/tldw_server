@@ -2,16 +2,32 @@
 
 import contextlib
 import json
-from collections.abc import Iterator
-from typing import Any, Protocol
+from collections.abc import Iterator, Sequence
+from typing import TYPE_CHECKING, Any, Protocol
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.media_db import (
+    legacy_content_queries,
+    legacy_maintenance,
+    legacy_reads,
+    legacy_state,
+    legacy_wrappers,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.DB_Management.media_db.repositories import (
+    MAX_OPERATION_OWNED_CLONE_MEDIA,
+    CloneSnapshotRepository,
     DocumentVersionsRepository,
     KeywordsRepository,
     MediaRepository,
+    OperationOwnedMediaPublicationState,
+    OperationOwnedMediaReadiness,
+    OperationOwnedMediaReference,
+    OperationOwnedMediaResult,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.repositories import (
+    hash_media_clone_snapshot as _hash_media_clone_snapshot,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_lookup_repository import (
     MediaLookupRepository,
@@ -19,19 +35,14 @@ from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_lookup_r
 from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_search_repository import (
     MediaSearchRepository,
 )
-from tldw_Server_API.app.core.DB_Management.media_db import legacy_content_queries
-from tldw_Server_API.app.core.DB_Management.media_db import legacy_maintenance
-from tldw_Server_API.app.core.DB_Management.media_db import legacy_reads
-from tldw_Server_API.app.core.DB_Management.media_db import legacy_state
-from tldw_Server_API.app.core.DB_Management.media_db import legacy_wrappers
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.defaults import (
+    build_media_runtime_config,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.factory import (
     MediaDbRuntimeConfig,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.factory import (
     create_media_database as runtime_create_media_database,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.defaults import (
-    build_media_runtime_config,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.session import (
     MediaDbFactory,
@@ -46,6 +57,9 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import (
 from tldw_Server_API.app.core.DB_Management.media_db.services import (
     media_details_service,
 )
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.Sharing.clone_models import MediaCloneSnapshot
 
 
 class MediaWriterLike(Protocol):
@@ -177,6 +191,128 @@ def get_media_by_id(
     )
 
 
+def read_media_clone_snapshots(
+    db: MediaDbLike,
+    media_ids: Sequence[int],
+) -> dict[int, "MediaCloneSnapshot"]:
+    """Read cloneable Media rows through one repository-owned source snapshot."""
+    db_instance = unwrap_media_database_like(db)
+    if is_media_database_like(db_instance):
+        return CloneSnapshotRepository.from_legacy_db(db_instance).read(media_ids)
+    reader = _require_read_method(
+        db,
+        "read_media_clone_snapshots",
+        error_message="db must expose the Media DB clone snapshot read contract.",
+    )
+    return reader.read_media_clone_snapshots(media_ids)
+
+
+def read_operation_owned_clone_media_readiness(
+    db: MediaDbLike,
+    *,
+    operation_id: str,
+    items: Sequence[tuple[str, str]],
+) -> dict[str, OperationOwnedMediaReadiness]:
+    """Read canonical readiness for exact pending clone Media identities."""
+    db_instance = unwrap_media_database_like(db)
+    return CloneSnapshotRepository.from_legacy_db(
+        db_instance
+    ).read_operation_owned_clone_media_readiness(
+        operation_id=operation_id,
+        items=items,
+    )
+
+
+def read_operation_owned_clone_media_publication_state(
+    db: MediaDbLike,
+    *,
+    operation_id: str,
+    limit: int = 100,
+) -> OperationOwnedMediaPublicationState:
+    """Read durable pending/promoted clone Media publication proof."""
+    db_instance = unwrap_media_database_like(db)
+    return CloneSnapshotRepository.from_legacy_db(
+        db_instance
+    ).read_operation_owned_clone_media_publication_state(
+        operation_id=operation_id,
+        limit=limit,
+    )
+
+
+def hash_media_clone_snapshot(snapshot: "MediaCloneSnapshot") -> str:
+    """Return the repository-owned canonical content identity for a snapshot."""
+    return _hash_media_clone_snapshot(snapshot)
+
+
+def insert_operation_owned_clone_media(
+    db: MediaDbLike,
+    *,
+    snapshot: "MediaCloneSnapshot",
+    operation_id: str,
+    source_identity: str,
+    expected_content_hash: str,
+) -> OperationOwnedMediaResult:
+    """Insert or replay an isolated operation-owned Media clone snapshot."""
+    db_instance = unwrap_media_database_like(db)
+    return CloneSnapshotRepository.from_legacy_db(
+        db_instance
+    ).insert_operation_owned_clone_media(
+        snapshot=snapshot,
+        operation_id=operation_id,
+        source_identity=source_identity,
+        expected_content_hash=expected_content_hash,
+    )
+
+
+def delete_operation_owned_clone_media(
+    db: MediaDbLike,
+    *,
+    operation_id: str,
+    source_identity: str,
+    expected_content_hash: str,
+) -> int:
+    """Hard-delete the exact operation-owned Media clone graph."""
+    db_instance = unwrap_media_database_like(db)
+    return CloneSnapshotRepository.from_legacy_db(
+        db_instance
+    ).delete_operation_owned_clone_media(
+        operation_id=operation_id,
+        source_identity=source_identity,
+        expected_content_hash=expected_content_hash,
+    )
+
+
+def list_operation_owned_clone_media(
+    db: MediaDbLike,
+    *,
+    operation_id: str,
+    limit: int = 100,
+) -> list[OperationOwnedMediaReference]:
+    """Return bounded pending clone Media identities for one operation."""
+    db_instance = unwrap_media_database_like(db)
+    return CloneSnapshotRepository.from_legacy_db(
+        db_instance
+    ).list_operation_owned_clone_media(operation_id=operation_id, limit=limit)
+
+
+def confirm_operation_owned_clone_media(
+    db: MediaDbLike,
+    *,
+    operation_id: str,
+    source_identity: str,
+    expected_content_hash: str,
+) -> int:
+    """Activate and clear markers from one exact pending clone Media row."""
+    db_instance = unwrap_media_database_like(db)
+    return CloneSnapshotRepository.from_legacy_db(
+        db_instance
+    ).confirm_operation_owned_clone_media(
+        operation_id=operation_id,
+        source_identity=source_identity,
+        expected_content_hash=expected_content_hash,
+    )
+
+
 def get_media_status_by_id(
     db: MediaDbLike | MediaDbReadLike,
     media_id: int,
@@ -204,6 +340,35 @@ def get_media_status_by_id(
     )
 
 
+def get_media_source_projection(
+    db: MediaDbLike | MediaDbReadLike,
+    media_id: int,
+    *,
+    max_chars: int,
+    owner_user_id: str | None = None,
+) -> dict[str, Any] | None:
+    """Return a bounded active text projection for standalone Slides generation."""
+    db_instance = unwrap_media_database_like(db)
+    if is_media_database_like(db_instance):
+        return MediaLookupRepository.from_legacy_db(db_instance).source_projection_by_id(
+            media_id,
+            max_chars=max_chars,
+            owner_user_id=owner_user_id,
+        )
+    reader = _require_read_method(
+        db,
+        "get_media_source_projection",
+        error_message="db must expose the bounded Media DB source read contract.",
+    )
+    if owner_user_id is None:
+        return reader.get_media_source_projection(media_id, max_chars=max_chars)
+    return reader.get_media_source_projection(
+        media_id,
+        max_chars=max_chars,
+        owner_user_id=owner_user_id,
+    )
+
+
 def has_unvectorized_chunks(
     db: MediaDbLike | MediaDbReadLike,
     media_id: int,
@@ -213,7 +378,9 @@ def has_unvectorized_chunks(
     if is_media_database_like(db_instance):
         try:
             cursor = db_instance.execute_query(
-                "SELECT 1 FROM UnvectorizedMediaChunks WHERE media_id = ? AND deleted = 0 LIMIT 1",
+                "SELECT 1 FROM UnvectorizedMediaChunks c WHERE media_id = ? AND deleted = 0 "
+                "AND EXISTS (SELECT 1 FROM Media m WHERE m.id = c.media_id "
+                "AND m.system_operation_id IS NULL) LIMIT 1",
                 (media_id,),
             )
             return cursor.fetchone() is not None
@@ -591,7 +758,9 @@ def get_unvectorized_chunk_count(
         try:
             cursor = db_instance.execute_query(
                 "SELECT COUNT(*) AS chunk_count FROM UnvectorizedMediaChunks "
-                "WHERE media_id = ? AND deleted = 0",
+                "WHERE media_id = ? AND deleted = 0 AND EXISTS "
+                "(SELECT 1 FROM Media m WHERE m.id = UnvectorizedMediaChunks.media_id "
+                "AND m.system_operation_id IS NULL)",
                 (media_id_int,),
             )
             row = cursor.fetchone()
@@ -630,7 +799,9 @@ def get_unvectorized_max_chunk_index(
         try:
             cursor = db_instance.execute_query(
                 "SELECT MAX(chunk_index) AS max_chunk_index FROM UnvectorizedMediaChunks "
-                "WHERE media_id = ? AND deleted = 0",
+                "WHERE media_id = ? AND deleted = 0 AND EXISTS "
+                "(SELECT 1 FROM Media m WHERE m.id = UnvectorizedMediaChunks.media_id "
+                "AND m.system_operation_id IS NULL)",
                 (media_id_int,),
             )
             row = cursor.fetchone()
@@ -664,6 +835,9 @@ def get_unvectorized_anchor_index_for_offset(
                 FROM UnvectorizedMediaChunks
                 WHERE media_id = ? AND deleted = 0 AND start_char IS NOT NULL AND end_char IS NOT NULL
                   AND start_char <= ? AND end_char > ?
+                  AND EXISTS (SELECT 1 FROM Media m
+                              WHERE m.id = UnvectorizedMediaChunks.media_id
+                                AND m.system_operation_id IS NULL)
                 ORDER BY chunk_index ASC
                 LIMIT 1
                 """,
@@ -695,7 +869,9 @@ def get_unvectorized_chunk_index_by_uuid(
         try:
             cursor = db_instance.execute_query(
                 "SELECT chunk_index FROM UnvectorizedMediaChunks "
-                "WHERE media_id = ? AND uuid = ? AND deleted = 0",
+                "WHERE media_id = ? AND uuid = ? AND deleted = 0 AND EXISTS "
+                "(SELECT 1 FROM Media m WHERE m.id = UnvectorizedMediaChunks.media_id "
+                "AND m.system_operation_id IS NULL)",
                 (media_id, chunk_uuid),
             )
             row = cursor.fetchone()
@@ -727,6 +903,9 @@ def get_unvectorized_chunk_by_index(
                 SELECT chunk_index, chunk_text, start_char, end_char, chunk_type
                 FROM UnvectorizedMediaChunks
                 WHERE media_id = ? AND chunk_index = ? AND deleted = 0
+                  AND EXISTS (SELECT 1 FROM Media m
+                              WHERE m.id = UnvectorizedMediaChunks.media_id
+                                AND m.system_operation_id IS NULL)
                 ORDER BY id DESC
                 LIMIT 1
                 """,
@@ -762,6 +941,9 @@ def get_unvectorized_chunks_in_range(
                 SELECT chunk_index, uuid, chunk_text, start_char, end_char, chunk_type
                 FROM UnvectorizedMediaChunks
                 WHERE media_id = ? AND deleted = 0 AND chunk_index BETWEEN ? AND ?
+                  AND EXISTS (SELECT 1 FROM Media m
+                              WHERE m.id = UnvectorizedMediaChunks.media_id
+                                AND m.system_operation_id IS NULL)
                 ORDER BY chunk_index ASC
                 """,
                 (media_id, start_index, end_index),
@@ -1137,9 +1319,16 @@ __all__ = [
     "MediaDbSession",
     "MediaDbReadLike",
     "MediaWriterLike",
+    "MAX_OPERATION_OWNED_CLONE_MEDIA",
     "MediaRepository",
+    "OperationOwnedMediaReadiness",
+    "OperationOwnedMediaPublicationState",
+    "OperationOwnedMediaReference",
+    "OperationOwnedMediaResult",
+    "confirm_operation_owned_clone_media",
     "create_media_database",
     "create_document_version",
+    "delete_operation_owned_clone_media",
     "get_document_version",
     "get_all_document_versions",
     "get_full_media_details",
@@ -1169,11 +1358,18 @@ __all__ = [
     "fetch_all_keywords",
     "check_media_exists",
     "permanently_delete_item",
+    "read_media_clone_snapshots",
+    "read_operation_owned_clone_media_readiness",
+    "read_operation_owned_clone_media_publication_state",
     "get_media_by_id",
+    "get_media_source_projection",
     "get_media_status_by_id",
     "get_media_by_uuid",
     "managed_media_database",
     "get_media_repository",
+    "hash_media_clone_snapshot",
+    "insert_operation_owned_clone_media",
+    "list_operation_owned_clone_media",
     "list_document_versions",
     "search_media",
     "soft_delete_document_version",

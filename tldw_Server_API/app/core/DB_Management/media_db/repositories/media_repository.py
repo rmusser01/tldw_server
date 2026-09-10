@@ -42,7 +42,7 @@ class MediaRepository:
         self.session = session
 
     @classmethod
-    def from_legacy_db(cls, db: MediaDbLike) -> "MediaRepository":
+    def from_legacy_db(cls, db: MediaDbLike) -> MediaRepository:
         return cls(session=db)
 
     def add_media_with_keywords(
@@ -283,13 +283,15 @@ class MediaRepository:
                     if len(dedupe_url_candidates) == 1:
                         return _fetchone(
                             f"SELECT {select_columns} "  # nosec B608
-                            "FROM Media WHERE url = ? AND deleted = 0 LIMIT 1",
+                            "FROM Media WHERE url = ? AND deleted = 0 "
+                            "AND system_operation_id IS NULL LIMIT 1",
                             (dedupe_url_candidates[0],),
                         )
                     placeholders = ", ".join(["?"] * len(dedupe_url_candidates))
                     return _fetchone(
                         f"SELECT {select_columns} "  # nosec B608
                         f"FROM Media WHERE url IN ({placeholders}) AND deleted = 0 "
+                        "AND system_operation_id IS NULL "
                         "ORDER BY last_modified DESC, id DESC LIMIT 1",
                         tuple(dedupe_url_candidates),
                     )
@@ -303,13 +305,15 @@ class MediaRepository:
                         row = _fetchone(
                             "SELECT id, uuid, version, url, content_hash, source_hash, visibility, owner_user_id, org_id, team_id "
                             "FROM Media WHERE content_hash = ? AND deleted = 0 "
+                            "AND system_operation_id IS NULL "
                             "AND COALESCE(CAST(owner_user_id AS TEXT), client_id) = ? LIMIT 1",
                             (content_hash, owner_lookup_value),
                         )
                     else:
                         row = _fetchone(
                             "SELECT id, uuid, version, url, content_hash, source_hash, visibility, owner_user_id, org_id, team_id "
-                            "FROM Media WHERE content_hash = ? AND deleted = 0 LIMIT 1",
+                            "FROM Media WHERE content_hash = ? AND deleted = 0 "
+                            "AND system_operation_id IS NULL LIMIT 1",
                             (content_hash,),
                         )
 
@@ -369,7 +373,10 @@ class MediaRepository:
                                 update_params.extend([now, new_doc_version, client_id])
                                 update_sql = (
                                     f"UPDATE DocumentVersions SET {', '.join(update_fields)} "  # nosec B608
-                                    "WHERE id = ? AND version = ?"
+                                    "WHERE id = ? AND version = ? "
+                                    "AND EXISTS (SELECT 1 FROM Media m "
+                                    "WHERE m.id = DocumentVersions.media_id "
+                                    "AND m.system_operation_id IS NULL)"
                                 )
                                 update_params.extend([latest_version["id"], current_doc_version])
                                 update_cursor = _exec(update_sql, tuple(update_params))
@@ -469,6 +476,7 @@ class MediaRepository:
                                    last_modified = ?, version = ?, org_id = ?, team_id = ?,
                                    visibility = ?, owner_user_id = ?, client_id = ?, deleted = ?
                                WHERE id = ? AND version = ?
+                                 AND system_operation_id IS NULL
                         """
                         update_params = (
                             payload["url"],
@@ -541,7 +549,9 @@ class MediaRepository:
                         logger.info(f"Canonicalizing URL for media_id {media_id} to {url}")
                         new_ver = current_ver + 1
                         canon_cursor = _exec(
-                            "UPDATE Media SET url = ?, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ?",
+                            "UPDATE Media SET url = ?, last_modified = ?, version = ?, "
+                            "client_id = ? WHERE id = ? AND version = ? "
+                            "AND system_operation_id IS NULL",
                             (url, now, new_ver, client_id, media_id, current_ver),
                         )
                         if canon_cursor.rowcount == 0:
@@ -563,7 +573,8 @@ class MediaRepository:
                     try:
                         new_ver = current_ver + 1
                         touch_cursor = _exec(
-                            "UPDATE Media SET last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ?",
+                            "UPDATE Media SET last_modified = ?, version = ?, client_id = ? "
+                            "WHERE id = ? AND version = ? AND system_operation_id IS NULL",
                             (now, new_ver, client_id, media_id, current_ver),
                         )
                         if touch_cursor.rowcount == 1:

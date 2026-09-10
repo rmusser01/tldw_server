@@ -44,6 +44,10 @@
     "typescript": "^5.9.3",
     "vitest": "^4.0.16"
   },
+  "dependencies": {
+    "@noble/hashes": "2.0.1",
+    "diff": "^9.0.0"
+  },
   "peerDependencies": {
     "@ant-design/cssinjs": "^2.0.3",
     "@ant-design/icons": "*",

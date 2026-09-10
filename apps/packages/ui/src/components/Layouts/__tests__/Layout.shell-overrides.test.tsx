@@ -335,3 +335,27 @@ describe("OptionLayout shell overrides", () => {
     }
   )
 })
+
+describe("OptionLayout bypass block (#2889)", () => {
+  it("renders a skip link as the first focusable element, targeting the main region", () => {
+    const view = render(
+      <MemoryRouter>
+        <OptionLayout>
+          <div data-testid="route-content">Content</div>
+        </OptionLayout>
+      </MemoryRouter>
+    )
+
+    const firstFocusable = view.container.querySelector(
+      "a[href], button, [tabindex]:not([tabindex='-1'])"
+    ) as HTMLElement
+    expect(firstFocusable).toBeTruthy()
+    expect(firstFocusable.tagName).toBe("A")
+    expect(firstFocusable).toHaveTextContent("Skip to main content")
+    expect(firstFocusable).toHaveAttribute("href", "#main-content")
+
+    const main = view.container.querySelector("main")
+    expect(main).toHaveAttribute("id", "main-content")
+    expect(main).toHaveAttribute("tabindex", "-1")
+  })
+})

@@ -28,6 +28,11 @@ except ImportError:  # pragma: no cover - CSS sanitizer depends on optional tiny
     CSSSanitizer = None  # type: ignore
 
 try:
+    import tinycss2  # type: ignore
+except ImportError:  # pragma: no cover - direct dependency is smoke tested elsewhere
+    tinycss2 = None  # type: ignore
+
+try:
     import markdown  # type: ignore
 except Exception as exc:  # pragma: no cover - markdown is a declared dependency
     raise RuntimeError("markdown package is required for slides export") from exc
@@ -186,6 +191,7 @@ _ALLOWED_CSS_PROPERTIES = [
     "left",
     "width",
 ]
+_CSS_FUNCTION_TYPE = "function"
 
 _PDF_FORMAT_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 _PDF_DIMENSION_RE = re.compile(r"^\d+(\.\d+)?(px|in|cm|mm)$")
@@ -401,14 +407,14 @@ def _render_image_html(image: dict[str, Any]) -> str:
     if isinstance(height, int):
         attrs += f' height="{height}"'
     src = f"data:{image['mime']};base64,{image['data_b64']}"
-    return f"<img src=\"{src}\"{attrs} />"
+    return f'<img src="{src}"{attrs} />'
 
 
 def _render_images_html(images: list[dict[str, Any]]) -> str:
     if not images:
         return ""
     rendered = "\n".join(_render_image_html(image) for image in images)
-    return f"<div class=\"slide-images\">\n{rendered}\n</div>"
+    return f'<div class="slide-images">\n{rendered}\n</div>'
 
 
 def _render_image_markdown(image: dict[str, Any]) -> str:
@@ -443,21 +449,76 @@ def _json_for_inline_script(value: Any) -> str:
     )
 
 
+def _css_tokens_contain_url(tokens: Iterable[Any]) -> bool:
+    """Reject URL values after tinycss2 has normalized CSS escapes."""
+
+    for token in tokens:
+        token_type = getattr(token, "type", None)
+        if token_type in {"url", "bad-url"}:
+            return True
+        if token_type == _CSS_FUNCTION_TYPE:
+            name = getattr(token, "lower_name", None) or getattr(token, "name", None)
+            if isinstance(name, str) and name.casefold() == "url":
+                return True
+            arguments = getattr(token, "arguments", None)
+            if isinstance(arguments, list) and _css_tokens_contain_url(arguments):
+                return True
+        content = getattr(token, "content", None)
+        if isinstance(content, list) and _css_tokens_contain_url(content):
+            return True
+    return False
+
+
+def _parse_css_rules_without_urls(css_text: str) -> list[Any]:
+    """Parse a stylesheet and reject every normalized URL-bearing token."""
+
+    rules = tinycss2.parse_stylesheet(
+        css_text,
+        skip_comments=False,
+        skip_whitespace=False,
+    )
+    for rule in rules:
+        if getattr(rule, "type", None) == "error":
+            raise SlidesExportInputError("custom_css_rule_blocked")
+        prelude = getattr(rule, "prelude", None)
+        content = getattr(rule, "content", None)
+        if (isinstance(prelude, list) and _css_tokens_contain_url(prelude)) or (
+            isinstance(content, list) and _css_tokens_contain_url(content)
+        ):
+            raise SlidesExportInputError("custom_css_url_blocked")
+    return rules
+
+
 def _sanitize_custom_css(css_text: str | None) -> str | None:
     if not css_text:
+        return None
+    if CSSSanitizer is None or tinycss2 is None:
         return None
     if re.search(r"@import", css_text, flags=re.IGNORECASE):
         raise SlidesExportInputError("custom_css_import_blocked")
     if re.search(r"url\s*\(", css_text, flags=re.IGNORECASE):
         raise SlidesExportInputError("custom_css_url_blocked")
-    cleaned = css_text
-    if CSSSanitizer is not None:
-        try:
-            sanitizer = CSSSanitizer(allowed_css_properties=_ALLOWED_CSS_PROPERTIES)
-            cleaned = sanitizer.sanitize_css(css_text)
-        except Exception as exc:
-            logger.warning("slides export: css sanitizer failed: {}", exc)
-            cleaned = ""
+    cleaned = ""
+    try:
+        sanitizer = CSSSanitizer(allowed_css_properties=_ALLOWED_CSS_PROPERTIES)
+        rules = _parse_css_rules_without_urls(css_text)
+        sanitized_rules: list[str] = []
+        for rule in rules:
+            if rule.type in {"comment", "whitespace"}:
+                sanitized_rules.append(tinycss2.serialize([rule]))
+                continue
+            if rule.type != "qualified-rule":
+                raise SlidesExportInputError("custom_css_rule_blocked")
+            declarations = sanitizer.sanitize_css(tinycss2.serialize(rule.content)).strip()
+            if declarations:
+                sanitized_rules.append(f"{tinycss2.serialize(rule.prelude).strip()} {{{declarations}}}")
+        cleaned = "".join(sanitized_rules)
+        _parse_css_rules_without_urls(cleaned)
+    except SlidesExportInputError:
+        raise
+    except Exception:
+        logger.warning("slides export: css sanitizer failed")
+        cleaned = ""
     cleaned = cleaned.replace("\x00", "").strip()
     return cleaned or None
 
@@ -594,9 +655,7 @@ def _render_timeline_block(block: dict[str, Any]) -> str:
         return ""
     return (
         '<div class="visual-block visual-block--timeline" data-visual-block-type="timeline">'
-        '<ol class="visual-block-list">'
-        + "".join(rendered_items)
-        + "</ol></div>"
+        '<ol class="visual-block-list">' + "".join(rendered_items) + "</ol></div>"
     )
 
 
@@ -626,9 +685,7 @@ def _render_comparison_matrix_block(block: dict[str, Any]) -> str:
         return ""
     return (
         '<div class="visual-block visual-block--comparison" data-visual-block-type="comparison_matrix">'
-        '<table class="visual-block-table"><tbody>'
-        + "".join(rendered_rows)
-        + "</tbody></table></div>"
+        '<table class="visual-block-table"><tbody>' + "".join(rendered_rows) + "</tbody></table></div>"
     )
 
 
@@ -653,9 +710,7 @@ def _render_process_flow_block(block: dict[str, Any]) -> str:
         return ""
     return (
         '<div class="visual-block visual-block--process" data-visual-block-type="process_flow">'
-        '<ol class="visual-block-list">'
-        + "".join(rendered_steps)
-        + "</ol></div>"
+        '<ol class="visual-block-list">' + "".join(rendered_steps) + "</ol></div>"
     )
 
 
@@ -687,9 +742,7 @@ def _render_stat_group_block(block: dict[str, Any]) -> str:
         return ""
     return (
         '<div class="visual-block visual-block--stats" data-visual-block-type="stat_group">'
-        '<dl class="visual-block-stats">'
-        + "".join(rendered_items)
-        + "</dl></div>"
+        '<dl class="visual-block-stats">' + "".join(rendered_items) + "</dl></div>"
     )
 
 
@@ -872,12 +925,12 @@ def _render_sections(
         suppress_content = rendered_all_blocks and _content_is_structured_fallback(content, fallback_text)
         content_html = _sanitize_markdown(str(content or "")) if content and not suppress_content else ""
         body_html = "".join(part for part in (content_html, visual_blocks_html, images_html) if part)
-        notes_html = f"<aside class=\"notes\">{escape(str(notes))}</aside>" if notes else ""
+        notes_html = f'<aside class="notes">{escape(str(notes))}</aside>' if notes else ""
 
         section = (
-            f"      <section data-layout=\"{layout}\">\n"
+            f'      <section data-layout="{layout}">\n'
             f"        {title_html}\n"
-            f"        <div class=\"content\">{body_html}</div>\n"
+            f'        <div class="content">{body_html}</div>\n'
             f"        {notes_html}\n"
             f"      </section>"
         )
@@ -895,7 +948,7 @@ def _render_index_html(
     visual_style_snapshot: dict[str, Any] | None = None,
     asset_resolver: SlideAssetResolver | None = None,
 ) -> str:
-    css_link = "  <link rel=\"stylesheet\" href=\"assets/custom.css\">\n" if include_custom_css else ""
+    css_link = '  <link rel="stylesheet" href="assets/custom.css">\n' if include_custom_css else ""
     title_html = escape(title or "Presentation")
     sections_html = _render_sections(slides, asset_resolver=asset_resolver)
     reveal_attrs = _render_style_shell_attrs(visual_style_snapshot)
@@ -903,20 +956,20 @@ def _render_index_html(
         "<!DOCTYPE html>\n"
         "<html>\n"
         "<head>\n"
-        "  <meta charset=\"utf-8\">\n"
+        '  <meta charset="utf-8">\n'
         f"  <title>{title_html}</title>\n"
-        "  <link rel=\"stylesheet\" href=\"assets/reveal/reveal.css\">\n"
-        f"  <link rel=\"stylesheet\" href=\"assets/reveal/theme/{escape(theme)}.css\">\n"
+        '  <link rel="stylesheet" href="assets/reveal/reveal.css">\n'
+        f'  <link rel="stylesheet" href="assets/reveal/theme/{escape(theme)}.css">\n'
         f"{css_link}"
         "</head>\n"
         "<body>\n"
-        f"  <div class=\"reveal\"{reveal_attrs}>\n"
-        "    <div class=\"slides\">\n"
+        f'  <div class="reveal"{reveal_attrs}>\n'
+        '    <div class="slides">\n'
         f"{sections_html}\n"
         "    </div>\n"
         "  </div>\n"
-        "  <script src=\"assets/reveal/reveal.js\"></script>\n"
-        "  <script src=\"assets/reveal/plugin/notes/notes.js\"></script>\n"
+        '  <script src="assets/reveal/reveal.js"></script>\n'
+        '  <script src="assets/reveal/plugin/notes/notes.js"></script>\n'
         "  <script>\n"
         f"    const settings = {settings_json};\n"
         "    settings.plugins = [ RevealNotes ];\n"
@@ -1110,4 +1163,4 @@ def export_presentation_pdf(
 
 
 def export_presentation_json(payload: dict[str, Any]) -> str:
-    return json.dumps(payload, ensure_ascii=True, indent=2)
+    return json.dumps(payload, ensure_ascii=False, indent=2)

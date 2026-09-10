@@ -22,12 +22,14 @@ const createUseStorageImplementation = ({
   serverUrl = "",
   authMode = "single-user",
   apiKey = "",
-  accessToken = ""
+  accessToken = "",
+  refreshRotation
 }: {
   serverUrl?: string
   authMode?: string
   apiKey?: string
   accessToken?: string
+  refreshRotation?: unknown
 }) => {
   return (key: string, defaultValue: unknown) => {
     if (key === "serverUrl") {
@@ -41,6 +43,9 @@ const createUseStorageImplementation = ({
     }
     if (key === "accessToken") {
       return [accessToken, vi.fn()] as const
+    }
+    if (key === "tldwRefreshRotation") {
+      return [refreshRotation, vi.fn()] as const
     }
     return [defaultValue, vi.fn()] as const
   }
@@ -148,6 +153,39 @@ describe("useCanonicalConnectionConfig", () => {
       authMode: "single-user",
       apiKey: "frontend-key"
     })
+  })
+
+  it("rehydrates mounted consumers when scoped refresh rotation changes", async () => {
+    let refreshRotation: unknown
+    useStorageMock.mockImplementation((key: string, defaultValue: unknown) =>
+      createUseStorageImplementation({ refreshRotation })(key, defaultValue)
+    )
+    getConfigMock
+      .mockResolvedValueOnce({
+        serverUrl: "https://api.example.test",
+        authMode: "multi-user",
+        accessToken: "stale-access"
+      })
+      .mockResolvedValue({
+        serverUrl: "https://api.example.test",
+        authMode: "multi-user",
+        accessToken: "rotated-access"
+      })
+
+    const { result, rerender } = renderHook(() =>
+      useCanonicalConnectionConfig()
+    )
+    await waitFor(() => {
+      expect(result.current.config?.accessToken).toBe("stale-access")
+    })
+
+    refreshRotation = { version: 1, accessToken: "rotated-access" }
+    rerender()
+
+    await waitFor(() => {
+      expect(result.current.config?.accessToken).toBe("rotated-access")
+    })
+    expect(getConfigMock).toHaveBeenCalledTimes(2)
   })
 
 })

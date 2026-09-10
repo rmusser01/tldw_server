@@ -184,7 +184,9 @@ describe("useSetupReadinessSummary", () => {
     });
 
     expect(result.current.status).toEqual(statusPayload);
-    expect(result.current.error).toBe("Setup readiness could not be loaded.");
+    expect(result.current.error).toBe(
+      "Setup readiness could not be loaded. The server may still be starting, or the connection details may be missing - retry once your tldw server is reachable.",
+    );
     expect(result.current.loading).toBe(false);
   });
 
@@ -200,7 +202,7 @@ describe("useSetupReadinessSummary", () => {
 
     await waitFor(() =>
       expect(result.current.error).toBe(
-        "Setup readiness could not be loaded.",
+        "Setup readiness could not be loaded. The server may still be starting, or the connection details may be missing - retry once your tldw server is reachable.",
       ),
     );
     expect(result.current.status).toBeNull();

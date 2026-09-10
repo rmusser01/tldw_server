@@ -244,25 +244,34 @@ async def test_webhook_hmac_and_ssrf(monkeypatch, client_with_wf: TestClient):
 
     import sys
     dummy_httpx = type("_DummyHttpx", (), {"Client": _CapClient})()
-    if "httpx" in sys.modules:
-        del sys.modules["httpx"]
+    # Installed directly rather than through monkeypatch, which the repo-wide
+    # guard against patching httpx/requests/aiohttp would reject. Restored in
+    # the finally below: leaving the stub in sys.modules poisoned every later
+    # test that imported httpx for the first time.
+    _sentinel = object()
+    _original_httpx = sys.modules.get("httpx", _sentinel)
     sys.modules["httpx"] = dummy_httpx
+    try:
+        # Set secret for HMAC signing
+        monkeypatch.setenv("WORKFLOWS_WEBHOOK_SECRET", "supersecret")
 
-    # Set secret for HMAC signing
-    monkeypatch.setenv("WORKFLOWS_WEBHOOK_SECRET", "supersecret")
+        engine = eng_mod.WorkflowEngine(db)
+        definition = {"on_completion_webhook": {"url": "http://example.test/hook", "include_outputs": True}}
+        await engine._maybe_send_completion_webhook(definition, run_id, status="succeeded")
+        assert captured["calls"] == 1
+        import hmac, hashlib
+        ts = captured["headers"].get("X-Signature-Timestamp")
+        signed_body = f"{ts}.{captured['data']}" if ts else captured["data"]
+        expected_sig = hmac.new(b"supersecret", signed_body.encode("utf-8"), hashlib.sha256).hexdigest()
+        assert captured["headers"].get("X-Workflows-Signature") == expected_sig
 
-    engine = eng_mod.WorkflowEngine(db)
-    definition = {"on_completion_webhook": {"url": "http://example.test/hook", "include_outputs": True}}
-    await engine._maybe_send_completion_webhook(definition, run_id, status="succeeded")
-    assert captured["calls"] == 1
-    import hmac, hashlib
-    ts = captured["headers"].get("X-Signature-Timestamp")
-    signed_body = f"{ts}.{captured['data']}" if ts else captured["data"]
-    expected_sig = hmac.new(b"supersecret", signed_body.encode("utf-8"), hashlib.sha256).hexdigest()
-    assert captured["headers"].get("X-Workflows-Signature") == expected_sig
-
-    # SSRF block: ensure no call happens
-    captured["calls"] = 0
-    monkeypatch.setattr(egress_mod, "is_url_allowed", lambda url: False)
-    await engine._maybe_send_completion_webhook(definition, run_id, status="succeeded")
-    assert captured["calls"] == 0
+        # SSRF block: ensure no call happens
+        captured["calls"] = 0
+        monkeypatch.setattr(egress_mod, "is_url_allowed", lambda url: False)
+        await engine._maybe_send_completion_webhook(definition, run_id, status="succeeded")
+        assert captured["calls"] == 0
+    finally:
+        if _original_httpx is _sentinel:
+            sys.modules.pop("httpx", None)
+        else:
+            sys.modules["httpx"] = _original_httpx

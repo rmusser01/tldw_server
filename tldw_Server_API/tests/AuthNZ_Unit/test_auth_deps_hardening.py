@@ -1,17 +1,29 @@
-from datetime import timezone
+import asyncio
 import io
+from concurrent.futures import ThreadPoolExecutor
+from datetime import timezone
+from threading import Barrier
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from fastapi import HTTPException, Response
+from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi.security import HTTPAuthorizationCredentials
+from fastapi.testclient import TestClient
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+from tldw_Server_API.app.core.Audit.unified_audit_service import (
+    AuditEventCategory,
+    AuditEventType,
+)
 from tldw_Server_API.app.core.AuthNZ import migrations
-from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseLockError
+from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseLockError,
+)
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.app.services import admin_audit_service
 
 
 class _FailingCommitConn:
@@ -35,6 +47,45 @@ class _FakeDBPool:
         return _AcquireCM()
 
 
+class _BlockingCleanupConn:
+    def __init__(self) -> None:
+        self.rollback_started = asyncio.Event()
+        self.allow_rollback = asyncio.Event()
+        self.rollback_finished = asyncio.Event()
+
+    async def rollback(self) -> None:
+        self.rollback_started.set()
+        await self.allow_rollback.wait()
+        self.rollback_finished.set()
+
+
+class _BlockingCleanupAcquire:
+    def __init__(self, conn: _BlockingCleanupConn) -> None:
+        self.conn = conn
+        self.release_started = asyncio.Event()
+        self.allow_release = asyncio.Event()
+        self.release_finished = asyncio.Event()
+
+    async def __aenter__(self) -> _BlockingCleanupConn:
+        return self.conn
+
+    async def __aexit__(self, exc_type, exc, tb) -> bool:
+        del exc_type, exc, tb
+        self.release_started.set()
+        await self.allow_release.wait()
+        self.release_finished.set()
+        return False
+
+
+class _BlockingCleanupPool:
+    def __init__(self) -> None:
+        self.conn = _BlockingCleanupConn()
+        self.acquire_context = _BlockingCleanupAcquire(self.conn)
+
+    def acquire(self) -> _BlockingCleanupAcquire:
+        return self.acquire_context
+
+
 class _ExplodingPoolProperty:
     @property
     def pool(self) -> object:
@@ -48,6 +99,16 @@ class _DummyRequest:
         self.method = "GET"
         self.url = SimpleNamespace(path="/test")
         self.headers: dict[str, str] = {}
+
+
+class _NoRbacOverridePool:
+    pool = object()
+
+    async def fetchone(self, *_args, **_kwargs):
+        return None
+
+    async def fetchall(self, *_args, **_kwargs):
+        return []
 
 
 class _LockingTxnCM:
@@ -74,13 +135,46 @@ class _LockingPool:
         self.raise_lock_on_exit = raise_lock_on_exit
         self.enter_calls = 0
         self.exit_calls = 0
+        self.acquire_timeouts: list[float | None] = []
         self.conn = object()
 
-    def transaction(self) -> _LockingTxnCM:
+    def transaction(
+        self,
+        *,
+        acquire_timeout_seconds: float | None = None,
+    ) -> _LockingTxnCM:
+        self.acquire_timeouts.append(acquire_timeout_seconds)
         return _LockingTxnCM(self)
 
     def acquire(self) -> object:
         raise AssertionError("adapter path should not be used for lock retry tests")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("expected_user_id", [None, " 42 "])
+async def test_expected_user_guard_allows_absent_or_matching_header(
+    expected_user_id: str | None,
+) -> None:
+    principal = AuthPrincipal(kind="user", user_id=42)
+
+    result = await auth_deps.require_expected_user(expected_user_id, principal)
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_expected_user_guard_rejects_mismatch_without_caching() -> None:
+    principal = AuthPrincipal(kind="user", user_id=42)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_deps.require_expected_user("99", principal)
+
+    assert exc_info.value.status_code == 412
+    assert exc_info.value.headers == {"Cache-Control": "no-store"}
+    assert exc_info.value.detail == {
+        "code": "request_config_scope_changed",
+        "message": "The server or authenticated account changed before the request was sent.",
+    }
 
 
 @pytest.mark.asyncio
@@ -93,11 +187,9 @@ async def test_test_db_adapter_execute_propagates_sqlite_commit_errors(monkeypat
 
     agen = auth_deps.get_db_transaction()
     adapter = await agen.__anext__()
-    try:
-        with pytest.raises(RuntimeError, match="sqlite commit failed"):
-            await adapter.execute("SELECT 1")
-    finally:
-        await agen.aclose()
+    await adapter.execute("SELECT 1")
+    with pytest.raises(RuntimeError, match="sqlite commit failed"):
+        await agen.__anext__()
 
 
 @pytest.mark.asyncio
@@ -110,11 +202,48 @@ async def test_test_db_adapter_commit_propagates_sqlite_commit_errors(monkeypatc
 
     agen = auth_deps.get_db_transaction()
     adapter = await agen.__anext__()
-    try:
-        with pytest.raises(RuntimeError, match="sqlite commit failed"):
-            await adapter.commit()
-    finally:
-        await agen.aclose()
+    await adapter.commit()
+    with pytest.raises(RuntimeError, match="sqlite commit failed"):
+        await agen.__anext__()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_at", ["rollback", "release"])
+async def test_test_db_adapter_drains_cleanup_before_propagating_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+    cancel_at: str,
+) -> None:
+    pool = _BlockingCleanupPool()
+
+    async def _fake_get_db_pool() -> _BlockingCleanupPool:
+        return pool
+
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setattr(auth_deps, "get_db_pool", _fake_get_db_pool)
+
+    async def _exercise_dependency() -> None:
+        generator = auth_deps.get_db_transaction()
+        await generator.__anext__()
+        await generator.athrow(RuntimeError("body failed"))
+
+    cleanup_task = asyncio.create_task(_exercise_dependency())
+
+    await pool.conn.rollback_started.wait()
+    if cancel_at == "rollback":
+        cleanup_task.cancel()
+        pool.conn.allow_rollback.set()
+        await pool.acquire_context.release_started.wait()
+    else:
+        pool.conn.allow_rollback.set()
+        await pool.acquire_context.release_started.wait()
+        cleanup_task.cancel()
+
+    pool.acquire_context.allow_release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await cleanup_task
+
+    assert pool.conn.rollback_finished.is_set()
+    assert pool.acquire_context.release_finished.is_set()
 
 
 @pytest.mark.asyncio
@@ -136,6 +265,42 @@ async def test_stub_session_manager_uses_timezone_aware_timestamps(monkeypatch: 
 
     refreshed = await sm.refresh_session("unused-positional", session_id=1, user_id=1)
     assert str(refreshed["expires_at"]).endswith("+00:00")
+
+
+def test_stub_session_manager_supports_admin_endpoint_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.delenv("AUTHNZ_FORCE_REAL_SESSION_MANAGER", raising=False)
+    app = FastAPI()
+
+    @app.post("/admin-session-contract")
+    async def exercise_admin_session_contract(
+        session_manager=Depends(auth_deps.get_session_manager_dep),
+    ) -> dict[str, int]:
+        user_id = 987_654
+        await session_manager.create_session(
+            user_id=user_id,
+            access_token="access",
+            refresh_token="refresh",
+        )
+        sessions = await session_manager.get_user_sessions(user_id, strict=True)
+        revoked = await session_manager.revoke_all_user_sessions(
+            user_id=user_id,
+            reason="Support case 123",
+            revoked_by=7,
+        )
+        remaining = await session_manager.get_user_sessions(user_id, strict=True)
+        return {
+            "listed": len(sessions),
+            "revoked": revoked,
+            "remaining": len(remaining),
+        }
+
+    response = TestClient(app).post("/admin-session-contract")
+
+    assert response.status_code == 200
+    assert response.json() == {"listed": 1, "revoked": 1, "remaining": 0}
 
 @pytest.mark.asyncio
 async def test_get_current_user_fast_path_sanitizes_cached_user(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -589,6 +754,325 @@ async def test_check_auth_rate_limit_enforces_fallback_limiter_when_rg_enabled_w
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("catalog_limit", [(0, 3), (3, 0)])
+async def test_rbac_rate_limit_zero_rpm_or_burst_denies_without_bucket(
+    monkeypatch: pytest.MonkeyPatch,
+    catalog_limit: tuple[int, int],
+) -> None:
+    request = _DummyRequest()
+    request.state.user_id = 41
+    request.state.auth = AuthContext(
+        principal=AuthPrincipal(kind="user", user_id=41, subject="user:41"),
+    )
+    monkeypatch.setattr(
+        auth_deps,
+        "_catalog_rate_limit_for_resource",
+        lambda _resource: catalog_limit,
+    )
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+
+    with pytest.raises(HTTPException) as captured:
+        await auth_deps.enforce_rbac_rate_limit(
+            request,
+            "prompts.improve",
+            _NoRbacOverridePool(),
+        )
+
+    assert captured.value.status_code == 429
+    assert auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS == {}
+
+
+def test_fallback_rate_bucket_honors_burst_above_rpm_and_principal_isolation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [100.0]
+    monkeypatch.setattr(auth_deps.time, "monotonic", lambda: now[0])
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+
+    first_user = [
+        auth_deps._consume_auth_deps_fallback_rate_token(
+            dependency="rbac_rate_limit:prompts.improve",
+            identifier="principal:user:1:prompts.improve",
+            limit=2,
+            burst=4,
+            window_seconds=60.0,
+        )[0]
+        for _ in range(5)
+    ]
+    second_user = auth_deps._consume_auth_deps_fallback_rate_token(
+        dependency="rbac_rate_limit:prompts.improve",
+        identifier="principal:user:2:prompts.improve",
+        limit=2,
+        burst=4,
+        window_seconds=60.0,
+    )[0]
+
+    assert first_user == [True, True, True, True, False]
+    assert second_user is True
+
+
+def test_fallback_rate_bucket_honors_burst_below_rpm_and_partial_refill(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [200.0]
+    monkeypatch.setattr(auth_deps.time, "monotonic", lambda: now[0])
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+    def consume() -> bool:
+        return auth_deps._consume_auth_deps_fallback_rate_token(
+            dependency="rbac_rate_limit:prompts.improve",
+            identifier="principal:user:3:prompts.improve",
+            limit=4,
+            burst=2,
+            window_seconds=60.0,
+        )[0]
+
+    assert [consume(), consume(), consume()] == [True, True, False]
+    now[0] += 15.0
+    assert [consume(), consume()] == [True, False]
+
+
+def test_fallback_rate_bucket_refills_across_full_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [300.0]
+    monkeypatch.setattr(auth_deps.time, "monotonic", lambda: now[0])
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+    def consume() -> bool:
+        return auth_deps._consume_auth_deps_fallback_rate_token(
+            dependency="rbac_rate_limit:prompts.improve",
+            identifier="principal:user:4:prompts.improve",
+            limit=2,
+            burst=2,
+            window_seconds=60.0,
+        )[0]
+
+    assert [consume(), consume(), consume()] == [True, True, False]
+    now[0] += 60.0
+    assert [consume(), consume(), consume()] == [True, True, False]
+
+
+def test_fallback_rate_bucket_keeps_partial_refill_when_burst_exceeds_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [350.0]
+    monkeypatch.setattr(auth_deps.time, "monotonic", lambda: now[0])
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+
+    def consume() -> bool:
+        return auth_deps._consume_auth_deps_fallback_rate_token(
+            dependency="rbac_rate_limit:prompts.improve",
+            identifier="principal:user:burst-refill",
+            limit=2,
+            burst=4,
+            window_seconds=60.0,
+        )[0]
+
+    assert [consume() for _ in range(5)] == [True, True, True, True, False]
+    now[0] += 60.0
+
+    assert [consume() for _ in range(3)] == [True, True, False]
+
+
+def test_fallback_rate_bucket_prunes_refill_complete_inactive_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [400.0]
+    monkeypatch.setattr(auth_deps.time, "monotonic", lambda: now[0])
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+
+    auth_deps._consume_auth_deps_fallback_rate_token(
+        dependency="rbac_rate_limit:prompts.improve",
+        identifier="principal:stale:prompts.improve",
+        limit=1,
+        burst=1,
+        window_seconds=60.0,
+    )
+    now[0] += 61.0
+    auth_deps._consume_auth_deps_fallback_rate_token(
+        dependency="rbac_rate_limit:prompts.improve",
+        identifier="principal:active:prompts.improve",
+        limit=1,
+        burst=1,
+        window_seconds=60.0,
+    )
+
+    assert list(auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS) == [
+        (
+            "rbac_rate_limit:prompts.improve",
+            "principal:active:prompts.improve",
+        )
+    ]
+
+
+def test_fallback_rate_bucket_prunes_by_inactivity_not_refill_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [1_000.0]
+    monkeypatch.setattr(auth_deps.time, "monotonic", lambda: now[0])
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+
+    auth_deps._consume_auth_deps_fallback_rate_token(
+        dependency="rbac_rate_limit:prompts.improve",
+        identifier="principal:inactive:prompts.improve",
+        limit=1,
+        burst=1,
+        window_seconds=60.0,
+    )
+    now[0] += 50.0
+    auth_deps._consume_auth_deps_fallback_rate_token(
+        dependency="rbac_rate_limit:prompts.improve",
+        identifier="principal:recent:prompts.improve",
+        limit=4,
+        burst=2,
+        window_seconds=60.0,
+    )
+    now[0] += 16.0
+    auth_deps._consume_auth_deps_fallback_rate_token(
+        dependency="rbac_rate_limit:prompts.improve",
+        identifier="principal:trigger:prompts.improve",
+        limit=1,
+        burst=1,
+        window_seconds=60.0,
+    )
+
+    keys = set(auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS)
+    assert (
+        "rbac_rate_limit:prompts.improve",
+        "principal:inactive:prompts.improve",
+    ) not in keys
+    assert (
+        "rbac_rate_limit:prompts.improve",
+        "principal:recent:prompts.improve",
+    ) in keys
+
+
+def _consume_capacity_test_token(identifier: str) -> tuple[bool, int]:
+    return auth_deps._consume_auth_deps_fallback_rate_token(
+        dependency="rbac_rate_limit:prompts.improve",
+        identifier=identifier,
+        limit=1,
+        burst=1,
+        window_seconds=60.0,
+    )
+
+
+def test_fallback_rate_bucket_capacity_caps_many_active_distinct_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(auth_deps.time, "monotonic", lambda: 500.0)
+    monkeypatch.setattr(
+        auth_deps,
+        "_AUTH_DEPS_FALLBACK_RATE_BUCKET_CAPACITY",
+        3,
+        raising=False,
+    )
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+
+    allowed = [
+        _consume_capacity_test_token(f"principal:active:{index}")[0]
+        for index in range(5)
+    ]
+
+    assert allowed == [True, True, True, False, False]
+
+
+def test_fallback_rate_bucket_capacity_denies_unseen_key_without_allocation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(auth_deps.time, "monotonic", lambda: 600.0)
+    monkeypatch.setattr(
+        auth_deps,
+        "_AUTH_DEPS_FALLBACK_RATE_BUCKET_CAPACITY",
+        2,
+        raising=False,
+    )
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+    _consume_capacity_test_token("principal:known:1")
+    _consume_capacity_test_token("principal:known:2")
+    before = dict(auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS)
+
+    allowed, retry_after = _consume_capacity_test_token("principal:unseen")
+
+    assert allowed is False
+    assert retry_after == 60
+    assert before == auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS
+
+
+def test_fallback_rate_bucket_capacity_preserves_known_key_quota_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(auth_deps.time, "monotonic", lambda: 700.0)
+    monkeypatch.setattr(
+        auth_deps,
+        "_AUTH_DEPS_FALLBACK_RATE_BUCKET_CAPACITY",
+        1,
+        raising=False,
+    )
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+
+    results = [
+        _consume_capacity_test_token("principal:known")[0],
+        _consume_capacity_test_token("principal:unseen")[0],
+        _consume_capacity_test_token("principal:known")[0],
+    ]
+
+    assert results == [True, False, False]
+    assert list(auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS) == [
+        ("rbac_rate_limit:prompts.improve", "principal:known")
+    ]
+
+
+def test_fallback_rate_bucket_capacity_prunes_then_admits_new_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [800.0]
+    monkeypatch.setattr(auth_deps.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(
+        auth_deps,
+        "_AUTH_DEPS_FALLBACK_RATE_BUCKET_CAPACITY",
+        1,
+        raising=False,
+    )
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+
+    first = _consume_capacity_test_token("principal:old")[0]
+    blocked = _consume_capacity_test_token("principal:new")[0]
+    now[0] += 61.0
+    admitted = _consume_capacity_test_token("principal:new")[0]
+
+    assert [first, blocked, admitted] == [True, False, True]
+    assert list(auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS) == [
+        ("rbac_rate_limit:prompts.improve", "principal:new")
+    ]
+
+
+def test_fallback_rate_bucket_capacity_never_exceeded_concurrently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    capacity = 4
+    attempts = 12
+    start = Barrier(attempts)
+    monkeypatch.setattr(auth_deps.time, "monotonic", lambda: 900.0)
+    monkeypatch.setattr(
+        auth_deps,
+        "_AUTH_DEPS_FALLBACK_RATE_BUCKET_CAPACITY",
+        capacity,
+        raising=False,
+    )
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+
+    def consume(index: int) -> bool:
+        start.wait(timeout=5.0)
+        return _consume_capacity_test_token(f"principal:concurrent:{index}")[0]
+
+    with ThreadPoolExecutor(max_workers=attempts) as pool:
+        allowed = list(pool.map(consume, range(attempts)))
+
+    assert sum(allowed) == capacity
+    assert len(auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS) == capacity
+
+
+@pytest.mark.asyncio
 async def test_get_session_manager_dep_requires_explicit_test_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TEST_MODE", "0")
     monkeypatch.delenv("AUTHNZ_FORCE_REAL_SESSION_MANAGER", raising=False)
@@ -638,7 +1122,12 @@ async def test_get_db_transaction_requires_explicit_test_mode(monkeypatch: pytes
             return False
 
     class _Pool:
-        def transaction(self) -> _TxnCM:
+        def transaction(
+            self,
+            *,
+            acquire_timeout_seconds: float | None = None,
+        ) -> _TxnCM:
+            assert acquire_timeout_seconds == 5.0
             return _TxnCM()
 
         def acquire(self) -> object:
@@ -690,6 +1179,7 @@ async def test_get_db_transaction_retries_lock_contention_on_entry(
     assert pool.enter_calls == 2
     assert pool.exit_calls == 1
     assert sleep_calls == [0.0]
+    assert pool.acquire_timeouts == [5.0, 5.0]
 
 
 @pytest.mark.asyncio
@@ -726,6 +1216,7 @@ async def test_get_db_transaction_returns_503_when_lock_retries_exhausted(
     assert pool.enter_calls == 2
     assert pool.exit_calls == 0
     assert sleep_calls == [0.0]
+    assert pool.acquire_timeouts == [5.0, 5.0]
 
 
 @pytest.mark.asyncio
@@ -755,6 +1246,164 @@ async def test_get_db_transaction_maps_cleanup_lock_error_to_503(
     assert exc_info.value.headers.get("Retry-After") == "3"
     assert pool.enter_calls == 1
     assert pool.exit_calls == 1
+    assert pool.acquire_timeouts == [5.0]
+
+
+@pytest.mark.asyncio
+async def test_get_db_transaction_cancellation_wins_over_cleanup_lock_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.setenv("TLDW_TEST_MODE", "0")
+    pool = _LockingPool(lock_on_enter_count=0, raise_lock_on_exit=True)
+    cancellation = asyncio.CancelledError()
+
+    async def _fake_get_db_pool() -> _LockingPool:
+        return pool
+
+    monkeypatch.setattr(auth_deps, "get_db_pool", _fake_get_db_pool)
+
+    agen = auth_deps.get_db_transaction()
+    assert await agen.__anext__() is pool.conn
+
+    with pytest.raises(asyncio.CancelledError) as raised:
+        await agen.athrow(cancellation)
+
+    assert raised.value is cancellation
+    assert raised.value.__cause__ is None
+    assert pool.enter_calls == 1
+    assert pool.exit_calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("commit_fails", [False, True])
+async def test_admin_audit_is_flushed_only_after_authnz_commit(
+    monkeypatch: pytest.MonkeyPatch,
+    commit_fails: bool,
+) -> None:
+    events: list[dict[str, Any]] = []
+
+    class _AuditService:
+        async def log_event(self, **kwargs: Any) -> None:
+            events.append(kwargs)
+
+        async def flush(self, *, raise_on_failure: bool) -> None:
+            assert raise_on_failure is False
+
+    async def _get_audit_service(_actor_id: int | None) -> _AuditService:
+        return _AuditService()
+
+    class _Transaction:
+        async def __aenter__(self) -> object:
+            return object()
+
+        async def __aexit__(self, exc_type, exc, traceback) -> bool:
+            del exc_type, exc, traceback
+            if commit_fails:
+                raise RuntimeError("commit failed")
+            return False
+
+    class _Pool:
+        def transaction(self, *, acquire_timeout_seconds: float | None = None):
+            assert acquire_timeout_seconds == 5.0
+            return _Transaction()
+
+    async def _get_pool() -> _Pool:
+        return _Pool()
+
+    monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.setenv("TLDW_TEST_MODE", "0")
+    monkeypatch.setattr(auth_deps, "get_db_pool", _get_pool)
+    monkeypatch.setattr(
+        admin_audit_service,
+        "get_or_create_audit_service_for_user_id_optional",
+        _get_audit_service,
+    )
+    generator = auth_deps.get_db_transaction()
+    await generator.__anext__()
+    await admin_audit_service.emit_admin_account_audit_event(
+        actor_id=7,
+        target_user_id=42,
+        event_type=AuditEventType.USER_UPDATED,
+        category=AuditEventCategory.AUTHORIZATION,
+        resource_type="user_account",
+        resource_id="42",
+        action="admin.user.update",
+    )
+
+    was_deferred = events == []
+    if commit_fails:
+        with pytest.raises(RuntimeError, match="commit failed"):
+            await generator.__anext__()
+        commit_outcome_is_correct = events == []
+    else:
+        with pytest.raises(StopAsyncIteration):
+            await generator.__anext__()
+        commit_outcome_is_correct = len(events) == 1
+
+    assert was_deferred
+    assert commit_outcome_is_correct
+
+
+@pytest.mark.asyncio
+async def test_get_db_transaction_passes_configured_pool_acquire_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.setenv("TLDW_TEST_MODE", "0")
+    monkeypatch.setenv("AUTHNZ_DB_POOL_ACQUIRE_TIMEOUT_SECONDS", "2.75")
+    pool = _LockingPool()
+
+    async def _fake_get_db_pool() -> _LockingPool:
+        return pool
+
+    monkeypatch.setattr(auth_deps, "get_db_pool", _fake_get_db_pool)
+
+    agen = auth_deps.get_db_transaction()
+    try:
+        assert await agen.__anext__() is pool.conn
+    finally:
+        await agen.aclose()
+
+    assert pool.acquire_timeouts == [2.75]
+
+
+@pytest.mark.asyncio
+async def test_get_db_transaction_maps_pool_exhaustion_to_exact_busy_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.setenv("TLDW_TEST_MODE", "0")
+    monkeypatch.setenv("AUTHNZ_SQLITE_LOCK_RETRY_AFTER_SECONDS", "4")
+
+    class _ExhaustedTxn:
+        async def __aenter__(self) -> object:
+            raise ConnectionPoolExhaustedError()
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+    class _ExhaustedPool:
+        def transaction(
+            self,
+            *,
+            acquire_timeout_seconds: float | None = None,
+        ) -> _ExhaustedTxn:
+            assert acquire_timeout_seconds == 5.0
+            return _ExhaustedTxn()
+
+    async def _fake_get_db_pool() -> _ExhaustedPool:
+        return _ExhaustedPool()
+
+    monkeypatch.setattr(auth_deps, "get_db_pool", _fake_get_db_pool)
+
+    agen = auth_deps.get_db_transaction()
+    with pytest.raises(HTTPException) as exc_info:
+        await agen.__anext__()
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == "Authentication database is busy. Please retry shortly."
+    assert exc_info.value.headers == {"Retry-After": "4"}
 
 
 @pytest.mark.asyncio

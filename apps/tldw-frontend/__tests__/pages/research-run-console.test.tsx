@@ -808,7 +808,7 @@ describe('ResearchRunsPage', () => {
     renderWithProviders(<ResearchRunsPage />);
 
     await screen.findByText('Investigate local evidence');
-    await user.click(screen.getByRole('button', { name: 'Load trust details' }));
+    await user.click(await screen.findByRole('button', { name: 'Load trust details' }));
 
     await waitFor(() => {
       expect(mocks.getResearchArtifact).toHaveBeenCalledWith('rs_1', 'verification_summary.json');
@@ -841,7 +841,7 @@ describe('ResearchRunsPage', () => {
     renderWithProviders(<ResearchRunsPage />);
 
     await screen.findByText('Investigate local evidence');
-    await user.click(screen.getByRole('button', { name: 'Load verification_summary.json' }));
+    await user.click(await screen.findByRole('button', { name: 'Load verification_summary.json' }));
     await user.click(screen.getByRole('button', { name: 'Load unsupported_claims.json' }));
     await user.click(screen.getByRole('button', { name: 'Load contradictions.json' }));
     await user.click(screen.getByRole('button', { name: 'Load source_trust.json' }));
@@ -873,7 +873,7 @@ describe('ResearchRunsPage', () => {
     renderWithProviders(<ResearchRunsPage />);
 
     await screen.findByText('Investigate local evidence');
-    await user.click(screen.getByRole('button', { name: 'Load verification_summary.json' }));
+    await user.click(await screen.findByRole('button', { name: 'Load verification_summary.json' }));
     await user.click(screen.getByRole('button', { name: 'Load unsupported_claims.json' }));
     await user.click(screen.getByRole('button', { name: 'Load contradictions.json' }));
     await user.click(screen.getByRole('button', { name: 'Load source_trust.json' }));

@@ -68,7 +68,17 @@ def _handle_request(payload: dict) -> dict | None:
                     },
                 }
             )
-        return _result_response(request_id, {"stopReason": "end"})
+        return _result_response(
+            request_id,
+            {
+                "stopReason": "end",
+                "taskCompletion": {
+                    "status": "completed",
+                    "summary": "Deterministic ACP stub completed the requested task.",
+                    "artifacts": [],
+                },
+            },
+        )
 
     if method in {"session/cancel", "_tldw/session/close"}:
         return _result_response(request_id, None)

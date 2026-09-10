@@ -1,115 +1,128 @@
 # Webhooks
 
-Webhooks let the admin UI push event notifications to external systems in real time. When a subscribed event fires (e.g. user created, incident opened, key rotated), the platform sends an HTTP POST with a JSON payload to the configured URL.
+The Webhooks page manages the canonical outgoing-webhook control plane. The
+current PR 1 release manages registrations and migration state only. It cannot
+send webhook traffic, test a receiver, show canonical delivery history, or
+activate a registration.
 
----
+## Availability
 
-## Creating a Webhook
+The page reads `/api/v1/admin/webhooks/status` before selecting an API family.
+It does not infer compatibility mode from a failed request.
 
-1. Navigate to **Settings > Webhooks**.
-2. Click **Create Webhook**.
-3. Provide a **URL** (must be HTTPS in production).
-4. Select one or more **event types** to subscribe to:
-   - `user.created`, `user.deleted`, `user.role_changed`
-   - `org.created`, `org.deleted`, `org.member_added`, `org.member_removed`
-   - `incident.created`, `incident.resolved`, `incident.status_changed`
-   - `api_key.created`, `api_key.revoked`
-   - `policy.created`, `policy.updated`, `policy.deleted`
-5. Optionally set a **description** for your own reference.
-6. Click **Save**. The webhook secret is shown once -- copy it immediately.
+| Status | UI behavior |
+| --- | --- |
+| Canonical mode `off` | Shows the disabled warning; canonical registrations cannot be loaded or changed. |
+| Canonical mode `migrate` or incomplete migration | Shows migration state; canonical registrations cannot be loaded or changed. |
+| Canonical mode `on`, migration complete | Loads the catalog and redacted registration list. PR 1 still reports delivery unavailable and blocks activation. |
+| `route_selection=legacy` | Shows a prominent compatibility warning and uses only the typed legacy adapter. Canonical ETags and secret rotation are unavailable. |
+| Status unavailable or malformed | Shows the bounded error and retry action; no automatic downgrade occurs. |
 
----
+The page requires a platform-admin account. Canonical mutations also require a
+user-backed admin principal.
 
-## HMAC Signature Verification
+## Create A Canonical Registration
 
-Every delivery includes an `X-Webhook-Signature` header containing an HMAC-SHA256 hex digest computed over the raw request body using the webhook secret.
+1. Open **Webhooks** and confirm the operational alerts show the expected mode,
+   completed migration, available key, and acceptable limits.
+2. Select **Add webhook**.
+3. Enter the complete destination URL. HTTPS is required unless the deployment
+   explicitly allows HTTP in non-production.
+4. Optionally enter a description and set a timeout from 1 to 30 seconds.
+5. Select one or more events from the server-provided catalog.
+6. Select **Create**.
+7. Copy the generated signing secret into the receiver's secret manager.
+8. Check the acknowledgement only after the secret is stored, then select
+   **Done**.
 
-### Verification steps
+Creation is always inactive. The secret is shown once and cannot be retrieved
+from list/get responses. The page keeps it and the same-command retry key in
+memory only; it does not use local storage, session storage, cookies, URLs, or
+console output. Page exit and back-forward-cache restoration clear both.
 
-```python
-import hmac
-import hashlib
+If a transport failure leaves the create result unknown, use **Retry same
+create** only while that action remains visible. It sends the exact same body
+and in-memory idempotency key. After navigation/reload, fetch the resulting
+inactive registration and rotate it to obtain a new secret instead of trying to
+recover the original.
 
-def verify_signature(body: bytes, signature: str, secret: str) -> bool:
-    expected = hmac.new(
-        secret.encode(),
-        body,
-        hashlib.sha256,
-    ).hexdigest()
-    return hmac.compare_digest(f"sha256={expected}", signature)
-```
+## Review Registrations
 
-```typescript
-import { createHmac, timingSafeEqual } from 'crypto';
+Canonical rows show only the destination origin and hostname. The full path and
+query are encrypted and are not retrievable after submission. Rows also show:
 
-function verify(body: Buffer, signature: string, secret: string): boolean {
-  const expected = `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`;
-  return timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
-}
-```
+- active/inactive state;
+- subscribed catalog events;
+- timeout and description;
+- revision and delivery/secret versions;
+- imported-secret rotation requirement;
+- created/updated actor and time metadata.
 
-Always use a constant-time comparison to prevent timing attacks.
+Pagination is server-backed. Operational alerts report registration and active
+limits, key state, migration state, rollback eligibility, imported secrets that
+require rotation, and delivery availability.
 
----
+## Edit Metadata Or Replace A Destination
 
-## Delivery Monitoring
+**Edit metadata** changes description, events, timeout, or active state without
+submitting a URL. **Replace destination** is separate and starts with a blank
+field because the full existing destination is intentionally unavailable.
 
-Each webhook has a **Deliveries** tab showing recent attempts:
+Before any PATCH, the page fetches the current registration and uses its strong
+ETag. The confirmation dialog shows the current reviewed registration. If the
+server returns `412` or `428`, the page fetches and displays the new current
+state and requires another explicit review. It never retries a conditional
+mutation against a changed revision automatically.
 
-| Column         | Description                                       |
-|----------------|---------------------------------------------------|
-| Event          | The event type that triggered the delivery.       |
-| Status         | HTTP response code or `timeout` / `error`.        |
-| Latency        | Round-trip time in milliseconds.                  |
-| Attempted At   | Timestamp of the delivery attempt.                |
+PR 1 blocks activation because `delivery_capability_ready=false`. Imported
+registrations are also blocked until their signing secret is rotated.
 
-Failed deliveries are retried with exponential backoff (1 min, 5 min, 30 min) up to 3 attempts. After exhaustion the delivery is marked as permanently failed.
+## Rotate A Signing Secret
 
-### Inspecting a delivery
+1. Keep or make the registration inactive.
+2. Select **Rotate secret**.
+3. Review the freshly fetched registration and confirm.
+4. Copy the new secret to the receiver's secret manager.
+5. Acknowledge storage and close the dialog.
 
-Click a delivery row to see:
+Rotation uses a fresh in-memory idempotency key and the current ETag. A lost
+response can be retried only through the visible same-command retry action. An
+exact retry returns the same secret while its recorded version remains current.
+If that in-memory action is gone, perform a new rotation.
 
-- **Request headers** and **body** (JSON payload).
-- **Response headers** and **body** from the receiver.
-- **Error details** if the delivery failed.
+Do not reactivate a receiver until its configuration uses the new secret. In PR
+1, final activation remains unavailable regardless.
 
----
+## Delete A Registration
 
-## Testing a Webhook
+Delete first fetches the current registration, presents it for review, and
+sends its ETag. Deletion is a soft delete and cannot be undone through the UI.
+A stale ETag refreshes current state and requires a new confirmation.
 
-1. Open the webhook detail page.
-2. Click **Send Test Event**.
-3. Choose an event type from the dropdown.
-4. The platform sends a synthetic payload to your URL with the header `X-Webhook-Test: true`.
-5. Check the delivery log to confirm the result.
+## Legacy Compatibility Mode
 
-Use this to validate your endpoint before subscribing to production events.
+Legacy compatibility exists only as a temporary migration bridge while
+canonical mode is `off`. The page can expose historical create, enable/disable,
+test, delivery-history, and delete controls only when authenticated status
+explicitly selects the legacy route family.
 
----
+Legacy behavior lacks canonical ETags, destination redaction, and signing-secret
+rotation guarantees. Do not use a failed canonical request as a reason to switch
+or fall back. Complete the reviewed migration runbook before canonical use.
 
-## Payload Format
+## Current PR 1 Limitations
 
-All payloads share a common envelope:
+- No outbound webhook delivery.
+- No canonical test sends or delivery history.
+- No retry worker, reconciler, or producer health.
+- No receiver payload/signature contract for production use.
+- No canonical activation while delivery capability is unavailable.
 
-```json
-{
-  "id": "evt_abc123",
-  "type": "user.created",
-  "created_at": "2026-03-27T12:00:00Z",
-  "data": {
-    "user_id": 42,
-    "username": "alice"
-  }
-}
-```
+The delivery substrate, durable producers, receiver guide, and final activation
+gate are separate follow-up releases. Do not configure a receiver on the
+assumption that PR 1 will send events.
 
-The `data` field varies by event type. Refer to the API reference for per-event schemas.
-
----
-
-## Best Practices
-
-- **Respond quickly.** Return a 2xx within 10 seconds. Process asynchronously if your handler is slow.
-- **Idempotency.** Use the `id` field to deduplicate deliveries.
-- **Secret rotation.** Rotate webhook secrets periodically via the admin UI and update your verification code.
-- **Monitoring.** Set up alerts on repeated delivery failures to catch endpoint issues early.
+Operator environment, migration, rollback, and key-rotation procedures are in
+`Docs/Admin_Webhooks_Control_Plane.md`,
+`Docs/Admin_Webhooks_Migration_Runbook.md`, and
+`Docs/Admin_Webhooks_Key_Rotation_Runbook.md`.

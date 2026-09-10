@@ -16,9 +16,9 @@ import tempfile
 import os
 import shutil
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 from datetime import datetime
-from typing import Any
 from uuid import uuid4
 
 from tldw_Server_API.app.core.Chat.document_generator import DocumentGeneratorService, DocumentType
@@ -391,37 +391,106 @@ class TestDocumentGeneratorService:
         if not hasattr(service, 'delete_document'):
             pytest.skip("delete_document not implemented")
 
-    def test_save_custom_prompt_config(
-        self,
-        service: DocumentGeneratorService,
-        real_db: CharactersRAGDB,
-    ) -> None:
+    def test_save_custom_prompt_config(self, service, real_db):
 
         """Test saving custom prompt configuration."""
-        assert service.save_prompt_config({DocumentType.SUMMARY: "Custom summary prompt"}) is True
+        assert service.save_prompt_config({DocumentType.SUMMARY: "Custom summary prompt"})
 
         with real_db.get_connection() as conn:
             row = conn.execute(
                 """
-                SELECT user_prompt
-                FROM user_prompts
-                WHERE document_type = ? AND is_active = 1
+                SELECT user_id, document_type, custom_prompt
+                FROM user_prompt_configs
+                WHERE user_id = ? AND document_type = ?
                 """,
-                (DocumentType.SUMMARY.value,),
+                ("test_user", DocumentType.SUMMARY.value),
             ).fetchone()
 
-        assert row is not None
-        assert row["user_prompt"] == "Custom summary prompt"
+        assert dict(row) == {
+            "user_id": "test_user",
+            "document_type": DocumentType.SUMMARY.value,
+            "custom_prompt": "Custom summary prompt",
+        }
 
-    def test_save_custom_prompt_config_repeated_updates(
-        self,
-        service: DocumentGeneratorService,
-        real_db: CharactersRAGDB,
-    ) -> None:
-        """Repeated prompt edits should replace old rows without unique collisions."""
-        assert service.save_prompt_config({DocumentType.SUMMARY: "First prompt"}) is True
-        assert service.save_prompt_config({DocumentType.SUMMARY: "Second prompt"}) is True
-        assert service.save_prompt_config({DocumentType.SUMMARY: "Third prompt"}) is True
+    def test_get_prompt_config(self, service, real_db):
+
+        """Test retrieving custom prompt configuration."""
+        assert service.save_prompt_config({DocumentType.QA: "Custom QA prompt"})
+        assert service.get_prompt_config(DocumentType.QA) == "Custom QA prompt"
+
+    def test_save_user_prompt_config_allows_multiple_inactive_versions(self, service, real_db):
+        """Saving new prompt versions keeps history while leaving one active prompt."""
+        assert service.save_user_prompt_config(
+            DocumentType.SUMMARY,
+            "System v1",
+            "User v1",
+        )
+        assert service.save_user_prompt_config(
+            DocumentType.SUMMARY,
+            "System v2",
+            "User v2",
+        )
+        assert service.save_user_prompt_config(
+            DocumentType.SUMMARY,
+            "System v3",
+            "User v3",
+        )
+
+        rows = real_db.execute_query(
+            """
+            SELECT user_prompt, is_active
+            FROM user_prompts
+            WHERE document_type = ?
+            ORDER BY id
+            """,
+            (DocumentType.SUMMARY.value,)
+        ).fetchall()
+
+        assert [row["user_prompt"] for row in rows] == ["User v1", "User v2", "User v3"]
+        assert [row["is_active"] for row in rows] == [0, 0, 1]
+
+    def test_init_repairs_legacy_user_prompt_unique_constraint(self, real_db):
+        """Existing prompt tables with legacy uniqueness are repaired in place."""
+        with real_db.get_connection() as conn:
+            conn.execute("""
+                CREATE TABLE user_prompts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    document_type TEXT NOT NULL,
+                    system_prompt TEXT NOT NULL,
+                    user_prompt TEXT NOT NULL,
+                    temperature REAL DEFAULT 0.7,
+                    max_tokens INTEGER DEFAULT 2000,
+                    is_active BOOLEAN DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(document_type, is_active)
+                )
+            """)
+            conn.execute(
+                """
+                INSERT INTO user_prompts
+                (document_type, system_prompt, user_prompt, is_active)
+                VALUES (?, ?, ?, 0)
+                """,
+                (DocumentType.SUMMARY.value, "System v1", "User v1")
+            )
+            conn.execute(
+                """
+                INSERT INTO user_prompts
+                (document_type, system_prompt, user_prompt, is_active)
+                VALUES (?, ?, ?, 1)
+                """,
+                (DocumentType.SUMMARY.value, "System v2", "User v2")
+            )
+            conn.commit()
+
+        service = DocumentGeneratorService(real_db, user_id="test_user")
+
+        assert service.save_user_prompt_config(
+            DocumentType.SUMMARY,
+            "System v3",
+            "User v3",
+        )
 
         with real_db.get_connection() as conn:
             rows = conn.execute(
@@ -431,55 +500,20 @@ class TestDocumentGeneratorService:
                 WHERE document_type = ?
                 ORDER BY id
                 """,
-                (DocumentType.SUMMARY.value,),
+                (DocumentType.SUMMARY.value,)
             ).fetchall()
+            index_row = conn.execute(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type = 'index'
+                  AND name = 'idx_user_prompts_active_document_type'
+                """
+            ).fetchone()
 
-        assert [(row["user_prompt"], row["is_active"]) for row in rows] == [("Third prompt", 1)]
-
-    def test_save_custom_prompt_config_validates_batch_before_writing(
-        self,
-        service: DocumentGeneratorService,
-    ) -> None:
-        """Invalid batch entries should not partially overwrite existing prompts."""
-        assert service.save_prompt_config({DocumentType.SUMMARY: "Stable prompt"}) is True
-
-        assert service.save_prompt_config({
-            DocumentType.SUMMARY: "Partial prompt",
-            "not-a-document-type": "Invalid prompt",
-        }) is False
-
-        assert service.get_prompt_config(DocumentType.SUMMARY) == "Stable prompt"
-
-    def test_get_prompt_config(self, service: DocumentGeneratorService, real_db: CharactersRAGDB) -> None:
-
-        """Test retrieving custom prompt configuration."""
-        assert service.save_prompt_config({DocumentType.SUMMARY: "Saved prompt"}) is True
-
-        assert service.get_prompt_config(DocumentType.SUMMARY) == "Saved prompt"
-
-    def test_get_prompt_config_handles_tuple_rows(self, service: DocumentGeneratorService) -> None:
-        """Prompt lookups should tolerate tuple rows from connections without row_factory."""
-        class _Cursor:
-            def fetchone(self) -> tuple[str]:
-                return ("Tuple prompt",)
-
-        class _Connection:
-            def __enter__(self) -> "_Connection":
-                return self
-
-            def __exit__(self, *_args: Any) -> None:
-                return None
-
-            def execute(self, *_args: Any, **_kwargs: Any) -> _Cursor:
-                return _Cursor()
-
-        class _DB:
-            def get_connection(self) -> _Connection:
-                return _Connection()
-
-        service.db = _DB()
-
-        assert service.get_prompt_config(DocumentType.SUMMARY) == "Tuple prompt"
+        assert [row["user_prompt"] for row in rows] == ["User v1", "User v2", "User v3"]
+        assert [row["is_active"] for row in rows] == [0, 0, 1]
+        assert index_row is not None
 
     @pytest.mark.asyncio
     async def test_bulk_generation(

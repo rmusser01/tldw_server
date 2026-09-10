@@ -30,7 +30,7 @@ class FakePGCursor:
         self._fetch_buffer = None
         # Idempotent insert returning * (first insert returns a row, later returns None)
         if "ON CONFLICT (domain, queue, job_type, idempotency_key) DO NOTHING RETURNING *" in s:
-            # params: (uuid, domain, queue, job_type, owner, project, batch_group, idem_key, payload_json, priority, max_retries, available_at, request_id, trace_id)
+            # params: uuid, identity, payload, immutable execution controls, scheduling, trace context
             domain = params[1]
             queue = params[2]
             job_type = params[3]
@@ -53,7 +53,9 @@ class FakePGCursor:
                 "idempotency_key": idem,
                 "status": "queued",
                 "priority": int(params[9]),
-                "available_at": params[11],
+                "expired_lease_policy": params[11],
+                "quarantine_threshold": params[12],
+                "available_at": params[13],
             }
             self.jobs[new_id] = row
             self._fetch_buffer = row
@@ -254,6 +256,8 @@ def test_pg_idempotent_create_uses_current_request_context_for_job_created_event
             "request_id": "old-request",
             "trace_id": "old-trace",
             "retry_count": 0,
+            "expired_lease_policy": "consume_retry",
+            "quarantine_threshold": None,
         }
     }
     cursor = FakePGCursor(jobs)
@@ -314,6 +318,8 @@ def test_pg_idempotent_replay_side_effects_use_current_event_context(monkeypatch
             "request_id": "old-request",
             "trace_id": "old-trace",
             "retry_count": 0,
+            "expired_lease_policy": "consume_retry",
+            "quarantine_threshold": None,
         }
     }
     cursor = FakePGCursor(jobs)

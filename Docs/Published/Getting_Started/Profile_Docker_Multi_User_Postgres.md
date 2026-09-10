@@ -11,7 +11,7 @@ Prerequisites:
 - Docker Engine or Docker Desktop
 - Docker Compose
 - Git
-- Python 3.10+ for the lightweight `tldw-setup` helper used by the Makefile
+- Python 3.11+ for the lightweight `tldw-setup` helper used by the Makefile
 
 ```bash
 git clone https://github.com/rmusser01/tldw_server.git

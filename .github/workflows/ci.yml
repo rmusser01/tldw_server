@@ -104,6 +104,36 @@ jobs:
           ok = compileall.compile_dir('tldw_Server_API/app', force=True, quiet=1)
           sys.exit(0 if ok else 1)
           PY
+  preflight-python-311:
+    name: Governed Preflight (Python 3.11)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: .
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      TEST_MODE: 'true'
+      DISABLE_HEAVY_STARTUP: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - name: Install PortAudio build dependencies
+        uses: ./.github/actions/setup-ffmpeg
+        with:
+          install-ffmpeg: 'false'
+          install-portaudio: 'true'
+      - name: Setup Python 3.11 and dependencies
+        uses: ./.github/actions/setup-python-deps
+        with:
+          python-version: '3.11'
+          use-uv: 'true'
+          enable-pip-cache: ${{ github.event_name != 'workflow_run' }}
+          extras: dev
+      - name: Run governed preflight final gate
+        run: |
+          pytest -q --disable-warnings -p pytest_asyncio.plugin \
+            tldw_Server_API/tests/Web_Scraping/test_phase3_preflight_architecture.py \
+            tldw_Server_API/tests/Web_Scraping/test_phase3_preflight_browser.py \
+            tldw_Server_API/tests/Web_Scraping/test_phase3_preflight_browser_analyzers.py
   shard-coverage:
     name: Shard coverage guard
     needs: admission
@@ -895,6 +925,9 @@ jobs:
           - name: admin-watchlists-webhooks
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_w*.py
+          - name: admin-webhooks-canonical
+            paths: >-
+              tldw_Server_API/tests/Admin_Webhooks
           - name: admin-system-usage
             paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
@@ -903,6 +936,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/AuthNZ/integration/test_admin_*.py
               tldw_Server_API/tests/AuthNZ/integration/test_api_key_*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_audio_quota_dates_postgres.py
               tldw_Server_API/tests/AuthNZ/integration/test_auth_*.py
           - name: auth-integration-authnz
             paths: >-
@@ -950,6 +984,13 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
               tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_link_migration_v58.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_moodboard_studio_sync_migration_v61.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_moodboard_studio_sync_postgres_tenancy.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v55.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v57.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_migration_v56.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_postgres_tenancy.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_db.py
@@ -958,7 +999,12 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
               tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_creation.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py
+              tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py
+              tldw_Server_API/tests/Workspaces/test_workspace_job_status.py
+              tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
@@ -966,6 +1012,7 @@ jobs:
               tldw_Server_API/tests/DB
               tldw_Server_API/tests/DB_Management
               tldw_Server_API/tests/MediaDB2
+              tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py
               tldw_Server_API/tests/PrivilegeCatalog
               tldw_Server_API/tests/Privileges
           - name: ai-chromadb
@@ -1172,6 +1219,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_kanban_retriever.py
               tldw_Server_API/tests/RAG_NEW/unit/test_learned_fusion_simple.py
               tldw_Server_API/tests/RAG_NEW/unit/test_llamacpp_reranker_topk_full_input.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_preinstalled_local_reranker.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pipeline*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_post*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pre_retrieval*.py
@@ -1196,6 +1244,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_path_validation_security.py
               tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_security_filters_sanitizers.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py
               tldw_Server_API/tests/RAG_NEW/unit/test_source*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_strict_extractive_and_citations.py
           - name: rag-new-unit-media-ingest
@@ -1235,6 +1284,7 @@ jobs:
               tldw_Server_API/tests/Audio
               tldw_Server_API/tests/Audio_Studio
               tldw_Server_API/tests/AudioJobs
+              tldw_Server_API/tests/Benchmarks
               tldw_Server_API/tests/STT
               tldw_Server_API/tests/TTS
               tldw_Server_API/tests/TTS_NEW
@@ -1246,14 +1296,20 @@ jobs:
           - name: media-core-api
             paths: >-
               tldw_Server_API/tests/Media/test_archive_member_cap.py
+              tldw_Server_API/tests/Media/test_audio_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py
               tldw_Server_API/tests/Media/test_cache_index.py
+              tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_email_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py
               tldw_Server_API/tests/Media/test_json_*.py
               tldw_Server_API/tests/Media/test_media_*.py
               tldw_Server_API/tests/Media/test_navigation_policy_contract.py
+              tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_process_code_and_uploads.py
               tldw_Server_API/tests/Media/test_upload_sink_security.py
+              tldw_Server_API/tests/Media/test_video_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_web_summary_service_prompt.py
               tldw_Server_API/tests/Media/unit
           - name: media-ingestion-new-ocr
             paths: >-
@@ -1278,6 +1334,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_original_file_replacement.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py
           - name: media-ingestion-new-unit-mediawiki
             paths: >-
@@ -1354,6 +1411,7 @@ jobs:
               tldw_Server_API/tests/Visual_Identities
           - name: chat-character-unit-core
             paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py
               tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_cards_fts_bootstrap.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_chat_default_provider.py
@@ -1393,6 +1451,7 @@ jobs:
               tldw_Server_API/tests/Visual_Identities
           - name: chat-character-integration-api
             paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
@@ -1480,6 +1539,8 @@ jobs:
               tldw_Server_API/tests/Claims/test_claim_review_rule_assignment.py
               tldw_Server_API/tests/Claims/test_claims_alerts_*.py
               tldw_Server_API/tests/Claims/test_claims_alignment.py
+              tldw_Server_API/tests/Claims/property/test_claims_analytics_export_state_properties.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports.py
               tldw_Server_API/tests/Claims/test_claims_analytics_exports_cleanup.py
               tldw_Server_API/tests/Claims/test_claims_api_strict_parse_mode.py
               tldw_Server_API/tests/Claims/test_claims_budget_guard.py
@@ -1503,6 +1564,10 @@ jobs:
               tldw_Server_API/tests/Claims/test_claims_review_*.py
           - name: product-claims-service
             paths: >-
+              tldw_Server_API/tests/Claims/test_claims_cancellation_and_timeout.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports_api.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports_worker_e2e.py
+              tldw_Server_API/tests/Claims/test_claims_jobs_*.py
               tldw_Server_API/tests/Claims/test_claims_runtime_config.py
               tldw_Server_API/tests/Claims/test_claims_service_*.py
               tldw_Server_API/tests/Claims/test_claims_settings_*.py
@@ -1522,6 +1587,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_embeddings_abtest_*.py
           - name: product-evaluations-core
             paths: >-
+              tldw_Server_API/tests/Evaluations/test_article_extraction_benchmark.py
               tldw_Server_API/tests/Evaluations/test_benchmark_*.py
               tldw_Server_API/tests/Evaluations/test_circuit_breaker.py
               tldw_Server_API/tests/Evaluations/test_connection_pool.py
@@ -1694,7 +1760,9 @@ jobs:
               tldw_Server_API/tests/Resource_Governance
           - name: platform-services-startup
             paths: >-
+              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
+              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -1718,6 +1786,8 @@ jobs:
               tldw_Server_API/tests/Services/test_lifecycle_*.py
               tldw_Server_API/tests/Services/test_loop_*.py
               tldw_Server_API/tests/Services/test_media_*.py
+              tldw_Server_API/tests/Services/test_notes_graph_projection_worker.py
+              tldw_Server_API/tests/Services/test_notes_graph_suggestions_workers.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
@@ -2047,6 +2117,8 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
+          # TEST_PATHS is a matrix-provided list of pytest path arguments.
+          # shellcheck disable=SC2086
           pytest -q --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
@@ -2351,6 +2423,9 @@ jobs:
           - name: admin-watchlists-webhooks
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_w*.py
+          - name: admin-webhooks-canonical
+            paths: >-
+              tldw_Server_API/tests/Admin_Webhooks
           - name: admin-system-usage
             paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
@@ -2359,6 +2434,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/AuthNZ/integration/test_admin_*.py
               tldw_Server_API/tests/AuthNZ/integration/test_api_key_*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_audio_quota_dates_postgres.py
               tldw_Server_API/tests/AuthNZ/integration/test_auth_*.py
           - name: auth-integration-authnz
             paths: >-
@@ -2406,6 +2482,13 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
               tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_link_migration_v58.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_moodboard_studio_sync_migration_v61.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_moodboard_studio_sync_postgres_tenancy.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v55.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v57.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_migration_v56.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_postgres_tenancy.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_db.py
@@ -2414,7 +2497,12 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
               tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_creation.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py
+              tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py
+              tldw_Server_API/tests/Workspaces/test_workspace_job_status.py
+              tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
@@ -2422,6 +2510,7 @@ jobs:
               tldw_Server_API/tests/DB
               tldw_Server_API/tests/DB_Management
               tldw_Server_API/tests/MediaDB2
+              tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py
               tldw_Server_API/tests/PrivilegeCatalog
               tldw_Server_API/tests/Privileges
           - name: ai-chromadb
@@ -2628,6 +2717,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_kanban_retriever.py
               tldw_Server_API/tests/RAG_NEW/unit/test_learned_fusion_simple.py
               tldw_Server_API/tests/RAG_NEW/unit/test_llamacpp_reranker_topk_full_input.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_preinstalled_local_reranker.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pipeline*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_post*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pre_retrieval*.py
@@ -2652,6 +2742,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_path_validation_security.py
               tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_security_filters_sanitizers.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py
               tldw_Server_API/tests/RAG_NEW/unit/test_source*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_strict_extractive_and_citations.py
           - name: rag-new-unit-media-ingest
@@ -2691,6 +2782,7 @@ jobs:
               tldw_Server_API/tests/Audio
               tldw_Server_API/tests/Audio_Studio
               tldw_Server_API/tests/AudioJobs
+              tldw_Server_API/tests/Benchmarks
               tldw_Server_API/tests/STT
               tldw_Server_API/tests/TTS
               tldw_Server_API/tests/TTS_NEW
@@ -2702,14 +2794,20 @@ jobs:
           - name: media-core-api
             paths: >-
               tldw_Server_API/tests/Media/test_archive_member_cap.py
+              tldw_Server_API/tests/Media/test_audio_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py
               tldw_Server_API/tests/Media/test_cache_index.py
+              tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_email_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py
               tldw_Server_API/tests/Media/test_json_*.py
               tldw_Server_API/tests/Media/test_media_*.py
               tldw_Server_API/tests/Media/test_navigation_policy_contract.py
+              tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_process_code_and_uploads.py
               tldw_Server_API/tests/Media/test_upload_sink_security.py
+              tldw_Server_API/tests/Media/test_video_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_web_summary_service_prompt.py
               tldw_Server_API/tests/Media/unit
           - name: media-ingestion-new-ocr
             paths: >-
@@ -2734,6 +2832,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_original_file_replacement.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py
           - name: media-ingestion-new-unit-mediawiki
             paths: >-
@@ -2849,6 +2948,7 @@ jobs:
               tldw_Server_API/tests/Visual_Identities
           - name: chat-character-integration-api
             paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
@@ -2936,6 +3036,8 @@ jobs:
               tldw_Server_API/tests/Claims/test_claim_review_rule_assignment.py
               tldw_Server_API/tests/Claims/test_claims_alerts_*.py
               tldw_Server_API/tests/Claims/test_claims_alignment.py
+              tldw_Server_API/tests/Claims/property/test_claims_analytics_export_state_properties.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports.py
               tldw_Server_API/tests/Claims/test_claims_analytics_exports_cleanup.py
               tldw_Server_API/tests/Claims/test_claims_api_strict_parse_mode.py
               tldw_Server_API/tests/Claims/test_claims_budget_guard.py
@@ -2959,6 +3061,10 @@ jobs:
               tldw_Server_API/tests/Claims/test_claims_review_*.py
           - name: product-claims-service
             paths: >-
+              tldw_Server_API/tests/Claims/test_claims_cancellation_and_timeout.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports_api.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports_worker_e2e.py
+              tldw_Server_API/tests/Claims/test_claims_jobs_*.py
               tldw_Server_API/tests/Claims/test_claims_runtime_config.py
               tldw_Server_API/tests/Claims/test_claims_service_*.py
               tldw_Server_API/tests/Claims/test_claims_settings_*.py
@@ -2978,6 +3084,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_embeddings_abtest_*.py
           - name: product-evaluations-core
             paths: >-
+              tldw_Server_API/tests/Evaluations/test_article_extraction_benchmark.py
               tldw_Server_API/tests/Evaluations/test_benchmark_*.py
               tldw_Server_API/tests/Evaluations/test_circuit_breaker.py
               tldw_Server_API/tests/Evaluations/test_connection_pool.py
@@ -3150,7 +3257,9 @@ jobs:
               tldw_Server_API/tests/Resource_Governance
           - name: platform-services-startup
             paths: >-
+              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
+              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -3174,6 +3283,8 @@ jobs:
               tldw_Server_API/tests/Services/test_lifecycle_*.py
               tldw_Server_API/tests/Services/test_loop_*.py
               tldw_Server_API/tests/Services/test_media_*.py
+              tldw_Server_API/tests/Services/test_notes_graph_projection_worker.py
+              tldw_Server_API/tests/Services/test_notes_graph_suggestions_workers.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
@@ -3447,6 +3558,8 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
+          # TEST_PATHS is a matrix-provided list of pytest path arguments.
+          # shellcheck disable=SC2086
           pytest -q --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
@@ -3678,6 +3791,9 @@ jobs:
           - name: admin-watchlists-webhooks
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_w*.py
+          - name: admin-webhooks-canonical
+            paths: >-
+              tldw_Server_API/tests/Admin_Webhooks
           - name: admin-system-usage
             paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
@@ -3686,6 +3802,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/AuthNZ/integration/test_admin_*.py
               tldw_Server_API/tests/AuthNZ/integration/test_api_key_*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_audio_quota_dates_postgres.py
               tldw_Server_API/tests/AuthNZ/integration/test_auth_*.py
           - name: auth-integration-authnz
             paths: >-
@@ -3733,6 +3850,13 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
               tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_link_migration_v58.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_moodboard_studio_sync_migration_v61.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_moodboard_studio_sync_postgres_tenancy.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v55.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v57.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_migration_v56.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_postgres_tenancy.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_db.py
@@ -3741,7 +3865,12 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
               tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_creation.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py
+              tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py
+              tldw_Server_API/tests/Workspaces/test_workspace_job_status.py
+              tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
@@ -3749,6 +3878,7 @@ jobs:
               tldw_Server_API/tests/DB
               tldw_Server_API/tests/DB_Management
               tldw_Server_API/tests/MediaDB2
+              tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py
               tldw_Server_API/tests/PrivilegeCatalog
               tldw_Server_API/tests/Privileges
           - name: ai-chromadb
@@ -3955,6 +4085,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_kanban_retriever.py
               tldw_Server_API/tests/RAG_NEW/unit/test_learned_fusion_simple.py
               tldw_Server_API/tests/RAG_NEW/unit/test_llamacpp_reranker_topk_full_input.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_preinstalled_local_reranker.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pipeline*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_post*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pre_retrieval*.py
@@ -3979,6 +4110,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_path_validation_security.py
               tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_security_filters_sanitizers.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py
               tldw_Server_API/tests/RAG_NEW/unit/test_source*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_strict_extractive_and_citations.py
           - name: rag-new-unit-media-ingest
@@ -4018,6 +4150,7 @@ jobs:
               tldw_Server_API/tests/Audio
               tldw_Server_API/tests/Audio_Studio
               tldw_Server_API/tests/AudioJobs
+              tldw_Server_API/tests/Benchmarks
               tldw_Server_API/tests/STT
               tldw_Server_API/tests/TTS
               tldw_Server_API/tests/TTS_NEW
@@ -4029,14 +4162,20 @@ jobs:
           - name: media-core-api
             paths: >-
               tldw_Server_API/tests/Media/test_archive_member_cap.py
+              tldw_Server_API/tests/Media/test_audio_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py
               tldw_Server_API/tests/Media/test_cache_index.py
+              tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_email_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py
               tldw_Server_API/tests/Media/test_json_*.py
               tldw_Server_API/tests/Media/test_media_*.py
               tldw_Server_API/tests/Media/test_navigation_policy_contract.py
+              tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_process_code_and_uploads.py
               tldw_Server_API/tests/Media/test_upload_sink_security.py
+              tldw_Server_API/tests/Media/test_video_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_web_summary_service_prompt.py
               tldw_Server_API/tests/Media/unit
           - name: media-ingestion-new-ocr
             paths: >-
@@ -4061,6 +4200,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_original_file_replacement.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py
           - name: media-ingestion-new-unit-mediawiki
             paths: >-
@@ -4176,6 +4316,7 @@ jobs:
               tldw_Server_API/tests/Visual_Identities
           - name: chat-character-integration-api
             paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
@@ -4263,6 +4404,8 @@ jobs:
               tldw_Server_API/tests/Claims/test_claim_review_rule_assignment.py
               tldw_Server_API/tests/Claims/test_claims_alerts_*.py
               tldw_Server_API/tests/Claims/test_claims_alignment.py
+              tldw_Server_API/tests/Claims/property/test_claims_analytics_export_state_properties.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports.py
               tldw_Server_API/tests/Claims/test_claims_analytics_exports_cleanup.py
               tldw_Server_API/tests/Claims/test_claims_api_strict_parse_mode.py
               tldw_Server_API/tests/Claims/test_claims_budget_guard.py
@@ -4286,6 +4429,10 @@ jobs:
               tldw_Server_API/tests/Claims/test_claims_review_*.py
           - name: product-claims-service
             paths: >-
+              tldw_Server_API/tests/Claims/test_claims_cancellation_and_timeout.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports_api.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports_worker_e2e.py
+              tldw_Server_API/tests/Claims/test_claims_jobs_*.py
               tldw_Server_API/tests/Claims/test_claims_runtime_config.py
               tldw_Server_API/tests/Claims/test_claims_service_*.py
               tldw_Server_API/tests/Claims/test_claims_settings_*.py
@@ -4305,6 +4452,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_embeddings_abtest_*.py
           - name: product-evaluations-core
             paths: >-
+              tldw_Server_API/tests/Evaluations/test_article_extraction_benchmark.py
               tldw_Server_API/tests/Evaluations/test_benchmark_*.py
               tldw_Server_API/tests/Evaluations/test_circuit_breaker.py
               tldw_Server_API/tests/Evaluations/test_connection_pool.py
@@ -4477,7 +4625,9 @@ jobs:
               tldw_Server_API/tests/Resource_Governance
           - name: platform-services-startup
             paths: >-
+              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
+              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -4501,6 +4651,8 @@ jobs:
               tldw_Server_API/tests/Services/test_lifecycle_*.py
               tldw_Server_API/tests/Services/test_loop_*.py
               tldw_Server_API/tests/Services/test_media_*.py
+              tldw_Server_API/tests/Services/test_notes_graph_projection_worker.py
+              tldw_Server_API/tests/Services/test_notes_graph_suggestions_workers.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
@@ -4698,6 +4850,8 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
+          # TEST_PATHS is a matrix-provided list of pytest path arguments.
+          # shellcheck disable=SC2086
           pytest -q --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
@@ -4928,6 +5082,9 @@ jobs:
           - name: admin-watchlists-webhooks
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_w*.py
+          - name: admin-webhooks-canonical
+            paths: >-
+              tldw_Server_API/tests/Admin_Webhooks
           - name: admin-system-usage
             paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
@@ -4936,6 +5093,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/AuthNZ/integration/test_admin_*.py
               tldw_Server_API/tests/AuthNZ/integration/test_api_key_*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_audio_quota_dates_postgres.py
               tldw_Server_API/tests/AuthNZ/integration/test_auth_*.py
           - name: auth-integration-authnz
             paths: >-
@@ -4983,6 +5141,13 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
               tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_link_migration_v58.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_moodboard_studio_sync_migration_v61.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_moodboard_studio_sync_postgres_tenancy.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v55.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v57.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_migration_v56.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_postgres_tenancy.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_db.py
@@ -4991,7 +5156,12 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
               tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_creation.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py
+              tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py
+              tldw_Server_API/tests/Workspaces/test_workspace_job_status.py
+              tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
@@ -4999,6 +5169,7 @@ jobs:
               tldw_Server_API/tests/DB
               tldw_Server_API/tests/DB_Management
               tldw_Server_API/tests/MediaDB2
+              tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py
               tldw_Server_API/tests/PrivilegeCatalog
               tldw_Server_API/tests/Privileges
           - name: ai-chromadb
@@ -5205,6 +5376,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_kanban_retriever.py
               tldw_Server_API/tests/RAG_NEW/unit/test_learned_fusion_simple.py
               tldw_Server_API/tests/RAG_NEW/unit/test_llamacpp_reranker_topk_full_input.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_preinstalled_local_reranker.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pipeline*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_post*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pre_retrieval*.py
@@ -5229,6 +5401,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_path_validation_security.py
               tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_security_filters_sanitizers.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py
               tldw_Server_API/tests/RAG_NEW/unit/test_source*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_strict_extractive_and_citations.py
           - name: rag-new-unit-media-ingest
@@ -5268,6 +5441,7 @@ jobs:
               tldw_Server_API/tests/Audio
               tldw_Server_API/tests/Audio_Studio
               tldw_Server_API/tests/AudioJobs
+              tldw_Server_API/tests/Benchmarks
               tldw_Server_API/tests/STT
               tldw_Server_API/tests/TTS
               tldw_Server_API/tests/TTS_NEW
@@ -5279,14 +5453,20 @@ jobs:
           - name: media-core-api
             paths: >-
               tldw_Server_API/tests/Media/test_archive_member_cap.py
+              tldw_Server_API/tests/Media/test_audio_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py
               tldw_Server_API/tests/Media/test_cache_index.py
+              tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_email_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py
               tldw_Server_API/tests/Media/test_json_*.py
               tldw_Server_API/tests/Media/test_media_*.py
               tldw_Server_API/tests/Media/test_navigation_policy_contract.py
+              tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_process_code_and_uploads.py
               tldw_Server_API/tests/Media/test_upload_sink_security.py
+              tldw_Server_API/tests/Media/test_video_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_web_summary_service_prompt.py
               tldw_Server_API/tests/Media/unit
           - name: media-ingestion-new-ocr
             paths: >-
@@ -5311,6 +5491,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_original_file_replacement.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py
           - name: media-ingestion-new-unit-mediawiki
             paths: >-
@@ -5426,6 +5607,7 @@ jobs:
               tldw_Server_API/tests/Visual_Identities
           - name: chat-character-integration-api
             paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
@@ -5513,6 +5695,8 @@ jobs:
               tldw_Server_API/tests/Claims/test_claim_review_rule_assignment.py
               tldw_Server_API/tests/Claims/test_claims_alerts_*.py
               tldw_Server_API/tests/Claims/test_claims_alignment.py
+              tldw_Server_API/tests/Claims/property/test_claims_analytics_export_state_properties.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports.py
               tldw_Server_API/tests/Claims/test_claims_analytics_exports_cleanup.py
               tldw_Server_API/tests/Claims/test_claims_api_strict_parse_mode.py
               tldw_Server_API/tests/Claims/test_claims_budget_guard.py
@@ -5536,6 +5720,10 @@ jobs:
               tldw_Server_API/tests/Claims/test_claims_review_*.py
           - name: product-claims-service
             paths: >-
+              tldw_Server_API/tests/Claims/test_claims_cancellation_and_timeout.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports_api.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports_worker_e2e.py
+              tldw_Server_API/tests/Claims/test_claims_jobs_*.py
               tldw_Server_API/tests/Claims/test_claims_runtime_config.py
               tldw_Server_API/tests/Claims/test_claims_service_*.py
               tldw_Server_API/tests/Claims/test_claims_settings_*.py
@@ -5555,6 +5743,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_embeddings_abtest_*.py
           - name: product-evaluations-core
             paths: >-
+              tldw_Server_API/tests/Evaluations/test_article_extraction_benchmark.py
               tldw_Server_API/tests/Evaluations/test_benchmark_*.py
               tldw_Server_API/tests/Evaluations/test_circuit_breaker.py
               tldw_Server_API/tests/Evaluations/test_connection_pool.py
@@ -5727,7 +5916,9 @@ jobs:
               tldw_Server_API/tests/Resource_Governance
           - name: platform-services-startup
             paths: >-
+              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
+              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -5751,6 +5942,8 @@ jobs:
               tldw_Server_API/tests/Services/test_lifecycle_*.py
               tldw_Server_API/tests/Services/test_loop_*.py
               tldw_Server_API/tests/Services/test_media_*.py
+              tldw_Server_API/tests/Services/test_notes_graph_projection_worker.py
+              tldw_Server_API/tests/Services/test_notes_graph_suggestions_workers.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
@@ -5952,6 +6145,8 @@ jobs:
           if [ "$SHARD_NAME" = "research-websearch" ]; then
             EXTRA_PYTEST_ARGS=(-vv -p pytest_timeout --timeout=120 --timeout-method=thread)
           fi
+          # TEST_PATHS is a matrix-provided list of pytest path arguments.
+          # shellcheck disable=SC2086
           pytest -q --disable-warnings -p pytest_asyncio.plugin \
             "${EXTRA_PYTEST_ARGS[@]}" \
             -m "not jobs and not e2e" \
@@ -6184,6 +6379,9 @@ jobs:
           - name: admin-watchlists-webhooks
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_w*.py
+          - name: admin-webhooks-canonical
+            paths: >-
+              tldw_Server_API/tests/Admin_Webhooks
           - name: admin-system-usage
             paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
@@ -6192,6 +6390,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/AuthNZ/integration/test_admin_*.py
               tldw_Server_API/tests/AuthNZ/integration/test_api_key_*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_audio_quota_dates_postgres.py
               tldw_Server_API/tests/AuthNZ/integration/test_auth_*.py
           - name: auth-integration-authnz
             paths: >-
@@ -6239,6 +6438,13 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
               tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_link_migration_v58.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_moodboard_studio_sync_migration_v61.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_moodboard_studio_sync_postgres_tenancy.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v55.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v57.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_migration_v56.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_postgres_tenancy.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_db.py
@@ -6247,7 +6453,12 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
               tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_creation.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py
+              tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py
+              tldw_Server_API/tests/Workspaces/test_workspace_job_status.py
+              tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
@@ -6255,6 +6466,7 @@ jobs:
               tldw_Server_API/tests/DB
               tldw_Server_API/tests/DB_Management
               tldw_Server_API/tests/MediaDB2
+              tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py
               tldw_Server_API/tests/PrivilegeCatalog
               tldw_Server_API/tests/Privileges
           - name: ai-chromadb
@@ -6461,6 +6673,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_kanban_retriever.py
               tldw_Server_API/tests/RAG_NEW/unit/test_learned_fusion_simple.py
               tldw_Server_API/tests/RAG_NEW/unit/test_llamacpp_reranker_topk_full_input.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_preinstalled_local_reranker.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pipeline*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_post*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pre_retrieval*.py
@@ -6485,6 +6698,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_path_validation_security.py
               tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_security_filters_sanitizers.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py
               tldw_Server_API/tests/RAG_NEW/unit/test_source*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_strict_extractive_and_citations.py
           - name: rag-new-unit-media-ingest
@@ -6524,6 +6738,7 @@ jobs:
               tldw_Server_API/tests/Audio
               tldw_Server_API/tests/Audio_Studio
               tldw_Server_API/tests/AudioJobs
+              tldw_Server_API/tests/Benchmarks
               tldw_Server_API/tests/STT
               tldw_Server_API/tests/TTS
               tldw_Server_API/tests/TTS_NEW
@@ -6535,14 +6750,20 @@ jobs:
           - name: media-core-api
             paths: >-
               tldw_Server_API/tests/Media/test_archive_member_cap.py
+              tldw_Server_API/tests/Media/test_audio_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py
               tldw_Server_API/tests/Media/test_cache_index.py
+              tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_email_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py
               tldw_Server_API/tests/Media/test_json_*.py
               tldw_Server_API/tests/Media/test_media_*.py
               tldw_Server_API/tests/Media/test_navigation_policy_contract.py
+              tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_process_code_and_uploads.py
               tldw_Server_API/tests/Media/test_upload_sink_security.py
+              tldw_Server_API/tests/Media/test_video_summary_service_prompt.py
+              tldw_Server_API/tests/Media/test_web_summary_service_prompt.py
               tldw_Server_API/tests/Media/unit
           - name: media-ingestion-new-ocr
             paths: >-
@@ -6567,6 +6788,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_original_file_replacement.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py
           - name: media-ingestion-new-unit-mediawiki
             paths: >-
@@ -6682,6 +6904,7 @@ jobs:
               tldw_Server_API/tests/Visual_Identities
           - name: chat-character-integration-api
             paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
@@ -6769,6 +6992,8 @@ jobs:
               tldw_Server_API/tests/Claims/test_claim_review_rule_assignment.py
               tldw_Server_API/tests/Claims/test_claims_alerts_*.py
               tldw_Server_API/tests/Claims/test_claims_alignment.py
+              tldw_Server_API/tests/Claims/property/test_claims_analytics_export_state_properties.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports.py
               tldw_Server_API/tests/Claims/test_claims_analytics_exports_cleanup.py
               tldw_Server_API/tests/Claims/test_claims_api_strict_parse_mode.py
               tldw_Server_API/tests/Claims/test_claims_budget_guard.py
@@ -6792,6 +7017,10 @@ jobs:
               tldw_Server_API/tests/Claims/test_claims_review_*.py
           - name: product-claims-service
             paths: >-
+              tldw_Server_API/tests/Claims/test_claims_cancellation_and_timeout.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports_api.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports_worker_e2e.py
+              tldw_Server_API/tests/Claims/test_claims_jobs_*.py
               tldw_Server_API/tests/Claims/test_claims_runtime_config.py
               tldw_Server_API/tests/Claims/test_claims_service_*.py
               tldw_Server_API/tests/Claims/test_claims_settings_*.py
@@ -6811,6 +7040,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_embeddings_abtest_*.py
           - name: product-evaluations-core
             paths: >-
+              tldw_Server_API/tests/Evaluations/test_article_extraction_benchmark.py
               tldw_Server_API/tests/Evaluations/test_benchmark_*.py
               tldw_Server_API/tests/Evaluations/test_circuit_breaker.py
               tldw_Server_API/tests/Evaluations/test_connection_pool.py
@@ -6983,7 +7213,9 @@ jobs:
               tldw_Server_API/tests/Resource_Governance
           - name: platform-services-startup
             paths: >-
+              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
+              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -7007,6 +7239,8 @@ jobs:
               tldw_Server_API/tests/Services/test_lifecycle_*.py
               tldw_Server_API/tests/Services/test_loop_*.py
               tldw_Server_API/tests/Services/test_media_*.py
+              tldw_Server_API/tests/Services/test_notes_graph_projection_worker.py
+              tldw_Server_API/tests/Services/test_notes_graph_suggestions_workers.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
@@ -7204,6 +7438,8 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
+          # TEST_PATHS is a matrix-provided list of pytest path arguments.
+          # shellcheck disable=SC2086
           pytest -q --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             $TEST_PATHS \

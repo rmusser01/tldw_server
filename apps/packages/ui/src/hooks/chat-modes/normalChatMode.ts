@@ -1,7 +1,4 @@
-import {
-  systemPromptForNonRagOption,
-  getWebSearchPrompt
-} from "~/services/tldw-server"
+import { systemPromptForNonRagOption } from "~/services/tldw-server"
 import {
   type ChatHistory,
   type Message,
@@ -31,11 +28,18 @@ import type {
 import type { DynamicUIRequest } from "@/types/dynamic-ui"
 import type { SaveMessageData, SaveMessageErrorData } from "@/types/chat-modes"
 import {
+  getRequiredServicePrompt,
   runChatPipeline,
   type ChatModeDefinition
 } from "./chatModePipeline"
 import { appendSystemPromptSuffix } from "@/utils/output-formatting-guide"
 import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
+import {
+  loadServicePromptSnapshot,
+  renderServicePromptPart,
+  type ServicePromptSnapshot
+} from "@/services/service-prompts"
+import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 
 interface WebSearchPayload {
   query: string
@@ -79,9 +83,11 @@ const normalizeWebSearchResult = (result: any) => {
   }
 }
 
-const buildWebSearchPrompt = async (results: any[]) => {
+const buildWebSearchPrompt = (
+  results: any[],
+  prompt: ReturnType<typeof getRequiredServicePrompt>
+) => {
   if (!Array.isArray(results) || results.length === 0) return null
-  const prompt = await getWebSearchPrompt()
   const now = new Date().toISOString()
   const formattedResults = results
     .map((result, index) => {
@@ -97,9 +103,12 @@ const buildWebSearchPrompt = async (results: any[]) => {
     })
     .join("\n\n")
 
-  return prompt
-    .replace("{current_date_time}", now)
-    .replace("{search_results}", formattedResults)
+  return renderServicePromptPart(
+    prompt.definition,
+    "template",
+    prompt.parts.template,
+    { current_date_time: now, search_results: formattedResults }
+  )
 }
 
 const buildWebSearchSources = (results: any[]) => {
@@ -144,6 +153,8 @@ type NormalChatModeParams = {
   setIsProcessing: (value: boolean) => void
   setStreaming: (value: boolean) => void
   setAbortController: (controller: AbortController | null) => void
+  releaseAbortControllerIfOwned?: (signal: AbortSignal) => boolean
+  discardCurrentTurnOnAbort?: () => boolean
   historyId: string | null
   serverChatId?: string | null
   setHistoryId: (id: string) => void
@@ -164,6 +175,7 @@ type NormalChatModeParams = {
   historyForModel?: ChatHistory
   messageForModel?: string
   regenerateFromMessage?: Message
+  servicePromptSnapshot?: ServicePromptSnapshot
 }
 
 const isBackendUnavailableError = (error: unknown): boolean => {
@@ -372,12 +384,19 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
     return null
   },
   preparePrompt: async (ctx) => {
+    const webSearchPrompt = ctx.webSearch
+      ? getRequiredServicePrompt(
+          ctx.servicePromptSnapshot,
+          "chat.web_search.answer"
+        )
+      : null
     const prompt = await systemPromptForNonRagOption()
     const selectedPrompt = await getPromptById(ctx.selectedSystemPrompt)
     const promptId = ctx.selectedSystemPrompt
     let promptContent: string | undefined = undefined
     let webSearchSources: any[] = []
     let webSearchSystemMessage: any | null = null
+    let webSearchResults: any[] = []
     const messageForModel = ctx.messageForModel ?? ctx.message
 
     let humanMessage = await humanMessageFormatter({
@@ -462,7 +481,8 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
 
         const res = await tldwClient.webSearch({
           ...payload,
-          signal: ctx.signal
+          signal: ctx.signal,
+          requestScope: ctx.servicePromptSnapshot?.requestScope
         })
 
         if (res?.error) {
@@ -473,20 +493,32 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
           )
         }
 
-        const results = res?.web_search_results_dict?.results || []
-        webSearchSources = buildWebSearchSources(results)
-        const webSearchPrompt = await buildWebSearchPrompt(results)
-        if (webSearchPrompt) {
-          webSearchSystemMessage = await systemPromptFormatter({
-            content: webSearchPrompt
-          })
-        }
+        webSearchResults = res?.web_search_results_dict?.results || []
+        webSearchSources = buildWebSearchSources(webSearchResults)
       } catch (error) {
+        if (
+          ctx.signal.aborted ||
+          isRequestConfigScopeChangedError(error)
+        ) {
+          throw error
+        }
         console.error("Web search failed, continuing without context", error)
       } finally {
         if (ctx.setIsSearchingInternet) {
           ctx.setIsSearchingInternet(false)
         }
+      }
+    }
+
+    if (webSearchPrompt) {
+      const renderedWebSearchPrompt = buildWebSearchPrompt(
+        webSearchResults,
+        webSearchPrompt
+      )
+      if (renderedWebSearchPrompt) {
+        webSearchSystemMessage = await systemPromptFormatter({
+          content: renderedWebSearchPrompt
+        })
       }
     }
 
@@ -577,17 +609,44 @@ export const normalChatMode = async (
   params: NormalChatModeParams
 ): Promise<ChatSubmitResult> => {
   console.log("Using normalChatMode")
-  const resolvedImage =
-    image.length > 0 ? `data:image/jpeg;base64,${image.split(",")[1]}` : ""
+  const ownsServicePromptSnapshot = !params.servicePromptSnapshot && params.webSearch
+  const servicePromptSnapshot =
+    params.servicePromptSnapshot ??
+    (params.webSearch
+      ? await loadServicePromptSnapshot(["chat.web_search.answer"], { signal })
+      : undefined)
+  const executionSignal = servicePromptSnapshot
+    ? servicePromptSnapshot.scopeSignal
+    : signal
+  try {
+    if (params.webSearch) {
+      getRequiredServicePrompt(servicePromptSnapshot, "chat.web_search.answer")
+    }
+    const resolvedImage =
+      image.length > 0 ? `data:image/jpeg;base64,${image.split(",")[1]}` : ""
 
-  return runChatPipeline(
-    normalChatModeDefinition,
-    message,
-    resolvedImage,
-    isRegenerate,
-    messages,
-    history,
-    signal,
-    params
-  )
+    return await runChatPipeline(
+      normalChatModeDefinition,
+      message,
+      resolvedImage,
+      isRegenerate,
+      messages,
+      history,
+      executionSignal,
+      {
+        ...params,
+        servicePromptSnapshot,
+        discardCurrentTurnOnAbort: servicePromptSnapshot
+          ? () => servicePromptSnapshot.scopeInvalidatedSignal.aborted
+          : undefined,
+        releaseAbortControllerIfOwned: params.releaseAbortControllerIfOwned
+          ? () => params.releaseAbortControllerIfOwned!(signal)
+          : undefined
+      }
+    )
+  } finally {
+    if (ownsServicePromptSnapshot && servicePromptSnapshot) {
+      servicePromptSnapshot.release()
+    }
+  }
 }

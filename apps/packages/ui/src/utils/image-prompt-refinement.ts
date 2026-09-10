@@ -1,6 +1,13 @@
 import type { ChatMessage } from "@/services/tldw/TldwApiClient"
 import type { WeightedImagePromptContextEntry } from "@/utils/image-prompt-strategies"
 
+const DEFAULT_SYSTEM_SEMANTICS =
+  "You refine image-generation prompts. Preserve intent while improving clarity, visual specificity, and composition."
+const DEFAULT_REWRITE_SEMANTICS =
+  "Rewrite the prompt to be concise, concrete, and generation-ready."
+const LOCKED_OUTPUT_CONTRACT =
+  "Output only the final refined prompt as plain text. Do not include markdown, labels, bullets, or commentary."
+
 const normalizeWhitespace = (value: string): string =>
   value.replace(/\s+/g, " ").trim()
 
@@ -47,6 +54,8 @@ export const buildImagePromptRefineMessages = (args: {
   strategyLabel?: string | null
   backend?: string | null
   contextEntries?: WeightedImagePromptContextEntry[]
+  systemSemantics?: string
+  rewriteSemantics?: string
 }): ChatMessage[] => {
   const normalizedPrompt = normalizeWhitespace(args.originalPrompt || "")
   const strategyLabel = normalizeWhitespace(args.strategyLabel || "Scene")
@@ -59,9 +68,7 @@ export const buildImagePromptRefineMessages = (args: {
   return [
     {
       role: "system",
-      content:
-        "You refine image-generation prompts. Preserve intent while improving clarity, visual specificity, and composition. " +
-        "Output only the final refined prompt as plain text. Do not include markdown, labels, bullets, or commentary."
+      content: `${args.systemSemantics ?? DEFAULT_SYSTEM_SEMANTICS} ${LOCKED_OUTPUT_CONTRACT}`
     },
     {
       role: "user",
@@ -70,7 +77,7 @@ export const buildImagePromptRefineMessages = (args: {
         `Backend: ${backend}`,
         `Original prompt:\n${truncate(normalizedPrompt, 1200)}`,
         contextBlock,
-        "Rewrite the prompt to be concise, concrete, and generation-ready."
+        args.rewriteSemantics ?? DEFAULT_REWRITE_SEMANTICS
       ]
         .filter(Boolean)
         .join("\n\n")

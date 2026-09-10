@@ -191,8 +191,9 @@ export function captureAllApiCalls(page: Page): {
   stop: () => Promise<CapturedApiCall[]>
 } {
   const calls: CapturedApiCall[] = []
+  const inFlight = new Set<Promise<void>>()
 
-  const handler = async (request: Request) => {
+  const captureRequest = async (request: Request): Promise<void> => {
     if (!request.url().includes("/api/")) return
     const response = await request.response()
     if (!response) return
@@ -213,11 +214,18 @@ export function captureAllApiCalls(page: Page): {
     })
   }
 
-  page.on("requestfinished", handler)
+  const handler = (request: Request): void => {
+    const pending = captureRequest(request)
+    inFlight.add(pending)
+    void pending.finally(() => inFlight.delete(pending))
+  }
+
+  page.on("request", handler)
 
   return {
     stop: async () => {
-      page.removeListener("requestfinished", handler)
+      page.removeListener("request", handler)
+      await Promise.allSettled([...inFlight])
       return calls
     },
   }

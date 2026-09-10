@@ -20,7 +20,7 @@ type AdminUserRecord = {
 
 const origin = (process.env.TLDW_ADMIN_UI_URL || 'http://127.0.0.1:3001').replace('localhost', '127.0.0.1');
 const apiOrigin = new URL(process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:5999');
-const jwtSecret = process.env.JWT_SECRET_KEY || 'playwright-test-secret';
+const jwtSecret = process.env.JWT_SECRET_KEY || 'playwright-test-secret-1234567890';
 export const singleUserApiKey = 'single-user-admin-key';
 
 export const adminUser: AdminUserRecord = {

@@ -11,7 +11,7 @@ import urllib.parse as _url
 from dataclasses import replace
 from pathlib import Path
 from threading import RLock, Thread
-from typing import Optional
+from typing import Any, Optional
 
 from loguru import logger
 
@@ -195,11 +195,11 @@ def _retire_backend_instance(backend: DatabaseBackend) -> None:
     pool_lock = getattr(backend, "_pool_lock", None)
     if pool_lock is not None:
         with pool_lock:
-            setattr(backend, "_retired", True)
+            backend._retired = True
         return
 
     if hasattr(backend, "_retired"):
-        setattr(backend, "_retired", True)
+        backend._retired = True
 
 
 def _close_backend_instance(name: str, backend: DatabaseBackend) -> None:
@@ -257,7 +257,7 @@ def _evict_selected_sqlite_backend_references(
     sqlite_targets: list[str] | None = None,
 ) -> list[tuple[str, DatabaseBackend]]:
     selected_backend_ids = {
-        id(backend)
+        id(_unwrap_backend_reference(backend))
         for backend in (backends or [])
         if backend is not None
     }
@@ -328,8 +328,23 @@ def _get_or_create_shared_sqlite_backend(config: DatabaseConfig) -> DatabaseBack
         return backend
 
 
+def _unwrap_backend_reference(backend: Any) -> Any:
+    """Return the factory-owned backend behind a bounded composition guard."""
+    seen: set[int] = set()
+    while backend is not None:
+        if id(backend) in seen:
+            return None
+        seen.add(id(backend))
+        wrapped = getattr(backend, "_authnz_wrapped_backend", None)
+        if wrapped is None:
+            return backend
+        backend = wrapped
+    return None
+
+
 def is_factory_managed_backend(backend: DatabaseBackend | None) -> bool:
     """Return True when *backend* is a shared SQLite backend tracked by the factory."""
+    backend = _unwrap_backend_reference(backend)
     if backend is None:
         return False
     if getattr(backend, "backend_type", None) != BackendType.SQLITE:

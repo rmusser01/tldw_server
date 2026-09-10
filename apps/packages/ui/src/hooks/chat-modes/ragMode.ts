@@ -1,4 +1,3 @@
-import { promptForRag } from "~/services/tldw-server" // Reuse prompts storage for now
 import {
   type ChatHistory,
   type Message,
@@ -23,12 +22,19 @@ import {
 import type { ChatModelSettings } from "@/store/model"
 import type { SaveMessageData, SaveMessageErrorData } from "@/types/chat-modes"
 import {
+  getRequiredServicePrompt,
   runChatPipeline,
   type ChatModeContext,
   type ChatModeDefinition
 } from "./chatModePipeline"
 import { appendSystemPromptSuffix } from "@/utils/output-formatting-guide"
 import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
+import {
+  loadServicePromptSnapshot,
+  renderServicePromptPart,
+  type ServicePromptSnapshot
+} from "@/services/service-prompts"
+import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 
 const RAG_STRING_ARRAY_KEYS = new Set([
   "sources",
@@ -38,7 +44,8 @@ const RAG_STRING_ARRAY_KEYS = new Set([
   "content_policy_types",
   "html_allowed_tags",
   "html_allowed_attrs",
-  "batch_queries"
+  "batch_queries",
+  "ground_truth_doc_ids"
 ])
 const RAG_NUMBER_ARRAY_KEYS = new Set(["include_media_ids"])
 const RAG_NULLABLE_STRING_KEYS = new Set([
@@ -46,7 +53,19 @@ const RAG_NULLABLE_STRING_KEYS = new Set([
   "generation_provider",
   "generation_prompt",
   "user_id",
-  "session_id"
+  "session_id",
+  "grading_model",
+  "grading_provider",
+  "fast_hallucination_provider",
+  "fast_hallucination_model",
+  "utility_grading_provider",
+  "utility_grading_model"
+])
+const RAG_NULLABLE_NUMBER_KEYS = new Set([
+  "collection_id",
+  "accumulation_time_budget_sec",
+  "subquery_time_budget_sec",
+  "subquery_doc_budget"
 ])
 const RAG_ALLOWED_KEYS = new Set([
   ...Object.keys(DEFAULT_RAG_SETTINGS).filter((key) => key !== "query")
@@ -80,9 +99,18 @@ const sanitizeRagAdvancedOptions = (options?: Record<string, unknown>) => {
   if (!options) return {}
   const sanitized: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(options)) {
-    if (value === undefined || value === null) continue
-    if (typeof value === "string" && value.trim() === "") continue
+    if (value === undefined) continue
     if (!RAG_ALLOWED_KEYS.has(key)) continue
+    if (value === null) {
+      if (
+        RAG_NULLABLE_STRING_KEYS.has(key) ||
+        RAG_NULLABLE_NUMBER_KEYS.has(key)
+      ) {
+        sanitized[key] = null
+      }
+      continue
+    }
+    if (typeof value === "string" && value.trim() === "") continue
 
     if (RAG_STRING_ARRAY_KEYS.has(key)) {
       if (!Array.isArray(value)) continue
@@ -125,6 +153,12 @@ const sanitizeRagAdvancedOptions = (options?: Record<string, unknown>) => {
       if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
         continue
       }
+      sanitized[key] = value
+      continue
+    }
+
+    if (RAG_NULLABLE_NUMBER_KEYS.has(key)) {
+      if (typeof value !== "number" || !Number.isFinite(value)) continue
       sanitized[key] = value
       continue
     }
@@ -209,6 +243,8 @@ type RagModeParams = {
   setIsProcessing: (value: boolean) => void
   setStreaming: (value: boolean) => void
   setAbortController: (controller: AbortController | null) => void
+  releaseAbortControllerIfOwned?: (signal: AbortSignal) => boolean
+  discardCurrentTurnOnAbort?: () => boolean
   historyId: string | null
   setHistoryId: (id: string) => void
   ragMediaIds: number[] | null
@@ -230,6 +266,7 @@ type RagModeParams = {
   assistantParentMessageId?: string | null
   historyForModel?: ChatHistory
   regenerateFromMessage?: Message
+  servicePromptSnapshot?: ServicePromptSnapshot
 }
 
 type PreparedRagRetrieval = {
@@ -306,13 +343,9 @@ const buildSelectedSourceGroundingResponse = (
   saveToDb: false
 })
 
-const resolveRagQuery = async (
-  ctx: ChatModeContext<RagModeParams>,
-  questionPrompt: string
-) => {
-  let query = ctx.message
+const buildRagRewritePrompt = (ctx: ChatModeContext<RagModeParams>) => {
   if (hasSelectedMediaSources(ctx)) {
-    return query
+    return null
   }
 
   const contextMessages = ctx.isRegenerate
@@ -329,7 +362,7 @@ const resolveRagQuery = async (
       ]
 
   if (contextMessages.length <= 2) {
-    return query
+    return null
   }
 
   const lastTenMessages = contextMessages.slice(-10)
@@ -339,13 +372,29 @@ const resolveRagQuery = async (
       return `${message.isBot ? "Assistant: " : "Human: "}${message.message}`
     })
     .join("\n")
-  const promptForQuestion = questionPrompt
-    .replaceAll("{chat_history}", chat_history)
-    .replaceAll("{question}", ctx.message)
+  const rewritePrompt = getRequiredServicePrompt(
+    ctx.servicePromptSnapshot,
+    "chat.rag.question_rewrite"
+  )
+  return renderServicePromptPart(
+    rewritePrompt.definition,
+    "template",
+    rewritePrompt.parts.template,
+    { chat_history, question: ctx.message }
+  )
+}
+
+const resolveRagQuery = async (
+  ctx: ChatModeContext<RagModeParams>,
+  promptForQuestion: string | null
+) => {
+  if (!promptForQuestion) return ctx.message
   const questionOllama = await pageAssistModel({
     model: ctx.selectedModel,
     toolChoice: "none",
-    saveToDb: false
+    tools: [],
+    saveToDb: false,
+    requestScope: ctx.servicePromptSnapshot?.requestScope
   })
   const questionMessage = await humanMessageFormatter({
     content: [
@@ -357,9 +406,11 @@ const resolveRagQuery = async (
     model: ctx.selectedModel,
     useOCR: ctx.useOCR
   })
-  const response = await questionOllama.invoke([questionMessage])
-  query = response.content.toString()
-  return removeReasoning(query)
+  const response = await questionOllama.invoke(
+    [questionMessage],
+    { signal: ctx.signal }
+  )
+  return removeReasoning(response.content.toString())
 }
 
 const buildRagOptions = async (
@@ -424,14 +475,16 @@ const buildRagOptions = async (
     ragOptions.enable_intent_routing = false
     ragOptions.enable_pre_retrieval_clarification = false
   }
+  ragOptions.signal = ctx.signal
+  ragOptions.requestScope = ctx.servicePromptSnapshot?.requestScope
   return ragOptions
 }
 
 const prepareRagRetrieval = async (
   ctx: ChatModeContext<RagModeParams>,
-  questionPrompt: string
+  rewritePrompt: string | null
 ): Promise<PreparedRagRetrieval> => {
-  const query = await resolveRagQuery(ctx, questionPrompt)
+  const query = await resolveRagQuery(ctx, rewritePrompt)
   await tldwClient.initialize()
   const defaultTopK = await getNoOfRetrievedDocs()
   const ragOptions = await buildRagOptions(ctx, defaultTopK)
@@ -499,9 +552,8 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
       return null
     }
 
-    const { ragQuestionPrompt: questionPrompt } = await promptForRag()
     try {
-      const retrieval = await prepareRagRetrieval(ctx, questionPrompt)
+      const retrieval = await prepareRagRetrieval(ctx, null)
       if (retrieval.source.length > 0) {
         selectedSourceRetrievalCache.set(ctx, retrieval)
         return null
@@ -513,6 +565,9 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
         retrieval.rawResponse
       )
     } catch (error) {
+      if (ctx.signal.aborted || isRequestConfigScopeChangedError(error)) {
+        throw error
+      }
       return buildSelectedSourceGroundingResponse(
         buildSelectedSourceRetrievalErrorText(error),
         "selected_source_retrieval_failed",
@@ -522,12 +577,11 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
     }
   },
   preparePrompt: async (ctx) => {
-    const { ragPrompt: systemPrompt, ragQuestionPrompt: questionPrompt } =
-      await promptForRag()
-    const resolvedSystemPrompt = appendSystemPromptSuffix(
-      systemPrompt,
-      ctx.systemPromptAppendix
+    const answerPrompt = getRequiredServicePrompt(
+      ctx.servicePromptSnapshot,
+      "chat.rag.answer"
     )
+    const rewritePrompt = buildRagRewritePrompt(ctx)
 
     let context = ""
     let source: RagSourceEntry[] = []
@@ -537,13 +591,14 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
         selectedSourceRetrievalCache.delete(ctx)
       }
       const retrieval =
-        cachedRetrieval || (await prepareRagRetrieval(ctx, questionPrompt))
+        cachedRetrieval || (await prepareRagRetrieval(ctx, rewritePrompt))
       context = retrieval.context
       source = retrieval.source
       if (hasSelectedMediaSources(ctx) && source.length === 0) {
         throw new Error(buildSelectedSourceNoEvidenceText(retrieval.rawResponse))
       }
     } catch (e) {
+      if (ctx.signal.aborted || isRequestConfigScopeChangedError(e)) throw e
       if (hasSelectedMediaSources(ctx)) {
         throw e
       }
@@ -552,12 +607,21 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
       source = []
     }
 
+    const renderedSystemPrompt = renderServicePromptPart(
+      answerPrompt.definition,
+      "template",
+      answerPrompt.parts.template,
+      { context, question: ctx.message }
+    )
+    const resolvedSystemPrompt = appendSystemPromptSuffix(
+      renderedSystemPrompt,
+      ctx.systemPromptAppendix
+    )
+
     const humanMessage = await humanMessageFormatter({
       content: [
         {
-          text: resolvedSystemPrompt
-            .replace("{context}", context)
-            .replace("{question}", ctx.message),
+          text: resolvedSystemPrompt,
           type: "text"
         }
       ],
@@ -595,16 +659,39 @@ export const ragMode = async (
   params: RagModeParams
 ): Promise<ChatSubmitResult> => {
   console.log("Using ragMode")
-  return runChatPipeline(
-    ragModeDefinition,
-    message,
-    image,
-    isRegenerate,
-    messages,
-    history,
-    signal,
-    params
-  )
+  const ownsServicePromptSnapshot = !params.servicePromptSnapshot
+  const servicePromptSnapshot =
+    params.servicePromptSnapshot ??
+    (await loadServicePromptSnapshot(
+      ["chat.rag.answer", "chat.rag.question_rewrite"],
+      { signal }
+    ))
+  const executionSignal = servicePromptSnapshot.scopeSignal
+  const scopeInvalidatedSignal = servicePromptSnapshot.scopeInvalidatedSignal
+  try {
+    getRequiredServicePrompt(servicePromptSnapshot, "chat.rag.answer")
+    getRequiredServicePrompt(servicePromptSnapshot, "chat.rag.question_rewrite")
+    return await runChatPipeline(
+      ragModeDefinition,
+      message,
+      image,
+      isRegenerate,
+      messages,
+      history,
+      executionSignal,
+      {
+        ...params,
+        servicePromptSnapshot,
+        discardCurrentTurnOnAbort: () =>
+          scopeInvalidatedSignal.aborted,
+        releaseAbortControllerIfOwned: params.releaseAbortControllerIfOwned
+          ? () => params.releaseAbortControllerIfOwned!(signal)
+          : undefined
+      }
+    )
+  } finally {
+    if (ownsServicePromptSnapshot) servicePromptSnapshot.release()
+  }
 }
 
 export const __testing__ = {

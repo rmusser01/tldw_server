@@ -53,6 +53,7 @@ def _specs_by_name(startup_pollers: Any) -> dict[str, Any]:
         "prompt_studio_jobs_task",
         "workspace_file_inventory_jobs_task",
         "writing_annotation_review_jobs_task",
+        "shared_workspace_clone_jobs_task",
     ],
 )
 def test_primary_jobs_worker_specs_match_legacy_worker_contract(
@@ -81,6 +82,7 @@ def test_primary_jobs_worker_specs_use_expected_names() -> None:
         "prompt_studio_jobs_task",
         "workspace_file_inventory_jobs_task",
         "writing_annotation_review_jobs_task",
+        "shared_workspace_clone_jobs_task",
     ]
 
 
@@ -102,6 +104,10 @@ def test_primary_jobs_worker_spec_factories_delegate_to_existing_worker_services
         (
             "writing_annotation_review_jobs_task",
             "_run_writing_annotation_review_jobs_worker_service",
+        ),
+        (
+            "shared_workspace_clone_jobs_task",
+            "_run_shared_workspace_clone_jobs_worker_service",
         ),
     ]:
         monkeypatch.setattr(
@@ -129,7 +135,62 @@ def test_primary_jobs_worker_spec_factories_delegate_to_existing_worker_services
             "writing_annotation_review_jobs_task",
             "writing_annotation_review_jobs_task-stop",
         ),
+        (
+            "shared_workspace_clone_jobs_task",
+            "shared_workspace_clone_jobs_task-stop",
+        ),
     ]
+
+
+def test_shared_workspace_clone_worker_is_default_on_for_application_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_primary_jobs_pollers()
+    monkeypatch.delenv("SHARED_WORKSPACE_CLONE_JOBS_WORKER_ENABLED", raising=False)
+    spec = _specs_by_name(startup_pollers)["shared_workspace_clone_jobs_task"]
+
+    assert spec.enabled(_context()) is True
+
+
+@pytest.mark.parametrize(
+    ("flag", "sidecar_mode", "route_allowed"),
+    [
+        ("false", False, True),
+        ("true", True, True),
+        ("true", False, False),
+    ],
+)
+def test_shared_workspace_clone_worker_respects_disable_gates(
+    monkeypatch: pytest.MonkeyPatch,
+    flag: str,
+    sidecar_mode: bool,
+    route_allowed: bool,
+) -> None:
+    startup_pollers = _import_startup_primary_jobs_pollers()
+    monkeypatch.setenv("SHARED_WORKSPACE_CLONE_JOBS_WORKER_ENABLED", flag)
+    spec = _specs_by_name(startup_pollers)["shared_workspace_clone_jobs_task"]
+    context = WorkerLifecycleContext(
+        app="app",
+        settings={},
+        test_mode=True,
+        route_enabled=lambda route_name: route_name == "sharing" and route_allowed,
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+        sidecar_mode=sidecar_mode,
+    )
+
+    assert spec.enabled(context) is False
+
+
+def test_shared_workspace_clone_worker_has_no_legacy_startup_owner() -> None:
+    startup_pollers = _import_startup_primary_jobs_pollers()
+
+    assert not hasattr(startup_pollers, "_start_shared_workspace_clone_jobs_worker")
+    assert not hasattr(
+        startup_pollers.PrimaryJobsPollerHandles,
+        "shared_workspace_clone_jobs_task",
+    )
 
 
 def test_primary_jobs_worker_spec_predicates_use_route_enabled(

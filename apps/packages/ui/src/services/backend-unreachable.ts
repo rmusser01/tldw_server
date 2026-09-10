@@ -1,3 +1,5 @@
+import { isExplicitRequestCancellation } from "./request-events"
+
 export type BackendUnreachableSource = "background" | "direct"
 
 export type BackendUnreachableRecentRequestError = {
@@ -216,8 +218,6 @@ const getRawMessage = (error: unknown): string => {
 
 const getRawName = (error: unknown): string => normalizeString(getErrorLike(error).name)
 
-const getRawCode = (error: unknown): string => normalizeString(getErrorLike(error).code)
-
 const parseStatus = (value: unknown): number | undefined => {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value
@@ -240,13 +240,9 @@ const findMatchingPattern = (
 ): BackendUnreachablePattern | undefined => patterns.find(({ pattern }) => pattern.test(value))
 
 const isAbortLike = (error: unknown, rawMessage: string): boolean => {
-  const rawName = getRawName(error)
-  const rawCode = getRawCode(error)
-
   return (
-    Boolean(findMatchingPattern(rawMessage, BACKEND_UNREACHABLE_ABORT_MESSAGE_PATTERNS)) ||
-    /^AbortError$/i.test(rawName) ||
-    /^REQUEST_ABORTED$/i.test(rawCode)
+    isExplicitRequestCancellation(error) ||
+    isExplicitRequestCancellation(rawMessage)
   )
 }
 

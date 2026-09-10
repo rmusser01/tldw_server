@@ -9,6 +9,7 @@ from typing import Any, cast
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.schema_once import ensure_once
 from tldw_Server_API.app.core.RPG.constants import (
     RPG_EVENT_SCHEMA_VERSION,
     RPG_REDUCER_VERSION,
@@ -41,6 +42,18 @@ class CommitEventsResult:
     replayed: bool
 
 
+# Every table ensure_schema() creates, so a partially built database fails
+# verification instead of being accepted from the memo.
+_RPG_REQUIRED_TABLES = (
+    "rpg_campaigns",
+    "rpg_sessions",
+    "rpg_session_proposals",
+    "rpg_session_events",
+    "rpg_idempotency_records",
+    "rpg_session_snapshots",
+)
+
+
 class RPGRepository:
     """Persistence adapter for RPG campaign/session state in a user's ChaChaNotes DB."""
 
@@ -49,9 +62,35 @@ class RPGRepository:
 
     @classmethod
     def initialized(cls, db: CharactersRAGDB) -> RPGRepository:
+        """Return a repository whose tables exist, creating them once per process.
+
+        This is called per request from the RPG endpoints. ensure_schema() is
+        idempotent but issues ten DDL statements, so it is de-duplicated per
+        database file rather than repeated on every call.
+        """
         repo = cls(db)
-        repo.ensure_schema()
+        ensure_once(
+            "rpg",
+            getattr(db, "db_path_str", None),
+            repo.ensure_schema,
+            verify=repo._schema_present,
+        )
         return repo
+
+    def _schema_present(self) -> bool:
+        """Cheap check that this database still has the RPG tables.
+
+        Checks the whole set rather than one table, so a database holding only
+        part of the schema is rebuilt instead of being accepted. Failures
+        propagate to :func:`ensure_once`, which logs them and rebuilds.
+        """
+        with self.db.transaction() as conn:
+            rows = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+                "(?, ?, ?, ?, ?, ?)",
+                _RPG_REQUIRED_TABLES,
+            ).fetchall()
+        return {row[0] for row in rows}.issuperset(_RPG_REQUIRED_TABLES)
 
     def ensure_schema(self) -> None:
         statements = (

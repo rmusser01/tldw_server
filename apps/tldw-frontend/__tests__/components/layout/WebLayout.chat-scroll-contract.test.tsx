@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useOptionLayoutShellOverrides } from '@/components/Layouts/Layout';
@@ -73,8 +73,19 @@ const connectionState = vi.hoisted(() => ({
     phase: 'connected',
     isConnected: true,
     isChecking: false,
+    lastCheckedAt: 100 as number | null,
+    checksSinceConfigChange: 1,
+    consecutiveFailures: 0,
   },
 }));
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
 const confirmDangerMock = vi.hoisted(() => vi.fn(async () => false));
 const getUnreadCountMock = vi.hoisted(() => vi.fn(async () => ({ unread_count: 0 })));
@@ -215,7 +226,20 @@ vi.mock('@/components/Option/Sidebar', () => ({
 }));
 
 vi.mock('@/components/Layouts/Header', () => ({
-  Header: () => <div data-testid="header" />,
+  Header: ({
+    onToggleSidebar,
+    sidebarCollapsed,
+  }: {
+    onToggleSidebar?: () => void;
+    sidebarCollapsed?: boolean;
+  }) => (
+    <button
+      type="button"
+      data-testid="header"
+      aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+      onClick={onToggleSidebar}
+    />
+  ),
 }));
 
 vi.mock('@/components/Layouts/QuickIngestButton', () => ({
@@ -317,7 +341,14 @@ vi.mock('@web/components/layout/BackendUnavailableModalGate', () => ({
       <div
         data-presentation={String(props.presentation)}
         data-testid="backend-unavailable-modal"
-      />
+      >
+        <span data-testid="backend-unavailable-detail">
+          {JSON.stringify(props.backendUnavailableDetail)}
+        </span>
+        <button type="button" onClick={() => (props.onRetry as () => void)()}>
+          Retry
+        </button>
+      </div>
     ) : null;
   },
 }));
@@ -358,6 +389,10 @@ vi.mock('@/hooks/useConnectionState', () => ({
   useConnectionState: () => ({
     phase: connectionState.value.phase,
     isConnected: connectionState.value.isConnected,
+    isChecking: connectionState.value.isChecking,
+    lastCheckedAt: connectionState.value.lastCheckedAt,
+    checksSinceConfigChange: connectionState.value.checksSinceConfigChange,
+    consecutiveFailures: connectionState.value.consecutiveFailures,
   }),
   useConnectionUxState: () => ({
     isChecking: connectionState.value.isChecking,
@@ -367,6 +402,7 @@ vi.mock('@/hooks/useConnectionState', () => ({
 vi.mock('@/types/connection', () => ({
   ConnectionPhase: {
     CONNECTED: 'connected',
+    ERROR: 'error',
   },
 }));
 
@@ -388,6 +424,7 @@ describe('WebLayout /chat scroll contract', () => {
     routerState.location.hash = '';
     storageState.stickyChatInput = true;
     featureFlagState.showChatSidebar = false;
+    layoutUiState.value.chatSidebarCollapsed = true;
     mediaQueryState.isDesktop = false;
     mediaQueryState.isMobile = false;
     chatSidebarMockState.props = [];
@@ -396,6 +433,9 @@ describe('WebLayout /chat scroll contract', () => {
     connectionState.value.phase = 'connected';
     connectionState.value.isConnected = true;
     connectionState.value.isChecking = false;
+    connectionState.value.lastCheckedAt = 100;
+    connectionState.value.checksSinceConfigChange = 1;
+    connectionState.value.consecutiveFailures = 0;
   });
 
   afterEach(() => {
@@ -403,7 +443,9 @@ describe('WebLayout /chat scroll contract', () => {
     delete (globalThis as typeof globalThis & { __tldwOptionShell?: unknown }).__tldwOptionShell;
   });
 
-  it('clears backend-unreachable detail after forced recovery finishes connected', async () => {
+  it('keeps an ambiguous backend-unreachable candidate hidden when forced recovery finishes connected', async () => {
+    const check = deferred();
+    connectionState.value.checkOnce = vi.fn(() => check.promise);
     const { rerender } = render(
       <OptionLayout>
         <div data-testid="route-content">Research workspace route</div>
@@ -427,10 +469,7 @@ describe('WebLayout /chat scroll contract', () => {
     });
 
     expect(connectionState.value.checkOnce).toHaveBeenCalledWith({ force: true });
-    expect(screen.getByTestId('backend-unavailable-modal')).toHaveAttribute(
-      'data-presentation',
-      'modal'
-    );
+    expect(screen.queryByTestId('backend-unavailable-modal')).toBeNull();
 
     connectionState.value.isChecking = true;
     rerender(
@@ -438,9 +477,13 @@ describe('WebLayout /chat scroll contract', () => {
         <div data-testid="route-content">Research workspace route</div>
       </OptionLayout>
     );
-    expect(screen.getByTestId('backend-unavailable-modal')).toBeInTheDocument();
+    expect(screen.queryByTestId('backend-unavailable-modal')).toBeNull();
 
     connectionState.value.isChecking = false;
+    connectionState.value.lastCheckedAt = 101;
+    connectionState.value.checksSinceConfigChange = 2;
+    check.resolve();
+    await act(async () => check.promise);
     rerender(
       <OptionLayout>
         <div data-testid="route-content">Research workspace route</div>
@@ -452,10 +495,156 @@ describe('WebLayout /chat scroll contract', () => {
     });
   });
 
+  it('shows diagnostics only after a fresh forced check confirms an outage and rechecks on Retry', async () => {
+    const firstCheck = deferred();
+    const retryCheck = deferred();
+    connectionState.value.checkOnce = vi
+      .fn()
+      .mockImplementationOnce(() => firstCheck.promise)
+      .mockImplementationOnce(() => retryCheck.promise);
+    const route = <div data-testid="route-content">Research workspace route</div>;
+    const { rerender } = render(<OptionLayout>{route}</OptionLayout>);
+
+    await act(async () => undefined);
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('tldw:backend-unreachable', {
+          detail: {
+            method: 'GET',
+            path: '/api/v1/llm/models/metadata',
+            message: 'Failed to fetch',
+            source: 'direct',
+            timestamp: Date.now(),
+          },
+        })
+      );
+    });
+
+    expect(screen.queryByTestId('backend-unavailable-modal')).toBeNull();
+
+    connectionState.value.phase = 'error';
+    connectionState.value.isConnected = false;
+    connectionState.value.lastCheckedAt = 101;
+    connectionState.value.checksSinceConfigChange = 2;
+    firstCheck.resolve();
+    await act(async () => firstCheck.promise);
+    rerender(<OptionLayout>{route}</OptionLayout>);
+
+    expect(screen.getByTestId('backend-unavailable-modal')).toHaveAttribute(
+      'data-presentation',
+      'modal'
+    );
+    expect(screen.getByTestId('backend-unavailable-detail')).toHaveTextContent(
+      '"method":"GET"'
+    );
+    expect(screen.getByTestId('backend-unavailable-detail')).toHaveTextContent(
+      '"path":"/api/v1/llm/models/metadata"'
+    );
+    expect(screen.getByTestId('backend-unavailable-detail')).toHaveTextContent(
+      '"message":"Failed to fetch"'
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(connectionState.value.checkOnce).toHaveBeenCalledTimes(2);
+    expect(screen.queryByTestId('backend-unavailable-modal')).toBeNull();
+
+    connectionState.value.phase = 'connected';
+    connectionState.value.isConnected = true;
+    connectionState.value.lastCheckedAt = 102;
+    connectionState.value.checksSinceConfigChange = 3;
+    retryCheck.resolve();
+    await act(async () => retryCheck.promise);
+    rerender(<OptionLayout>{route}</OptionLayout>);
+
+    expect(screen.queryByTestId('backend-unavailable-modal')).toBeNull();
+  });
+
+  it('shows diagnostics when a forced check fails inside the connection grace window', async () => {
+    const check = deferred();
+    connectionState.value.checkOnce = vi.fn(() => check.promise);
+    const route = <div data-testid="route-content">Research workspace route</div>;
+    const { rerender } = render(<OptionLayout>{route}</OptionLayout>);
+
+    await act(async () => undefined);
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('tldw:backend-unreachable', {
+          detail: {
+            method: 'GET',
+            path: '/api/v1/llm/models/metadata',
+            message: 'Failed to fetch',
+            source: 'direct',
+            timestamp: Date.now(),
+          },
+        })
+      );
+    });
+
+    connectionState.value.lastCheckedAt = 101;
+    connectionState.value.checksSinceConfigChange = 2;
+    connectionState.value.consecutiveFailures = 1;
+    check.resolve();
+    await act(async () => check.promise);
+    rerender(<OptionLayout>{route}</OptionLayout>);
+
+    expect(screen.getByTestId('backend-unavailable-modal')).toBeInTheDocument();
+  });
+
+  it('ignores an older forced check that settles after a newer recovery', async () => {
+    const olderCheck = deferred();
+    const newerCheck = deferred();
+    connectionState.value.checkOnce = vi
+      .fn()
+      .mockImplementationOnce(() => olderCheck.promise)
+      .mockImplementationOnce(() => newerCheck.promise);
+    const route = <div data-testid="route-content">Research workspace route</div>;
+    const { rerender } = render(<OptionLayout>{route}</OptionLayout>);
+
+    await act(async () => undefined);
+    const dispatchOutageCandidate = (path: string) => {
+      window.dispatchEvent(
+        new CustomEvent('tldw:backend-unreachable', {
+          detail: {
+            method: 'GET',
+            path,
+            message: 'Failed to fetch',
+            source: 'direct',
+            timestamp: Date.now(),
+          },
+        })
+      );
+    };
+
+    act(() => {
+      dispatchOutageCandidate('/api/v1/older-request');
+      dispatchOutageCandidate('/api/v1/newer-request');
+    });
+    expect(connectionState.value.checkOnce).toHaveBeenCalledTimes(2);
+
+    connectionState.value.lastCheckedAt = 101;
+    connectionState.value.checksSinceConfigChange = 2;
+    newerCheck.resolve();
+    await act(async () => newerCheck.promise);
+    rerender(<OptionLayout>{route}</OptionLayout>);
+    expect(screen.queryByTestId('backend-unavailable-modal')).toBeNull();
+
+    connectionState.value.phase = 'error';
+    connectionState.value.isConnected = false;
+    connectionState.value.lastCheckedAt = 102;
+    connectionState.value.checksSinceConfigChange = 3;
+    olderCheck.resolve();
+    await act(async () => olderCheck.promise);
+    rerender(<OptionLayout>{route}</OptionLayout>);
+
+    expect(screen.queryByTestId('backend-unavailable-modal')).toBeNull();
+  });
+
   it('uses the non-blocking backend-unreachable presentation on settings routes', async () => {
     routerState.location.pathname = '/settings/ui';
+    const check = deferred();
+    connectionState.value.checkOnce = vi.fn(() => check.promise);
 
-    render(
+    const { rerender } = render(
       <OptionLayout>
         <div data-testid="route-content">Settings UI route</div>
       </OptionLayout>
@@ -477,6 +666,19 @@ describe('WebLayout /chat scroll contract', () => {
       );
     });
 
+    expect(screen.queryByTestId('backend-unavailable-modal')).toBeNull();
+    connectionState.value.phase = 'error';
+    connectionState.value.isConnected = false;
+    connectionState.value.lastCheckedAt = 101;
+    connectionState.value.checksSinceConfigChange = 2;
+    check.resolve();
+    await act(async () => check.promise);
+    rerender(
+      <OptionLayout>
+        <div data-testid="route-content">Settings UI route</div>
+      </OptionLayout>
+    );
+
     expect(screen.getByTestId('backend-unavailable-modal')).toHaveAttribute(
       'data-presentation',
       'inline'
@@ -490,8 +692,10 @@ describe('WebLayout /chat scroll contract', () => {
 
   it('does not treat settings-prefixed non-settings routes as settings routes', async () => {
     routerState.location.pathname = '/settings-wizard';
+    const check = deferred();
+    connectionState.value.checkOnce = vi.fn(() => check.promise);
 
-    render(
+    const { rerender } = render(
       <OptionLayout>
         <div data-testid="route-content">Settings wizard route</div>
       </OptionLayout>
@@ -512,6 +716,19 @@ describe('WebLayout /chat scroll contract', () => {
         })
       );
     });
+
+    expect(screen.queryByTestId('backend-unavailable-modal')).toBeNull();
+    connectionState.value.phase = 'error';
+    connectionState.value.isConnected = false;
+    connectionState.value.lastCheckedAt = 101;
+    connectionState.value.checksSinceConfigChange = 2;
+    check.resolve();
+    await act(async () => check.promise);
+    rerender(
+      <OptionLayout>
+        <div data-testid="route-content">Settings wizard route</div>
+      </OptionLayout>
+    );
 
     expect(screen.getByTestId('backend-unavailable-modal')).toHaveAttribute(
       'data-presentation',
@@ -586,6 +803,26 @@ describe('WebLayout /chat scroll contract', () => {
         openResetKey: expect.any(Number),
       })
     );
+  });
+
+  it('labels and opens the legacy sidebar from the Drawer state', () => {
+    featureFlagState.showChatSidebar = false;
+    layoutUiState.value.chatSidebarCollapsed = false;
+
+    render(
+      <OptionLayout>
+        <div data-testid="chat-route-content">Chat route</div>
+      </OptionLayout>
+    );
+
+    const sidebarToggle = screen.getByTestId('header');
+    expect(sidebarToggle).toHaveAttribute('aria-label', 'Expand sidebar');
+    expect(screen.queryByTestId('drawer')).toBeNull();
+
+    fireEvent.click(sidebarToggle);
+
+    expect(screen.getByTestId('drawer')).toBeInTheDocument();
+    expect(sidebarToggle).toHaveAttribute('aria-label', 'Collapse sidebar');
   });
 
   it('mirrors shared layout reset-key wiring for desktop and mobile mounts', () => {
@@ -714,5 +951,36 @@ describe('WebLayout /chat scroll contract', () => {
 
     expect(mediaQueryModule.useTablet).toEqual(expect.any(Function));
     expect(mediaQueryModule.useMediaQuery).toEqual(expect.any(Function));
+  });
+});
+
+describe('WebLayout bypass block (#2889)', () => {
+  beforeEach(() => {
+    delete (globalThis as typeof globalThis & { __tldwOptionShell?: unknown }).__tldwOptionShell;
+    vi.clearAllMocks();
+    routerState.location.pathname = '/admin/server';
+    connectionState.value.phase = 'connected';
+    connectionState.value.isConnected = true;
+  });
+
+  afterEach(() => {
+    cleanup();
+    delete (globalThis as typeof globalThis & { __tldwOptionShell?: unknown }).__tldwOptionShell;
+  });
+
+  it('renders a skip link as the first focusable element, targeting the main region', () => {
+    const view = render(<OptionLayout><div>Content</div></OptionLayout>);
+
+    const firstFocusable = view.container.querySelector(
+      "a[href], button, [tabindex]:not([tabindex='-1'])"
+    ) as HTMLElement;
+    expect(firstFocusable).toBeTruthy();
+    expect(firstFocusable.tagName).toBe('A');
+    expect(firstFocusable).toHaveTextContent('Skip to main content');
+    expect(firstFocusable).toHaveAttribute('href', '#main-content');
+
+    const main = view.container.querySelector('main');
+    expect(main).toHaveAttribute('id', 'main-content');
+    expect(main).toHaveAttribute('tabindex', '-1');
   });
 });

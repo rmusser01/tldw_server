@@ -3,6 +3,7 @@
 These routers handle content ingestion, search, retrieval, and
 related operations.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -103,12 +104,14 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
 
     # Evaluations and OCR are lazy so route policy can disable them before
     # importing modules with heavier optional dependencies.
-    specs.append(RouterSpec(
-        router=evaluations_router_factory,
-        prefix=f"{API_V1_PREFIX}",
-        tags=("evaluations",),
-        route_key="evaluations",
-    ))
+    specs.append(
+        RouterSpec(
+            router=evaluations_router_factory,
+            prefix=f"{API_V1_PREFIX}",
+            tags=("evaluations",),
+            route_key="evaluations",
+        )
+    )
 
     append_imported_router_spec(
         specs,
@@ -169,6 +172,37 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
         append_imported_router_spec(
             specs,
             ImportedRouterSpec(
+                import_path="tldw_Server_API.app.api.v1.endpoints.audio.audio_realtime",
+                log_name="audio_realtime",
+                prefix=f"{API_V1_PREFIX}/audio",
+                tags=("audio-realtime",),
+                route_key="audio-realtime",
+            ),
+        )
+        append_imported_router_spec(
+            specs,
+            ImportedRouterSpec(
+                import_path="tldw_Server_API.app.api.v1.endpoints.audio.audio_realtime",
+                log_name="audio_realtime_websocket",
+                prefix=f"{API_V1_PREFIX}/audio",
+                tags=("audio-realtime",),
+                route_key="audio-realtime",
+                attr_name="ws_router",
+            ),
+        )
+        append_imported_router_spec(
+            specs,
+            ImportedRouterSpec(
+                import_path="tldw_Server_API.app.api.v1.endpoints.realtime_compat",
+                log_name="realtime_compat",
+                prefix="/v1",
+                tags=("audio-realtime",),
+                route_key="audio-realtime",
+            ),
+        )
+        append_imported_router_spec(
+            specs,
+            ImportedRouterSpec(
                 import_path="tldw_Server_API.app.api.v1.endpoints.audio.audio_jobs",
                 log_name="audio_jobs",
                 prefix=f"{API_V1_PREFIX}/audio",
@@ -220,6 +254,13 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
             prefix=f"{API_V1_PREFIX}/prompts",
             tags=("prompts",),
             route_key="prompts",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.service_prompts",
+            log_name="service_prompts",
+            prefix=API_V1_PREFIX,
+            tags=("service-prompts",),
+            route_key="",
         ),
     ):
         append_imported_router_spec(specs, processing_spec)
@@ -577,6 +618,13 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
     # static subpaths are not shadowed by /{note_id}.
     for notes_spec in (
         ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.notes_graph_suggestions",
+            log_name="notes_graph_suggestions",
+            prefix=f"{API_V1_PREFIX}/notes",
+            tags=("notes",),
+            route_key="notes",
+        ),
+        ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.notes_graph",
             log_name="notes_graph",
             prefix=f"{API_V1_PREFIX}/notes",
@@ -703,6 +751,13 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
     # Persona endpoints are force-included in explicit pytest runtime for WS/unit coverage.
     for persona_spec in (
         ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.buddies",
+            log_name="buddies",
+            prefix=f"{API_V1_PREFIX}/buddies",
+            tags=("buddies",),
+            route_key="persona",
+        ),
+        ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.persona",
             log_name="persona",
             prefix=f"{API_V1_PREFIX}/persona",
@@ -716,6 +771,13 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
             tags=("personalization",),
             route_key="personalization",
             default_stable=False,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.personal_context",
+            log_name="personal-context",
+            prefix=f"{API_V1_PREFIX}/personal-context",
+            tags=("personal-context",),
+            route_key="personal-context",
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.companion",

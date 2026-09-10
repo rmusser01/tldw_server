@@ -104,7 +104,12 @@ const {
       page_size: 25,
       has_more: false
     })),
-    getCharacter: vi.fn(async () => null),
+    getCharacter: vi.fn(
+      async (
+        _id: string | number,
+        _options?: { forceRefresh?: boolean }
+      ): Promise<unknown> => null
+    ),
     listChats: vi.fn(async () => []),
     createChat: vi.fn(async () => ({ id: "quick-chat-session-default" })),
     createCharacter: vi.fn(

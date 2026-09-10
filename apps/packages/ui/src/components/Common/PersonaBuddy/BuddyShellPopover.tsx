@@ -38,8 +38,10 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
 }) => {
   const { t } = useTranslation("common")
   const [draft, setDraft] = React.useState("")
-  const [draftClientMessageId, setDraftClientMessageId] =
-    React.useState<string | null>(null)
+  const draftRevisionRef = React.useRef(0)
+  const [draftClientMessageId, setDraftClientMessageId] = React.useState<
+    string | null
+  >(null)
   const [sendError, setSendError] = React.useState<string | null>(null)
   const [sending, setSending] = React.useState(false)
   const normalizedPersonaId = String(personaId ?? "").trim()
@@ -49,29 +51,42 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
         tab: "visuals"
       })
     : null
+  const focusedSession = liveControl?.focusedSession ?? null
   const liveRoute = normalizedPersonaId
     ? buildPersonaGardenRoute({
         personaId: normalizedPersonaId,
-        tab: "live"
+        tab: "live",
+        sessionId: focusedSession?.sessionId
       })
     : buildPersonaGardenRoute({ tab: "live" })
-  const focusedSession = liveControl?.focusedSession ?? null
-  const needsApproval = (focusedSession?.pendingApprovalCount ?? 0) > 0
+  const feedback =
+    liveControl?.feedback &&
+    liveControl.feedback.sessionId === focusedSession?.sessionId &&
+    liveControl?.feedback?.personaId === focusedSession?.personaId &&
+    (!normalizedPersonaId || normalizedPersonaId === focusedSession?.personaId)
+      ? liveControl.feedback
+      : null
+  const needsApproval =
+    (focusedSession?.pendingApprovalCount ?? 0) > 0 ||
+    feedback?.status === "review"
   const sessionOptions = liveControl?.sessions ?? []
   const voiceCapable = Boolean(
     focusedSession &&
-      (liveControl?.voiceAvailable || focusedSession.capabilities?.voice)
+    (liveControl?.voiceAvailable || focusedSession.capabilities?.voice)
   )
-  const voiceState = String(liveControl?.voiceState ?? "").trim().toLowerCase()
+  const voiceState = String(liveControl?.voiceState ?? "")
+    .trim()
+    .toLowerCase()
   const isListening =
     liveControl?.voiceIsListening === true || voiceState === "listening"
-  const voiceActionLabel = isListening
-    ? t("personaBuddy.voiceStop", "Stop listening")
-    : t("personaBuddy.voiceListen", "Listen")
+  const voiceActionLabel = !voiceCapable
+    ? t("personaBuddy.voiceSetup", "Set up voice")
+    : isListening
+      ? t("personaBuddy.voiceStop", "Stop listening")
+      : t("personaBuddy.voiceListen", "Listen")
 
-  const handleDraftChange = (
-    event: React.ChangeEvent<HTMLTextAreaElement>
-  ) => {
+  const handleDraftChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    draftRevisionRef.current += 1
     setDraft(event.target.value)
     setDraftClientMessageId(null)
     setSendError(null)
@@ -80,6 +95,7 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
   const handleSend = async () => {
     const trimmed = draft.trim()
     if (!trimmed || !liveControl || sending) return
+    const draftRevision = draftRevisionRef.current
     setSending(true)
     setSendError(null)
     const clientMessageId =
@@ -90,6 +106,7 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
         await liveControl.startTextSession(normalizedPersonaId || null)
       }
       const result = await liveControl.sendText(trimmed, { clientMessageId })
+      if (draftRevisionRef.current !== draftRevision) return
       if (result.ok) {
         setDraft("")
         setDraftClientMessageId(null)
@@ -108,7 +125,7 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
   return (
     <div
       data-testid="persona-buddy-popover"
-      className="min-w-[220px] rounded-2xl border border-border bg-bg/95 p-3 shadow-xl backdrop-blur"
+      className="min-h-0 min-w-[220px] overflow-y-auto rounded-2xl border border-border bg-bg/95 p-3 shadow-xl backdrop-blur"
     >
       <div className="text-xs uppercase tracking-[0.18em] text-text-muted">
         {t("personaBuddy.title", "Persona Buddy")}
@@ -127,30 +144,35 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
           data-severity={visualDiagnostic.severity}
           className={`mt-3 rounded-lg border px-2.5 py-2 text-xs leading-5 ${getPersonaVisualDiagnosticToneClassName(visualDiagnostic.severity)}`}
         >
-          <div className="font-medium text-inherit">{visualDiagnostic.title}</div>
+          <div className="font-medium text-inherit">
+            {visualDiagnostic.title}
+          </div>
           <div>{visualDiagnostic.message}</div>
         </div>
       ) : null}
       {liveControl ? (
         <div className="mt-3 space-y-2 border-t border-border pt-3">
           {sessionOptions.length > 1 ? (
-            <select
-              data-testid="persona-buddy-session-select"
-              value={liveControl.focusedSessionId ?? ""}
-              onChange={(event) => {
-                const sessionId = event.target.value
-                if (sessionId) {
-                  void liveControl.focusSession(sessionId)
-                }
-              }}
-              className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-text"
-            >
-              {sessionOptions.map((session) => (
-                <option key={session.sessionId} value={session.sessionId}>
-                  {session.personaName}
-                </option>
-              ))}
-            </select>
+            <label className="block text-xs font-medium text-text">
+              Connected session
+              <select
+                data-testid="persona-buddy-session-select"
+                value={liveControl.focusedSessionId ?? ""}
+                onChange={(event) => {
+                  const sessionId = event.target.value
+                  if (sessionId) {
+                    void liveControl.focusSession(sessionId)
+                  }
+                }}
+                className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-text"
+              >
+                {sessionOptions.map((session) => (
+                  <option key={session.sessionId} value={session.sessionId}>
+                    {session.personaName}
+                  </option>
+                ))}
+              </select>
+            </label>
           ) : null}
 
           {needsApproval ? (
@@ -159,6 +181,17 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
               className="rounded-md border border-warning/40 bg-warning/10 px-2.5 py-2 text-xs font-medium text-text"
             >
               Needs approval
+            </div>
+          ) : null}
+
+          {feedback ? (
+            <div
+              data-testid="persona-buddy-stream-feedback"
+              role={feedback.status === "error" ? "alert" : "status"}
+              aria-live={feedback.status === "error" ? "assertive" : "polite"}
+              className="max-h-36 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-text"
+            >
+              {feedback.text}
             </div>
           ) : null}
 
@@ -175,7 +208,9 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => void liveControl.stopSession(focusedSession?.sessionId)}
+              onClick={() =>
+                void liveControl.stopSession(focusedSession?.sessionId)
+              }
               disabled={!focusedSession}
               className="inline-flex flex-1 items-center justify-center gap-1 rounded-md border border-border bg-surface px-2 py-1.5 text-xs font-medium text-text hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -183,7 +218,7 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
               Stop
             </button>
           </div>
-          {voiceCapable ? (
+          {focusedSession ? (
             <Link
               data-testid="persona-buddy-voice-link"
               to={liveRoute}
@@ -198,14 +233,17 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
             </Link>
           ) : null}
 
-          <textarea
-            data-testid="persona-buddy-text-input"
-            value={draft}
-            onChange={handleDraftChange}
-            rows={3}
-            className="w-full resize-none rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-text"
-            placeholder="Message your buddy"
-          />
+          <label className="block text-xs font-medium text-text">
+            Message your Buddy
+            <textarea
+              data-testid="persona-buddy-text-input"
+              value={draft}
+              onChange={handleDraftChange}
+              rows={3}
+              className="w-full resize-none rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-text"
+              placeholder="Message your buddy"
+            />
+          </label>
           {sendError ? (
             <div className="text-xs font-medium text-danger">{sendError}</div>
           ) : null}

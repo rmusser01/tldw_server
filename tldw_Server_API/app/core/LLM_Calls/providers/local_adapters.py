@@ -54,9 +54,7 @@ from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 from tldw_Server_API.app.core.Utils.Utils import logging
 
-from .base import raise_if_in_band_provider_error
-
-from .base import ChatProvider, apply_tool_choice
+from .base import ChatProvider, apply_tool_choice, raise_if_in_band_provider_error
 
 _LOCAL_HTTP_EXCEPTIONS: tuple[type[BaseException], ...] = ()
 try:
@@ -519,7 +517,7 @@ def _chat_with_openai_compatible_local_server(
     session = None
     try:
         session = create_session()
-        attempts = max(1, int(api_retries)) + 1
+        attempts = max(1, int(api_retries) + 1)
         base_ms = max(50, int(api_retry_delay * 1000))
         policy = _HC_RetryPolicy(attempts=attempts, backoff_base_ms=base_ms)
         fetch_impl = http_fetcher or _hc_fetch
@@ -1055,7 +1053,7 @@ def _kobold_request(
 
 
     try:
-        policy = _HC_RetryPolicy(attempts=max(1, int(api_retries)) + 1, backoff_base_ms=max(50, int(api_retry_delay * 1000)))
+        policy = _HC_RetryPolicy(attempts=max(1, int(api_retries) + 1), backoff_base_ms=max(50, int(api_retry_delay * 1000)))
         fetch_impl = http_fetcher or _hc_fetch
         response = fetch_impl(
             method="POST",

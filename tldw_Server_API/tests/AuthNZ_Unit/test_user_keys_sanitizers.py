@@ -4,12 +4,15 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.endpoints import user_keys as routes
 from tldw_Server_API.app.api.v1.schemas.user_keys import (
     OpenAICredentialSourceSwitchRequest,
     OpenAIOAuthAuthorizeRequest,
     ProviderKeyTestRequest,
+    SharedProviderKeyTestRequest,
+    SharedProviderKeyUpsertRequest,
     UserProviderKeyUpsertRequest,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -154,6 +157,50 @@ def _install_oauth_patches(monkeypatch) -> None:
         },
     )
     monkeypatch.setattr(routes, "_openai_oauth_token_exchange", token_exchange)
+
+
+@pytest.mark.parametrize(
+    ("model_type", "payload"),
+    [
+        (
+            UserProviderKeyUpsertRequest,
+            {
+                "provider": "openai",
+                "api_key": "sk-test",
+                "base_url": "https://attacker.example/v1",
+            },
+        ),
+        (
+            ProviderKeyTestRequest,
+            {"provider": "openai", "headers": {"X-Attacker": "yes"}},
+        ),
+        (
+            SharedProviderKeyUpsertRequest,
+            {
+                "scope_type": "org",
+                "scope_id": 7,
+                "provider": "openai",
+                "api_key": "sk-test",
+                "base_url": "https://attacker.example/v1",
+            },
+        ),
+        (
+            SharedProviderKeyTestRequest,
+            {
+                "scope_type": "org",
+                "scope_id": 7,
+                "provider": "openai",
+                "modle": "misspelled-model",
+            },
+        ),
+    ],
+)
+def test_provider_key_mutation_and_test_models_forbid_unknown_fields(
+    model_type,
+    payload,
+) -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        model_type.model_validate(payload)
 
 
 @pytest.mark.asyncio

@@ -222,10 +222,11 @@ class PatchExternalServerRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str | None = None
-    transport: Literal["stdio", "websocket"] | None = None
+    transport: Literal["stdio", "websocket", "streamable_http", "sse"] | None = None
     command: list[str] | None = None
     url: str | None = None
     cwd: str | None = None
+    headers: dict[str, str] | None = None
     env_allowlist: list[str] | None = None
     credential_slots: list[str] | None = None
     metadata: dict[str, Any] | None = None

@@ -17,14 +17,40 @@ and this project adheres to Some kind of Versioning
 ### Removed
 
 
-## [0.1.42] - 2026-07-26
+## [0.1.42] - 2026-09-10
 
-> Rollup coverage: this entry covers the frozen `dev` release train after
-> `0.1.41` through PR #2750, plus the trusted license-gate bootstrap on
-> `main`. It includes PRs #2746, #2748, #2749, #2733, #2755, #2756, #2727,
-> #2757, #2758, #2750, and #2753.
+> Rollup coverage: frozen `dev` commit
+> `50c1f689575b1bc21ed3e78cdb193b03fe968cdd`, through PR #2939, plus
+> the trusted license-gate bootstrap on `main`. This refresh includes the
+> original July candidate and the subsequent merged development train.
 
 ### Added
+
+- **Chat And Service Prompts** — Added chat macros, prompt improvement/review
+  workflows, scoped conversation history, resumable character-chat contracts,
+  and service-prompt customization for titles, ingestion, summaries, document
+  insights, study assistance, and writing (#2618, #2771, #2799, #2833, #2811,
+  #2812, #2867, #2868, #2880–#2882, #2887, #2901, #2904, #2907, #2913,
+  #2914, #2923, #2926, #2930).
+- **Notes And Personal Context** — Added notes/link/organization/attachment and
+  task-activity synchronization, personal-context profile and ongoing sync
+  surfaces, and shared-workspace cloning (#2775, #2781, #2782, #2784–#2788,
+  #2793, #2794, #2813, #2818, #2823, #2844, #2845, #2886).
+- **Research And Presentations** — Expanded article extraction, ClinicalTrials
+  and PMC discovery, and Research Workspace workflows. Added default-off
+  standalone HTML presentations with Jobs generation, immutable versions,
+  strong-ETag editing, attachment downloads, and a text-only outline; the WebUI
+  does not execute or preview generated HTML (#2769, #2776, #2792, #2800,
+  #2802, #2808, #2809).
+- **Audio, Persona And MCP** — Added OpenRouter/generic TTS gateways,
+  audio.cpp TTS support, a realtime speech endpoint, Migu/persona voice and
+  buddy workflows, and MCP Unified HTTP/SSE transports (#2751, #2599, #2572,
+  #2861, #2884, #2902, #2906, #2908, #2927, #2928, #2933, #2934).
+- **Administration And Automation** — Added durable webhook delivery and
+  producer activation, admin workflow improvements, automation-definition and
+  agent-task execution surfaces, and a production reference deployment with
+  health, backup, and rollback checks (#2806, #2798, #2801, #2803, #2804,
+  #2840, #2841, #2842, #2846, #2879, #2900, #2905, #2925).
 
 - **Embeddings Workflow Architecture** — Added the inline embeddings workflow
   facade and hardened its runtime and CI contracts.
@@ -46,16 +72,40 @@ and this project adheres to Some kind of Versioning
 
 ### Fixed
 
+- **Authentication And Data Integrity** — Hardened trusted-proxy identity and
+  login lockout isolation, embeddings authentication/metrics access, SQLite
+  migration atomicity and recovery, media-original cleanup, and session-schema
+  compatibility (#2838, #2857, #2859, #2627, #2612, #2939).
+- **Runtime And CI** — Reduced repeated provider probes and schema setup,
+  restored required CI enforcement on dev, addressed stale security findings,
+  and repaired frontend test and live-UAT regressions (#2834, #2836, #2837,
+  #2847, #2848, #2849, #2854, #2822, #2911, #2924).
+
 - **Release And Workflow Reliability** — Closed the `0.1.41` release records,
   synchronized released `main` back to `dev`, and corrected workflow
   prerequisites required for the protected release train.
+
+### Upgrade And Release Readiness
+
+- Back up databases, uploaded content, and configuration before upgrading. The
+  accumulated release train changes authentication, conversation, notes-sync,
+  personal-context, presentation, and webhook schemas. Rollback must restore a
+  compatible data snapshot; do not assume binary-only downgrade is safe. See
+  `Docs/Deployment/Production_Reference_Deployment.md` and
+  `Docs/Admin_Webhooks_Migration_Runbook.md`.
+- Standalone HTML presentation generation remains disabled by default. Follow
+  `Docs/Deployment/Standalone_HTML_Presentations.md` before enabling it;
+  downloaded HTML may execute JavaScript when opened outside tldw.
+- Candidate preparation is not release certification: final-head CI and the
+  open release-readiness dependencies are tracked in TASK-13013.3 and
+  `Docs/superpowers/plans/2026-09-10-pr2761-release-refresh-plan.md`.
 
 ### Licensing
 
 - The tagged source release contains protected frontend source under PolyForm
   Perimeter 1.0.1. Its release-specific Countdown grant adds
   `AGPL-3.0-only` as an additional option beginning
-  `2028-07-26T12:00:00Z`; see `LICENSES/releases/0.1.42/`.
+  `2028-09-10T12:00:00Z`; see `LICENSES/releases/0.1.42/`.
 - No WebUI, Admin UI, shared UI, or extension binary is published in this
   release. PyPI and the `app`, `worker`, and `audio-worker` images remain
   server-only and GPL-3.0-only.

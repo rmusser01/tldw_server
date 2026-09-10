@@ -52,6 +52,71 @@ describe("useMessage website RAG boundary", () => {
     })
   })
 
+  it("binds website ingest and retrieval to the captured request scope", async () => {
+    const signal = new AbortController().signal
+    const requestScope = {
+      config: {
+        serverUrl: "https://api.example.test",
+        authMode: "multi-user" as const,
+      },
+      userId: 42,
+    }
+    const client = {
+      initialize: vi.fn().mockResolvedValue(undefined),
+      addMedia: vi.fn().mockResolvedValue({
+        results: [{ status: "Success", db_id: 321 }],
+      }),
+      ragSearch: vi.fn().mockResolvedValue({ results: [] }),
+    }
+
+    await resolveWebsiteChatContext({
+      ...makeInput(client),
+      signal,
+      requestScope,
+    })
+
+    expect(client.addMedia).toHaveBeenCalledWith(
+      "https://example.com/article",
+      { signal, requestScope },
+    )
+    expect(client.ragSearch).toHaveBeenCalledWith("What changed?", {
+      top_k: 4,
+      sources: ["media_db"],
+      include_media_ids: [321],
+      signal,
+      requestScope,
+    })
+  })
+
+  it("does not turn a request-scope rejection into inline fallback", async () => {
+    const scopeError = Object.assign(new Error("scope changed"), {
+      status: 412,
+      details: {
+        detail: { code: "request_config_scope_changed" },
+      },
+    })
+    const client = {
+      initialize: vi.fn().mockResolvedValue(undefined),
+      addMedia: vi.fn().mockRejectedValue(scopeError),
+      ragSearch: vi.fn(),
+    }
+
+    await expect(
+      resolveWebsiteChatContext({
+        ...makeInput(client),
+        signal: new AbortController().signal,
+        requestScope: {
+          config: {
+            serverUrl: "https://api.example.test",
+            authMode: "multi-user" as const,
+          },
+          userId: 42,
+        },
+      }),
+    ).rejects.toBe(scopeError)
+    expect(client.ragSearch).not.toHaveBeenCalled()
+  })
+
   it("uses inline content and never searches the whole corpus when media/add omits an id", async () => {
     const client = {
       initialize: vi.fn().mockResolvedValue(undefined),

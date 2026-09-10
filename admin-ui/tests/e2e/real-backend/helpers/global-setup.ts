@@ -1,5 +1,9 @@
 import { postAdminE2EJson } from './admin-e2e-support';
-import { getProjectEnv, REAL_BACKEND_PROJECTS, shouldManageBackend } from './project-env';
+import {
+  getProjectEnv,
+  getRequestedRealBackendProjects,
+  shouldManageBackend,
+} from './project-env';
 import { startManagedBackend, stopManagedBackend, waitForManagedBackend } from './backend-lifecycle';
 
 type JwtSeedResponse = {
@@ -20,9 +24,6 @@ type JwtBootstrapResponse = {
 type ProxyCurrentUser = {
   id: number;
 };
-
-const shouldManageBackends = (): boolean =>
-  process.argv.some((arg) => arg.includes('real-backend') || arg.includes('chromium-real-'));
 
 const wait = async (ms: number): Promise<void> =>
   new Promise((resolve) => {
@@ -182,11 +183,12 @@ const warmJwtProtectedRoute = async (
 };
 
 export default async function globalSetup(): Promise<void> {
-  if (!shouldManageBackends()) {
+  const requestedRealBackendProjects = getRequestedRealBackendProjects(process.argv);
+  if (requestedRealBackendProjects.length === 0) {
     return;
   }
 
-  for (const projectName of REAL_BACKEND_PROJECTS) {
+  for (const projectName of requestedRealBackendProjects) {
     const project = getProjectEnv(projectName);
     if (!shouldManageBackend(projectName)) {
       continue;
@@ -195,7 +197,7 @@ export default async function globalSetup(): Promise<void> {
     await startManagedBackend(project);
   }
 
-  for (const projectName of REAL_BACKEND_PROJECTS) {
+  for (const projectName of requestedRealBackendProjects) {
     const project = getProjectEnv(projectName);
     await waitForManagedBackend(project);
     await warmUiRoute(project.uiBaseUrl, '/login', { method: 'GET' }, [200]);

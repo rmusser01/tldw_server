@@ -71,7 +71,7 @@ class ACPAuditDB:
         retention_days: int = 30,
     ) -> None:
         if db_path is None:
-            db_path = os.path.join(
+            db_path = os.getenv("ACP_AUDIT_DB_PATH") or os.path.join(
                 os.path.dirname(__file__),
                 "..", "..", "..", "Databases", "acp_audit.db",
             )

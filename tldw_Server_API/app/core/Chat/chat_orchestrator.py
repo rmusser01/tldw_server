@@ -19,7 +19,6 @@ from typing import Any, Callable, Optional, TypeVar, Union
 #
 # 3rd-party Libraries
 from loguru import logger
-from loguru import logger as logging
 
 #
 # Local Imports
@@ -37,6 +36,12 @@ from tldw_Server_API.app.core.Chat.chat_dictionary import (
     ChatDictionary,
     parse_user_dict_markdown_file,
     process_user_input,
+)
+from tldw_Server_API.app.core.Chat.chat_logging import (
+    exception_summary,
+    message_payload_summary,
+    response_summary,
+    text_summary,
 )
 from tldw_Server_API.app.core.Chat.chat_service import (
     perform_chat_api_call,
@@ -220,6 +225,25 @@ def _sanitize_error_for_client(error_text: str, max_length: int = 100) -> str:
     return error_str or "An error occurred"
 
 
+def _build_command_context(llm_user_identifier: Optional[str]) -> command_router.CommandContext:
+    auth_user_int = None
+    try:
+        if llm_user_identifier is not None:
+            auth_user_int = int(llm_user_identifier)
+    except _CHAT_ORCHESTRATOR_COERCE_EXCEPTIONS:
+        auth_user_int = None
+
+    auth_mode = str(os.getenv("AUTH_MODE", "")).strip().lower() or None
+    return command_router.CommandContext(
+        user_id=llm_user_identifier or "anonymous",
+        auth_user_id=auth_user_int,
+        request_meta={
+            "auth_mode": auth_mode,
+            "is_single_user_owner": auth_mode == "single_user",
+        },
+    )
+
+
 def _get_http_status_from_exception(exc: Exception) -> Optional[int]:
     response = getattr(exc, "response", None)
     if response is not None:
@@ -306,7 +330,7 @@ def approximate_token_count(history):
         total_tokens = len(total_text.split())
         return total_tokens
     except _CHAT_ORCHESTRATOR_NONCRITICAL_EXCEPTIONS as e:
-        logging.bind(error_type=type(e).__name__).error("Error calculating token count")
+        logger.bind(error_type=type(e).__name__).error("Error calculating token count")
         return 0
 
 #
@@ -406,7 +430,7 @@ def chat_api_call(
     """
     resolved_endpoint = resolve_provider(model=model, provider=api_endpoint)
     endpoint_lower = resolved_endpoint.lower()
-    logging.info(f"Chat API Call - Routing to endpoint: {endpoint_lower}")
+    logger.info(f"Chat API Call - Routing to endpoint: {endpoint_lower}")
     log_counter("chat_api_call_attempt", labels={"api_endpoint": endpoint_lower})
     start_time = time.time()
     log_legacy_once(
@@ -459,16 +483,16 @@ def chat_api_call(
             and len(_key_val) > 8
             and _shared_is_truthy(_os_keys.getenv("ALLOW_MASKED_KEY_LOG", ""))
         ):
-            logging.debug(
-                "Chat API Call - API Key (masked): %s...%s",
+            logger.debug(
+                "Chat API Call - API Key (masked): {}...{}",
                 _key_val[:4],
                 _key_val[-4:]
             )
     except _CHAT_ORCHESTRATOR_NONCRITICAL_EXCEPTIONS as key_log_err:
-        logging.debug(f"Could not log masked API key: {key_log_err}")
+        logger.debug("Could not log masked API key: {}", exception_summary(key_log_err))
 
     try:
-        logging.debug(
+        logger.debug(
             "Calling adapter-backed chat dispatcher with kwargs: {}",
             {k: (type(v) if k != "api_key" else "key_hidden") for k, v in call_kwargs.items()},
         )
@@ -479,11 +503,11 @@ def chat_api_call(
         log_counter("chat_api_call_success", labels={"api_endpoint": endpoint_lower})
 
         if isinstance(response, str):
-             logging.debug(f"Debug - Chat API Call - Response (first 500 chars): {response[:500]}...")
+             logger.debug("Debug - Chat API Call - Response summary: {}", response_summary(response))
         elif hasattr(response, '__iter__') and not isinstance(response, (str, bytes, dict)):
-             logging.debug("Debug - Chat API Call - Response: Streaming Generator")
+             logger.debug("Debug - Chat API Call - Response: Streaming Generator")
         else:
-             logging.debug(f"Debug - Chat API Call - Response Type: {type(response)}")
+             logger.debug("Debug - Chat API Call - Response summary: {}", response_summary(response))
         if streaming:
             return execute_stream(response)
         return response
@@ -500,17 +524,21 @@ def chat_api_call(
         # This catches cases where the handler itself has already processed an error
         # (e.g. non-HTTP error, or it decided to raise a specific Chat*Error type)
         # and raises one of our custom exceptions.
-        # Escape curly braces in the error message to avoid loguru formatting issues
-        error_message = getattr(e_chat_direct, 'message', str(e_chat_direct))
-        escaped_message = str(error_message).replace("{", "{{").replace("}", "}}")
         # Safely access status_code with fallback
         status_code = getattr(e_chat_direct, 'status_code', 500)
-        logging.error(
-            f"Handler for {endpoint_lower} directly raised: {type(e_chat_direct).__name__} - {escaped_message}",
+        logger.error(
+            "Handler for {} directly raised: {}",
+            endpoint_lower,
+            exception_summary(e_chat_direct),
             exc_info=status_code >= 500)
         raise  # Re-raise the specific error
     except (ValueError, TypeError, KeyError) as e:
-        logging.error(f"Value/Type/Key error during chat API call setup for {endpoint_lower}: {e}", exc_info=True)
+        logger.error(
+            "Value/Type/Key error during chat API call setup for {}: {}",
+            endpoint_lower,
+            exception_summary(e),
+            exc_info=True,
+        )
         error_type = "Configuration/Parameter Error"
         if "Unsupported API endpoint" in str(e):
             raise ChatConfigurationError(provider=endpoint_lower, message=f"Unsupported API endpoint: {endpoint_lower}") from e
@@ -525,9 +553,9 @@ def chat_api_call(
             error_text = _get_http_error_text(e)
             log_message_base = f"{endpoint_lower} API call failed with status {status_code}"
             try:
-                logging.error("%s. Details: %s", log_message_base, error_text[:500], exc_info=False)
+                logger.error("{} details_summary={}", log_message_base, text_summary(error_text), exc_info=False)
             except _CHAT_ORCHESTRATOR_NONCRITICAL_EXCEPTIONS as log_e:
-                logging.error(f"Error during logging HTTP error details: {log_e}")
+                logger.error("Error during logging HTTP error details: {}", exception_summary(log_e))
             sanitized_error = _sanitize_error_for_client(error_text)
             if status_code == 401:
                 raise ChatAuthenticationError(provider=endpoint_lower,
@@ -545,15 +573,19 @@ def chat_api_call(
             raise ChatAPIError(provider=endpoint_lower,
                                message=f"Unexpected error (Status {status_code}). {sanitized_error}",
                                status_code=status_code) from e
-        mapped_error = map_stream_error(e)
         if _is_network_exception(e):
-            logging.error(
-                f"Network error connecting to {endpoint_lower}: {mapped_error['message']}",
+            logger.error(
+                "Network error connecting to {}: {}",
+                endpoint_lower,
+                exception_summary(e),
                 exc_info=False,
             )
             raise ChatProviderError(provider=endpoint_lower, message="Network error. Please check your connection.", status_code=504) from e
-        logging.exception(
-            f"Unexpected internal error in chat_api_call for {endpoint_lower}: {e}")
+        logger.error(
+            "Unexpected internal error in chat_api_call for {}: {}",
+            endpoint_lower,
+            exception_summary(e),
+        )
         raise ChatAPIError(provider=endpoint_lower,
                            message=f"An unexpected internal error occurred in chat_api_call for {endpoint_lower}: {str(e)}",
                            status_code=500) from e
@@ -880,8 +912,12 @@ def _chat_sync_impl(
     start_time = time.time()
 
     try:
-        logging.info(f"Debug - Chat Function - Input Text: '{message}', Image provided: {'Yes' if current_image_input else 'No'}")
-        logging.info(f"Debug - Chat Function - History length: {len(history)}, Image History Mode: {image_history_mode}")
+        logger.info(
+            "Chat input received summary={} image_provided={}",
+            text_summary(message),
+            bool(current_image_input),
+        )
+        logger.info(f"Debug - Chat Function - History length: {len(history)}, Image History Mode: {image_history_mode}")
 
         # Ensure selected_parts is a list
         selected_parts = normalize_selected_parts(selected_parts)
@@ -896,14 +932,7 @@ def _chat_sync_impl(
             parsed = command_router.parse_slash_command(message)
             if parsed:
                 cmd_name, cmd_args = parsed
-                # Build minimal context; user_identifier may be None
-                auth_user_int = None
-                try:
-                    if llm_user_identifier is not None:
-                        auth_user_int = int(llm_user_identifier)  # best-effort parse for RBAC
-                except _CHAT_ORCHESTRATOR_COERCE_EXCEPTIONS:
-                    auth_user_int = None
-                ctx = command_router.CommandContext(user_id=llm_user_identifier or "anonymous", auth_user_id=auth_user_int)
+                ctx = _build_command_context(llm_user_identifier)
                 cmd_res = _run_coro_sync(
                     command_router.async_dispatch_command(ctx, cmd_name, cmd_args)
                 )
@@ -976,7 +1005,10 @@ def _chat_sync_impl(
                                 try:
                                     mime_type_part = image_url_data.split(';base64,')[0].split('/')[-1]
                                 except _CHAT_ORCHESTRATOR_NONCRITICAL_EXCEPTIONS as e:
-                                    logging.debug(f"Failed to extract MIME type from data URI: {e}")
+                                    logger.debug(
+                                        "Failed to extract MIME type from data URI: {}",
+                                        exception_summary(e),
+                                    )
                                     mime_type_part = "image"
                             processed_hist_content_parts.append({"type": "text", "text": f"<image: prior_history.{mime_type_part}>"})
                         # "ignore_past": do nothing, image part is skipped
@@ -1000,7 +1032,11 @@ def _chat_sync_impl(
                     appended_to_last = True
                     break
             if not appended_to_last: # No user message in history, or image already there
-                 logging.debug(f"Could not append last_user_image_from_history, no suitable prior user message or already present. Image: {last_user_image_url_from_history[:60]}...")
+                 logger.debug(
+                     "Could not append last_user_image_from_history, no suitable prior user message or already present. "
+                     "image_summary={}",
+                     text_summary(last_user_image_url_from_history),
+                 )
 
 
         # 3. Add RAG Content (prepended to current user's text)
@@ -1053,7 +1089,7 @@ def _chat_sync_impl(
             current_user_content_parts.append({"type": "image_url", "image_url": {"url": image_url}})
 
         if not current_user_content_parts: # Should only happen if message, custom_prompt, RAG, and image are all empty/None
-             logging.warning("Current user message has no text or image content parts. Sending a placeholder.")
+             logger.warning("Current user message has no text or image content parts. Sending a placeholder.")
              current_user_content_parts.append({"type": "text", "text": "(No user input for this turn)"})
 
         llm_messages_payload.append({"role": "user", "content": current_user_content_parts})
@@ -1061,25 +1097,16 @@ def _chat_sync_impl(
         # Temperature and other LLM params
         temperature_float = normalize_temperature(temperature, default=0.7)
 
-        logging.debug("Debug - Chat Function - Final LLM Payload (structure, image data truncated):")
-        for i, msg_p in enumerate(llm_messages_payload):
-            content_log = []
-            if isinstance(msg_p.get("content"), list):
-                for _part_idx, part_c in enumerate(msg_p["content"]):
-                    if part_c.get("type") == "text":
-                        content_log.append(f"text: '{part_c['text'][:30]}...'")
-                    elif part_c.get("type") == "image_url":
-                        content_log.append(f"image: '{part_c['image_url']['url'][:40]}...'")
-            logging.debug(f"  Msg {i}: Role: {msg_p['role']}, Content: [{', '.join(content_log)}]")
+        logger.debug("Debug - Chat Function - Final LLM Payload summary: {}", message_payload_summary(llm_messages_payload))
 
-        logging.debug(f"Debug - Chat Function - Temperature: {temperature}")
+        logger.debug(f"Debug - Chat Function - Temperature: {temperature}")
         # Avoid logging secrets unless explicitly enabled
         try:
             if api_key and _shared_is_truthy(os.getenv("ALLOW_MASKED_KEY_LOG", "")):
-                logging.debug("Debug - Chat Function - API Key (masked): %s...%s", api_key[:4], api_key[-4:])
+                logger.debug("Debug - Chat Function - API Key (masked): {}...{}", api_key[:4], api_key[-4:])
         except _CHAT_ORCHESTRATOR_NONCRITICAL_EXCEPTIONS as key_log_err:
-            logging.debug(f"Could not log masked API key: {key_log_err}")
-        logging.debug(f"Debug - Chat Function - Prompt: {custom_prompt}")
+            logger.debug("Could not log masked API key: {}", exception_summary(key_log_err))
+        logger.debug("Custom prompt received summary={}", text_summary(custom_prompt))
 
         # --- Call the LLM via the updated chat_api_call ---
         # Preload config once and pass down to provider to avoid repeated loads
@@ -1110,13 +1137,13 @@ def _chat_sync_impl(
         )
 
         if streaming:
-            logging.debug("Chat Function - Response: Streaming Generator")
+            logger.debug("Chat Function - Response: Streaming Generator")
             return response
         else:
             chat_duration = time.time() - start_time
             log_histogram("chat_duration_multimodal", chat_duration, labels={"api_endpoint": api_endpoint})
             log_counter("chat_success_multimodal", labels={"api_endpoint": api_endpoint})
-            logging.debug(f"Chat Function - Response (first 500 chars): {str(response)[:500]}")
+            logger.debug("Chat Function - Response summary: {}", response_summary(response))
 
             loaded_config_data = preloaded_cfg or load_and_log_configs()
             post_gen_replacement_config = loaded_config_data.get('chat_dictionaries', {}).get('post_gen_replacement')
@@ -1130,23 +1157,28 @@ def _chat_sync_impl(
                                 ChatDictionary(key=k, content=str(v)) for k, v in parsed_entries.items()
                             ]
                             response = process_user_input(response, post_gen_chat_dict_objects)
-                            logging.debug(
-                                f"Response after post-gen replacement (first 500 chars): {str(response)[:500]}"
+                            logger.debug(
+                                "Response after post-gen replacement summary: {}",
+                                response_summary(response),
                             )
                         else:
-                            logging.debug("Post-gen dictionary parsed but resulted in no ChatDictionary objects.")
+                            logger.debug("Post-gen dictionary parsed but resulted in no ChatDictionary objects.")
                     except _CHAT_ORCHESTRATOR_NONCRITICAL_EXCEPTIONS as e_post_gen:
-                        logging.error(f"Error during post-generation replacement: {e_post_gen}", exc_info=True)
+                        logger.error(
+                            "Error during post-generation replacement: {}",
+                            exception_summary(e_post_gen),
+                            exc_info=True,
+                        )
                 else:
-                    logging.warning("Post-gen replacement enabled but dict file not found/configured.")
+                    logger.warning("Post-gen replacement enabled but dict file not found/configured.")
             return response
 
     except ChatAPIError:
         # Re-raise ChatAPIError subclasses as-is for proper upstream handling
         raise
     except _CHAT_ORCHESTRATOR_PROVIDER_EXCEPTIONS as e:
-        log_counter("chat_error_multimodal", labels={"api_endpoint": api_endpoint, "error": str(e)})
-        logging.error(f"Error in multimodal chat function: {str(e)}", exc_info=True)
+        log_counter("chat_error_multimodal", labels={"api_endpoint": api_endpoint, "error_type": type(e).__name__})
+        logger.error("Error in multimodal chat function: {}", exception_summary(e), exc_info=True)
         # Raise a proper exception instead of returning an error string
         raise ChatProviderError(
             message=f"An error occurred in the chat function: {str(e)}",
@@ -1299,7 +1331,7 @@ def chat(
             "Use await achat(...) or disable CHAT_SYNC_IN_EVENT_LOOP_STRICT."
         )
 
-    logging.warning(
+    logger.warning(
         "chat() called from a running event loop; returning a Future. "
         "Prefer await achat(...) in async contexts."
     )
@@ -1388,8 +1420,12 @@ async def achat(
     start_time = time.time()
 
     try:
-        logging.info(f"Debug - Chat Function (async) - Input Text: '{message}', Image provided: {'Yes' if current_image_input else 'No'}")
-        logging.info(f"Debug - Chat Function (async) - History length: {len(history)}, Image History Mode: {image_history_mode}")
+        logger.info(
+            "Async chat input received summary={} image_provided={}",
+            text_summary(message),
+            bool(current_image_input),
+        )
+        logger.info(f"Debug - Chat Function (async) - History length: {len(history)}, Image History Mode: {image_history_mode}")
 
         selected_parts = normalize_selected_parts(selected_parts)
 
@@ -1402,13 +1438,7 @@ async def achat(
             parsed = command_router.parse_slash_command(message)
             if parsed:
                 cmd_name, cmd_args = parsed
-                auth_user_int = None
-                try:
-                    if llm_user_identifier is not None:
-                        auth_user_int = int(llm_user_identifier)
-                except _CHAT_ORCHESTRATOR_COERCE_EXCEPTIONS:
-                    auth_user_int = None
-                ctx = command_router.CommandContext(user_id=llm_user_identifier or "anonymous", auth_user_id=auth_user_int)
+                ctx = _build_command_context(llm_user_identifier)
                 cmd_res = await command_router.async_dispatch_command(ctx, cmd_name, cmd_args)
                 injected_text = command_router.build_injection_text(cmd_name, cmd_res.content)
                 if cmd_res.ok:
@@ -1462,7 +1492,10 @@ async def achat(
                                 try:
                                     mime_type_part = image_url_data.split(";base64,")[0].split("/")[-1]
                                 except _CHAT_ORCHESTRATOR_NONCRITICAL_EXCEPTIONS as e:
-                                    logging.debug(f"Failed to extract MIME type from data URI: {e}")
+                                    logger.debug(
+                                        "Failed to extract MIME type from data URI: {}",
+                                        exception_summary(e),
+                                    )
                                     mime_type_part = "image"
                             processed_hist_content_parts.append(
                                 {"type": "text", "text": f"<image: prior_history.{mime_type_part}>"}
@@ -1493,9 +1526,10 @@ async def achat(
                     appended_to_last = True
                     break
             if not appended_to_last:
-                logging.debug(
+                logger.debug(
                     "Could not append last_user_image_from_history, no suitable prior user message or already present. "
-                    f"Image: {last_user_image_url_from_history[:60]}..."
+                    "image_summary={}",
+                    text_summary(last_user_image_url_from_history),
                 )
 
         # 3. Add RAG Content (prepended to current user's text)
@@ -1544,14 +1578,17 @@ async def achat(
             image_url = f"data:{current_image_input['mime_type']};base64,{current_image_input['base64_data']}"
             current_user_content_parts.append({"type": "image_url", "image_url": {"url": image_url}})
         if not current_user_content_parts:
-            logging.warning("Current user message has no text or image content parts. Sending a placeholder.")
+            logger.warning("Current user message has no text or image content parts. Sending a placeholder.")
             current_user_content_parts.append({"type": "text", "text": "(No user input for this turn)"})
 
         llm_messages_payload.append({"role": "user", "content": current_user_content_parts})
 
         temperature_float = normalize_temperature(temperature, default=0.7)
 
-        logging.debug("Debug - Async Chat Function - Final LLM Payload prepared")
+        logger.debug(
+            "Debug - Async Chat Function - Final LLM Payload summary: {}",
+            message_payload_summary(llm_messages_payload),
+        )
 
         preloaded_cfg = load_and_log_configs()
         response = await chat_api_call_async(
@@ -1579,7 +1616,7 @@ async def achat(
         )
 
         if streaming:
-            logging.debug("Async Chat Function - Response: Streaming Generator")
+            logger.debug("Async Chat Function - Response: Streaming Generator")
             return response
         else:
             chat_duration = time.time() - start_time
@@ -1598,23 +1635,28 @@ async def achat(
                                 ChatDictionary(key=k, content=str(v)) for k, v in parsed_entries.items()
                             ]
                             response = process_user_input(response, post_gen_chat_dict_objects)
-                            logging.debug(
-                                f"Async response after post-gen replacement (first 500 chars): {str(response)[:500]}"
+                            logger.debug(
+                                "Async response after post-gen replacement summary: {}",
+                                response_summary(response),
                             )
                         else:
-                            logging.debug("Post-gen dictionary parsed but resulted in no ChatDictionary objects.")
+                            logger.debug("Post-gen dictionary parsed but resulted in no ChatDictionary objects.")
                     except _CHAT_ORCHESTRATOR_NONCRITICAL_EXCEPTIONS as e_post_gen:
-                        logging.error(f"Error during post-generation replacement: {e_post_gen}", exc_info=True)
+                        logger.error(
+                            "Error during post-generation replacement: {}",
+                            exception_summary(e_post_gen),
+                            exc_info=True,
+                        )
                 else:
-                    logging.warning("Post-gen replacement enabled but dict file not found/configured.")
+                    logger.warning("Post-gen replacement enabled but dict file not found/configured.")
             return response
 
     except ChatAPIError:
         # Re-raise ChatAPIError subclasses as-is for proper upstream handling
         raise
     except _CHAT_ORCHESTRATOR_PROVIDER_EXCEPTIONS as e:
-        log_counter("chat_error_multimodal", labels={"api_endpoint": api_endpoint, "error": str(e)})
-        logging.error(f"Error in async multimodal chat function: {str(e)}", exc_info=True)
+        log_counter("chat_error_multimodal", labels={"api_endpoint": api_endpoint, "error_type": type(e).__name__})
+        logger.error("Error in async multimodal chat function: {}", exception_summary(e), exc_info=True)
         # Raise a proper exception instead of returning an error string
         raise ChatProviderError(
             message=f"An error occurred in the async chat function: {str(e)}",

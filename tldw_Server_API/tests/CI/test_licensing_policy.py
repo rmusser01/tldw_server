@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+
 # The fixed git invocation below verifies the checked-in manifest without a shell.
 import subprocess  # nosec B404
 from hashlib import sha256
@@ -82,9 +83,9 @@ def test_release_0_1_42_has_completed_source_record() -> None:
     assert record["release_id"] == "0.1.42"
     assert record["product_version"] == "0.1.42"
     assert record["repository"] == "https://github.com/rmusser01/tldw_server"
-    assert record["protected_source_revision"] == "0f3983788c413e0d17ffe7eabe8cff4a9f6ae723"
-    assert record["release_date"] == "2026-07-26"
-    assert record["countdown_start"] == "2028-07-26T12:00:00Z"
+    assert record["protected_source_revision"] == "50c1f689575b1bc21ed3e78cdb193b03fe968cdd"
+    assert record["release_date"] == "2026-09-10"
+    assert record["countdown_start"] == "2028-09-10T12:00:00Z"
     assert record["protected_paths"] == PROTECTED_PATHS
     assert record["initial_license"] == {
         "name": "PolyForm Perimeter License 1.0.1",
@@ -97,7 +98,7 @@ def test_release_0_1_42_has_completed_source_record() -> None:
     assert record["artifact_verification"]["protected_source_snapshot"] == {
         "manifest": "LICENSES/releases/0.1.42/protected-files.sha256",
         "result": "verified",
-        "source_revision": "0f3983788c413e0d17ffe7eabe8cff4a9f6ae723",
+        "source_revision": "50c1f689575b1bc21ed3e78cdb193b03fe968cdd",
     }
     assert record["artifact_verification"]["protected_binaries"] == {
         "published": False,
@@ -108,7 +109,7 @@ def test_release_0_1_42_has_completed_source_record() -> None:
     grant = (release_dir / "PolyForm-Countdown-1.0.0.txt").read_text(encoding="utf-8")
     expected_grant = _read("LICENSES/PolyForm-Countdown-1.0.0-template.txt").replace(
         "{start date}",
-        "2028-07-26",
+        "2028-09-10",
     ).replace(
         "{Copy the scheduled license terms here.}",
         _read("LICENSES/AGPL-3.0-only.txt").rstrip(),

@@ -11,6 +11,7 @@ import os
 import threading
 import time
 from collections import deque
+from functools import partial
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Callable, Optional
 from uuid import uuid4
@@ -92,11 +93,19 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     invoke_stream_close_bounded,
     provider_stream_error_payload,
 )
+from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
+    INTERNAL_CHAT_SETTINGS_KEYS,
+    validate_chat_settings_storage,
+)
 from tldw_Server_API.app.core.config import (
     load_comprehensive_config,
     resolve_default_transcription_model_setting,
 )
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    ConflictError,
+    InputError,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts import (
     upsert_transcript,
 )
@@ -237,6 +246,7 @@ async def handle_unified_websocket(*args, **kwargs):
     return await _handle_unified_websocket(*args, **kwargs)
 
 _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS = (
+    ConflictError,
     asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
@@ -971,6 +981,86 @@ async def _shim_get_or_create_conversation(
     except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS:
         fn = get_or_create_conversation
     return await fn(db, conversation_id, character_id, character_name, client_id, loop)
+
+
+def _persist_audio_chat_settings(
+    db: Any,
+    conversation_id: str,
+    settings_payload: dict[str, Any],
+    *,
+    conversation_created: bool,
+) -> bool:
+    """Validate and persist the final audio settings object with CAS when merging."""
+    reserved_keys = INTERNAL_CHAT_SETTINGS_KEYS.intersection(settings_payload)
+    if reserved_keys:
+        raise InputError(
+            f"{sorted(reserved_keys)[0]} is reserved server-owned state."
+        )
+    if conversation_created:
+        final_settings = dict(settings_payload)
+        final_settings = validate_chat_settings_storage(
+            final_settings,
+            reject_credentials=True,
+        )
+        return bool(db.upsert_conversation_settings(conversation_id, final_settings))
+
+    if callable(getattr(db, "get_roleplay_resume_state", None)) and callable(
+        getattr(db, "transaction", None)
+    ):
+        with db.transaction() as conn:
+            resume_state = db.get_roleplay_resume_state(
+                conversation_id,
+                conn=conn,
+                lock_for_update=True,
+                owner_client_id=str(getattr(db, "client_id", "") or ""),
+            )
+            conversation = resume_state.get("conversation")
+            if not isinstance(conversation, dict):
+                raise InputError("Audio conversation resume state is incomplete.")
+            final_settings = {
+                **dict(resume_state.get("settings") or {}),
+                **settings_payload,
+            }
+            final_settings = validate_chat_settings_storage(
+                final_settings,
+                reject_credentials=True,
+                allow_internal=True,
+                behavior_snapshot=resume_state.get("behavior_snapshot"),
+                conversation=conversation,
+            )
+            return bool(
+                db.upsert_conversation_settings(
+                    conversation_id,
+                    final_settings,
+                    conn=conn,
+                    expected_settings_version=int(
+                        resume_state.get("settings_version") or 0
+                    ),
+                )
+            )
+
+    conversation = db.get_conversation_by_id(conversation_id)
+    if not isinstance(conversation, dict):
+        raise InputError("Audio conversation was not found or is not owned.")
+    settings_row = db.get_conversation_settings(conversation_id)
+    final_settings = {
+        **dict((settings_row or {}).get("settings") or {}),
+        **settings_payload,
+    }
+    final_settings = validate_chat_settings_storage(
+        final_settings,
+        reject_credentials=True,
+        conversation=conversation,
+    )
+    return bool(
+        db.upsert_conversation_settings(
+            conversation_id,
+            final_settings,
+            expected_settings_version=int(
+                (settings_row or {}).get("settings_version") or 0
+            ),
+        )
+    )
 
 
 async def _can_start_stream(user_id: int):
@@ -2305,7 +2395,7 @@ async def websocket_audio_chat_stream(
                 if isinstance(character_card, dict) and character_card.get("name"):
                     character_name = str(character_card.get("name"))
 
-                persistence_session_id, _ = await _shim_get_or_create_conversation(
+                persistence_session_id, conversation_created = await _shim_get_or_create_conversation(
                     persistence_db,
                     persistence_session_id,
                     int(character_db_id),
@@ -2332,9 +2422,13 @@ async def websocket_audio_chat_stream(
                 try:
                     await loop.run_in_executor(
                         None,
-                        persistence_db.upsert_conversation_settings,
-                        persistence_session_id,
-                        settings_payload,
+                        partial(
+                            _persist_audio_chat_settings,
+                            persistence_db,
+                            persistence_session_id,
+                            settings_payload,
+                            conversation_created=conversation_created,
+                        ),
                     )
                 except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as settings_exc:
                     logger.debug(f"audio.chat.stream conversation_settings upsert failed: {settings_exc}")

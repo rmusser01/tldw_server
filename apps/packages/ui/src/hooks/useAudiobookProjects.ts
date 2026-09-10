@@ -146,7 +146,10 @@ export function useCurrentProject() {
             audioBlob,
             audioUrl,
             audioDuration: ch.audioDuration,
-            errorMessage: ch.errorMessage
+            errorMessage: ch.errorMessage,
+            requestedBackend: ch.requestedBackend,
+            actualBackend: ch.actualBackend,
+            fallbackUsed: ch.fallbackUsed
           }
         })
       )

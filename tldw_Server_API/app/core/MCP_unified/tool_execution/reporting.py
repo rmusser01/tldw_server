@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -18,9 +19,30 @@ from mcp_unified.tool_use_reporting.models import (
     ToolUseStatus,
 )
 from mcp_unified.tool_use_reporting.recorder import record_tool_use_safely
+from mcp_unified.tool_use_reporting.sanitization import sanitize_reason_code
 
 from ..protocol_types import GovernanceDeniedError, RequestContext
 from .hooks import ToolExecutionHooks
+
+
+def _safe_exception_family(exc: BaseException) -> str:
+    """Return a bounded exception family without reading exception text."""
+
+    try:
+        name = type(exc).__name__
+        if (
+            type(name) is str
+            and 1 <= len(name) <= 64
+            and name.isascii()
+            and (name[0].isalpha() or name[0] == "_")
+            and all(character.isalnum() or character == "_" for character in name)
+        ):
+            return name
+    except asyncio.CancelledError:
+        raise
+    except BaseException:  # noqa: BLE001 - hostile exception types degrade safely.
+        return "Exception"
+    return "Exception"
 
 
 class ToolExecutionReporter:
@@ -259,9 +281,7 @@ class ToolExecutionReporter:
             else None
         )
         file_policy_sha256_after_present = (
-            self.tool_use_contains_key(payload, {"sha256_after"})
-            if file_policy_related
-            else None
+            self.tool_use_contains_key(payload, {"sha256_after"}) if file_policy_related else None
         )
         file_policy_lock_lease_present = (
             (
@@ -326,11 +346,7 @@ class ToolExecutionReporter:
         if getattr(request, "method", None) != "tools/call" or not should_record(context):
             return
         params = request.params if isinstance(getattr(request, "params", None), dict) else {}
-        requested = (
-            requested_tool_name
-            if requested_tool_name is not None
-            else params.get("name")
-        )
+        requested = requested_tool_name if requested_tool_name is not None else params.get("name")
         build_event = build_event or self.build_event
         record_event = record_event or self.record_event
         duration_ms = duration_ms or self.duration_ms
@@ -390,10 +406,16 @@ class ToolExecutionReporter:
         duration_ms: float,
         arguments_hash: str | None,
         error: Exception | None = None,
+        reason_code: str | None = None,
     ) -> None:
         """Emit a best-effort structured audit log for a completed tool execution."""
 
         try:
+            error_type = _safe_exception_family(error) if error is not None else None
+            safe_reason_code = sanitize_reason_code(reason_code)
+            if error is not None and safe_reason_code is None:
+                _status, classified_reason_code = classify_tool_use_exception(error)
+                safe_reason_code = sanitize_reason_code(classified_reason_code)
             log = logger.bind(
                 audit=True,
                 request_id=context.request_id,
@@ -405,15 +427,22 @@ class ToolExecutionReporter:
                 duration_ms=round(duration_ms, 2),
                 arguments_hash=arguments_hash,
                 status=status,
+                error_type=error_type,
+                reason_code=safe_reason_code,
             )
             if error:
-                log.error("MCP tool execution failed: {error_type}", error_type=error.__class__.__name__)
+                log.error(
+                    "MCP tool execution failed: {error_type}",
+                    error_type=error_type,
+                )
             else:
                 log.info("MCP tool executed")
+        except asyncio.CancelledError:
+            raise
         except self._noncritical_exceptions as exc:
             logger.debug(
                 "MCP audit log emission skipped after noncritical failure: {error_type}",
-                error_type=exc.__class__.__name__,
+                error_type=_safe_exception_family(exc),
             )
 
     _audit_tool_event = audit_tool_event

@@ -39,6 +39,7 @@ from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.exceptions import DuplicateRoleError
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGateway
 from tldw_Server_API.app.core.AuthNZ.rbac import get_effective_permissions
 from tldw_Server_API.app.core.AuthNZ.repos.rbac_repo import AuthnzRbacRepo
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -74,7 +75,6 @@ router = APIRouter()
 
 
 _RBAC_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,
@@ -263,7 +263,6 @@ async def create_tool_permission(
                     "INSERT INTO permissions (name, description, category) VALUES (?, ?, ?)",
                     (name, desc, "tools"),
                 )
-                await db.commit()
                 cur = await db.execute("SELECT name, description, category FROM permissions WHERE name = ?", (name,))
                 r = await cur.fetchone()
             return ToolPermissionResponse(name=r[0], description=r[1], category=r[2])
@@ -407,7 +406,6 @@ async def grant_tool_permissions_batch(
                     await db.execute(
                         "INSERT INTO permissions (name, description, category) VALUES (?, ?, ?)", (name, desc, "tools")
                     )
-                    await db.commit()
                     cur = await db.execute(
                         "SELECT id, name, description, category FROM permissions WHERE name = ?", (name,)
                     )
@@ -415,7 +413,6 @@ async def grant_tool_permissions_batch(
                 await db.execute(
                     "INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)", (role_id, r[0])
                 )
-                await db.commit()
                 results.append(ToolPermissionResponse(name=r[1], description=r[2], category=r[3]))
         return results
     except _RBAC_NONCRITICAL_EXCEPTIONS as e:
@@ -450,7 +447,6 @@ async def revoke_tool_permissions_batch(
                     await db.execute(
                         "DELETE FROM role_permissions WHERE role_id = ? AND permission_id = ?", (role_id, r[0])
                     )
-                    await db.commit()
                     revoked.append(name)
         return {"revoked": revoked, "count": len(revoked)}
     except _RBAC_NONCRITICAL_EXCEPTIONS as e:
@@ -498,7 +494,6 @@ async def grant_tool_permissions_by_prefix(
                 await db.execute(
                     "INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)", (role_id, r[0])
                 )
-                await db.commit()
                 results.append(ToolPermissionResponse(name=r[1], description=r[2], category=r[3]))
         return results
     except _RBAC_NONCRITICAL_EXCEPTIONS as e:
@@ -529,7 +524,6 @@ async def revoke_tool_permissions_by_prefix(
                 await db.execute(
                     "DELETE FROM role_permissions WHERE role_id = ? AND permission_id = ?", (role_id, r[0])
                 )
-                await db.commit()
                 names.append(r[1])
         return {"revoked": names, "count": len(names)}
     except _RBAC_NONCRITICAL_EXCEPTIONS as e:
@@ -928,7 +922,6 @@ async def grant_permission_to_role(role_id: int, permission_id: int, db=Depends(
                 "INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)",
                 (role_id, permission_id),
             )
-            await db.commit()
         return {"message": "Permission granted to role"}
     except _RBAC_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Failed to grant permission to role")
@@ -947,7 +940,6 @@ async def revoke_permission_from_role(role_id: int, permission_id: int, db=Depen
             await db.execute(
                 "DELETE FROM role_permissions WHERE role_id = ? AND permission_id = ?", (role_id, permission_id)
             )
-            await db.commit()
         return {"message": "Permission revoked from role"}
     except _RBAC_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Failed to revoke permission from role")
@@ -1000,7 +992,6 @@ async def add_role_to_user(
                 "INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?)",
                 (user_id, role_id),
             )
-            await db.commit()
         return {"message": "Role added to user"}
     except _RBAC_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Failed to add role to user")
@@ -1021,7 +1012,6 @@ async def remove_role_from_user(
             await db.execute("DELETE FROM user_roles WHERE user_id = $1 AND role_id = $2", user_id, role_id)
         else:
             await db.execute("DELETE FROM user_roles WHERE user_id = ? AND role_id = ?", (user_id, role_id))
-            await db.commit()
         return {"message": "Role removed from user"}
     except _RBAC_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Failed to remove role from user")
@@ -1069,32 +1059,38 @@ async def upsert_user_override(
         from tldw_Server_API.app.core.AuthNZ.settings import is_single_user_mode as _is_single
 
         if _is_single() and int(user_id) == int(getattr(_settings, "SINGLE_USER_FIXED_ID", 1)):
+            gateway = VersionedUserWriteGateway("postgres" if _is_pg else "sqlite")
             if _is_pg:
-                await db.execute(
-                    """
-                    INSERT INTO users (id, username, email, password_hash, is_active, is_verified, role)
-                    VALUES ($1, $2, $3, $4, TRUE, TRUE, COALESCE((SELECT role FROM users WHERE id=$1),'user'))
-                    ON CONFLICT (id) DO NOTHING
-                    """,
-                    user_id,
-                    "single_user",
-                    "single_user@example.local",
-                    "",
+                await gateway.insert_user(
+                    db,
+                    values={
+                        "id": user_id,
+                        "username": "single_user",
+                        "email": "single_user@example.local",
+                        # This stub is never accepted as an authenticating password.
+                        "password_hash": "",  # nosec B105
+                        "is_active": True,
+                        "is_verified": True,
+                        "role": "user",
+                    },
+                    ignore_conflict=True,
                 )
             else:
                 # SQLite path: insert a stub single_user row with default role 'user'
-                cur = await db.execute(
-                    """
-                    INSERT OR IGNORE INTO users (id, username, email, password_hash, is_active, is_verified, role)
-                    VALUES (?, ?, ?, ?, 1, 1, 'user')
-                    """,
-                    user_id,
-                    "single_user",
-                    "single_user@example.local",
-                    "",
+                await gateway.insert_user(
+                    db,
+                    values={
+                        "id": user_id,
+                        "username": "single_user",
+                        "email": "single_user@example.local",
+                        # This stub is never accepted as an authenticating password.
+                        "password_hash": "",  # nosec B105
+                        "is_active": 1,
+                        "is_verified": 1,
+                        "role": "user",
+                    },
+                    ignore_conflict=True,
                 )
-                if not _is_pg:
-                    await db.commit()
         # Resolve permission_id if only name provided
         perm_id = payload.permission_id
         if not perm_id and payload.permission_name:
@@ -1132,9 +1128,6 @@ async def upsert_user_override(
                 granted,
                 payload.expires_at,
             )
-            # Commit on SQLite acquire()-based connection
-            if not _is_pg:
-                await db.commit()
         return {"message": "Override upserted"}
     except HTTPException:
         raise
@@ -1161,8 +1154,6 @@ async def delete_user_override(
             await db.execute(
                 "DELETE FROM user_permissions WHERE user_id = ? AND permission_id = ?", (user_id, permission_id)
             )
-            if not _is_pg:
-                await db.commit()
         return {"message": "Override deleted"}
     except _RBAC_NONCRITICAL_EXCEPTIONS as e:
         logger.exception("Failed to delete user override")

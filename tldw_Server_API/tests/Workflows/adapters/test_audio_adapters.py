@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import json
 import subprocess
+
+from tldw_Server_API.tests.Workflows.adapters.conftest import patch_ffmpeg, setattr_ffmpeg
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -542,7 +544,7 @@ async def test_audio_normalize_adapter_valid_config(monkeypatch, tmp_path):
         Path(output_path).write_bytes(b"normalized_audio_data")
         return MagicMock(returncode=0, stdout=b"", stderr=b"")
 
-    with patch("subprocess.run", mock_subprocess_run):
+    with patch_ffmpeg(mock_subprocess_run):
         config = {"input_path": str(audio_file), "target_loudness": -23}
         context = {"user_id": "test", "step_run_id": "step_norm_1"}
 
@@ -585,7 +587,7 @@ async def test_audio_normalize_adapter_ffmpeg_timeout(monkeypatch, tmp_path):
     def mock_subprocess_run(cmd, **kwargs):
         raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 300))
 
-    with patch("subprocess.run", mock_subprocess_run):
+    with patch_ffmpeg(mock_subprocess_run):
         config = {"input_path": str(audio_file)}
         context = {"user_id": "test", "step_run_id": "step_norm_timeout"}
 
@@ -632,7 +634,7 @@ async def test_audio_normalize_adapter_from_previous_step(monkeypatch, tmp_path)
         Path(output_path).write_bytes(b"normalized_audio_data")
         return MagicMock(returncode=0, stdout=b"", stderr=b"")
 
-    with patch("subprocess.run", mock_subprocess_run):
+    with patch_ffmpeg(mock_subprocess_run):
         config = {}  # No input_path specified
         context = {
             "user_id": "test",
@@ -670,7 +672,7 @@ async def test_audio_concat_adapter_valid_config(monkeypatch, tmp_path):
         Path(output_path).write_bytes(b"concatenated_audio")
         return MagicMock(returncode=0, stdout=b"", stderr=b"")
 
-    with patch("subprocess.run", mock_subprocess_run):
+    with patch_ffmpeg(mock_subprocess_run):
         config = {"input_paths": [str(audio1), str(audio2)], "format": "mp3"}
         context = {"user_id": "test", "step_run_id": "step_concat_1"}
 
@@ -760,7 +762,7 @@ async def test_audio_trim_adapter_valid_config(monkeypatch, tmp_path):
         Path(output_path).write_bytes(b"trimmed_audio")
         return MagicMock(returncode=0, stdout=b"", stderr=b"")
 
-    with patch("subprocess.run", mock_subprocess_run):
+    with patch_ffmpeg(mock_subprocess_run):
         config = {"input_path": str(audio_file), "start": "00:00:10", "end": "00:01:00"}
         context = {"user_id": "test", "step_run_id": "step_trim_1"}
 
@@ -788,7 +790,7 @@ async def test_audio_trim_adapter_with_duration(monkeypatch, tmp_path):
         Path(output_path).write_bytes(b"trimmed_audio")
         return MagicMock(returncode=0, stdout=b"", stderr=b"")
 
-    with patch("subprocess.run", mock_subprocess_run):
+    with patch_ffmpeg(mock_subprocess_run):
         config = {"input_path": str(audio_file), "start": "0", "duration": "30"}
         context = {"user_id": "test", "step_run_id": "step_trim_dur"}
 
@@ -856,7 +858,7 @@ async def test_audio_convert_adapter_valid_config(monkeypatch, tmp_path):
         Path(output_path).write_bytes(b"converted_audio")
         return MagicMock(returncode=0, stdout=b"", stderr=b"")
 
-    with patch("subprocess.run", mock_subprocess_run):
+    with patch_ffmpeg(mock_subprocess_run):
         config = {"input_path": str(audio_file), "format": "wav", "bitrate": "192k"}
         context = {"user_id": "test", "step_run_id": "step_convert_1"}
 
@@ -904,7 +906,7 @@ async def test_audio_convert_adapter_with_sample_rate(monkeypatch, tmp_path):
         Path(output_path).write_bytes(b"converted_audio")
         return MagicMock(returncode=0, stdout=b"", stderr=b"")
 
-    with patch("subprocess.run", mock_subprocess_run):
+    with patch_ffmpeg(mock_subprocess_run):
         config = {"input_path": str(audio_file), "format": "wav", "sample_rate": 44100}
         context = {"user_id": "test", "step_run_id": "step_convert_sr"}
 
@@ -952,7 +954,7 @@ async def test_audio_convert_adapter_from_previous_step(monkeypatch, tmp_path):
         Path(output_path).write_bytes(b"converted_audio")
         return MagicMock(returncode=0, stdout=b"", stderr=b"")
 
-    with patch("subprocess.run", mock_subprocess_run):
+    with patch_ffmpeg(mock_subprocess_run):
         config = {"format": "wav"}  # No input_path
         context = {
             "user_id": "test",
@@ -987,7 +989,7 @@ async def test_audio_extract_adapter_valid_config(monkeypatch, tmp_path):
         Path(output_path).write_bytes(b"extracted_audio")
         return MagicMock(returncode=0, stdout=b"", stderr=b"")
 
-    with patch("subprocess.run", mock_subprocess_run):
+    with patch_ffmpeg(mock_subprocess_run):
         config = {"input_path": str(video_file), "format": "mp3"}
         context = {"user_id": "test", "step_run_id": "step_extract_1"}
 
@@ -1052,7 +1054,7 @@ async def test_audio_extract_adapter_from_previous_step(monkeypatch, tmp_path):
         Path(output_path).write_bytes(b"extracted_audio")
         return MagicMock(returncode=0, stdout=b"", stderr=b"")
 
-    with patch("subprocess.run", mock_subprocess_run):
+    with patch_ffmpeg(mock_subprocess_run):
         config = {"format": "mp3"}  # No input_path
         context = {
             "user_id": "test",
@@ -1085,7 +1087,7 @@ async def test_audio_extract_adapter_aac_codec(monkeypatch, tmp_path):
         Path(output_path).write_bytes(b"extracted_audio")
         return MagicMock(returncode=0, stdout=b"", stderr=b"")
 
-    with patch("subprocess.run", mock_subprocess_run):
+    with patch_ffmpeg(mock_subprocess_run):
         config = {"input_path": str(video_file), "format": "aac"}
         context = {"user_id": "test", "step_run_id": "step_extract_aac"}
 
@@ -1122,7 +1124,7 @@ async def test_audio_mix_adapter_valid_config(monkeypatch, tmp_path):
         Path(output_path).write_bytes(b"mixed_audio")
         return MagicMock(returncode=0, stdout=b"", stderr=b"")
 
-    with patch("subprocess.run", mock_subprocess_run):
+    with patch_ffmpeg(mock_subprocess_run):
         config = {"input_paths": [str(audio1), str(audio2)]}
         context = {"user_id": "test", "step_run_id": "step_mix_1"}
 
@@ -1172,7 +1174,7 @@ async def test_audio_mix_adapter_with_volumes(monkeypatch, tmp_path):
         Path(output_path).write_bytes(b"mixed_audio")
         return MagicMock(returncode=0, stdout=b"", stderr=b"")
 
-    with patch("subprocess.run", mock_subprocess_run):
+    with patch_ffmpeg(mock_subprocess_run):
         config = {
             "input_paths": [str(audio1), str(audio2)],
             "volumes": [0.8, 0.5],
@@ -1221,7 +1223,7 @@ async def test_audio_mix_adapter_ffmpeg_error(monkeypatch, tmp_path):
     def mock_subprocess_run(cmd, **kwargs):
         raise subprocess.CalledProcessError(1, cmd, stderr=b"ffmpeg error")
 
-    with patch("subprocess.run", mock_subprocess_run):
+    with patch_ffmpeg(mock_subprocess_run):
         config = {"input_paths": [str(audio1), str(audio2)]}
         context = {"user_id": "test", "step_run_id": "step_mix_err"}
 
@@ -1275,7 +1277,7 @@ async def test_audio_processing_adapters_sanitize_ffmpeg_errors(
     def mock_subprocess_run(cmd, **kwargs):
         raise subprocess.CalledProcessError(1, cmd, stderr=b"ffmpeg failed at /private/ffmpeg-cache")
 
-    with patch("subprocess.run", mock_subprocess_run):
+    with patch_ffmpeg(mock_subprocess_run):
         result = await getattr(workflow_adapters, adapter_name)(
             configs[adapter_name],
             {"user_id": "test", "step_run_id": f"step_{adapter_name}"},
@@ -1741,7 +1743,7 @@ async def test_artifact_creation_with_add_artifact_callback(monkeypatch, tmp_pat
         Path(output_path).write_bytes(b"normalized_audio")
         return MagicMock(returncode=0, stdout=b"", stderr=b"")
 
-    with patch("subprocess.run", mock_subprocess_run):
+    with patch_ffmpeg(mock_subprocess_run):
         config = {"input_path": str(audio_file)}
         context = {
             "user_id": "test",
@@ -1773,7 +1775,7 @@ async def test_template_resolution_in_config(monkeypatch, tmp_path):
         Path(output_path).write_bytes(b"trimmed_audio")
         return MagicMock(returncode=0, stdout=b"", stderr=b"")
 
-    with patch("subprocess.run", mock_subprocess_run):
+    with patch_ffmpeg(mock_subprocess_run):
         # Use template syntax in input_path
         config = {"input_path": "{{ inputs.audio_file }}", "start": "0", "duration": "30"}
         context = {

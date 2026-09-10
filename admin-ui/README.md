@@ -156,26 +156,30 @@ bun run test:smoke
 
 ```bash
 bunx playwright install --with-deps chromium
-bun run test:real-backend -- \
-  --project=chromium-real-jwt \
-  --project=chromium-real-single-user \
-  --reporter=line
+bun run test:real-backend
 ```
 
-This lane auto-starts two auth-specific admin-ui servers plus matching backend instances:
+This lane builds the admin UI once in production mode, then runs each auth-specific
+UI server and matching backend in a separate Playwright process:
 - `chromium-real-jwt` — multi-user JWT admin flows
 - `chromium-real-single-user` — single-user API-key admin flows
 
-The suite runs with `--workers=1` intentionally since each auth-mode project shares one managed backend instance.
+The projects run sequentially so Next.js never has two servers sharing one build
+directory. Each project also runs with `--workers=1` because its tests share one
+managed backend instance.
+
+To build and run only one auth mode:
+
+```bash
+bun run test:real-backend:jwt
+bun run test:real-backend:single-user
+```
 
 To reuse already-running backends:
 ```bash
 TLDW_ADMIN_E2E_JWT_API_URL=http://127.0.0.1:8101 \
 TLDW_ADMIN_E2E_SINGLE_USER_API_URL=http://127.0.0.1:8102 \
-bun run test:real-backend -- \
-  --project=chromium-real-jwt \
-  --project=chromium-real-single-user \
-  --reporter=line
+bun run test:real-backend
 ```
 
 Reused backends must have `ENABLE_ADMIN_E2E_TEST_MODE=true` for seed/reset/bootstrap helpers.

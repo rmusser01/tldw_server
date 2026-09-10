@@ -4,9 +4,53 @@ This page is the release notes index placeholder for published versions.
 
 ## Unreleased
 
-No published changes yet.
+## 0.1.42 - 2026-09-10
 
-## 0.1.42 - 2026-07-26
+This candidate refreshes the frozen development train through PR #2939
+(`50c1f689575b1bc21ed3e78cdb193b03fe968cdd`). See `CHANGELOG.md` for the
+complete grouped rollup and the release-refresh plan for outstanding gates.
+
+### Chat, notes, research, and personal context
+
+- Added chat macros, prompt improvement workflows, scoped history, resumable
+  character chat, and customizable service prompts across ingestion, titles,
+  summaries, study assistance, and writing.
+- Expanded notes and task-activity synchronization, attachment/link/organization
+  contracts, shared-workspace cloning, personal-context profiles and ongoing
+  sync, article extraction, ClinicalTrials/PMC discovery, and Research Workspace
+  usability.
+- Added Migu/persona voice and buddy workflows, OpenRouter/generic and audio.cpp
+  TTS support, realtime speech, and MCP Unified HTTP/SSE transports.
+
+### Administration and upgrade preparation
+
+- Added durable webhook delivery and producer activation, admin improvements,
+  automation-definition/agent-task execution, and a production reference
+  deployment with health, backup, and rollback checks.
+- Hardened trusted-proxy login isolation, embeddings authentication, migration
+  durability, media cleanup, schema compatibility, and required CI enforcement.
+- Back up persistent databases, content, and configuration before upgrading.
+  Conversation, authentication, notes sync, personal-context, presentations, and
+  webhook schemas have changed. Use a compatible backup for rollback; see
+  `Docs/Deployment/Production_Reference_Deployment.md` and
+  `Docs/Admin_Webhooks_Migration_Runbook.md`.
+
+### Presentation Studio
+
+- Added standalone HTML + JavaScript presentations as a separately gated,
+  default-off project kind. Generation runs asynchronously through Jobs and an
+  administrator-selected built-in provider adapter. Saved projects remain
+  readable when generation or provider egress is disabled.
+- The WebUI edits the complete document as inert text, offers a bounded
+  text-only Safe outline, uses explicit strong-ETag saves, and downloads exact
+  bytes as an attachment. It never previews or executes the document. Opening
+  a downloaded HTML file outside tldw can execute its JavaScript and should be
+  treated accordingly.
+- The browser extension remains source-free for standalone projects and offers
+  a metadata-only handoff to the canonical WebUI. Operators should complete the
+  schema-v2 backup and default-off rollout steps in
+  `Docs/Deployment/Standalone_HTML_Presentations.md` before enabling
+  generation.
 
 ### Provider credentials and embeddings
 
@@ -27,7 +71,7 @@ No published changes yet.
 
 - The tagged source release includes protected frontend source under PolyForm
   Perimeter 1.0.1. The release-specific Countdown grant adds
-  `AGPL-3.0-only` as an additional option on July 26, 2028 at 12:00 UTC.
+  `AGPL-3.0-only` as an additional option on September 10, 2028 at 12:00 UTC.
 - The immutable record, completed grant, exact source revision, and file
   manifest are in `LICENSES/releases/0.1.42/`.
 - This release publishes no protected frontend binaries. The Python package and

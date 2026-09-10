@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Any, Iterable, Mapping
+from collections.abc import Iterable, Mapping
+from typing import Any
 
+from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
+    StudioSectionsV1,
+)
 
 NOTE_STUDIO_RENDER_VERSION = 1
 _CUE_SECTION_TITLES = {"cue", "cues", "key questions", "questions"}
@@ -54,6 +58,41 @@ def render_studio_markdown(payload: Mapping[str, Any]) -> str:
     return "\n\n".join(markdown_parts).strip()
 
 
+def canonical_studio_sections(sections: Any) -> list[dict[str, Any]]:
+    """Validate and dump exact Task 1 Studio sections without semantic repair."""
+    parsed = StudioSectionsV1.model_validate({"sections": sections})
+    return parsed.model_dump(mode="json")["sections"]
+
+
+def build_derived_studio_payload(
+    payload: Mapping[str, Any],
+    *,
+    template_type: str,
+    handwriting_mode: str,
+    render_version: int = NOTE_STUDIO_RENDER_VERSION,
+    fallback_title: str = "Untitled Study Notes",
+    source_note_id: str,
+) -> dict[str, Any]:
+    """Build a derive payload around exact contract-validated section state."""
+    incoming_meta = payload.get("meta")
+    raw_title = incoming_meta.get("title") if isinstance(incoming_meta, Mapping) else None
+    title = raw_title.strip() if isinstance(raw_title, str) else ""
+    if not title:
+        title = str(fallback_title).strip() or "Untitled Study Notes"
+    return {
+        "meta": {
+            "title": title,
+            "source_note_id": source_note_id,
+        },
+        "layout": {
+            "template_type": str(template_type).strip() or "lined",
+            "handwriting_mode": str(handwriting_mode).strip() or "accented",
+            "render_version": int(render_version),
+        },
+        "sections": canonical_studio_sections(payload.get("sections")),
+    }
+
+
 def normalize_studio_payload(
     payload: Mapping[str, Any] | None,
     *,
@@ -87,12 +126,22 @@ def normalize_studio_payload(
     meta["title"] = normalized_title
     meta["source_note_id"] = normalized_source_note_id
 
-    normalized_sections = _normalize_sections(
-        incoming_payload.get("sections"),
-        existing_sections=existing.get("sections"),
+    normalized_sections = _try_canonical_studio_sections(
+        incoming_payload.get("sections")
     )
-    if not normalized_sections:
-        normalized_sections = _normalize_sections(existing.get("sections"), existing_sections=None)
+    if normalized_sections is None:
+        normalized_sections = _normalize_sections(
+            incoming_payload.get("sections"),
+            existing_sections=existing.get("sections"),
+        )
+        if not normalized_sections:
+            normalized_sections = _try_canonical_studio_sections(
+                existing.get("sections")
+            )
+            if normalized_sections is None:
+                normalized_sections = _normalize_sections(
+                    existing.get("sections"), existing_sections=None
+                )
 
     return {
         "meta": meta,
@@ -151,6 +200,16 @@ def _iter_sections(sections: Any) -> Iterable[dict[str, Any]]:
         if isinstance(section, Mapping):
             normalized_sections.append(dict(section))
     return normalized_sections
+
+
+def _try_canonical_studio_sections(
+    sections: Any,
+) -> list[dict[str, Any]] | None:
+    """Return canonical Studio sections, or ``None`` for invalid input."""
+    try:
+        return canonical_studio_sections(sections)
+    except (TypeError, ValueError):
+        return None
 
 
 def _normalize_sections(sections: Any, *, existing_sections: Any = None) -> list[dict[str, Any]]:

@@ -763,6 +763,12 @@ class ElevenLabsTTSAdapter(ElevenLabsAdapter):
     def supported_models(self) -> list[str]:
         return list(self.MODELS.keys())
 
+    @classmethod
+    def _canonical_model_id(cls, model: str) -> str:
+        """Return a known legacy model key without mutating the request."""
+        lookup_key = model.lower()
+        return lookup_key if lookup_key in cls.MODELS else model
+
     # --- Convenience API ---
     async def fetch_voices(self) -> list[dict[str, Any]]:
         """Return available voices as a list of dicts from the public API."""
@@ -849,7 +855,7 @@ class ElevenLabsTTSAdapter(ElevenLabsAdapter):
             raise TTSTextTooLongError("Text exceeds maximum for ElevenLabs", provider=self._provider_simple)
 
         # Model validation when provided
-        if request.model and request.model not in self.MODELS:
+        if request.model and self._canonical_model_id(request.model) not in self.MODELS:
             from ..tts_exceptions import TTSValidationError
             raise TTSValidationError("Invalid model for ElevenLabs", provider=self._provider_simple, details={"model": request.model})
 
@@ -868,7 +874,7 @@ class ElevenLabsTTSAdapter(ElevenLabsAdapter):
         request.stream = False
         # Map request fields into extra_params expected by base adapter
         if request.model:
-            request.extra_params["model"] = request.model
+            request.extra_params["model"] = self._canonical_model_id(request.model)
         if request.voice_settings:
             if request.voice_settings.stability is not None:
                 request.extra_params["stability"] = request.voice_settings.stability
@@ -902,7 +908,7 @@ class ElevenLabsTTSAdapter(ElevenLabsAdapter):
         # Prepare voice/model
         voice_id = self._get_voice_id(request.voice or "rachel")
         if request.model:
-            request.extra_params["model"] = request.model
+            request.extra_params["model"] = self._canonical_model_id(request.model)
         model_id = self._select_model(request)
 
         url = f"{self.base_url}/text-to-speech/{voice_id}/stream"

@@ -18,6 +18,21 @@ describe("deriveRequestTimeout generation defaults", () => {
     expect(timeout).toBeGreaterThanOrEqual(120000)
   })
 
+  it("keeps the model metadata catalog above the generic 10-second timeout", () => {
+    expect(
+      deriveRequestTimeout(
+        { requestTimeoutMs: 10000 },
+        "/api/v1/llm/models/metadata"
+      )
+    ).toBeGreaterThanOrEqual(60000)
+    expect(
+      deriveRequestTimeout(
+        { requestTimeoutMs: 90000 },
+        "/api/v1/llm/models/metadata"
+      )
+    ).toBe(90000)
+  })
+
   it("still honors an explicit chatRequestTimeoutMs override", () => {
     const timeout = deriveRequestTimeout(
       { chatRequestTimeoutMs: 20000 },
@@ -70,6 +85,49 @@ describe("tldwRequest post-refresh retry", () => {
     // The retried request must send the SAME FormData instance, not "{}".
     expect(bodies[0]).toBe(form)
     expect(bodies[1]).toBe(form)
+  })
+
+  it("does not dispatch the retry when the request aborts during refresh", async () => {
+    let releaseRefresh!: () => void
+    let signalRefreshStarted!: () => void
+    const refreshStarted = new Promise<void>((resolve) => {
+      signalRefreshStarted = resolve
+    })
+    const refreshGate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve
+    })
+    const fetchFn = vi.fn(async () =>
+      new Response("unauthorized", { status: 401 })) as unknown as typeof fetch
+    const abort = new AbortController()
+    const runtime = {
+      getConfig: async () => ({
+        serverUrl: "https://api.example.com",
+        authMode: "multi-user",
+        accessToken: "stale-access",
+        refreshToken: "refresh-token"
+      }),
+      refreshAuth: async () => {
+        signalRefreshStarted()
+        await refreshGate
+      },
+      fetchFn
+    }
+
+    const pending = tldwRequest(
+      {
+        path: "https://api.example.com/api/v1/chat/completions",
+        method: "POST",
+        body: { messages: [] },
+        abortSignal: abort.signal
+      },
+      runtime
+    )
+    await refreshStarted
+    abort.abort()
+    releaseRefresh()
+
+    await expect(pending).resolves.toMatchObject({ ok: false, status: 0 })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
   })
 })
 

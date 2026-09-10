@@ -58,6 +58,7 @@ def test_legacy_self_update_with_valid_and_unknown_key_rejects_without_partial_a
     assert response.status_code == 400
     payload = response.json()
     assert payload["error_code"] == "profile_update_unknown_key"
+    assert payload["detail"] == "One or more keys are not recognized"
     assert payload["errors"] == [
         {"key": "preferences.ui.missing", "message": "unknown_key"}
     ]
@@ -65,6 +66,63 @@ def test_legacy_self_update_with_valid_and_unknown_key_rejects_without_partial_a
     assert profile_response.status_code == 200
     preferences = profile_response.json().get("preferences", {})
     assert preferences.get("preferences.ui.theme") != rejected_value
+
+
+def test_legacy_self_stale_version_precedes_invalid_value_rejection(
+    auth_headers,
+) -> None:
+    with TestClient(app) as client:
+        response = client.patch(
+            "/api/v1/users/me/profile",
+            headers=auth_headers,
+            json={
+                "profile_version": "2000-01-01T00:00:00Z",
+                "updates": [
+                    {"key": "identity.email", "value": "not-an-email"},
+                ],
+            },
+        )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "error_code": "profile_version_mismatch",
+        "detail": "profile_version_mismatch",
+        "errors": [{"key": "profile_version", "message": "mismatch"}],
+    }
+
+
+def test_legacy_self_dry_run_preserves_duplicate_key_order_without_writing(
+    auth_headers,
+) -> None:
+    first_value = "legacy-dry-run-first"
+    second_value = "legacy-dry-run-second"
+
+    with TestClient(app) as client:
+        response = client.patch(
+            "/api/v1/users/me/profile",
+            headers=auth_headers,
+            json={
+                "dry_run": True,
+                "updates": [
+                    {"key": "preferences.ui.theme", "value": first_value},
+                    {"key": "preferences.ui.theme", "value": second_value},
+                ],
+            },
+        )
+        profile_response = client.get(
+            "/api/v1/users/me/profile",
+            params={"sections": "preferences"},
+            headers=auth_headers,
+        )
+
+    assert response.status_code == 200
+    assert response.json()["applied"] == [
+        "preferences.ui.theme",
+        "preferences.ui.theme",
+    ]
+    assert response.json()["skipped"] == []
+    preferences = profile_response.json().get("preferences", {})
+    assert preferences.get("preferences.ui.theme") not in {first_value, second_value}
 
 
 def test_legacy_admin_update_returns_string_version_applied_and_empty_skipped(
@@ -89,7 +147,7 @@ def test_legacy_admin_update_returns_string_version_applied_and_empty_skipped(
     assert payload["skipped"] == []
 
 
-def test_legacy_admin_update_with_stale_version_returns_version_mismatch_shape(
+def test_legacy_admin_stale_version_precedes_invalid_value_rejection(
     auth_headers,
 ) -> None:
     with TestClient(app) as client:
@@ -100,7 +158,7 @@ def test_legacy_admin_update_with_stale_version_returns_version_mismatch_shape(
             json={
                 "profile_version": "2000-01-01T00:00:00Z",
                 "updates": [
-                    {"key": "limits.storage_quota_mb", "value": 4096},
+                    {"key": "identity.email", "value": "not-an-email"},
                 ],
             },
         )
@@ -108,6 +166,7 @@ def test_legacy_admin_update_with_stale_version_returns_version_mismatch_shape(
     assert response.status_code == 409
     payload = response.json()
     assert payload["error_code"] == "profile_version_mismatch"
+    assert payload["detail"] == "profile_version_mismatch"
     assert payload["errors"] == [
         {"key": "profile_version", "message": "mismatch"}
     ]

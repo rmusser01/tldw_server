@@ -50,7 +50,16 @@ from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
 # ---------------------------------------------------------------------------
 # Imports
 # ---------------------------------------------------------------------------
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_request_user, rbac_rate_limit, RequirePermission, resolve_user_id_for_request, TokenScopeGuard, User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    get_auth_principal,
+    get_request_user,
+    rbac_rate_limit,
+    require_expected_user,
+    RequirePermission,
+    resolve_user_id_for_request,
+    TokenScopeGuard,
+    User,
+)
 from tldw_Server_API.app.core.Utils.image_validation import (
     get_max_base64_bytes,
     validate_image_url,
@@ -66,12 +75,17 @@ def is_authentication_required() -> bool:
     """
     return True
 from loguru import logger
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, StreamingResponse
 
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     get_chacha_db_for_user,
     get_chacha_db_for_user_id,
+)
+from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
+from tldw_Server_API.app.api.v1.endpoints.notes_sync_errors import (
+    NOTES_SYNC_EXCEPTIONS,
+    notes_sync_http_error,
 )
 from tldw_Server_API.app.api.v1.schemas.chat_conversation_schemas import (
     ChatAnalyticsBucket,
@@ -118,6 +132,10 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
 from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
     map_sender_to_role,
 )
+from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
+    ChatSettingsSizeError,
+    validate_chat_settings_storage,
+)
 from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_embeddings import (
     score_exemplars_with_embeddings,
 )
@@ -128,6 +146,7 @@ from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_selector i
 from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_telemetry import (
     compute_persona_exemplar_telemetry,
 )
+from tldw_Server_API.app.core.Chat.persistence_service import save_workspace_chat_model_selection
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
     ChatAuthenticationError,
@@ -142,6 +161,11 @@ from tldw_Server_API.app.core.Chat.chat_exceptions import (
     ChatErrorCode,
     ChatModuleException,
     set_request_id,
+)
+from tldw_Server_API.app.core.Chat.chat_target_resolution import (
+    config_default_llm_provider,
+    get_default_model_for_provider,
+    get_default_provider,
 )
 
 # Note: streaming utilities are handled inside chat_service. No direct import needed here.
@@ -225,6 +249,12 @@ from tldw_Server_API.app.core.DB_Management.transaction_utils import (
 from tldw_Server_API.app.core.Moderation.supervised_policy import (
     bootstrap_guardian_moderation_runtime,
 )
+from tldw_Server_API.app.core.Notes.organization_capture import (
+    active_coordinator,
+    capture_note_upsert,
+    replace_keywords,
+    stable_note_id,
+)
 from tldw_Server_API.app.core.Skills.context_integration import (
     add_skill_tool_to_tools_list_async,
     build_system_message_with_skills_async,
@@ -274,8 +304,18 @@ from tldw_Server_API.app.core.AuthNZ.crypto_utils import derive_hmac_key
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
 from tldw_Server_API.app.core.AuthNZ.rbac import user_has_permission
 from tldw_Server_API.app.core.Chat import command_router
+from tldw_Server_API.app.core.Chat.command_authorization import (
+    authorize_command,
+    build_command_authorization_context,
+)
+from tldw_Server_API.app.core.Chat_Macros.exceptions import MacroStorageError, MacroValidationError
+from tldw_Server_API.app.core.Chat_Macros.jobs import enqueue_chat_macro_run_job
+from tldw_Server_API.app.core.Chat_Macros.context_snapshot import build_macro_context_snapshot
+from tldw_Server_API.app.core.Chat_Macros.parser import enforce_background_execution, parse_macro_args
+from tldw_Server_API.app.core.Chat_Macros.repository import ChatMacroRepository
+from tldw_Server_API.app.core.Chat_Macros.service import ChatMacroCatalogItem, ChatMacrosService
+from tldw_Server_API.app.core.Chat_Macros.storage import ChatMacroStorage
 from tldw_Server_API.app.core.Chat.validate_dictionary import validate_dictionary as _validate_dictionary
-from tldw_Server_API.app.core.config import loaded_config_data
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
 from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
@@ -2035,6 +2075,229 @@ def _extract_assistant_text_from_completion_payload(payload: dict[str, Any]) -> 
     return _extract_text_from_message_content(message_block.get("content"))
 
 
+def _build_chat_macro_service(
+    *,
+    current_user: User,
+    chat_db: CharactersRAGDB,
+    user_base_dir: Any,
+) -> ChatMacrosService | None:
+    """Build the current user's macro service when durable context is available."""
+    user_id = getattr(current_user, "id", None)
+    if user_id is None or user_base_dir is None:
+        return None
+    repository = ChatMacroRepository(chat_db)
+    repository.ensure_ready()
+    return ChatMacrosService(
+        user_id=str(user_id),
+        storage=ChatMacroStorage(user_base_dir),
+        repository=repository,
+        core_commands=command_router.reserved_core_command_names(),
+    )
+
+
+def _find_enabled_chat_macro(
+    service: ChatMacrosService,
+    command: str,
+) -> ChatMacroCatalogItem | None:
+    """Return the enabled macro bound to a slash command, if one exists."""
+    normalized = str(command or "").strip().lower()
+    if not normalized:
+        return None
+    return next(
+        (item for item in service.list_macros() if item.enabled and item.command == normalized),
+        None,
+    )
+
+
+def _chat_macro_completion_payload(
+    *,
+    request_data: ChatCompletionRequest,
+    model: str | None,
+    content: str,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    """Build an OpenAI-compatible completion carrying chat macro metadata."""
+    return {
+        "id": f"chatmacro-{uuid.uuid4().hex[:12]}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model or request_data.model or "chat-macro",
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": content,
+                    "metadata": {"chat_macro": metadata},
+                },
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        "tldw_conversation_id": request_data.conversation_id,
+    }
+
+
+def _chat_macro_completion_response(
+    request_data: ChatCompletionRequest,
+    payload: dict[str, Any],
+) -> JSONResponse | StreamingResponse:
+    """Return JSON or OpenAI-compatible SSE according to the request stream flag."""
+    if not request_data.stream:
+        return JSONResponse(content=payload)
+    message = payload["choices"][0]["message"]
+    first_chunk = {
+        "id": payload["id"],
+        "object": "chat.completion.chunk",
+        "created": payload["created"],
+        "model": payload["model"],
+        "choices": [
+            {
+                "index": 0,
+                "delta": {
+                    "role": "assistant",
+                    "content": message["content"],
+                    "metadata": message["metadata"],
+                },
+                "finish_reason": None,
+            }
+        ],
+    }
+    final_chunk = {
+        "id": payload["id"],
+        "object": "chat.completion.chunk",
+        "created": payload["created"],
+        "model": payload["model"],
+        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+    }
+    frames = [
+        f"data: {json.dumps(first_chunk, separators=(',', ':'))}\n\n",
+        f"data: {json.dumps(final_chunk, separators=(',', ':'))}\n\n",
+        "data: [DONE]\n\n",
+    ]
+    return StreamingResponse(
+        iter(frames),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _chat_macro_error_payload(
+    *,
+    request_data: ChatCompletionRequest,
+    model: str | None,
+    command: str,
+    error_code: str,
+    public_error: str,
+) -> dict[str, Any]:
+    """Build a bounded chat-visible failure for a positively identified macro."""
+    return _chat_macro_completion_payload(
+        request_data=request_data,
+        model=model,
+        content=f"Could not run /{command}: {public_error}",
+        metadata={
+            "command": command,
+            "status": "error",
+            "error_code": error_code,
+            "error": public_error,
+        },
+    )
+
+
+class _ChatMacroJobsUnavailableError(RuntimeError):
+    """Raised when a macro run cannot be dispatched because Jobs is unavailable."""
+
+
+def _create_chat_macro_run_payload(
+    *,
+    request_data: ChatCompletionRequest,
+    service: ChatMacrosService,
+    item: ChatMacroCatalogItem,
+    raw_args: str | None,
+    selected_provider: str | None,
+    selected_model: str | None,
+    job_manager: Any | None,
+) -> dict[str, Any]:
+    """Create and enqueue a durable macro run, returning its status completion."""
+    normalized_args = parse_macro_args(
+        raw_args,
+        item.definition.args,
+        max_repeated_values=item.definition.execution.max_branches,
+    )
+    enforce_background_execution(normalized_args)
+    normalized_args["mode"] = str(
+        normalized_args.get("mode") or item.definition.execution.mode_default
+    )
+    output_profile = str(normalized_args.get("output_profile") or item.definition.output_profile)
+    resolved_profile = service.resolve_output_profile(output_profile)
+    normalized_args["output_profile"] = resolved_profile.name
+    if job_manager is None:
+        raise _ChatMacroJobsUnavailableError("Jobs manager unavailable.")
+
+    request_metadata = dict(request_data.__pydantic_extra__ or {})
+    snapshot = build_macro_context_snapshot(
+        chat_db=None,
+        conversation_id=request_data.conversation_id,
+        workspace_id=request_metadata.get("workspace_id"),
+        acp_session_id=request_metadata.get("acp_session_id"),
+        request_messages=request_data.messages,
+        model_selection={
+            "api_provider": selected_provider or request_data.api_provider,
+            "model": selected_model,
+        },
+        output_profile=resolved_profile.name,
+        request_metadata=request_metadata,
+    )
+    run = service.repository.create_run(
+        user_id=service.user_id,
+        macro_name=item.name,
+        macro_command=item.command,
+        macro_source=item.source,
+        macro_version=item.builtin_version,
+        macro_digest=item.digest,
+        normalized_args=normalized_args,
+        status="pending",
+        surface="chat",
+        conversation_id=request_data.conversation_id,
+        output_profile=resolved_profile.name,
+        workspace_id=snapshot.workspace_id,
+        acp_session_id=snapshot.acp_session_id,
+        context_snapshot=snapshot.model_dump(mode="json"),
+        model_selection=snapshot.model_selection,
+    )
+    try:
+        enqueue_chat_macro_run_job(
+            macro_run_id=run.run_id,
+            user_id=service.user_id,
+            macro_digest=item.digest,
+            normalized_args=normalized_args,
+            job_manager=job_manager,
+        )
+    except (MacroStorageError, TypeError, ValueError, RuntimeError) as exc:
+        service.repository.update_run_status(
+            run.run_id,
+            status="failed",
+            error_code="job_enqueue_failed",
+            error_message="Failed to enqueue macro run.",
+        )
+        raise MacroStorageError("Failed to enqueue macro run.") from exc
+
+    metadata = {
+        "run_id": run.run_id,
+        "name": item.name,
+        "command": item.command,
+        "status": run.status,
+        "detail_url": f"/api/v1/chat/macros/runs/{run.run_id}",
+        "output_profile": run.output_profile,
+    }
+    return _chat_macro_completion_payload(
+        request_data=request_data,
+        model=selected_model,
+        content=f"Started /{item.command}. Macro run {run.run_id} is pending.",
+        metadata=metadata,
+    )
+
+
 def _persona_memory_write_enabled(assistant_context: dict[str, Any] | None) -> bool:
     if not isinstance(assistant_context, dict):
         return False
@@ -2339,8 +2602,7 @@ async def _maybe_rg_shadow_chat_decision(
     summary="List available slash commands",
     description=(
         "Returns available chat slash commands with their descriptions."
-        " When permission enforcement is enabled, commands requiring a permission"
-        " are filtered by the current user's privileges in multi-user mode."
+        " Commands requiring a permission are filtered by the current user's privileges."
     ),
     tags=["chat"],
     dependencies=[
@@ -2372,64 +2634,48 @@ async def list_chat_commands(
             ),
         )
 
-    def _as_chat_command_from_dict(entry: dict[str, Any]) -> ChatCommandInfo:
-        return ChatCommandInfo(
-            name=str(entry.get("name", "")),
-            description=str(entry.get("description", "")),
-            required_permission=entry.get("required_permission"),
-            usage=entry.get("usage"),
-            args=list(entry.get("args", []) or []),
-            requires_api_key=entry.get("requires_api_key"),
-            rate_limit=entry.get("rate_limit"),
-            rbac_required=entry.get("rbac_required"),
-        )
+    def _current_auth_user_id(user: User) -> int | None:
+        raw_user_id = getattr(user, "id", None)
+        if raw_user_id is None:
+            return None
+        try:
+            return int(raw_user_id)
+        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+            return None
 
     # If commands are globally disabled, return empty list for discoverability
     if not command_router.commands_enabled():
         return ChatCommandsListResponse(commands=[])
 
-    # Determine if RBAC filtering is enforced
-    require_perms = _cfg_bool_cmds("CHAT_COMMANDS_REQUIRE_PERMISSIONS", "require_permissions", False)
-
-    if not require_perms:
-        # Include metadata from registry even if not filtering.
-        reg = getattr(command_router, "_registry", {})
-        items = []
-        if isinstance(reg, dict) and reg:
-            for name, spec in reg.items():  # type: ignore
-                items.append(_as_chat_command_from_spec(name, spec))
-        else:
-            for c in command_router.list_commands():
-                items.append(_as_chat_command_from_dict(c))
-        return ChatCommandsListResponse(commands=items)
-
-    # Permission-filtered list using registry metadata
     items: list[ChatCommandInfo] = []
     try:
-        # Access registry for permission metadata (conventionally private, stable enough for internal use)
         reg = getattr(command_router, "_registry", {})
-        # Prefer claim-first checks when current_user exposes permissions to avoid DB hits.
-        perms_claim = set(getattr(current_user, "permissions", []) or [])
+        if not isinstance(reg, dict) or not reg:
+            return ChatCommandsListResponse(commands=[])
+        command_ctx = command_router.CommandContext(
+            user_id=str(getattr(current_user, "id", "anonymous")),
+            auth_user_id=_current_auth_user_id(current_user),
+            request_meta={
+                "permissions": list(getattr(current_user, "permissions", []) or []),
+                "roles": list(getattr(current_user, "roles", []) or []),
+                "is_admin": bool(getattr(current_user, "is_admin", False)),
+                "auth_mode": os.getenv("AUTH_MODE"),
+                "is_single_user_owner": bool(
+                    getattr(current_user, "is_single_user_owner", False)
+                ),
+            },
+        )
+        auth_context = build_command_authorization_context(command_ctx)
         for name, spec in reg.items():  # type: ignore
-            perm = getattr(spec, "required_permission", None)
-            if not perm:
-                items.append(_as_chat_command_from_spec(name, spec))
-                continue
-
-            has_perm_claim = perm in perms_claim
-            has_perm_db = False
-            if not has_perm_claim:
-                try:
-                    has_perm_db = user_has_permission(int(getattr(current_user, "id", 0) or 0), perm)
-                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-                    has_perm_db = False
-
-            if has_perm_claim or has_perm_db:
+            decision = authorize_command(
+                spec=spec,
+                context=auth_context,
+                permission_checker=user_has_permission,
+            )
+            if decision.allowed:
                 items.append(_as_chat_command_from_spec(name, spec))
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-        # Fallback: unfiltered list if registry not accessible
-        for c in command_router.list_commands():
-            items.append(_as_chat_command_from_dict(c))
+        return ChatCommandsListResponse(commands=[])
 
     return ChatCommandsListResponse(commands=items)
 
@@ -2473,22 +2719,8 @@ async def validate_chat_dictionary(
 
 @lru_cache(maxsize=1)
 def _config_default_llm_provider() -> str | None:
-    """Read default provider from config.txt (llm_api_settings/API sections)."""
-    cfg = load_and_log_configs()
-    if not isinstance(cfg, dict):
-        return None
-
-    def _extract(section: str) -> str | None:
-        data = cfg.get(section)
-        if isinstance(data, dict):
-            default_api = data.get("default_api")
-            if isinstance(default_api, str):
-                value = default_api.strip()
-                if value:
-                    return value
-        return None
-
-    return _extract("llm_api_settings") or _extract("API")
+    """Compatibility wrapper for tests patching the endpoint config loader."""
+    return config_default_llm_provider(load_and_log_configs())
 
 
 def _any_cloud_provider_has_key() -> bool:
@@ -2518,17 +2750,22 @@ def _any_cloud_provider_has_key() -> bool:
 
 
 def _get_default_provider() -> str:
-    """Resolve default provider preferring config.txt, then env/test fallbacks."""
-    cfg_default = _config_default_llm_provider()
-    if cfg_default:
-        return cfg_default
+    """Compatibility wrapper for tests patching ordinary chat defaults."""
+    return get_default_provider(
+        config_resolver=_config_default_llm_provider,
+        test_mode_resolver=_shared_is_test_mode,
+        fallback_provider=DEFAULT_LLM_PROVIDER,
+    )
 
-    env_val = os.getenv("DEFAULT_LLM_PROVIDER")
-    if env_val:
-        return env_val
-    if _shared_is_test_mode():
-        return "local-llm"
-    return DEFAULT_LLM_PROVIDER
+
+def _get_default_model_for_provider_name(target_provider: str) -> str | None:
+    """Compatibility wrapper for ordinary chat's patchable override helpers."""
+    return get_default_model_for_provider(
+        target_provider,
+        override_default_resolver=get_override_default_model,
+        override_resolver=get_llm_provider_override,
+        config_loader=lambda: _config,
+    )
 
 
 def _should_enforce_strict_model_selection() -> bool:
@@ -2733,7 +2970,6 @@ def _normalize_message_timestamp(value: Any) -> str | None:
     elif isinstance(value, (int, float)):
         try:
             dt = datetime.fromtimestamp(float(value), tz=timezone.utc)
-            return dt.isoformat().replace("+00:00", "Z")
         except (ValueError, OSError, OverflowError):
             return None
     elif isinstance(value, str):
@@ -2753,7 +2989,11 @@ def _normalize_message_timestamp(value: Any) -> str | None:
 
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return (
+        dt.astimezone(timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
 
 def _persist_message_sync(
     db: CharactersRAGDB,
@@ -2785,6 +3025,11 @@ async def _save_message_turn_to_db(
     - Logs only metadata, never raw content.
     - Can optionally use transactions for atomic operations.
     """
+    from tldw_Server_API.app.core.Buddy.publication import current_buddy_publication
+    from tldw_Server_API.app.core.exceptions import BuddyPublicationRevokedError
+
+    # Capture before run_in_executor: executor threads do not inherit ContextVars.
+    publication = current_buddy_publication.get()
     metrics = get_chat_metrics()
     current_loop = asyncio.get_running_loop()
     role = message_obj.get("role")
@@ -2926,22 +3171,24 @@ async def _save_message_turn_to_db(
 
     try:
         async with metrics.track_database_operation("save_message"):
-            if use_transaction:
+            if use_transaction or publication is not None:
                 def _persist_with_transaction() -> tuple[str | None, int]:
                     retries = 0
                     max_retries = 3
                     while True:
                         try:
-                            with db.transaction():
-                                return (
-                                    _persist_message_sync(
-                                        db,
-                                        db_payload,
-                                        serialized_tool_calls,
-                                        serialized_extra,
-                                    ),
-                                    retries,
+                            with db.transaction() as conn:
+                                if publication is not None:
+                                    publication.repository.assert_publication(conn, publication.turn, conversation_id)
+                                message_id = _persist_message_sync(
+                                    db,
+                                    db_payload,
+                                    serialized_tool_calls,
+                                    serialized_extra,
                                 )
+                                if publication is not None:
+                                    publication.repository.record_message(conn, publication.turn["id"], role, message_id)
+                                return message_id, retries
                         except ConflictError:
                             retries += 1
                             if retries >= max_retries:
@@ -2971,6 +3218,9 @@ async def _save_message_turn_to_db(
                 result = await current_loop.run_in_executor(None, saver)
                 metrics.track_message_saved(conversation_id, role)
                 return result
+    except BuddyPublicationRevokedError:
+        # Fail closed. Ordinary best-effort persistence must not swallow Stop.
+        raise
     except (InputError, ConflictError, CharactersRAGDBError) as e_db:
         error = ChatDatabaseError(
             message="Database error saving message",
@@ -3086,6 +3336,7 @@ async def _persist_system_message_if_needed(
         status.HTTP_504_GATEWAY_TIMEOUT: {"description": "Upstream LLM provider timed out."},
     },
     dependencies=[
+        Depends(require_expected_user),
         Depends(rbac_rate_limit("chat.create")),
         Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.completions", count_as="call")),
         Depends(get_auth_principal),  # Establish AuthPrincipal/AuthContext early for guardrails
@@ -3105,6 +3356,7 @@ async def create_chat_completion(
     audit_service=Depends(get_audit_service_for_user),
     usage_log: UsageEventLogger = Depends(get_usage_event_logger),
     billing_org_id: int | None = Depends(get_billing_org_id),
+    job_manager: Any = Depends(try_get_job_manager),
     # background_tasks: BackgroundTasks = Depends(), # Replaced by starlette.background.BackgroundTask for StreamingResponse
 ):
     """
@@ -3281,7 +3533,7 @@ async def create_chat_completion(
 
         provider = metrics_provider
         model = metrics_model
-        initial_provider = metrics_provider
+        initial_provider = selected_provider
 
         try:
             logger.debug("Provider/model resolution: {}", provider_debug)
@@ -3330,6 +3582,7 @@ async def create_chat_completion(
         # Billing: initialized after request_json is available (see below)
         _billing_enforcer: LimitEnforcer | None = None
         _billing_enforcer_entered = False
+        chat_macro_intent: dict[str, Any] | None = None
 
         _track_request_cm = metrics.track_request(
             provider=provider, model=model, streaming=request_data.stream, client_id=client_id
@@ -3370,6 +3623,11 @@ async def create_chat_completion(
                                 request_meta={
                                     'endpoint': '/chat/completions',
                                     'auth_user_id': int(getattr(current_user, 'id', 0)) if getattr(current_user, 'id', None) is not None else None,
+                                    'permissions': list(getattr(current_user, 'permissions', []) or []),
+                                    'roles': list(getattr(current_user, 'roles', []) or []),
+                                    'is_admin': bool(getattr(current_user, 'is_admin', False)),
+                                    'auth_mode': os.getenv('AUTH_MODE'),
+                                    'is_single_user_owner': bool(getattr(current_user, 'is_single_user_owner', False)),
                                     'conversation_id': request_data.conversation_id,
                                     'character_id': request_data.character_id,
                                     'chat_db': chat_db,
@@ -3536,6 +3794,40 @@ async def create_chat_completion(
                                         request_data.messages.append(sys_msg)
                                     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as inj_err:
                                         logger.debug(f"Failed to append system injection message: {inj_err}")
+                        else:
+                            candidate = command_router.extract_slash_candidate(last_text)
+                            if candidate:
+                                macro_command, macro_args = candidate
+                                try:
+                                    macro_service = await asyncio.to_thread(
+                                        _build_chat_macro_service,
+                                        current_user=current_user,
+                                        chat_db=chat_db,
+                                        user_base_dir=user_base_dir,
+                                    )
+                                    macro_item = (
+                                        await asyncio.to_thread(
+                                            _find_enabled_chat_macro,
+                                            macro_service,
+                                            macro_command,
+                                        )
+                                        if macro_service is not None
+                                        else None
+                                    )
+                                except Exception as macro_error:  # noqa: BLE001 - discovery must fall through
+                                    logger.warning(
+                                        "Failed to resolve chat macro for /{}; continuing as normal chat: {}",
+                                        macro_command,
+                                        type(macro_error).__name__,
+                                    )
+                                else:
+                                    if macro_service is not None and macro_item is not None:
+                                        chat_macro_intent = {
+                                            "command": macro_command,
+                                            "raw_args": macro_args,
+                                            "service": macro_service,
+                                            "item": macro_item,
+                                        }
             except HTTPException as _cmd_err:
                 detail = getattr(_cmd_err, "detail", None)
                 if (
@@ -3889,6 +4181,91 @@ async def create_chat_completion(
                 except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _billing_err:
                     logger.debug(f"Billing token pre-check failed (fail-open): {_billing_err}")
                     _billing_enforcer = None
+
+            # Resolve one effective model before either durable macro creation or direct dispatch.
+            provider = selected_provider
+            model = selected_model
+
+            try:
+                if not request_model_was_explicit:
+                    default_model_for_provider = _get_default_model_for_provider_name(provider)
+                    if default_model_for_provider:
+                        model = default_model_for_provider
+                        request_data.model = default_model_for_provider
+                override_error = validate_provider_override(provider, model)
+            except ByokResolutionError as credential_error:
+                raise_detached_error(
+                    _provider_credential_http_exception(credential_error)
+                )
+            if not model:
+                # Fail fast with a clear client error instead of cascading into a 500
+                # when downstream provider adapters require an explicit model.
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Model is required for provider '{provider}'. Please select a model in the WebUI "
+                        f"or configure a default via environment variable 'DEFAULT_MODEL_{provider.replace('.', '_').replace('-', '_').upper()}'"
+                    ),
+                )
+
+            if override_error:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=override_error)
+
+            selected_model = model
+
+            if chat_macro_intent is not None:
+                macro_command = str(chat_macro_intent["command"])
+                try:
+                    macro_payload = await asyncio.to_thread(
+                        _create_chat_macro_run_payload,
+                        request_data=request_data,
+                        service=chat_macro_intent["service"],
+                        item=chat_macro_intent["item"],
+                        raw_args=chat_macro_intent.get("raw_args"),
+                        selected_provider=selected_provider,
+                        selected_model=selected_model,
+                        job_manager=job_manager,
+                    )
+                except MacroValidationError as macro_error:
+                    macro_payload = _chat_macro_error_payload(
+                        request_data=request_data,
+                        model=selected_model,
+                        command=macro_command,
+                        error_code="validation_error",
+                        public_error=str(macro_error)[:500],
+                    )
+                except _ChatMacroJobsUnavailableError:
+                    macro_payload = _chat_macro_error_payload(
+                        request_data=request_data,
+                        model=selected_model,
+                        command=macro_command,
+                        error_code="jobs_unavailable",
+                        public_error="Jobs manager unavailable.",
+                    )
+                except MacroStorageError as macro_error:
+                    logger.warning(
+                        "Failed to create chat macro run for /{}: {}",
+                        macro_command,
+                        type(macro_error).__name__,
+                    )
+                    macro_payload = _chat_macro_error_payload(
+                        request_data=request_data,
+                        model=selected_model,
+                        command=macro_command,
+                        error_code="storage_error",
+                        public_error="Macro storage is unavailable.",
+                    )
+
+                if _rg_handle_id and not rg_finalized:
+                    try:
+                        governor = getattr(request.app.state, "rg_governor", None)
+                        if governor is not None:
+                            await governor.commit(_rg_handle_id, actuals={"tokens": 0})
+                            rg_finalized = True
+                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as rg_error:
+                        logger.debug("RG macro zero-usage commit skipped/failed: {}", rg_error)
+                return _chat_macro_completion_response(request_data, macro_payload)
+
             try:
                 input_moderation_chat_type = await resolve_input_moderation_chat_type(
                     chat_db=chat_db,
@@ -3962,54 +4339,6 @@ async def create_chat_completion(
                 raise
             except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as e:
                 logger.warning(f"Moderation input processing error: {e}")
-
-            # Normalize provider/model on the request for downstream logic (already resolved)
-            provider = selected_provider
-            model = selected_model or model
-
-            def _get_default_model_for_provider_name(target_provider: str) -> str | None:
-                override_default = get_override_default_model(target_provider)
-                if override_default:
-                    return override_default
-                override = get_llm_provider_override(target_provider)
-                if override and override.allowed_models:
-                    return override.allowed_models[0]
-                normalized = target_provider.replace(".", "_").replace("-", "_")
-                env_key = f"DEFAULT_MODEL_{normalized.upper()}"
-                env_val = os.getenv(env_key)
-                if env_val:
-                    return env_val
-                config_key = f"default_model_{normalized.lower()}"
-                if _chat_config:
-                    cfg_val = _chat_config.get(config_key)
-                    if cfg_val:
-                        return cfg_val
-                return None
-
-            try:
-                if not request_model_was_explicit:
-                    default_model_for_provider = _get_default_model_for_provider_name(provider)
-                    if default_model_for_provider:
-                        model = default_model_for_provider
-                        request_data.model = default_model_for_provider
-                override_error = validate_provider_override(provider, model)
-            except ByokResolutionError as credential_error:
-                raise_detached_error(
-                    _provider_credential_http_exception(credential_error)
-                )
-            if not model:
-                # Fail fast with a clear client error instead of cascading into a 500
-                # when downstream provider adapters require an explicit model.
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=(
-                        f"Model is required for provider '{provider}'. Please select a model in the WebUI "
-                        f"or configure a default via environment variable 'DEFAULT_MODEL_{provider.replace('.', '_').replace('-', '_').upper()}'"
-                    ),
-                )
-
-            if override_error:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=override_error)
 
             persona_alias_used = _resolve_character_id_from_persona_alias(request_data)
 
@@ -4149,6 +4478,18 @@ async def create_chat_completion(
                     invalid_patterns = ("invalid-", "test-invalid-", "bad-key-", "dummy-invalid-")
                     if any(str(provider_api_key).lower().startswith(p) for p in invalid_patterns):
                         raise _provider_credential_http_exception_for_code("provider_authentication_failed")
+
+                await asyncio.to_thread(
+                    save_workspace_chat_model_selection,
+                    chat_db=chat_db,
+                    conversation_id=final_conversation_id,
+                    owner_client_id=user_id,
+                    provider=target_api_provider,
+                    model=model,
+                    save_to_db=request_data.save_to_db,
+                    explicit_provider_requested=explicit_provider_requested,
+                    explicit_model_requested=explicit_model_requested,
+                )
 
                 # --- Character/Conversation Context, History, and Current Turn ---
                 continuation_runtime: dict[str, Any] = {}
@@ -6049,7 +6390,22 @@ def _replace_conversation_keywords(
     db: CharactersRAGDB,
     conversation_id: str,
     keywords: list[str],
+    *,
+    owner_user_id: int | str,
+    coordinator=None,
+    preflighted: bool = False,
 ) -> None:
+    if not preflighted:
+        coordinator = active_coordinator(db, user_id=owner_user_id)
+    if coordinator is not None:
+        replace_keywords(
+            coordinator,
+            subject_type="conversation",
+            subject_id=conversation_id,
+            keywords=keywords,
+            source="chat-api",
+        )
+        return
     existing = db.get_keywords_for_conversation(conversation_id)
     existing_map = {str(k.get("keyword") or "").strip().lower(): int(k.get("id")) for k in existing if k.get("id")}
     target = {str(k).strip() for k in keywords if k is not None and str(k).strip()}
@@ -6181,24 +6537,73 @@ def _normalize_knowledge_qa_share_links(raw_links: Any) -> list[dict[str, Any]]:
 
 def _load_knowledge_qa_share_links(
     db: CharactersRAGDB, conversation_id: str
-) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+) -> tuple[dict[str, Any], list[dict[str, Any]], int | None]:
     settings_row = db.get_conversation_settings(conversation_id) or {}
     settings = settings_row.get("settings") if isinstance(settings_row, dict) else {}
-    settings_payload: dict[str, Any] = settings if isinstance(settings, dict) else {}
+    settings_payload: dict[str, Any] = dict(settings) if isinstance(settings, dict) else {}
     links = _normalize_knowledge_qa_share_links(
         settings_payload.get(_KNOWLEDGE_QA_SHARE_LINKS_SETTINGS_KEY)
     )
-    return settings_payload, links
+    settings_version = settings_row.get("settings_version")
+    if not isinstance(settings_version, int):
+        settings_version = 0
+    return settings_payload, links, settings_version
 
 
 def _persist_knowledge_qa_share_links(
     db: CharactersRAGDB,
     conversation_id: str,
-    settings_payload: dict[str, Any],
     links: list[dict[str, Any]],
+    *,
+    conversation: dict[str, Any],
+    expected_settings_version: int | None,
 ) -> None:
-    settings_payload[_KNOWLEDGE_QA_SHARE_LINKS_SETTINGS_KEY] = links
-    if not db.upsert_conversation_settings(conversation_id, settings_payload):
+    try:
+        with db.transaction() as conn:
+            resume_state = db.get_roleplay_resume_state(
+                conversation_id,
+                conn=conn,
+                lock_for_update=True,
+                owner_client_id=str(conversation.get("client_id") or ""),
+            )
+            authoritative_conversation = resume_state.get("conversation")
+            if not isinstance(authoritative_conversation, dict):
+                raise InputError("Conversation resume state is incomplete.")
+            final_settings = dict(resume_state.get("settings") or {})
+            final_settings[_KNOWLEDGE_QA_SHARE_LINKS_SETTINGS_KEY] = links
+            snapshot = resume_state.get("behavior_snapshot")
+            snapshot_valid = (
+                isinstance(snapshot, dict) and snapshot.get("status") == "valid"
+            )
+            final_settings = validate_chat_settings_storage(
+                final_settings,
+                reject_credentials=snapshot_valid,
+                allow_internal=True,
+                behavior_snapshot=snapshot,
+                conversation=authoritative_conversation,
+            )
+            updated = db.upsert_conversation_settings(
+                conversation_id,
+                final_settings,
+                conn=conn,
+                expected_settings_version=expected_settings_version,
+            )
+    except ChatSettingsSizeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=str(exc),
+        ) from exc
+    except InputError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except ConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Conversation settings changed; retry the request",
+        ) from exc
+    if not updated:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to persist share link settings",
@@ -6319,30 +6724,33 @@ async def save_chat_knowledge(
         safe_title = conv_title[:200]
         note_title = f"Snippet: {safe_title}" if not safe_title.lower().startswith("snippet") else safe_title
 
-        note_id: int | None = None
+        note_id: str | None = None
         flashcard_id: str | None = None
 
-        # Ensure note, keyword links, and optional flashcard are created atomically.
-        async with db_transaction(db):
-            note_id = db.add_note(
+        coordinator = active_coordinator(db, user_id=current_user.id)
+        if coordinator is not None:
+            key = coordinator.request_fingerprint(
+                "chat.knowledge.save",
+                {
+                    "conversation_id": payload.conversation_id,
+                    "message_id": payload.message_id,
+                    "title": note_title,
+                    "snippet": payload.snippet,
+                    "tags": payload.tags,
+                },
+            )
+            note_id = stable_note_id("chat-knowledge", key)
+            capture_note_upsert(
+                coordinator,
+                note_id=note_id,
                 title=note_title,
                 content=payload.snippet,
                 conversation_id=payload.conversation_id,
                 message_id=payload.message_id,
+                keywords=payload.tags,
+                source="chat-knowledge",
+                key=key,
             )
-
-            if payload.tags:
-                for tag in payload.tags:
-                    try:
-                        kw = db.get_keyword_by_text(tag)
-                        if not kw:
-                            kw_id = db.add_keyword(tag)
-                            kw = db.get_keyword_by_id(kw_id) if kw_id is not None else None
-                        if kw and kw.get("id") is not None and note_id is not None:
-                            db.link_note_to_keyword(note_id, int(kw["id"]))
-                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as kw_err:
-                        logger.warning(f"Keyword attach failed for '{tag}' on note {note_id}: {kw_err}")
-
             if payload.make_flashcard:
                 flashcard_id = db.add_flashcard(
                     {
@@ -6356,6 +6764,41 @@ async def save_chat_knowledge(
                         "model_type": "basic",
                     }
                 )
+        else:
+            # Preserve the pre-Sync transaction contract when the dataset is inactive.
+            async with db_transaction(db):
+                note_id = db.add_note(
+                    title=note_title,
+                    content=payload.snippet,
+                    conversation_id=payload.conversation_id,
+                    message_id=payload.message_id,
+                )
+
+                if payload.tags:
+                    for tag in payload.tags:
+                        try:
+                            kw = db.get_keyword_by_text(tag)
+                            if not kw:
+                                kw_id = db.add_keyword(tag)
+                                kw = db.get_keyword_by_id(kw_id) if kw_id is not None else None
+                            if kw and kw.get("id") is not None and note_id is not None:
+                                db.link_note_to_keyword(note_id, int(kw["id"]))
+                        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as kw_err:
+                            logger.warning(f"Keyword attach failed for '{tag}' on note {note_id}: {kw_err}")
+
+                if payload.make_flashcard:
+                    flashcard_id = db.add_flashcard(
+                        {
+                            "front": payload.snippet,
+                            "back": "",
+                            "notes": f"From {safe_title}",
+                            "source_ref_type": "note",
+                            "source_ref_id": note_id,
+                            "conversation_id": payload.conversation_id,
+                            "message_id": payload.message_id,
+                            "model_type": "basic",
+                        }
+                    )
 
         return KnowledgeSaveResponse(
             note_id=note_id,
@@ -6367,6 +6810,8 @@ async def save_chat_knowledge(
         )
     except HTTPException:
         raise
+    except NOTES_SYNC_EXCEPTIONS as exc:
+        raise notes_sync_http_error(exc) from exc
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
         logger.error(f"Failed to save chat knowledge snippet: {exc}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to save snippet") from exc
@@ -6675,6 +7120,9 @@ async def update_chat_conversation(
         update_fields = payload.model_dump(exclude_unset=True)
         keywords_payload = update_fields.pop("keywords", None)
         update_fields.pop("version", None)
+        keyword_coordinator = None
+        if "keywords" in payload.model_fields_set:
+            keyword_coordinator = active_coordinator(db, user_id=current_user.id)
 
         topic_label_changed = "topic_label" in payload.model_fields_set
         if topic_label_changed:
@@ -6707,7 +7155,14 @@ async def update_chat_conversation(
         db.update_conversation(conversation_id, update_data, payload.version)
 
         if "keywords" in payload.model_fields_set:
-            _replace_conversation_keywords(db, conversation_id, keywords_payload or [])
+            _replace_conversation_keywords(
+                db,
+                conversation_id,
+                keywords_payload or [],
+                owner_user_id=current_user.id,
+                coordinator=keyword_coordinator,
+                preflighted=True,
+            )
 
         if topic_label_changed:
             try:
@@ -6744,6 +7199,8 @@ async def update_chat_conversation(
         )
     except (ConflictError, InputError) as exc:
         raise map_db_error_to_http(exc) from exc
+    except NOTES_SYNC_EXCEPTIONS as exc:
+        raise notes_sync_http_error(exc) from exc
     except HTTPException:
         raise
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
@@ -6979,7 +7436,9 @@ async def create_conversation_share_link(
     ttl_seconds = max(300, min(ttl_seconds, _KNOWLEDGE_QA_SHARE_MAX_TTL_SECONDS))
     expires_at = now + timedelta(seconds=ttl_seconds)
 
-    settings_payload, existing_links = _load_knowledge_qa_share_links(db, conversation_id)
+    _settings_payload, existing_links, settings_version = _load_knowledge_qa_share_links(
+        db, conversation_id
+    )
     links = _prune_knowledge_qa_share_links(existing_links)
 
     share_id = str(uuid.uuid4())
@@ -6993,7 +7452,13 @@ async def create_conversation_share_link(
         "label": request_body.label.strip() if isinstance(request_body.label, str) and request_body.label.strip() else None,
     }
     links.append(link_entry)
-    _persist_knowledge_qa_share_links(db, conversation_id, settings_payload, links)
+    _persist_knowledge_qa_share_links(
+        db,
+        conversation_id,
+        links,
+        conversation=conversation,
+        expected_settings_version=settings_version,
+    )
 
     token_payload = {
         "v": _KNOWLEDGE_QA_SHARE_TOKEN_VERSION,
@@ -7046,10 +7511,18 @@ async def list_conversation_share_links(
 ):
     scope = _resolve_conversation_scope(scope_type, workspace_id)
     conversation = _verify_conversation_ownership(db, conversation_id, current_user, scope)
-    settings_payload, existing_links = _load_knowledge_qa_share_links(db, conversation_id)
+    _settings_payload, existing_links, settings_version = _load_knowledge_qa_share_links(
+        db, conversation_id
+    )
     links = _prune_knowledge_qa_share_links(existing_links)
     if links != existing_links:
-        _persist_knowledge_qa_share_links(db, conversation_id, settings_payload, links)
+        _persist_knowledge_qa_share_links(
+            db,
+            conversation_id,
+            links,
+            conversation=conversation,
+            expected_settings_version=settings_version,
+        )
 
     now = datetime.now(timezone.utc)
     response_links: list[ConversationShareLinkListItem] = []
@@ -7121,8 +7594,15 @@ async def revoke_conversation_share_link(
     current_user: User = Depends(get_request_user),
 ):
     scope = _resolve_conversation_scope(scope_type, workspace_id)
-    _verify_conversation_ownership(db, conversation_id, current_user, scope)
-    settings_payload, existing_links = _load_knowledge_qa_share_links(db, conversation_id)
+    conversation = _verify_conversation_ownership(
+        db,
+        conversation_id,
+        current_user,
+        scope,
+    )
+    _settings_payload, existing_links, settings_version = _load_knowledge_qa_share_links(
+        db, conversation_id
+    )
     links = _prune_knowledge_qa_share_links(existing_links)
 
     share_found = False
@@ -7138,7 +7618,13 @@ async def revoke_conversation_share_link(
     if not share_found:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share link not found")
 
-    _persist_knowledge_qa_share_links(db, conversation_id, settings_payload, links)
+    _persist_knowledge_qa_share_links(
+        db,
+        conversation_id,
+        links,
+        conversation=conversation,
+        expected_settings_version=settings_version,
+    )
     return ConversationShareLinkRevokeResponse(success=True, share_id=share_id)
 
 
@@ -7187,7 +7673,7 @@ async def resolve_conversation_share_token(
     if not conversation or conversation.get("deleted"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
 
-    _, links = _load_knowledge_qa_share_links(db, conversation_id)
+    _, links, _ = _load_knowledge_qa_share_links(db, conversation_id)
     share_link = next((entry for entry in links if str(entry.get("id")) == share_id), None)
     if not share_link:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share link not found")

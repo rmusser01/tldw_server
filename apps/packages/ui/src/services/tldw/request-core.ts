@@ -17,6 +17,7 @@ import {
   isSameOriginAbsoluteUrlForConfiguredServer as guardIsSameOriginAbsoluteUrlForConfiguredServer,
   type AllowlistWarnHooks
 } from "@/utils/absolute-url-guard"
+import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 
 export type TldwRequestPayload = {
   path: PathOrUrl
@@ -35,6 +36,7 @@ type TldwRequestRuntime = {
   getConfig: () => Promise<TldwConfigLike>
   refreshAuth?: () => Promise<void>
   fetchFn?: typeof fetch
+  useRuntimeAuthOverride?: boolean
 }
 
 export type BrowserRequestTransport = {
@@ -84,6 +86,7 @@ const isMediaApiPath = (path: string): boolean => /\/api\/v1\/media(?:\/|\?|$)/.
 const isFilesApiPath = (path: string): boolean => /\/api\/v1\/files(?:\/|\?|$)/.test(path)
 const isSlidesApiPath = (path: string): boolean => /\/api\/v1\/slides(?:\/|\?|$)/.test(path)
 const SLIDES_REQUEST_TIMEOUT_FLOOR_MS = 120000
+const MODEL_METADATA_REQUEST_TIMEOUT_FLOOR_MS = 60000
 // LLM generation and RAG endpoints routinely run far longer than the generic
 // 10s request default. Using the short default aborts normal generations
 // mid-response and surfaces as a spurious "Network error". Default these paths
@@ -133,6 +136,11 @@ export const deriveRequestTimeout = (
       : Number(cfg?.requestTimeoutMs) > 0
         ? Number(cfg.requestTimeoutMs)
         : GENERATION_REQUEST_TIMEOUT_DEFAULT_MS
+  }
+  if (/\/api\/v1\/llm\/models\/metadata(?:[/?#]|$)/.test(p)) {
+    const configuredTimeout =
+      Number(cfg?.requestTimeoutMs) > 0 ? Number(cfg.requestTimeoutMs) : 0
+    return Math.max(configuredTimeout, MODEL_METADATA_REQUEST_TIMEOUT_FLOOR_MS)
   }
   if (isMediaApiPath(p)) {
     return Number(cfg?.mediaRequestTimeoutMs) > 0
@@ -397,7 +405,9 @@ export const tldwRequest = async (
       if (kl === "x-api-key" || kl === "authorization") delete h[k]
     }
     if (!hostedMode) {
-      const runtimeApiKey = String(getRuntimeSingleUserApiKeyOverride() || "").trim()
+      const runtimeApiKey = runtime.useRuntimeAuthOverride === false
+        ? ""
+        : String(getRuntimeSingleUserApiKeyOverride() || "").trim()
       if (runtimeApiKey && !isPlaceholderApiKey(runtimeApiKey)) {
         h["X-API-KEY"] = runtimeApiKey
       } else if (cfg?.authMode === "single-user") {
@@ -445,10 +455,12 @@ export const tldwRequest = async (
   }
 
   const controller = new AbortController()
+  let retryController: AbortController | null = null
   const timeoutMs = deriveRequestTimeout(cfg, normalizedPath, Number(overrideTimeoutMs))
   const onAbort = () => {
     try {
       controller.abort()
+      retryController?.abort()
     } catch {}
   }
   let timeoutId: ReturnType<typeof setTimeout> | null = null
@@ -503,10 +515,18 @@ export const tldwRequest = async (
         await runtime.refreshAuth()
         refreshSucceeded = true
       } catch (refreshError) {
+        if (isRequestConfigScopeChangedError(refreshError)) {
+          throw refreshError
+        }
         console.warn(
           `${REQUEST_LOG_PREFIX} Token refresh failed — retrying with stale token`,
           refreshError
         )
+      }
+      if (abortSignal?.aborted) {
+        const abortError = new Error("Request was aborted during token refresh.")
+        abortError.name = "AbortError"
+        throw abortError
       }
       const updated = await runtime.getConfig()
       const retryHeaders = { ...h }
@@ -515,8 +535,14 @@ export const tldwRequest = async (
         if (kl === "authorization" || kl === "x-api-key") delete retryHeaders[k]
       }
       if (updated?.accessToken) retryHeaders["Authorization"] = `Bearer ${updated.accessToken}`
-      const retryController = new AbortController()
-      retryTimeoutId = setTimeout(() => retryController.abort(), timeoutMs)
+      retryController = new AbortController()
+      const activeRetryController = retryController
+      if (abortSignal?.aborted) {
+        const abortError = new Error("Request was aborted before retry.")
+        abortError.name = "AbortError"
+        throw abortError
+      }
+      retryTimeoutId = setTimeout(() => activeRetryController.abort(), timeoutMs)
       // lgtm[js/request-forgery]: retry reuses the same validated URL from the initial request.
       resp = await fetchFn(url, {
         method,
@@ -524,11 +550,11 @@ export const tldwRequest = async (
         // Reuse the binary-aware serialization from the first attempt. A plain
         // JSON.stringify here corrupts FormData/Blob uploads into "{}".
         body: resolvedBody,
-        signal: retryController.signal
+        signal: activeRetryController.signal
       })
       // Re-arm so the retry body read is bounded as well.
       if (retryTimeoutId) clearTimeout(retryTimeoutId)
-      retryTimeoutId = setTimeout(() => retryController.abort(), timeoutMs)
+      retryTimeoutId = setTimeout(() => activeRetryController.abort(), timeoutMs)
       if (!refreshSucceeded && resp.status === 401) {
         return {
           ok: false,
@@ -601,6 +627,7 @@ export const tldwRequest = async (
 
     return { ok: true, status: resp.status, data, headers: headersOut, retryAfterMs }
   } catch (e: any) {
+    if (isRequestConfigScopeChangedError(e)) throw e
     return {
       ok: false,
       status: 0,

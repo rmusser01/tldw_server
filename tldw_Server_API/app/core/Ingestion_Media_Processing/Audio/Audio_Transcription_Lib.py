@@ -14,6 +14,7 @@
 #
 # Import necessary libraries to run solo for testing
 import asyncio
+import contextlib
 import gc
 import hashlib
 import importlib
@@ -56,9 +57,6 @@ except ImportError:
     def load_diarization_config():
         return {}  # type: ignore[assignment]
 #
-# Import Local
-import contextlib
-
 from tldw_Server_API.app.core.config import (
     get_stt_config,
     load_and_log_configs,
@@ -67,8 +65,24 @@ from tldw_Server_API.app.core.config import (
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.exceptions import (
     CancelCheckError,
+    STTExecutionPlanError,
+    STTExecutionUnsupportedError,
     STTTranscriptionError,
     TranscriptionCancelled,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+    PLANNED_STT_TRANSCRIPTION_FAILURE,
+    SttBatchExecutionPlan,
+    SttExecutionRoute,
+    SttLoadedRuntime,
+    SttTranscriptionOutcome,
+    actual_execution_from_route,
+    is_planned_stt_sentinel,
+    require_local_execution_route,
+    validate_stt_loaded_runtime,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+    is_transcription_error_message as _is_transcription_error_message,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import resolve_safe_local_path
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram, timeit
@@ -109,6 +123,18 @@ _ORIGINAL_WHISPER_MODEL_IMPORT_ATTEMPTED: bool = False
 _QWEN2AUDIO_CLASSES: tuple[Any, Any] | None = None
 _QWEN2AUDIO_IMPORT_ERROR: Exception | None = None
 _QWEN2AUDIO_IMPORT_ATTEMPTED: bool = False
+_qwen2audio_plan_cache: dict[
+    tuple[str, str | None, str | None, str | None],
+    tuple[Any, Any],
+] = {}
+
+_RUNTIME_MODEL_PATH = "model_path"
+_RUNTIME_REVISION = "revision"
+_RUNTIME_DEVICE = "device"
+_RUNTIME_DEVICE_MAP = "device_map"
+_RUNTIME_COMPUTE_TYPE = "compute_type"
+_RUNTIME_DTYPE = "dtype"
+_RUNTIME_VARIANT = "variant"
 
 
 def _get_torch(*, allow_import: bool) -> Any | None:
@@ -190,6 +216,17 @@ def _torch_cuda_available(*, allow_import: bool = False) -> bool:
         return bool(torch_mod.cuda.is_available())
     except Exception:
         return False
+
+
+def faster_whisper_cuda_available() -> bool:
+    """Return whether CTranslate2 reports at least one CUDA device."""
+    try:
+        import ctranslate2
+
+        return int(ctranslate2.get_cuda_device_count()) > 0
+    except (ImportError, AttributeError, RuntimeError, TypeError, ValueError):
+        return False
+
 
 #
 #######################################################################################################################
@@ -702,10 +739,16 @@ def validate_whisper_model_identifier(model_name: str) -> str:
     This helper rejects path-like identifiers that escape the allowed model
     root and is safe to call on user-supplied model parameters.
     """
-    return _normalize_whisper_model_identifier(
+    normalized = _normalize_whisper_model_identifier(
         model_name,
         base_dir=WHISPER_MODEL_BASE_DIR,
     )
+    path = Path(normalized)
+    if path.is_absolute() and path.is_dir():
+        required = ("config.json", "tokenizer.json", "model.bin")
+        if not all((path / name).is_file() for name in required):
+            raise ValueError("Whisper local model artifact is incomplete")
+    return normalized
 
 
 def _normalize_qwen2audio_model_identifier(model_id: str) -> str:
@@ -740,7 +783,25 @@ def _normalize_qwen2audio_model_identifier(model_id: str) -> str:
 
 def validate_qwen2audio_model_identifier(model_id: str) -> str:
     """Public validator for Qwen2Audio model identifiers."""
-    return _normalize_qwen2audio_model_identifier(model_id)
+    normalized = _normalize_qwen2audio_model_identifier(model_id)
+    path = Path(normalized)
+    if path.is_absolute():
+        required = (
+            path / "config.json",
+            path / "preprocessor_config.json",
+            path / "tokenizer.json",
+        )
+        weights = (
+            path / "model.safetensors",
+            path / "model.safetensors.index.json",
+            path / "pytorch_model.bin",
+            path / "pytorch_model.bin.index.json",
+        )
+        if not all(item.is_file() for item in required) or not any(
+            item.is_file() for item in weights
+        ):
+            raise ValueError("Qwen2Audio local model artifact is incomplete")
+    return normalized
 
 
 def _resolve_whisper_download_root(download_root: Optional[Union[str, Path]]) -> Path:
@@ -1714,26 +1775,7 @@ def is_transcription_error_message(msg: str) -> bool:
     This centralizes detection used by API endpoints and speech chat so that
     provider-specific error messages stay in sync with callers.
     """
-    if not isinstance(msg, str):
-        return False
-
-    lower_msg = msg.lower().strip()
-    if not lower_msg:
-        return False
-
-    return (
-        lower_msg.startswith("[error")
-        or lower_msg.startswith("[transcription error")
-        or lower_msg.startswith("error in transcription")
-        or lower_msg.startswith("canary transcription error")
-        or lower_msg.startswith("parakeet transcription error")
-        or lower_msg.startswith("external provider transcription error")
-        or lower_msg.startswith("external provider module not available")
-        or lower_msg.startswith("external provider transcription failed")
-        or lower_msg.startswith("nemo transcription module not available")
-        or lower_msg.startswith("failed to import nemo")
-        or lower_msg.startswith("failed to import external provider")
-    )
+    return _is_transcription_error_message(msg)
 
 
 def strip_whisper_metadata_header(segments):
@@ -2105,7 +2147,45 @@ def run_stt_job_via_registry(
 qwen_processor = None
 qwen_model = None
 
-def load_qwen2audio():
+def _runtime_string(value: object) -> str | None:
+    """Normalize one effective runtime field without using requested values."""
+    if value is None:
+        return None
+    type_value = getattr(value, "type", None)
+    rendered = str(type_value if type_value is not None else value).strip().lower()
+    for prefix in ("torch.", "numpy."):
+        if rendered.startswith(prefix):
+            rendered = rendered.removeprefix(prefix)
+    return rendered or None
+
+
+def _effective_attr(component: object, name: str) -> str | None:
+    """Read a small allowlist of documented loaded-runtime attribute paths."""
+    candidates = (
+        component,
+        getattr(component, "_delegate", None),
+        getattr(component, "model", None),
+        getattr(getattr(component, "_delegate", None), "model", None),
+    )
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        value = getattr(candidate, name, None)
+        normalized = _runtime_string(value)
+        if normalized is not None:
+            return normalized
+    return None
+
+
+def load_qwen2audio(
+    *,
+    model_id: str | None = None,
+    revision: str | None = None,
+    local_files_only: bool = False,
+    device_map: str | None = None,
+    dtype_name: str | None = None,
+    execution_route: SttExecutionRoute | None = None,
+) -> tuple[Any, Any] | SttLoadedRuntime:
     """
     Loads the Qwen2Audio model and processor.
 
@@ -2130,22 +2210,47 @@ def load_qwen2audio():
             or loading fails (e.g., network issues, insufficient memory).
     """
     global qwen_processor, qwen_model
-    if qwen_processor is None or qwen_model is None:
-        torch_mod = _get_torch(allow_import=True)
-        if torch_mod is None:
-            raise RuntimeError(
-                f"[Transcription error] Qwen2Audio unavailable because torch failed to import: {_TORCH_IMPORT_ERROR}"
+    planned = execution_route is not None
+    if planned:
+        require_local_execution_route(
+            execution_route,
+            provider="qwen2audio",
+            backend="transformers",
+        )
+        if not local_files_only:
+            raise STTExecutionPlanError(
+                "Planned Qwen2Audio execution must be local-files-only"
             )
-        qwen2audio_classes = _get_qwen2audio_classes()
-        if qwen2audio_classes is None:
-            raise RuntimeError(
-                "[Transcription error] Qwen2Audio unavailable because transformers failed to import: "
-                f"{_QWEN2AUDIO_IMPORT_ERROR}"
+        if model_id is None:
+            raise STTExecutionUnsupportedError(
+                "Planned Qwen2Audio execution requires an explicit local model path"
             )
-        auto_processor_cls, qwen2audio_model_cls = qwen2audio_classes
-        # Gate heavy Qwen2Audio loading behind config so typical installs
-        # do not attempt to download/initialize this large model unless
-        # explicitly enabled.
+        try:
+            normalized_model_id = validate_qwen2audio_model_identifier(model_id)
+        except ValueError:
+            raise STTExecutionUnsupportedError(
+                "Planned Qwen2Audio artifact is invalid"
+            ) from None
+        local_model_path = Path(normalized_model_id)
+        if not local_model_path.is_absolute() or not local_model_path.is_dir():
+            raise STTExecutionUnsupportedError(
+                "Planned Qwen2Audio execution requires an existing local model directory"
+            )
+        planned_cache_key = (
+            normalized_model_id,
+            revision,
+            device_map,
+            dtype_name,
+        )
+        cached_components = _qwen2audio_plan_cache.get(planned_cache_key)
+        if cached_components is not None:
+            planned_processor, planned_model = cached_components
+        else:
+            planned_processor = planned_model = None
+    else:
+        planned_cache_key = None
+        if qwen_processor is not None and qwen_model is not None:
+            return qwen_processor, qwen_model
         cfg = load_and_log_configs() or {}
         stt_cfg = cfg.get("STT-Settings") or {}
         enabled_raw = stt_cfg.get("qwen2audio_enabled")
@@ -2154,25 +2259,125 @@ def load_qwen2audio():
                 "Qwen2Audio requested but STT-Settings.qwen2audio_enabled is not set or false; "
                 "treating Qwen2Audio as disabled."
             )
-            raise RuntimeError("[Transcription error] Qwen2Audio is disabled or not configured")
-
-        configured_model_id = stt_cfg.get("qwen2audio_model_id", "Qwen/Qwen2-Audio-7B-Instruct")
+            raise RuntimeError(
+                "[Transcription error] Qwen2Audio is disabled or not configured"
+            )
+        configured_model_id = stt_cfg.get(
+            "qwen2audio_model_id",
+            "Qwen/Qwen2-Audio-7B-Instruct",
+        )
         try:
-            model_id = _normalize_qwen2audio_model_identifier(str(configured_model_id))
+            resolved_model_id = _normalize_qwen2audio_model_identifier(
+                str(configured_model_id)
+            )
         except ValueError as exc:
-            logging.warning(f"Rejected unsafe Qwen2Audio model identifier '{configured_model_id}': {exc}")
-            raise RuntimeError("[Transcription error] Invalid Qwen2Audio model identifier") from exc
-        revision = stt_cfg.get("qwen2audio_revision") or os.getenv("QWEN2AUDIO_REVISION")
-        logging.info(f"Loading Qwen2Audio model: {model_id}")
+            logging.warning(
+                f"Rejected unsafe Qwen2Audio model identifier '{configured_model_id}': {exc}"
+            )
+            raise RuntimeError(
+                "[Transcription error] Invalid Qwen2Audio model identifier"
+            ) from exc
+        revision = stt_cfg.get("qwen2audio_revision") or os.getenv(
+            "QWEN2AUDIO_REVISION"
+        )
+        device_map = "auto"
+        dtype_name = "float16"
 
-        qwen_processor = auto_processor_cls.from_pretrained(model_id, revision=revision)  # nosec B615
-        qwen_model = qwen2audio_model_cls.from_pretrained(
-            model_id,
-            revision=revision,
-            torch_dtype=torch_mod.float16,
-            device_map="auto"
-        )  # nosec B615
-    return qwen_processor, qwen_model
+    needs_load = (
+        planned_processor is None or planned_model is None
+        if planned
+        else qwen_processor is None or qwen_model is None
+    )
+
+    if needs_load:
+        torch_mod = _get_torch(allow_import=True)
+        if torch_mod is None:
+            if planned:
+                raise STTExecutionUnsupportedError(
+                    "Planned Qwen2Audio runtime is unavailable"
+                ) from None
+            raise RuntimeError(
+                f"[Transcription error] Qwen2Audio unavailable because torch failed to import: {_TORCH_IMPORT_ERROR}"
+            )
+        qwen2audio_classes = _get_qwen2audio_classes()
+        if qwen2audio_classes is None:
+            if planned:
+                raise STTExecutionUnsupportedError(
+                    "Planned Qwen2Audio runtime is unavailable"
+                ) from None
+            raise RuntimeError(
+                "[Transcription error] Qwen2Audio unavailable because transformers failed to import: "
+                f"{_QWEN2AUDIO_IMPORT_ERROR}"
+            )
+        auto_processor_cls, qwen2audio_model_cls = qwen2audio_classes
+        if planned:
+            resolved_model_id = normalized_model_id
+
+        dtype_value = getattr(torch_mod, dtype_name or "float16", None)
+        if dtype_value is None:
+            if planned:
+                raise STTExecutionUnsupportedError(
+                    "Planned Qwen2Audio device or dtype is unsupported"
+                ) from None
+            raise STTExecutionUnsupportedError(
+                f"Unsupported Qwen2Audio dtype: {dtype_name}"
+            )
+        logging.info(
+            "Loading planned local Qwen2Audio model"
+            if planned
+            else f"Loading Qwen2Audio model: {resolved_model_id}"
+        )
+        processor_kwargs = {"revision": revision}
+        model_kwargs = {
+            "revision": revision,
+            "torch_dtype": dtype_value,
+            "device_map": device_map or "auto",
+        }
+        if local_files_only:
+            processor_kwargs["local_files_only"] = True
+            model_kwargs["local_files_only"] = True
+        try:
+            loaded_processor = auto_processor_cls.from_pretrained(
+                resolved_model_id,
+                **processor_kwargs,
+            )  # nosec B615
+            loaded_model = qwen2audio_model_cls.from_pretrained(
+                resolved_model_id,
+                **model_kwargs,
+            )  # nosec B615
+        except Exception:
+            if planned:
+                raise STTExecutionUnsupportedError(
+                    "Planned local Qwen2Audio artifact could not be loaded"
+                ) from None
+            raise
+        if planned:
+            _qwen2audio_plan_cache[planned_cache_key] = (
+                loaded_processor,
+                loaded_model,
+            )
+            planned_processor, planned_model = loaded_processor, loaded_model
+        else:
+            qwen_processor, qwen_model = loaded_processor, loaded_model
+
+    if not planned:
+        return qwen_processor, qwen_model
+
+    effective_device = _effective_attr(planned_model, "device")
+    effective_dtype = _effective_attr(planned_model, "dtype")
+    if effective_device is None or effective_dtype is None:
+        raise STTExecutionPlanError(
+            "Qwen2Audio did not expose effective device and dtype"
+        )
+    return SttLoadedRuntime(
+        components=(planned_processor, planned_model),
+        actual_execution=actual_execution_from_route(
+            execution_route,
+            device=effective_device,
+            compute_type=None,
+            dtype=effective_dtype,
+        ),
+    )
 
 def transcribe_with_qwen2audio(audio: np.ndarray, sample_rate: int = 16000) -> str:
     """
@@ -2200,6 +2405,22 @@ def transcribe_with_qwen2audio(audio: np.ndarray, sample_rate: int = 16000) -> s
             or during `model.generate`.
     """
     processor, model = load_qwen2audio()
+    return _transcribe_with_qwen2audio_components(
+        audio,
+        sample_rate,
+        processor=processor,
+        model=model,
+    )
+
+
+def _transcribe_with_qwen2audio_components(
+    audio: np.ndarray,
+    sample_rate: int,
+    *,
+    processor: Any,
+    model: Any,
+) -> str:
+    """Run Qwen2Audio inference with already-loaded immutable components."""
 
     # We build a prompt that includes <|audio_bos|><|AUDIO|><|audio_eos|> token(s)
     # The simplest approach is "User: <|AUDIO|>"
@@ -2538,6 +2759,7 @@ def unload_all_transcription_models():
     if qwen_model is not None:
         del qwen_model
         qwen_model = None
+    _qwen2audio_plan_cache.clear()
 
     # Unload Nemo models
     try:
@@ -2561,7 +2783,16 @@ def unload_all_transcription_models():
 whisper_model_cache = {}
 whisper_model_cache_lock = threading.Lock()
 
-def get_whisper_model(model_name, device, check_download_status=False):
+def get_whisper_model(
+    model_name: str,
+    device: str,
+    check_download_status: bool = False,
+    *,
+    compute_type_override: str | None = None,
+    local_files_only: bool = False,
+    allow_device_fallback: bool = True,
+    execution_route: SttExecutionRoute | None = None,
+) -> Any | tuple[None, dict[str, Any]] | SttLoadedRuntime:
     """
     Retrieves or initializes a `WhisperModel` instance, using a cache.
 
@@ -2594,20 +2825,48 @@ def get_whisper_model(model_name, device, check_download_status=False):
     """
     # Optional override from STT-Settings; when unset or "auto", fall back to
     # the prior device-based heuristic.
-    if WHISPER_COMPUTE_TYPE_OVERRIDE and WHISPER_COMPUTE_TYPE_OVERRIDE != "auto":
+    if compute_type_override is not None:
+        compute_type = compute_type_override
+    elif WHISPER_COMPUTE_TYPE_OVERRIDE and WHISPER_COMPUTE_TYPE_OVERRIDE != "auto":
         compute_type = WHISPER_COMPUTE_TYPE_OVERRIDE
     else:
         compute_type = "float16" if "cuda" in device else "int8"
     try:
-        normalized_model_name = _normalize_whisper_model_identifier(
-            model_name,
-            base_dir=WHISPER_MODEL_BASE_DIR,
-        )
+        normalized_model_name = validate_whisper_model_identifier(model_name)
     except ValueError as exc:
+        if execution_route is not None:
+            raise STTExecutionUnsupportedError(
+                "Planned faster-whisper model identifier is invalid"
+            ) from None
         logging.error(f"Invalid whisper model identifier '{model_name}': {exc}")
         raise ValueError(str(exc)) from exc
 
-    cache_key = (normalized_model_name, device, compute_type)
+    if execution_route is not None:
+        require_local_execution_route(
+            execution_route,
+            provider="faster-whisper",
+            backend="ctranslate2",
+        )
+        if not local_files_only:
+            raise STTExecutionPlanError(
+                "Planned faster-whisper execution must be local-files-only"
+            )
+        if not check_model_exists(normalized_model_name):
+            raise STTExecutionUnsupportedError(
+                "Planned faster-whisper model is not available locally"
+            )
+        allow_device_fallback = False
+
+    cache_key = (
+        normalized_model_name,
+        device,
+        compute_type,
+        local_files_only,
+    ) if execution_route is not None else (
+        normalized_model_name,
+        device,
+        compute_type,
+    )
 
     with whisper_model_cache_lock:
         # If checking download status and model not in cache
@@ -2624,18 +2883,33 @@ def get_whisper_model(model_name, device, check_download_status=False):
                 }
 
         if cache_key not in whisper_model_cache:
-            logging.info(f"Cache miss. Initializing WhisperModel for key: {cache_key}")
+            logging.info(
+                "Initializing planned local faster-whisper model"
+                if execution_route is not None
+                else f"Cache miss. Initializing WhisperModel for key: {cache_key}"
+            )
             try:
                 # This now calls the *corrected* WhisperModel.__init__
-                instance = WhisperModel(
-                    model_size_or_path=normalized_model_name,
-                    device=device,
-                    compute_type=compute_type
-                )
+                load_kwargs: dict[str, Any] = {
+                    "model_size_or_path": normalized_model_name,
+                    "device": device,
+                    "compute_type": compute_type,
+                }
+                if local_files_only:
+                    load_kwargs["local_files_only"] = True
+                instance = WhisperModel(**load_kwargs)
                 whisper_model_cache[cache_key] = instance
             except (ValueError, RuntimeError) as e:
+                if execution_route is not None:
+                    raise RuntimeError(
+                        f"Planned faster-whisper {device.upper()} initialization failed"
+                    ) from None
                 # Check if the error is related to CUDA not being available
-                if "cuda" in device.lower() and ("CUDA" in str(e) or "cuda" in str(e).lower()):
+                if (
+                    allow_device_fallback
+                    and "cuda" in device.lower()
+                    and ("CUDA" in str(e) or "cuda" in str(e).lower())
+                ):
                     logging.warning(f"CUDA initialization failed for {normalized_model_name}: {e}. Falling back to CPU.")
                     # Try again with CPU
                     cpu_compute_type = "int8"
@@ -2665,9 +2939,30 @@ def get_whisper_model(model_name, device, check_download_status=False):
                     logging.error(f"Fatal error creating whisper model instance for key {cache_key}: {e}")
                     raise  # Re-raise the exception
         else:
-            logging.debug(f"Cache hit. Reusing existing WhisperModel instance for key: {cache_key}")
+            logging.debug(
+                "Reusing planned local faster-whisper model"
+                if execution_route is not None
+                else f"Cache hit. Reusing existing WhisperModel instance for key: {cache_key}"
+            )
 
-        return whisper_model_cache[cache_key]
+        instance = whisper_model_cache[cache_key]
+        if execution_route is None:
+            return instance
+        effective_device = _effective_attr(instance, "device")
+        effective_compute_type = _effective_attr(instance, "compute_type")
+        if effective_device is None or effective_compute_type is None:
+            raise STTExecutionPlanError(
+                "faster-whisper did not expose effective device and compute type"
+            )
+        return SttLoadedRuntime(
+            components=(instance,),
+            actual_execution=actual_execution_from_route(
+                execution_route,
+                device=effective_device,
+                compute_type=effective_compute_type,
+                dtype=None,
+            ),
+        )
 
 
 # Transcribe .wav into .segments.json
@@ -3034,7 +3329,9 @@ def speech_to_text_parakeet(
     selected_source_lang: str = 'en',
     vad_filter: bool = False,
     base_dir: Optional[Path] = None,
-) -> list:
+    *,
+    execution_plan: SttBatchExecutionPlan | None = None,
+) -> list | SttTranscriptionOutcome:
     """
     Transcribe audio using Parakeet with specified variant.
 
@@ -3048,6 +3345,82 @@ def speech_to_text_parakeet(
     Returns:
         List of segments in whisper-compatible format
     """
+    if execution_plan is not None:
+        runtime = execution_plan.runtime_values()
+        route = execution_plan.descriptor.primary_route
+        variant = str(runtime.get(_RUNTIME_VARIANT) or "")
+        if variant not in {"standard", "cuda", "onnx", "mlx"}:
+            raise STTExecutionUnsupportedError(
+                f"Unsupported planned Parakeet variant: {variant}"
+            )
+        audio_path = _resolve_audio_input_path_for_provider(
+            audio_file_path,
+            base_dir=base_dir,
+            label="Audio input path",
+        )
+        model_path = str(runtime.get(_RUNTIME_MODEL_PATH) or "")
+        device = str(runtime.get(_RUNTIME_DEVICE) or "")
+        if variant in {"standard", "cuda"}:
+            import librosa
+
+            from .Audio_Transcription_Nemo import (
+                load_parakeet_model,
+                transcribe_with_parakeet,
+            )
+
+            loaded = load_parakeet_model(
+                variant,
+                model_path=model_path,
+                device=device,
+                compute_type=str(runtime.get(_RUNTIME_DTYPE) or ""),
+                allow_download=False,
+                allow_variant_fallback=False,
+                execution_route=route,
+            )
+            loaded_runtime = validate_stt_loaded_runtime(loaded, route)
+            audio_data, sample_rate = librosa.load(
+                str(audio_path),
+                sr=16000,
+                mono=True,
+            )
+            outcome = transcribe_with_parakeet(
+                audio_data,
+                sample_rate,
+                variant,
+                execution_plan=execution_plan,
+                execution_route=route,
+                _loaded_runtime=loaded_runtime,
+            )
+        elif variant == "onnx":
+            from .Audio_Transcription_Parakeet_ONNX import (
+                transcribe_with_parakeet_onnx,
+            )
+
+            outcome = transcribe_with_parakeet_onnx(
+                str(audio_path),
+                model_path=model_path,
+                device=device,
+                execution_plan=execution_plan,
+                execution_route=route,
+            )
+        else:
+            from .Audio_Transcription_Parakeet_MLX import (
+                transcribe_with_parakeet_mlx,
+            )
+
+            outcome = transcribe_with_parakeet_mlx(
+                str(audio_path),
+                return_structured=True,
+                model_path=model_path,
+                execution_plan=execution_plan,
+                execution_route=route,
+            )
+        if not isinstance(outcome, SttTranscriptionOutcome):
+            raise STTExecutionPlanError(
+                "Planned Parakeet helper did not return a typed outcome"
+            )
+        return outcome
+
     try:
         logging.info(f"Transcribing with Parakeet variant: {variant}")
 
@@ -3246,7 +3619,9 @@ def speech_to_text_canary(
     selected_source_lang: str = 'en',
     vad_filter: bool = False,
     base_dir: Optional[Path] = None,
-) -> list:
+    *,
+    execution_plan: SttBatchExecutionPlan | None = None,
+) -> list | SttTranscriptionOutcome:
     """
     Transcribe audio using Canary model.
 
@@ -3259,6 +3634,50 @@ def speech_to_text_canary(
     Returns:
         List of segments in whisper-compatible format
     """
+    if execution_plan is not None:
+        route = execution_plan.descriptor.primary_route
+        audio_path = _resolve_audio_input_path_for_provider(
+            audio_file_path,
+            base_dir=base_dir,
+            label="Audio input path",
+        )
+        import librosa
+
+        from .Audio_Transcription_Nemo import (
+            load_canary_model,
+            transcribe_with_canary,
+        )
+
+        runtime = execution_plan.runtime_values()
+        loaded = load_canary_model(
+            model_path=str(runtime.get(_RUNTIME_MODEL_PATH) or ""),
+            device=str(runtime.get(_RUNTIME_DEVICE) or ""),
+            dtype_name=str(runtime.get(_RUNTIME_DTYPE) or ""),
+            allow_download=False,
+            execution_route=route,
+        )
+        loaded_runtime = validate_stt_loaded_runtime(loaded, route)
+        audio_data, sample_rate = librosa.load(
+            str(audio_path),
+            sr=16000,
+            mono=True,
+        )
+        outcome = transcribe_with_canary(
+            audio_data,
+            sample_rate,
+            execution_plan.language,
+            task=execution_plan.task,
+            target_language=None,
+            execution_plan=execution_plan,
+            execution_route=route,
+            _loaded_runtime=loaded_runtime,
+        )
+        if not isinstance(outcome, SttTranscriptionOutcome):
+            raise STTExecutionPlanError(
+                "Planned Canary helper did not return a typed outcome"
+            )
+        return outcome
+
     try:
         logging.info("Transcribing with Canary model")
 
@@ -3295,7 +3714,9 @@ def speech_to_text_qwen2audio(
     selected_source_lang: str = 'en',
     vad_filter: bool = False,
     base_dir: Optional[Path] = None,
-) -> list:
+    *,
+    execution_plan: SttBatchExecutionPlan | None = None,
+) -> list | SttTranscriptionOutcome:
     """
     Transcribe audio using Qwen2Audio model.
 
@@ -3308,6 +3729,56 @@ def speech_to_text_qwen2audio(
     Returns:
         List of segments in whisper-compatible format
     """
+    if execution_plan is not None:
+        runtime = execution_plan.runtime_values()
+        route = execution_plan.descriptor.primary_route
+        audio_path = _resolve_audio_input_path_for_provider(
+            audio_file_path,
+            base_dir=base_dir,
+            label="Audio input path",
+        )
+        loaded = load_qwen2audio(
+            model_id=str(runtime.get(_RUNTIME_MODEL_PATH) or ""),
+            revision=(
+                str(runtime[_RUNTIME_REVISION])
+                if runtime.get(_RUNTIME_REVISION) is not None
+                else None
+            ),
+            local_files_only=True,
+            device_map=str(runtime.get(_RUNTIME_DEVICE_MAP) or "auto"),
+            dtype_name=str(runtime.get(_RUNTIME_DTYPE) or ""),
+            execution_route=route,
+        )
+        loaded = validate_stt_loaded_runtime(loaded, route)
+        import librosa
+
+        audio_data, sample_rate = librosa.load(
+            str(audio_path),
+            sr=16000,
+            mono=True,
+        )
+        audio_duration = librosa.get_duration(y=audio_data, sr=sample_rate)
+        processor, model = loaded.components
+        text = _transcribe_with_qwen2audio_components(
+            audio_data,
+            sample_rate,
+            processor=processor,
+            model=model,
+        )
+        segments = create_segments_from_text(
+            text,
+            audio_duration,
+            segmentation="sentence",
+        )
+        return SttTranscriptionOutcome(
+            artifact={
+                "text": text,
+                "segments": segments,
+                "language": execution_plan.language,
+            },
+            actual_execution=loaded.actual_execution,
+        )
+
     try:
         logging.info("Transcribing with Qwen2Audio model via speech_to_text_qwen2audio")
 
@@ -3339,6 +3810,111 @@ def speech_to_text_qwen2audio(
         logging.error(f"Qwen2Audio transcription failed: {e}")
         raise RuntimeError(f"Qwen2Audio transcription error: {str(e)}") from e
 
+def _speech_to_text_planned(
+    audio_input: Union[str, Path, np.ndarray],
+    *,
+    execution_plan: SttBatchExecutionPlan,
+    base_dir: Optional[Path],
+    cancel_check: Optional[Callable[[], bool]],
+) -> SttTranscriptionOutcome:
+    """Execute one immutable local plan without legacy config or fallback."""
+    if not isinstance(execution_plan, SttBatchExecutionPlan):
+        raise STTExecutionPlanError("Invalid planned STT execution")
+    route = execution_plan.descriptor.primary_route
+    runtime = execution_plan.runtime_values()
+    _check_cancel(cancel_check, label="planned speech-to-text")
+
+    if route.provider in {"parakeet", "canary", "qwen2audio"}:
+        if not isinstance(audio_input, (str, Path)):
+            raise STTExecutionUnsupportedError(
+                f"Planned {route.provider} execution requires an audio file"
+            )
+        if route.provider == "parakeet":
+            outcome = speech_to_text_parakeet(
+                str(audio_input),
+                variant=str(runtime.get(_RUNTIME_VARIANT) or ""),
+                selected_source_lang=execution_plan.language or "en",
+                vad_filter=False,
+                base_dir=base_dir,
+                execution_plan=execution_plan,
+            )
+        elif route.provider == "canary":
+            outcome = speech_to_text_canary(
+                str(audio_input),
+                selected_source_lang=execution_plan.language or "en",
+                vad_filter=False,
+                base_dir=base_dir,
+                execution_plan=execution_plan,
+            )
+        else:
+            outcome = speech_to_text_qwen2audio(
+                str(audio_input),
+                selected_source_lang=execution_plan.language or "en",
+                vad_filter=False,
+                base_dir=base_dir,
+                execution_plan=execution_plan,
+            )
+        if not isinstance(outcome, SttTranscriptionOutcome):
+            raise STTExecutionPlanError(
+                "Planned provider helper did not report actual execution"
+            )
+        return outcome
+
+    if route.provider != "faster-whisper":
+        raise STTExecutionUnsupportedError(
+            f"Provider {route.provider} is not a Task 2 local planned provider"
+        )
+    model_path = str(runtime.get(_RUNTIME_MODEL_PATH) or "")
+    device = str(runtime.get(_RUNTIME_DEVICE) or "")
+    compute_type = str(runtime.get(_RUNTIME_COMPUTE_TYPE) or "")
+    loaded = get_whisper_model(
+        model_path,
+        device,
+        check_download_status=False,
+        compute_type_override=compute_type,
+        local_files_only=True,
+        allow_device_fallback=False,
+        execution_route=route,
+    )
+    loaded = validate_stt_loaded_runtime(loaded, route)
+    model = loaded.components[0]
+    options: dict[str, Any] = {
+        "beam_size": 5,
+        "best_of": 5,
+        "vad_filter": False,
+        "task": execution_plan.task,
+    }
+    if execution_plan.language:
+        options["language"] = execution_plan.language
+    if execution_plan.word_timestamps:
+        options["word_timestamps"] = True
+    if execution_plan.prompt:
+        options["initial_prompt"] = execution_plan.prompt
+    segments_raw, info = model.transcribe(audio_input, **options)
+    segments: list[dict[str, Any]] = []
+    for segment in segments_raw:
+        segments.append(
+            {
+                "start_seconds": segment.start,
+                "end_seconds": segment.end,
+                "Time_Start": segment.start,
+                "Time_End": segment.end,
+                "Text": segment.text.strip(),
+            }
+        )
+    text = " ".join(str(segment["Text"]) for segment in segments).strip()
+    if not text:
+        raise STTTranscriptionError("No transcription produced")
+    return SttTranscriptionOutcome(
+        artifact={
+            "text": text,
+            "segments": segments,
+            "language": getattr(info, "language", None) or execution_plan.language,
+        },
+        actual_execution=loaded.actual_execution,
+    )
+
+
 def speech_to_text(
     audio_input: Union[str, Path, np.ndarray],
     whisper_model: str = "distil-large-v3",
@@ -3359,7 +3935,12 @@ def speech_to_text(
     base_dir: Optional[Path] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
     include_metadata_header: bool = True,
-) -> Union[list[dict[str, Any]], tuple[list[dict[str, Any]], Optional[str]]]:
+    execution_plan: SttBatchExecutionPlan | None = None,
+) -> Union[
+    list[dict[str, Any]],
+    tuple[list[dict[str, Any]], Optional[str]],
+    SttTranscriptionOutcome,
+]:
     """
     Canonical file/segment-based speech-to-text helper.
 
@@ -3427,6 +4008,35 @@ def speech_to_text(
             error, issue during transcription process, or if no segments are produced).
             The original exception may be chained.
     """
+    if execution_plan is not None:
+        planned_transcription_sentinel = False
+        try:
+            return _speech_to_text_planned(
+                audio_input,
+                execution_plan=execution_plan,
+                base_dir=base_dir,
+                cancel_check=cancel_check,
+            )
+        except STTTranscriptionError as exc:
+            if not is_planned_stt_sentinel(str(exc)):
+                raise
+            planned_transcription_sentinel = True
+        except (
+            CancelCheckError,
+            STTExecutionPlanError,
+            STTExecutionUnsupportedError,
+            TranscriptionCancelled,
+        ):
+            raise
+        except Exception:
+            raise STTTranscriptionError(
+                "Planned local STT execution failed"
+            ) from None
+        if planned_transcription_sentinel:
+            raise STTTranscriptionError(
+                PLANNED_STT_TRANSCRIPTION_FAILURE
+            ) from None
+
     file_path: Optional[Path] = None
     file_path_label = "<memory>"
     time_start = time.time()

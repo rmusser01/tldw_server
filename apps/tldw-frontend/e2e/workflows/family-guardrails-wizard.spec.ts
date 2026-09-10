@@ -609,8 +609,12 @@ test.describe("Family Guardrails Wizard Workflow", () => {
     await gotoWizard(authedPage)
 
     await expect(authedPage).toHaveURL(/\/settings\/family-guardrails/)
+    // The settings route shell now renders its own governed h1 with the same
+    // text, so scope to the wizard shell to avoid a strict-mode violation.
     await expect(
-      authedPage.getByRole("heading", { name: /Family Guardrails Wizard/i })
+      authedPage
+        .getByTestId("wizard-shell")
+        .getByRole("heading", { name: /Family Guardrails Wizard/i })
     ).toBeVisible()
     await expect(authedPage.getByRole("heading", { name: "Household Basics" })).toBeVisible()
     await expect(authedPage.getByText("Step 1 of 8")).toBeVisible()

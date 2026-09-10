@@ -58,6 +58,53 @@ bun run dev -- -p 8080
 
 Open [http://localhost:8080](http://localhost:8080) with your browser.
 
+### Development runtime and the bottom-left diagnostics badge
+
+`bun run dev` uses Next.js Turbopack. It is the supported default because a
+clean live-backend qualification completed all 113 route checks, stayed
+responsive through a 20-minute warm idle, and passed all 7 critical routes on
+the second pass. The measured process tree peaked at 14,093,615,104 bytes RSS;
+warm-idle growth was 2,142,453,760 bytes. The UAT-host guardrails are 16 GiB
+maximum RSS and no more than 2 GiB growth after route compilation. The local
+evidence report is written to
+`test-results/dev-runtime/turbopack-20m-clean.json`.
+
+Webpack remains available as an explicit compatibility fallback:
+
+```bash
+bun run dev:webpack -- -p 8080
+```
+
+It is not the qualified default for this workload. Its clean short comparison
+exceeded 38 GB RSS and failed six of seven second-pass checks; the local report
+is `test-results/dev-runtime/webpack-short.json`.
+
+In development, a badge in the bottom-left corner belongs to **Next
+DevTools**, not to tldw's notification or backend-recovery UI. A red number is
+Next's count of captured build/runtime issues. Click it and inspect the Next
+panel, browser console, and dev-server terminal; it is actionable diagnostic
+evidence even though it is not a tldw-owned error counter. A tldw error popup
+is a separate application behavior and should be investigated independently.
+
+To repeat the runtime qualification against an already-running real backend,
+keep offline fallback disabled and use an isolated synthetic API key:
+
+```bash
+TLDW_E2E_ALLOW_OFFLINE=0 \
+TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 \
+TLDW_E2E_API_KEY=your_isolated_test_key \
+bun run uat:dev-runtime -- \
+  --bundler=turbopack \
+  --port=8080 \
+  --warm-idle-ms=1200000 \
+  --output=test-results/dev-runtime/turbopack.json
+```
+
+The harness removes the candidate's `.next` output before measurement, probes
+the full descendant process tree, fails closed if the backend is unavailable,
+and stops a candidate immediately after an irreversible responsiveness or RSS
+failure.
+
 ### Quickstart networking (default Docker WebUI path)
 
 When you use the repository quickstart Docker + WebUI flow, the default browser path stays on same-origin browser API requests through the WebUI proxy. That is the default quickstart networking story and does not depend on browser CORS setup or a custom browser-visible API host.

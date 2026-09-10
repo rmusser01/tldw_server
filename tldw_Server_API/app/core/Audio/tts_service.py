@@ -272,13 +272,15 @@ def _sanitize_speech_request(
             },
         )
 
-    model = getattr(request_data, "model", None)
-    provider_hint = _infer_tts_provider_from_model(model)
-    if isinstance(model, str) and model.strip() and provider_hint is None:
-        _raise_for_tts_error(
-            TTSModelNotFoundError("Requested TTS model is not registered"),
-            request_id,
-        )
+    provider_hint = None
+    if getattr(request_data, "backend", None) is None:
+        model = getattr(request_data, "model", None)
+        provider_hint = _infer_tts_provider_from_model(model)
+        if isinstance(model, str) and model.strip() and provider_hint is None:
+            _raise_for_tts_error(
+                TTSModelNotFoundError("Requested TTS model is not registered"),
+                request_id,
+            )
 
     try:
         tts_config = get_tts_config()

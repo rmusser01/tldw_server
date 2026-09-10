@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 import types
+from contextlib import nullcontext
 from types import SimpleNamespace
 from typing import Any, AsyncIterator, Dict, Iterable, List, Optional
 
@@ -71,6 +72,19 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
     ProviderCredentialRuntime as RealProviderCredentialRuntime,
     is_runtime_issued_provider_call_credentials,
+)
+from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
+    build_materialized_behavior_controls,
+)
+from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
+    build_pending_greeting_record,
+)
+from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import (
+    build_materialized_behavior_settings,
+)
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    ConflictError,
+    InputError,
 )
 
 _AUDIO_LABEL_TO_SAMPLE = {
@@ -2953,6 +2967,767 @@ async def test_audio_chat_ws_persists_turn_when_enabled(monkeypatch: pytest.Monk
     assert persisted_db.settings
     _, settings = persisted_db.settings[0]
     assert settings.get("audio_chat_ws", {}).get("action_hint") == "demo_tool"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_audio_chat_ws_existing_session_merges_settings_with_version_cas(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
+    ws = DummyWebSocket(
+        [
+            {
+                "type": "config",
+                "session_id": "resume-chat",
+                "stt": {"model": "parakeet"},
+                "llm": {"provider": "stub", "model": "stub-model"},
+                "tts": {"voice": "af_heart", "format": "pcm"},
+                "metadata": {"persist_history": True},
+            },
+            {"type": "audio", "data": audio_payload},
+            {"type": "commit"},
+            {"type": "stop"},
+        ]
+    )
+
+    existing_settings, existing_resume_state = _valid_roleplay_settings_with_blob(16)
+    existing_settings["userSetting"] = "preserve-me"
+    existing_resume_state["settings"] = existing_settings
+
+    class _ExistingChatDB:
+        client_id = "1"
+
+        def __init__(self) -> None:
+            self.messages: list[dict[str, Any]] = []
+            self.current = {
+                "settings": existing_settings,
+                "settings_version": 7,
+            }
+            self.upsert_calls: list[tuple[dict[str, Any], int | None]] = []
+
+        def add_message(self, msg_data: dict[str, Any]) -> str:
+            self.messages.append(dict(msg_data))
+            return "msg-id"
+
+        def get_conversation_settings(self, conversation_id: str) -> dict[str, Any]:
+            assert conversation_id == "resume-chat"
+            return {
+                "settings": dict(self.current["settings"]),
+                "settings_version": self.current["settings_version"],
+            }
+
+        def transaction(self):
+            return nullcontext(object())
+
+        def get_roleplay_resume_state(
+            self,
+            conversation_id: str,
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            assert conversation_id == "resume-chat"
+            return {
+                **existing_resume_state,
+                "conversation": _owned_audio_test_conversation(conversation_id),
+            }
+
+        def get_conversation_by_id(self, conversation_id: str) -> dict[str, Any]:
+            return _owned_audio_test_conversation(conversation_id)
+
+        def upsert_conversation_settings(
+            self,
+            conversation_id: str,
+            settings: dict[str, Any],
+            *,
+            conn=None,
+            expected_settings_version: int | None = None,
+        ) -> bool:
+            assert conversation_id == "resume-chat"
+            self.upsert_calls.append((dict(settings), expected_settings_version))
+            return True
+
+    persisted_db = _ExistingChatDB()
+
+    async def _get_tts_service():
+        return _DummyTTSService([b"tts"])
+
+    async def _get_db_for_user_id(_user_id: int, client_id: Optional[str] = None):  # noqa: ARG001
+        return persisted_db
+
+    async def _character_context(_db: Any, _character_id: Any, _loop: Any):
+        return {"id": 42, "name": "Helpful AI Assistant"}, 42
+
+    async def _conversation_context(*_args: Any, **_kwargs: Any):
+        return "resume-chat", False
+
+    monkeypatch.setattr(audio, "get_tts_service", _get_tts_service)
+    monkeypatch.setattr(audio, "get_chacha_db_for_user_id", _get_db_for_user_id, raising=False)
+    monkeypatch.setattr(audio, "get_or_create_character_context", _character_context, raising=False)
+    monkeypatch.setattr(audio, "get_or_create_conversation", _conversation_context, raising=False)
+
+    await audio.websocket_audio_chat_stream(ws, token=None)
+
+    assert len(persisted_db.upsert_calls) == 1
+    merged, expected_version = persisted_db.upsert_calls[0]
+    assert expected_version == 7
+    assert merged["userSetting"] == "preserve-me"
+    assert merged["roleplayResumeV1"] == existing_settings["roleplayResumeV1"]
+    assert merged["roleplayBehaviorV1"] == existing_settings["roleplayBehaviorV1"]
+    assert merged["audio_chat_ws"]["session_id"] == "resume-chat"
+
+
+def _nested_audio_metadata(depth: int) -> dict[str, Any]:
+    value: dict[str, Any] = {"leaf": "value"}
+    for _index in range(depth):
+        value = {"nested": value}
+    return value
+
+
+def _owned_audio_test_conversation(conversation_id: str) -> dict[str, Any]:
+    return {
+        "id": conversation_id,
+        "character_id": 42,
+        "client_id": "1",
+        "deleted": 0,
+    }
+
+
+def _valid_roleplay_settings_with_blob(blob_size: int) -> tuple[dict[str, Any], dict[str, Any]]:
+    snapshot_digest = "sha256:" + ("a" * 64)
+    effective = {
+        "provider": "local-llm",
+        "model": "local-test",
+        "sampling": {
+            "temperature": 0.7,
+            "top_p": 1.0,
+            "repetition_penalty": 1.0,
+            "stop": [],
+        },
+    }
+    behavior = build_materialized_behavior_settings(
+        {
+            "base_snapshot": {"schema_version": 1, "digest": snapshot_digest},
+            "behavior_controls": build_materialized_behavior_controls({}),
+            "effective_completion": effective,
+            "participants": [{"frozen_prompt": "x" * blob_size}],
+        }
+    )
+    settings = {
+        "userSetting": "preserve-me",
+        "roleplayResumeV1": {
+            "resumeEligible": True,
+            "resumeIneligibleReason": None,
+            "effectiveCompletion": effective,
+        },
+        "roleplayBehaviorV1": behavior,
+    }
+    resume_state = {
+        "settings": settings,
+        "settings_version": 7,
+        "behavior_snapshot": {
+            "status": "valid",
+            "schema_version": 1,
+            "digest": snapshot_digest,
+        },
+        "materialized_settings": {
+            "schema_version": 1,
+            "digest": behavior["digest"],
+            "values": behavior["values"],
+        },
+        "resume_eligible": True,
+        "resume_ineligible_reason": None,
+        "effective_completion": effective,
+    }
+    return settings, resume_state
+
+
+@pytest.mark.unit
+def test_audio_writer_rejects_pending_greeting_for_different_character() -> None:
+    snapshot_digest = "sha256:" + ("a" * 64)
+    pending = build_pending_greeting_record(
+        {
+            "base_snapshot": {
+                "schema_version": 1,
+                "digest": snapshot_digest,
+            },
+            "character_id": 99,
+            "greetings_checksum": "sha256:frozen-greetings",
+            "greeting": {
+                "content": "Frozen alternate greeting",
+                "selection_id": "greeting:1:selected",
+                "source": "alternate_greeting",
+                "source_index": 1,
+                "character_version": 1,
+            },
+        }
+    )
+    settings = {
+        "greetingSelectionId": "greeting:1:selected",
+        "greetingsChecksum": "sha256:frozen-greetings",
+        "roleplayResumeV1": {
+            "resumeEligible": False,
+            "resumeIneligibleReason": "incomplete_effective_settings",
+            "effectiveCompletion": None,
+        },
+        "roleplayPendingGreetingV1": pending,
+    }
+    resume_state = {
+        "settings": settings,
+        "settings_version": 7,
+        "history_version": 11,
+        "behavior_snapshot": {
+            "status": "valid",
+            "schema_version": 1,
+            "digest": snapshot_digest,
+        },
+    }
+
+    class _SettingsDB:
+        client_id = "1"
+
+        def __init__(self) -> None:
+            self.current = dict(resume_state)
+            self.upsert_calls: list[dict[str, Any]] = []
+
+        def transaction(self):
+            return nullcontext(object())
+
+        def get_roleplay_resume_state(
+            self,
+            _conversation_id: str,
+            *,
+            conn,
+            lock_for_update: bool,
+            owner_client_id: str | None = None,
+        ) -> dict[str, Any]:
+            assert conn is not None
+            assert lock_for_update is True
+            assert owner_client_id == "1"
+            return {
+                **self.current,
+                "conversation": _owned_audio_test_conversation("pending-audio"),
+            }
+
+        def get_conversation_by_id(self, _conversation_id: str) -> dict[str, Any]:
+            return _owned_audio_test_conversation("pending-audio")
+
+        def upsert_conversation_settings(
+            self,
+            _conversation_id: str,
+            updated: dict[str, Any],
+            *,
+            conn=None,
+            expected_settings_version: int | None = None,  # noqa: ARG002
+        ) -> bool:
+            self.upsert_calls.append(dict(updated))
+            self.current["settings"] = dict(updated)
+            self.current["settings_version"] += 1
+            return True
+
+    db = _SettingsDB()
+    before = dict(db.current)
+
+    with pytest.raises(InputError, match="pending greeting"):
+        audio_streaming_module._persist_audio_chat_settings(
+            db,
+            "pending-audio",
+            {"audio_chat_ws": {"metadata": {"mode": "tiny"}}},
+            conversation_created=False,
+        )
+
+    assert db.upsert_calls == []
+    assert db.current == before
+
+
+@pytest.mark.unit
+def test_audio_writer_uses_transactional_conversation_identity(monkeypatch) -> None:
+    stale_conversation = _owned_audio_test_conversation("racing-audio")
+    current_conversation = {
+        **stale_conversation,
+        "version": 2,
+        "character_id": 2,
+        "assistant_id": "2",
+    }
+
+    class _SettingsDB:
+        client_id = "1"
+
+        def __init__(self) -> None:
+            self.owner_client_id: str | None = None
+
+        def get_conversation_by_id(self, _conversation_id: str) -> dict[str, Any]:
+            return stale_conversation
+
+        def transaction(self):
+            return nullcontext(object())
+
+        def get_roleplay_resume_state(
+            self,
+            _conversation_id: str,
+            *,
+            conn,
+            lock_for_update: bool,
+            owner_client_id: str | None = None,
+        ) -> dict[str, Any]:
+            assert conn is not None
+            assert lock_for_update is True
+            self.owner_client_id = owner_client_id
+            return {
+                "conversation": current_conversation,
+                "settings": {"preserved": True},
+                "settings_version": 4,
+                "behavior_snapshot": {"status": "missing"},
+            }
+
+        def upsert_conversation_settings(
+            self,
+            _conversation_id: str,
+            _settings: dict[str, Any],
+            *,
+            conn,
+            expected_settings_version: int,
+        ) -> bool:
+            assert conn is not None
+            assert expected_settings_version == 4
+            return True
+
+    seen: dict[str, object] = {}
+
+    def _capture_validation(settings, **kwargs):
+        seen["conversation"] = kwargs.get("conversation")
+        return settings
+
+    monkeypatch.setattr(
+        audio_streaming_module,
+        "validate_chat_settings_storage",
+        _capture_validation,
+    )
+    db = _SettingsDB()
+
+    assert audio_streaming_module._persist_audio_chat_settings(
+        db,
+        "racing-audio",
+        {"audio_chat_ws": {"metadata": {"mode": "tiny"}}},
+        conversation_created=False,
+    )
+
+    assert seen["conversation"] == current_conversation
+    assert db.owner_client_id == "1"
+
+
+@pytest.mark.unit
+def test_audio_writer_allows_small_public_update_with_large_valid_internal_authority() -> None:
+    settings, resume_state = _valid_roleplay_settings_with_blob(210_000)
+
+    class _SettingsDB:
+        client_id = "1"
+
+        def __init__(self) -> None:
+            self.current = dict(settings)
+            self.upsert_calls: list[tuple[dict[str, Any], int | None]] = []
+
+        def get_conversation_settings(self, _conversation_id: str) -> dict[str, Any]:
+            return {"settings": dict(self.current), "settings_version": 7}
+
+        def transaction(self):
+            return nullcontext(object())
+
+        def get_roleplay_resume_state(
+            self,
+            conversation_id: str,
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            return {
+                **resume_state,
+                "conversation": _owned_audio_test_conversation(conversation_id),
+            }
+
+        def get_conversation_by_id(self, conversation_id: str) -> dict[str, Any]:
+            return _owned_audio_test_conversation(conversation_id)
+
+        def upsert_conversation_settings(
+            self,
+            _conversation_id: str,
+            updated: dict[str, Any],
+            *,
+            conn=None,
+            expected_settings_version: int | None = None,
+        ) -> bool:
+            self.upsert_calls.append((dict(updated), expected_settings_version))
+            return True
+
+    db = _SettingsDB()
+    updated = audio_streaming_module._persist_audio_chat_settings(
+        db,
+        "large-resumable-audio",
+        {"audio_chat_ws": {"metadata": {"mode": "tiny"}}},
+        conversation_created=False,
+    )
+
+    assert updated is True
+    assert len(db.upsert_calls) == 1
+    persisted, expected_version = db.upsert_calls[0]
+    assert expected_version == 7
+    assert persisted["roleplayBehaviorV1"] == settings["roleplayBehaviorV1"]
+    assert persisted["audio_chat_ws"]["metadata"] == {"mode": "tiny"}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("internal_mutation", ["digest", "oversize"])
+def test_audio_writer_rejects_invalid_preserved_internal_authority(
+    internal_mutation: str,
+) -> None:
+    settings, resume_state = _valid_roleplay_settings_with_blob(16)
+    behavior = dict(settings["roleplayBehaviorV1"])
+    if internal_mutation == "digest":
+        behavior["digest"] = "sha256:" + ("0" * 64)
+    else:
+        values = dict(behavior["values"])
+        values["participants"] = [{"oversize": "x" * (1024 * 1024 + 1)}]
+        behavior["values"] = values
+    settings["roleplayBehaviorV1"] = behavior
+    resume_state["settings"] = settings
+
+    class _SettingsDB:
+        client_id = "1"
+
+        def __init__(self) -> None:
+            self.upsert_calls: list[dict[str, Any]] = []
+
+        def get_conversation_settings(self, _conversation_id: str) -> dict[str, Any]:
+            return {"settings": dict(settings), "settings_version": 7}
+
+        def transaction(self):
+            return nullcontext(object())
+
+        def get_roleplay_resume_state(
+            self,
+            conversation_id: str,
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            return {
+                **resume_state,
+                "conversation": _owned_audio_test_conversation(conversation_id),
+            }
+
+        def get_conversation_by_id(self, conversation_id: str) -> dict[str, Any]:
+            return _owned_audio_test_conversation(conversation_id)
+
+        def upsert_conversation_settings(
+            self,
+            _conversation_id: str,
+            updated: dict[str, Any],
+            *,
+            conn=None,
+            expected_settings_version: int | None = None,  # noqa: ARG002
+        ) -> bool:
+            self.upsert_calls.append(dict(updated))
+            return True
+
+    db = _SettingsDB()
+    with pytest.raises(InputError, match="materialized|roleplay"):
+        audio_streaming_module._persist_audio_chat_settings(
+            db,
+            "invalid-resumable-audio",
+            {"audio_chat_ws": {"metadata": {"mode": "tiny"}}},
+            conversation_created=False,
+        )
+    assert db.upsert_calls == []
+
+
+@pytest.mark.unit
+def test_audio_writer_rejects_caller_replacement_of_internal_authority() -> None:
+    class _SettingsDB:
+        def get_conversation_settings(self, _conversation_id: str) -> dict[str, Any]:
+            return {"settings": {"userSetting": "preserve"}, "settings_version": 2}
+
+        def upsert_conversation_settings(self, *_args: Any, **_kwargs: Any) -> bool:
+            raise AssertionError("caller-controlled internal state must not reach upsert")
+
+    with pytest.raises(InputError, match="reserved|server-owned"):
+        audio_streaming_module._persist_audio_chat_settings(
+            _SettingsDB(),
+            "caller-internal-audio",
+            {"roleplayBehaviorV1": {"caller": "replacement"}},
+            conversation_created=False,
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("conversation_created", [True, False], ids=["create", "merge"])
+@pytest.mark.parametrize(
+    ("metadata", "message"),
+    [
+        ({"payload": "x" * 200_001}, "bytes"),
+        (_nested_audio_metadata(40), "depth"),
+        ({"score": float("nan")}, "finite"),
+    ],
+    ids=["oversize", "depth", "nonfinite"],
+)
+def test_audio_settings_writer_rejects_invalid_final_object_before_upsert(
+    conversation_created: bool,
+    metadata: dict[str, Any],
+    message: str,
+) -> None:
+    class _SettingsDB:
+        def __init__(self) -> None:
+            self.current = {
+                "settings": {"userSetting": "unchanged"},
+                "settings_version": 4,
+            }
+            self.upsert_calls: list[tuple[dict[str, Any], int | None]] = []
+
+        def get_conversation_settings(self, _conversation_id: str) -> dict[str, Any]:
+            return {
+                "settings": dict(self.current["settings"]),
+                "settings_version": self.current["settings_version"],
+            }
+
+        def get_conversation_by_id(self, conversation_id: str) -> dict[str, Any]:
+            return _owned_audio_test_conversation(conversation_id)
+
+        def upsert_conversation_settings(
+            self,
+            _conversation_id: str,
+            settings: dict[str, Any],
+            *,
+            expected_settings_version: int | None = None,
+        ) -> bool:
+            self.upsert_calls.append((dict(settings), expected_settings_version))
+            self.current = {
+                "settings": dict(settings),
+                "settings_version": self.current["settings_version"] + 1,
+            }
+            return True
+
+    db = _SettingsDB()
+    before = dict(db.current)
+    settings_payload = {
+        "audio_chat_ws": {
+            "session_id": "audio-validation",
+            "metadata": metadata,
+        }
+    }
+
+    with pytest.raises(InputError, match=message):
+        audio_streaming_module._persist_audio_chat_settings(
+            db,
+            "audio-validation",
+            settings_payload,
+            conversation_created=conversation_created,
+        )
+
+    assert db.upsert_calls == []
+    assert db.current == before
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_audio_chat_ws_existing_session_conflict_does_not_blind_replace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
+    ws = DummyWebSocket(
+        [
+            {
+                "type": "config",
+                "session_id": "resume-chat-conflict",
+                "stt": {"model": "parakeet"},
+                "llm": {"provider": "stub", "model": "stub-model"},
+                "tts": {"voice": "af_heart", "format": "pcm"},
+                "metadata": {"persist_history": True},
+            },
+            {"type": "audio", "data": audio_payload},
+            {"type": "commit"},
+            {"type": "stop"},
+        ]
+    )
+
+    existing_settings, existing_resume_state = _valid_roleplay_settings_with_blob(16)
+    existing_settings["userSetting"] = "winner"
+    existing_resume_state["settings"] = existing_settings
+    existing_resume_state["settings_version"] = 9
+
+    class _ConflictingChatDB:
+        client_id = "1"
+
+        def __init__(self) -> None:
+            self.blind_writes = 0
+            self.cas_versions: list[int | None] = []
+
+        def add_message(self, _msg_data: dict[str, Any]) -> str:
+            return "msg-id"
+
+        def get_conversation_settings(self, _conversation_id: str) -> dict[str, Any]:
+            return {
+                "settings": existing_settings,
+                "settings_version": 9,
+            }
+
+        def transaction(self):
+            return nullcontext(object())
+
+        def get_roleplay_resume_state(
+            self,
+            conversation_id: str,
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            return {
+                **existing_resume_state,
+                "conversation": _owned_audio_test_conversation(conversation_id),
+            }
+
+        def get_conversation_by_id(self, conversation_id: str) -> dict[str, Any]:
+            return _owned_audio_test_conversation(conversation_id)
+
+        def upsert_conversation_settings(
+            self,
+            _conversation_id: str,
+            _settings: dict[str, Any],
+            *,
+            conn=None,
+            expected_settings_version: int | None = None,
+        ) -> bool:
+            self.cas_versions.append(expected_settings_version)
+            if expected_settings_version is None:
+                self.blind_writes += 1
+            raise ConflictError("concurrent settings winner")
+
+    persisted_db = _ConflictingChatDB()
+
+    async def _get_tts_service():
+        return _DummyTTSService([b"tts"])
+
+    async def _get_db_for_user_id(_user_id: int, client_id: Optional[str] = None):  # noqa: ARG001
+        return persisted_db
+
+    async def _character_context(_db: Any, _character_id: Any, _loop: Any):
+        return {"id": 42, "name": "Helpful AI Assistant"}, 42
+
+    async def _conversation_context(*_args: Any, **_kwargs: Any):
+        return "resume-chat-conflict", False
+
+    monkeypatch.setattr(audio, "get_tts_service", _get_tts_service)
+    monkeypatch.setattr(audio, "get_chacha_db_for_user_id", _get_db_for_user_id, raising=False)
+    monkeypatch.setattr(audio, "get_or_create_character_context", _character_context, raising=False)
+    monkeypatch.setattr(audio, "get_or_create_conversation", _conversation_context, raising=False)
+
+    await audio.websocket_audio_chat_stream(ws, token=None)
+
+    assert persisted_db.cas_versions == [9]
+    assert persisted_db.blind_writes == 0
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_audio_chat_ws_existing_resumable_session_rejects_credential_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
+    ws = DummyWebSocket(
+        [
+            {
+                "type": "config",
+                "session_id": "resume-chat-secret",
+                "stt": {"model": "parakeet"},
+                "llm": {"provider": "stub", "model": "stub-model"},
+                "tts": {"voice": "af_heart", "format": "pcm"},
+                "metadata": {
+                    "persist_history": True,
+                    "nested": {"apiKey": "must-not-persist"},
+                },
+            },
+            {"type": "audio", "data": audio_payload},
+            {"type": "commit"},
+            {"type": "stop"},
+        ]
+    )
+
+    existing_settings, existing_resume_state = _valid_roleplay_settings_with_blob(16)
+    existing_resume_state["settings_version"] = 4
+
+    class _ExistingResumableDB:
+        client_id = "1"
+
+        def __init__(self) -> None:
+            self.upsert_calls: list[dict[str, Any]] = []
+
+        def add_message(self, _msg_data: dict[str, Any]) -> str:
+            return "msg-id"
+
+        def get_conversation_settings(self, _conversation_id: str) -> dict[str, Any]:
+            return {
+                "settings": existing_settings,
+                "settings_version": 4,
+            }
+
+        def transaction(self):
+            return nullcontext(object())
+
+        def get_roleplay_resume_state(
+            self,
+            conversation_id: str,
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            return {
+                **existing_resume_state,
+                "conversation": _owned_audio_test_conversation(conversation_id),
+            }
+
+        def get_conversation_by_id(self, conversation_id: str) -> dict[str, Any]:
+            return _owned_audio_test_conversation(conversation_id)
+
+        def upsert_conversation_settings(
+            self,
+            _conversation_id: str,
+            settings: dict[str, Any],
+            *,
+            conn=None,
+            expected_settings_version: int | None = None,
+        ) -> bool:
+            self.upsert_calls.append(dict(settings))
+            return True
+
+    persisted_db = _ExistingResumableDB()
+
+    async def _get_tts_service():
+        return _DummyTTSService([b"tts"])
+
+    async def _get_db_for_user_id(
+        _user_id: int,
+        client_id: Optional[str] = None,
+    ):  # noqa: ARG001
+        return persisted_db
+
+    async def _character_context(_db: Any, _character_id: Any, _loop: Any):
+        return {"id": 42, "name": "Helpful AI Assistant"}, 42
+
+    async def _conversation_context(*_args: Any, **_kwargs: Any):
+        return "resume-chat-secret", False
+
+    monkeypatch.setattr(audio, "get_tts_service", _get_tts_service)
+    monkeypatch.setattr(
+        audio,
+        "get_chacha_db_for_user_id",
+        _get_db_for_user_id,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        audio,
+        "get_or_create_character_context",
+        _character_context,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        audio,
+        "get_or_create_conversation",
+        _conversation_context,
+        raising=False,
+    )
+
+    await audio.websocket_audio_chat_stream(ws, token=None)
+
+    assert persisted_db.upsert_calls == []
 
 
 @pytest.mark.integration

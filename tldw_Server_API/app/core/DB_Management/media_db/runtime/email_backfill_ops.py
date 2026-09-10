@@ -13,7 +13,6 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import 
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
 
-
 _MEDIA_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
 
 
@@ -80,6 +79,7 @@ def run_email_legacy_backfill_batch(
                 "EXISTS(SELECT 1 FROM email_messages em WHERE em.media_id = m.id) AS already_backfilled "
                 "FROM Media m "
                 "WHERE m.deleted = 0 "
+                "AND m.system_operation_id IS NULL "
                 "AND lower(COALESCE(m.type, '')) = 'email' "
                 "AND m.id > ? "
                 "ORDER BY m.id ASC "
@@ -221,6 +221,7 @@ def run_email_legacy_backfill_batch(
             (
                 "SELECT id FROM Media "
                 "WHERE deleted = 0 "
+                "AND system_operation_id IS NULL "
                 "AND lower(COALESCE(type, '')) = 'email' "
                 "AND id > ? "
                 "LIMIT 1"

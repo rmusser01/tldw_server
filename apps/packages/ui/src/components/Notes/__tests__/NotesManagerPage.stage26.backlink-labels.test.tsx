@@ -355,7 +355,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     fireEvent.click(await screen.findByText(/open linked conversation/i))
 
     await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith("/")
+      expect(mockNavigate).toHaveBeenCalledWith("/chat")
     })
     expect(openSpy).not.toHaveBeenCalled()
     openSpy.mockRestore()

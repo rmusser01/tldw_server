@@ -2032,8 +2032,16 @@ export const workspaceApiMethods = {
     return await bgRequest<any>({ path: "/api/v1/resource-governor/policy", method: "GET" })
   },
 
-  async getGovernorCoverage(): Promise<any> {
-    return await bgRequest<any>({ path: "/api/v1/diag/coverage", method: "GET" })
+  async getGovernorCoverage(params?: { limit?: number }): Promise<any> {
+    const limit = params?.limit
+    const query =
+      typeof limit === "number" && Number.isFinite(limit)
+        ? `?limit=${Math.max(1, Math.floor(limit))}`
+        : ""
+    return await bgRequest<any>({
+      path: `/api/v1/diag/coverage${query}`,
+      method: "GET"
+    })
   },
 
   async listAdminRateLimits(): Promise<any[]> {

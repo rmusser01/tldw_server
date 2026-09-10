@@ -2,9 +2,43 @@ from __future__ import annotations
 
 """Pydantic schemas for the Sync v2 M1 protocol API."""
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictInt,
+    StrictStr,
+    field_validator,
+    model_validator,
+)
+
+from tldw_Server_API.app.core.exceptions import NoteAttachmentPolicyError
+from tldw_Server_API.app.core.Notes.attachment_policy import (
+    canonicalize_note_attachment_file_name,
+)
+from tldw_Server_API.app.core.Sync.v2.models import (
+    NOTES_LINK_DOMAINS,
+    NOTES_LINK_SYNC_OPERATIONS,
+    NOTES_ORGANIZATION_DOMAINS,
+    NOTES_ORGANIZATION_SYNC_OPERATIONS,
+    normalize_supported_adapter_versions,
+    normalize_sync_v2_requested_domains,
+    sync_v2_dataset_writable_adapter_versions,
+    sync_v2_domain_schemas,
+    sync_v2_server_supported_adapter_versions,
+    validate_notes_note_upsert_payload,
+)
+from tldw_Server_API.app.core.Sync.v2.personal_context_ongoing_contract import (
+    PersonalContextActivationReceipt,
+    PersonalContextAuthorityMetadata,
+    PersonalContextExchangeProof,
+    PersonalContextPurgeReceipt,
+    PersonalContextRelayContinuation,
+    validate_client_personal_context_metadata,
+)
 
 SyncDomain = Literal[
     "notes.note",
@@ -17,6 +51,20 @@ SyncDomain = Literal[
     "media.item",
     "media.keyword",
     "media.keyword_link",
+    "notes.keyword",
+    "notes.keyword_link",
+    "notes.keyword_collection",
+    "notes.keyword_collection_link",
+    "notes.folder",
+    "notes.folder_link",
+    "notes.link",
+    "notes.task",
+    "notes.task_activity",
+    "personal_context.manifest",
+    "personal_context.scope",
+    "personal_context.record",
+    "personal_context.proposal",
+    "personal_context.purge",
 ]
 SyncOperation = Literal["upsert", "append", "tombstone"]
 DatasetScopeType = Literal["personal", "workspace"]
@@ -30,9 +78,10 @@ SyncKeyWrappedFor = Literal["server", "passphrase", "device", "recovery"]
 SyncKeyRewrapStatus = Literal["not_required", "pending", "complete", "failed", "blocked"]
 ConflictStatus = Literal["unresolved", "resolved", "dismissed"]
 ConflictResolutionAction = Literal["overwrite", "duplicate_rename", "skip"]
-SyncApplyStatus = Literal["pending", "applied", "failed", "conflict"]
+SyncApplyStatus = Literal["pending", "applied", "failed", "conflict", "superseded"]
 SyncProfileBootstrapMode = Literal["server_frontend", "offline_sync"]
 SyncRestorePreviewAction = Literal["apply", "append", "delete", "hide", "noop"]
+SyncRestoreOrderedActionKind = Literal["apply", "tombstone", "noop", "conflict"]
 SyncDeviceStatus = Literal["pending_authorization", "active", "paused", "revoked"]
 SyncDeviceAuthorizationStatus = Literal["pending", "approved", "rejected"]
 SyncBackgroundLeaseStatus = Literal["acquired", "refreshed", "held_by_other"]
@@ -94,18 +143,43 @@ MEDIA_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     "media.keyword": ["upsert", "tombstone"],
     "media.keyword_link": ["upsert", "tombstone"],
 }
+PERSONAL_CONTEXT_SYNC_DOMAINS: tuple[SyncDomain, ...] = (
+    "personal_context.manifest",
+    "personal_context.scope",
+    "personal_context.record",
+    "personal_context.proposal",
+    "personal_context.purge",
+)
+PERSONAL_CONTEXT_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
+    "personal_context.manifest": ["upsert"],
+    "personal_context.scope": ["upsert"],
+    "personal_context.record": ["upsert", "tombstone"],
+    "personal_context.proposal": ["upsert"],
+    "personal_context.purge": ["tombstone"],
+}
 SYNC_V2_SUPPORTED_DOMAINS: list[SyncDomain] = (
     list(M1_SYNC_DOMAINS)
     + list(WORKSPACE_SYNC_DOMAINS)
     + list(SOURCE_CACHE_SYNC_DOMAINS)
     + list(MEDIA_SYNC_DOMAINS)
+    + list(NOTES_ORGANIZATION_DOMAINS)
+    + list(NOTES_LINK_DOMAINS)
+    + list(PERSONAL_CONTEXT_SYNC_DOMAINS)
 )
 SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     **M1_SYNC_OPERATIONS,
     **WORKSPACE_SYNC_OPERATIONS,
     **SOURCE_CACHE_SYNC_OPERATIONS,
     **MEDIA_SYNC_OPERATIONS,
+    **NOTES_ORGANIZATION_SYNC_OPERATIONS,
+    **NOTES_LINK_SYNC_OPERATIONS,
+    **PERSONAL_CONTEXT_SYNC_OPERATIONS,
 }
+SYNC_V2_KNOWN_DOMAINS: tuple[SyncDomain, ...] = (
+    *SYNC_V2_SUPPORTED_DOMAINS,
+    "notes.task",
+    "notes.task_activity",
+)
 DEFAULT_M1_ENCRYPTION_POLICY: EncryptionPolicy = "server_trusted_v1"
 SYNC_V2_ENCRYPTION_POLICIES: list[EncryptionPolicy] = [
     "server_trusted_v1",
@@ -256,6 +330,77 @@ def _with_transition_aliases(data: Any) -> Any:
     return normalized
 
 
+class PersonalContextSyncCapabilitiesResponse(BaseModel):
+    """Typed readiness and bounded transport contract for Personal Context."""
+
+    available: bool = False
+    blockers: list[str] = Field(
+        default_factory=lambda: ["personal_context_profile_key_unavailable"],
+        max_length=8,
+    )
+    ongoing_sync_version: Literal[0, 1] = 0
+    ongoing_sync_blockers: list[str] = Field(default_factory=list, max_length=8)
+    activation_epoch: str | None = Field(None, min_length=16, max_length=256)
+    continuity_token: str | None = Field(None, min_length=16, max_length=256)
+    authorization_policy: Literal["server_trusted_v1"] = "server_trusted_v1"
+    min_schema_version: Literal[1] = 1
+    max_schema_version: Literal[1] = 1
+    integrity_algorithm: Literal["hmac-sha256-v1"] = "hmac-sha256-v1"
+    integrity_key_distribution: Literal["wrapped-bootstrap-v1"] = "wrapped-bootstrap-v1"
+    privacy_cleanup_ack: Literal["personal-context-cleanup-v1"] = "personal-context-cleanup-v1"
+    purge_generation: Literal["personal-context-purge-v1"] = "personal-context-purge-v1"
+    max_record_bytes: int = Field(16_384, ge=16_384)
+    max_search_results: int = Field(20, ge=20)
+    max_proposals_per_turn: int = Field(5, ge=5)
+    max_proposals_per_session: int = Field(25, ge=25)
+    max_unresolved_proposals: int = Field(200, ge=200)
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "anyOf": [
+                {"properties": {
+                    "activation_epoch": {"type": "null"},
+                    "continuity_token": {"type": "null"},
+                }},
+                {
+                    "required": ["activation_epoch", "continuity_token"],
+                    "properties": {
+                        "activation_epoch": {"type": "string"},
+                        "continuity_token": {"type": "string"},
+                    },
+                },
+            ],
+            "if": {
+                "required": ["ongoing_sync_version"],
+                "properties": {"ongoing_sync_version": {"const": 1}},
+            },
+            "then": {
+                "required": ["activation_epoch", "continuity_token"],
+                "properties": {
+                    "activation_epoch": {"type": "string"},
+                    "continuity_token": {"type": "string"},
+                    "ongoing_sync_blockers": {"maxItems": 0},
+                },
+            },
+        },
+    )
+
+    @model_validator(mode="after")
+    def validate_ongoing_state(self) -> PersonalContextSyncCapabilitiesResponse:
+        """Keep ongoing synchronization unavailable until all readiness is present."""
+
+        if (self.activation_epoch is None) != (self.continuity_token is None):
+            raise ValueError("activation epoch and continuity token must appear together")
+        if self.ongoing_sync_version == 1 and (
+            self.ongoing_sync_blockers
+            or self.activation_epoch is None
+            or self.continuity_token is None
+        ):
+            raise ValueError("ongoing sync version 1 requires an unblocked continuity pair")
+        return self
+
+
 class SyncCapabilitiesResponse(BaseModel):
     """Server-supported Sync v2 M1 protocol capabilities."""
 
@@ -268,8 +413,20 @@ class SyncCapabilitiesResponse(BaseModel):
     operations: dict[SyncDomain, list[SyncOperation]] = Field(
         default_factory=lambda: {domain: list(operations) for domain, operations in SYNC_V2_SUPPORTED_OPERATIONS.items()}
     )
+    domain_schemas: dict[SyncDomain, dict[str, Any]] = Field(
+        default_factory=sync_v2_domain_schemas
+    )
+    supported_adapter_versions: dict[SyncDomain, list[int]] = Field(
+        default_factory=sync_v2_server_supported_adapter_versions
+    )
+    writable_adapter_versions: dict[SyncDomain, list[int]] = Field(
+        default_factory=sync_v2_dataset_writable_adapter_versions
+    )
     encryption: dict[str, Any] = Field(default_factory=_default_encryption)
     encryption_policies: list[EncryptionPolicy] = Field(default_factory=lambda: [DEFAULT_M1_ENCRYPTION_POLICY])
+    personal_context: PersonalContextSyncCapabilitiesResponse = Field(
+        default_factory=PersonalContextSyncCapabilitiesResponse
+    )
     blob_transfer: dict[str, Any] = Field(default_factory=_default_blob_transfer)
     quota: dict[str, Any] = Field(default_factory=dict)
     max_batch_size: int = Field(100, ge=1)
@@ -294,7 +451,7 @@ class SyncCapabilitiesResponse(BaseModel):
     def _default_m1_domains(cls, value: Any) -> list[SyncDomain]:
         if value in (None, []):
             return list(SYNC_V2_SUPPORTED_DOMAINS)
-        if isinstance(value, list) and all(domain in SYNC_V2_SUPPORTED_DOMAINS for domain in value):
+        if isinstance(value, list) and all(domain in SYNC_V2_KNOWN_DOMAINS for domain in value):
             return value
         return list(SYNC_V2_SUPPORTED_DOMAINS)
 
@@ -309,10 +466,46 @@ class SyncDeviceRegisterRequest(BaseModel):
     client_type: str = Field("chatbook", description="Client family, such as chatbook or webui.")
     client_version: str | None = None
     supported_domains: list[SyncDomain] = Field(default_factory=lambda: list(M1_SYNC_DOMAINS))
+    supported_adapter_versions: dict[str, list[StrictInt]] | None = None
     capabilities: dict[str, Any] = Field(
         default_factory=dict,
         validation_alias=AliasChoices("capabilities", "client_capabilities"),
     )
+
+    @model_validator(mode="after")
+    def _normalize_supported_adapter_versions(self) -> SyncDeviceRegisterRequest:
+        requested_domains = normalize_sync_v2_requested_domains(
+            self.supported_domains
+        )
+        legacy_requested = self.capabilities.get("requested_domains")
+        if legacy_requested is not None:
+            normalized_legacy_requested = normalize_sync_v2_requested_domains(
+                legacy_requested
+            )
+            if (
+                "supported_domains" in self.model_fields_set
+                and normalized_legacy_requested != requested_domains
+            ):
+                raise ValueError(
+                    "capabilities.requested_domains must match supported_domains"
+                )
+            if "supported_domains" not in self.model_fields_set:
+                requested_domains = normalized_legacy_requested
+        self.supported_domains = requested_domains
+        supplied = self.supported_adapter_versions
+        if supplied is None:
+            supplied = self.capabilities.get("supported_adapter_versions")
+        normalized = normalize_supported_adapter_versions(
+            supplied,
+            requested_domains=requested_domains,
+        )
+        self.supported_adapter_versions = normalized
+        self.capabilities = {
+            **self.capabilities,
+            "requested_domains": requested_domains,
+            "supported_adapter_versions": normalized,
+        }
+        return self
 
 
 class SyncDeviceRegisterResponse(BaseModel):
@@ -400,6 +593,7 @@ class SyncDeviceDomainAckRequest(BaseModel):
     domain: SyncDomain
     through_server_sequence: int = Field(..., ge=0)
     applied_at: str
+    adapter_version: int = Field(1, ge=1)
     idempotency_key: str | None = None
 
 
@@ -417,6 +611,20 @@ class SyncDeviceBlobAckRequest(BaseModel):
         return _validate_sha256_hash(value)
 
 
+class SyncDeviceBlobIdAckRequest(BaseModel):
+    """Immutable blob-ID verification evidence for adapter-v2 flows."""
+
+    blob_id: str = Field(..., min_length=1)
+    payload_hash: str
+    verified_at: str
+    idempotency_key: str | None = None
+
+    @field_validator("payload_hash")
+    @classmethod
+    def _validate_payload_hash(cls, value: Any) -> str:
+        return _validate_sha256_hash(value)
+
+
 class SyncDeviceAcknowledgmentsRequest(BaseModel):
     """Batch of domain/blob acknowledgments for one dataset/device."""
 
@@ -424,6 +632,10 @@ class SyncDeviceAcknowledgmentsRequest(BaseModel):
     device_id: str = Field(..., min_length=1)
     domain_acks: list[SyncDeviceDomainAckRequest] = Field(default_factory=list)
     blob_acks: list[SyncDeviceBlobAckRequest] = Field(default_factory=list)
+    blob_id_acks: list[SyncDeviceBlobIdAckRequest] = Field(
+        default_factory=list,
+        max_length=800,
+    )
 
 
 class SyncDeviceDomainAckResponse(BaseModel):
@@ -435,6 +647,7 @@ class SyncDeviceDomainAckResponse(BaseModel):
     through_server_sequence: int = Field(..., ge=0)
     applied_at: str
     updated_at: str
+    adapter_version: int = Field(1, ge=1)
     idempotency_key: str | None = None
 
 
@@ -450,6 +663,18 @@ class SyncDeviceBlobAckResponse(BaseModel):
     idempotency_key: str | None = None
 
 
+class SyncDeviceBlobIdAckResponse(BaseModel):
+    """Stored immutable blob-ID verification evidence."""
+
+    dataset_id: str
+    device_id: str
+    blob_id: str
+    payload_hash: str
+    verified_at: str
+    updated_at: str
+    idempotency_key: str | None = None
+
+
 class SyncDeviceAcknowledgmentsResponse(BaseModel):
     """Stored acknowledgment summary for one dataset/device pair."""
 
@@ -457,6 +682,8 @@ class SyncDeviceAcknowledgmentsResponse(BaseModel):
     device_id: str
     domain_acks: dict[SyncDomain, SyncDeviceDomainAckResponse] = Field(default_factory=dict)
     blob_acks: list[SyncDeviceBlobAckResponse] = Field(default_factory=list)
+    version_acks: list[SyncDeviceDomainAckResponse] = Field(default_factory=list)
+    blob_id_acks: list[SyncDeviceBlobIdAckResponse] = Field(default_factory=list)
 
 
 class SyncBackgroundPolicyPatchRequest(BaseModel):
@@ -542,7 +769,12 @@ class SyncBackgroundStatusResponse(BaseModel):
     server_time: str | None = None
 
 
-SyncRetentionCandidateType = Literal["envelope_compaction", "tombstone_prune", "blob_gc"]
+SyncRetentionCandidateType = Literal[
+    "envelope_compaction",
+    "tombstone_prune",
+    "binding_release",
+    "blob_gc",
+]
 
 
 class SyncRetentionDryRunRequest(BaseModel):
@@ -568,6 +800,7 @@ class SyncRetentionCandidateResponse(BaseModel):
     server_sequence: int | None = Field(None, ge=1)
     blob_id: str | None = None
     attachment_id: str | None = None
+    attachment_revision: int | None = Field(None, ge=1)
     payload_hash: str | None = None
     size_bytes: int | None = Field(None, ge=0)
     blockers: list[str] = Field(default_factory=list)
@@ -602,6 +835,7 @@ class SyncRetentionCompactRequest(BaseModel):
     confirm: bool = False
     apply_envelope_compaction: bool = True
     apply_tombstone_prune: bool = True
+    apply_binding_release: bool = True
     apply_blob_gc: bool = True
     minimum_envelope_age_seconds: int = Field(0, ge=0)
     minimum_tombstone_age_seconds: int = Field(0, ge=0)
@@ -624,6 +858,7 @@ class SyncRetentionCompactResponse(BaseModel):
     blockers: list[str] = Field(default_factory=list)
     blocker_counts: dict[str, int] = Field(default_factory=dict)
     domain_compactions: list[dict[str, Any]] = Field(default_factory=list)
+    binding_releases: list[dict[str, Any]] = Field(default_factory=list)
     blob_gc: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -687,6 +922,65 @@ class SyncDiagnosticsRetentionSummaryResponse(BaseModel):
     blocker_counts: dict[str, int] = Field(default_factory=dict)
 
 
+class SyncRecoveryActionDescriptorResponse(BaseModel):
+    """One explicit recovery hint; returning it never invokes the action."""
+
+    action: Literal[
+        "resume_upload",
+        "retry_upload",
+        "retry_verify",
+        "repair_projection",
+        "resolve_conflict",
+        "restore_attachment",
+        "restore_note",
+        "release_quarantine",
+        "bootstrap_resume",
+        "gc_retry",
+        "wait_for_retention",
+    ]
+    reason_code: str
+    target_type: Literal[
+        "dataset", "attachment", "blob", "upload", "conflict", "envelope"
+    ] = "dataset"
+    target_id: str | None = None
+    retryable: bool = True
+    requires_confirmation: bool = False
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SyncAttachmentDiagnosticSampleResponse(BaseModel):
+    """One bounded owner-authorized attachment lifecycle sample."""
+
+    category: str
+    code: str
+    attachment_id: str | None = None
+    blob_id: str | None = None
+    server_cursor: int | None = Field(None, ge=1)
+    recovery_actions: list[SyncRecoveryActionDescriptorResponse] = Field(
+        default_factory=list,
+        max_length=4,
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SyncAttachmentDiagnosticsResponse(BaseModel):
+    """Bounded read-only Notes attachment lifecycle diagnostics."""
+
+    counts: dict[str, int] = Field(default_factory=dict)
+    samples: list[SyncAttachmentDiagnosticSampleResponse] = Field(
+        default_factory=list,
+        max_length=500,
+    )
+    recovery_actions: list[SyncRecoveryActionDescriptorResponse] = Field(
+        default_factory=list,
+        max_length=32,
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class SyncDiagnosticsResponse(BaseModel):
     """Redacted Sync v2 diagnostics response."""
 
@@ -702,6 +996,9 @@ class SyncDiagnosticsResponse(BaseModel):
     )
     retention: SyncDiagnosticsRetentionSummaryResponse = Field(
         default_factory=SyncDiagnosticsRetentionSummaryResponse
+    )
+    attachment_lifecycle: SyncAttachmentDiagnosticsResponse = Field(
+        default_factory=SyncAttachmentDiagnosticsResponse
     )
 
 
@@ -744,6 +1041,51 @@ class SyncProfileDeviceStatusResponse(BaseModel):
     client_version: str | None = None
 
 
+class SyncNotesOrganizationStatusResponse(BaseModel):
+    """Safe Notes organization bootstrap progress exposed to clients."""
+
+    state: Literal["initializing", "ready", "failed"]
+    captured_count: int = Field(0, ge=0)
+    expected_count: int = Field(0, ge=0)
+    error_code: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SyncNotesAttachmentCleanupSampleResponse(BaseModel):
+    """One bounded public-safe legacy cleanup candidate."""
+
+    source_key_hash: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    attachment_id: str
+    state: Literal["captured"] = "captured"
+    blocker_code: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SyncNotesAttachmentBootstrapDiagnosticsResponse(BaseModel):
+    """Read-only bounded legacy attachment bootstrap diagnostics."""
+
+    state: Literal["not_started", "initializing", "ready", "failed"]
+    captured_count: int = Field(0, ge=0)
+    expected_count: int = Field(0, ge=0)
+    cursor: str | None = Field(None, pattern=r"^sha256:[0-9a-f]{64}$")
+    error_code: str | None = None
+    dry_run: bool = False
+    source_candidate_count: int | None = Field(None, ge=0, le=1_000)
+    source_candidate_count_is_lower_bound: bool = False
+    cleanup_candidates: list[SyncNotesAttachmentCleanupSampleResponse] = Field(
+        default_factory=list,
+        max_length=100,
+    )
+    recovery_actions: list[SyncRecoveryActionDescriptorResponse] = Field(
+        default_factory=list,
+        max_length=4,
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class SyncProfileDatasetStatusResponse(BaseModel):
     """Default personal dataset metadata in profile responses."""
 
@@ -757,6 +1099,9 @@ class SyncProfileDatasetStatusResponse(BaseModel):
     encryption_policy: EncryptionPolicy = DEFAULT_M1_ENCRYPTION_POLICY
     server_frontend_mutation_enabled: bool = True
     server_frontend_mutation_blockers: list[str] = Field(default_factory=list)
+    notes_organization: SyncNotesOrganizationStatusResponse | None = None
+    notes_link: SyncNotesOrganizationStatusResponse | None = None
+    notes_attachment: SyncNotesOrganizationStatusResponse | None = None
 
 
 class SyncProfileDomainStatusResponse(BaseModel):
@@ -802,12 +1147,281 @@ class SyncProfileBootstrapRequest(BaseModel):
     client_profile_id: str | None = None
     client_instance: dict[str, Any] = Field(default_factory=dict)
     requested_domains: list[SyncDomain] = Field(default_factory=lambda: list(M1_SYNC_DOMAINS))
+    supported_adapter_versions: dict[str, list[StrictInt]] | None = None
+
+    @model_validator(mode="after")
+    def _normalize_supported_adapter_versions(self) -> SyncProfileBootstrapRequest:
+        requested_domains = normalize_sync_v2_requested_domains(
+            self.requested_domains
+        )
+        self.requested_domains = requested_domains
+        supplied = self.supported_adapter_versions
+        if supplied is None:
+            supplied = self.client_instance.get("supported_adapter_versions")
+        normalized = normalize_supported_adapter_versions(
+            supplied,
+            requested_domains=requested_domains,
+        )
+        self.supported_adapter_versions = normalized
+        self.client_instance = {
+            **self.client_instance,
+            "supported_adapter_versions": normalized,
+        }
+        return self
 
 
 class SyncProfileBootstrapResponse(SyncProfileResponse):
     """Response from explicit profile bootstrap."""
 
     created: bool = False
+
+
+_PersonalContextAttentionInteger = Annotated[
+    int,
+    Field(strict=True, ge=0, le=2**63 - 1),
+]
+
+
+def _valid_personal_context_quota_name(name: str) -> bool:
+    """Return whether one quota name is safe for the public contract."""
+
+    return (
+        1 <= len(name) <= 64
+        and name[0].isalpha()
+        and name[0].isascii()
+        and all(
+            character.isascii()
+            and (character.islower() or character.isdigit() or character == "_")
+            for character in name
+        )
+    )
+
+
+class SyncPersonalContextBootstrapRequest(BaseModel):
+    """Authenticated registered-device request for canonical Personal Context."""
+
+    device_id: str
+    required_schema_version: int | None = Field(None, ge=1)
+    required_quotas: dict[StrictStr, _PersonalContextAttentionInteger] = Field(
+        default_factory=dict,
+        max_length=32,
+    )
+    expected_purge_generation: int | None = Field(None, ge=0)
+    ongoing_sync_version: Literal[1] | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def _validate_required_quota_names(
+        self,
+    ) -> SyncPersonalContextBootstrapRequest:
+        if not all(
+            _valid_personal_context_quota_name(name)
+            for name in self.required_quotas
+        ):
+            raise ValueError("quota name is invalid")
+        return self
+
+
+class SyncPersonalContextSchemaAttention(BaseModel):
+    """Exact content-free schema bounds blocking bootstrap review."""
+
+    kind: Literal["schema_incompatible"]
+    required_schema_version: Annotated[int, Field(strict=True, ge=1)]
+    server_min_schema_version: Annotated[int, Field(strict=True, ge=1)]
+    server_max_schema_version: Annotated[int, Field(strict=True, ge=1)]
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    @model_validator(mode="after")
+    def _validate_incompatible_range(self) -> SyncPersonalContextSchemaAttention:
+        if self.server_min_schema_version > self.server_max_schema_version:
+            raise ValueError("server schema range is invalid")
+        if (
+            self.server_min_schema_version
+            <= self.required_schema_version
+            <= self.server_max_schema_version
+        ):
+            raise ValueError("required schema version is compatible")
+        return self
+
+
+class SyncPersonalContextQuotaAttention(BaseModel):
+    """Exact content-free quota deficits blocking bootstrap review."""
+
+    kind: Literal["quota_incompatible"]
+    required_quotas: dict[StrictStr, _PersonalContextAttentionInteger] = Field(
+        ..., min_length=1, max_length=32
+    )
+    available_quotas: dict[StrictStr, _PersonalContextAttentionInteger] = Field(
+        ..., min_length=1, max_length=32
+    )
+    insufficient_quotas: list[StrictStr] = Field(
+        ..., min_length=1, max_length=32
+    )
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    @model_validator(mode="after")
+    def _validate_exact_shortfall(self) -> SyncPersonalContextQuotaAttention:
+        all_names = set(self.required_quotas) | set(self.available_quotas)
+        if not all(_valid_personal_context_quota_name(name) for name in all_names):
+            raise ValueError("quota name is invalid")
+        if not set(self.required_quotas).issubset(self.available_quotas):
+            raise ValueError("available quotas do not cover required quotas")
+        expected = {
+            name
+            for name, required in self.required_quotas.items()
+            if required > self.available_quotas[name]
+        }
+        actual = set(self.insufficient_quotas)
+        if len(actual) != len(self.insufficient_quotas) or actual != expected:
+            raise ValueError("insufficient quotas do not match the quota values")
+        return self
+
+
+class SyncPersonalContextPurgeAttention(BaseModel):
+    """Exact content-free purge generations blocking bootstrap review."""
+
+    kind: Literal["purge_generation_mismatch"]
+    expected_purge_generation: _PersonalContextAttentionInteger
+    current_purge_generation: _PersonalContextAttentionInteger
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    @model_validator(mode="after")
+    def _validate_mismatch(self) -> SyncPersonalContextPurgeAttention:
+        if self.expected_purge_generation == self.current_purge_generation:
+            raise ValueError("purge generations match")
+        return self
+
+
+class SyncPersonalContextBootstrapErrorDetail(BaseModel):
+    """Stable bootstrap failure with actionable content-free review facts."""
+
+    error_code: StrictStr = Field(..., min_length=1, max_length=128)
+    message: StrictStr = Field(..., min_length=1, max_length=512)
+    attention: (
+        SyncPersonalContextSchemaAttention
+        | SyncPersonalContextQuotaAttention
+        | SyncPersonalContextPurgeAttention
+        | None
+    ) = Field(None, discriminator="kind")
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    @model_validator(mode="after")
+    def _validate_attention_error_code(
+        self,
+    ) -> SyncPersonalContextBootstrapErrorDetail:
+        if self.attention is None:
+            return self
+        expected_codes = {
+            "schema_incompatible": "personal_context_schema_incompatible",
+            "quota_incompatible": "personal_context_quota_incompatible",
+            "purge_generation_mismatch": "personal_context_purge_generation_stale",
+        }
+        if self.error_code != expected_codes[self.attention.kind]:
+            raise ValueError("attention kind does not match error code")
+        return self
+
+
+class SyncPersonalContextBootstrapErrorResponse(BaseModel):
+    """FastAPI error envelope for Personal Context bootstrap."""
+
+    detail: SyncPersonalContextBootstrapErrorDetail
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class SyncPersonalContextBootstrapResponse(BaseModel):
+    """Canonical bootstrap snapshot with device-wrapped integrity key material."""
+
+    dataset_id: str
+    authority_id: str
+    manifest: dict[str, Any]
+    scopes: list[dict[str, Any]] = Field(default_factory=list)
+    records: list[dict[str, Any]] = Field(default_factory=list)
+    proposals: list[dict[str, Any]] = Field(default_factory=list)
+    purge_generation: int
+    schema_version: int
+    quotas: dict[StrictStr, _PersonalContextAttentionInteger] = Field(
+        ..., min_length=1, max_length=32
+    )
+    cursor: str
+    sync_transport_cursor: str
+    integrity_key_id: str
+    key_record_id: str
+    wrapped_key_blob: str
+    activation: PersonalContextActivationReceipt | None = None
+    personal_context_exchange: PersonalContextExchangeProof | None = None
+
+    @field_validator("quotas")
+    @classmethod
+    def _validate_quota_names(
+        cls,
+        quotas: dict[str, int],
+    ) -> dict[str, int]:
+        if not all(_valid_personal_context_quota_name(name) for name in quotas):
+            raise ValueError("quota name is invalid")
+        return quotas
+
+
+class SyncPersonalContextLinkCompleteRequest(BaseModel):
+    """Cursor-bound acknowledgement that one device completed reconciliation."""
+
+    device_id: str
+    dataset_id: str
+    bootstrap_cursor: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SyncPersonalContextActivationAcknowledgeRequest(BaseModel):
+    """Strict device acknowledgement for a version-one activation receipt."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    dataset_id: StrictStr = Field(min_length=1, max_length=128)
+    device_id: StrictStr = Field(min_length=1, max_length=128)
+    activation_id: StrictStr = Field(min_length=16, max_length=128)
+    baseline_digest: StrictStr = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    local_receipt_id: StrictStr = Field(min_length=16, max_length=128)
+    personal_context_exchange: PersonalContextExchangeProof
+
+
+class SyncPersonalContextActivationAcknowledgeResponse(BaseModel):
+    """Version-one activation acknowledgement receipt."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    receipt: PersonalContextActivationReceipt
+    personal_context_exchange: PersonalContextExchangeProof
+
+
+class SyncPersonalContextPurgeRequest(BaseModel):
+    """Strict signed device request for a Personal Context global purge."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    dataset_id: StrictStr = Field(min_length=1, max_length=128)
+    device_id: StrictStr = Field(min_length=1, max_length=128)
+    request_id: StrictStr = Field(min_length=16, max_length=128)
+    expected_purge_generation: StrictInt = Field(ge=0)
+    idempotency_key: StrictStr = Field(min_length=16, max_length=128)
+    signature: StrictStr = Field(min_length=32, max_length=512)
+
+
+class SyncPersonalContextPurgeResponse(BaseModel):
+    """Version-one receipt for a device-originated global purge request."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    receipt: PersonalContextPurgeReceipt
 
 
 class SyncRestoreManifestDataset(BaseModel):
@@ -854,6 +1468,7 @@ class SyncRestorePreviewLocalInventoryItem(BaseModel):
     dataset_id: str | None = None
     domain: SyncDomain
     object_id: str = Field(..., min_length=1, validation_alias=AliasChoices("object_id", "entity_id"))
+    adapter_version: int = Field(1, ge=1)
     object_revision: int | None = Field(None, ge=0, validation_alias=AliasChoices("object_revision", "entity_version"))
     object_hash: str | None = Field(None, validation_alias=AliasChoices("object_hash", "payload_hash"))
     deleted: bool = False
@@ -870,12 +1485,15 @@ class SyncRestorePreviewRequest(BaseModel):
     """Client inventory request for a Sync v2 M1 restore preview."""
 
     device_id: str | None = None
-    dataset_ids: list[str] = Field(default_factory=list)
-    domains: list[SyncDomain] = Field(default_factory=list)
-    selected_object_ids: list[str] = Field(default_factory=list)
-    selected_attachment_ids: list[str] = Field(default_factory=list)
+    dataset_ids: list[str] = Field(default_factory=list, max_length=100)
+    domains: list[SyncDomain] = Field(default_factory=list, max_length=100)
+    selected_object_ids: list[str] = Field(default_factory=list, max_length=10_000)
+    selected_attachment_ids: list[str] = Field(default_factory=list, max_length=10_000)
     metadata_only: bool = False
-    local_inventory: list[SyncRestorePreviewLocalInventoryItem] = Field(default_factory=list)
+    local_inventory: list[SyncRestorePreviewLocalInventoryItem] = Field(
+        default_factory=list,
+        max_length=10_000,
+    )
     attachment_availability: dict[str, str] = Field(default_factory=dict)
 
 
@@ -938,6 +1556,25 @@ class SyncRestorePreviewObjectConflict(BaseModel):
     message: str | None = None
 
 
+class SyncRestoreOrderedAction(BaseModel):
+    """One content-free action in canonical restore execution order."""
+
+    plan_index: int = Field(..., ge=0)
+    action: SyncRestoreOrderedActionKind
+    dataset_id: str
+    domain: SyncDomain
+    object_id: str
+    operation: SyncOperation
+    server_cursor: int = Field(..., ge=0)
+    adapter_version: int = Field(..., ge=1)
+    mutation_group_id: str | None = None
+    mutation_step: int | None = Field(None, ge=0)
+    mutation_step_count: int | None = Field(None, ge=1)
+    code: str | None = None
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
 class SyncRestorePreviewAttachmentRef(BaseModel):
     """Attachment metadata surfaced in a restore preview."""
 
@@ -951,6 +1588,7 @@ class SyncRestorePreviewAttachmentRef(BaseModel):
     payload_hash: str
     availability: str
     server_cursor: int = Field(..., ge=0)
+    adapter_version: int = Field(..., ge=1)
 
 
 class SyncRestorePreviewWarning(BaseModel):
@@ -968,6 +1606,7 @@ class SyncRestorePreviewResponse(BaseModel):
     """Non-mutating Sync v2 M1 restore preview response."""
 
     datasets: list[SyncRestorePreviewDataset] = Field(default_factory=list)
+    ordered_actions: list[SyncRestoreOrderedAction] = Field(default_factory=list)
     safe_applies: list[SyncRestorePreviewObject] = Field(default_factory=list)
     object_conflicts: list[SyncRestorePreviewObjectConflict] = Field(default_factory=list)
     tombstones: list[SyncRestorePreviewObject] = Field(default_factory=list)
@@ -1012,6 +1651,37 @@ class SyncBlobUploadCreateRequest(BaseModel):
     def _validate_chunk_shape(self) -> SyncBlobUploadCreateRequest:
         if self.chunk_size * self.chunk_count < self.size_bytes:
             raise ValueError("chunk_count and chunk_size must cover size_bytes")
+        raw_intent = self.metadata.get("notes_attachment_intent")
+        if self.domain != "attachment.ref":
+            if raw_intent is not None:
+                raise ValueError(
+                    "notes_attachment_intent is reserved for attachment.ref uploads"
+                )
+            return self
+        if not isinstance(raw_intent, dict):
+            raise ValueError("attachment.ref uploads require notes_attachment_intent")
+        intent_type = raw_intent.get("intent")
+        intent_model = (
+            SyncNotesAttachmentCreateIntent
+            if intent_type == "create"
+            else SyncNotesAttachmentReplaceIntent
+            if intent_type == "replace"
+            else None
+        )
+        if intent_model is None:
+            raise ValueError("notes_attachment_intent has an unsupported intent")
+        intent = intent_model.model_validate(raw_intent)
+        if (
+            intent.attachment_id != self.attachment_id
+            or intent.attachment_id != self.object_id
+        ):
+            raise ValueError(
+                "notes_attachment_intent attachment_id must match the upload identity"
+            )
+        self.metadata = {
+            **self.metadata,
+            "notes_attachment_intent": intent.model_dump(mode="json"),
+        }
         return self
 
     @property
@@ -1019,6 +1689,74 @@ class SyncBlobUploadCreateRequest(BaseModel):
         return self.object_id
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class _SyncNotesAttachmentIntent(BaseModel):
+    """Shared immutable identity for a Notes attachment upload intent."""
+
+    note_id: str
+    attachment_id: str
+
+    @field_validator("note_id", "attachment_id")
+    @classmethod
+    def _validate_uuid4(cls, value: Any, info: Any) -> str:
+        """Validate one canonical Notes attachment UUIDv4 field."""
+
+        from uuid import RFC_4122, UUID
+
+        if not isinstance(value, str):
+            raise ValueError(f"{info.field_name} must be a canonical lowercase UUIDv4")
+        try:
+            parsed = UUID(value)
+        except ValueError as exc:
+            raise ValueError(
+                f"{info.field_name} must be a canonical lowercase UUIDv4"
+            ) from exc
+        if parsed.version != 4 or parsed.variant != RFC_4122 or str(parsed) != value:
+            raise ValueError(f"{info.field_name} must be a canonical lowercase UUIDv4")
+        return value
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SyncNotesAttachmentCreateIntent(_SyncNotesAttachmentIntent):
+    """Immutable resumable-upload intent for a new Notes attachment."""
+
+    intent: Literal["create"] = "create"
+    file_name: str
+
+    @field_validator("file_name")
+    @classmethod
+    def _canonicalize_file_name(cls, value: Any) -> str:
+        """Canonicalize the requested create-intent filename."""
+
+        try:
+            return canonicalize_note_attachment_file_name(value)[0]
+        except NoteAttachmentPolicyError as exc:
+            raise ValueError(str(exc)) from exc
+
+
+class SyncNotesAttachmentReplaceIntent(_SyncNotesAttachmentIntent):
+    """Immutable resumable-upload intent for attachment content replacement."""
+
+    intent: Literal["replace"] = "replace"
+    base_server_cursor: StrictInt = Field(..., ge=1)
+    base_object_revision: StrictInt = Field(..., ge=1)
+    base_object_hash: str
+
+    @field_validator("base_object_hash")
+    @classmethod
+    def _validate_object_hash(cls, value: Any) -> str:
+        """Validate the optimistic replacement base digest."""
+
+        import re
+
+        if (
+            not isinstance(value, str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", value) is None
+        ):
+            raise ValueError("base_object_hash must be a lowercase SHA-256 digest")
+        return value
 
 
 class SyncBlobUploadSessionResponse(BaseModel):
@@ -1172,9 +1910,11 @@ class SyncV2Envelope(BaseModel):
     object_id: str = Field(..., min_length=1)
     parent_id: str | None = None
     schema_version: int = Field(1, ge=1)
+    adapter_version: int = Field(1, ge=1)
     payload: dict[str, Any] = Field(default_factory=dict)
     payload_hash: str = Field(..., min_length=1)
     object_revision: int | None = Field(None, ge=0)
+    entity_version: StrictStr | StrictInt | None = None
     created_at_client: str | None = None
     received_at_server: str | None = None
     deleted: bool = False
@@ -1189,6 +1929,7 @@ class SyncV2Envelope(BaseModel):
     apply_error_code: str | None = None
     apply_error_message: str | None = None
     applied_at: str | None = None
+    authority: PersonalContextAuthorityMetadata | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -1244,15 +1985,58 @@ class SyncV2Envelope(BaseModel):
         ):
             raise ValueError("chat.message append envelopes require object_id and payload_hash")
 
+        if self.domain == "notes.note" and self.operation == "upsert":
+            validate_notes_note_upsert_payload(self.payload)
+
         if self.domain == "attachment.ref":
-            missing = _ATTACHMENT_REF_REQUIRED_PAYLOAD_KEYS.difference(self.payload)
-            if missing:
-                raise ValueError(
-                    "attachment.ref envelopes require payload metadata fields: " + ", ".join(sorted(missing))
+            if self.adapter_version == 2:
+                from tldw_Server_API.app.core.Sync.v2.attachment_refs_v2 import (
+                    attachment_ref_v2_object_hash,
+                    parse_attachment_ref_v2_payload,
+                    validate_attachment_ref_v2_object_id,
+                    validate_attachment_ref_v2_routing_metadata,
                 )
-            attachment_id = self.payload.get("attachment_id")
-            if isinstance(attachment_id, str) and self.object_id != attachment_id.strip():
-                raise ValueError("attachment.ref object_id must match payload attachment_id")
+
+                if self.schema_version != 2:
+                    raise ValueError(
+                        "attachment.ref adapter version 2 requires schema version 2"
+                    )
+                attachment = parse_attachment_ref_v2_payload(
+                    self.operation,
+                    self.payload,
+                )
+                validate_attachment_ref_v2_object_id(self.object_id)
+                validate_attachment_ref_v2_routing_metadata(
+                    self.operation,
+                    self.routing_metadata,
+                )
+                if self.object_id != str(attachment.attachment_id):
+                    raise ValueError(
+                        "attachment.ref object_id must match payload attachment_id"
+                    )
+                if self.payload_hash != attachment_ref_v2_object_hash(
+                    self.operation,
+                    attachment,
+                    object_revision=self.object_revision,
+                ):
+                    raise ValueError(
+                        "attachment.ref v2 payload_hash must match the canonical object hash"
+                    )
+            else:
+                missing = _ATTACHMENT_REF_REQUIRED_PAYLOAD_KEYS.difference(self.payload)
+                if missing:
+                    raise ValueError(
+                        "attachment.ref envelopes require payload metadata fields: "
+                        + ", ".join(sorted(missing))
+                    )
+                attachment_id = self.payload.get("attachment_id")
+                if (
+                    isinstance(attachment_id, str)
+                    and self.object_id != attachment_id.strip()
+                ):
+                    raise ValueError(
+                        "attachment.ref object_id must match payload attachment_id"
+                    )
         return self
 
     @property
@@ -1278,6 +2062,15 @@ class SyncV2Envelope(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
+class SyncV2EnvelopeResponse(SyncV2Envelope):
+    """Server envelope fields returned by pull but never accepted from push."""
+
+    mutation_group_id: str | None = None
+    mutation_step: int | None = Field(None, ge=0)
+    mutation_step_count: int | None = Field(None, ge=1)
+    mutation_plan_hash: str | None = None
+
+
 class SyncPushOptions(BaseModel):
     """Client push behavior flags from the locked Sync v2 M1 contract."""
 
@@ -1300,6 +2093,20 @@ class SyncPushRequest(BaseModel):
     idempotency_key: str | None = None
     last_known_cursor: str | None = None
     options: SyncPushOptions = Field(default_factory=SyncPushOptions)
+    personal_context_exchange: PersonalContextExchangeProof | None = None
+
+    @model_validator(mode="after")
+    def _validate_personal_context_authority(self) -> SyncPushRequest:
+        """Reserve home authority metadata for internal server publication only."""
+
+        for envelope in self.envelopes:
+            authority = envelope.authority
+            if authority is None:
+                continue
+            if not envelope.domain.startswith("personal_context."):
+                raise ValueError("Personal Context authority metadata requires a Personal Context envelope")
+            validate_client_personal_context_metadata(authority)
+        return self
 
 
 class SyncPushAcceptedEnvelope(BaseModel):
@@ -1347,6 +2154,9 @@ class SyncPushConflictEnvelope(BaseModel):
         validation_alias=AliasChoices("server_cursor", "server_sequence"),
     )
     message: str | None = None
+    expected_local_envelope_id: str | None = Field(None, min_length=16, max_length=128)
+    expected_remote_envelope_id: str | None = Field(None, min_length=16, max_length=128)
+    authority_candidate: SyncV2EnvelopeResponse | None = None
 
     @property
     def entity_id(self) -> str:
@@ -1367,15 +2177,18 @@ class SyncPushResponse(BaseModel):
     rejected: list[SyncPushRejectedEnvelope] = Field(default_factory=list)
     conflicts: list[SyncPushConflictEnvelope] = Field(default_factory=list)
     next_cursor: str | None = None
+    personal_context_exchange: PersonalContextExchangeProof | None = None
 
 
 class SyncPullResponse(BaseModel):
     """Stable cursor-ordered envelopes returned by pull."""
 
     dataset_id: str
-    envelopes: list[SyncV2Envelope] = Field(default_factory=list)
+    envelopes: list[SyncV2EnvelopeResponse] = Field(default_factory=list)
     next_cursor: str | None = None
     has_more: bool = False
+    personal_context_relay: PersonalContextRelayContinuation | None = None
+    personal_context_exchange: PersonalContextExchangeProof | None = None
 
 
 class SyncRepairRequest(BaseModel):
@@ -1503,6 +2316,9 @@ class SyncConflictResolution(BaseModel):
     conflict_id: str = Field(..., min_length=1)
     action: ConflictResolutionAction
     resolution_envelope: SyncV2Envelope | None = None
+    expected_local_envelope_id: str | None = Field(None, min_length=16, max_length=128)
+    expected_remote_envelope_id: str | None = Field(None, min_length=16, max_length=128)
+    idempotency_key: str | None = Field(None, min_length=16, max_length=128)
 
     @model_validator(mode="after")
     def _validate_resolution_envelope(self) -> SyncConflictResolution:
@@ -1510,6 +2326,14 @@ class SyncConflictResolution(BaseModel):
             raise ValueError("duplicate_rename requires a resolution_envelope")
         if self.action == "skip" and self.resolution_envelope is not None:
             raise ValueError("skip must not include a resolution_envelope")
+        if self.resolution_envelope is not None:
+            authority = self.resolution_envelope.authority
+            if authority is not None:
+                if not self.resolution_envelope.domain.startswith("personal_context."):
+                    raise ValueError(
+                        "Personal Context authority metadata requires a Personal Context envelope"
+                    )
+                validate_client_personal_context_metadata(authority)
         return self
 
     model_config = ConfigDict(extra="forbid")
@@ -1521,6 +2345,17 @@ class SyncConflictResolveRequest(BaseModel):
     dataset_id: str = Field(..., min_length=1)
     device_id: str = Field(..., min_length=1)
     resolutions: list[SyncConflictResolution] = Field(default_factory=list, min_length=1)
+    personal_context_exchange: PersonalContextExchangeProof | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SyncConflictListResponse(BaseModel):
+    """Proof-bearing version-one response for a Personal Context conflict list."""
+
+    dataset_id: str
+    conflicts: list[SyncConflictRecord] = Field(default_factory=list, max_length=20)
+    personal_context_exchange: PersonalContextExchangeProof
 
     model_config = ConfigDict(extra="forbid")
 
@@ -1565,6 +2400,7 @@ class SyncConflictResolveResponse(BaseModel):
     server_cursor: int | None = Field(None, ge=0)
     resolved: list[SyncConflictResolveResolvedItem] = Field(default_factory=list)
     rejected: list[SyncConflictResolveRejectedItem] = Field(default_factory=list)
+    personal_context_exchange: PersonalContextExchangeProof | None = None
 
 
 class SyncKeyRecoveryBundleRequest(BaseModel):
@@ -1699,6 +2535,9 @@ __all__ = [
     "M1_SYNC_OPERATIONS",
     "MEDIA_SYNC_DOMAINS",
     "MEDIA_SYNC_OPERATIONS",
+    "PERSONAL_CONTEXT_SYNC_DOMAINS",
+    "PERSONAL_CONTEXT_SYNC_OPERATIONS",
+    "PersonalContextSyncCapabilitiesResponse",
     "STRICT_ENCRYPTION_POLICIES",
     "SOURCE_CACHE_SYNC_DOMAINS",
     "SOURCE_CACHE_SYNC_OPERATIONS",
@@ -1716,8 +2555,11 @@ __all__ = [
     "SyncBlobUploadCreateRequest",
     "SyncBlobUploadSessionResponse",
     "SyncBlobUploadStatus",
+    "SyncNotesAttachmentCreateIntent",
+    "SyncNotesAttachmentReplaceIntent",
     "SyncCapabilitiesResponse",
     "SyncConflictRecord",
+    "SyncConflictListResponse",
     "SyncConflictResolution",
     "SyncConflictResolveRequest",
     "SyncConflictResolveResolvedItem",
@@ -1751,6 +2593,21 @@ __all__ = [
     "SyncProfileBootstrapMode",
     "SyncProfileBootstrapRequest",
     "SyncProfileBootstrapResponse",
+    "SyncPersonalContextBootstrapRequest",
+    "SyncPersonalContextBootstrapResponse",
+    "SyncPersonalContextActivationAcknowledgeRequest",
+    "SyncPersonalContextActivationAcknowledgeResponse",
+    "SyncPersonalContextBootstrapErrorResponse",
+    "SyncPersonalContextBootstrapErrorDetail",
+    "SyncPersonalContextSchemaAttention",
+    "SyncPersonalContextQuotaAttention",
+    "SyncPersonalContextPurgeAttention",
+    "SyncPersonalContextLinkCompleteRequest",
+    "SyncPersonalContextPurgeRequest",
+    "SyncPersonalContextPurgeResponse",
+    "SyncNotesAttachmentBootstrapDiagnosticsResponse",
+    "SyncNotesAttachmentCleanupSampleResponse",
+    "SyncNotesOrganizationStatusResponse",
     "SyncProfileDatasetStatusResponse",
     "SyncProfileDeviceStatusResponse",
     "SyncProfileDomainStatusResponse",
@@ -1775,6 +2632,7 @@ __all__ = [
     "SyncRestoreManifestDevice",
     "SyncRestoreManifestDataset",
     "SyncRestoreManifestResponse",
+    "SyncRestoreOrderedAction",
     "SyncRestorePreviewAttachmentRef",
     "SyncRestorePreviewDataset",
     "SyncRestorePreviewRequest",
@@ -1785,6 +2643,7 @@ __all__ = [
     "SyncRestoreCompletenessStatus",
     "SyncRestoreDomainCompleteness",
     "SyncV2Envelope",
+    "SyncV2EnvelopeResponse",
     "WORKSPACE_SYNC_DOMAINS",
     "WORKSPACE_SYNC_OPERATIONS",
 ]

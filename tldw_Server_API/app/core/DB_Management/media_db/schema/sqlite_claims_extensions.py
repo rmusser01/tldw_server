@@ -68,6 +68,30 @@ def ensure_sqlite_claims_extensions(db: Any, conn: sqlite3.Connection) -> None:
         logger.warning(f"Could not ensure Claims extension tables/indexes: {exc}")
 
     try:
+        exports_cursor = conn.execute("PRAGMA table_info(claims_analytics_exports)")
+        exports_columns = {row[1] for row in exports_cursor.fetchall()}
+        if exports_columns and "snapshot_event_id" not in exports_columns:
+            conn.executescript(
+                "ALTER TABLE claims_analytics_exports "
+                "ADD COLUMN snapshot_event_id INTEGER;"
+            )
+        if exports_columns:
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS "
+                "idx_claims_analytics_exports_user_status_export_id "
+                "ON claims_analytics_exports(user_id, status, export_id);"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS "
+                "idx_claims_analytics_exports_user_status_updated_export_id "
+                "ON claims_analytics_exports(user_id, status, updated_at, export_id);"
+            )
+    except sqlite3.Error as exc:
+        logger.warning(
+            f"Could not ensure claims_analytics_exports extensions: {exc}"
+        )
+
+    try:
         events_cursor = conn.execute("PRAGMA table_info(claims_monitoring_events)")
         events_columns = {row[1] for row in events_cursor.fetchall()}
         events_statements: list[str] = []
@@ -80,6 +104,14 @@ def ensure_sqlite_claims_extensions(db: Any, conn: sqlite3.Connection) -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_delivered "
             "ON claims_monitoring_events(delivered_at);"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_user_created_id "
+            "ON claims_monitoring_events(user_id, created_at, id);"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_user_id "
+            "ON claims_monitoring_events(user_id, id);"
         )
     except sqlite3.Error as exc:
         logger.warning(f"Could not ensure delivered_at for claims_monitoring_events: {exc}")

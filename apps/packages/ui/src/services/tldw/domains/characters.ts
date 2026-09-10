@@ -1,12 +1,10 @@
 import { bgRequest, bgStream } from '@/services/background-proxy'
 import { buildQuery } from '../client-utils'
 import { appendPathQuery } from '../path-utils'
-import { createSafeStorage } from '@/utils/safe-storage'
 import { tldwRequest } from '@/services/tldw/request-core'
 import type { AllowedPath } from '@/services/tldw/openapi-guard'
 import type { TldwApiClientCore } from '../TldwApiClient'
 import type {
-  TldwConfig,
   CharacterListQueryParams,
   CharacterListQueryResponse,
   CharacterVersionEntry,
@@ -618,7 +616,6 @@ export const characterMethods = {
     const requestCreateDirect = async (
       requestPath: string
     ): Promise<any> => {
-      const storage = createSafeStorage({ area: "local" })
       const response = await tldwRequest(
         {
           path: requestPath as AllowedPath,
@@ -627,8 +624,7 @@ export const characterMethods = {
           body: payload
         },
         {
-          getConfig: () =>
-            storage.get<TldwConfig>("tldwConfig").catch(() => null)
+          getConfig: () => this.getConfig()
         }
       )
       if (response?.ok) {

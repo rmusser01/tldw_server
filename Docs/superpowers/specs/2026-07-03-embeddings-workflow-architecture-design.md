@@ -89,6 +89,7 @@ Workflow identity is safe metadata. Inline API workflows always generate and val
 Request phase values:
 
 - `created`
+- `resolving_intent`
 - `normalizing`
 - `resolving_policy`
 - `planning`
@@ -119,7 +120,7 @@ Initial item state values:
 
 Slice one does not persist these states. It derives coarse workflow trace events from `PreparedEmbeddingRequest` and `EmbeddingExecutionResult`.
 
-The full phase vocabulary is intentionally larger than slice one. Slice one should emit only phases it can represent truthfully around the current wrapped orchestrator. More granular cache, provider, postprocessing, and persistence phases become mandatory when those behaviors move into workflow-owned steps.
+The full phase vocabulary is intentionally larger than slice one. Slice one should emit only phases it can represent truthfully around the current wrapped orchestrator. Stage 2 adds truthful preparation phases but keeps cache, provider, postprocessing, and writeback as attempt-local stages under the monotonic request-level `executing` phase. The durable attempt model in Stage 3 decides which granular phase and item-state literals become persisted attempt transitions; fallback must not move the request-level phase backward.
 
 Item events carry stable `item_index`, aggregate state, and fixed execution categories. Provider/model/backend identity, fallback source, and other caller-controlled identifiers require explicit trusted canonicalization before a later slice may add them. They do not carry raw text, token arrays, API keys, auth headers, or provider response bodies.
 
@@ -235,7 +236,7 @@ Trace metadata must be safe by construction:
 - Accept string metadata only for fixed enum values; do not trace caller-controlled provider, model, cache, fallback, error, class, request, user, or header identifiers.
 - Validate workflow ids independently at context and event construction so they cannot bypass metadata rules.
 - Treat credential-pattern detection as defense in depth, not proof that an arbitrary string is safe.
-- Use aggregate response-header counts, not names or values.
+- Slice one uses aggregate response-header counts, not names or values; Stage 2 replaces them with bounded aggregate attempt counters.
 - Freeze validated metadata mappings and sequence values before collectors can retain them.
 - Bound collection size to prevent unbounded memory growth in tests or future callers.
 - Fail closed on trace metadata validation errors. Bad trace metadata should fail isolated workflow tests and future debug callers, not become production logs.
@@ -276,6 +277,8 @@ Add `workflow_types.py` and `workflow_runner.py`. Wrap the feature-flagged `/api
 ### Stage 2: Extract Concrete API Steps
 
 Move cache serving, provider execution, fallback, postprocessing, and response metadata out of `EmbeddingRequestOrchestrator` into workflow-compatible components. Keep `EmbeddingRequestOrchestrator` as a compatibility facade until tests migrate.
+
+Stage 2 refines the inline trace contract by adding `resolving_intent`, replacing HTTP-derived response-header counts with bounded aggregate attempt counters, and emitting no per-attempt or per-item events. `completed` remains a request status, not a phase. Granular attempt persistence remains Stage 3 work.
 
 ### Stage 3: Durable Workflow Store And Jobs Runner
 

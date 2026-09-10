@@ -14,10 +14,10 @@ const stripTsxComments = (source: string): string =>
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/^\s*\/\/.*$/gm, "")
 
-const getResearchWorkspaceWrapperClassName = (source: string): string | null => {
+const getResearchWorkspaceGateWrapperClassName = (source: string): string | null => {
   const uncommentedSource = stripTsxComments(source)
   const wrapperMatch = uncommentedSource.match(
-    /<([A-Za-z][\w.]*)\b([^>]*)>\s*<ResearchWorkspace\s*\/>\s*<\/\1>/m
+    /<([A-Za-z][\w.]*)\b([^>]*)>\s*<ResearchWorkspaceRouteGate\s*\/>\s*<\/\1>/m
   )
   if (!wrapperMatch) return null
 
@@ -406,9 +406,9 @@ describe("ResearchWorkspace desktop layout guardrails", () => {
       ),
       "utf8"
     )
-    const sharedWrapperClassName = getResearchWorkspaceWrapperClassName(sharedRoute)
+    const sharedWrapperClassName = getResearchWorkspaceGateWrapperClassName(sharedRoute)
     const extensionWrapperClassName =
-      getResearchWorkspaceWrapperClassName(extensionRoute)
+      getResearchWorkspaceGateWrapperClassName(extensionRoute)
 
     expect(sharedWrapperClassName?.split(/\s+/)).toEqual(
       expect.arrayContaining(["h-full", "min-h-0", "flex-1", "overflow-hidden"])

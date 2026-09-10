@@ -12,11 +12,14 @@ satisfies every invariant (an independent oracle, so a dropped guard fails).
 from __future__ import annotations
 
 import pytest
-from hypothesis import given, settings as hyp_settings, strategies as st
+from hypothesis import given
+from hypothesis import settings as hyp_settings
+from hypothesis import strategies as st
 
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AdmissionRejectionReason,
     AdmissionResult,
+    BatchRenewLeasesResult,
     LifecycleResult,
     NoTransitionReason,
     OperationOutcome,
@@ -62,9 +65,7 @@ def _admission_is_consistent(
         return False
     if outcome is OperationOutcome.ADMISSION_REJECTED and admission_rejection_reason is None:
         return False
-    if outcome is not OperationOutcome.ADMISSION_REJECTED and admission_rejection_reason is not None:
-        return False
-    return True
+    return not (outcome is not OperationOutcome.ADMISSION_REJECTED and admission_rejection_reason is not None)
 
 
 def _lifecycle_is_consistent(
@@ -83,9 +84,7 @@ def _lifecycle_is_consistent(
             return False
     if outcome is OperationOutcome.NO_TRANSITION and no_transition_reason is None:
         return False
-    if outcome is not OperationOutcome.NO_TRANSITION and no_transition_reason is not None:
-        return False
-    return True
+    return not (outcome is not OperationOutcome.NO_TRANSITION and no_transition_reason is not None)
 
 
 class TestAdmissionResultContract:
@@ -229,3 +228,22 @@ class TestLifecycleResultContract:
     def test_impossible_states_raise(self, kwargs: dict) -> None:
         with pytest.raises(ValueError):
             LifecycleResult(**kwargs)
+
+
+@_COMMON
+@given(
+    requested=st.integers(min_value=-5, max_value=100),
+    applied=st.integers(min_value=-5, max_value=105),
+)
+def test_batch_renew_result_constructs_only_for_valid_count_pairs(
+    requested: int,
+    applied: int,
+) -> None:
+    valid = requested >= 0 and 0 <= applied <= requested
+    if valid:
+        result = BatchRenewLeasesResult(requested_count=requested, applied_count=applied)
+        assert result.requested_count == requested
+        assert result.applied_count == applied
+    else:
+        with pytest.raises(ValueError):
+            BatchRenewLeasesResult(requested_count=requested, applied_count=applied)

@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     loads_envelope,
 )
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
+from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import set_authnz_test_user_active
 from tldw_Server_API.tests.AuthNZ_SQLite.test_byok_endpoints_sqlite import (
     _insert_raw_shared_key,
     _setup_byok_sqlite,
@@ -184,6 +185,7 @@ async def _insert_raw_user_payload(pool, *, user_id: int, provider: str, payload
 @pytest.mark.asyncio
 async def test_byok_resolution_precedence(tmp_path, monkeypatch):
     state = await _setup_byok_sqlite(tmp_path, monkeypatch)
+    monkeypatch.setenv("BYOK_LAST_USED_THROTTLE_SECONDS", "0")
     user_id = int(state["user"]["id"])
     org_id = int(state["org"]["id"])
     team_id = int(state["team"]["id"])
@@ -244,6 +246,10 @@ async def test_byok_resolution_precedence(tmp_path, monkeypatch):
     assert resolved.api_key == "sk-user-openai-1111"
     assert resolved.app_config
     assert resolved.app_config["openai_api"]["api_base_url"] == "https://example.com/v1"
+    await resolved.touch_last_used()
+    user_row = await user_repo.fetch_secret_for_user(user_id, "openai")
+    assert user_row is not None
+    assert user_row["last_used_at"] is not None
 
     # Remove the row to validate absence precedence (team before org).
     await pool.execute(
@@ -260,6 +266,10 @@ async def test_byok_resolution_precedence(tmp_path, monkeypatch):
     assert resolved.source == "team"
     assert resolved.status == "RESOLVED"
     assert resolved.api_key == "sk-team-openai-2222"
+    await resolved.touch_last_used()
+    team_row = await org_repo.fetch_secret("team", team_id, "openai")
+    assert team_row is not None
+    assert team_row["last_used_at"] is not None
 
     # Remove the row to fall back to the org shared key.
     await pool.execute(
@@ -276,6 +286,27 @@ async def test_byok_resolution_precedence(tmp_path, monkeypatch):
     assert resolved.source == "org"
     assert resolved.status == "RESOLVED"
     assert resolved.api_key == "sk-org-openai-3333"
+    await resolved.touch_last_used()
+    org_row = await org_repo.fetch_secret("org", org_id, "openai")
+    assert org_row is not None
+    assert org_row["last_used_at"] is not None
+
+    # Remove the final BYOK key to prove the complete precedence chain reaches
+    # the server-secret boundary without manufacturing a repository fallback.
+    await pool.execute(
+        "DELETE FROM org_provider_secrets WHERE scope_type = ? AND scope_id = ? AND provider = ?",
+        ("org", org_id, "openai"),
+    )
+    resolved = await resolve_byok_credentials(
+        "openai",
+        user_id=user_id,
+        team_ids=[team_id],
+        org_ids=[org_id],
+        request=request,
+        fallback_resolver=lambda _provider: "sk-server-openai-4444",
+    )
+    assert resolved.source == "server_default"
+    assert resolved.api_key == "sk-server-openai-4444"
 
     # Remove the row to validate server precedence.
     await pool.execute(
@@ -1156,10 +1187,7 @@ async def test_inactive_user_blocks_overlapping_oauth_refresh_before_openai_adap
         await asyncio.wait_for(initial_reads_ready.wait(), timeout=5)
         await asyncio.sleep(0)
         assert not second_task.done()
-        await pool.execute(
-            "UPDATE users SET is_active = 0 WHERE id = ?",
-            (user_id,),
-        )
+        await set_authnz_test_user_active(pool, user_id, False)
     finally:
         release_refresh.set()
 
@@ -1201,10 +1229,7 @@ async def test_inactive_user_static_openai_key_fails_before_adapter_sqlite(
         "openai",
         "sk-inactive-owner-must-not-dispatch",
     )
-    await pool.execute(
-        "UPDATE users SET is_active = 0 WHERE id = ?",
-        (user_id,),
-    )
+    await set_authnz_test_user_active(pool, user_id, False)
     adapter, captured_headers = _capture_real_openai_adapter_headers(monkeypatch)
     adapter_calls = 0
 

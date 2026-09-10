@@ -187,8 +187,8 @@ async def _count_chat_messages(user_id: int) -> int:
 
 def _get_chroma_manager_for_user(user_id: int):
     """Create a ChromaDBManager for the given user using lazy import."""
-    from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import ChromaDBManager
     from tldw_Server_API.app.core.config import settings as app_settings
+    from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import ChromaDBManager
 
     embedding_config: dict = {}
     user_db_base = app_settings.get("USER_DB_BASE_DIR")
@@ -474,7 +474,19 @@ async def _erase_notes(user_id: int) -> int:
     return await asyncio.to_thread(
         _sqlite_hard_delete_sync,
         path,
-        [("DELETE FROM notes", ())],
+        [
+            (
+                "DELETE FROM note_edges WHERE from_note_id IN (SELECT id FROM notes) "
+                "OR to_note_id IN (SELECT id FROM notes)",
+                (),
+            ),
+            (
+                "DELETE FROM note_wikilink_edges WHERE source_note_id IN (SELECT id FROM notes) "
+                "OR target_note_id IN (SELECT id FROM notes)",
+                (),
+            ),
+            ("DELETE FROM notes", ()),
+        ],
     )
 
 

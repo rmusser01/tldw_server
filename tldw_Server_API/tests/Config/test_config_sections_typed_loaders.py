@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 from configparser import ConfigParser
 
 import pytest
@@ -17,6 +18,7 @@ from tldw_Server_API.app.core.config_sections.moderation import load_moderation_
 from tldw_Server_API.app.core.config_sections.providers import load_providers_config
 from tldw_Server_API.app.core.config_sections.rag import load_rag_config
 from tldw_Server_API.app.core.config_sections.server import load_server_config
+from tldw_Server_API.app.core.config_sections.slides import load_slides_config
 from tldw_Server_API.app.core.config_sections.stt import load_stt_config
 
 pytestmark = pytest.mark.unit
@@ -37,6 +39,7 @@ def _build_parser_with_required_sections() -> ConfigParser:
     parser.add_section("Logging")
     parser.add_section("Moderation")
     parser.add_section("Server")
+    parser.add_section("SlidesStandaloneHtml")
     return parser
 
 
@@ -71,6 +74,19 @@ def test_load_config_sections_exposes_new_typed_sections(monkeypatch: pytest.Mon
         "DISABLE_CORS",
         "STT_WS_CONTROL_V2_ENABLED",
         "STT_REDACT_CATEGORIES",
+        "SLIDES_STANDALONE_ENABLED",
+        "SLIDES_STANDALONE_EGRESS_ENABLED",
+        "SLIDES_STANDALONE_DEFAULT_PROVIDER",
+        "SLIDES_STANDALONE_DEFAULT_MODEL",
+        "SLIDES_STANDALONE_DEFAULT_ADAPTER_ID",
+        "SLIDES_STANDALONE_ALLOWED_TARGETS_JSON",
+        "SLIDES_STANDALONE_CONNECT_TIMEOUT_SECONDS",
+        "SLIDES_STANDALONE_READ_TIMEOUT_SECONDS",
+        "SLIDES_STANDALONE_OVERALL_TIMEOUT_SECONDS",
+        "SLIDES_STANDALONE_MAX_OUTPUT_TOKENS",
+        "SLIDES_STANDALONE_MAX_SOURCE_CHARS",
+        "SLIDES_STANDALONE_MAX_SOURCE_TOKENS",
+        "SLIDES_STANDALONE_MAX_PROVIDER_RESPONSE_BYTES",
     ):
         monkeypatch.delenv(env_key, raising=False)
 
@@ -121,6 +137,12 @@ def test_load_config_sections_exposes_new_typed_sections(monkeypatch: pytest.Mon
     parser.set("Moderation", "categories_enabled", "pii, safety")
     parser.set("Moderation", "pii_enabled", "true")
     parser.set("Server", "disable_cors", "true")
+    parser.set("SlidesStandaloneHtml", "enabled", "true")
+    parser.set("SlidesStandaloneHtml", "egress_enabled", "false")
+    parser.set("SlidesStandaloneHtml", "default_provider", "openai")
+    parser.set("SlidesStandaloneHtml", "default_model", "gpt-4o-mini")
+    parser.set("SlidesStandaloneHtml", "default_adapter_id", "openai_official_chat_v1")
+    parser.set("SlidesStandaloneHtml", "allowed_targets_json", "[]")
     parser.set("STT-Settings", "ws_control_v2_enabled", "true")
     parser.set("STT-Settings", "redact_categories", '["email", "phone"]')
 
@@ -169,6 +191,12 @@ def test_load_config_sections_exposes_new_typed_sections(monkeypatch: pytest.Mon
     assert sections.moderation.categories_enabled == ["pii", "safety"]
     assert sections.moderation.pii_enabled is True
     assert sections.server.disable_cors is True
+    assert sections.slides.enabled is True
+    assert sections.slides.egress_enabled is False
+    assert sections.slides.default_provider == "openai"
+    assert sections.slides.default_model == "gpt-4o-mini"
+    assert sections.slides.default_adapter_id == "openai_official_chat_v1"
+    assert sections.slides.allowed_targets_json == "[]"
     assert sections.stt.ws_control_v2_enabled is True
     assert sections.stt.redact_categories == ["email", "phone"]
 
@@ -619,3 +647,84 @@ def test_moderation_section_loader_rejects_invalid_security_values() -> None:
     parser.set("Moderation", "enabled", "true")
     with pytest.raises(ValueError, match="max_scan_chars.*not-an-int"):
         load_moderation_config(parser, env={"MODERATION_MAX_SCAN_CHARS": "not-an-int"})
+
+
+def test_slides_standalone_section_loader_prefers_env_and_preserves_model_case() -> None:
+    parser = ConfigParser(interpolation=None)
+    parser.read_dict(
+        {
+            "SlidesStandaloneHtml": {
+                "enabled": "false",
+                "egress_enabled": "false",
+                "default_provider": "anthropic",
+                "default_model": "Config-Model",
+                "default_adapter_id": "anthropic_official_messages_v1",
+                "allowed_targets_json": "[]",
+                "connect_timeout_seconds": "10",
+                "read_timeout_seconds": "120",
+                "overall_timeout_seconds": "180",
+                "max_output_tokens": "16384",
+                "max_source_chars": "200000",
+                "max_source_tokens": "50000",
+                "max_provider_response_bytes": "8388608",
+            }
+        }
+    )
+
+    cfg = load_slides_config(
+        parser,
+        env={
+            "SLIDES_STANDALONE_ENABLED": "true",
+            "SLIDES_STANDALONE_EGRESS_ENABLED": "yes",
+            "SLIDES_STANDALONE_DEFAULT_PROVIDER": "OpenAI",
+            "SLIDES_STANDALONE_DEFAULT_MODEL": "CaseSensitive-Model",
+            "SLIDES_STANDALONE_DEFAULT_ADAPTER_ID": "openai_official_chat_v1",
+            "SLIDES_STANDALONE_ALLOWED_TARGETS_JSON": '[{"provider":"openai","model":"CaseSensitive-Model","adapter_id":"openai_official_chat_v1"}]',
+            "SLIDES_STANDALONE_CONNECT_TIMEOUT_SECONDS": "5.5",
+            "SLIDES_STANDALONE_READ_TIMEOUT_SECONDS": "60",
+            "SLIDES_STANDALONE_OVERALL_TIMEOUT_SECONDS": "90",
+            "SLIDES_STANDALONE_MAX_OUTPUT_TOKENS": "4096",
+            "SLIDES_STANDALONE_MAX_SOURCE_CHARS": "100000",
+            "SLIDES_STANDALONE_MAX_SOURCE_TOKENS": "25000",
+            "SLIDES_STANDALONE_MAX_PROVIDER_RESPONSE_BYTES": "4194304",
+        },
+    )
+
+    assert dataclasses.asdict(cfg) == {
+        "enabled": True,
+        "egress_enabled": True,
+        "default_provider": "OpenAI",
+        "default_model": "CaseSensitive-Model",
+        "default_adapter_id": "openai_official_chat_v1",
+        "allowed_targets_json": '[{"provider":"openai","model":"CaseSensitive-Model","adapter_id":"openai_official_chat_v1"}]',
+        "connect_timeout_seconds": 5.5,
+        "read_timeout_seconds": 60.0,
+        "overall_timeout_seconds": 90.0,
+        "max_output_tokens": 4096,
+        "max_source_chars": 100000,
+        "max_source_tokens": 25000,
+        "max_provider_response_bytes": 4194304,
+    }
+
+
+@pytest.mark.parametrize(
+    ("env_key", "value"),
+    [
+        ("SLIDES_STANDALONE_ENABLED", "maybe"),
+        ("SLIDES_STANDALONE_EGRESS_ENABLED", "maybe"),
+        ("SLIDES_STANDALONE_CONNECT_TIMEOUT_SECONDS", "nan"),
+        ("SLIDES_STANDALONE_MAX_OUTPUT_TOKENS", "not-an-int"),
+    ],
+)
+def test_slides_standalone_section_loader_rejects_malformed_security_values(
+    env_key: str,
+    value: str,
+) -> None:
+    parser = ConfigParser(interpolation=None)
+    parser.add_section("SlidesStandaloneHtml")
+
+    with pytest.raises(ValueError, match="^standalone_html_config_invalid$") as caught:
+        load_slides_config(parser, env={env_key: value})
+
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None or caught.value.__suppress_context__ is True

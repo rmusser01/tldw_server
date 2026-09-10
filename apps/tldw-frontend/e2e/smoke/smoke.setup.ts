@@ -112,6 +112,10 @@ export const AUTH_CONFIG = {
   allowOffline: process.env.TLDW_E2E_ALLOW_OFFLINE !== "0"
 }
 
+export const shouldInstallSmokeApiStubs = (
+  env: Record<string, string | undefined> = process.env
+): boolean => env.TLDW_LIVE_TIER_UAT !== "1"
+
 const fulfillSmokeJson = async (
   route: Route,
   status: number,
@@ -220,7 +224,7 @@ export async function seedAuth(
         : AUTH_CONFIG.allowOffline
   }
 
-  if (cfg.authMode === "single-user") {
+  if (cfg.authMode === "single-user" && shouldInstallSmokeApiStubs()) {
     await page.route("**/api/_tldw-webui/runtime-config", async (route) => {
       await fulfillSmokeJson(route, 200, {
         runtimeAuth: { available: false },
@@ -457,7 +461,9 @@ export async function seedAuth(
     },
     cfg
   )
-  await stubCompletedFirstRunSetup(page)
+  if (shouldInstallSmokeApiStubs()) {
+    await stubCompletedFirstRunSetup(page)
+  }
 }
 
 /**

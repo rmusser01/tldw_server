@@ -209,6 +209,43 @@ def provider_config_value(
     return None
 
 
+def configured_provider_generation_metadata(
+    config_parser: ConfigParser,
+    section_name: str | None,
+    provider_name: str,
+) -> dict[str, float | int | bool]:
+    """Project optional configured generation defaults into provider metadata.
+
+    Args:
+        config_parser: Current config.txt-style provider configuration.
+        section_name: Provider configuration section, when one is configured.
+        provider_name: Catalog provider name used to prefix option keys.
+
+    Returns:
+        Present temperature, token-limit and streaming fields. Missing options
+        and blank token limits are omitted, without supplying a token default.
+
+    Raises:
+        ValueError: If a present temperature or nonblank token limit is not numeric.
+        configparser.Error: If reading an option fails, including interpolation errors.
+    """
+    metadata: dict[str, float | int | bool] = {}
+    temperature_field = f"{provider_name}_temperature"
+    if config_parser.has_option(section_name, temperature_field):
+        metadata["default_temperature"] = float(config_parser.get(section_name, temperature_field, fallback="0.7"))
+    tokens_field = f"{provider_name}_max_tokens"
+    if config_parser.has_option(section_name, tokens_field):
+        max_tokens = config_parser.get(section_name, tokens_field, fallback="").strip()
+        if max_tokens:
+            metadata["max_tokens"] = int(max_tokens)
+    streaming_field = f"{provider_name}_streaming"
+    if config_parser.has_option(section_name, streaming_field):
+        metadata["supports_streaming"] = (
+            config_parser.get(section_name, streaming_field, fallback="False").lower() == "true"
+        )
+    return metadata
+
+
 def resolve_provider_endpoint_url(
     provider_name: str,
     config_parser: ConfigParser,

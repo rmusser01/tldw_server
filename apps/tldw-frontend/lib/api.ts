@@ -3,6 +3,7 @@ import { dispatchAuthCredentialsChanged } from '@web/lib/auth-events';
 import { getApiBearer, getApiKey, hasEnvApiAuth } from '@web/lib/authStorage';
 import { buildApiBaseUrl, resolvePublicApiOrigin } from '@web/lib/api-base';
 import { captureSessionIdFromHeaders, getOrCreateSessionId, SESSION_HEADER_NAME } from '@web/lib/session';
+import { isExplicitRequestCancellation } from '@/services/request-events';
 import type { ApiErrorResponse, ApiRequestConfig, ApiRequestConfigWithMetadata } from '@web/types/common';
 
 type ApiResponse<T = unknown> = {
@@ -538,6 +539,13 @@ function recordFailure(
   }
 }
 
+function createRequestCancellationError(): Error & { code: "REQUEST_ABORTED" } {
+  const error = new Error('Request aborted') as Error & { code: "REQUEST_ABORTED" };
+  error.name = 'AbortError';
+  error.code = 'REQUEST_ABORTED';
+  return error;
+}
+
 function handleUnauthorized(
   requestHeaders: Headers | undefined,
   sessionTokenAtStart: string | null
@@ -610,9 +618,16 @@ async function request<T = unknown>(
     });
   } catch (error) {
     abort.cleanup();
+    const timedOut = abort.didTimeout();
+    if (
+      !timedOut &&
+      (config.signal?.aborted || isExplicitRequestCancellation(error))
+    ) {
+      throw createRequestCancellationError();
+    }
     const message =
       error instanceof DOMException && error.name === 'AbortError'
-        ? abort.didTimeout()
+        ? timedOut
           ? 'Request timed out'
           : 'Request aborted'
         : error instanceof Error

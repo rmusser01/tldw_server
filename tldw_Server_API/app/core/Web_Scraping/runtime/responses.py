@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-
 _FALSE_STRINGS = frozenset({"false", "0", "no", "off"})
 _TRUE_STRINGS = frozenset({"true", "1", "yes", "on"})
 
@@ -88,7 +87,7 @@ class FetchResponse:
         fallback_backend: str | None = None,
         elapsed_seconds: float | None = None,
         metadata: Mapping[str, Any] | None = None,
-    ) -> "FetchResponse":
+    ) -> FetchResponse:
         status = _raw_get(raw, "status")
         if status is None:
             status = _raw_get(raw, "status_code", 0)
@@ -97,11 +96,7 @@ class FetchResponse:
             status=int(status or 0),
             headers=dict(_raw_get(raw, "headers", {}) or {}),
             text=str(_raw_get(raw, "text", "") or ""),
-            backend=str(
-                _raw_get(raw, "backend", fallback_backend or "httpx")
-                or fallback_backend
-                or "httpx"
-            ),
+            backend=str(_raw_get(raw, "backend", fallback_backend or "httpx") or fallback_backend or "httpx"),
             elapsed_seconds=float(elapsed_seconds or 0.0),
             metadata=metadata or {},
         )

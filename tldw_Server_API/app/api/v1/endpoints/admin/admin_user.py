@@ -174,7 +174,12 @@ async def list_users(
             logger.debug("TEST_MODE header assignment failed")
         raise
     except Exception as e:
-        logger.error("Failed to list users")
+        logger.exception(
+            "Failed to list users (principal={}, page={}, limit={})",
+            getattr(principal, "user_id", None),
+            page,
+            limit,
+        )
         try:
             if is_test_mode():
                 response.headers["X-TLDW-Admin-Error"] = str(e)

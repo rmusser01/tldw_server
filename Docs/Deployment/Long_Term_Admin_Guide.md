@@ -6,6 +6,7 @@ Audience: Operators and administrators running tldw_server in production
 This guide covers day-2 operations: upgrades, backups, monitoring, capacity and cost management, security operations, and troubleshooting. Pair this with the Production Hardening checklist and Metrics Cheatsheet.
 
 Related documents
+- [Production reference deployment](Production_Reference_Deployment.md)
 - First-time production setup: `Docs/Deployment/First_Time_Production_Setup.md`
 - Production hardening checklist: `Docs/Published/User_Guides/Server/Production_Hardening_Checklist.md`
 - Reverse proxy examples: `Docs/Deployment/Reverse_Proxy_Examples.md`
@@ -16,13 +17,19 @@ Related documents
 ## 1) Service Management
 
 Docker Compose
-- Start: `docker compose up -d`
+- Production operations: use `make production-preflight`,
+  `make production-deploy`, and `make production-rollback` exactly as documented
+  in the production reference deployment.
+- Generic `docker compose up -d`, rebuild commands, and overlays below are
+  non-production examples; they do not provide verified backups or rollback.
+- Start (non-production): `docker compose up -d`
 - Stop: `docker compose down`
 - Logs: `docker compose logs -f app`
 - Rebuild: `docker compose build app && docker compose up -d`
 - Sidecar workers: `docker compose -f Dockerfiles/docker-compose.yml -f Dockerfiles/docker-compose.workers.yml up -d --build` (see `Docs/Deployment/Sidecar_Workers.md`).
 - Scale workers (CPU bound): set `UVICORN_WORKERS` env and rebuild or override at runtime.
- - Overrides: `docker-compose.override.yml` ships with production defaults.
+ - The legacy `docker-compose.override.yml` is a non-production customization
+   example, not the production reference profile.
 
 systemd (bare-metal)
 - Status: `sudo systemctl status tldw`
@@ -36,11 +43,14 @@ launchd (macOS)
 ## 2) Upgrades & Rollbacks
 
 Recommended (Compose deployments)
-1. Back up databases and user data (see Backups).
-2. Pull changes: `git pull` (or update image tag if you publish images).
-3. Rebuild and restart: `docker compose up --build -d`.
-4. Verify health: `/health`, `/ready`, smoke tests.
-5. If issues: `docker compose logs app`, and roll back by checking out the previous commit/tag and rebuilding.
+1. Set immutable `TLDW_APP_IMAGE` and `TLDW_ROLLBACK_IMAGE` values.
+2. Run `make production-preflight PRODUCTION_ENV_FILE=/absolute/path`.
+3. Run `make production-deploy PRODUCTION_ENV_FILE=/absolute/path`; retain its
+   verified manifest.
+4. Verify exact public `/health`, public 404 denials, and authenticated operator
+   diagnostics and metrics.
+5. If state or migration compatibility is uncertain, stop writes and run
+   `make production-rollback` with that manifest. Do not use binary-only rollback.
 
 Bare-metal
 - Update code then reinstall: `pip install --upgrade .`.
@@ -88,14 +98,18 @@ Disaster recovery (Compose)
 ## 4) Monitoring & Alerting
 
 Endpoints
-- Health: `GET /health`, readiness: `GET /ready`.
-- Metrics (text): `GET /metrics` or `GET /api/v1/metrics/text`.
-- JSON metrics: `GET /api/v1/metrics/json`.
+- Public liveness: `GET /health` returns only `{"status":"ok"}`.
+- Container-local readiness: `GET /internal/ready`; it is not a remote
+  anonymous endpoint. Legacy `/ready` is operator-protected and publicly denied.
+- Metrics (text): authenticated `GET /api/v1/metrics/text` with `system.logs`.
+- JSON metrics: authenticated `GET /api/v1/metrics/json`.
 - Chat/LLM cost and tokens: `GET /api/v1/metrics/chat`.
 - Unified circuit breaker status (admin): `GET /api/v1/admin/circuit-breakers` (requires admin role + `system.logs` permission).
 
 Grafana + Prometheus
 - Use the sample dashboards and alerts referenced in `Docs/Deployment/Monitoring/Metrics_Cheatsheet.md`.
+- Set `TLDW_METRICS_API_KEY_FILE` to a mode-0600 file containing an API key for
+  a dedicated principal whose only diagnostic permission is `system.logs`.
 - Suggested alerts: HTTP 5xx error rate, p95 latency, Postgres connection saturation, token/cost spikes, user storage near quota.
 
 Logs
@@ -149,7 +163,7 @@ Registration controls (multi-user)
 Network
 - Enforce TLS at the proxy and restrict `ALLOWED_ORIGINS`.
 - Ensure WebSocket upgrade rules for `/api/v1/audio/stream/transcribe` and `/api/v1/mcp/*`.
- - Caddy example: `Samples/Caddy/Caddyfile`.
+ - Caddy example: `Helper_Scripts/Samples/Caddy/Caddyfile.compose`.
 
 Rate limiting
 - Keep global and module-specific rate limiters enabled; adjust per your user base.
@@ -193,7 +207,9 @@ Common issues and fixes
 - Slow embeddings/LLM
   - Use smaller models, enable GPU where available, or scale out orchestrator.
 
-Diagnostics
+Direct-host diagnostics (non-production profiles only; for the production
+reference, use the in-container operator commands in
+`Docs/Deployment/Production_Reference_Deployment.md`)
 ```bash
 # Basic health
 curl -sS http://127.0.0.1:8000/health | jq .
@@ -202,7 +218,8 @@ curl -sS http://127.0.0.1:8000/health | jq .
 curl -sS -H "X-API-KEY: $SINGLE_USER_API_KEY" http://127.0.0.1:8000/api/v1/llm/providers | jq .
 
 # Metrics snapshot
-curl -sS http://127.0.0.1:8000/metrics | head -n 50
+curl -sS -H "Authorization: Bearer $TLDW_OPERATOR_TOKEN" \
+  http://127.0.0.1:8000/api/v1/metrics/text | head -n 50
 ```
 
 ## 9) Change Management
@@ -218,5 +235,6 @@ Recommended practice
 - Registration & AuthNZ configuration: `Docs/User_Guides/Server/Authentication_Setup.md`
 - Multi-User deployment patterns: `Docs/User_Guides/Server/Multi-User_Deployment_Guide.md`
 - Reverse proxy and TLS: `Docs/Deployment/Reverse_Proxy_Examples.md`
+- Production-safe Compose operations: `Docs/Deployment/Production_Reference_Deployment.md`
 - Postgres/SQLite backends: `Docs/Code_Documentation/Database-Backends.md`
 - Metrics and dashboards: `Docs/Deployment/Monitoring/Metrics_Cheatsheet.md`

@@ -84,6 +84,11 @@ class StreamTaskCapacityError(RuntimeError):
 
 
 _TRUSTED_LOCAL_STREAM_FRAME_PROVENANCE = object()
+_TRUSTED_LOCAL_STREAM_ERROR_MESSAGES = {
+    "unsupported_multi_choice_tool_autoexec": (
+        "Local tool auto-execution supports one assistant choice per request."
+    ),
+}
 
 
 class _TrustedLocalStreamFrame(str):
@@ -94,6 +99,17 @@ def _trusted_local_stream_frame(value: str) -> str:
     frame = _TrustedLocalStreamFrame(value)
     frame._tldw_local_stream_provenance = _TRUSTED_LOCAL_STREAM_FRAME_PROVENANCE
     return frame
+
+
+def trusted_local_stream_error_frame(code: str) -> str:
+    """Build an allowlisted local SSE error frame with private provenance."""
+
+    message = _TRUSTED_LOCAL_STREAM_ERROR_MESSAGES.get(code)
+    if message is None:
+        raise ValueError("Unsupported local stream error code")
+    return _trusted_local_stream_frame(
+        f"data: {json.dumps({'error': {'code': code, 'type': code, 'message': message}})}\n\n"
+    )
 
 
 def is_trusted_local_stream_frame(value: Any) -> bool:
@@ -1890,6 +1906,11 @@ class StreamingResponseHandler:
                     if self.is_timed_out():
                         logger.warning(f"Stream timeout during processing for {self.conversation_id}")
                         yield canonical_provider_error("provider_unavailable")
+                        break
+
+                    if is_trusted_local_stream_frame(chunk):
+                        self.error_occurred = True
+                        yield chunk
                         break
 
                     if self.upstream_done_received:

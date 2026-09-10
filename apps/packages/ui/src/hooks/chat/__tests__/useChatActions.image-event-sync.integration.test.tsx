@@ -18,6 +18,7 @@ const {
   streamCharacterChatCompletionMock,
   persistCharacterCompletionMock,
   normalChatModeMock,
+  savedSuccessPayloads,
   updateMessageMediaMock,
   chatSettingsState,
   storageValues,
@@ -31,6 +32,7 @@ const {
   })),
   createChatMock: vi.fn(),
   normalChatModeMock: vi.fn(),
+  savedSuccessPayloads: [] as unknown[],
   updateMessageMediaMock: vi.fn(async (_messageId: string, _payload: any) => null),
   chatSettingsState: {
     value: { imageEventSyncMode: "off" as "off" | "on" }
@@ -65,8 +67,10 @@ vi.mock("@/hooks/utils/messageHelpers", () => ({
   validateBeforeSubmit: vi.fn(() => true),
   createSaveMessageOnSuccess: vi.fn(
     () =>
-      async (_payload?: unknown): Promise<string | null> =>
-        "history-image-sync"
+      async (payload?: unknown): Promise<string | null> => {
+        savedSuccessPayloads.push(payload)
+        return "history-image-sync"
+      }
   ),
   createSaveMessageOnError: vi.fn(
     () =>
@@ -320,6 +324,7 @@ describe("useChatActions image event sync integration", () => {
     storageValues.set(PLAYGROUND_IMAGE_EVENT_SYNC_DEFAULT_STORAGE_KEY, "off")
     chatSettingsState.value = { imageEventSyncMode: "off" }
     storeOptionState.value = { selectedModel: "deepseek-chat" }
+    savedSuccessPayloads.length = 0
 
     normalChatModeMock.mockImplementation(
       async (
@@ -408,6 +413,61 @@ describe("useChatActions image event sync integration", () => {
     expect(syncMeta?.serverMessageId).toBe("server-message-42")
     expect(getCurrentMessages()[0]?.generationInfo?.image_generation?.sync?.status).toBe(
       "synced"
+    )
+  })
+
+  it("includes scoped image sync metadata in the deferred local save", async () => {
+    addChatMessageMock.mockResolvedValueOnce({ id: "server-message-42" })
+    const scopeController = new AbortController()
+    const requestScope = Object.freeze({
+      config: Object.freeze({
+        serverUrl: "https://scope.example",
+        authMode: "multi-user" as const
+      }),
+      userId: 7
+    })
+    normalChatModeMock.mockImplementationOnce(
+      async (
+        _message: string,
+        _image: string,
+        _isRegenerate: boolean,
+        _messages: any[],
+        _history: any[],
+        _signal: AbortSignal,
+        params: any
+      ) => {
+        await params.saveMessageOnSuccess({
+          historyId: "history-image-sync",
+          conversationId: "server-chat-1",
+          saveToDb: false,
+          message: "sunlit city skyline",
+          fullText: "",
+          assistantMessageId: "assistant-image-1",
+          userMessageType: IMAGE_GENERATION_USER_MESSAGE_TYPE,
+          assistantMessageType: IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
+          assistantImages: ["data:image/png;base64,AAAA"],
+          generationInfo: defaultInitialMessages[0].generationInfo,
+          imageEventSyncPolicy: params.imageEventSyncPolicy,
+          scopeSignal: scopeController.signal,
+          scopeInvalidatedSignal: scopeController.signal,
+          requestScope
+        })
+      }
+    )
+    const { options } = createHookOptions()
+    const { result } = renderHook(() => useChatActions(options))
+
+    await invokeImageSubmit(result.current.onSubmit, "on")
+
+    expect(savedSuccessPayloads).toHaveLength(1)
+    const persisted = savedSuccessPayloads[0] as any
+    expect(persisted.generationInfo.image_generation.sync).toEqual(
+      expect.objectContaining({
+        status: "synced",
+        mode: "on",
+        policy: "on",
+        serverMessageId: "server-message-42"
+      })
     )
   })
 

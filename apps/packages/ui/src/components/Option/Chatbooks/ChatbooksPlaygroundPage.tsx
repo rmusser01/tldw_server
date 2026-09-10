@@ -2351,7 +2351,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
                   value: "full_account",
                   label: t(
                     "settings:chatbooksPlayground.backupAllMode",
-                    "Backup all account data"
+                    "Backup supported account data"
                   )
                 },
                 {
@@ -2374,13 +2374,21 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
               {...passiveAlertProps}
               title={t(
                 "settings:chatbooksPlayground.backupAllTitle",
-                "Backup all account data"
+                "Backup supported account data"
               )}
             >
-              {t(
-                "settings:chatbooksPlayground.backupAllDescription",
-                "Includes all restorable account records, stored media artifacts, embeddings, generated content, and pointer metadata tracked by tldw."
-              )}
+              <p>
+                {t(
+                  "settings:chatbooksPlayground.backupAllDescription",
+                  "Includes all restorable account records, stored media artifacts, embeddings, generated content, and pointer metadata tracked by tldw."
+                )}
+              </p>
+              <p className="mt-1">
+                {t(
+                  "settings:chatbooksPlayground.backupAllExclusions",
+                  "This portable backup does not include Service Prompt overrides."
+                )}
+              </p>
             </DesignSystemAlert>
           ) : (
             <>

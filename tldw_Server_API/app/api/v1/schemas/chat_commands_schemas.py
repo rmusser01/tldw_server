@@ -14,7 +14,7 @@ class ChatCommandInfo(BaseModel):
     description: str = Field(..., description="Brief description of what the command does")
     required_permission: str | None = Field(
         None,
-        description="Permission required to invoke this command when RBAC enforcement is enabled",
+        description="Permission required to invoke this command",
     )
     usage: str | None = Field(
         None,
@@ -34,7 +34,7 @@ class ChatCommandInfo(BaseModel):
     )
     rbac_required: bool | None = Field(
         None,
-        description="Whether command invocation is guarded by RBAC permissions",
+        description="Whether command invocation is guarded by permissions",
     )
 
 

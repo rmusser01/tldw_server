@@ -5,6 +5,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -24,6 +25,75 @@ def jobs_db(tmp_path):
     db_path = tmp_path / "jobs.db"
     ensure_jobs_tables(db_path)
     yield db_path
+
+
+@pytest.mark.unit
+def test_ensure_jobs_tables_uses_environment_path_when_no_path_is_passed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Jobs migrations use the profile environment path by default."""
+    environment_path = tmp_path / "environment" / "jobs.db"
+    monkeypatch.setenv("JOBS_DB_PATH", str(environment_path))
+
+    resolved_path = ensure_jobs_tables()
+
+    assert resolved_path == environment_path
+    assert environment_path.exists()
+
+
+@pytest.mark.unit
+def test_ensure_jobs_tables_explicit_path_precedes_environment_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit jobs path takes precedence over the environment path."""
+    environment_path = tmp_path / "environment" / "jobs.db"
+    explicit_path = tmp_path / "explicit" / "jobs.db"
+    monkeypatch.setenv("JOBS_DB_PATH", str(environment_path))
+
+    resolved_path = ensure_jobs_tables(explicit_path)
+
+    assert resolved_path == explicit_path
+    assert explicit_path.exists()
+    assert not environment_path.exists()
+
+
+def test_sqlite_archive_collision_queries_live_in_db_management(jobs_db):
+    from tldw_Server_API.app.core.DB_Management.jobs_sql_fragments import (
+        fetch_slides_archive_collision_rows,
+    )
+
+    connection = sqlite3.connect(jobs_db)
+    connection.row_factory = sqlite3.Row
+    try:
+        with connection:
+            connection.execute(
+                "INSERT INTO jobs "
+                "(id, uuid, domain, queue, job_type, payload, status, created_at) "
+                "VALUES (41, 'collision-uuid', 'slides', 'default', "
+                "'presentation.generate', '{}', 'completed', DATETIME('now'))"
+            )
+            connection.execute(
+                "INSERT INTO jobs_archive "
+                "(id, uuid, domain, queue, job_type, payload, status, created_at) "
+                "VALUES (41, 'collision-uuid', 'slides', 'default', "
+                "'presentation.generate', '{}', 'completed', DATETIME('now'))"
+            )
+
+        collisions = fetch_slides_archive_collision_rows(
+            connection,
+            backend="sqlite",
+            where_clause=" WHERE id = ?",
+            params=(41,),
+        )
+    finally:
+        connection.close()
+
+    assert len(collisions) == 1
+    active, archived = collisions[0]
+    assert active["uuid"] == "collision-uuid"
+    assert [row["uuid"] for row in archived] == ["collision-uuid"]
 
 
 def _capture_sqlite_archive_query_plan(
@@ -56,6 +126,111 @@ def _capture_sqlite_archive_query_plan(
     )
     rows = manager.list_archived_jobs(**list_kwargs)
     return rows, plan
+
+
+def test_jobs_models_owns_terminal_status_classification():
+    from tldw_Server_API.app.core.Jobs import models
+
+    assert frozenset({"completed", "failed", "cancelled", "quarantined"}) == (
+        models.TERMINAL_JOB_STATUSES
+    )
+    assert all(models.is_terminal_job_status(status) for status in models.TERMINAL_JOB_STATUSES)
+    assert models.is_terminal_job_status("processing") is False
+    assert models.is_terminal_job_status(None) is False
+
+
+def test_pg_ensure_ignores_optional_index_psycopg_error_after_required_indexes(
+    monkeypatch,
+):
+    import psycopg
+
+    from tldw_Server_API.app.core.Jobs import pg_migrations
+
+    connections = []
+    maintenance_calls = []
+
+    class _Cursor:
+        def __init__(self, phase):
+            self.phase = phase
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params=None):
+            del params
+            if self.phase == 3 and "idx_jobs_status_available_at" in str(query):
+                raise psycopg.OperationalError("optional index unavailable")
+
+    class _Connection:
+        def __init__(self, phase):
+            self.cursor_instance = _Cursor(phase)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def cursor(self):
+            return self.cursor_instance
+
+        def commit(self):
+            return None
+
+    def _connect(_dsn, *, autocommit=False):
+        del autocommit
+        connection = _Connection(len(connections) + 1)
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(psycopg, "connect", _connect)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Jobs.pg_util.negotiate_pg_dsn",
+        lambda dsn: dsn,
+    )
+    monkeypatch.setattr(
+        pg_migrations,
+        "_ensure_pg_archive_locators",
+        lambda _dsn: None,
+    )
+    monkeypatch.setattr(
+        pg_migrations,
+        "_ensure_pg_archive_batch_read_indexes",
+        lambda _cursor: None,
+    )
+    monkeypatch.setattr(
+        pg_migrations,
+        "_upgrade_legacy_admin_webhook_archives_pg",
+        lambda _cursor: None,
+    )
+    monkeypatch.setattr(
+        pg_migrations,
+        "_mark_slides_audit_failure_pg",
+        lambda _cursor: None,
+    )
+    monkeypatch.setattr(
+        pg_migrations,
+        "_audit_slides_generation_pg",
+        lambda _cursor: (None, 0),
+    )
+    monkeypatch.setattr(
+        pg_migrations,
+        "ensure_job_events_pg",
+        lambda _dsn: maintenance_calls.append("events"),
+    )
+    monkeypatch.setattr(
+        pg_migrations,
+        "ensure_job_counters_pg",
+        lambda _dsn: maintenance_calls.append("counters"),
+    )
+    monkeypatch.delenv("JOBS_PG_RLS_ENABLE", raising=False)
+
+    pg_migrations.ensure_jobs_tables_pg("postgresql://jobs.test/jobs")
+
+    assert maintenance_calls == ["events", "counters"]
 
 
 def test_create_and_acquire_and_complete(jobs_db):
@@ -484,11 +659,10 @@ def test_list_archived_jobs_paginates_same_second_microsecond_timestamps(
 ):
     jm = JobManager(jobs_db)
     archived_id = 17
-    archived_uuid = "reused-archive-uuid"
     timestamp_versions = (
-        ("2026-01-01 00:00:00.900000", "newest"),
-        ("2026-01-01T00:00:00.500000", "middle"),
-        ("2026-01-01 00:00:00.100000+00:00", "oldest"),
+        ("2026-01-01 00:00:00.900000", "newest", "archive-newest"),
+        ("2026-01-01T00:00:00.500000", "middle", "archive-middle"),
+        ("2026-01-01 00:00:00.100000+00:00", "oldest", "archive-oldest"),
     )
     conn = sqlite3.connect(jobs_db)
     try:
@@ -504,7 +678,7 @@ def test_list_archived_jobs_paginates_same_second_microsecond_timestamps(
                     json.dumps({"version": version}),
                     timestamp,
                 )
-                for timestamp, version in timestamp_versions
+                for timestamp, version, archived_uuid in timestamp_versions
             ],
         )
         conn.commit()
@@ -529,7 +703,7 @@ def test_list_archived_jobs_paginates_same_second_microsecond_timestamps(
                 str(row["_archive_cursor_created_at"])
             ),
             "before_id": archived_id,
-            "before_uuid": archived_uuid,
+            "before_uuid": str(row["_archive_cursor_uuid"]),
             "before_archive_locator": row["_archive_locator"],
         }
 
@@ -557,11 +731,11 @@ def test_list_archived_jobs_paginates_submillisecond_ties_by_locator(
         conn.executemany(
             "INSERT INTO jobs_archive "
             "(id, uuid, domain, queue, job_type, payload, status, created_at) "
-            "VALUES (23, 'submillisecond-tie', 'prompt_studio', 'default', "
+            "VALUES (23, ?, 'prompt_studio', 'default', "
             "'optimization', ?, 'cancelled', ?)",
             (
-                (json.dumps({"version": "first"}), "2026-01-01 00:00:00.100900"),
-                (json.dumps({"version": "second"}), "2026-01-01 00:00:00.100800"),
+                ("submillisecond-first", json.dumps({"version": "first"}), "2026-01-01 00:00:00.100900"),
+                ("submillisecond-second", json.dumps({"version": "second"}), "2026-01-01 00:00:00.100800"),
             ),
         )
         conn.commit()
@@ -789,6 +963,130 @@ def test_jobs_archive_has_migration_scan_index(jobs_db):
     assert "idx_jobs_archive_migration" in indexes
 
 
+_SQLITE_ARCHIVE_BATCH_READ_INDEX_COLUMNS = {
+    "idx_jobs_archive_lookup_id": [
+        ("id", False),
+        ("archive_id", True),
+    ],
+    "idx_jobs_archive_batch_group_scope": [
+        ("batch_group", False),
+        ("domain", False),
+        ("owner_user_id", False),
+        ("job_type", False),
+        ("archive_id", True),
+    ],
+}
+
+
+def _read_sqlite_archive_batch_index_columns(db_path, index_name):
+    conn = sqlite3.connect(db_path)
+    try:
+        return [
+            (str(row[2]), bool(row[3]))
+            for row in conn.execute(
+                f"PRAGMA index_xinfo({index_name})"
+            ).fetchall()
+            if bool(row[5])
+        ]
+    finally:
+        conn.close()
+
+
+def test_jobs_archive_batch_read_indexes_are_created_and_recreated(jobs_db):
+    def _read_index_columns():
+        return {
+            index_name: _read_sqlite_archive_batch_index_columns(
+                jobs_db, index_name
+            )
+            for index_name in _SQLITE_ARCHIVE_BATCH_READ_INDEX_COLUMNS
+        }
+
+    assert _read_index_columns() == _SQLITE_ARCHIVE_BATCH_READ_INDEX_COLUMNS
+
+    conn = sqlite3.connect(jobs_db)
+    try:
+        for index_name in _SQLITE_ARCHIVE_BATCH_READ_INDEX_COLUMNS:
+            conn.execute(f"DROP INDEX {index_name}")
+        conn.commit()
+    finally:
+        conn.close()
+
+    ensure_jobs_tables(jobs_db)
+
+    assert _read_index_columns() == _SQLITE_ARCHIVE_BATCH_READ_INDEX_COLUMNS
+
+
+@pytest.mark.parametrize(
+    ("index_name", "misdefined_ddl"),
+    (
+        (
+            "idx_jobs_archive_lookup_id",
+            "CREATE INDEX idx_jobs_archive_lookup_id "
+            "ON jobs_archive(id, archive_id)",
+        ),
+        (
+            "idx_jobs_archive_batch_group_scope",
+            "CREATE INDEX idx_jobs_archive_batch_group_scope "
+            "ON jobs_archive(domain, batch_group, owner_user_id, job_type, "
+            "archive_id)",
+        ),
+    ),
+)
+def test_sqlite_archive_batch_read_index_migration_repairs_misdefined_index(
+    jobs_db,
+    index_name,
+    misdefined_ddl,
+):
+    conn = sqlite3.connect(jobs_db)
+    try:
+        conn.execute(f"DROP INDEX {index_name}")
+        conn.execute(misdefined_ddl)
+        conn.commit()
+    finally:
+        conn.close()
+
+    ensure_jobs_tables(jobs_db)
+
+    assert _read_sqlite_archive_batch_index_columns(
+        jobs_db, index_name
+    ) == _SQLITE_ARCHIVE_BATCH_READ_INDEX_COLUMNS[index_name]
+
+
+@pytest.mark.parametrize(
+    "index_name",
+    tuple(_SQLITE_ARCHIVE_BATCH_READ_INDEX_COLUMNS),
+)
+def test_sqlite_archive_batch_read_index_migration_rejects_name_collision(
+    jobs_db,
+    index_name,
+):
+    conn = sqlite3.connect(jobs_db)
+    try:
+        conn.execute(f"DROP INDEX {index_name}")
+        conn.execute("CREATE TABLE archive_index_name_owner (id INTEGER)")
+        conn.execute(
+            f"CREATE INDEX {index_name} ON archive_index_name_owner(id)"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with pytest.raises(RuntimeError, match=f"{index_name} belongs to another table"):
+        ensure_jobs_tables(jobs_db)
+
+    conn = sqlite3.connect(jobs_db)
+    try:
+        owner = conn.execute(
+            "SELECT tbl_name FROM sqlite_master "
+            "WHERE type = 'index' AND name = ?",
+            (index_name,),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    assert owner == "archive_index_name_owner"
+
+
 def test_sqlite_archive_cursor_index_handles_invalid_legacy_timestamps(
     tmp_path,
 ):
@@ -892,11 +1190,11 @@ def test_sqlite_archive_full_cursor_uses_cursor_index_without_temp_sort(
         conn.executemany(
             "INSERT INTO jobs_archive "
             "(id, uuid, domain, queue, job_type, payload, status, created_at) "
-            "VALUES (3, 'full-cursor-plan', 'prompt_studio', 'default', "
+            "VALUES (3, ?, 'prompt_studio', 'default', "
             "'optimization', '{}', 'cancelled', ?)",
             (
-                ("2026-01-01 00:00:00.900000",),
-                ("2026-01-01 00:00:00.100000",),
+                ("full-cursor-newer", "2026-01-01 00:00:00.900000"),
+                ("full-cursor-older", "2026-01-01 00:00:00.100000"),
             ),
         )
         conn.commit()
@@ -1589,11 +1887,82 @@ def test_idempotency_key_returns_existing(jobs_db):
     assert j2["status"] == "queued"
 
 
+def test_exact_scoped_idempotency_lookup_is_active_first_and_archive_aware(
+    jobs_db,
+    monkeypatch,
+):
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "1")
+    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_NOTES", "graph-suggestions")
+    jm = JobManager(jobs_db)
+    job = jm.create_job(
+        domain="notes",
+        queue="graph-suggestions",
+        job_type="note_graph_suggestions",
+        payload={"run_id": "run-lookup"},
+        owner_user_id="owner-lookup",
+        idempotency_key="run-lookup",
+        max_retries=0,
+    )
+
+    lookup = jm.get_job_or_archived_by_idempotency_key(
+        idempotency_key="run-lookup",
+        domain="notes",
+        queue="graph-suggestions",
+        job_type="note_graph_suggestions",
+        owner_user_id="owner-lookup",
+    )
+    assert lookup is not None and lookup["uuid"] == job["uuid"] and lookup["archived"] is False
+    for field, value in (
+        ("domain", "other"),
+        ("queue", "other"),
+        ("job_type", "other"),
+        ("owner_user_id", "other"),
+        ("idempotency_key", "other"),
+    ):
+        query = {
+            "idempotency_key": "run-lookup",
+            "domain": "notes",
+            "queue": "graph-suggestions",
+            "job_type": "note_graph_suggestions",
+            "owner_user_id": "owner-lookup",
+        }
+        query[field] = value
+        assert jm.get_job_or_archived_by_idempotency_key(**query) is None
+
+    leased = jm.acquire_next_job(
+        domain="notes",
+        queue="graph-suggestions",
+        lease_seconds=30,
+        worker_id="lookup-worker",
+    )
+    assert leased is not None and leased["uuid"] == job["uuid"]
+    assert jm.complete_job(int(leased["id"]))
+    conn = jm._connect()
+    try:
+        with conn:
+            conn.execute(
+                "UPDATE jobs SET completed_at='2000-01-01 00:00:00' WHERE uuid=?",
+                (job["uuid"],),
+            )
+    finally:
+        conn.close()
+    assert jm.prune_jobs(statuses=["completed"], older_than_days=31) == 1
+
+    archived = jm.get_job_or_archived_by_idempotency_key(
+        idempotency_key="run-lookup",
+        domain="notes",
+        queue="graph-suggestions",
+        job_type="note_graph_suggestions",
+        owner_user_id="owner-lookup",
+    )
+    assert archived is not None and archived["uuid"] == job["uuid"] and archived["archived"] is True
+
+
 def test_available_at_scheduling_delays_acquire(jobs_db):
 
 
     jm = JobManager(jobs_db)
-    future = datetime.utcnow() + timedelta(seconds=1)
+    future = datetime.utcnow() + timedelta(minutes=5)
     jm.create_job(
         domain="chatbooks",
         queue="default",
@@ -1605,9 +1974,14 @@ def test_available_at_scheduling_delays_acquire(jobs_db):
     # Should not acquire before available_at
     j = jm.acquire_next_job(domain="chatbooks", queue="default", lease_seconds=5, worker_id="w4")
     assert j is None
-    # Wait for availability window
-    import time as _t
-    _t.sleep(1.2)
+    connection = jm._connect()
+    try:
+        with connection:
+            connection.execute(
+                "UPDATE jobs SET available_at=DATETIME('now', '-1 second')",
+            )
+    finally:
+        connection.close()
     j2 = jm.acquire_next_job(domain="chatbooks", queue="default", lease_seconds=5, worker_id="w4")
     assert j2 is not None
     assert j2["status"] == "processing"
@@ -1635,6 +2009,8 @@ def test_create_job_backfills_missing_batch_group(tmp_path, monkeypatch):
               status TEXT NOT NULL,
               priority INTEGER DEFAULT 5,
               max_retries INTEGER DEFAULT 3,
+              expired_lease_policy TEXT DEFAULT 'consume_retry',
+              quarantine_threshold INTEGER,
               retry_count INTEGER DEFAULT 0,
               available_at TEXT,
               created_at TEXT,

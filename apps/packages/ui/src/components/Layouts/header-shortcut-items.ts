@@ -494,6 +494,13 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
     titleDefault: "Admin & Help",
     items: [
       {
+        id: "admin-overview",
+        to: "/admin",
+        icon: CogIcon,
+        labelKey: "option:header.adminOverview",
+        labelDefault: "Admin Operations"
+      },
+      {
         id: "admin-server",
         to: "/admin/server",
         icon: CogIcon,

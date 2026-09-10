@@ -1,4 +1,6 @@
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
+import { sha256 } from "@noble/hashes/sha2.js"
+import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js"
 import {
   deriveScopedUserId,
   deriveServerFingerprint
@@ -50,6 +52,25 @@ const deriveSingleUserApiKeyScope = (
 
   const normalizedKey = String(apiKey || "").trim()
   return normalizedKey ? `key:${fnv1a36(normalizedKey)}` : "key:none"
+}
+
+export const deriveSingleUserApiKeyCredentialScope = (
+  authMode: string | null | undefined,
+  apiKey: string | null | undefined
+): string | null => {
+  if (normalizeAuthMode(authMode) !== "single-user") {
+    return null
+  }
+
+  const normalizedKey = String(apiKey || "").trim()
+  if (!normalizedKey) return "key:none"
+
+  const digest = sha256(
+    utf8ToBytes(
+      `tldw:service-prompt-single-user-api-key:v1\0${normalizedKey}`
+    )
+  )
+  return `key:sha256:${bytesToHex(digest)}`
 }
 
 export const buildChatSurfaceScopeKey = (

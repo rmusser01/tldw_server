@@ -2,19 +2,21 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 import mcp_unified.gateway.tool_use_reporting as gateway_tool_use_reporting
+import pytest
 from mcp_unified.gateway.config import (
     GatewayProfileBootstrapConfig,
     bootstrap_profile_gateway_from_config,
 )
 from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+from mcp_unified.gateway.protocol_cancellation import GatewayCancellationToken
 from mcp_unified.gateway.runtime import GatewayPolicyDenied, GatewayRequestContext
 from mcp_unified.gateway.tool_use_reporting import ToolUseReportingGatewayRuntime
 from mcp_unified.profiles.models import MCPProfile, ProfilePolicy
 from mcp_unified.profiles.store import InMemoryProfileStore
 from mcp_unified.tool_use_reporting.models import ToolUseEvent
+
+pytestmark = pytest.mark.unit
 
 
 class _MemoryToolUseRecorder:
@@ -170,6 +172,51 @@ async def test_gateway_wrapper_records_direct_call_with_profile_and_model() -> N
     assert event.execution_origin == "executed"
     assert backend.call_requests[-1][2].metadata["mcp_tool_use_observed"] is True
     assert "mcp_tool_use_observed" not in context.metadata
+
+
+@pytest.mark.asyncio
+async def test_gateway_wrappers_preserve_strict_protocol_context_fields() -> None:
+    """Metadata enrichment must retain cancellation and negotiated client context."""
+
+    recorder = _MemoryToolUseRecorder()
+    backend = _FakeGatewayRuntime()
+    profile_runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([_profile_with_deferred_tools()]),
+        default_profile_id="researcher",
+    )
+    wrapped = ToolUseReportingGatewayRuntime(profile_runtime, recorder=recorder)
+    token = GatewayCancellationToken()
+    context = GatewayRequestContext(
+        request_id="req-strict",
+        client_id="client-1",
+        user_id="user-1",
+        metadata={"profile_id": "researcher"},
+        protocol_version="2026-07-28",
+        protocol_era="modern",
+        client_info={"name": "official-sdk", "version": "2.0.0"},
+        client_capabilities={"sampling": {}},
+        cancellation=token,
+    )
+
+    await wrapped.call_tool(
+        "tool_call",
+        {
+            "tool_id": "echo.search",
+            "arguments": {"query": "bridge"},
+        },
+        context,
+    )
+
+    delegated = backend.call_requests[-1][2]
+    assert delegated.request_id == "req-strict"
+    assert delegated.client_id == "client-1"
+    assert delegated.user_id == "user-1"
+    assert delegated.protocol_version == "2026-07-28"
+    assert delegated.protocol_era == "modern"
+    assert delegated.client_info == {"name": "official-sdk", "version": "2.0.0"}
+    assert delegated.client_capabilities == {"sampling": {}}
+    assert delegated.cancellation is token
 
 
 @pytest.mark.asyncio

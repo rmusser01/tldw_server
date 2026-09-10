@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({
   initialize: vi.fn(async () => {}),
   getConfig: vi.fn(async () => null),
+  createChatCompletion: vi.fn(),
   streamChatCompletion: vi.fn()
 }))
 
@@ -10,6 +11,8 @@ vi.mock("../TldwApiClient", () => ({
   tldwClient: {
     initialize: (...args: unknown[]) => mocks.initialize(...args),
     getConfig: (...args: unknown[]) => mocks.getConfig(...args),
+    createChatCompletion: (...args: unknown[]) =>
+      mocks.createChatCompletion(...args),
     streamChatCompletion: (...args: unknown[]) =>
       mocks.streamChatCompletion(...args)
   }
@@ -24,6 +27,94 @@ describe("TldwChatService abort lifecycle", () => {
     vi.clearAllMocks()
     mocks.initialize.mockResolvedValue(undefined)
     mocks.getConfig.mockResolvedValue(null)
+  })
+
+  it("passes the caller signal to non-streaming chat completion", async () => {
+    mocks.createChatCompletion.mockResolvedValue({
+      json: async () => ({ choices: [{ message: { content: "answer" } }] })
+    })
+    const controller = new AbortController()
+    const service = new TldwChatService()
+
+    await expect(service.sendMessage(
+      [{ role: "user", content: "hi" }],
+      { model: "m", signal: controller.signal }
+    )).resolves.toBe("answer")
+
+    expect(mocks.createChatCompletion.mock.calls[0]?.[1]).toMatchObject({
+      signal: controller.signal
+    })
+  })
+
+  it("passes the captured request scope to both completion transports", async () => {
+    mocks.createChatCompletion.mockResolvedValue({
+      json: async () => ({ choices: [{ message: { content: "answer" } }] })
+    })
+    mocks.streamChatCompletion.mockImplementation(async function* () {
+      yield chunk("answer")
+    })
+    const requestScope = {
+      config: {
+        serverUrl: "https://research-one.test",
+        authMode: "multi-user" as const
+      },
+      userId: 42
+    }
+    const service = new TldwChatService()
+
+    await service.sendMessage(
+      [{ role: "user", content: "hi" }],
+      { model: "m", requestScope }
+    )
+    for await (const _token of service.streamMessage(
+      [{ role: "user", content: "hi" }],
+      { model: "m", stream: true, requestScope }
+    )) {
+      // consume the stream
+    }
+
+    expect(mocks.createChatCompletion.mock.calls[0]?.[1]).toMatchObject({
+      requestScope
+    })
+    expect(mocks.streamChatCompletion.mock.calls[0]?.[1]).toMatchObject({
+      requestScope
+    })
+  })
+
+  it("preserves a non-streaming request-scope change error", async () => {
+    const scopeChangedError = Object.assign(new Error("scope changed"), {
+      status: 412,
+      details: {
+        detail: { code: "request_config_scope_changed" }
+      }
+    })
+    mocks.createChatCompletion.mockRejectedValue(scopeChangedError)
+    const service = new TldwChatService()
+
+    await expect(service.sendMessage(
+      [{ role: "user", content: "hi" }],
+      { model: "m" }
+    )).rejects.toBe(scopeChangedError)
+  })
+
+  it("preserves a streaming request-scope change error", async () => {
+    const scopeChangedError = Object.assign(new Error("scope changed"), {
+      status: 412,
+      details: {
+        detail: { code: "request_config_scope_changed" }
+      }
+    })
+    mocks.streamChatCompletion.mockImplementation(async function* () {
+      yield* []
+      throw scopeChangedError
+    })
+    const service = new TldwChatService()
+    const stream = service.streamMessage(
+      [{ role: "user", content: "hi" }],
+      { model: "m", stream: true }
+    )
+
+    await expect(stream.next()).rejects.toBe(scopeChangedError)
   })
 
   it("gives each streamMessage call its own controller so concurrent streams do not cancel each other", async () => {

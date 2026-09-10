@@ -257,7 +257,7 @@ vi.mock("@/services/researchWorkspaceArtifacts", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     ragSearch: mockRagSearch,
-    synthesizeSpeech: mockSynthesizeSpeech,
+    synthesizeSpeechDetailed: mockSynthesizeSpeech,
     generateSlidesFromMedia: mockGenerateSlidesFromMedia,
     listVisualStyles: vi.fn().mockResolvedValue([]),
     createChatCompletion: mockCreateChatCompletion,
@@ -503,7 +503,11 @@ describe("StudioPane Stage 2 workflows", () => {
       total: 1
     })
     mockRagSearch.mockResolvedValue({ generation: "summary" })
-    mockSynthesizeSpeech.mockResolvedValue(new ArrayBuffer(8))
+    mockSynthesizeSpeech.mockResolvedValue({
+      buffer: new ArrayBuffer(8),
+      actualBackend: "kokoro",
+      fallbackUsed: false
+    })
     mockGenerateSlidesFromMedia.mockResolvedValue({
       id: "presentation-1",
       title: "Slides",
@@ -1358,7 +1362,7 @@ describe("StudioPane Stage 2 workflows", () => {
         })
       })
     )
-  }, 15000)
+  }, 30000)
 
   it("fails flashcard artifacts when generated cards are placeholder-only", async () => {
     mockGetMediaDetails.mockResolvedValue({

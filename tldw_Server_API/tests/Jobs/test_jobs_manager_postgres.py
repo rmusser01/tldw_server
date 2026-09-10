@@ -72,6 +72,68 @@ def test_pg_create_acquire_complete_idempotent():
     assert ok
 
 
+def test_pg_exact_scoped_idempotency_lookup_is_active_first_and_archive_aware(monkeypatch):
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "1")
+    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_NOTES", "graph-suggestions")
+    jm = _new_pg_manager()
+    job = jm.create_job(
+        domain="notes",
+        queue="graph-suggestions",
+        job_type="note_graph_suggestions",
+        payload={"run_id": "pg-run-lookup"},
+        owner_user_id="pg-owner-lookup",
+        idempotency_key="pg-run-lookup",
+        max_retries=0,
+    )
+
+    lookup = jm.get_job_or_archived_by_idempotency_key(
+        idempotency_key="pg-run-lookup",
+        domain="notes",
+        queue="graph-suggestions",
+        job_type="note_graph_suggestions",
+        owner_user_id="pg-owner-lookup",
+    )
+    assert lookup is not None and lookup["uuid"] == job["uuid"] and lookup["archived"] is False
+    assert (
+        jm.get_job_or_archived_by_idempotency_key(
+            idempotency_key="pg-run-lookup",
+            domain="notes",
+            queue="wrong-queue",
+            job_type="note_graph_suggestions",
+            owner_user_id="pg-owner-lookup",
+        )
+        is None
+    )
+
+    leased = jm.acquire_next_job(
+        domain="notes",
+        queue="graph-suggestions",
+        lease_seconds=30,
+        worker_id="pg-lookup-worker",
+    )
+    assert leased is not None and leased["uuid"] == job["uuid"]
+    assert jm.complete_job(int(leased["id"]))
+    conn = jm._connect()
+    try:
+        with conn, jm._pg_cursor(conn) as cur:
+            cur.execute(
+                "UPDATE jobs SET completed_at=%s WHERE uuid=%s",
+                (datetime(2000, 1, 1, tzinfo=timezone.utc), job["uuid"]),
+            )
+    finally:
+        conn.close()
+    assert jm.prune_jobs(statuses=["completed"], older_than_days=31) == 1
+
+    archived = jm.get_job_or_archived_by_idempotency_key(
+        idempotency_key="pg-run-lookup",
+        domain="notes",
+        queue="graph-suggestions",
+        job_type="note_graph_suggestions",
+        owner_user_id="pg-owner-lookup",
+    )
+    assert archived is not None and archived["uuid"] == job["uuid"] and archived["archived"] is True
+
+
 def test_pg_create_job_rejects_secret_payload_without_persisting(monkeypatch):
     monkeypatch.setenv("JOBS_SECRET_REJECT", "1")
     monkeypatch.setenv("JOBS_SECRET_REDACT", "0")

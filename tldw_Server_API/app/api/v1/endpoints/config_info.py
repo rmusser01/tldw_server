@@ -58,6 +58,7 @@ from tldw_Server_API.app.services.worker_startup_policy import should_start_inpr
 
 router = APIRouter()
 _DOCS_API_KEY_PLACEHOLDER = "YOUR_API_KEY"
+_SHIPPED_CAPABILITIES = {"hasReadingSnapshotPagesV1": True}
 
 
 def get_config_path() -> Path:
@@ -84,7 +85,9 @@ def load_safe_config() -> dict:
         logger.warning("Config file not found")
         return {
             "configured": False,
-            "message": "Configuration file not found"
+            "message": "Configuration file not found",
+            "capabilities": dict(_SHIPPED_CAPABILITIES),
+            "supported_features": dict(_SHIPPED_CAPABILITIES),
         }
 
     config = configparser.ConfigParser()
@@ -147,33 +150,47 @@ def load_safe_config() -> dict:
     # FFmpeg availability (needed by clients to gate video/audio ingestion UX)
     safe_config["ffmpeg_available"] = shutil.which("ffmpeg") is not None
 
-    # Feature flags / capabilities (safe to expose)
+    # Feature flags / capabilities (safe to expose). The shipped fallback
+    # remains available if dynamic derivation fails, while a successful route
+    # lookup can explicitly disable Reading support.
+    caps = dict(_SHIPPED_CAPABILITIES)
     try:
+        derived_caps: dict[str, bool] = {
+            "hasReadingSnapshotPagesV1": bool(
+                config_mod.route_enabled("reading", default_stable=True)
+            )
+        }
         has_media_routes = bool(config_mod.route_enabled("media", default_stable=True))
         has_audio_http = bool(config_mod.route_enabled("audio", default_stable=True))
         has_audio_websocket = bool(config_mod.route_enabled("audio-websocket", default_stable=True))
-        caps = {
-            "personalization": bool(config_mod.legacy_get("PERSONALIZATION_ENABLED", True))
-            and bool(config_mod.route_enabled("personalization", default_stable=False)),
-            "persona": bool(config_mod.legacy_get("PERSONA_ENABLED", True))
-            and bool(config_mod.route_enabled("persona", default_stable=True)),
-        }
-        caps["hasSlides"] = bool(config_mod.route_enabled("slides", default_stable=True))
-        caps["hasPresentationStudio"] = bool(caps["hasSlides"])
-        caps["hasPresentationRender"] = bool(caps["hasPresentationStudio"]) and bool(
-            is_truthy(os.getenv("PRESENTATION_RENDER_ENABLED", "true"))
+        derived_caps["personalization"] = bool(
+            config_mod.legacy_get("PERSONALIZATION_ENABLED", True)
+        ) and bool(config_mod.route_enabled("personalization", default_stable=False))
+        derived_caps["persona"] = bool(
+            config_mod.legacy_get("PERSONA_ENABLED", True)
+        ) and bool(config_mod.route_enabled("persona", default_stable=True))
+        derived_caps["hasSlides"] = bool(
+            config_mod.route_enabled("slides", default_stable=True)
         )
+        derived_caps["hasPresentationStudio"] = bool(derived_caps["hasSlides"])
+        derived_caps["hasPresentationRender"] = bool(
+            derived_caps["hasPresentationStudio"]
+        ) and bool(is_truthy(os.getenv("PRESENTATION_RENDER_ENABLED", "true")))
         # Docs-info serves as the authoritative feature gate for clients that
         # cannot infer websocket transport support from OpenAPI alone.
-        caps["hasStt"] = bool(has_audio_http or has_audio_websocket)
-        caps["hasTts"] = bool(has_audio_http or has_audio_websocket)
-        caps["hasVoiceChat"] = bool(has_audio_http or has_audio_websocket)
-        caps["hasVoiceConversationTransport"] = bool(has_audio_websocket)
-        caps["hasAudio"] = bool(caps["hasStt"] or caps["hasTts"] or caps["hasVoiceChat"])
-        caps["hasMediaPlaylistPreflight"] = has_media_routes
-        caps["hasMediaIngestJobs"] = has_media_routes
-        caps["hasMediaIngestJobEvents"] = has_media_routes
-        caps["hasMediaIngestWorker"] = bool(
+        derived_caps["hasStt"] = bool(has_audio_http or has_audio_websocket)
+        derived_caps["hasTts"] = bool(has_audio_http or has_audio_websocket)
+        derived_caps["hasVoiceChat"] = bool(has_audio_http or has_audio_websocket)
+        derived_caps["hasVoiceConversationTransport"] = bool(has_audio_websocket)
+        derived_caps["hasAudio"] = bool(
+            derived_caps["hasStt"]
+            or derived_caps["hasTts"]
+            or derived_caps["hasVoiceChat"]
+        )
+        derived_caps["hasMediaPlaylistPreflight"] = has_media_routes
+        derived_caps["hasMediaIngestJobs"] = has_media_routes
+        derived_caps["hasMediaIngestJobEvents"] = has_media_routes
+        derived_caps["hasMediaIngestWorker"] = bool(
             has_media_routes
             and should_start_inprocess_worker(
                 "MEDIA_INGEST_JOBS_WORKER_ENABLED",
@@ -183,13 +200,15 @@ def load_safe_config() -> dict:
                 test_mode=False,
             )
         )
-        caps["hasDurableMediaCollections"] = has_media_routes
-        caps["hasKnowledgeQaMediaScope"] = has_media_routes
-        # expose both for backward-compat and forward-looking UI
-        safe_config["supported_features"] = caps
-        safe_config["capabilities"] = caps
+        derived_caps["hasDurableMediaCollections"] = has_media_routes
+        derived_caps["hasKnowledgeQaMediaScope"] = has_media_routes
     except Exception:
         logger.debug("Failed to derive safe capability flags")
+    else:
+        caps.update(derived_caps)
+    # Expose both for backward-compat and forward-looking UI.
+    safe_config["supported_features"] = caps
+    safe_config["capabilities"] = caps
 
     return safe_config
 

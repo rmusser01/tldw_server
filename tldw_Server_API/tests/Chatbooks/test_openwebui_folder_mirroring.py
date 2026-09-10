@@ -7,7 +7,6 @@ from tldw_Server_API.app.core.Chatbooks.openwebui_folders import (
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -46,6 +45,7 @@ def test_mirror_openwebui_folder_creates_namespace_path_and_links_conversation(f
         source_path_segments=["Research", "Papers"],
         source_folder_id="folder-papers",
         metadata={"source": "test"},
+        owner_user_id="openwebui-folder-user",
     )
 
     assert result.final_collection_id is not None
@@ -69,6 +69,7 @@ def test_mirror_openwebui_folder_creates_namespace_path_and_links_conversation(f
         source_path_segments=["Research", "Papers"],
         source_folder_id="folder-papers",
         metadata={"source": "test"},
+        owner_user_id="openwebui-folder-user",
     )
 
     assert rerun.final_collection_id == result.final_collection_id
@@ -88,6 +89,7 @@ def test_mirror_openwebui_folder_disambiguates_global_collection_name_collision(
         source_path_segments=["Research"],
         source_folder_id="folder-research",
         metadata={},
+        owner_user_id="openwebui-folder-user",
     )
 
     assert result.final_collection_id != existing_id
@@ -111,6 +113,7 @@ def test_mirror_openwebui_folder_reuses_keyword_across_chats_in_same_folder(fold
         source_path_segments=["Research", "Papers"],
         source_folder_id="folder-papers",
         metadata={"source_user_id": "user-a", "external_ref": "chat-a"},
+        owner_user_id="openwebui-folder-user",
     )
     second = mirror_openwebui_folder_for_conversation(
         db,
@@ -119,6 +122,7 @@ def test_mirror_openwebui_folder_reuses_keyword_across_chats_in_same_folder(fold
         source_path_segments=["Research", "Papers"],
         source_folder_id="folder-papers",
         metadata={"source_user_id": "user-a", "external_ref": "chat-b"},
+        owner_user_id="openwebui-folder-user",
     )
 
     assert second.final_collection_id == first.final_collection_id
@@ -142,6 +146,7 @@ def test_mirror_openwebui_folder_collision_reuses_disambiguated_collection_for_s
         source_path_segments=["Research"],
         source_folder_id="folder-research",
         metadata={"source_user_id": "user-a", "external_ref": "chat-a"},
+        owner_user_id="openwebui-folder-user",
     )
     second = mirror_openwebui_folder_for_conversation(
         db,
@@ -150,6 +155,7 @@ def test_mirror_openwebui_folder_collision_reuses_disambiguated_collection_for_s
         source_path_segments=["Research"],
         source_folder_id="folder-research",
         metadata={"source_user_id": "user-a", "external_ref": "chat-b"},
+        owner_user_id="openwebui-folder-user",
     )
 
     assert first.final_collection_id != existing_id

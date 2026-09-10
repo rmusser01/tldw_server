@@ -48,6 +48,8 @@ def _specs_by_name(startup_pollers: Any) -> dict[str, Any]:
     [
         "study_pack_jobs_task",
         "study_suggestions_jobs_task",
+        "notes_graph_suggestions_jobs_task",
+        "notes_graph_suggestions_maintenance_task",
         "privilege_snapshot_task",
     ],
 )
@@ -76,6 +78,8 @@ def test_study_privilege_jobs_worker_specs_use_expected_names() -> None:
     ] == [
         "study_pack_jobs_task",
         "study_suggestions_jobs_task",
+        "notes_graph_suggestions_jobs_task",
+        "notes_graph_suggestions_maintenance_task",
         "privilege_snapshot_task",
     ]
 
@@ -89,6 +93,11 @@ def test_study_privilege_jobs_worker_spec_factories_delegate_to_existing_worker_
     for spec_name, factory_name in [
         ("study_pack_jobs_task", "_run_study_pack_jobs_worker_service"),
         ("study_suggestions_jobs_task", "_run_study_suggestions_jobs_worker_service"),
+        ("notes_graph_suggestions_jobs_task", "_run_notes_graph_suggestions_worker_service"),
+        (
+            "notes_graph_suggestions_maintenance_task",
+            "_run_notes_graph_suggestions_maintenance_service",
+        ),
         ("privilege_snapshot_task", "_run_privilege_snapshot_worker_service"),
     ]:
         monkeypatch.setattr(
@@ -106,6 +115,14 @@ def test_study_privilege_jobs_worker_spec_factories_delegate_to_existing_worker_
     assert calls == [
         ("study_pack_jobs_task", "study_pack_jobs_task-stop"),
         ("study_suggestions_jobs_task", "study_suggestions_jobs_task-stop"),
+        (
+            "notes_graph_suggestions_jobs_task",
+            "notes_graph_suggestions_jobs_task-stop",
+        ),
+        (
+            "notes_graph_suggestions_maintenance_task",
+            "notes_graph_suggestions_maintenance_task-stop",
+        ),
         ("privilege_snapshot_task", "privilege_snapshot_task-stop"),
     ]
 
@@ -125,16 +142,22 @@ def test_study_privilege_jobs_worker_spec_predicates_use_route_enabled(
     for env_key in [
         "STUDY_PACK_JOBS_WORKER_ENABLED",
         "STUDY_SUGGESTIONS_JOBS_WORKER_ENABLED",
+        "NOTES_GRAPH_SUGGESTIONS_WORKER_ENABLED",
+        "NOTES_GRAPH_SUGGESTIONS_MAINTENANCE_ENABLED",
         "PRIVILEGE_SNAPSHOT_WORKER_ENABLED",
     ]:
         monkeypatch.setenv(env_key, "true")
 
     assert specs["study_pack_jobs_task"].enabled(context) is False
     assert specs["study_suggestions_jobs_task"].enabled(context) is False
+    assert specs["notes_graph_suggestions_jobs_task"].enabled(context) is False
+    assert specs["notes_graph_suggestions_maintenance_task"].enabled(context) is False
     assert specs["privilege_snapshot_task"].enabled(context) is False
     assert calls == [
         (("flashcards",), {}),
         (("study-suggestions",), {}),
+        (("notes",), {}),
+        (("notes",), {}),
         (("privileges",), {}),
     ]
 

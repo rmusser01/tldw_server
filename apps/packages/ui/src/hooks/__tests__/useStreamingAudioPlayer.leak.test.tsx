@@ -29,7 +29,7 @@ class RejectingAudio {
   autoplay = false
   onended: (() => void) | null = null
   onerror: (() => void) | null = null
-  play() {
+  play(): Promise<void> {
     return Promise.reject(new Error("blocked"))
   }
   pause() {}
@@ -42,6 +42,49 @@ describe("useStreamingAudioPlayer stream->buffer fallback", () => {
   afterEach(() => {
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
+  })
+
+  it.each([true, false])("settles a rejected play promise when streaming=%s", async (streaming) => {
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:audio")
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {})
+    vi.stubGlobal("MediaSource", MockMediaSource)
+    vi.stubGlobal("Audio", RejectingAudio)
+    const { result } = renderHook(() => useStreamingAudioPlayer())
+    await act(async () => {
+      result.current.start("mp3", streaming)
+      if (!streaming) result.current.finish()
+      await Promise.resolve()
+    })
+    expect(result.current.state.error).toBe("Audio playback blocked")
+    expect(result.current.state.playing).toBe(false)
+  })
+
+  it("ignores a retired player's late rejection and decode error after a newer start", async () => {
+    let rejectOld!: (error: Error) => void
+    const instances: DeferredAudio[] = []
+    class DeferredAudio extends RejectingAudio {
+      constructor() { super(); instances.push(this) }
+      play() {
+        return instances.length === 1
+          ? new Promise<void>((_resolve, reject) => { rejectOld = reject })
+          : Promise.resolve()
+      }
+    }
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:audio")
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {})
+    vi.stubGlobal("MediaSource", MockMediaSource)
+    vi.stubGlobal("Audio", DeferredAudio)
+    const { result } = renderHook(() => useStreamingAudioPlayer())
+    act(() => result.current.start("mp3", true))
+    const oldError = instances[0].onerror
+    act(() => result.current.start("mp3", true))
+    await act(async () => {
+      rejectOld(new Error("late rejection"))
+      oldError?.()
+      await Promise.resolve()
+    })
+    expect(result.current.state.error).toBeNull()
+    expect(result.current.state.playing).toBe(true)
   })
 
   it("revokes the MediaSource blob URL before overwriting it with the fallback blob URL", async () => {

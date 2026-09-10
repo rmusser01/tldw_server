@@ -1,13 +1,14 @@
-"""Extract ``[[id:UUID]]`` wikilink references from note content."""
+"""Compatibility wrapper for the neutral Notes wikilink parser."""
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
-# Full UUID-4 hex pattern inside [[id:...]]
-_WIKILINK_RE = re.compile(
-    r"\[\[id:([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\]\]"
+from tldw_Server_API.app.core.Notes.wikilinks import (
+    MAX_WIKILINK_TARGETS,
+    WIKILINK_PARSER_VERSION,
+    WikilinkProjection,
+    parse_wikilinks,
 )
 
 
@@ -24,14 +25,17 @@ def extract_wikilinks(content: str) -> list[WikilinkRef]:
     Only ``[[id:<UUID>]]`` syntax is matched.  Title-based ``[[Title]]``
     links are intentionally ignored (deferred to Phase 2).
     """
-    if not content:
-        return []
+    return [
+        WikilinkRef(target_note_id=target)
+        for target in parse_wikilinks(content).target_note_ids
+    ]
 
-    seen: set[str] = set()
-    result: list[WikilinkRef] = []
-    for m in _WIKILINK_RE.finditer(content):
-        normalized = m.group(1).lower()
-        if normalized not in seen:
-            seen.add(normalized)
-            result.append(WikilinkRef(target_note_id=normalized))
-    return result
+
+__all__ = [
+    "MAX_WIKILINK_TARGETS",
+    "WIKILINK_PARSER_VERSION",
+    "WikilinkProjection",
+    "WikilinkRef",
+    "extract_wikilinks",
+    "parse_wikilinks",
+]

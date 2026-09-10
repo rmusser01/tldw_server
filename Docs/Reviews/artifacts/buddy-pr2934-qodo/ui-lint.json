@@ -1,0 +1,35 @@
+{
+  "configuration": "apps/tldw-frontend/eslint.config.mjs; next.rootDir points to the actual Next app; no rule overrides",
+  "files": [
+    {
+      "file": "/private/tmp/tldw-server-buddy-persona-ux/apps/packages/ui/src/components/Common/PersonaBuddy/BuddyInteraction.tsx",
+      "errors": 0,
+      "warnings": 0,
+      "messages": []
+    },
+    {
+      "file": "/private/tmp/tldw-server-buddy-persona-ux/apps/packages/ui/src/components/Common/PersonaBuddy/BuddyManagementModal.tsx",
+      "errors": 0,
+      "warnings": 0,
+      "messages": []
+    },
+    {
+      "file": "/private/tmp/tldw-server-buddy-persona-ux/apps/packages/ui/src/components/Common/PersonaBuddy/__tests__/BuddyInteraction.test.tsx",
+      "errors": 0,
+      "warnings": 0,
+      "messages": []
+    },
+    {
+      "file": "/private/tmp/tldw-server-buddy-persona-ux/apps/packages/ui/src/components/Common/PersonaBuddy/__tests__/BuddyManagementModal.test.tsx",
+      "errors": 0,
+      "warnings": 0,
+      "messages": []
+    },
+    {
+      "file": "/private/tmp/tldw-server-buddy-persona-ux/apps/packages/ui/src/components/Common/PersonaBuddy/__tests__/IndependentBuddyHost.test.tsx",
+      "errors": 0,
+      "warnings": 0,
+      "messages": []
+    }
+  ]
+}

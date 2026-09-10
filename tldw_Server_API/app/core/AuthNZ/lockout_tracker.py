@@ -12,6 +12,9 @@ protection.
 
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -20,6 +23,25 @@ from loguru import logger
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.repos.rate_limits_repo import AuthnzRateLimitsRepo
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_settings
+
+_LOGIN_CLIENT_LOCKOUT_KEY_RE = re.compile(r"login-client-v1:[0-9a-f]{64}\Z")
+
+
+def build_login_client_lockout_key(client_ip: str | None, login_identifier: str) -> str:
+    """Build a stable, opaque lockout key for one client and login identifier."""
+    payload = json.dumps(
+        [client_ip or "unknown", login_identifier.strip().lower()],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return f"login-client-v1:{hashlib.sha256(payload).hexdigest()}"
+
+
+def validate_login_client_lockout_key(value: object) -> str | None:
+    """Return a canonical client lockout key, or ``None`` for invalid input."""
+    if isinstance(value, str) and _LOGIN_CLIENT_LOCKOUT_KEY_RE.fullmatch(value):
+        return value
+    return None
 
 
 class LockoutTracker:

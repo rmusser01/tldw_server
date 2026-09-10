@@ -347,6 +347,30 @@ class TestRequestValidation:
         assert adapter.map_voice("invalid_voice") in {"alloy", "echo", "fable", "onyx", "nova", "shimmer"}
 
     @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_legacy_model_alias_keeps_request_case_and_sends_canonical_payload(self):
+        captured: dict[str, object] = {}
+
+        async def _stream(**kwargs):
+            captured.update(kwargs)
+            yield b"audio"
+
+        adapter = ProductionOpenAITTSAdapter({"api_key": "test-key"})
+        request = TTSRequest(
+            text="Hello",
+            voice="alloy",
+            model="TTS-1",
+            stream=True,
+        )
+
+        with patch.object(openai_mod, "astream_bytes", _stream):
+            chunks = [chunk async for chunk in adapter.generate_stream(request)]
+
+        assert chunks == [b"audio"]
+        assert request.model == "TTS-1"
+        assert captured["json"]["model"] == "tts-1"
+
+    @pytest.mark.unit
     @pytest.mark.xfail(reason="OpenAIAdapter does not validate model names in validate_request")
     async def test_validate_invalid_model(self):
         adapter = OpenAITTSAdapter({"openai_api_key": "test-key"})

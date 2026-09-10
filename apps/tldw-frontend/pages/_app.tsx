@@ -9,6 +9,7 @@ import { useRouter } from "next/router"
 import React from "react"
 import { BackendRecoveryUiProvider } from "@/components/Common/BackendRecoveryUiContext"
 import { PageAssistLoader } from "@/components/Common/PageAssistLoader"
+import { isAdminRoute } from "@/components/Option/Admin/admin-modules"
 import { FirstRunGate } from "@/components/PersonaGarden/FirstRunGate"
 import { AppProviders } from "@web/components/AppProviders"
 import ErrorBoundary from "@web/components/ErrorBoundary"
@@ -31,6 +32,16 @@ import {
 
 const OptionLayout = dynamic(
   () => import("@web/components/layout/WebLayout"),
+  { ssr: false }
+)
+
+// Buddy interaction state belongs to the authenticated app, outside route
+// layouts and readiness/first-run transitions that can replace their children.
+const IndependentBuddyHost = dynamic(
+  () =>
+    import("@/components/Common/PersonaBuddy/IndependentBuddyHost").then(
+      (module) => module.IndependentBuddyHost
+    ),
   { ssr: false }
 )
 
@@ -66,6 +77,7 @@ type ConfiguredAuthState = {
   hasConfig: boolean
   authMode?: "single-user" | "multi-user"
   isAuthenticated: boolean
+  serverUrl?: string | null
 }
 
 const getErrorStatus = (error: unknown): number | null => {
@@ -145,6 +157,8 @@ const getConfiguredAuthState = async (): Promise<ConfiguredAuthState> => {
         isAuthenticated: false
       }
     }
+    const serverUrl =
+      typeof config.serverUrl === "string" ? config.serverUrl : null
 
     if (config.authMode === "multi-user") {
       const hostedMode = isHostedTldwDeployment()
@@ -155,7 +169,8 @@ const getConfiguredAuthState = async (): Promise<ConfiguredAuthState> => {
         return {
           hasConfig: true,
           authMode: "multi-user",
-          isAuthenticated: false
+          isAuthenticated: false,
+          serverUrl
         }
       }
 
@@ -165,14 +180,16 @@ const getConfiguredAuthState = async (): Promise<ConfiguredAuthState> => {
         return {
           hasConfig: true,
           authMode: "multi-user",
-          isAuthenticated: true
+          isAuthenticated: true,
+          serverUrl
         }
       } catch (error) {
         if (!isAuthValidationFailure(error)) {
           return {
             hasConfig: true,
             authMode: "multi-user",
-            isAuthenticated: true
+            isAuthenticated: true,
+            serverUrl
           }
         }
         try {
@@ -183,7 +200,8 @@ const getConfiguredAuthState = async (): Promise<ConfiguredAuthState> => {
         return {
           hasConfig: true,
           authMode: "multi-user",
-          isAuthenticated: false
+          isAuthenticated: false,
+          serverUrl
         }
       }
     }
@@ -191,6 +209,7 @@ const getConfiguredAuthState = async (): Promise<ConfiguredAuthState> => {
     return {
       hasConfig: true,
       authMode: "single-user",
+      serverUrl,
       isAuthenticated:
         hasActiveCookieSessionAuth(config) ||
         (typeof config.apiKey === "string" && config.apiKey.trim().length > 0)
@@ -220,6 +239,8 @@ export default function App({ Component, pageProps }: AppProps) {
   const shouldBypassGates =
     isPublicAuthRoute || isSettingsRoute || isSetupRoute || isDebugRoute
   const [isAuthenticated, setIsAuthenticated] = React.useState(false)
+  const [configuredServerUrl, setConfiguredServerUrl] =
+    React.useState<string | null>(null)
   const [authResolved, setAuthResolved] = React.useState(false)
   const didWarmRoutePrefetch = React.useRef(false)
 
@@ -244,6 +265,7 @@ export default function App({ Component, pageProps }: AppProps) {
 
       if (!cancelled) {
         setIsAuthenticated(authed)
+        setConfiguredServerUrl(configuredAuth.serverUrl ?? null)
         setAuthResolved(true)
         if (
           !authed &&
@@ -378,10 +400,14 @@ export default function App({ Component, pageProps }: AppProps) {
     () => buildFirstRunSetupRoute(router.asPath || routePath || "/"),
     [routePath, router.asPath]
   )
+  const isAdminRoutePath = isAdminRoute(routePath)
   const shouldBypassFirstRunOverlay =
     !shouldBypassGates &&
     (routePath === "/" ||
       routePath === "/research-workspace" ||
+      // Admin routes are operator surfaces: never hijack them with the
+      // assistant-onboarding interstitial (2026-09 UX audit finding S8).
+      isAdminRoutePath ||
       firstRunEntryIntent === CHARACTER_CHAT_ONBOARDING_INTENT)
 
   const handleStartSetup = React.useCallback(() => {
@@ -399,6 +425,13 @@ export default function App({ Component, pageProps }: AppProps) {
   )
   const enableNotifications =
     authResolved && isAuthenticated && !isPublicAuthRoute && !isSetupRoute
+
+  const enableIndependentBuddy =
+    authResolved &&
+    isAuthenticated &&
+    !isPublicAuthRoute &&
+    !isSetupRoute &&
+    !isSidepanelDebugRoute
 
   if (!authResolved) {
     return <PageAssistLoader label="Loading..." autoFocus={false} />
@@ -426,10 +459,16 @@ export default function App({ Component, pageProps }: AppProps) {
     <AppProviders enableNotifications={enableNotifications}>
       <ConfigurationGuard>
         <BackendRecoveryUiProvider routeRecoveryEnabled>
+          {enableIndependentBuddy ? (
+            <ErrorBoundary>
+              <IndependentBuddyHost />
+            </ErrorBoundary>
+          ) : null}
           <ErrorBoundary>
             <ServerReadinessGate
               bypass={shouldBypassGates}
-              allowDegraded={shouldAllowDegradedReadiness}>
+              allowDegraded={shouldAllowDegradedReadiness}
+              configuredServerUrl={configuredServerUrl}>
               {gatedContent}
             </ServerReadinessGate>
           </ErrorBoundary>

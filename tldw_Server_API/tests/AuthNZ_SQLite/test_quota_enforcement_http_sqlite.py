@@ -5,6 +5,8 @@ from typing import Any, Callable
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_test_user
+
 
 def _jwt_service():
     from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
@@ -92,13 +94,10 @@ async def test_jwt_quota_enforced_for_chat_and_rag_sqlite(monkeypatch, tmp_path)
         pool = await get_db_pool()
         ensure_authnz_tables(Path(pool.db_path))
 
-        # Create a user for JWT auth
-        async with pool.transaction() as conn:
-            await conn.execute(
-                "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
-                ("su", "su@example.com", "x"),
-            )
-        user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "su")
+        # Create a user for JWT auth through the guarded write path.
+        user_id = await create_authnz_test_user(
+            pool, username="su", email="su@example.com"
+        )
         from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 
         await AuthnzUsersRepo(db_pool=pool).assign_role_if_missing(
@@ -215,13 +214,10 @@ async def test_api_key_quota_enforced_for_rag_and_chat_sqlite(monkeypatch, tmp_p
         pool = await get_db_pool()
         ensure_authnz_tables(Path(pool.db_path))
 
-        # Create a user
-        async with pool.transaction() as conn:
-            await conn.execute(
-                "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
-                ("alice", "alice@example.com", "x"),
-            )
-        user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "alice")
+        # Create a user through the guarded write path.
+        user_id = await create_authnz_test_user(
+            pool, username="alice", email="alice@example.com"
+        )
         from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 
         await AuthnzUsersRepo(db_pool=pool).assign_role_if_missing(

@@ -48,7 +48,7 @@ def check_media_exists(
     if not query_parts:
         raise ValueError("Must provide id, url, or content_hash to check.")  # noqa: TRY003
 
-    query = f"SELECT id FROM Media WHERE ({' OR '.join(query_parts)}) AND deleted = 0 LIMIT 1"  # nosec B608
+    query = f"SELECT id FROM Media WHERE ({' OR '.join(query_parts)}) AND deleted = 0 AND system_operation_id IS NULL LIMIT 1"  # nosec B608
     try:
         cursor = db_instance.execute_query(query, tuple(params))
         result = cursor.fetchone()
@@ -66,7 +66,8 @@ def get_unprocessed_media(db_instance: MediaDbLike) -> list[dict]:
     try:
         query = (
             "SELECT id, uuid, content, type, title FROM Media "
-            "WHERE vector_processing = 0 AND deleted = 0 AND is_trash = 0 ORDER BY id"
+            "WHERE vector_processing = 0 AND deleted = 0 AND is_trash = 0 "
+            "AND system_operation_id IS NULL ORDER BY id"
         )
         cursor = db_instance.execute_query(query)
         return [dict(row) for row in cursor.fetchall()]
@@ -90,7 +91,8 @@ def mark_media_as_processed(
         with db_instance.transaction() as conn:
             media_row = db_instance._fetchone_with_connection(
                 conn,
-                "SELECT uuid, version, vector_processing, chunking_status FROM Media WHERE id = ? AND deleted = 0",
+                "SELECT uuid, version, vector_processing, chunking_status FROM Media "
+                "WHERE id = ? AND deleted = 0 AND system_operation_id IS NULL",
                 (media_id,),
             )
             if not media_row:
@@ -117,7 +119,7 @@ def mark_media_as_processed(
                     last_modified = ?,
                     version = ?,
                     client_id = ?
-                WHERE id = ? AND version = ?
+                WHERE id = ? AND version = ? AND system_operation_id IS NULL
                 """,
                 ("completed", now, next_version, db_instance.client_id, media_id, current_version),
             )
@@ -129,7 +131,7 @@ def mark_media_as_processed(
                 )
             payload = db_instance._fetchone_with_connection(
                 conn,
-                "SELECT * FROM Media WHERE id = ?",
+                "SELECT * FROM Media WHERE id = ? AND system_operation_id IS NULL",
                 (media_id,),
             ) or {}
             db_instance._log_sync_event(conn, "Media", media_uuid, "update", next_version, payload)

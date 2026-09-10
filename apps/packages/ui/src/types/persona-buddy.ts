@@ -35,7 +35,17 @@ export interface PersonaBuddyLiveSessionSummary {
   suggestedVisualState?: string | null
 }
 
+export interface PersonaBuddyStreamFeedback {
+  sessionId: string
+  personaId: string
+  clientMessageId: string
+  status: "pending" | "reply" | "review" | "error" | "notice"
+  text: string
+  planId?: string
+}
+
 export interface PersonaBuddyLiveControlView {
+  feedback?: PersonaBuddyStreamFeedback | null
   sessions: PersonaBuddyLiveSessionSummary[]
   focusedSessionId: string | null
   focusedSession: PersonaBuddyLiveSessionSummary | null

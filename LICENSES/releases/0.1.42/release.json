@@ -4,9 +4,9 @@
   "product_version": "0.1.42",
   "repository": "https://github.com/rmusser01/tldw_server",
   "source_url": "https://github.com/rmusser01/tldw_server/tree/v0.1.42",
-  "protected_source_revision": "0f3983788c413e0d17ffe7eabe8cff4a9f6ae723",
-  "release_date": "2026-07-26",
-  "countdown_start": "2028-07-26T12:00:00Z",
+  "protected_source_revision": "50c1f689575b1bc21ed3e78cdb193b03fe968cdd",
+  "release_date": "2026-09-10",
+  "countdown_start": "2028-09-10T12:00:00Z",
   "protected_paths": [
     "admin-ui/**",
     "apps/tldw-frontend/**",
@@ -24,11 +24,11 @@
   "legal_file_digests": {
     "LICENSES/PolyForm-Perimeter-1.0.1.txt": "5c7a5ccd847fcc285dda039e511ba013693fe979dfc5faee47f6fb59c7add337",
     "LICENSES/AGPL-3.0-only.txt": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0",
-    "LICENSES/releases/0.1.42/PolyForm-Countdown-1.0.0.txt": "ff04bff956d546085ea742c436cc677fea1d0c35f19aac234915ac5f96df9b9f"
+    "LICENSES/releases/0.1.42/PolyForm-Countdown-1.0.0.txt": "29d5e44f9fabdadf30038b616a0e2a94a2a7128842ddfcd45146ea01bf9f4403"
   },
   "protected_file_manifest": {
     "path": "LICENSES/releases/0.1.42/protected-files.sha256",
-    "sha256": "dbf6e25909154b262bc3012f765ad05e51e21353435ba2c8b1b0016a8b1ea3fd"
+    "sha256": "7fa381167aef148d649b519e5d03aac9d695746c100cb512b1bade584c7d233f"
   },
   "required_notices": [
     "LICENSE",
@@ -42,7 +42,7 @@
     "protected_source_snapshot": {
       "manifest": "LICENSES/releases/0.1.42/protected-files.sha256",
       "result": "verified",
-      "source_revision": "0f3983788c413e0d17ffe7eabe8cff4a9f6ae723"
+      "source_revision": "50c1f689575b1bc21ed3e78cdb193b03fe968cdd"
     },
     "protected_binaries": {
       "published": false,

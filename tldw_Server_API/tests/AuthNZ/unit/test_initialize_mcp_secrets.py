@@ -103,3 +103,57 @@ def test_authnz_initializer_does_not_create_missing_exclusive_env_file(
         _ensure_env_file()
 
     assert not missing_env.exists()  # nosec B101
+
+
+def test_prompt_yes_no_uses_yes_default_when_stdin_is_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use and log the displayed yes default when stdin is closed."""
+    messages: list[str] = []
+
+    def _closed_stdin(_prompt: str) -> str:
+        """Simulate a launcher whose standard input is closed."""
+        raise EOFError
+
+    def _record_warning(message: str) -> None:
+        """Capture the non-interactive diagnostic sent through Loguru."""
+        messages.append(message)
+
+    monkeypatch.setattr("builtins.input", _closed_stdin)
+    monkeypatch.setattr(initialize_module.logger, "warning", _record_warning)
+
+    result = initialize_module._prompt_yes_no(
+        "Generate missing keys?",
+        default_yes=True,
+        non_interactive=False,
+    )
+
+    assert result is True
+    assert messages == ["No interactive input detected; using default: yes"]
+
+
+def test_prompt_yes_no_uses_no_default_when_stdin_is_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use and log the displayed no default when stdin is closed."""
+    messages: list[str] = []
+
+    def _closed_stdin(_prompt: str) -> str:
+        """Simulate a launcher whose standard input is closed."""
+        raise EOFError
+
+    def _record_warning(message: str) -> None:
+        """Capture the non-interactive diagnostic sent through Loguru."""
+        messages.append(message)
+
+    monkeypatch.setattr("builtins.input", _closed_stdin)
+    monkeypatch.setattr(initialize_module.logger, "warning", _record_warning)
+
+    result = initialize_module._prompt_yes_no(
+        "Generate replacement keys?",
+        default_yes=False,
+        non_interactive=False,
+    )
+
+    assert result is False
+    assert messages == ["No interactive input detected; using default: no"]

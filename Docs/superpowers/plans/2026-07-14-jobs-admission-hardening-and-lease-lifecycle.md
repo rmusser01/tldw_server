@@ -4,7 +4,7 @@
 
 **Goal:** Remove the three validated Jobs admission defects, then incrementally extract the single-job lease acquisition, renewal, and release transaction boundaries without changing the public `JobManager` API.
 
-**Architecture:** Deliver three separate PRs. PR 1 keeps `JobManager.create_job` as the facade while making secret rejection authoritative, quota failures fail closed, optional PostgreSQL counters savepoint-isolated, and enabled quotas atomic. PostgreSQL uses owner/domain-scoped advisory locks; SQLite uses a short `BEGIN IMMEDIATE` transaction because SQLite write locking is database-wide. PR 2 starts only after PR 1 is merged and rebased; it adds a typed acquisition command and moves only single-job acquisition SQL into backend lifecycle modules. PR 3 starts only after PR 2 is merged and rebased; it adds typed renewal/release commands and moves those two transitions. Validation, compatibility mapping, and post-commit effects remain in `JobManager` throughout.
+**Architecture:** Deliver three separate PRs. PR 1 keeps `JobManager.create_job` as the facade while making secret rejection authoritative, quota failures fail closed, optional PostgreSQL counters savepoint-isolated, and enabled quotas atomic. PostgreSQL uses owner/domain-scoped advisory locks; SQLite uses a short `BEGIN IMMEDIATE` transaction because SQLite write locking is database-wide. PR 2 starts only after PR 1 is merged and rebased; it adds a typed acquisition command and moves only single-job acquisition SQL into backend lifecycle modules. PR 3 starts only after PR 2 is merged and rebased; it adds typed renewal/release commands and moves those two transitions. Validation, compatibility mapping, expired-processing recovery, and post-commit effects remain in `JobManager` throughout. Expired recovery can schedule retries or apply terminal failure policy, so it is not part of the single queued-to-processing acquisition transaction extracted in PR 2.
 
 **Tech Stack:** Python 3.14, sqlite3, psycopg 3, PostgreSQL transaction-scoped advisory locks, SQLite `BEGIN IMMEDIATE`, dataclasses, pytest, existing Jobs temporary PostgreSQL fixtures, Loguru, Bandit.
 
@@ -14,12 +14,12 @@
 - Admission implementation task: `TASK-12969.1`.
 - Lease acquisition task: `TASK-12969.2`, dependent on `TASK-12969.1`.
 - Lease renewal/release task: `TASK-12969.3`, dependent on `TASK-12969.2`.
-- Current execution base: `7c7d591c6e3552ca4bdbf30bdd6bf79460221ece` from `origin/dev`.
+- Current renewal/release execution base: `76481b293908f6874b0acef26f4a0a6d49acdd4f` from `origin/dev` after PR #2760 merged.
 - Findings were reproduced on `132037dd075090c295003d6885ac4276a9640916`; the intervening upstream commits did not change Jobs source or tests, and each task reconfirms its red state before implementation.
 - Preserve every public `JobManager` method signature and return shape.
 - Backend operation modules must not import `JobManager`.
 - Do not add or change database schema in any PR.
-- Acquire quota locks only when the corresponding quota is enabled and an owner scope exists; do not globally serialize normal admissions or acquisitions.
+- Acquire PostgreSQL quota locks only when the corresponding quota is enabled and an owner scope exists; do not globally serialize normal PostgreSQL admissions or acquisitions. Preserve SQLite's merged unconditional `BEGIN IMMEDIATE` acquisition boundary, which prevents dependency edges from committing between candidate selection and the queued-to-processing update.
 - Durable job row, counter, and existing outbox writes remain in the backend transaction. Metrics, tracing, gauges, SLA reporting, and `emit_job_event` calls run after commit.
 - `complete_job`, `fail_job`, `cancel_job`, terminal transitions, `batch_renew_leases`, batch completion/failure, retry, quarantine, pruning, and admin-owned SQL are out of scope.
 - Real PostgreSQL tests use `pytest.mark.pg_jobs`, `jobs_pg_dsn`, and `RUN_JOBS=1`; a skipped PostgreSQL test is not acceptable evidence for any PR.
@@ -69,19 +69,19 @@ quota concurrency: 2 created, expected 1
 **Goal:** Define the typed acquisition command and characterize acquisition before moving SQL.
 **Success Criteria:** Facade tests cover contention, expiry, dependencies, quotas, counters, ordering, and post-commit effects on both backends.
 **Tests:** Contract tests, shared acquisition parity scenarios, direct backend operation tests.
-**Status:** Not Started
+**Status:** Complete
 
 ### Stage 4: Acquisition Extraction
 **Goal:** Move single-job acquisition SQL into backend modules and leave `JobManager.acquire_next_job` as a thin compatibility facade.
 **Success Criteria:** SQLite and real PostgreSQL acquisition suites pass with no operation-module dependency on `JobManager`; renewal, release, batch, and terminal paths remain unchanged.
 **Tests:** Focused acquisition matrix, acquisition concurrency stress, Jobs parity, Bandit, compile check.
-**Status:** Not Started
+**Status:** Complete
 
 ### Stage 5: Renewal and Release Extraction
 **Goal:** Characterize and move single-job renewal/release SQL only after acquisition is merged.
 **Success Criteria:** Both backends preserve enforcement, no-shorten renewal, progress, field clearing, counters, and post-commit effects; batch and terminal paths remain unchanged.
 **Tests:** Contract tests, shared renewal/release parity, direct operation tests, Jobs parity, Bandit, compile check.
-**Status:** Not Started
+**Status:** Complete
 
 ## File Structure
 
@@ -671,11 +671,11 @@ Open a PR against `dev` containing only `TASK-12969.1` implementation and planni
 - Consumes: merged PR 1 and current `origin/dev`.
 - Produces: a new clean acquisition worktree/branch based on the merge commit.
 
-- [ ] **Step 1: Confirm the admission PR is merged and green**
+- [x] **Step 1: Confirm the admission PR is merged and green**
 
 Record the PR URL, merge commit, focused test results, Bandit result, and requester-owned Change summary in `TASK-12969.1`. Mark it Done only after the merge is visible on `origin/dev`.
 
-- [ ] **Step 2: Create a new acquisition worktree**
+- [x] **Step 2: Create a new acquisition worktree**
 
 ```bash
 git fetch origin dev
@@ -685,9 +685,11 @@ git worktree add .worktrees/jobs-lease-acquisition \
 
 Do not continue acquisition work on the admission branch. Set `TASK-12969.2` to In Progress and record the new worktree/branch.
 
-- [ ] **Step 3: Re-run the merged admission gate**
+- [x] **Step 3: Re-run the merged admission gate**
 
 Run the Task 4 admission gate in the new worktree. Expected: all tests pass with real PostgreSQL execution. Stop and repair regression fallout before any acquisition edits.
+
+Execution evidence on the merged base: 63 tests passed with required real PostgreSQL execution and zero skips. The first sandboxed run could not reach the healthy local PostgreSQL container; the unchanged matrix passed when rerun with local service access.
 
 ## Task 6: Add the Typed Single-Job Acquisition Command
 
@@ -699,11 +701,11 @@ Run the Task 4 admission gate in the new worktree. Expected: all tests pass with
 - Consumes: existing `LifecycleResult`, `NoTransitionReason`, and manager arguments.
 - Produces: `AcquireJobCommand` used by both backend modules.
 
-- [ ] **Step 1: Add red command and invariant tests**
+- [x] **Step 1: Add red command and invariant tests**
 
 Test exact field preservation, frozen behavior, invalid ordering values, and invalid lease duration. Add no-transition coverage for `NO_ELIGIBLE_JOB`.
 
-- [ ] **Step 2: Add the acquisition command dataclass**
+- [x] **Step 2: Add the acquisition command dataclass**
 
 Implement these contracts:
 
@@ -741,7 +743,7 @@ NO_ELIGIBLE_JOB = "no_eligible_job"
 
 Preserve `tie_break=None`: PostgreSQL currently resolves it to FIFO, while SQLite keeps the current Chatbooks dynamic default and FIFO for other domains.
 
-- [ ] **Step 3: Export and verify contracts**
+- [x] **Step 3: Export and verify contracts**
 
 Add the command classes to `__all__`, run:
 
@@ -751,7 +753,7 @@ RUN_JOBS=1 python -m pytest tldw_Server_API/tests/Jobs/test_jobs_operation_contr
 
 Expected: all contract tests pass, including the recursive no-`JobManager` import guard.
 
-- [ ] **Step 4: Commit Task 6**
+- [x] **Step 4: Commit Task 6**
 
 ```bash
 git add tldw_Server_API/app/core/Jobs/operations/contracts.py \
@@ -770,7 +772,7 @@ git commit -m "refactor(jobs): define single job acquisition command"
 - Consumes: current public `JobManager` methods.
 - Produces: passing backend-neutral acquisition scenarios that remain unchanged while Tasks 8-9 move the implementation.
 
-- [ ] **Step 1: Add shared public parity scenarios**
+- [x] **Step 1: Add shared public parity scenarios**
 
 Add these helpers to `parity/scenarios.py` and wrappers in both backend parity files. Add imports for `ThreadPoolExecutor`, `Barrier`, and `Callable`.
 
@@ -845,7 +847,7 @@ def run_expired_lease_reclaim_scenario(
 
 Construct PostgreSQL managers before entering the executor so concurrent schema initialization cannot interfere with the contention assertion.
 
-- [ ] **Step 2: Add backend expiry adapters in the wrapper files**
+- [x] **Step 2: Add backend expiry adapters in the wrapper files**
 
 The SQLite wrapper passes this callback:
 
@@ -879,7 +881,7 @@ def _expire_postgres_lease(manager: JobManager, job_id: int) -> None:
 
 Add one wrapper test per new scenario in each parity file.
 
-- [ ] **Step 3: Verify the characterization suite is green before extraction**
+- [x] **Step 3: Verify the characterization suite is green before extraction**
 
 ```bash
 RUN_JOBS=1 python -m pytest \
@@ -890,7 +892,7 @@ RUN_JOBS=1 python -m pytest \
 
 Expected: every shared scenario passes on both backends and no PostgreSQL test skips. If a scenario fails, correct the scenario or split a newly discovered behavior defect into a separate task before extraction.
 
-- [ ] **Step 4: Commit the green characterization tests**
+- [x] **Step 4: Commit the green characterization tests**
 
 ```bash
 git add tldw_Server_API/tests/Jobs/parity
@@ -915,9 +917,9 @@ The module exposes one function with this exact signature:
 
 - `acquire_job(conn: sqlite3.Connection, *, command: AcquireJobCommand, counters_enabled: bool, now: datetime) -> LifecycleResult`
 
-- [ ] **Step 1: Write and run the red SQLite direct-operation tests**
+- [x] **Step 1: Write and run the red SQLite direct-operation tests**
 
-Import `acquire_job` from the future SQLite lifecycle module. Cover applied acquisition, no eligible row, FIFO/LIFO/default ordering, dependency blocking, expired reclaim, max-inflight quota, and counter movement. Run:
+Import `acquire_job` from the future SQLite lifecycle module. Cover applied acquisition, no eligible row, FIFO/LIFO/default ordering, dependency blocking, max-inflight quota including expired leases not counting as active inflight work, and counter movement. Expired-processing recovery remains a facade workflow and is covered by the unchanged public parity reclaim scenario from Task 7. Run:
 
 ```bash
 RUN_JOBS=1 python -m pytest \
@@ -927,9 +929,9 @@ RUN_JOBS=1 python -m pytest \
 
 Expected: collection fails because `operations.sqlite.lifecycle` does not exist.
 
-- [ ] **Step 2: Implement SQLite acquire transaction**
+- [x] **Step 2: Implement SQLite acquire transaction**
 
-Move the existing eligibility, dependency, ordering, single-update toggle, expired-lease reclaim, update, row fetch, and counter SQL into `acquire_job`. Preserve dynamic Chatbooks ordering exactly. When `max_inflight_quota > 0` and `owner_user_id` exists, execute `BEGIN IMMEDIATE` before count plus acquisition so both are one serialized decision.
+Move the existing queued-job eligibility, dependency, ordering, single-update toggle, update, row fetch, and counter SQL into `acquire_job`. Preserve dynamic Chatbooks ordering exactly. Keep expired-processing recovery in `JobManager`; it owns retry scheduling and terminal failure behavior outside this extraction. Preserve the merged unconditional `BEGIN IMMEDIATE` before candidate selection: it prevents a dependency edge from committing between the eligibility query and queued-to-processing update, and it also keeps an enabled max-inflight count plus acquisition in one serialized decision. Do not narrow this lock to quota-enabled calls during extraction.
 
 Use `cursor.rowcount` for transition success. Return:
 
@@ -940,11 +942,12 @@ LifecycleResult.no_transition(NoTransitionReason.NO_ELIGIBLE_JOB)
 
 Counter updates remain inside the transaction. Do not decrypt payloads, emit events, update gauges, record SLA breaches, or observe metrics in the operation module.
 
-- [ ] **Step 3: Export acquisition and route the SQLite facade**
+- [x] **Step 3: Export acquisition and route the SQLite facade**
 
 `JobManager` continues to:
 - honor acquire gate and queue pause;
 - clamp/adapt lease seconds;
+- recover expired processing jobs and reconcile terminal dependents before queued selection;
 - resolve priority direction, tie-break, single-update flag, and quota values;
 - generate the lease id;
 - decrypt/parse payload and assert public invariants;
@@ -975,11 +978,11 @@ result = _sqlite_acquire_job(
 )
 ```
 
-- [ ] **Step 4: Add and satisfy facade post-commit side-effect tests**
+- [x] **Step 4: Add and satisfy facade post-commit side-effect tests**
 
 In `test_jobs_lifecycle_side_effects.py`, monkeypatch `emit_job_event`, `observe_queue_latency`, and `_update_gauges`. Stub `_sqlite_acquire_job` with applied and no-transition `LifecycleResult` values. Assert applied acquisition emits one `job.acquired`; no-transition or raised backend errors emit no success event, metric, or gauge. Record `"operation-returned"` in the stub and assert every callback occurs later in the recorded order.
 
-- [ ] **Step 5: Verify SQLite direct and facade behavior**
+- [x] **Step 5: Verify SQLite direct and facade behavior**
 
 ```bash
 RUN_JOBS=1 python -m pytest \
@@ -994,11 +997,11 @@ RUN_JOBS=1 python -m pytest \
 
 Expected: all selected tests pass.
 
-- [ ] **Step 6: Confirm renewal and release are untouched**
+- [x] **Step 6: Confirm renewal and release are untouched**
 
 Use `git diff --function-context origin/dev -- tldw_Server_API/app/core/Jobs/manager.py` and verify `renew_job_lease`, `release_job`, `batch_renew_leases`, and terminal methods contain no behavioral edits. Import-only adjacency changes must be reviewed explicitly.
 
-- [ ] **Step 7: Commit Task 8**
+- [x] **Step 7: Commit Task 8**
 
 ```bash
 git add tldw_Server_API/app/core/Jobs/operations/sqlite \
@@ -1026,9 +1029,9 @@ The module exposes one function with this exact signature:
 
 - `acquire_job(conn: Any, cursor_factory: Callable[[Any], AbstractContextManager[Any]], *, command: AcquireJobCommand, counters_enabled: bool, now: datetime) -> LifecycleResult`
 
-- [ ] **Step 1: Write and run the red PostgreSQL direct-operation tests**
+- [x] **Step 1: Write and run the red PostgreSQL direct-operation tests**
 
-Import `acquire_job` from the future PostgreSQL lifecycle module. Use `pytestmark = pytest.mark.pg_jobs` and `jobs_pg_dsn`. Cover applied acquisition, no eligible row, `SKIP LOCKED` contention, priority/tie ordering, dependency blocking, expired reclaim, atomic max-inflight quota, counter movement, and counter savepoint recovery. Run:
+Import `acquire_job` from the future PostgreSQL lifecycle module. Use `pytestmark = pytest.mark.pg_jobs` and `jobs_pg_dsn`. Cover applied acquisition, no eligible row, `SKIP LOCKED` contention, priority/tie ordering, dependency blocking, atomic max-inflight quota including expired leases not counting as active inflight work, counter movement, and counter savepoint recovery. Expired-processing recovery remains a facade workflow and is covered by the Task 7 public parity reclaim scenario. Run:
 
 ```bash
 RUN_JOBS=1 python -m pytest \
@@ -1038,21 +1041,21 @@ RUN_JOBS=1 python -m pytest \
 
 Expected: collection fails because `operations.postgres.lifecycle` does not exist. The test must execute rather than skip.
 
-- [ ] **Step 2: Implement PostgreSQL acquire transaction**
+- [x] **Step 2: Implement PostgreSQL acquire transaction**
 
-Move both existing `JOBS_PG_SINGLE_UPDATE_ACQUIRE` and two-step `FOR UPDATE SKIP LOCKED` paths into the operation. Preserve current ordering and dependency predicates. If max-inflight quota is enabled for an owner, acquire a transaction-scoped advisory lock in the namespace `jobs:acquire-inflight`, count active unexpired processing rows, and return `NO_ELIGIBLE_JOB` at the limit before selecting another row.
+Move both existing `JOBS_PG_SINGLE_UPDATE_ACQUIRE` and two-step `FOR UPDATE SKIP LOCKED` paths into the operation. Preserve current ordering and dependency predicates. Keep expired-processing recovery in `JobManager`; it owns retry scheduling and terminal failure behavior outside this extraction. If max-inflight quota is enabled for an owner, acquire the current transaction-scoped advisory lock, count active unexpired processing rows, and return `NO_ELIGIBLE_JOB` at the limit before selecting another row.
 
-Generate the advisory key with the same stable BLAKE2b technique as admission but a distinct fixed prefix. Keep counter updates in a savepoint so a noncritical counter failure cannot poison the lease transaction.
+Preserve the exact current `JobManager._pg_advisory_key("max-inflight", domain, owner_user_id)` SHA-1-derived key material and signed-BIGINT mapping in a private operation helper. This keeps mixed old/new workers on the same lock during rolling deployment; changing to a new BLAKE2b namespace inside the extraction would temporarily break quota serialization. Keep counter updates in a savepoint so a noncritical counter failure cannot poison the lease transaction.
 
-- [ ] **Step 3: Route PostgreSQL facade calls and remove migrated acquisition SQL**
+- [x] **Step 3: Route PostgreSQL facade calls and remove migrated acquisition SQL**
 
 Use the same facade responsibilities and result mapping established for SQLite. Delete the old PostgreSQL acquisition SQL only after direct and parity tests pass. Keep renewal, release, batch renewal, and terminal methods byte-for-byte unchanged except import/format adjustments required by tooling.
 
-- [ ] **Step 4: Extend post-commit side-effect tests to PostgreSQL routing**
+- [x] **Step 4: Extend post-commit side-effect tests to PostgreSQL routing**
 
 Add applied, no-transition, and raised-error stubs for `_postgres_acquire_job`. Reuse the Task 8 event-order assertions and verify facade behavior is identical across backend routing.
 
-- [ ] **Step 5: Verify direct PostgreSQL and parity behavior**
+- [x] **Step 5: Verify direct PostgreSQL and parity behavior**
 
 ```bash
 RUN_JOBS=1 python -m pytest \
@@ -1066,7 +1069,7 @@ RUN_JOBS=1 python -m pytest \
 
 Expected: all selected tests pass and none skip.
 
-- [ ] **Step 6: Run focused concurrency stress**
+- [x] **Step 6: Run focused concurrency stress**
 
 ```bash
 RUN_JOBS=1 python -m pytest \
@@ -1077,11 +1080,11 @@ RUN_JOBS=1 python -m pytest \
 
 Expected: both stress files pass. Record runtime and test counts in `TASK-12969.2`.
 
-- [ ] **Step 7: Confirm renewal and release are untouched**
+- [x] **Step 7: Confirm renewal and release are untouched**
 
 Repeat the Task 8 function-context review for `manager.py`. The acquisition PR must not move, rewrite, or opportunistically clean up renewal/release code.
 
-- [ ] **Step 8: Commit Task 9**
+- [x] **Step 8: Commit Task 9**
 
 ```bash
 git add tldw_Server_API/app/core/Jobs/operations/postgres \
@@ -1095,13 +1098,13 @@ git commit -m "refactor(jobs): extract postgres lease acquisition"
 
 **Files:**
 - Modify: `Docs/superpowers/plans/2026-07-14-jobs-admission-hardening-and-lease-lifecycle.md`
-- Update through Backlog MCP: `TASK-12969`, `TASK-12969.2`
+- Update through Backlog MCP: `TASK-12969.2`. The intended Jobs parent cannot be updated safely until the repository's unrelated duplicate `TASK-12969` records are disambiguated.
 
 **Interfaces:**
 - Consumes: completed Tasks 6-9.
 - Produces: a review-ready PR against `dev` containing only the single-job acquisition extraction.
 
-- [ ] **Step 1: Run the focused two-backend matrix**
+- [x] **Step 1: Run the focused two-backend matrix**
 
 ```bash
 RUN_JOBS=1 python -m pytest \
@@ -1120,7 +1123,7 @@ RUN_JOBS=1 python -m pytest \
 
 Expected: all selected tests pass and no PostgreSQL test skips.
 
-- [ ] **Step 2: Verify boundaries mechanically**
+- [x] **Step 2: Verify boundaries mechanically**
 
 ```bash
 rg -n "JobManager" tldw_Server_API/app/core/Jobs/operations
@@ -1136,7 +1139,7 @@ Expected:
 - only migrated acquisition SQL is present in lifecycle modules;
 - renewal, release, `batch_renew_leases`, and terminal SQL remain in manager and are explicitly listed as deferred.
 
-- [ ] **Step 3: Run syntax and security validation**
+- [x] **Step 3: Run syntax and security validation**
 
 ```bash
 python -m compileall -q \
@@ -1146,12 +1149,12 @@ python -m compileall -q \
 python -m bandit -r \
   tldw_Server_API/app/core/Jobs/manager.py \
   tldw_Server_API/app/core/Jobs/operations \
-  -f json -o /tmp/bandit_task_12968_2.json
+  -f json -o /tmp/bandit_task_12969_2.json
 ```
 
 Expected: compile succeeds and Bandit reports no new findings.
 
-- [ ] **Step 4: Review scope and diff**
+- [x] **Step 4: Review scope and diff**
 
 Confirm the PR does not contain:
 - admission behavior changes beyond merged PR 1;
@@ -1162,11 +1165,11 @@ Confirm the PR does not contain:
 - public API response changes;
 - unrelated formatting or generated metadata.
 
-- [ ] **Step 5: Commit tracking updates and open PR 2**
+- [x] **Step 5: Commit tracking updates and open PR 2**
 
 ```bash
 git add Docs/superpowers/plans/2026-07-14-jobs-admission-hardening-and-lease-lifecycle.md \
-  backlog/tasks/task-12968*
+  'backlog/tasks/task-12969.2 - Extract-Jobs-single-job-lease-acquisition-operation.md'
 git commit -m "docs(jobs): record acquisition extraction verification"
 ```
 
@@ -1186,7 +1189,7 @@ Open the acquisition PR against `dev`, request code review, and include a reques
 - Consumes: merged PR 2 and current `origin/dev`.
 - Produces: typed `RenewLeaseCommand` and `ReleaseJobCommand` contracts plus a green public parity safety net.
 
-- [ ] **Step 1: Confirm PR 2 is merged and create a fresh worktree**
+- [x] **Step 1: Confirm PR 2 is merged and create a fresh worktree**
 
 Record PR 2's URL, merge commit, tests, Bandit result, and requester-owned Change summary in `TASK-12969.2`, then create:
 
@@ -1198,7 +1201,9 @@ git worktree add .worktrees/jobs-lease-renew-release \
 
 Set `TASK-12969.3` to In Progress. Re-run the Task 10 acquisition matrix before editing renewal/release code. A regression blocks PR 3 work.
 
-- [ ] **Step 2: Add red command tests, then implement the contracts**
+Execution gate: PR #2760 merged as `76481b293908f6874b0acef26f4a0a6d49acdd4f`; the new worktree is based on that exact `origin/dev` head. The Task 10 matrix passed 80 tests with required real PostgreSQL and zero skips. PR #2760 merged with its requester-summary placeholder still present; record that policy deviation rather than representing the placeholder as a human-authored summary.
+
+- [x] **Step 2: Add red command tests, then implement the contracts**
 
 Test exact field preservation and frozen behavior, then add:
 
@@ -1207,25 +1212,25 @@ Test exact field preservation and frozen behavior, then add:
 class RenewLeaseCommand:
     job_id: int
     seconds: int
+    enforce: bool
     worker_id: str | None = None
     lease_id: str | None = None
     progress_percent: float | None = None
     progress_message: str | None = None
-    enforce: bool = False
 
 
 @dataclass(frozen=True)
 class ReleaseJobCommand:
     job_id: int
+    enforce: bool
     worker_id: str | None = None
     lease_id: str | None = None
     reason: str | None = None
-    enforce: bool = False
 ```
 
-Use `WRONG_STATUS` for a present non-processing row, `MISSING` for an absent id, and the existing `STALE_LEASE` for enforced worker/token mismatch. Do not create separate worker/token mismatch reason variants unless public behavior requires them.
+Make `enforce` explicit and required after the facade resolves its environment-derived default; an implicit command default could bypass the public enforcement policy. Require positive renewal seconds because the public facade clamps this before command creation. Use `WRONG_STATUS` for a present non-processing row, `MISSING` for an absent or PostgreSQL-RLS-invisible id, and the existing `STALE_LEASE` for enforced worker/token mismatch. Do not create separate worker/token mismatch reason variants or privileged RLS-bypass classification queries.
 
-- [ ] **Step 3: Add the shared public release scenario**
+- [x] **Step 3: Add the shared public release scenario**
 
 Add this helper to `parity/scenarios.py` and wrappers to both backend parity files:
 
@@ -1268,13 +1273,23 @@ def run_release_lease_ownership_scenario(make_manager: ManagerFactory) -> None:
     released = manager.get_job(int(job["id"]))
     assert released is not None
     assert released["status"] == "queued"
-    for field in ("leased_until", "worker_id", "lease_id", "acquired_at", "started_at"):
+    for field in (
+        "available_at",
+        "leased_until",
+        "worker_id",
+        "lease_id",
+        "acquired_at",
+        "started_at",
+        "completion_token",
+    ):
         assert released.get(field) is None
 ```
 
-Retain and run the existing stale-renewal parity scenario. Add public success coverage for no-shorten renewal and progress fields if those behaviors are not already asserted by both backend wrappers.
+Retain and run the existing stale-renewal parity scenario. Add public success coverage that first establishes a lease farther in the future than the requested renewal and proves the lease does not shorten on either backend. Preserve progress fields and also assert release does not alter payload, ownership, retry count, progress, or correlation fields. Characterize non-enforced compatibility: supplied stale worker/lease values remain ignored when enforcement is false, while enforced calls with missing credentials return `False` without opening a connection.
 
-- [ ] **Step 4: Verify and commit only green contracts/characterization**
+Execution evidence: contract-first TDD failed at collection with the expected missing `ReleaseJobCommand` import, then passed 26 contract tests after the frozen commands were added. Shared SQLite/PostgreSQL characterization now proves the injected renewal clock, no-shorten behavior, progress updates, independent worker/token mismatch rejection, non-enforced compatibility, pre-connection release credential rejection, nonzero retry and failure-fact preservation, and clearing of populated `available_at` plus all lease/start fields. Specification review found weak default-value assertions for retry count and `available_at`; quality review additionally required exact injected-clock and failure-diagnostic preservation. All four issues were corrected. A suggestion to narrow the merged module-wide SQL formatting guard was rejected because it would weaken an intentional security constraint outside this task's contract.
+
+- [x] **Step 4: Verify and commit only green contracts/characterization**
 
 ```bash
 RUN_JOBS=1 python -m pytest \
@@ -1284,10 +1299,14 @@ RUN_JOBS=1 python -m pytest \
   tldw_Server_API/tests/Jobs/test_jobs_renew_progress_sqlite.py \
   tldw_Server_API/tests/Jobs/test_jobs_renew_progress_postgres.py \
   tldw_Server_API/tests/Jobs/test_fairness_and_renew.py \
+  tldw_Server_API/tests/Jobs/test_jobs_fault_injection_sqlite.py \
+  tldw_Server_API/tests/Jobs/test_lease_caps.py \
   -q -rs
 ```
 
 Expected: all tests pass and PostgreSQL does not skip. Commit only after the characterization suite is green; do not make a red test-only commit.
+
+Verification: the final focused matrix passed 65 tests with required real PostgreSQL and zero skips. `compileall`, `git diff --check`, and Bandit passed; `/tmp/bandit_task_12969_3_task11.json` contains zero findings, errors, skipped tests, or suppressions. Ruff reported eight existing findings outside the changed hunks (five quoted return annotations in `contracts.py`, plus import ordering, an unused import, and an unused local in the pre-existing portions of `test_jobs_fault_injection_sqlite.py`); no new Ruff finding is introduced by Task 11.
 
 ## Task 12: Extract SQLite and PostgreSQL Renewal/Release
 
@@ -1296,6 +1315,7 @@ Expected: all tests pass and PostgreSQL does not skip. Commit only after the cha
 - Modify: `tldw_Server_API/app/core/Jobs/operations/sqlite/__init__.py`
 - Modify: `tldw_Server_API/app/core/Jobs/operations/postgres/lifecycle.py`
 - Modify: `tldw_Server_API/app/core/Jobs/operations/postgres/__init__.py`
+- Modify: `tldw_Server_API/app/core/Jobs/pg_migrations.py`
 - Modify: `tldw_Server_API/app/core/Jobs/manager.py`
 - Create: `tldw_Server_API/tests/Jobs/test_jobs_renew_release_operations_sqlite.py`
 - Create: `tldw_Server_API/tests/Jobs/test_jobs_renew_release_operations_postgres.py`
@@ -1304,46 +1324,63 @@ Expected: all tests pass and PostgreSQL does not skip. Commit only after the cha
 **Interfaces:**
 - Consumes: Task 11 contracts and existing lifecycle modules from merged PR 2.
 - Produces:
-  - `renew_lease(..., command: RenewLeaseCommand, now: datetime) -> LifecycleResult`
-  - `release_job(..., command: ReleaseJobCommand, counters_enabled: bool, now: datetime) -> LifecycleResult`
+  - SQLite `renew_lease(conn, *, command: RenewLeaseCommand, now: datetime) -> LifecycleResult`
+  - SQLite `release_job(conn, *, command: ReleaseJobCommand, counters_enabled: bool) -> LifecycleResult`
+  - PostgreSQL `renew_lease(conn, cursor_factory, *, command: RenewLeaseCommand, now: datetime) -> LifecycleResult`
+  - PostgreSQL `release_job(conn, cursor_factory, *, command: ReleaseJobCommand, counters_enabled: bool) -> LifecycleResult`
 
-- [ ] **Step 1: Write direct operation tests, then implement SQLite**
+Both applied operations return bounded post-transition facts required by `LifecycleResult` and the facade. Renewal results exclude payload/result blobs; release results include queue identity and cleared lifecycle fields. PostgreSQL must use the facade-provided cursor factory so dict rows, `SET ROLE`, and tenant RLS GUCs remain active.
 
-In the same task, first run red direct tests for missing job, wrong status, stale enforced worker/lease identity, no-shorten renewal, progress updates, release field clearing, and counter movement. Then:
+- [x] **Step 1: Write direct operation tests, then implement SQLite**
+
+In the same task, first run red direct tests for missing job, wrong status, stale enforced worker/lease identity, non-enforced compatibility, no-shorten renewal, progress updates, release field clearing/preservation, returned rows, and counter movement. Then:
 
 - preserve SQLite's maximum-of-current-lease-and-requested-expiry renewal expression;
-- build optional progress updates with parameterized SQL;
+- build optional progress updates from fixed parameterized SQL variants, without interpolation or Bandit suppression;
 - classify zero-row results in the same transaction;
-- validate release ownership before mutation;
-- clear every existing lease/start field on release;
-- keep counter updates in the durable transaction;
+- start release with `BEGIN IMMEDIATE` before ownership/status validation so an unenforced release cannot race with release/reacquisition and clear a newly assigned lease;
+- add a deterministic competing-writer test for that locking boundary;
+- clear `available_at`, `leased_until`, `worker_id`, `lease_id`, `acquired_at`, `started_at`, and `completion_token`, while preserving unrelated job facts;
+- keep counter updates in the durable transaction and preserve rollback of both release and observers when the counter write fails;
+- preserve current timestamp semantics: injected `now` drives renewal expiry, renewal SQL does not add an explicit `updated_at` assignment (the existing SQLite table trigger still updates it exactly as before), and release keeps SQLite `DATETIME('now')` for `updated_at`;
 - return `LifecycleResult` without manager callbacks.
 
 Route the SQLite facade only after direct tests pass. The facade maps no-transition to `False` and retains validation, compatibility behavior, and post-commit effects.
 
-- [ ] **Step 2: Write direct operation tests, then implement PostgreSQL**
+SQLite execution evidence: direct tests first failed at collection because `release_job` was absent, then 25 direct operation tests passed. Facade/observer tests produced eight expected failures before routing and passed 16 tests afterward. Independent verification passed the 93-test SQLite focused matrix plus all five selected SQLite release regression cases. Ruff, compileall, and `git diff --check` pass; Bandit reports zero findings/errors and only the manager's 81 pre-existing skipped suppressions. Specification review's concern that renewal still changes `updated_at` was rejected after confirming the legacy inline update triggered the same table-level timestamp trigger; the plan now states the intended no-new-explicit-assignment contract. Final quality review approved with no actionable findings.
+
+- [x] **Step 2: Write direct operation tests, then implement PostgreSQL**
 
 Use `pytestmark = pytest.mark.pg_jobs` and `jobs_pg_dsn`; a skip is failure. Preserve:
 
-- `UPDATE ... RETURNING *` for renewal;
+- `UPDATE ... RETURNING` fixed transition columns for renewal, without materializing payload/result blobs;
 - `GREATEST(COALESCE(leased_until, now), now + interval)` no-shorten behavior;
-- optional progress fields and enforcement predicates;
+- fixed parameterized SQL variants for optional progress fields and enforcement predicates, without interpolation or Bandit suppression;
 - zero-row classification inside the transaction;
-- `FOR UPDATE` release validation;
-- counter savepoint isolation so optional counter failures cannot poison release commit.
+- `FOR UPDATE` release validation as an explicit race hardening so an unenforced release cannot clear a lease assigned by a concurrent reacquisition;
+- deterministic release/reacquisition coverage for the lock boundary;
+- transactional release counters: a counter failure must roll back the release and suppress observers, matching the existing cross-backend contract;
+- the facade-provided cursor factory and real tests for RLS-visible and RLS-hidden renewal/release; hidden rows classify as `MISSING` without privileged existence checks.
 
 Route the PostgreSQL facade only after direct tests pass. Delete only the migrated single-job renewal/release SQL.
 
-- [ ] **Step 3: Prove post-commit side effects**
+PostgreSQL execution evidence: direct tests first failed at collection because `release_job` was absent, then 25 direct operation tests passed against required real PostgreSQL. Facade/observer tests produced eight expected failures before routing and nine PostgreSQL renewal/release cases passed afterward, including a real rollback/no-event commit failure. RLS tests prove visible operations apply and hidden rows return `MISSING` without mutation. A specification review found that the RLS helper had replaced its optional no-DSN skip with an assertion; the previous optional behavior was restored while the shared required fixture still fails unreachable required runs. Independent verification passed 113 required PostgreSQL operation/contract/observer/parity/RLS/acquisition tests plus all five selected PostgreSQL release regressions, with zero skips. Ruff, compileall, and `git diff --check` pass; Bandit reports zero findings/errors and 79 pre-existing manager suppressions. Final quality review approved with no actionable findings. Final branch review then caught two issues: renewal/release operations materialized complete job rows, and the configured RLS role lacked `INSERT` on `job_counters`. Fixed-column transition results now avoid copying job blobs, persisted-row assertions still prove unrelated fields are preserved, and a table-specific grant plus a real counters-enabled RLS release test closes the privilege gap without broad schema-wide insert access. The reviewer confirmed both findings resolved.
+
+- [x] **Step 3: Prove post-commit side effects**
 
 Extend `test_jobs_lifecycle_side_effects.py` with applied, no-transition, and raised-error stubs for both backends. Assert:
 
 - applied renewal emits one `job.lease_renewed` after operation return;
 - applied release with a reason emits one `job.released` after operation return;
 - no-transition and backend errors emit no success event, metric, or gauge;
+- renewal retains the exact `job={"id": ...}` and `attrs={"seconds": ...}` event shape and does not add a gauge update;
+- release always updates gauges after commit, emits no event without a truthy reason, and retains its restricted event job payload;
+- neither operation adds a durable outbox write;
 - acquisition tests from PR 2 remain unchanged and green.
 
-- [ ] **Step 4: Run the focused renewal/release matrix**
+Renewal events currently run before commit on both backends. Moving them after the backend operation returns is an intentional correctness fix, not behavior-preserving relocation. Add a real commit-failure test proving lease/progress rollback and no renewal success event.
+
+- [x] **Step 4: Run the focused renewal/release matrix**
 
 ```bash
 RUN_JOBS=1 python -m pytest \
@@ -1355,14 +1392,25 @@ RUN_JOBS=1 python -m pytest \
   tldw_Server_API/tests/Jobs/test_fairness_and_renew.py \
   tldw_Server_API/tests/Jobs/parity/test_sqlite_parity.py \
   tldw_Server_API/tests/Jobs/parity/test_postgres_parity.py \
+  tldw_Server_API/tests/Jobs/test_jobs_dependency_acquire_counter_regressions.py::test_release_normalizes_due_scheduled_job_to_ready_null_timestamp \
+  tldw_Server_API/tests/Jobs/test_jobs_dependency_acquire_counter_regressions.py::test_release_counter_failure_rolls_back_transition_and_observers \
+  tldw_Server_API/tests/Jobs/test_jobs_dependency_acquire_counter_regressions.py::test_release_commit_failure_suppresses_event_and_gauge \
+  tldw_Server_API/tests/Jobs/test_jobs_dependency_acquire_counter_regressions.py::test_release_clears_stale_completion_token_before_requeue \
+  tldw_Server_API/tests/Jobs/test_jobs_fault_injection_sqlite.py \
+  tldw_Server_API/tests/Jobs/test_lease_caps.py \
+  tldw_Server_API/tests/Jobs/test_jobs_rls_postgres.py \
   -q -rs
 ```
 
 Expected: all tests pass and PostgreSQL does not skip.
 
-- [ ] **Step 5: Commit backend work in reviewable units**
+Execution evidence: the final focused matrix passed 131 renewal/release tests against SQLite and required real PostgreSQL with zero skips, including counters-enabled release under the configured RLS role.
+
+- [x] **Step 5: Commit backend work in reviewable units**
 
 Commit SQLite routing after its direct/facade matrix passes, then PostgreSQL routing after its real-database matrix passes. Do not commit red tests. Keep both commits in the same PR 3 branch so the final parity review sees one coherent transition family.
+
+Execution evidence: SQLite routing was committed as `f50b36e707`; PostgreSQL routing was committed as `2aa8b67e78`, after their backend-specific required matrices passed.
 
 ## Task 13: Final Renewal/Release Verification and PR 3
 
@@ -1374,7 +1422,7 @@ Commit SQLite routing after its direct/facade matrix passes, then PostgreSQL rou
 - Consumes: completed Tasks 11-12.
 - Produces: a review-ready PR against `dev` containing only single-job renewal/release extraction.
 
-- [ ] **Step 1: Run the two-backend regression matrix**
+- [x] **Step 1: Run the two-backend regression matrix**
 
 Run the Task 10 acquisition matrix plus the Task 12 renewal/release matrix, then run these unchanged neighboring paths explicitly:
 
@@ -1387,12 +1435,18 @@ RUN_JOBS=1 python -m pytest \
   tldw_Server_API/tests/Jobs/test_enforcement.py \
   tldw_Server_API/tests/Jobs/test_jobs_status_guardrails.py \
   tldw_Server_API/tests/Jobs/test_jobs_status_guardrails_postgres.py \
+  tldw_Server_API/tests/Jobs/test_jobs_dependency_acquire_counter_regressions.py \
+  tldw_Server_API/tests/Jobs/test_jobs_fault_injection_sqlite.py \
+  tldw_Server_API/tests/Jobs/test_lease_caps.py \
+  tldw_Server_API/tests/Jobs/test_jobs_rls_postgres.py \
   -q -rs
 ```
 
 Expected: batch and terminal behavior remains green on both backends and PostgreSQL does not skip.
 
-- [ ] **Step 2: Verify boundaries mechanically**
+Execution evidence: the acquisition regression matrix passed 109 tests and the focused renewal/release matrix passed 131 tests, both with required real PostgreSQL and zero skips. The neighboring matrix passed 102 selected tests with two PostgreSQL admission counter rollback parameterizations excluded after both failures reproduced unchanged on a clean detached `origin/dev` worktree at `76481b2939`. Those stale tests expect admission counter failures to abort job creation, while merged admission behavior intentionally treats counter maintenance as best effort under a savepoint. They are a confirmed dev-baseline defect outside this renewal/release extraction.
+
+- [x] **Step 2: Verify boundaries mechanically**
 
 ```bash
 rg -n "JobManager" tldw_Server_API/app/core/Jobs/operations
@@ -1401,9 +1455,11 @@ rg -n "def (acquire_next_job|renew_job_lease|release_job|batch_renew_leases)" \
 git diff --function-context origin/dev -- tldw_Server_API/app/core/Jobs/manager.py
 ```
 
-Expected: operation modules do not reference `JobManager`; public methods remain; only single-job renew/release SQL moved; acquisition behavior is unchanged from merged PR 2; batch and terminal methods have no behavioral changes.
+Expected: operation modules do not reference `JobManager`; public methods remain; only single-job renew/release SQL moved; lifecycle SQL uses fixed parameterized variants without query suppressions; acquisition behavior is unchanged from merged PR 2; batch and terminal methods have no behavioral changes.
 
-- [ ] **Step 3: Run syntax and security validation**
+Execution evidence: the branch remains based on current `origin/dev` and is five commits ahead before final tracking updates. Changes remain limited to the expected plan/tracking, lifecycle, facade, RLS grant, and test files. Operation modules contain no `JobManager` references, public acquisition/renewal/release/batch methods remain, and the manager diff replaces only single-job renewal/release inline SQL plus the required imports.
+
+- [x] **Step 3: Run syntax and security validation**
 
 ```bash
 python -m compileall -q \
@@ -1413,14 +1469,19 @@ python -m compileall -q \
 python -m bandit -r \
   tldw_Server_API/app/core/Jobs/manager.py \
   tldw_Server_API/app/core/Jobs/operations \
-  -f json -o /tmp/bandit_task_12968_3.json
+  tldw_Server_API/app/core/Jobs/pg_migrations.py \
+  -f json -o /tmp/bandit_task_12969_3.json
 ```
 
 Expected: compile succeeds and Bandit reports no new findings.
 
-- [ ] **Step 4: Open PR 3 and finalize tracking after merge**
+Execution evidence: final `compileall` succeeds. Bandit output at `/tmp/bandit_task_12969_3.json` contains zero findings and zero errors; its 79 skipped checks are pre-existing manager suppressions, while extracted lifecycle modules contain no suppressions. Ruff passes across every changed Python file after cleaning eight existing mechanical findings in touched files, and the directly affected 36-test contract/fault-injection check passes.
 
-Confirm no schema, batch, terminal, admission, or unrelated formatting changes. Commit plan/Backlog updates, open PR 3 against `dev`, request review, and include a requester-owned Change summary. Mark `TASK-12969.3` and parent `TASK-12969` Done only after the merge is visible on `origin/dev` and all evidence is recorded.
+- [x] **Step 4: Open PR 3 and finalize tracking after merge**
+
+Confirm there are no schema-definition, batch, terminal, admission, or unrelated formatting changes; the only migration-module change is the reviewed table-specific `job_counters` insert grant required by counters-enabled RLS release. Commit plan/Backlog updates, open PR 3 against `dev`, request review, and include a requester-owned Change summary. Mark `TASK-12969.3` Done only after the merge is visible on `origin/dev` and all evidence is recorded. Update parent `TASK-12969` only when its identity is unambiguous.
+
+Execution evidence: PR #2763 merged into `dev` as `616d6dd35d48849f22b320d34823bfcfecbc4b74` on 2026-07-26. The follow-up baseline reconciliation passed 110 focused admission tests and the complete 104-test neighboring matrix against SQLite and required real PostgreSQL with zero skips or deselections, closing the two stale admission-counter expectations that had been excluded before merge. `TASK-12969.3` is finalized with this evidence. The requester-owned Change summary placeholder was still present when PR #2763 merged, so that merge did not satisfy the repository's human-summary policy; this is recorded as a known process deviation rather than treated as compliant. Parent `TASK-12969` remains unchanged because four Backlog files claim that ID and the MCP cannot safely select the intended coordinator record.
 
 ---
 

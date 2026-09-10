@@ -27,6 +27,16 @@
     "chat_completions": {
       "patterns": [
         {
+          "match": { "system_prompt": "LIVE_TIER_ANALYSIS_ONE" },
+          "response_file": "chat/analysis-one.json",
+          "priority": 30
+        },
+        {
+          "match": { "system_prompt": "LIVE_TIER_ANALYSIS_TWO" },
+          "response_file": "chat/analysis-two.json",
+          "priority": 30
+        },
+        {
           "match": { "content_regex": "(?i).*(summarize|source|research note).*" },
           "response_file": "chat/source-summary.json",
           "priority": 10

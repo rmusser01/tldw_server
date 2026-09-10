@@ -18,7 +18,6 @@ from typing import Any, Optional
 
 import numpy as np
 from loguru import logger
-from sklearn.metrics.pairwise import cosine_similarity
 
 import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
@@ -658,6 +657,10 @@ class RAGEvaluator:
 
     async def _evaluate_answer_similarity(self, response: str, ground_truth: str, api_name: str = "openai", model: Optional[str] = None) -> tuple:
         """Evaluate similarity between response and ground truth"""
+        # Imported here rather than at module scope: sklearn pulls scipy and
+        # pandas (~0.9 s, ~1,300 modules) into every process that registers the
+        # evaluations router, which startup does whether or not this runs.
+        from sklearn.metrics.pairwise import cosine_similarity
 
         # Use embedding-based similarity if available
         if self.embedding_available:

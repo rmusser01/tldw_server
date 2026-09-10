@@ -47,6 +47,7 @@ vi.mock("antd", async () => {
   const Modal = ({
     children,
     confirmLoading,
+    okText,
     onCancel,
     onOk,
     open,
@@ -54,6 +55,7 @@ vi.mock("antd", async () => {
   }: {
     children?: React.ReactNode
     confirmLoading?: boolean
+    okText?: React.ReactNode
     onCancel?: () => void
     onOk?: () => void
     open?: boolean
@@ -65,7 +67,7 @@ vi.mock("antd", async () => {
       <div role="dialog" aria-label={title}>
         {children}
         <button type="button" disabled={confirmLoading} onClick={onOk}>
-          OK
+          {okText ?? "OK"}
         </button>
         <button type="button" onClick={onCancel}>
           Cancel
@@ -175,7 +177,8 @@ describe("ApiKeyManagementPage design-system states", () => {
     fireEvent.change(screen.getByPlaceholderText("e.g. Production Key"), {
       target: { value: "Production Key" }
     })
-    fireEvent.click(screen.getByRole("button", { name: "OK" }))
+    // The dialog commits with the verb, not a generic OK (#2892).
+    fireEvent.click(screen.getByRole("button", { name: "Create key" }))
 
     await waitFor(() => {
       expect(apiMock.createUserApiKey).toHaveBeenCalledWith(11, {
@@ -188,5 +191,56 @@ describe("ApiKeyManagementPage design-system states", () => {
     expect(alert).toHaveAttribute("role", "status")
     expect(alert).toHaveTextContent("Copy this key now -- it will not be shown again:")
     expect(alert).toHaveTextContent("sk-test-secret")
+  })
+
+  it("masks the created key after copy and supports reveal (#2898 L3)", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.assign(navigator, { clipboard: { writeText } })
+
+    await renderWithUser()
+
+    fireEvent.click(await screen.findByRole("button", { name: "Create Key" }))
+    fireEvent.click(screen.getByRole("button", { name: "Create key" }))
+
+    const alert = await expectDesignSystemAlertForText("New API Key Created")
+    expect(alert).toHaveTextContent("sk-test-secret")
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy key" }))
+    expect(writeText).toHaveBeenCalledWith("sk-test-secret")
+    await waitFor(() => {
+      expect(alert).not.toHaveTextContent("sk-test-secret")
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Reveal" }))
+    expect(alert).toHaveTextContent("sk-test-secret")
+  })
+
+  it("auto-selects the only user so single-user servers skip the picker", async () => {
+    render(<ApiKeyManagementPage />)
+
+    await waitFor(() => {
+      expect(apiMock.listUserApiKeys).toHaveBeenCalledWith(11)
+    })
+    expect(await screen.findByText("API Keys")).toBeTruthy()
+  })
+
+  it("surfaces user-list failures with a retry instead of a silent dead end", async () => {
+    apiMock.listAdminUsers.mockRejectedValueOnce(
+      new Error("Request failed: 500 (GET /api/v1/admin/users)")
+    )
+
+    render(<ApiKeyManagementPage />)
+
+    const alert = await expectDesignSystemAlertForText("Unable to load users")
+    expect(alert).toHaveTextContent("Request failed: 500")
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+
+    await waitFor(() => {
+      expect(apiMock.listAdminUsers).toHaveBeenCalledTimes(2)
+    })
+    await waitFor(() => {
+      expect(apiMock.listUserApiKeys).toHaveBeenCalledWith(11)
+    })
   })
 })

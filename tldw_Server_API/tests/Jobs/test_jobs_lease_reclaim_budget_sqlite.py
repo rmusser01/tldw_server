@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.operations.contracts import ExpiredLeasePolicy
 
 pytestmark = pytest.mark.unit
 
@@ -159,6 +161,182 @@ def _events(jm: JobManager, job_id: int, event_type: str) -> list[dict]:
         return [json.loads(row[0] or "{}") for row in rows]
     finally:
         conn.close()
+
+
+class _MutableSQLiteClock:
+    def __init__(self, now: datetime):
+        self.now = now
+
+    def now_utc(self) -> datetime:
+        return self.now
+
+    def shifted(self, value, *modifiers) -> datetime:
+        if value == "now":
+            shifted = self.now
+        else:
+            shifted = datetime.fromisoformat(
+                str(value).replace("Z", "+00:00").replace(" ", "T", 1)
+            )
+            if shifted.tzinfo is None:
+                shifted = shifted.replace(tzinfo=timezone.utc)
+        for modifier in modifiers:
+            amount_text, unit = str(modifier).split()
+            amount = float(amount_text)
+            scale = {
+                "second": 1,
+                "seconds": 1,
+                "minute": 60,
+                "minutes": 60,
+                "hour": 3600,
+                "hours": 3600,
+                "day": 86400,
+                "days": 86400,
+            }[unit]
+            shifted += timedelta(seconds=amount * scale)
+        return shifted
+
+
+def _install_fixed_sqlite_database_clock(
+    manager: JobManager,
+    monkeypatch,
+    clock: _MutableSQLiteClock,
+) -> None:
+    original_connect = manager._connect
+
+    def fixed_connect():
+        conn = original_connect()
+        conn.create_function(
+            "DATETIME",
+            -1,
+            lambda value, *modifiers: clock.shifted(value, *modifiers).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            ),
+        )
+        def fixed_strftime(format_string, value, *modifiers):
+            assert format_string == "%Y-%m-%d %H:%M:%f"
+            return clock.shifted(value, *modifiers).strftime(
+                "%Y-%m-%d %H:%M:%S.%f"
+            )[:-3]
+
+        conn.create_function("STRFTIME", -1, fixed_strftime)
+        return conn
+
+    monkeypatch.setattr(manager, "_connect", fixed_connect)
+
+
+def _fractional_recovery_job(manager: JobManager, *, domain: str) -> dict:
+    created = manager.create_job(
+        domain=domain,
+        queue="default",
+        job_type="fractional",
+        payload={},
+        owner_user_id=None,
+        max_retries=3,
+        expired_lease_policy=ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT,
+    )
+    acquired = manager.acquire_next_job(
+        domain=domain,
+        queue="default",
+        job_type="fractional",
+        lease_seconds=30,
+        worker_id="worker-before",
+    )
+    assert acquired is not None
+    return created
+
+
+@pytest.mark.parametrize("single_update", [False, True])
+def test_sqlite_acquisition_reclaims_only_after_fractional_lease_deadline(
+    tmp_path,
+    monkeypatch,
+    single_update,
+):
+    deadline = "2026-08-28 12:00:00.900"
+    clock = _MutableSQLiteClock(
+        datetime(2026, 8, 28, 12, 0, 0, 899000, tzinfo=timezone.utc)
+    )
+    manager = _manager(tmp_path, monkeypatch, single_update=single_update)
+    manager._clock = clock
+    _install_fixed_sqlite_database_clock(manager, monkeypatch, clock)
+    created = _fractional_recovery_job(manager, domain="fractional-acquire")
+    conn = manager._connect()
+    try:
+        conn.execute(
+            "UPDATE jobs SET leased_until=?, retry_count=2, "
+            "failure_streak_code='receiver_503', failure_streak_count=4 WHERE id=?",
+            (deadline, created["id"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    before = manager.acquire_next_job(
+        domain="fractional-acquire",
+        queue="default",
+        job_type="fractional",
+        lease_seconds=30,
+        worker_id="worker-too-early",
+    )
+    assert before is None
+    still_processing = manager.get_job(int(created["id"]))
+    assert still_processing["status"] == "processing"
+    assert still_processing["worker_id"] == "worker-before"
+    assert still_processing["leased_until"] == deadline
+
+    clock.now = datetime(2026, 8, 28, 12, 0, 0, 901000, tzinfo=timezone.utc)
+    reacquired = manager.acquire_next_job(
+        domain="fractional-acquire",
+        queue="default",
+        job_type="fractional",
+        lease_seconds=30,
+        worker_id="worker-after",
+    )
+
+    assert reacquired is not None
+    assert reacquired["worker_id"] == "worker-after"
+    assert int(reacquired["retry_count"]) == 2
+    assert reacquired["failure_streak_code"] == "receiver_503"
+    assert int(reacquired["failure_streak_count"]) == 4
+
+
+def test_sqlite_integrity_sweep_repairs_only_after_fractional_lease_deadline(
+    tmp_path,
+    monkeypatch,
+):
+    deadline = "2026-08-28 12:00:00.900"
+    clock = _MutableSQLiteClock(
+        datetime(2026, 8, 28, 12, 0, 0, 899000, tzinfo=timezone.utc)
+    )
+    manager = _manager(tmp_path, monkeypatch, single_update=False)
+    manager._clock = clock
+    _install_fixed_sqlite_database_clock(manager, monkeypatch, clock)
+    created = _fractional_recovery_job(manager, domain="fractional-sweep")
+    conn = manager._connect()
+    try:
+        conn.execute(
+            "UPDATE jobs SET leased_until=?, retry_count=2 WHERE id=?",
+            (deadline, created["id"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    before = manager.integrity_sweep(fix=True, domain="fractional-sweep")
+    assert before["processing_expired"] == 0
+    assert before["fixed"] == 0
+    assert manager.get_job(int(created["id"]))["status"] == "processing"
+
+    clock.now = datetime(2026, 8, 28, 12, 0, 0, 901000, tzinfo=timezone.utc)
+    after = manager.integrity_sweep(fix=True, domain="fractional-sweep")
+    persisted = manager.get_job(int(created["id"]))
+
+    assert after["processing_expired"] == 1
+    assert after["fixed"] == 1
+    assert persisted["status"] == "queued"
+    assert int(persisted["retry_count"]) == 2
+    assert persisted["worker_id"] is None
+    assert persisted["lease_id"] is None
+    assert persisted["leased_until"] is None
 
 
 @pytest.mark.parametrize("single_update", [False, True])
@@ -316,6 +494,97 @@ def test_sqlite_integrity_sweep_honors_expired_lease_retry_budget(
     assert exhausted_after["error_message"] == "Job lease expired; retry budget exhausted"
     assert exhausted_after["lease_id"] is None
     assert exhausted_after["worker_id"] is None
+
+
+@pytest.mark.parametrize("single_update", [False, True])
+def test_sqlite_expired_requeue_no_attempt_preserves_all_attempt_state(
+    tmp_path,
+    monkeypatch,
+    single_update,
+):
+    jm = _manager(tmp_path, monkeypatch, single_update=single_update)
+    created = jm.create_job(
+        domain="admin_webhooks",
+        queue="delivery",
+        job_type="admin_webhook_delivery",
+        payload={"delivery_id": "00000000-0000-4000-8000-000000000001"},
+        owner_user_id=None,
+        idempotency_key="admin-webhook-delivery:00000000-0000-4000-8000-000000000001",
+        max_retries=3,
+        expired_lease_policy=ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT,
+        quarantine_threshold=5,
+    )
+    acquired = jm.acquire_next_job(
+        domain="admin_webhooks",
+        queue="delivery",
+        job_type="admin_webhook_delivery",
+        lease_seconds=30,
+        worker_id="worker-1",
+    )
+    assert acquired is not None
+    conn = jm._connect()
+    try:
+        conn.execute(
+            "UPDATE jobs SET leased_until=DATETIME('now', '-10 minutes'), "
+            "retry_count=2, failure_streak_code='receiver_503', "
+            "failure_streak_count=4, quarantined_at=NULL WHERE id=?",
+            (created["id"],),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    reclaimed = jm.acquire_next_job(
+        domain="admin_webhooks",
+        queue="delivery",
+        job_type="admin_webhook_delivery",
+        lease_seconds=30,
+        worker_id="worker-2",
+    )
+
+    assert reclaimed is not None
+    assert reclaimed["worker_id"] == "worker-2"
+    assert int(reclaimed["retry_count"]) == 2
+    assert int(reclaimed["max_retries"]) == 3
+    assert reclaimed["failure_streak_code"] == "receiver_503"
+    assert int(reclaimed["failure_streak_count"]) == 4
+
+
+def test_sqlite_integrity_sweep_requeues_no_attempt_without_counter_mutation(
+    tmp_path,
+    monkeypatch,
+):
+    jm = _manager(tmp_path, monkeypatch, single_update=False)
+    created = jm.create_job(
+        domain="admin_webhooks",
+        queue="delivery",
+        job_type="admin_webhook_delivery",
+        payload={"delivery_id": "00000000-0000-4000-8000-000000000002"},
+        owner_user_id=None,
+        idempotency_key="admin-webhook-delivery:00000000-0000-4000-8000-000000000002",
+        max_retries=3,
+        expired_lease_policy=ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT,
+        quarantine_threshold=5,
+    )
+    assert jm.acquire_next_job(
+        domain="admin_webhooks",
+        queue="delivery",
+        lease_seconds=30,
+        worker_id="worker-1",
+    )
+    _expire_lease(jm, int(created["id"]), retry_count=2)
+
+    stats = jm.integrity_sweep(fix=True, domain="admin_webhooks")
+    persisted = jm.get_job(int(created["id"]))
+
+    assert stats["fixed"] == 1
+    assert persisted["status"] == "queued"
+    assert int(persisted["retry_count"]) == 2
+    assert persisted["worker_id"] is None
+    assert persisted["lease_id"] is None
+    assert persisted["leased_until"] is None
+    assert persisted["acquired_at"] is None
+    assert persisted["started_at"] is None
 
 
 @pytest.mark.parametrize("single_update", [False, True])

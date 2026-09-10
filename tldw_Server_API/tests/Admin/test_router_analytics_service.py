@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import uuid
 from datetime import datetime, timezone
 
 import pytest
@@ -18,20 +17,13 @@ def _setup_env(tmp_path) -> None:
 
 async def _ensure_router_usage_seed_rows() -> int:
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+    from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
     pool = await get_db_pool()
-    await pool.execute(
-        """
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            uuid TEXT UNIQUE,
-            username TEXT UNIQUE,
-            email TEXT,
-            password_hash TEXT,
-            is_active INTEGER DEFAULT 1
-        )
-        """
-    )
+    # The users table is created by UsersDB inside ensure_test_user below.
+    # Hand-rolling a cut-down one here is rejected by
+    # profile_user_write_guard: a users table without the profile-version
+    # columns would silently break the machinery that depends on them.
     await pool.execute(
         """
         CREATE TABLE IF NOT EXISTS llm_usage_log (
@@ -94,15 +86,9 @@ async def _ensure_router_usage_seed_rows() -> int:
     if "llm_budget_month_usd" not in key_cols:
         await pool.execute("ALTER TABLE api_keys ADD COLUMN llm_budget_month_usd REAL")
 
-    user_uuid = str(uuid.uuid4())
-    await pool.execute(
-        "INSERT OR IGNORE INTO users (uuid, username, email, password_hash, is_active) VALUES (?,?,?,?,1)",
-        user_uuid,
-        "router_analytics_user",
-        "router_analytics_user@example.com",
-        "x",
+    user_id = await ensure_test_user(
+        pool, "router_analytics_user", "router_analytics_user@example.com"
     )
-    user_id = int(await pool.fetchval("SELECT id FROM users WHERE username = ?", "router_analytics_user"))
     await pool.execute(
         """
         INSERT OR REPLACE INTO api_keys (

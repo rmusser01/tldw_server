@@ -200,9 +200,14 @@ vi.mock("../TemplateCodeEditor", () => ({
   )
 }))
 
-vi.mock("../../shared", () => ({
-  WatchlistsHelpTooltip: () => null
-}))
+vi.mock("../../shared", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../shared")>()
+  return {
+    ...actual,
+    WatchlistsHelpTooltip: () => null,
+    useWatchlistsViewport: () => ({ breakpoint: 768, isConstrained: false })
+  }
+})
 
 vi.mock("@/utils/watchlists-prevention-telemetry", () => ({
   trackWatchlistsPreventionTelemetry: vi.fn()

@@ -120,7 +120,7 @@ jobs:
           python -m uvicorn tldw_Server_API.app.main:app \
             --host 0.0.0.0 --port 8000 &
           # Wait for server to be ready
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             curl -sf http://127.0.0.1:8000/api/v1/health && break
             sleep 2
           done
@@ -228,7 +228,7 @@ jobs:
         run: |
           python -m uvicorn tldw_Server_API.app.main:app \
             --host 0.0.0.0 --port 8000 &
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             curl -sf http://127.0.0.1:8000/api/v1/health && break
             sleep 2
           done
@@ -329,7 +329,7 @@ jobs:
         run: |
           python -m uvicorn tldw_Server_API.app.main:app \
             --host 0.0.0.0 --port 8000 &
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             curl -sf http://127.0.0.1:8000/api/v1/health && break
             sleep 2
           done

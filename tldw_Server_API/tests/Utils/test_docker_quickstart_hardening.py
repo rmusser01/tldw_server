@@ -74,6 +74,29 @@ def test_makefile_quickstart_docker_targets_use_opt_in_build_flag():
     _require("--build" not in start_docker_single, "Expected no hardcoded --build in start-docker-single target")
 
 
+def test_makefile_production_targets_require_explicit_operator_inputs():
+    """Production entry points should fail closed and keep preflight offline."""
+    text = _read_text("Makefile")
+
+    for target in ("production-preflight", "production-deploy", "production-rollback"):
+        _require(target in text, f"Expected Makefile target: {target}")
+        block = _target_block(text, target)
+        _require(
+            'test -n "$(PRODUCTION_ENV_FILE)"' in block,
+            f"Expected {target} to require PRODUCTION_ENV_FILE",
+        )
+
+    preflight = _target_block(text, "production-preflight")
+    rollback = _target_block(text, "production-rollback")
+    _require("production_preflight.py" in preflight, "Expected canonical preflight CLI")
+    _require("docker compose up" not in preflight, "Preflight must remain offline")
+    _require(
+        'test -n "$(PRODUCTION_MANIFEST)"' in rollback,
+        "Expected rollback to require a verified manifest",
+    )
+    _require("--restore-artifacts" in rollback, "Expected explicit restore-backed rollback")
+
+
 def test_api_dockerfile_avoids_expensive_copy_and_recursive_chown_layers():
     """The API Dockerfile should avoid heavyweight copy and chown steps."""
     text = _read_text("Dockerfiles/Dockerfile.prod")

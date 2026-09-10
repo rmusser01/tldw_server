@@ -155,7 +155,7 @@ export const ChatModelSelectorDropdown = React.memo(
         <Tooltip
           title={
             statusTitle ||
-            (modelSelectorWarning
+            (statusWarning
               ? t("playground:composer.selectModelTooltip", "Click to select a model")
               : apiModelLabel)
           }
@@ -169,7 +169,7 @@ export const ChatModelSelectorDropdown = React.memo(
             aria-expanded={modelDropdownOpen}
             data-testid="model-selector"
             className={`inline-flex min-h-[44px] min-w-0 cursor-pointer items-center gap-1 rounded-full border px-2 text-[10px] transition-colors ${
-              modelSelectorWarning
+              statusWarning
                 ? "border-warn/50 bg-warn/10 text-warn hover:bg-warn/20"
                 : "border-border bg-surface hover:bg-surface-hover"
             }`}

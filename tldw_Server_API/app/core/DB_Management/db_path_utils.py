@@ -721,6 +721,12 @@ class DatabasePaths:
         return user_dir / DatabasePaths.SLIDES_DB_NAME
 
     @staticmethod
+    def resolve_slides_db_path(user_id: Optional[UserId]) -> Path:
+        """Resolve the user's Slides DB path without creating directories."""
+        user_dir = DatabasePaths.resolve_user_base_directory(user_id)
+        return user_dir / DatabasePaths.SLIDES_DB_NAME
+
+    @staticmethod
     def get_explainer_db_path(user_id: Optional[UserId]) -> Path:
         """Get the path to the user's Explainer database."""
         user_dir = DatabasePaths.get_user_base_directory(user_id)

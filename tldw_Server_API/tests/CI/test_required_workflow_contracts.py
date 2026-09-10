@@ -1,5 +1,6 @@
 import ast
 import fnmatch
+import json
 import re
 from pathlib import Path
 
@@ -137,6 +138,18 @@ def test_coverage_required_is_path_conditional() -> None:
     assert "coverage-required" in jobs
 
 
+def test_conditional_required_lanes_run_after_successful_change_detection() -> None:
+    for workflow_path, job_name in (
+        (".github/workflows/coverage-required.yml", "coverage-required"),
+        (".github/workflows/e2e-required.yml", "e2e-required"),
+    ):
+        job = _load(workflow_path)["jobs"][job_name]
+        assert job["needs"] == ["changes"]
+        assert " ".join(job["if"].split()) == (
+            "always() && !cancelled() && needs.changes.result == 'success'"
+        )
+
+
 def test_coverage_required_installs_portaudio_for_pyaudio_builds() -> None:
     workflow = _load(".github/workflows/coverage-required.yml")
     steps = workflow["jobs"]["coverage-required"]["steps"]
@@ -153,6 +166,38 @@ def test_coverage_required_uses_documented_global_floor() -> None:
     assert "--cov-fail-under=12" in coverage_step["run"]
 
 
+def test_global_coverage_floor_measures_only_application_code() -> None:
+    """The floor is a percentage, so what is in the denominator decides it.
+
+    ``--cov=tldw_Server_API`` also measured ``tldw_Server_API/tests`` -- 229k
+    statements this selection never covers -- which quietly diluted the number.
+    Widening the scope back would move the percentage without anything about the
+    code changing, so the whole target set is checked rather than merely the
+    presence of the app target: adding a second ``--cov`` would dilute it just
+    as effectively.
+
+    Returns:
+        None.
+    """
+    workflow = _load(".github/workflows/coverage-required.yml")
+    steps = workflow["jobs"]["coverage-required"]["steps"]
+    run = _get_step(steps, "Run global coverage floor")["run"]
+
+    tokens = run.split()
+    targets = {
+        token.split("=", 1)[1] if "=" in token else tokens[index + 1]
+        for index, token in enumerate(tokens)
+        if token == "--cov" or token.startswith("--cov=")
+    }
+
+    assert targets == {"tldw_Server_API/app"}, (
+        f"the global coverage floor measures {sorted(targets)}, not application "
+        "code alone. Any extra target pulls more statements into the "
+        "denominator, which moves the reported percentage without any change in "
+        "what is actually tested."
+    )
+
+
 def test_coverage_required_enforces_authnz_coverage_floor() -> None:
     workflow = _load(".github/workflows/coverage-required.yml")
     steps = workflow["jobs"]["coverage-required"]["steps"]
@@ -166,37 +211,111 @@ def test_frontend_required_lane_exists() -> None:
     assert "frontend-required" in jobs
 
 
-def test_frontend_required_does_not_require_missing_lockfile_cache() -> None:
+def test_frontend_required_uses_isolated_vitest_shards() -> None:
     workflow = _load(".github/workflows/frontend-required.yml")
-    steps = workflow["jobs"]["frontend-required"]["steps"]
+    jobs = workflow["jobs"]
+    unit_job = jobs["frontend-unit-tests"]
+    steps = unit_job["steps"]
+
+    assert unit_job["needs"] == ["changes", "admission"]
+    assert unit_job["timeout-minutes"] == 60
+    assert unit_job["strategy"] == {
+        "fail-fast": False,
+        "max-parallel": 8,
+        "matrix": {"shard": list(range(1, 9))},
+    }
 
     setup_node = _get_step(steps, "Setup Node.js")
     setup_with = setup_node.get("with") or {}
     cache_dependency_path = setup_with.get("cache-dependency-path")
     if cache_dependency_path and not Path(str(cache_dependency_path)).exists():
         raise AssertionError(
-            f"frontend-required references missing cache dependency path: {cache_dependency_path}"
+            f"frontend-unit-tests references missing cache dependency path: {cache_dependency_path}"
         )
 
     setup_bun = _get_step(steps, "Setup Bun")
     if setup_bun.get("uses") != "oven-sh/setup-bun@v2":
-        raise AssertionError("frontend-required must configure Bun with oven-sh/setup-bun@v2")
+        raise AssertionError("frontend-unit-tests must configure Bun with oven-sh/setup-bun@v2")
 
     install_step = _get_step(steps, "Install frontend dependencies")
     if install_step.get("working-directory") != "apps":
-        raise AssertionError("frontend-required must install workspace dependencies from apps/")
+        raise AssertionError("frontend-unit-tests must install workspace dependencies from apps/")
     run_script = str(install_step.get("run") or "")
     if "bun install" not in run_script:
-        raise AssertionError("frontend-required must install dependencies with bun install")
+        raise AssertionError("frontend-unit-tests must install dependencies with bun install")
     if "npm ci" in run_script:
-        raise AssertionError("frontend-required should not use npm ci for Bun workspace dependencies")
+        raise AssertionError("frontend-unit-tests should not use npm ci for Bun workspace dependencies")
 
-    test_step = _get_step(steps, "Run frontend unit tests")
+    test_step = _get_step(steps, "Run package-owned frontend unit tests")
+    assert test_step["working-directory"] == "apps"
     test_run_script = str(test_step.get("run") or "")
-    if "bunx vitest run --changed=" not in test_run_script:
-        raise AssertionError("frontend-required unit tests must use changed-only vitest execution in PRs")
-    if "bun run test:run" not in test_run_script:
-        raise AssertionError("frontend-required must keep full-suite fallback when base SHA is unavailable")
+    assert 'local head_package_root="${GITHUB_WORKSPACE}/${package_repo_path}"' in test_run_script
+    assert 'head_command+=("--exclude=${exclude_pattern}")' in test_run_script
+    assert '"${head_command[@]}"' in test_run_script
+    assert 'bunx vitest run "${failed_files[@]}"' in test_run_script
+    assert 'frontend_status=$?' in test_run_script
+    assert 'ui_status=$?' in test_run_script
+    assert 'if (( frontend_status != 0 || ui_status != 0 )); then' in test_run_script
+    assert (
+        'git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA"'
+        in test_run_script
+    )
+    assert (
+        'git worktree add --detach "$worktree_path" "$BASE_SHA"'
+        in test_run_script
+    )
+    assert "bun install --frozen-lockfile" in test_run_script
+    assert 'run_package "frontend" "apps/tldw-frontend" "../packages/ui/**"' in test_run_script
+    assert 'run_package "ui" "apps/packages/ui" ""' in test_run_script
+    assert '"--reporter=default"' in test_run_script
+    assert '"--reporter=json"' in test_run_script
+    assert '"--outputFile.json=${head_report}"' in test_run_script
+    assert 'RATCHET_SCRIPT="${GITHUB_WORKSPACE}/Helper_Scripts/ci/vitest_base_ratchet.py"' in test_run_script
+    assert 'python3 "$RATCHET_SCRIPT" validate-success' in test_run_script
+    assert 'python3 "$RATCHET_SCRIPT" extract' in test_run_script
+    assert 'python3 "$RATCHET_SCRIPT" compare' in test_run_script
+    assert 'if (( head_status == 0 )); then' in test_run_script
+    assert '--changed-files "$CHANGED_FILES_PATH"' in test_run_script
+    assert '"--changed=${BASE_SHA}"' in test_run_script
+    assert '"--shard=${{ matrix.shard }}/8"' in test_run_script
+    assert '"--maxWorkers=1"' in test_run_script
+    assert '"--passWithNoTests"' in test_run_script
+    assert "bun run test:run" not in test_run_script
+
+    frontend_config = Path("apps/tldw-frontend/vitest.config.ts").read_text(
+        encoding="utf-8"
+    )
+    assert "../packages/ui/src/**/__tests__" in frontend_config
+
+    apps_package = json.loads(Path("apps/package.json").read_text(encoding="utf-8"))
+    frontend_package = json.loads(
+        Path("apps/tldw-frontend/package.json").read_text(encoding="utf-8")
+    )
+    ui_package = json.loads(
+        Path("apps/packages/ui/package.json").read_text(encoding="utf-8")
+    )
+    assert {
+        apps_package["dependencies"]["jsdom"],
+        frontend_package["devDependencies"]["jsdom"],
+        ui_package["devDependencies"]["jsdom"],
+    } == {"^28.1.0"}
+
+    final_job = jobs["frontend-required"]
+    assert final_job["needs"] == ["changes", "admission", "frontend-unit-tests"]
+    assert final_job["timeout-minutes"] == 120
+    final_steps = final_job["steps"]
+    assert not any(step.get("name") == "Run frontend unit tests" for step in final_steps)
+    shard_guard = _get_step(final_steps, "Require frontend unit shard success")
+    shard_guard_script = str(shard_guard.get("run") or "")
+    assert shard_guard["env"] == {
+        "TLDW_FRONTEND_CHANGED": "${{ needs.changes.outputs.tldw_frontend_changed }}",
+        "UNIT_SHARDS_RESULT": "${{ needs.frontend-unit-tests.result }}",
+    }
+    assert "$TLDW_FRONTEND_CHANGED" in shard_guard_script
+    assert "$UNIT_SHARDS_RESULT" in shard_guard_script
+    assert '"$TLDW_FRONTEND_CHANGED" == "false"' in shard_guard_script
+    assert '"$TLDW_FRONTEND_CHANGED" != "true"' not in shard_guard_script
+    assert "exit 1" in shard_guard_script
 
 
 def test_e2e_required_lane_exists_and_is_conditional() -> None:
@@ -910,6 +1029,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "tldw_Server_API/tests/Audio",
             "tldw_Server_API/tests/AudioJobs",
             "tldw_Server_API/tests/Audio_Studio",
+            "tldw_Server_API/tests/Benchmarks",
             "tldw_Server_API/tests/STT",
             "tldw_Server_API/tests/TTS",
             "tldw_Server_API/tests/TTS_NEW",
@@ -921,14 +1041,20 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         }
         assert shard_path_sets["media-core-api"] == {
             "tldw_Server_API/tests/Media/test_archive_member_cap.py",
+            "tldw_Server_API/tests/Media/test_audio_summary_service_prompt.py",
             "tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py",
             "tldw_Server_API/tests/Media/test_cache_index.py",
+            "tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py",
+            "tldw_Server_API/tests/Media/test_email_summary_service_prompt.py",
             "tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py",
             "tldw_Server_API/tests/Media/test_json_*.py",
             "tldw_Server_API/tests/Media/test_media_*.py",
             "tldw_Server_API/tests/Media/test_navigation_policy_contract.py",
+            "tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py",
             "tldw_Server_API/tests/Media/test_process_code_and_uploads.py",
             "tldw_Server_API/tests/Media/test_upload_sink_security.py",
+            "tldw_Server_API/tests/Media/test_video_summary_service_prompt.py",
+            "tldw_Server_API/tests/Media/test_web_summary_service_prompt.py",
             "tldw_Server_API/tests/Media/unit",
         }
         assert shard_path_sets["media-ingestion-new-ocr"] == {
@@ -953,6 +1079,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_original_file_replacement.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py",
         }
         assert shard_path_sets["media-ingestion-new-unit-mediawiki"] == {
@@ -1272,9 +1399,15 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         # into an auth/db shard (e.g. persona-adjacent API tests living under
         # a feature directory rather than a DB-specific one).
         auth_db_extra_files = {
+            "tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py",
+            "tldw_Server_API/tests/Workspaces/test_workspace_assistant_creation.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py",
+            "tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py",
+            "tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_context_api.py",
+            "tldw_Server_API/tests/Workspaces/test_workspace_job_status.py",
+            "tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py",
         }
         auth_db_files = {
@@ -1633,7 +1766,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         }
         claims_files = {
             str(path)
-            for path in Path("tldw_Server_API/tests/Claims").glob("test*.py")
+            for path in Path("tldw_Server_API/tests/Claims").glob("**/test*.py")
         }
         covered_claims_files: dict[str, str] = {}
         for shard_name in claims_shards:

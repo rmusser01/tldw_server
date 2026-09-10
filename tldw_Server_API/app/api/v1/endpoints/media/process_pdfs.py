@@ -10,6 +10,7 @@ from fastapi import (
     Depends,
     File,
     Form,
+    Request,
     Response,
     UploadFile,
     status,
@@ -18,21 +19,34 @@ from loguru import logger
 from starlette.responses import JSONResponse
 
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import propagate_billing_headers, require_within_limit
-from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
-from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import (
     get_process_pdfs_form,
+)
+from tldw_Server_API.app.api.v1.API_Deps.media_route_deps import (
+    media_create_dependencies,
 )
 from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
 )
+from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
 from tldw_Server_API.app.api.v1.API_Deps.validations_deps import (
     file_validator_instance,
 )
 from tldw_Server_API.app.api.v1.endpoints import media as media_mod
+from tldw_Server_API.app.api.v1.endpoints.media.deprecation_signals import (
+    apply_media_legacy_headers,
+    build_media_legacy_signal,
+)
+from tldw_Server_API.app.api.v1.endpoints.media.input_contracts import (
+    normalize_urls_field,
+    validate_media_inputs,
+)
 from tldw_Server_API.app.api.v1.schemas.media_request_models import ProcessPDFsForm
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     apply_chunking_template_if_any,
     async_resolve_chunking_for_result,
@@ -40,12 +54,12 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
     resolve_chunking_options_and_plan,
     uses_hierarchical_chunking,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils import (
+    download_url_async as core_download_url_async,
+)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
     save_uploaded_files,
-)
-from tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils import (
-    download_url_async as core_download_url_async,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.pipeline import (
     ProcessItem,
@@ -55,14 +69,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.result_normalization im
     normalise_pdf_result,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Upload_Sink import FileValidator
-from tldw_Server_API.app.api.v1.endpoints.media.input_contracts import (
-    normalize_urls_field,
-    validate_media_inputs,
-)
-from tldw_Server_API.app.api.v1.endpoints.media.deprecation_signals import (
-    apply_media_legacy_headers,
-    build_media_legacy_signal,
-)
+from tldw_Server_API.app.core.Prompt_Management.service_prompts import resolve_service_prompt
 
 router = APIRouter()
 
@@ -75,6 +82,7 @@ ALLOWED_PDF_EXTENSIONS = [".pdf"]
     summary="Extract, chunk, analyse PDFs (NO DB Persistence)",
     tags=["Media Processing (No DB)"],
     dependencies=[
+        *media_create_dependencies(),
         Depends(guard_storage_quota),
         Depends(require_within_limit(LimitCategory.STORAGE_MB, 1)),
         Depends(require_within_limit(LimitCategory.API_CALLS_DAY, 1)),
@@ -83,6 +91,8 @@ ALLOWED_PDF_EXTENSIONS = [".pdf"]
 async def process_pdfs_endpoint(
     background_tasks: BackgroundTasks,  # Parity with legacy endpoint signature
     injected_response: Response,
+    request: Request,
+    current_user: User = Depends(get_request_user),
     db: Any = Depends(get_media_db_for_user),
     form_data: ProcessPDFsForm = Depends(get_process_pdfs_form),
     files: list[UploadFile] | None = File(None, description="PDF uploads"),
@@ -141,6 +151,25 @@ async def process_pdfs_endpoint(
         form_data.urls,
         files,
     )
+
+    system_prompt = form_data.system_prompt
+    # Optional multipart strings normalize empty fields to None. Preserve an
+    # explicit empty system prompt instead of replacing it with saved guidance.
+    if system_prompt is None and (await request.form()).get("system_prompt") == "":
+        system_prompt = ""
+    if form_data.perform_analysis and form_data.api_name and system_prompt is None:
+        prompts_db = await get_prompts_db_for_user(request, current_user)
+
+        def resolve_system_prompt() -> str:
+            """Capture PDF instructions and release this worker's connection."""
+            try:
+                return resolve_service_prompt(prompts_db, "media.pdf.summarization").parts["system"]
+            finally:
+                prompts_db.close_connection()
+
+        # Resolve once before uploads/downloads; every PDF and summary pass
+        # receives this value through the existing processor argument.
+        system_prompt = await asyncio.to_thread(resolve_system_prompt)
 
     batch: dict[str, Any] = {"results": [], "errors": []}
     items: list[ProcessItem] = []
@@ -334,7 +363,7 @@ async def process_pdfs_endpoint(
                         api_name=form_data.api_name,
                         # api_key is resolved from server-side config only
                         custom_prompt=form_data.custom_prompt,
-                        system_prompt=form_data.system_prompt,
+                        system_prompt=system_prompt,
                         summarize_recursively=form_data.summarize_recursively,
                         enable_ocr=form_data.enable_ocr,
                         ocr_backend=form_data.ocr_backend,

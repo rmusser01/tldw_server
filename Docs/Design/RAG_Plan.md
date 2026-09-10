@@ -13,6 +13,8 @@ https://docs.anthropic.com/en/api/files-create
 https://github.com/nishchaljs/MobiRAG
 https://arxiv.org/abs/2504.13587
 https://github.com/lmarena/search-arena
+https://opensourceconnections.com/blog/2019/12/09/demystifying-ndcg-and-err/
+https://github.com/RaguTeam/RAGU
 https://gerred.github.io/building-an-agentic-system/
 https://github.com/deepsense-ai/ragbits
 https://arxiv.org/pdf/2504.08748v1

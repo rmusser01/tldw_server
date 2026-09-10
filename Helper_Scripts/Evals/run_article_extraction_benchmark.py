@@ -35,6 +35,12 @@ def parse_args() -> argparse.Namespace:
         help="Number of bootstrap samples for confidence intervals (default: 1000).",
     )
     parser.add_argument(
+        "--bootstrap-seed",
+        type=int,
+        default=0,
+        help="Deterministic bootstrap seed (default: 0).",
+    )
+    parser.add_argument(
         "--save-predictions",
         type=Path,
         default=None,
@@ -48,6 +54,7 @@ def main() -> None:
     evaluator = ArticleExtractionBenchmarkEvaluator(
         dataset_root=args.dataset_root,
         n_bootstrap=args.bootstrap,
+        bootstrap_seed=args.bootstrap_seed,
     )
 
     metrics = evaluator.run(

@@ -11,8 +11,10 @@ Tests cover:
 """
 import pytest
 from unittest.mock import MagicMock
+from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_files_repository import (
     MediaFilesRepository,
 )
@@ -101,6 +103,22 @@ class TestInsertMediaFile:
 
 class TestGetMediaFile:
     """Tests for get_media_file method."""
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("delete_latest", [False, True])
+    def test_get_media_file_selects_latest_matching_registration(self, db_with_media: tuple[MediaDatabase, int], delete_latest: bool) -> None:
+        """Reads choose the newest matching row and honor soft-deletion filtering."""
+        db, media_id = db_with_media
+        db.insert_media_file(media_id, "original", "previous.pdf")
+        db.insert_media_file(media_id, "original", "latest.pdf")
+        db.insert_media_file(media_id, "thumbnail", "thumbnail.png")
+        if delete_latest:
+            latest = next(row for row in db.get_media_files(media_id) if row["storage_path"] == "latest.pdf")
+            db.soft_delete_media_file(latest["id"])
+
+        expected_path = "previous.pdf" if delete_latest else "latest.pdf"
+        assert db.get_media_file(media_id, "original")["storage_path"] == expected_path
+        assert db.get_media_file(media_id, "original", include_deleted=True)["storage_path"] == "latest.pdf"
 
     @pytest.mark.unit
     def test_get_media_file_returns_record(self, db_with_media):
@@ -264,6 +282,47 @@ class TestSoftDeleteMediaFile:
 
 
 class TestMediaFilesRepository:
+    @pytest.mark.unit
+    def test_hard_delete_rolls_back_when_sync_logging_fails(self, db_with_media: tuple[MediaDatabase, int], monkeypatch: pytest.MonkeyPatch) -> None:
+        """A sync-log failure restores the file row so deletion can be retried."""
+        db, media_id = db_with_media
+        db.insert_media_file(media_id, "original", "old.pdf")
+        old_id = db.get_media_file(media_id)["id"]
+        db.insert_media_file(media_id, "original", "new.pdf")
+
+        def fail_sync(*_args: Any, **_kwargs: Any) -> None:
+            """Fail sync logging inside the deletion transaction."""
+            raise RuntimeError("sync log unavailable")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(db, "_log_sync_event", fail_sync)
+            with pytest.raises(DatabaseError, match="sync log unavailable"):
+                db.soft_delete_media_file(old_id, hard_delete=True)
+
+        assert len(db.get_media_files(media_id, include_deleted=True)) == 2
+        db.soft_delete_media_file(old_id, hard_delete=True)
+        assert [row["storage_path"] for row in db.get_media_files(media_id, include_deleted=True)] == ["new.pdf"]
+
+    @pytest.mark.unit
+    def test_single_file_hard_delete_is_scoped_and_idempotent(self, db_with_media: tuple[MediaDatabase, int]) -> None:
+        """Deleting one original twice preserves other artifacts and emits one deletion event."""
+        db, media_id = db_with_media
+        old_uuid = db.insert_media_file(media_id, "original", "old.pdf")
+        old_id = db.get_media_file(media_id)["id"]
+        new_uuid = db.insert_media_file(media_id, "original", "new.pdf")
+        thumbnail_uuid = db.insert_media_file(media_id, "thumbnail", "thumbnail.png")
+
+        db.soft_delete_media_file(old_id, hard_delete=True)
+        db.soft_delete_media_file(old_id, hard_delete=True)
+
+        assert {row["uuid"] for row in db.get_media_files(media_id, include_deleted=True)} == {
+            new_uuid, thumbnail_uuid,
+        }
+        deletes = [row for row in db.get_sync_log_entries()
+                   if row["entity_uuid"] == old_uuid and row["operation"] == "delete"]
+        assert len(deletes) == 1
+        assert deletes[0]["payload"]["hard_delete"] is True
+
     @pytest.mark.unit
     def test_repository_lists_active_files(self, db_with_media):
         db, media_id = db_with_media
@@ -506,5 +565,5 @@ class TestMediaFileRuntimeHelperForwarding:
         helper_module.soft_delete_media_files_for_media(db, 11, hard_delete=True)
 
         assert from_legacy_db.call_args_list == [((db,),), ((db,),)]
-        repo.soft_delete.assert_called_once_with(91)
+        repo.soft_delete.assert_called_once_with(91, hard_delete=False)
         repo.soft_delete_for_media.assert_called_once_with(media_id=11, hard_delete=True)
