@@ -1,6 +1,7 @@
 import { MessageCircle, Star, StarOff } from "lucide-react"
 import { useMemo } from "react"
 import { Tooltip } from "antd"
+import { useTranslation } from "react-i18next"
 import type { PromptRowVM } from "./prompt-workspace-types"
 
 export type PromptGalleryDensity = "rich" | "compact"
@@ -44,6 +45,7 @@ export function PromptGalleryCard({
   density = "rich",
   onToggleFavorite
 }: PromptGalleryCardProps) {
+  const { t } = useTranslation(["settings"])
   const displayName = prompt.title || "Untitled prompt"
   const previewText = (prompt.previewSystem || prompt.previewUser || "").trim()
   const displayKeywords = (prompt.keywords || [])
@@ -70,13 +72,18 @@ export function PromptGalleryCard({
           onClick()
         }
       }}
-      aria-label={`Click to preview ${displayName}`}
+      aria-label={
+        prompt.kind === "recipe"
+          ? t("managePrompts.recipe.cardOpenLabel", {
+              defaultValue: "Open recipe editor for {{name}}",
+              name: displayName
+            })
+          : `Click to preview ${displayName}`
+      }
     >
       {/* Avatar */}
       <div
-        className={`relative aspect-square w-full ${
-          isCompact ? "max-w-[102px]" : "max-w-[120px]"
-        }`}
+        className={`relative aspect-square w-full ${isCompact ? "max-w-[102px]" : "max-w-[120px]"}`}
       >
         {onToggleFavorite && (
           <Tooltip title={prompt.favorite ? "Remove favorite" : "Add favorite"}>
@@ -142,10 +149,16 @@ export function PromptGalleryCard({
       {prompt.kind === "recipe" && (
         <div className="flex items-center justify-center gap-1">
           <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
-            Recipe
+            {t("managePrompts.recipe.badge", { defaultValue: "Recipe" })}
           </span>
           <span className="text-[10px] font-medium text-text-muted">
-            {prompt.recipeTarget === "system" ? "System" : "User"}
+            {prompt.recipeTarget === "system"
+              ? t("managePrompts.recipe.targetSystem", {
+                  defaultValue: "System"
+                })
+              : t("managePrompts.recipe.targetUser", {
+                  defaultValue: "User"
+                })}
           </span>
         </div>
       )}

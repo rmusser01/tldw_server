@@ -263,15 +263,47 @@ export function usePromptFilteredData(deps: UsePromptFilteredDataDeps) {
     return mapServerSearchItemsToLocalPrompts(serverSearchData.items, baseFilteredData)
   }, [baseFilteredData, serverSearchData, serverSearchStatus, shouldUseServerSearch])
 
+  const serverSearchDataWithLocalRecipes = useMemo(() => {
+    if (currentPage !== 1) return serverSearchMappedData
+
+    const seenLocalIds = new Set(
+      serverSearchMappedData.map((prompt: any) => String(prompt?.id ?? ""))
+    )
+    const seenServerIds = new Set(
+      serverSearchMappedData.flatMap((prompt: any) =>
+        typeof prompt?.serverId === "number" ? [prompt.serverId] : []
+      )
+    )
+    const localRecipeMatches = localSearchFilteredData.filter((prompt: any) => {
+      const syncStatus = prompt?.syncStatus ?? "local"
+      if (
+        classifyPromptRecipe(prompt).kind !== "recipe" ||
+        (syncStatus !== "local" && syncStatus !== "pending")
+      ) {
+        return false
+      }
+      return (
+        !seenLocalIds.has(String(prompt?.id ?? "")) &&
+        (typeof prompt?.serverId !== "number" ||
+          !seenServerIds.has(prompt.serverId))
+      )
+    })
+    return [...serverSearchMappedData, ...localRecipeMatches]
+  }, [currentPage, localSearchFilteredData, serverSearchMappedData])
+
   const useServerSearchResults =
     shouldUseServerSearch && serverSearchStatus === "success"
 
   const filteredData = useMemo(() => {
     if (useServerSearchResults) {
-      return serverSearchMappedData
+      return serverSearchDataWithLocalRecipes
     }
     return localSearchFilteredData
-  }, [localSearchFilteredData, serverSearchMappedData, useServerSearchResults])
+  }, [
+    localSearchFilteredData,
+    serverSearchDataWithLocalRecipes,
+    useServerSearchResults
+  ])
 
   const sortedFilteredData = useMemo(() => {
     if (!promptSort.key || !promptSort.order) {
@@ -314,7 +346,10 @@ export function usePromptFilteredData(deps: UsePromptFilteredDataDeps) {
 
   const tableTotal = useMemo(() => {
     if (useServerSearchResults) {
-      return serverSearchData?.total_matches ?? sortedFilteredData.length
+      return Math.max(
+        serverSearchData?.total_matches ?? 0,
+        sortedFilteredData.length
+      )
     }
     return sortedFilteredData.length
   }, [serverSearchData?.total_matches, sortedFilteredData.length, useServerSearchResults])

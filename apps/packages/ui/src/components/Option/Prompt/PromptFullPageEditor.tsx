@@ -13,9 +13,11 @@ import { StructuredPromptEditor } from "./Structured/StructuredPromptEditor"
 import { SingleFieldRecipeEditor } from "@/components/Common/PromptAssist/recipes/SingleFieldRecipeEditor"
 import type {
   RecipeSource,
+  RecipeTarget,
   SavedRecipeSource,
   SingleTextRecipeDefinition
 } from "@/components/Common/PromptAssist/recipes/types"
+import { parseRecipeDefinition } from "@/components/Common/PromptAssist/recipes/recipe-editor-state"
 import { useFormDraft, formatDraftAge } from "@/hooks/useFormDraft"
 import {
   estimatePromptTokens,
@@ -46,7 +48,7 @@ type PromptFullPageEditorProps = {
   savedRecipes?: readonly SavedRecipeSource[]
   recipePersistenceAvailable?: boolean
   recipePersistenceUnavailableReason?: string
-  onApplyRecipe?: (compiledText: string) => void
+  onApplyRecipe?: (compiledText: string, target: RecipeTarget) => void
   onSaveRecipeAsNew?: (
     definition: SingleTextRecipeDefinition
   ) => void | Promise<void>
@@ -143,6 +145,19 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
     }
     return cloneSavedRecipeSource(initialValues)
   }, [initialValues, recipeClassification])
+  const targetSavedRecipes = React.useMemo(() => {
+    if (recipeClassification.kind !== "recipe") return []
+    return savedRecipes.filter((source) => {
+      try {
+        return (
+          parseRecipeDefinition(source.definition).assembly_config
+            .target_role === recipeClassification.target
+        )
+      } catch {
+        return false
+      }
+    })
+  }, [recipeClassification, savedRecipes])
 
   useEffect(() => {
     if (!open) return
@@ -399,9 +414,16 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
           </button>
         </div>
         <div className="mx-auto w-full max-w-2xl p-6">
-          <Alert variant="error" title="Recipe unavailable">
-            This saved recipe cannot be opened safely. Its structured definition
-            is invalid or uses an unsupported version.
+          <Alert
+            variant="error"
+            title={t("managePrompts.recipe.unavailableTitle", {
+              defaultValue: "Recipe unavailable"
+            })}
+          >
+            {t("managePrompts.recipe.unavailableDescription", {
+              defaultValue:
+                "This saved recipe cannot be opened safely. Its structured definition is invalid or uses an unsupported version."
+            })}
           </Alert>
         </div>
       </div>
@@ -434,10 +456,17 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
                   : "user_message"
               }
               initialSource={initialRecipeSource}
-              savedRecipes={savedRecipes}
+              savedRecipes={targetSavedRecipes}
               persistenceAvailable={recipePersistenceAvailable}
               persistenceUnavailableReason={recipePersistenceUnavailableReason}
-              onApply={(compiledText) => onApplyRecipe?.(compiledText)}
+              onApply={(compiledText) =>
+                onApplyRecipe?.(
+                  compiledText,
+                  recipeClassification.target === "system"
+                    ? "system"
+                    : "user_message"
+                )
+              }
               onSaveAsNew={onSaveRecipeAsNew}
               onUpdate={onUpdateRecipe}
             />

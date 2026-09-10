@@ -135,6 +135,9 @@ export const createRecipeWorkingCopy = (
       source_kind: source.source_kind,
       id: source.id,
       name: source.name,
+      ...(source.source_kind === "saved" && source.syncStatus
+        ? { syncStatus: source.syncStatus }
+        : {}),
     },
     target,
     definition,
@@ -405,6 +408,7 @@ export const canSaveRecipeAsNew = (state: RecipeEditorState): boolean =>
 
 export const canUpdateRecipe = (state: RecipeEditorState): boolean =>
   state.source.source_kind === "saved" &&
+  state.source.syncStatus !== "conflict" &&
   isValidRecipeDefinition(state.definition);
 
 export const serializeRecipeDefinitionForSave = (

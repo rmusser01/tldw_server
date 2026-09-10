@@ -30,6 +30,7 @@ export type SavedRecipeSource = {
   id: string;
   name: string;
   definition: unknown;
+  syncStatus?: "local" | "synced" | "pending" | "conflict";
 };
 
 export type RecipeSource = BuiltInRecipe | SavedRecipeSource;
@@ -37,7 +38,9 @@ export type RecipeSource = BuiltInRecipe | SavedRecipeSource;
 export type RecipeSourceMetadata = Pick<
   RecipeSource,
   "source_kind" | "id" | "name"
->;
+> & {
+  syncStatus?: SavedRecipeSource["syncStatus"];
+};
 
 export type RecipeRuntimeValues = Readonly<Record<string, string>>;
 

@@ -12,6 +12,7 @@ import {
 } from "@/db/dexie/helpers"
 import { renderStructuredPromptLegacySnapshot } from "../structured-prompt-utils"
 import type { SingleTextRecipeDefinition } from "@/components/Common/PromptAssist/recipes/types"
+import type { SyncResult } from "@/services/prompt-sync"
 import {
   buildRecipePromptFields,
   classifyPromptRecipe
@@ -27,10 +28,15 @@ export interface UsePromptEditorDeps {
   getPromptKeywords: (prompt: any) => string[]
   getPromptRecordById: (id: string) => any
   confirmDanger: (options: any) => Promise<boolean>
-  syncPromptAfterLocalSave: (localId: string) => Promise<{
+  syncPromptAfterLocalSave: (
+    localId: string,
+    options?: { notifyOnFailure?: boolean }
+  ) => Promise<{
     attempted: boolean
     success: boolean
     error?: string
+    syncStatus?: SyncResult["syncStatus"]
+    failureKind?: SyncResult["failureKind"]
   }>
   recipePersistenceAvailable: boolean
   onEmptyTrashSuccess?: () => void
@@ -364,6 +370,7 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
             promptRecord?.structuredPromptDefinition != null
               ? structuredClone(promptRecord.structuredPromptDefinition)
               : null,
+          syncStatus: promptRecord?.syncStatus,
           keywords: promptRecord?.keywords ?? promptRecord?.tags ?? [],
           changeDescription: promptRecord?.changeDescription,
         })
@@ -443,6 +450,37 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
     [fullEditorMode, normalizePromptPayload, savePromptMutation, updatePromptMutation]
   )
 
+  const acceptRecipeSyncResult = React.useCallback(
+    (
+      result: Awaited<
+        ReturnType<UsePromptEditorDeps["syncPromptAfterLocalSave"]>
+      >
+    ) => {
+      if (!result.attempted || result.success) return
+      if (
+        result.failureKind === "transient" &&
+        result.syncStatus === "pending"
+      ) {
+        notification.warning({
+          message: t("managePrompts.sync.syncFailed", {
+            defaultValue: "Sync failed"
+          }),
+          description: t("managePrompts.sync.syncFailedWithLocalSave", {
+            defaultValue: "{{error}} Your changes are saved locally.",
+            error:
+              result.error ||
+              t("managePrompts.sync.pendingTooltip", {
+                defaultValue: "Local changes not yet synced."
+              })
+          })
+        })
+        return
+      }
+      throw new Error(result.error || "recipe_sync_failed")
+    },
+    [t]
+  )
+
   const handleSaveRecipeAsNew = React.useCallback(
     async (definition: SingleTextRecipeDefinition) => {
       if (!recipePersistenceAvailable || guardPrivateMode()) {
@@ -463,12 +501,15 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
         author: fullEditorInitialValues?.author,
         details: fullEditorInitialValues?.details
       })
-      await syncPromptAfterLocalSave(saved.id)
+      acceptRecipeSyncResult(
+        await syncPromptAfterLocalSave(saved.id, { notifyOnFailure: false })
+      )
       await queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
       setFullEditorOpen(false)
       setFullEditorInitialValues(null)
     },
     [
+      acceptRecipeSyncResult,
       fullEditorInitialValues,
       guardPrivateMode,
       queryClient,
@@ -485,13 +526,13 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
       if (!recipePersistenceAvailable || guardPrivateMode()) {
         throw new Error("recipe_persistence_unavailable")
       }
-      if (savedSourceId !== editId) {
-        throw new Error("recipe_source_identity_mismatch")
-      }
       const sourceRecord = getPromptRecordById(savedSourceId)
       const sourceRecipe = classifyPromptRecipe(sourceRecord)
       if (sourceRecipe.kind !== "recipe") {
         throw new Error("invalid_saved_recipe")
+      }
+      if (sourceRecord.syncStatus === "conflict") {
+        throw new Error("recipe_sync_conflict")
       }
       const fields = buildRecipePromptFields(definition)
       if (
@@ -513,12 +554,14 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
           serverParentVersionId: sourceRecord.serverParentVersionId
         })
       )
-      await syncPromptAfterLocalSave(id)
+      acceptRecipeSyncResult(
+        await syncPromptAfterLocalSave(id, { notifyOnFailure: false })
+      )
       await queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
     },
     [
+      acceptRecipeSyncResult,
       buildPromptUpdatePayload,
-      editId,
       getPromptRecordById,
       guardPrivateMode,
       queryClient,

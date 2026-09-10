@@ -6409,5 +6409,35 @@
   },
   "servicePrompts_workflows_writingAgent": {
     "message": "Writing Playground AI Agent"
+  },
+  "managePrompts_recipe_badge": {
+    "message": "Recipe"
+  },
+  "managePrompts_recipe_targetSystem": {
+    "message": "System"
+  },
+  "managePrompts_recipe_targetUser": {
+    "message": "User"
+  },
+  "managePrompts_recipe_filters_all": {
+    "message": "Recipes"
+  },
+  "managePrompts_recipe_filters_system": {
+    "message": "System recipes"
+  },
+  "managePrompts_recipe_filters_user": {
+    "message": "User recipes"
+  },
+  "managePrompts_recipe_openEditor": {
+    "message": "Open recipe editor"
+  },
+  "managePrompts_recipe_cardOpenLabel": {
+    "message": "Open recipe editor for {{name}}"
+  },
+  "managePrompts_recipe_unavailableTitle": {
+    "message": "Recipe unavailable"
+  },
+  "managePrompts_recipe_unavailableDescription": {
+    "message": "This saved recipe cannot be opened safely. Its structured definition is invalid or uses an unsupported version."
   }
 }

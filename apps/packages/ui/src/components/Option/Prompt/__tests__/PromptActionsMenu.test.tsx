@@ -131,6 +131,32 @@ describe("PromptActionsMenu", () => {
     expect(onQuickTest).toHaveBeenCalledTimes(1)
   })
 
+  it("opens recipes in the editor and omits legacy quick test", async () => {
+    const user = userEvent.setup()
+    const onOpenRecipe = vi.fn()
+
+    render(
+      <PromptActionsMenu
+        promptId="recipe-1"
+        syncStatus="local"
+        isRecipe
+        inlineUseInChat={false}
+        onEdit={vi.fn()}
+        onDuplicate={vi.fn()}
+        onUseInChat={onOpenRecipe}
+        onQuickTest={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    )
+
+    expect(screen.queryByTestId("menu-item-quickTest")).not.toBeInTheDocument()
+    const openRecipe = screen.getByRole("button", {
+      name: "Open recipe editor"
+    })
+    await user.click(openRecipe)
+    expect(onOpenRecipe).toHaveBeenCalledTimes(1)
+  })
+
   it("hides inline use button when inlineUseInChat is disabled and keeps overflow use action", async () => {
     const user = userEvent.setup()
     const onUseInChat = vi.fn()

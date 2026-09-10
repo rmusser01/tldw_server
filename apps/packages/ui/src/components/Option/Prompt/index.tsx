@@ -40,6 +40,8 @@ import { tagColors } from "@/utils/color"
 // isFireFoxPrivateMode moved to usePromptUtilities hook
 // useConfirmDanger moved to usePromptUtilities hook
 import { useServerOnline } from "@/hooks/useServerOnline"
+import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import FeatureEmptyState from "@/components/Common/FeatureEmptyState"
 import ConnectFeatureBanner from "@/components/Common/ConnectFeatureBanner"
 import { Alert } from "@/components/ui/primitives"
@@ -226,6 +228,17 @@ export const PromptBody = () => {
   const { t } = useTranslation(["settings", "common", "option"])
   const navigate = useNavigate()
   const isOnline = useServerOnline()
+  const {
+    config: canonicalConnectionConfig,
+    loading: canonicalConnectionLoading
+  } = useCanonicalConnectionConfig()
+  const promptBackendKey = useMemo(
+    () =>
+      canonicalConnectionLoading || !canonicalConnectionConfig
+        ? null
+        : buildChatSurfaceScopeKeyFromConfig(canonicalConnectionConfig),
+    [canonicalConnectionConfig, canonicalConnectionLoading]
+  )
   // Get initial segment from URL param
   const initialSegment = getSegmentFromParam(searchParams.get("tab"))
 
@@ -302,9 +315,9 @@ export const PromptBody = () => {
   })
 
   const { data: promptCapabilities } = useQuery({
-    queryKey: ["promptCapabilities", "prompt-library"],
+    queryKey: ["promptCapabilities", promptBackendKey],
     queryFn: fetchPromptCapabilities,
-    enabled: isOnline,
+    enabled: isOnline && Boolean(promptBackendKey),
     retry: false
   })
   const recipePersistence = getRecipePersistenceState(
@@ -441,7 +454,7 @@ export const PromptBody = () => {
     updateCopilotPrompt, isUpdatingCopilotPrompt,
     copyCopilotPromptToClipboard, copyPromptShareLink,
     insertPrompt, setInsertPrompt,
-    handleInsertChoice, handleUsePromptInChat,
+    handleInsertChoice, handleUsePromptInChat, handleApplyRecipe,
     localQuickTestPrompt, localQuickTestInput, setLocalQuickTestInput,
     localQuickTestOutput, isRunningLocalQuickTest, localQuickTestRunInfo,
     closeLocalQuickTestModal, handleQuickTest, runLocalQuickTest,
@@ -1161,6 +1174,7 @@ export const PromptBody = () => {
     (row: PromptRowVM) => {
       const promptRecord = getPromptRecordById(row.id)
       const actionDisabled = isFireFoxPrivateMode || !promptRecord
+      const isRecipe = classifyPromptRecipe(promptRecord).kind === "recipe"
       return (
         <PromptActionsMenu
           promptId={row.id}
@@ -1168,6 +1182,7 @@ export const PromptBody = () => {
           syncStatus={row.syncStatus}
           serverId={row.serverId}
           inlineUseInChat={false}
+          isRecipe={isRecipe}
           onEdit={() => {
             if (!promptRecord) return
             editor.openFullEditor(promptRecord)
@@ -1178,12 +1193,20 @@ export const PromptBody = () => {
           }}
           onUseInChat={() => {
             if (!promptRecord) return
+            if (isRecipe) {
+              editor.openFullEditor(promptRecord)
+              return
+            }
             void handleUsePromptInChat(promptRecord)
           }}
-          onQuickTest={() => {
-            if (!promptRecord) return
-            void handleQuickTest(promptRecord)
-          }}
+          onQuickTest={
+            isRecipe
+              ? undefined
+              : () => {
+                  if (!promptRecord) return
+                  void handleQuickTest(promptRecord)
+                }
+          }
           onDelete={() => {
             if (!promptRecord) return
             void editor.handleDeletePrompt(promptRecord)
@@ -2016,7 +2039,16 @@ export const PromptBody = () => {
                 defaultValue:
                   "Sync unavailable (offline). Showing last known status."
               }),
-              edit: t("managePrompts.tooltip.edit")
+                edit: t("managePrompts.tooltip.edit"),
+                recipe: t("managePrompts.recipe.badge", {
+                  defaultValue: "Recipe"
+                }),
+                recipeSystem: t("managePrompts.recipe.targetSystem", {
+                  defaultValue: "System"
+                }),
+                recipeUser: t("managePrompts.recipe.targetUser", {
+                  defaultValue: "User"
+                })
             }}
             paginationShowTotal={(total, range) =>
               t("managePrompts.pagination.summary", {
@@ -2596,7 +2628,11 @@ export const PromptBody = () => {
         savedRecipes={savedRecipes}
         recipePersistenceAvailable={recipePersistence.available}
         recipePersistenceUnavailableReason={recipePersistence.reason}
-        onApplyRecipe={() => undefined}
+        onApplyRecipe={(compiledText, target) => {
+          if (handleApplyRecipe(compiledText, target)) {
+            editor.closeFullEditor()
+          }
+        }}
         onSaveRecipeAsNew={editor.handleSaveRecipeAsNew}
         onUpdateRecipe={editor.handleUpdateRecipe}
       />
@@ -2646,7 +2682,10 @@ export const PromptBody = () => {
         }}
         onSelect={(projectId) => {
           if (sync.promptToSync) {
-            sync.pushToStudioMutation({ localId: sync.promptToSync, projectId })
+            sync.pushToStudioMutation({
+              localId: sync.promptToSync,
+              projectId
+            })
           }
         }}
         loading={sync.isPushing}

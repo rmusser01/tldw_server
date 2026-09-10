@@ -131,11 +131,18 @@ export const cloneSavedRecipeSource = (prompt: unknown): SavedRecipeSource => {
       : typeof record.title === "string" && record.title.trim()
         ? record.title
         : "Untitled recipe"
+  const syncStatus = record.syncStatus
   return {
     source_kind: "saved",
     id: String(id),
     name,
-    definition: clone(classification.definition)
+    definition: clone(classification.definition),
+    ...(syncStatus === "local" ||
+    syncStatus === "synced" ||
+    syncStatus === "pending" ||
+    syncStatus === "conflict"
+      ? { syncStatus }
+      : {})
   }
 }
 

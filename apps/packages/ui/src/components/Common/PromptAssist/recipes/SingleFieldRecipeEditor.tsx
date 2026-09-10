@@ -456,11 +456,15 @@ export function SingleFieldRecipeEditor({
     preview.definitionValid &&
     variableNamesReady &&
     Boolean(onSaveAsNew);
+  const sourceHasConflict =
+    state.source.source_kind === "saved" &&
+    state.source.syncStatus === "conflict";
   const updateEnabled =
     persistenceAvailable === true &&
     preview.definitionValid &&
     variableNamesReady &&
     state.source.source_kind === "saved" &&
+    !sourceHasConflict &&
     Boolean(onUpdate);
 
   return (
@@ -667,7 +671,7 @@ export function SingleFieldRecipeEditor({
         >
           Save as new recipe
         </Button>
-        {state.source.source_kind === "saved" ? (
+        {state.source.source_kind === "saved" && !sourceHasConflict ? (
           <Button
             variant="outline"
             size="lg"

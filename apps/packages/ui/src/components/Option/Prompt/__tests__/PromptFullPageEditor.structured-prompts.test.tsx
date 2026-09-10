@@ -20,6 +20,12 @@ vi.mock("react-i18next", () => ({
       key: string,
       fallbackOrOptions?: string | { defaultValue?: string; [k: string]: unknown }
     ) => {
+      if (key === "managePrompts.recipe.unavailableTitle") {
+        return "Localized recipe unavailable"
+      }
+      if (key === "managePrompts.recipe.unavailableDescription") {
+        return "Localized unsafe recipe description"
+      }
       if (typeof fallbackOrOptions === "string") return fallbackOrOptions
       if (fallbackOrOptions && typeof fallbackOrOptions === "object") {
         if (fallbackOrOptions.defaultValue) {
@@ -73,6 +79,29 @@ describe("PromptFullPageEditor structured prompts", () => {
     isLoading: false,
     allTags: []
   }
+
+  it("localizes the quarantined recipe message", () => {
+    render(
+      <PromptFullPageEditor
+        {...baseProps}
+        initialValues={{
+          id: "unsafe-recipe",
+          name: "Unsafe recipe",
+          promptFormat: "structured",
+          promptSchemaVersion: 2,
+          structuredPromptDefinition: {
+            schema_version: 2,
+            definition_kind: "single_text_recipe"
+          }
+        }}
+      />
+    )
+
+    expect(screen.getByText("Localized recipe unavailable")).toBeInTheDocument()
+    expect(
+      screen.getByText("Localized unsafe recipe description")
+    ).toBeInTheDocument()
+  })
 
   it("converts a legacy full-page prompt into a structured prompt and locks raw fields", async () => {
     render(<PromptFullPageEditor {...baseProps} />)
@@ -220,7 +249,7 @@ describe("PromptFullPageEditor structured prompts", () => {
     )
 
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "This saved recipe cannot be opened safely."
+      "Localized unsafe recipe description"
     )
     expect(screen.queryByTestId("single-field-recipe-editor")).not.toBeInTheDocument()
     expect(screen.queryByTestId("full-editor-system-prompt")).not.toBeInTheDocument()

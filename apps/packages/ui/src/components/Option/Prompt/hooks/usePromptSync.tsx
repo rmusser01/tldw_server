@@ -65,59 +65,67 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
   const batchSyncCancelRef = useRef(false)
   const batchSyncRunningRef = useRef(false)
 
-  const syncPromptAfterLocalSave = React.useCallback(async (localId: string) => {
-    try {
-      const autoSyncEnabled = await shouldAutoSyncWorkspacePrompts()
-      if (!autoSyncEnabled) {
-        return {
-          attempted: false,
-          success: true,
-          error: undefined
+  const syncPromptAfterLocalSave = React.useCallback(
+    async (localId: string, options: { notifyOnFailure?: boolean } = {}) => {
+      const notifyOnFailure = options.notifyOnFailure !== false
+      try {
+        const autoSyncEnabled = await shouldAutoSyncWorkspacePrompts()
+        if (!autoSyncEnabled) {
+          return {
+            attempted: false,
+            success: true,
+            error: undefined
+          }
         }
-      }
 
-      const result = await autoSyncPrompt(localId)
-      if (!result.success) {
-        notification.warning({
-          message: t("managePrompts.sync.syncFailed", {
-            defaultValue: "Sync failed"
-          }),
-          description: t("managePrompts.sync.syncFailedWithLocalSave", {
-            defaultValue: "{{error}} Your changes are saved locally.",
-            error: result.error || t("managePrompts.sync.pendingTooltip", {
-              defaultValue: "Local changes not yet synced."
+        const result = await autoSyncPrompt(localId)
+        if (!result.success && notifyOnFailure) {
+          notification.warning({
+            message: t("managePrompts.sync.syncFailed", {
+              defaultValue: "Sync failed"
+            }),
+            description: t("managePrompts.sync.syncFailedWithLocalSave", {
+              defaultValue: "{{error}} Your changes are saved locally.",
+              error: result.error || t("managePrompts.sync.pendingTooltip", {
+                defaultValue: "Local changes not yet synced."
+              })
             })
           })
-        })
-      }
-      return {
-        attempted: true,
-        success: result.success,
-        error: result.error
-      }
-    } catch (error: unknown) {
-      const fallbackError =
-        error instanceof Error
-          ? error.message
-          : t("managePrompts.sync.pendingTooltip", {
-              defaultValue: "Local changes not yet synced"
+        }
+        return {
+          attempted: true,
+          success: result.success,
+          error: result.error,
+          syncStatus: result.syncStatus,
+          failureKind: result.failureKind
+        }
+      } catch (error: unknown) {
+        const fallbackError =
+          error instanceof Error
+            ? error.message
+            : t("managePrompts.sync.pendingTooltip", {
+                defaultValue: "Local changes not yet synced"
+              })
+        if (notifyOnFailure) {
+          notification.warning({
+            message: t("managePrompts.sync.syncFailed", {
+              defaultValue: "Sync failed"
+            }),
+            description: t("managePrompts.sync.syncFailedWithLocalSave", {
+              defaultValue: "{{error}} Your changes are saved locally.",
+              error: fallbackError
             })
-      notification.warning({
-        message: t("managePrompts.sync.syncFailed", {
-          defaultValue: "Sync failed"
-        }),
-        description: t("managePrompts.sync.syncFailedWithLocalSave", {
-          defaultValue: "{{error}} Your changes are saved locally.",
+          })
+        }
+        return {
+          attempted: true,
+          success: false,
           error: fallbackError
-        })
-      })
-      return {
-        attempted: true,
-        success: false,
-        error: fallbackError
+        }
       }
-    }
-  }, [t])
+    },
+    [t]
+  )
 
   const { mutate: pushToStudioMutation, isPending: isPushing } = useMutation({
     mutationFn: async ({ localId, projectId }: { localId: string; projectId: number }) => {

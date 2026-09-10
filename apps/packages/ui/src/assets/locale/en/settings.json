@@ -1303,6 +1303,20 @@
     "option2": "RAG",
     "questionPrompt": "Question Prompt",
     "search": "Search titles and contents",
+    "recipe": {
+      "badge": "Recipe",
+      "targetSystem": "System",
+      "targetUser": "User",
+      "filters": {
+        "all": "Recipes",
+        "system": "System recipes",
+        "user": "User recipes"
+      },
+      "openEditor": "Open recipe editor",
+      "cardOpenLabel": "Open recipe editor for {{name}}",
+      "unavailableTitle": "Recipe unavailable",
+      "unavailableDescription": "This saved recipe cannot be opened safely. Its structured definition is invalid or uses an unsupported version."
+    },
     "filter": {
       "all": "All",
       "system": "System",

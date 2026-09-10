@@ -84,4 +84,35 @@ describe("prompt-table-columns visual alignment", () => {
     expect(titleMarkup).toContain("Recipe")
     expect(titleMarkup).toContain("User")
   })
+
+  it("uses supplied localized recipe badge labels", () => {
+    const columns = buildPromptTableColumns({
+      isOnline: true,
+      isCompactViewport: false,
+      sortKey: null,
+      sortOrder: null,
+      labels: {
+        recipe: "Localized recipe",
+        recipeSystem: "Localized system recipe",
+        recipeUser: "Localized user recipe"
+      }
+    })
+    const titleColumn = columns.find(
+      (column: any) => String(column?.key) === "title"
+    ) as any
+    const titleMarkup = renderToStaticMarkup(
+      <>
+        {
+          titleColumn?.render?.(sampleRow.title, {
+            ...sampleRow,
+            kind: "recipe",
+            recipeTarget: "system"
+          }) as React.ReactNode
+        }
+      </>
+    )
+
+    expect(titleMarkup).toContain("Localized recipe")
+    expect(titleMarkup).toContain("Localized system recipe")
+  })
 })

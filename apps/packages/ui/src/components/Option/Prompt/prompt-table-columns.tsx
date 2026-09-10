@@ -19,6 +19,9 @@ export type PromptTableColumnLabels = {
   unknown: string
   offlineStatus: string
   edit: string
+  recipe: string
+  recipeSystem: string
+  recipeUser: string
 }
 
 export type PromptTableColumnOptions = {
@@ -144,7 +147,10 @@ export const buildPromptTableColumns = (
     offlineStatus:
       labels?.offlineStatus ||
       "Sync unavailable while offline. Showing last known state.",
-    edit: labels?.edit || "Edit"
+    edit: labels?.edit || "Edit",
+    recipe: labels?.recipe || "Recipe",
+    recipeSystem: labels?.recipeSystem || "System",
+    recipeUser: labels?.recipeUser || "User"
   }
 
   const columns: ColumnsType<PromptRowVM> = [
@@ -189,9 +195,7 @@ export const buildPromptTableColumns = (
             </span>
             {record.usageCount > 0 && (
               <Tooltip
-                title={`${record.usageCount} ${
-                  record.usageCount === 1 ? "use" : "uses"
-                }`}
+                title={`${record.usageCount} ${record.usageCount === 1 ? "use" : "uses"}`}
               >
                 <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
                   <MessageCircle className="size-3" />
@@ -207,9 +211,11 @@ export const buildPromptTableColumns = (
           ) : null}
           {record.kind === "recipe" ? (
             <div className="flex items-center gap-1">
-              <Tag color="blue">Recipe</Tag>
+              <Tag color="blue">{resolvedLabels.recipe}</Tag>
               <span className="text-xs text-text-muted">
-                {record.recipeTarget === "system" ? "System" : "User"}
+                {record.recipeTarget === "system"
+                  ? resolvedLabels.recipeSystem
+                  : resolvedLabels.recipeUser}
               </span>
             </div>
           ) : null}
