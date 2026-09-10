@@ -23,6 +23,7 @@ _ADVISORY_IDENTITIES = {
     "GHSA-2wm9-hf6c-p5cr": ("CVE-2026-45830", "chromadb", "1.5.9"),
     "GHSA-xph7-9rjv-w5fr": ("CVE-2026-45831", "chromadb", "1.5.9"),
     "GHSA-8mgp-746c-j5xp": ("CVE-2026-81726", "nltk", "3.10.3"),
+    "GHSA-qqmf-gpg7-g8gw": ("CVE-2026-58659", "lightning", "2.6.5"),
 }
 _GHSA_PATTERN = re.compile(r"GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}")
 _MANIFESTS = frozenset({"pyproject.toml", "uv.lock"})
