@@ -1,10 +1,10 @@
 ---
 id: TASK-13233
 title: Review and rebase PR 2612 original-file cleanup safely onto current dev
-status: Done
+status: In Progress
 assignee: []
 created_date: '2026-09-10 00:49'
-updated_date: '2026-09-10 01:23'
+updated_date: '2026-09-10 01:52'
 labels:
   - media
   - storage
@@ -28,6 +28,7 @@ Refresh PR #2612 onto current dev, verify continued applicability, and resolve s
 - [x] #3 Focused and adjacent tests, no-new-lint comparison, Bandit, pre-commit checks, and independent review pass.
 - [x] #4 Existing PR branch is updated with a lease-protected push; current CI and human Change summary merge gates are reported.
 - [x] #5 Failed registration preserves the previous original; successful replacement selects the latest original and safely retires superseded binaries while preserving plaintext history.
+- [ ] #6 Latest dev rebase, all current Qodo feedback, and required CI are resolved before merging the user-authorized PR.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -44,6 +45,8 @@ Rebased original head b16d65a33407682425c9dd1539a63aea6ea37a5e onto origin/dev 4
 User clarified latest-only binaries; the prior retention decision is superseded by TASK-13233.1. Implemented retirement after committed replacement while preserving all plaintext history. Independent review approves; 153 tests pass and Bandit remains clean. Rebased again without conflicts onto dev 456eafb7a603449722ba8db806071a5e2aa5e7d6 (only intervening VZ Go changes); post-rebase validation in progress. The separate pre-existing quota-root concern is preserved in TASK-13233.2.
 
 Final post-rebase validation also passed: 153 tests, 8 existing warnings, 74.50 seconds. Range-diff shows all seven commits unchanged by the final rebase. Latest-only original replacement TASK-13233.1 is complete; old binary retention is no longer the normal successful-upload policy.
+
+Requester explicitly authorized rebasing onto latest dev, addressing all issues/comments after Qodo posts, and merging. Their human-written Change summary is published verbatim. Starting from local c39a1a798d; remote PR is now ready for review at d0806eeeea with Qodo review pending. Preserve and inspect the intervening remote update before rebasing; use an explicit push lease and final-head merge guard.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
