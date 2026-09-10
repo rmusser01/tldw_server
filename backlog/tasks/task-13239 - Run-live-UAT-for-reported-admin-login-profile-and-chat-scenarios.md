@@ -4,11 +4,13 @@ title: 'Run live UAT for reported admin login, profile, and chat scenarios'
 status: In Progress
 assignee: []
 created_date: '2026-09-10 05:07'
-updated_date: '2026-09-10 05:49'
+updated_date: '2026-09-10 06:22'
 labels: []
 dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/pull/2939'
+documentation:
+  - Docs/Reviews/ISSUES_2935_2938_LIVE_UAT_2026_09_10.md
 priority: high
 ---
 
@@ -20,9 +22,9 @@ Verify PR #2939 against the original issue 2935–2938 reproduction scenarios us
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Node 20 admin UI accepts a real login JWT and rejects invalid tokens without HTTP 500
-- [ ] #2 Live PostgreSQL profile requests succeed with Bearer and API-key auth, populated sessions, and zero/one/multiple organization and team memberships
-- [ ] #3 Live chat requests resolve omitted and blank models from configuration, preserve explicit models, and fail clearly before dispatch without a model
+- [x] #1 Node 20 admin UI accepts a real login JWT and rejects invalid tokens without HTTP 500
+- [x] #2 Live PostgreSQL profile requests succeed with Bearer and API-key auth, populated sessions, and zero/one/multiple organization and team memberships
+- [x] #3 Live chat requests resolve omitted and blank models from configuration, preserve explicit models, and fail clearly before dispatch without a model
 - [ ] #4 Scenario results, environment, evidence, limitations, and any follow-up regression checks are recorded on PR #2939
 <!-- AC:END -->
 
@@ -40,6 +42,8 @@ Live PostgreSQL 18.6 UAT exposed an additional full-profile 500: Usage/audio_quo
 Live UAT after quota DATE fix: full profile Bearer and API key 200 for 0/1/2 org and team memberships; team override value/source correct; token refresh and subsequent profile200; real registration auto-creates org/team and profile200. Compiled Next16.2.2 on Node20.19.5 admin browser login and reload pass; invalid JWT matrix redirects307. Local provider wire logs verify streaming/nonstreaming omitted/blank/default/explicit/missing-default behavior; Ollama adapter file default also passes. WebUI Save reports server responded successfully; persistence check in progress.
 
 Quota DATE fix verified: 4 new regressions red with asyncpg DataError, then 5 PostgreSQL +49 existing tests green; Ruff/Black/compilation/diff checks and scoped Bandit pass. Independent review found no actionable issues. Follow-up WebUI persistence retry exposed a separate event-loop/RBAC lock stall, tracked and being fixed under TASK-13240; final UAT report in Docs/Reviews/ISSUES_2935_2938_LIVE_UAT_2026_09_10.md.
+
+Live acceptance verification is complete. Real browser admin login/reload and WebUI API-key Save/persistence pass; exact Node20.20.2 runtime also passes valid JWT and all five invalid/missing-token redirects. Six profile membership/authentication cases, session activity, refresh, real signup, and24 streaming/nonstreaming chat cases pass. UAT exposed and repaired audio DATE binding and RBAC event-loop stalls, with cache concurrency followups from review. Final fresh API and lock replays pass. Disposable DB removal and all owned server ports stopped are verified; temporary fixture and completed plan removed. Report and sanitized evidence are prepared for PR publication; full-suite/external-provider/Docker limits are explicit.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

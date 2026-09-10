@@ -166,3 +166,13 @@ test assertions excluded via B101; the array test file also passes Black.
 The full backend and admin UI suites were not run. PostgreSQL verification uses
 the repository's standard local isolated fixture; it does not measure migration
 time or lock behavior on large production session tables.
+
+## Live UAT follow-up
+
+The [September 10 live acceptance report](../Reviews/ISSUES_2935_2938_LIVE_UAT_2026_09_10.md)
+records browser login/settings interactions, real PostgreSQL profile and session
+requests, Node 20.20.2 runtime JWT checks, and a 24-case chat matrix. UAT exposed
+additional audio quota DATE bindings and a synchronous RBAC event-loop stall;
+both are repaired with regressions. Review also hardened concurrent initialization
+and reset of the shared RBAC database cache. TASK-13239 and TASK-13240 retain the
+follow-up work and verification history.
