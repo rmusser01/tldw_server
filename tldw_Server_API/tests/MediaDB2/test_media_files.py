@@ -103,6 +103,21 @@ class TestGetMediaFile:
     """Tests for get_media_file method."""
 
     @pytest.mark.unit
+    @pytest.mark.parametrize("delete_latest", [False, True])
+    def test_get_media_file_selects_latest_matching_registration(self, db_with_media, delete_latest):
+        db, media_id = db_with_media
+        db.insert_media_file(media_id, "original", "previous.pdf")
+        db.insert_media_file(media_id, "original", "latest.pdf")
+        db.insert_media_file(media_id, "thumbnail", "thumbnail.png")
+        if delete_latest:
+            latest = next(row for row in db.get_media_files(media_id) if row["storage_path"] == "latest.pdf")
+            db.soft_delete_media_file(latest["id"])
+
+        expected_path = "previous.pdf" if delete_latest else "latest.pdf"
+        assert db.get_media_file(media_id, "original")["storage_path"] == expected_path
+        assert db.get_media_file(media_id, "original", include_deleted=True)["storage_path"] == "latest.pdf"
+
+    @pytest.mark.unit
     def test_get_media_file_returns_record(self, db_with_media):
         """Test that get_media_file returns the correct record."""
         db, media_id = db_with_media

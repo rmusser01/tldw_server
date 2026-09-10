@@ -15,15 +15,18 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing import (
     persistence as ingestion_persistence,
 )
 from tldw_Server_API.app.core import Storage
+from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_database
+from tldw_Server_API.app.core.Storage.filesystem_storage import FileSystemStorage
 from tldw_Server_API.app.services import storage_quota_service
 
 
 class _FakeStorage:
     def __init__(self) -> None:
         self.calls: List[Dict[str, Any]] = []
-        self.delete_calls: List[str] = []
-        self.delete_error: Exception | None = None
+        self.delete_calls: list[str] = []
+        self.delete_error: BaseException | None = None
         self.delete_result = True
+        self.store_error: BaseException | None = None
 
     async def store(
         self,
@@ -34,6 +37,8 @@ class _FakeStorage:
         data: bytes,
         mime_type: str,
     ) -> str:
+        if self.store_error is not None:
+            raise self.store_error
         payload = data
         if hasattr(data, "read") and not isinstance(data, (bytes, bytearray)):
             payload = data.read()
@@ -114,7 +119,7 @@ def fake_db() -> _FakeDB:
 
 
 @pytest.fixture(autouse=True)
-def _disable_collections_dual_write(monkeypatch: pytest.MonkeyPatch) -> None:
+def _isolate_external_services(monkeypatch: pytest.MonkeyPatch) -> None:
     def _noop(*_args: Any, **_kwargs: Any) -> None:
         return None
 
@@ -123,6 +128,7 @@ def _disable_collections_dual_write(monkeypatch: pytest.MonkeyPatch) -> None:
         "sync_media_add_results_to_collections",
         _noop,
     )
+    monkeypatch.setattr(storage_quota_service, "get_storage_quota_service", _FakeUploadQuotaService)
 
 
 @pytest.mark.unit
@@ -274,7 +280,7 @@ async def test_original_storage_deletes_blob_when_media_file_registration_fails(
         processing_source: str,
         media_type: Any,
         **_kwargs: Any,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         return {
             "status": "Success",
             "input_ref": item_input_ref,
@@ -315,7 +321,7 @@ async def test_original_storage_deletes_blob_when_media_file_registration_fails(
     body = json.loads(response.body)
     result = body["results"][0]
 
-    assert storage.delete_calls == ["storage/1/original.pdf"]
+    assert storage.delete_calls == [db.insert_calls[0]["storage_path"]]
     assert result["original_file_stored"] is False
     assert "original_file_path" not in result
     assert len(db.insert_calls) == 1
@@ -323,9 +329,17 @@ async def test_original_storage_deletes_blob_when_media_file_registration_fails(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_generic_registration_failure_is_not_masked_by_cleanup_failure(monkeypatch, fake_storage):
+@pytest.mark.parametrize("cancellation_stage", [None, "store", "cleanup"])
+async def test_original_storage_preserves_registration_errors_and_cancellation(
+    monkeypatch, fake_storage, cancellation_stage
+):
     storage = fake_storage
-    storage.delete_error = Exception("generic cleanup failure")
+    storage.delete_error = (
+        asyncio.CancelledError("cleanup cancelled")
+        if cancellation_stage == "cleanup" else Exception("generic cleanup failure")
+    )
+    if cancellation_stage == "store":
+        storage.store_error = asyncio.CancelledError("storage cancelled")
     db = _FailingMediaFileDB(error=Exception("generic registration failure"))
 
     async def fake_save_uploaded_files(_files, temp_dir, **_kwargs):
@@ -339,7 +353,7 @@ async def test_generic_registration_failure_is_not_masked_by_cleanup_failure(mon
         processing_source: str,
         media_type: Any,
         **_kwargs: Any,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         return {
             "status": "Success",
             "input_ref": item_input_ref,
@@ -368,7 +382,10 @@ async def test_generic_registration_failure_is_not_masked_by_cleanup_failure(mon
         generate_embeddings=False,
     )
 
-    with pytest.raises(Exception, match="generic registration failure"):
+    expected_error = (
+        storage.store_error or storage.delete_error if cancellation_stage else db.error
+    )
+    with pytest.raises(type(expected_error)) as raised:
         await ingestion_persistence.add_media_orchestrate(
             background_tasks=BackgroundTasks(),
             form_data=form_data,
@@ -378,8 +395,13 @@ async def test_generic_registration_failure_is_not_masked_by_cleanup_failure(mon
             usage_log=SimpleNamespace(log_event=lambda *_args, **_kwargs: None),
         )
 
-    assert storage.delete_calls == ["storage/1/original.pdf"]
-    assert len(db.insert_calls) == 1
+    assert raised.value is expected_error
+    if cancellation_stage == "store":
+        assert storage.delete_calls == []
+        assert db.insert_calls == []
+    else:
+        assert storage.delete_calls == [db.insert_calls[0]["storage_path"]]
+        assert len(db.insert_calls) == 1
 
 
 @pytest.mark.unit
@@ -390,12 +412,12 @@ async def test_generic_registration_failure_is_not_masked_by_cleanup_failure(mon
         (
             Exception("delete failed"),
             True,
-            "Failed to delete stored original file storage/1/original.pdf after registration failure",
+            "Failed to delete stored original file",
         ),
         (
             None,
             False,
-            "Stored original file storage/1/original.pdf was not deleted after registration failure",
+            "was not deleted after registration failure",
         ),
     ],
 )
@@ -410,7 +432,7 @@ async def test_original_storage_cleanup_failure_is_logged_without_masking_regist
     storage.delete_error = delete_error
     storage.delete_result = delete_result
     db = _FailingMediaFileDB()
-    warning_messages: List[str] = []
+    warning_messages: list[str] = []
     sink_id = ingestion_persistence.logger.add(
         lambda message: warning_messages.append(str(message)),
         level="WARNING",
@@ -427,7 +449,7 @@ async def test_original_storage_cleanup_failure_is_logged_without_masking_regist
         processing_source: str,
         media_type: Any,
         **_kwargs: Any,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         return {
             "status": "Success",
             "input_ref": item_input_ref,
@@ -471,11 +493,75 @@ async def test_original_storage_cleanup_failure_is_logged_without_masking_regist
     body = json.loads(response.body)
     result = body["results"][0]
 
-    assert storage.delete_calls == ["storage/1/original.pdf"]
+    assert storage.delete_calls == [db.insert_calls[0]["storage_path"]]
     assert result["original_file_stored"] is False
     assert any(
-        expected_log in message for message in warning_messages
+        expected_log in message and db.insert_calls[0]["storage_path"] in message
+        for message in warning_messages
     )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("registration_fails", [False, True])
+@pytest.mark.parametrize("previous_filename", ["original.pdf", "original-previous.pdf"])
+async def test_original_storage_preserves_registered_blob_on_reupload(
+    monkeypatch, tmp_path, registration_fails, previous_filename
+):
+    storage = FileSystemStorage(base_path=tmp_path / "storage")
+    db = create_media_database(db_path=str(tmp_path / "media.db"), client_id="original-storage-test")
+    try:
+        media_id, _, _ = db.add_media_with_keywords(
+            title="Existing PDF", content="existing", media_type="pdf", url="file:///source.pdf"
+        )
+        previous_path = await storage.store("1", media_id, previous_filename, b"previous original")
+        db.insert_media_file(media_id, "original", previous_path)
+
+        async def save_uploads(_files, temp_dir, **_kwargs):
+            source = Path(temp_dir) / "upload.pdf"
+            source.write_bytes(b"new original")
+            return [{"path": source, "original_filename": "source.pdf"}], []
+
+        async def process_document(**kwargs):
+            return {
+                "status": "Success",
+                "db_id": media_id,
+                "input_ref": kwargs["item_input_ref"],
+                "processing_source": kwargs["processing_source"],
+                "media_type": "pdf",
+            }
+
+        def fail_registration(**_kwargs):
+            raise RuntimeError("media file registration failed")
+
+        monkeypatch.setattr(input_sourcing, "save_uploaded_files", save_uploads)
+        monkeypatch.setattr(ingestion_persistence, "process_document_like_item", process_document)
+        monkeypatch.setattr(Storage, "get_storage_backend", lambda: storage)
+        monkeypatch.setattr(storage_quota_service, "StorageQuotaService", _FakeQuotaService)
+        if registration_fails:
+            monkeypatch.setattr(db, "insert_media_file", fail_registration)
+
+        response = await ingestion_persistence.add_media_orchestrate(
+            background_tasks=BackgroundTasks(),
+            form_data=SimpleNamespace(
+                media_type="pdf", urls=[], keep_original_file=True,
+                perform_chunking=False, perform_analysis=False, generate_embeddings=False,
+            ),
+            files=[object()], db=db, current_user=SimpleNamespace(id=1),
+            usage_log=SimpleNamespace(log_event=lambda *_args, **_kwargs: None),
+        )
+
+        assert (storage.base_path / previous_path).read_bytes() == b"previous original"
+        result = json.loads(response.body)["results"][0]
+        assert result["original_file_stored"] is not registration_fails
+        current = db.get_media_file(media_id, "original")
+        expected = b"previous original" if registration_fails else b"new original"
+        assert (storage.base_path / current["storage_path"]).read_bytes() == expected
+        registered_paths = {record["storage_path"] for record in db.get_media_files(media_id)}
+        actual_paths = {str(path.relative_to(storage.base_path)) for path in storage.base_path.rglob("*.pdf")}
+        assert actual_paths == registered_paths
+    finally:
+        db.close_connection()
 
 
 @pytest.mark.unit

@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path as FilePath
 from typing import Any, Callable, Mapping
 from urllib.parse import urlparse
+from uuid import uuid4
 
 from fastapi import BackgroundTasks, HTTPException, Request, UploadFile, status
 from loguru import logger
@@ -3309,7 +3310,8 @@ async def add_media_orchestrate(
                                 storage_path = await storage.store(
                                     user_id=user_id_str,
                                     media_id=media_id,
-                                    filename="original" + source_file.suffix,
+                                    # Each registration owns its blob, including concurrent reuploads.
+                                    filename=f"original-{uuid4().hex}{source_file.suffix}",
                                     data=handle,
                                     mime_type=mime_type,
                                 )
@@ -3353,12 +3355,16 @@ async def add_media_orchestrate(
                             logger.info(f"Stored original file for media_id={media_id}: {storage_path}")
                             result["original_file_stored"] = True
 
+                        except asyncio.CancelledError:
+                            raise
                         except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as store_err:
                             logger.error(f"Failed to store original file for media_id={media_id}: {store_err}")
                             # Non-fatal - don't fail the entire ingestion
                             result["original_file_stored"] = False
                             _ensure_warnings_list(result).append(f"Failed to store original file: {store_err}")
 
+                except asyncio.CancelledError:
+                    raise
                 except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as storage_init_err:
                     logger.error(f"Failed to initialize storage backend: {storage_init_err}")
 
@@ -3439,6 +3445,8 @@ async def add_media_orchestrate(
             content={"results": results},
         )
 
+    except asyncio.CancelledError:
+        raise
     except HTTPException as exc:
         request_outcome = "error"
         logger.warning(

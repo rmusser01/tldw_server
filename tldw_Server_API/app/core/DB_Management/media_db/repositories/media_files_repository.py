@@ -87,7 +87,8 @@ class MediaFilesRepository:
         if not include_deleted:
             clauses.append("deleted = 0")
         where_sql = " AND ".join(clauses)
-        sql = f"SELECT * FROM MediaFiles WHERE {where_sql} LIMIT 1"  # nosec B608
+        # Reuploads keep distinct blobs; serve the latest successfully registered file.
+        sql = f"SELECT * FROM MediaFiles WHERE {where_sql} ORDER BY id DESC LIMIT 1"  # nosec B608
         try:
             rows = db._fetchall_with_connection(conn, sql, params)
             return rows[0] if rows else None
