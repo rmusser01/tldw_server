@@ -30,4 +30,26 @@ describe("PromptStarterCards structured templates", () => {
       })
     )
   })
+
+  it("opens the built-in structured recipe as an editable v2 copy", () => {
+    const onUse = vi.fn()
+    render(<PromptStarterCards onUse={onUse} />)
+
+    fireEvent.click(screen.getByTestId("starter-use-structured-recipe"))
+
+    expect(onUse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptFormat: "structured",
+        promptSchemaVersion: 2,
+        recipeSource: expect.objectContaining({
+          source_kind: "built_in",
+          id: "clear_task"
+        }),
+        structuredPromptDefinition: expect.objectContaining({
+          schema_version: 2,
+          assembly_config: expect.objectContaining({ target_role: "system" })
+        })
+      })
+    )
+  })
 })

@@ -16,7 +16,12 @@ import {
 import {
   buildSyncBatchPlan
 } from "../sync-batch-utils"
-import type { PromptRowVM, PromptSavedView } from "../prompt-workspace-types"
+import type {
+  PromptListQueryState,
+  PromptRowVM,
+  PromptSavedView
+} from "../prompt-workspace-types"
+import { classifyPromptRecipe } from "../prompt-recipe-library"
 
 export interface UsePromptFilteredDataDeps {
   data: any[] | undefined
@@ -24,7 +29,7 @@ export interface UsePromptFilteredDataDeps {
   normalizedSearchText: string
   shouldUseServerSearch: boolean
   projectFilter: string | null
-  typeFilter: "all" | "system" | "quick"
+  typeFilter: PromptListQueryState["typeFilter"]
   syncFilter: string
   usageFilter: "all" | "used" | "unused"
   tagFilter: string[]
@@ -114,7 +119,9 @@ export function usePromptFilteredData(deps: UsePromptFilteredDataDeps) {
   }, [data])
 
   const baseFilteredData = useMemo(() => {
-    let items = (data || []) as any[]
+    let items = ((data || []) as any[]).filter(
+      (prompt) => classifyPromptRecipe(prompt).kind !== "quarantined_recipe"
+    )
     if (projectFilter) {
       const projectId = parseInt(projectFilter, 10)
       if (!isNaN(projectId)) {
@@ -124,6 +131,7 @@ export function usePromptFilteredData(deps: UsePromptFilteredDataDeps) {
     if (typeFilter !== "all") {
       items = items.filter((p) => {
         const promptType = getPromptType(p)
+        if (typeFilter === "recipe") return promptType.startsWith("recipe_")
         if (typeFilter === "system") return promptType === "system" || promptType === "mixed"
         if (typeFilter === "quick") return promptType === "quick" || promptType === "mixed"
         return promptType === typeFilter
@@ -192,7 +200,9 @@ export function usePromptFilteredData(deps: UsePromptFilteredDataDeps) {
   ])
 
   const sidebarCounts = useMemo(() => {
-    const all = (data || []) as any[]
+    const all = ((data || []) as any[]).filter(
+      (prompt) => classifyPromptRecipe(prompt).kind !== "quarantined_recipe"
+    )
     const typeCounts: Record<string, number> = { all: all.length }
     const syncCounts: Record<string, number> = { all: all.length }
     const tagCounts: Record<string, number> = {}
@@ -204,6 +214,9 @@ export function usePromptFilteredData(deps: UsePromptFilteredDataDeps) {
     for (const p of all) {
       const pt = getPromptType(p)
       typeCounts[pt] = (typeCounts[pt] || 0) + 1
+      if (pt.startsWith("recipe_")) {
+        typeCounts.recipe = (typeCounts.recipe || 0) + 1
+      }
       const ss = p.syncStatus || "local"
       syncCounts[ss] = (syncCounts[ss] || 0) + 1
       const kw = getPromptKeywords(p)
@@ -309,6 +322,7 @@ export function usePromptFilteredData(deps: UsePromptFilteredDataDeps) {
   const customPromptRows = useMemo<PromptRowVM[]>(() => {
     return paginatedData.map((prompt: any) => {
       const { systemText, userText } = getPromptTexts(prompt)
+      const recipe = classifyPromptRecipe(prompt)
       return {
         id: String(prompt?.id || ""),
         title:
@@ -328,7 +342,14 @@ export function usePromptFilteredData(deps: UsePromptFilteredDataDeps) {
         createdAt:
           typeof prompt?.createdAt === "number" ? prompt.createdAt : Date.now(),
         usageCount: getPromptUsageCount(prompt),
-        lastUsedAt: getPromptLastUsedAt(prompt)
+        lastUsedAt: getPromptLastUsedAt(prompt),
+        kind:
+          recipe.kind === "recipe"
+            ? "recipe"
+            : recipe.kind === "quarantined_recipe"
+              ? "quarantined_recipe"
+              : "prompt",
+        recipeTarget: recipe.kind === "recipe" ? recipe.target : undefined
       }
     })
   }, [

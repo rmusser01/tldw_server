@@ -98,7 +98,10 @@ export const PromptListToolbar: React.FC<PromptListToolbarProps> = (props) => {
             { label: "All types", value: "all" },
             { label: "System", value: "system" },
             { label: "Quick", value: "quick" },
-            { label: "Mixed", value: "mixed" }
+            { label: "Mixed", value: "mixed" },
+            { label: "Recipes", value: "recipe" },
+            { label: "System recipes", value: "recipe_system" },
+            { label: "User recipes", value: "recipe_user" }
           ]}
         />
         <Select

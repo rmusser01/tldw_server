@@ -186,7 +186,9 @@ export const renderStructuredPromptLegacySnapshot = (
   content: string
 } => {
   if (definition?.schema_version === 2) {
-    const result = renderSingleTextRecipe(definition as SingleTextRecipeDefinitionV2)
+    const result = renderSingleTextRecipeTemplate(
+      definition as SingleTextRecipeDefinitionV2
+    )
     return {
       systemPrompt: result.legacy.system_prompt,
       userPrompt: result.legacy.user_prompt,
@@ -444,3 +446,16 @@ export const renderSingleTextRecipe = (
     }
   }
 }
+
+/** Compile the authored recipe template for storage without resolving defaults. */
+export const renderSingleTextRecipeTemplate = (
+  definition: SingleTextRecipeDefinitionV2
+): SingleTextRecipeRenderResult =>
+  renderSingleTextRecipe({
+    ...definition,
+    variables: [],
+    blocks: (definition.blocks ?? []).map((block) => ({
+      ...block,
+      is_template: false
+    }))
+  })

@@ -120,7 +120,14 @@ describe("PromptDrawer structured prompts", () => {
     fireEvent.click(
       screen.getByRole("button", { name: /convert to structured/i })
     )
-    fireEvent.click(screen.getByTestId("structured-block-item-legacy_user"))
+    fireEvent.click(
+      screen.getByRole("button", { name: "Edit User Prompt block" })
+    )
+    await waitFor(() => {
+      expect(screen.getByTestId("structured-block-content")).toHaveValue(
+        "Summarize {{topic}}"
+      )
+    })
     fireEvent.change(screen.getByTestId("structured-block-content"), {
       target: { value: "Summarize {{topic}} clearly" }
     })

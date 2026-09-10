@@ -49,6 +49,7 @@ import {
   pullFromStudio
 } from "@/services/prompt-sync"
 import {
+  fetchPromptCapabilities,
   type PromptCollection
 } from "@/services/prompts-api"
 // prompt-studio imports moved to usePromptInteractions hook
@@ -75,6 +76,11 @@ import { usePromptCollections } from "./hooks/usePromptCollections"
 import { usePromptUtilities } from "./hooks/usePromptUtilities"
 import { usePromptFilteredData } from "./hooks/usePromptFilteredData"
 import { usePromptInteractions } from "./hooks/usePromptInteractions"
+import {
+  classifyPromptRecipe,
+  cloneSavedRecipeSource,
+  getRecipePersistenceState
+} from "./prompt-recipe-library"
 
 const PromptDrawer = React.lazy(() =>
   import("./PromptDrawer").then((module) => ({ default: module.PromptDrawer }))
@@ -230,9 +236,8 @@ export const PromptBody = () => {
   const projectFilter = searchParams.get("project")
 
   const [searchText, setSearchText] = useState("")
-  const [typeFilter, setTypeFilter] = useState<"all" | "system" | "quick">(
-    "all"
-  )
+  const [typeFilter, setTypeFilter] =
+    useState<PromptListQueryState["typeFilter"]>("all")
   const [usageFilter, setUsageFilter] = useState<"all" | "used" | "unused">(
     "all"
   )
@@ -296,6 +301,26 @@ export const PromptBody = () => {
     queryFn: getDeletedPrompts
   })
 
+  const { data: promptCapabilities } = useQuery({
+    queryKey: ["promptCapabilities", "prompt-library"],
+    queryFn: fetchPromptCapabilities,
+    enabled: isOnline,
+    retry: false
+  })
+  const recipePersistence = getRecipePersistenceState(
+    isOnline,
+    promptCapabilities
+  )
+  const savedRecipes = useMemo(
+    () =>
+      (Array.isArray(data) ? data : []).flatMap((prompt: any) =>
+        classifyPromptRecipe(prompt).kind === "recipe"
+          ? [cloneSavedRecipeSource(prompt)]
+          : []
+      ),
+    [data]
+  )
+
   // --- Utility Hooks ---
 
   const utils = usePromptUtilities({ t, data })
@@ -331,6 +356,7 @@ export const PromptBody = () => {
     getPromptRecordById,
     confirmDanger,
     syncPromptAfterLocalSave: sync.syncPromptAfterLocalSave,
+    recipePersistenceAvailable: recipePersistence.available,
     onEmptyTrashSuccess: () => {
       bulk.setTrashSelectedRowKeys([])
     }
@@ -565,6 +591,10 @@ export const PromptBody = () => {
 
     const openPromptDrawer = (promptRecord: any) => {
       clearPromptParam()
+      if (classifyPromptRecipe(promptRecord).kind !== "ordinary") {
+        editor.openFullEditor(promptRecord)
+        return
+      }
       editor.setEditId(promptRecord.id)
       editor.setDrawerOpen(true)
       editor.setDrawerInitialValues({
@@ -871,6 +901,19 @@ export const PromptBody = () => {
   }, [sortedFilteredData, t, bulk])
 
   // --- Callbacks ---
+
+  const handleOpenCustomPrompt = React.useCallback(
+    (promptId: string) => {
+      const promptRecord = getPromptRecordById(promptId)
+      if (!promptRecord) return
+      if (classifyPromptRecipe(promptRecord).kind !== "ordinary") {
+        editor.openFullEditor(promptRecord)
+        return
+      }
+      openPromptInspector(promptId)
+    },
+    [editor.openFullEditor, getPromptRecordById, openPromptInspector]
+  )
 
   const handleCopyCopilotToCustom = React.useCallback(
     (record: { key?: string; prompt?: string }) => {
@@ -1582,7 +1625,10 @@ export const PromptBody = () => {
                   options={[
                     { label: t("managePrompts.filter.all", { defaultValue: "All types" }), value: "all" },
                     { label: t("managePrompts.filter.system", { defaultValue: "System" }), value: "system" },
-                    { label: t("managePrompts.filter.quick", { defaultValue: "Quick" }), value: "quick" }
+                    { label: t("managePrompts.filter.quick", { defaultValue: "Quick" }), value: "quick" },
+                    { label: "Recipes", value: "recipe" },
+                    { label: "System recipes", value: "recipe_system" },
+                    { label: "User recipes", value: "recipe_user" }
                   ]}
                 />
               </div>
@@ -1927,7 +1973,7 @@ export const PromptBody = () => {
             selectedIds={bulk.selectedRowKeys.map((key) => String(key))}
             onQueryChange={handleCustomPromptTableQueryChange}
             onSelectionChange={(ids) => bulk.setSelectedRowKeys(ids)}
-            onRowOpen={openPromptInspector}
+            onRowOpen={handleOpenCustomPrompt}
             onEdit={editor.handleEditPromptById}
             onToggleFavorite={editor.handleTogglePromptFavorite}
             onOpenConflictResolution={sync.openConflictResolution}
@@ -1994,7 +2040,7 @@ export const PromptBody = () => {
                   <PromptGalleryCard
                     key={prompt.id}
                     prompt={prompt}
-                    onClick={() => openPromptInspector(prompt.id)}
+                    onClick={() => handleOpenCustomPrompt(prompt.id)}
                     density={galleryDensity}
                     onToggleFavorite={(next) => editor.handleTogglePromptFavorite(prompt.id, next)}
                   />
@@ -2547,6 +2593,12 @@ export const PromptBody = () => {
         onSubmit={editor.handleFullEditorSubmit}
         isLoading={editor.fullEditorMode === "create" ? editor.savePromptLoading : editor.isUpdatingPrompt}
         allTags={allTags}
+        savedRecipes={savedRecipes}
+        recipePersistenceAvailable={recipePersistence.available}
+        recipePersistenceUnavailableReason={recipePersistence.reason}
+        onApplyRecipe={() => undefined}
+        onSaveRecipeAsNew={editor.handleSaveRecipeAsNew}
+        onUpdateRecipe={editor.handleUpdateRecipe}
       />
     </Suspense>
   )

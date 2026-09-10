@@ -20,6 +20,9 @@ const TYPE_OPTIONS = [
   { value: "system", label: "System" },
   { value: "quick", label: "Quick" },
   { value: "mixed", label: "Mixed" },
+  { value: "recipe", label: "Recipes" },
+  { value: "recipe_system", label: "System recipes" },
+  { value: "recipe_user", label: "User recipes" },
 ]
 
 const SYNC_OPTIONS = [

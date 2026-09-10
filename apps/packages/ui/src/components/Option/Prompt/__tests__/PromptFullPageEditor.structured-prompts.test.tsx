@@ -1,6 +1,7 @@
 import React from "react"
 import { describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { CLEAR_TASK_RECIPE } from "@/components/Common/PromptAssist/recipes/built-in-recipes"
 import { PromptFullPageEditor } from "../PromptFullPageEditor"
 
 const mockDraftState = {
@@ -96,7 +97,14 @@ describe("PromptFullPageEditor structured prompts", () => {
     fireEvent.click(
       screen.getByRole("button", { name: /convert to structured/i })
     )
-    fireEvent.click(screen.getByTestId("structured-block-item-legacy_user"))
+    fireEvent.click(
+      screen.getByRole("button", { name: "Edit User Prompt block" })
+    )
+    await waitFor(() => {
+      expect(screen.getByTestId("structured-block-content")).toHaveValue(
+        "Summarize {{topic}}"
+      )
+    })
     fireEvent.change(screen.getByTestId("structured-block-content"), {
       target: { value: "Summarize {{topic}} clearly" }
     })
@@ -121,5 +129,100 @@ describe("PromptFullPageEditor structured prompts", () => {
         })
       )
     })
+  })
+
+  it("routes an exact saved v2 recipe to the recipe editor and updates its source id", async () => {
+    const onUpdateRecipe = vi.fn(async () => undefined)
+    render(
+      <PromptFullPageEditor
+        {...baseProps}
+        initialValues={{
+          id: "saved-recipe-42",
+          name: "Saved clear task",
+          promptFormat: "structured",
+          promptSchemaVersion: 2,
+          structuredPromptDefinition: structuredClone(
+            CLEAR_TASK_RECIPE.definition
+          )
+        }}
+        recipePersistenceAvailable
+        onUpdateRecipe={onUpdateRecipe}
+      />
+    )
+
+    expect(screen.getByTestId("single-field-recipe-editor")).toBeInTheDocument()
+    expect(screen.queryByTestId("full-editor-system-prompt")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Update recipe" }))
+
+    await waitFor(() => {
+      expect(onUpdateRecipe).toHaveBeenCalledWith(
+        "saved-recipe-42",
+        expect.objectContaining({
+          schema_version: 2,
+          definition_kind: "single_text_recipe"
+        })
+      )
+    })
+  })
+
+  it("keeps local recipe editing and apply available when persistence is disabled", () => {
+    const onApplyRecipe = vi.fn()
+    render(
+      <PromptFullPageEditor
+        {...baseProps}
+        initialValues={{
+          id: "saved-recipe-42",
+          name: "Saved clear task",
+          promptFormat: "structured",
+          promptSchemaVersion: 2,
+          structuredPromptDefinition: structuredClone(
+            CLEAR_TASK_RECIPE.definition
+          )
+        }}
+        recipePersistenceAvailable={false}
+        recipePersistenceUnavailableReason="Reconnect to save recipes."
+        onApplyRecipe={onApplyRecipe}
+      />
+    )
+
+    expect(screen.getByText("Reconnect to save recipes.")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Update recipe" })).toBeDisabled()
+    fireEvent.change(
+      screen.getByRole("textbox", {
+        name: "Current value for Task (not saved)"
+      }),
+      { target: { value: "Summarize the release" } }
+    )
+    const apply = screen.getByRole("button", {
+      name: "Apply to system prompt"
+    })
+    expect(apply).toBeEnabled()
+    fireEvent.click(apply)
+    expect(onApplyRecipe).toHaveBeenCalledTimes(1)
+  })
+
+  it("quarantines an invalid v2 record instead of opening either editor", () => {
+    render(
+      <PromptFullPageEditor
+        {...baseProps}
+        initialValues={{
+          id: "broken-recipe",
+          name: "Broken recipe",
+          promptFormat: "structured",
+          promptSchemaVersion: 2,
+          structuredPromptDefinition: {
+            ...structuredClone(CLEAR_TASK_RECIPE.definition),
+            definition_kind: "future_recipe"
+          }
+        }}
+      />
+    )
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "This saved recipe cannot be opened safely."
+    )
+    expect(screen.queryByTestId("single-field-recipe-editor")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("full-editor-system-prompt")).not.toBeInTheDocument()
   })
 })

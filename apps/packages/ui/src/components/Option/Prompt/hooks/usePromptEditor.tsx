@@ -11,6 +11,11 @@ import {
   incrementPromptUsage
 } from "@/db/dexie/helpers"
 import { renderStructuredPromptLegacySnapshot } from "../structured-prompt-utils"
+import type { SingleTextRecipeDefinition } from "@/components/Common/PromptAssist/recipes/types"
+import {
+  buildRecipePromptFields,
+  classifyPromptRecipe
+} from "../prompt-recipe-library"
 import { useSearchParams } from "react-router-dom"
 
 export interface UsePromptEditorDeps {
@@ -27,6 +32,7 @@ export interface UsePromptEditorDeps {
     success: boolean
     error?: string
   }>
+  recipePersistenceAvailable: boolean
   onEmptyTrashSuccess?: () => void
 }
 
@@ -40,6 +46,7 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
     getPromptRecordById,
     confirmDanger,
     syncPromptAfterLocalSave,
+    recipePersistenceAvailable,
     onEmptyTrashSuccess
   } = deps
 
@@ -58,16 +65,21 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
     const promptFormat = values?.promptFormat === "structured" ? "structured" : "legacy"
     const structuredPromptDefinition =
       promptFormat === "structured" ? values?.structuredPromptDefinition ?? null : null
+    const recipeFields =
+      promptFormat === "structured" && values?.promptSchemaVersion === 2
+        ? buildRecipePromptFields(structuredPromptDefinition)
+        : null
     const structuredSnapshot =
-      promptFormat === "structured"
+      promptFormat === "structured" && !recipeFields
         ? renderStructuredPromptLegacySnapshot(structuredPromptDefinition)
         : null
     const normalizedSystemPrompt =
-      structuredSnapshot?.systemPrompt ?? values?.system_prompt
+      recipeFields?.system_prompt ?? structuredSnapshot?.systemPrompt ?? values?.system_prompt
     const normalizedUserPrompt =
-      structuredSnapshot?.userPrompt ?? values?.user_prompt
+      recipeFields?.user_prompt ?? structuredSnapshot?.userPrompt ?? values?.user_prompt
     const hasSystemPrompt = !!(normalizedSystemPrompt?.trim())
     const resolvedContent =
+      recipeFields?.content ??
       values?.content ??
       structuredSnapshot?.content ??
       (hasSystemPrompt ? normalizedSystemPrompt : normalizedUserPrompt) ??
@@ -82,13 +94,14 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
       keywords,
       content: resolvedContent,
       promptFormat,
-      promptSchemaVersion: promptFormat === "structured" ? values?.promptSchemaVersion ?? 1 : null,
-      structuredPromptDefinition,
+      promptSchemaVersion: recipeFields?.promptSchemaVersion ?? (promptFormat === "structured" ? values?.promptSchemaVersion ?? 1 : null),
+      structuredPromptDefinition:
+        recipeFields?.structuredPromptDefinition ?? structuredPromptDefinition,
       system_prompt: normalizedSystemPrompt,
       user_prompt: normalizedUserPrompt,
       author: values?.author,
       details: values?.details,
-      is_system: hasSystemPrompt
+      is_system: recipeFields?.is_system ?? hasSystemPrompt
     }
   }, [])
 
@@ -348,7 +361,9 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
           promptFormat: promptRecord?.promptFormat ?? "legacy",
           promptSchemaVersion: promptRecord?.promptSchemaVersion ?? null,
           structuredPromptDefinition:
-            promptRecord?.structuredPromptDefinition ?? null,
+            promptRecord?.structuredPromptDefinition != null
+              ? structuredClone(promptRecord.structuredPromptDefinition)
+              : null,
           keywords: promptRecord?.keywords ?? promptRecord?.tags ?? [],
           changeDescription: promptRecord?.changeDescription,
         })
@@ -428,8 +443,95 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
     [fullEditorMode, normalizePromptPayload, savePromptMutation, updatePromptMutation]
   )
 
+  const handleSaveRecipeAsNew = React.useCallback(
+    async (definition: SingleTextRecipeDefinition) => {
+      if (!recipePersistenceAvailable || guardPrivateMode()) {
+        throw new Error("recipe_persistence_unavailable")
+      }
+      const fields = buildRecipePromptFields(definition)
+      const sourceName =
+        fullEditorInitialValues?.name ||
+        fullEditorInitialValues?.title ||
+        "Untitled recipe"
+      const title = `${sourceName} (Copy)`
+      const saved = await savePrompt({
+        ...fields,
+        title,
+        name: title,
+        keywords: fullEditorInitialValues?.keywords ?? [],
+        tags: fullEditorInitialValues?.keywords ?? [],
+        author: fullEditorInitialValues?.author,
+        details: fullEditorInitialValues?.details
+      })
+      await syncPromptAfterLocalSave(saved.id)
+      await queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
+      setFullEditorOpen(false)
+      setFullEditorInitialValues(null)
+    },
+    [
+      fullEditorInitialValues,
+      guardPrivateMode,
+      queryClient,
+      recipePersistenceAvailable,
+      syncPromptAfterLocalSave
+    ]
+  )
+
+  const handleUpdateRecipe = React.useCallback(
+    async (
+      savedSourceId: string,
+      definition: SingleTextRecipeDefinition
+    ) => {
+      if (!recipePersistenceAvailable || guardPrivateMode()) {
+        throw new Error("recipe_persistence_unavailable")
+      }
+      if (savedSourceId !== editId) {
+        throw new Error("recipe_source_identity_mismatch")
+      }
+      const sourceRecord = getPromptRecordById(savedSourceId)
+      const sourceRecipe = classifyPromptRecipe(sourceRecord)
+      if (sourceRecipe.kind !== "recipe") {
+        throw new Error("invalid_saved_recipe")
+      }
+      const fields = buildRecipePromptFields(definition)
+      if (
+        fields.structuredPromptDefinition.assembly_config.target_role !==
+        sourceRecipe.target
+      ) {
+        throw new Error("recipe_target_mismatch")
+      }
+      const id = await updatePrompt(
+        buildPromptUpdatePayload(sourceRecord, {
+          ...fields,
+          id: savedSourceId,
+          fewShotExamples: sourceRecord.fewShotExamples,
+          modulesConfig: sourceRecord.modulesConfig,
+          syncPayloadVersion: sourceRecord.syncPayloadVersion,
+          versionNumber: sourceRecord.versionNumber,
+          changeDescription: sourceRecord.changeDescription,
+          parentVersionId: sourceRecord.parentVersionId,
+          serverParentVersionId: sourceRecord.serverParentVersionId
+        })
+      )
+      await syncPromptAfterLocalSave(id)
+      await queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
+    },
+    [
+      buildPromptUpdatePayload,
+      editId,
+      getPromptRecordById,
+      guardPrivateMode,
+      queryClient,
+      recipePersistenceAvailable,
+      syncPromptAfterLocalSave
+    ]
+  )
+
   const handleDuplicatePrompt = React.useCallback(
     (record: any) => {
+      const recipe = classifyPromptRecipe(record)
+      if (recipe.kind === "quarantined_recipe") return
+      if (recipe.kind === "recipe" && !recipePersistenceAvailable) return
       savePromptMutation({
         title: `${record.title || record.name} (Copy)`,
         name: `${record.name || record.title} (Copy)`,
@@ -441,10 +543,13 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
         author: record?.author,
         details: record?.details,
         system_prompt: record?.system_prompt,
-        user_prompt: record?.user_prompt
+        user_prompt: record?.user_prompt,
+        ...(recipe.kind === "recipe"
+          ? buildRecipePromptFields(recipe.definition)
+          : {})
       })
     },
-    [getPromptKeywords, savePromptMutation]
+    [getPromptKeywords, recipePersistenceAvailable, savePromptMutation]
   )
 
   const handleDeletePrompt = React.useCallback(
@@ -505,6 +610,8 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
     openEditDrawer,
     handleDrawerSubmit,
     handleFullEditorSubmit,
+    handleSaveRecipeAsNew,
+    handleUpdateRecipe,
     handleDuplicatePrompt,
     handleDeletePrompt,
     handleTogglePromptFavorite,

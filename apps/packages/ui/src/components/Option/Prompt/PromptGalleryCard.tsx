@@ -139,6 +139,17 @@ export function PromptGalleryCard({
         </span>
       </Tooltip>
 
+      {prompt.kind === "recipe" && (
+        <div className="flex items-center justify-center gap-1">
+          <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
+            Recipe
+          </span>
+          <span className="text-[10px] font-medium text-text-muted">
+            {prompt.recipeTarget === "system" ? "System" : "User"}
+          </span>
+        </div>
+      )}
+
       {/* Preview text (rich density only) */}
       {!isCompact && previewText && (
         <Tooltip title={previewText} placement="bottom">

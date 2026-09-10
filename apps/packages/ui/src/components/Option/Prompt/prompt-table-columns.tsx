@@ -205,6 +205,14 @@ export const buildPromptTableColumns = (
               {resolvedLabels.author}: {record.author}
             </span>
           ) : null}
+          {record.kind === "recipe" ? (
+            <div className="flex items-center gap-1">
+              <Tag color="blue">Recipe</Tag>
+              <span className="text-xs text-text-muted">
+                {record.recipeTarget === "system" ? "System" : "User"}
+              </span>
+            </div>
+          ) : null}
           {record.details ? (
             <span className="line-clamp-2 text-xs text-text-muted">{record.details}</span>
           ) : null}

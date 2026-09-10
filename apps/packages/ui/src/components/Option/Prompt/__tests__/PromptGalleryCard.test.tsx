@@ -29,6 +29,20 @@ describe("PromptGalleryCard", () => {
     expect(screen.getByText("My Prompt")).toBeInTheDocument()
   })
 
+  it("labels recipes separately from ordinary prompts", () => {
+    const { rerender } = render(
+      <PromptGalleryCard
+        prompt={makePrompt({ kind: "recipe", recipeTarget: "system" })}
+        onClick={vi.fn()}
+      />
+    )
+    expect(screen.getByText("Recipe")).toBeInTheDocument()
+    expect(screen.getByText("System")).toBeInTheDocument()
+
+    rerender(<PromptGalleryCard prompt={makePrompt()} onClick={vi.fn()} />)
+    expect(screen.queryByText("Recipe")).not.toBeInTheDocument()
+  })
+
   it("shows colored fallback avatar with initial letter", () => {
     const tokens = getAvatarFallbackTokens("My Prompt")
     render(

@@ -60,4 +60,28 @@ describe("prompt-table-columns visual alignment", () => {
     expect(titleMarkup).toContain("text-xs")
     expect(titleMarkup).not.toContain("text-[11px]")
   })
+
+  it("renders a recipe badge and target in the title column", () => {
+    const columns = buildPromptTableColumns({
+      isOnline: true,
+      isCompactViewport: false,
+      sortKey: null,
+      sortOrder: null
+    })
+    const titleColumn = columns.find(
+      (column: any) => String(column?.key) === "title"
+    ) as any
+    const titleMarkup = renderToStaticMarkup(
+      <>
+        {titleColumn?.render?.(sampleRow.title, {
+          ...sampleRow,
+          kind: "recipe",
+          recipeTarget: "user"
+        }) as React.ReactNode}
+      </>
+    )
+
+    expect(titleMarkup).toContain("Recipe")
+    expect(titleMarkup).toContain("User")
+  })
 })
