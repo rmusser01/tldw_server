@@ -82,14 +82,113 @@ jobs:
             > evidence/subject-app.json
           SUBJECT_DIGEST="$SUBJECT_DIGEST" python - <<'PY'
           import hashlib
+          import json
           import os
+          import re
           from pathlib import Path
 
           raw = Path("evidence/subject-app.json").read_bytes()
           actual = "sha256:" + hashlib.sha256(raw).hexdigest()
-          assert actual == os.environ["SUBJECT_DIGEST"], (actual, os.environ["SUBJECT_DIGEST"])
+          if actual != os.environ["SUBJECT_DIGEST"]:
+              raise SystemExit("candidate subject digest mismatch")
+          payload = json.loads(raw)
+          media_type = payload["mediaType"]
+          if media_type in {
+              "application/vnd.oci.image.index.v1+json",
+              "application/vnd.docker.distribution.manifest.list.v2+json",
+          }:
+              matches = [
+                  item
+                  for item in payload["manifests"]
+                  if item.get("platform", {}).get("os") == "linux"
+                  and item.get("platform", {}).get("architecture") == "amd64"
+                  and item.get("annotations", {}).get(
+                      "vnd.docker.reference.type"
+                  ) != "attestation-manifest"
+              ]
+              if len(matches) != 1:
+                  raise SystemExit("expected exactly one linux/amd64 candidate manifest")
+              child = matches[0]["digest"]
+          elif media_type in {
+              "application/vnd.oci.image.manifest.v1+json",
+              "application/vnd.docker.distribution.manifest.v2+json",
+          }:
+              child = os.environ["SUBJECT_DIGEST"]
+          else:
+              raise SystemExit("unsupported candidate subject media type")
+          if not isinstance(child, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", child):
+              raise SystemExit("invalid candidate platform digest")
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              print(f"platform_digest={child}", file=output)
           PY
           printf 'candidate_ref=%s\n' "$candidate_ref" >> "$GITHUB_OUTPUT"
+
+      - name: Verify embedded backend runtime
+        id: runtime
+        continue-on-error: true
+        timeout-minutes: 10
+        shell: bash
+        env:
+          SUBJECT_DIGEST: ${{ steps.build.outputs.digest }}
+          PLATFORM_DIGEST: ${{ steps.identity.outputs.platform_digest }}
+          IMAGE_REPOSITORY: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        run: |
+          set -euo pipefail
+          export PLATFORM_REF="$IMAGE_REPOSITORY@$PLATFORM_DIGEST"
+          docker buildx imagetools inspect "$PLATFORM_REF" --raw \
+            > evidence/platform-manifest-app.json
+          docker pull --platform linux/amd64 "$PLATFORM_REF"
+          docker image inspect "$PLATFORM_REF" > "$RUNNER_TEMP/runtime-image-inspect.json"
+          CONFIG_DIGEST="$(python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          raw = Path("evidence/platform-manifest-app.json").read_bytes()
+          if "sha256:" + hashlib.sha256(raw).hexdigest() != os.environ["PLATFORM_DIGEST"]:
+              raise SystemExit("runtime platform manifest digest mismatch")
+          config = json.loads(raw)["config"]["digest"]
+          if not isinstance(config, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", config):
+              raise SystemExit("invalid runtime config digest")
+          images = json.loads((Path(os.environ["RUNNER_TEMP"]) / "runtime-image-inspect.json").read_text())
+          if len(images) != 1:
+              raise SystemExit("expected exactly one pulled runtime image")
+          image = images[0]
+          if (image["Os"], image["Architecture"]) != ("linux", "amd64"):
+              raise SystemExit("runtime image platform mismatch")
+          if os.environ["PLATFORM_REF"] not in image["RepoDigests"]:
+              raise SystemExit("runtime image repository digest mismatch")
+          print(config)
+          PY
+          )"
+          export CONFIG_DIGEST
+          docker run --rm --pull never --platform linux/amd64 \
+            --user "$(id -u):$(id -g)" \
+            --network none --cap-drop ALL --security-opt no-new-privileges:true \
+            --read-only --tmpfs /tmp:rw,nosuid,nodev,size=512m \
+            --workdir /tmp --env PYTHONDONTWRITEBYTECODE=1 \
+            --env USER_DB_BASE_DIR=/tmp/user_databases \
+            --env DATABASE_URL=sqlite:////tmp/users.db --env HF_HOME=/tmp/huggingface \
+            --volume "$PWD/Helper_Scripts/Supply_Chain/runtime_probe.py:/probe/runtime_probe.py:ro" \
+            --volume "$PWD/uv.lock:/probe/uv.lock:ro" \
+            --entrypoint python "$PLATFORM_REF" \
+            /probe/runtime_probe.py probe --lock /probe/uv.lock \
+            > "$RUNNER_TEMP/runtime-probe.json"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          result = json.loads((Path(os.environ["RUNNER_TEMP"]) / "runtime-probe.json").read_text())
+          result.update({
+              "subject_digest": os.environ["SUBJECT_DIGEST"],
+              "platform_manifest_digest": os.environ["PLATFORM_DIGEST"],
+              "config_digest": os.environ["CONFIG_DIGEST"],
+          })
+          Path("evidence/runtime-image-app.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+          PY
 
       - name: Prepare fresh pinned Trivy database
         shell: bash
@@ -205,6 +304,8 @@ jobs:
             cd evidence
             sha256sum \
               subject-app.json \
+              platform-manifest-app.json \
+              runtime-image-app.json \
               trivy-image-app.json \
               sbom-image-app.cdx.json \
               scan-decision-image-app.json \
@@ -227,6 +328,7 @@ jobs:
         run: |
           set -euo pipefail
           test "${{ steps.policy.outcome }}" = "success"
+          test "${{ steps.runtime.outcome }}" = "success"
 
       - name: Promote verified main aliases
         shell: bash

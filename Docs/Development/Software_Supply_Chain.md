@@ -182,6 +182,14 @@ succeed. The source-admission prerequisite still applies; this workflow change
 does not establish fresh release-image evidence until a release job actually runs.
 See [TASK-13013.7.25](../Evidence/TASK-13013.7.25-release-runtime-admission.md).
 
+The main-image publication workflow applies the same runtime check before alias
+promotion. It selects the sole eligible `linux/amd64` child from the authenticated
+build subject, records the probe's subject/platform/config identities and hashes
+both runtime JSON and the child manifest. Promotion requires runtime and policy
+success; source admission remains a prerequisite. This local wiring requires
+fresh candidate evidence before it can support an artifact-specific assessment.
+See [TASK-13013.7.27](../Evidence/TASK-13013.7.27-main-runtime-admission.md).
+
 All six application-owned persistent Chroma client constructors explicitly select
 the embedded Rust API, so `CHROMA_API_IMPL` cannot switch those paths to HTTP.
 The declared Chroma minimum is 1.5.9, the existing locked and tested version;
