@@ -4,7 +4,7 @@ title: Implement OpenAI-compatible realtime speech endpoint
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-09-10 02:59'
+updated_date: '2026-09-10 03:29'
 labels:
   - audio
   - realtime
@@ -108,12 +108,14 @@ Qodo follow-up implementation: rebased cleanly onto dev 456eafb7a6; Qodo confirm
 Final Qodo follow-up validation: d61c9b8573 received Qodo zero bugs/zero rule violations and all 50 CI checks passed (26 workflow skips). Local backend unit smoke: 403 passed; deployment-shaped startup smoke passed. Dev advanced during CI to f0248aaa00 through PR 2613 (three task documents and one audio-download test only), so the PR was rebased again without conflicts. Tree comparison confirms production code, manual smoke helper, and API fingerprint are unchanged from the fully green head. Focused realtime/route suite plus updated download regression: 153 passed, no skips; Bandit zero findings/errors. Refreshed-head checks run again before any merge. User merge decision and implementation-rationale sentence remain pending. Temporary follow-up plan outcomes are retained in the report; the plan file was removed.
 
 2026-09-10 merge instruction: requester supplied the Change summary and explicitly authorized merging PR 2572; no further approval or rationale is pending. GitHub strict status checks rejected the first merge because dev advanced through PR 2599 (audio.cpp TTS). Rebased cleanly onto dev 6b61b5074c. Feature implementation and review fixes are complete; the requested merge will proceed after GitHub required checks on the updated head.
+
+Final merge freshness update: dev advanced again through PR 2612 to 751563a966 (media original-file cleanup). Rebased cleanly and verified the combined realtime, route, audio.cpp registry, audio-download, and original-storage regression slice: 201 passed, 24 warnings. Bandit on realtime production/manual-helper scope again reported zero findings and errors. Requester merge authorization remains in effect; finishing the required GitHub checks and merge.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implementation and review of PR 2572 are complete. The requester supplied the Change summary and explicitly authorized merge. All confirmed Qodo findings were fixed, with zero findings on the preceding reviewed head. Final rebase includes dev 6b61b5074c and preserves the reviewed realtime feature. GitHub required checks must finish on the rebased head before the authorized merge can execute; live-provider interoperability and latency remain unverified.
+Implementation and Qodo review of PR 2572 are complete; the requester supplied the Change summary and authorized merge. Branch includes dev 751563a966, with 201 focused and inherited-media regression tests passing and zero Bandit findings. Current-head GitHub required checks are the remaining merge prerequisite. Live-provider interoperability and latency remain unverified.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
