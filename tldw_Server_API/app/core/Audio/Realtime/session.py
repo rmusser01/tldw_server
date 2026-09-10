@@ -36,8 +36,8 @@ from tldw_Server_API.app.core.Audio.Realtime.models import (
     ResponseTranscriptDoneEvent,
     SessionCreatedEvent,
     SessionUpdatedEvent,
-    UpdateSessionCommand,
     UnsupportedCommand,
+    UpdateSessionCommand,
 )
 from tldw_Server_API.app.core.Audio.Realtime.persistence import (
     NoopRealtimePersistenceAdapter,
@@ -75,7 +75,7 @@ class RealtimeSession:
         self.active_response_id: str | None = None
         self.generation_id = 0
         self.config = config or RealtimeSessionConfig()
-        self.input_audio_buffer = b""
+        self.input_audio_buffer = bytearray()
         self.buffer_started = False
         self.closed = False
         self.active_task: Any | None = None
@@ -161,7 +161,7 @@ class RealtimeSession:
                 )
             )
 
-        self.input_audio_buffer += command.audio
+        self.input_audio_buffer.extend(command.audio)
         return events
 
     async def commit_audio(self, command: CommitAudioCommand) -> list[RealtimeServerEvent]:
@@ -174,9 +174,9 @@ class RealtimeSession:
                 )
             ]
 
-        audio = self.input_audio_buffer
+        audio = bytes(self.input_audio_buffer)
         item_id = self._pending_audio_item_id or _new_realtime_id("item")
-        self.input_audio_buffer = b""
+        self.input_audio_buffer.clear()
         self.buffer_started = False
         self._pending_audio_item_id = None
 
@@ -187,7 +187,7 @@ class RealtimeSession:
                 sample_rate_hz=self.config.input_sample_rate_hz,
                 language=_language_from_metadata(self.config.metadata),
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - normalize provider failures without leaking private details
             events.append(
                 RealtimeErrorEvent(
                     code="internal_error",
@@ -225,7 +225,7 @@ class RealtimeSession:
         return events
 
     async def clear_audio(self, command: ClearAudioCommand) -> list[RealtimeServerEvent]:
-        self.input_audio_buffer = b""
+        self.input_audio_buffer.clear()
         self.buffer_started = False
         self._pending_audio_item_id = None
         return []
@@ -246,6 +246,7 @@ class RealtimeSession:
         item_id = _new_realtime_id("item")
         response_turn_index = self.turn_index
         response_user_transcript = self._last_user_transcript
+        response_persistence_config = persistence_config_from_metadata(self.config.metadata)
 
         assistant_text = ""
         assistant_transcript = ""
@@ -297,7 +298,8 @@ class RealtimeSession:
                 elif isinstance(pipeline_event, RealtimePipelineTranscriptDelta):
                     if not transcript_started:
                         transcript_started = True
-                        yield _content_part_added(command.event_id, response_id, item_id, 1, "audio_transcript")
+                        if not audio_started:
+                            yield _content_part_added(command.event_id, response_id, item_id, 1, "audio")
                         if not self._generation_is_current(generation_id, response_id):
                             return
                     assistant_transcript += pipeline_event.delta
@@ -314,7 +316,8 @@ class RealtimeSession:
                 elif isinstance(pipeline_event, RealtimePipelineAudioDelta):
                     if not audio_started:
                         audio_started = True
-                        yield _content_part_added(command.event_id, response_id, item_id, 2, "audio")
+                        if not transcript_started:
+                            yield _content_part_added(command.event_id, response_id, item_id, 1, "audio")
                         if not self._generation_is_current(generation_id, response_id):
                             return
                     yield ResponseAudioDeltaEvent(
@@ -322,12 +325,15 @@ class RealtimeSession:
                         response_id=response_id,
                         item_id=item_id,
                         output_index=0,
-                        content_index=2,
+                        content_index=1,
                         audio=pipeline_event.audio,
                     )
                     if not self._generation_is_current(generation_id, response_id):
                         return
                 elif isinstance(pipeline_event, RealtimePipelineTextDone):
+                    if not text_started:
+                        text_started = True
+                        yield _content_part_added(command.event_id, response_id, item_id, 0, "text")
                     if not self._generation_is_current(generation_id, response_id):
                         return
                     yield ResponseTextDoneEvent(
@@ -340,10 +346,14 @@ class RealtimeSession:
                     )
                     if not self._generation_is_current(generation_id, response_id):
                         return
-                    yield _content_part_done(command.event_id, response_id, item_id, 0, "text")
+                    yield _content_part_done(command.event_id, response_id, item_id, 0, "text", text=assistant_text)
                     if not self._generation_is_current(generation_id, response_id):
                         return
                 elif isinstance(pipeline_event, RealtimePipelineTranscriptDone):
+                    if not transcript_started:
+                        transcript_started = True
+                        if not audio_started:
+                            yield _content_part_added(command.event_id, response_id, item_id, 1, "audio")
                     if not self._generation_is_current(generation_id, response_id):
                         return
                     yield ResponseTranscriptDoneEvent(
@@ -356,10 +366,11 @@ class RealtimeSession:
                     )
                     if not self._generation_is_current(generation_id, response_id):
                         return
-                    yield _content_part_done(command.event_id, response_id, item_id, 1, "audio_transcript")
-                    if not self._generation_is_current(generation_id, response_id):
-                        return
                 elif isinstance(pipeline_event, RealtimePipelineAudioDone):
+                    if not audio_started:
+                        audio_started = True
+                        if not transcript_started:
+                            yield _content_part_added(command.event_id, response_id, item_id, 1, "audio")
                     if not self._generation_is_current(generation_id, response_id):
                         return
                     yield ResponseAudioDoneEvent(
@@ -367,16 +378,13 @@ class RealtimeSession:
                         response_id=response_id,
                         item_id=item_id,
                         output_index=0,
-                        content_index=2,
+                        content_index=1,
                     )
-                    if not self._generation_is_current(generation_id, response_id):
-                        return
-                    yield _content_part_done(command.event_id, response_id, item_id, 2, "audio")
                     if not self._generation_is_current(generation_id, response_id):
                         return
                 elif isinstance(pipeline_event, RealtimePipelineTurnDone):
                     final_status = pipeline_event.status
-        except Exception:
+        except Exception:  # noqa: BLE001 - injected pipelines may raise provider-specific errors
             if not self._generation_is_current(generation_id, response_id):
                 return
             yield RealtimeErrorEvent(
@@ -399,20 +407,33 @@ class RealtimeSession:
         if not self._generation_is_current(generation_id, response_id):
             return
 
+        content = []
+        if text_started:
+            content.append({"type": "output_text", "text": assistant_text})
+        if audio_started or transcript_started:
+            content.append({"type": "output_audio", "transcript": assistant_transcript})
+            yield _content_part_done(
+                command.event_id, response_id, item_id, 1, "audio", transcript=assistant_transcript
+            )
+            if not self._generation_is_current(generation_id, response_id):
+                return
         yield ResponseOutputItemDoneEvent(
             event_id=command.event_id,
             response_id=response_id,
             item_id=item_id,
             output_index=0,
             status=final_status,
+            content=content,
         )
         if not self._generation_is_current(generation_id, response_id):
             return
-        response_persistence_config = persistence_config_from_metadata(self.config.metadata)
         yield ResponseDoneEvent(
             event_id=command.event_id,
             response_id=response_id,
             status=final_status,
+            output=[
+                {"id": item_id, "type": "message", "role": "assistant", "status": final_status, "content": content}
+            ],
         )
         self._clear_active_response(response_id)
 
@@ -476,7 +497,7 @@ class RealtimeSession:
                 user_transcript=user_transcript,
                 assistant_text=assistant_text,
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - persistence failures must not invalidate delivered output
             return RealtimeErrorEvent(
                 code="internal_error",
                 message="Realtime persistence failed",
@@ -554,6 +575,9 @@ def _content_part_done(
     item_id: str,
     content_index: int,
     content_type: str,
+    *,
+    text: str | None = None,
+    transcript: str | None = None,
 ) -> ResponseContentPartDoneEvent:
     return ResponseContentPartDoneEvent(
         event_id=event_id,
@@ -562,4 +586,6 @@ def _content_part_done(
         output_index=0,
         content_index=content_index,
         content_type=content_type,
+        text=text,
+        transcript=transcript,
     )

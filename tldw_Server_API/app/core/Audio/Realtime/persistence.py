@@ -40,14 +40,19 @@ class NoopRealtimePersistenceAdapter:
 
 
 def persistence_config_from_metadata(metadata: dict[str, Any]) -> RealtimePersistenceConfig:
+    """Normalize explicitly opted-in persistence targets, excluding booleans and blank IDs."""
     tldw_metadata = metadata.get("tldw")
     if not isinstance(tldw_metadata, dict):
         return RealtimePersistenceConfig(enabled=False, conversation_id=None)
 
     conversation_id_value = tldw_metadata.get("conversation_id")
-    conversation_id = conversation_id_value if isinstance(conversation_id_value, str) else None
+    conversation_id = None
+    if isinstance(conversation_id_value, str):
+        conversation_id = conversation_id_value.strip() or None
+    elif type(conversation_id_value) is int:
+        conversation_id = str(conversation_id_value)
     return RealtimePersistenceConfig(
-        enabled=tldw_metadata.get("persist") is True,
+        enabled=tldw_metadata.get("persist") is True and conversation_id is not None,
         conversation_id=conversation_id,
         store_raw_audio=False,
     )

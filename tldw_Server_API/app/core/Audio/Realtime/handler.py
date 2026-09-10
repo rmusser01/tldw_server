@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import inspect
+import json
 from collections.abc import Callable
 from typing import Any
 
@@ -17,8 +17,10 @@ from tldw_Server_API.app.core.Audio.Realtime.constants import (
     REALTIME_INTERNAL_ERROR_CLOSE_CODE,
     REALTIME_MAX_JSON_FRAME_BYTES,
     REALTIME_PAYLOAD_TOO_LARGE_CLOSE_CODE,
+    REALTIME_QUOTA_DENIED_CLOSE_CODE,
 )
 from tldw_Server_API.app.core.Audio.Realtime.models import (
+    CancelResponseCommand,
     ClientCommand,
     CreateResponseCommand,
     RealtimeErrorEvent,
@@ -27,6 +29,7 @@ from tldw_Server_API.app.core.Audio.Realtime.models import (
 )
 from tldw_Server_API.app.core.Audio.Realtime.protocol import parse_client_event, to_openai_server_event
 from tldw_Server_API.app.core.Audio.Realtime.session import RealtimeSession
+from tldw_Server_API.app.core.Usage import audio_quota
 
 PipelineFactory = Callable[..., Any]
 PersistenceFactory = Callable[[], Any]
@@ -44,11 +47,22 @@ async def handle_realtime_websocket(
     if not authenticated:
         return
 
+    acquired_stream = False
+    heartbeat_task = None
     try:
+        if user_id is None:
+            await websocket.close(code=4403)
+            return
+        allowed, _reason = await audio_quota.can_start_stream(user_id)
+        if not allowed:
+            await websocket.close(code=REALTIME_QUOTA_DENIED_CLOSE_CODE)
+            return
+        acquired_stream = True
+        heartbeat_task = asyncio.create_task(_renew_stream_lease(user_id))
         websocket_state = getattr(websocket, "state", None)
         principal = getattr(websocket_state, "auth_principal", None)
         session = RealtimeSession(
-            pipeline=_call_pipeline_factory(pipeline_factory, principal=principal, user_id=user_id),
+            pipeline=_call_pipeline_factory(pipeline_factory, principal=principal, user_id=user_id, request=websocket),
             persistence_adapter=persistence_factory(),
         )
         limits = RealtimeLimits()
@@ -58,15 +72,33 @@ async def handle_realtime_websocket(
     except WebSocketDisconnect:
         return
     except Exception as exc:  # noqa: BLE001
-        logger.exception(f"Realtime WebSocket fatal error: {exc}")
+        logger.bind(route_kind=route_kind, user_id=user_id).error(
+            "Realtime WebSocket fatal error ({})", type(exc).__name__
+        )
         try:
             await websocket.close(code=REALTIME_INTERNAL_ERROR_CLOSE_CODE)
         except Exception as close_exc:  # noqa: BLE001
-            logger.debug(f"Failed to close realtime websocket after fatal error: {close_exc}")
+            logger.bind(route_kind=route_kind, user_id=user_id).debug(
+                "Failed to close realtime websocket ({})", type(close_exc).__name__
+            )
+    finally:
+        if heartbeat_task is not None:
+            heartbeat_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await heartbeat_task
+        if acquired_stream:
+            await audio_quota.finish_stream(user_id)
+
+
+async def _renew_stream_lease(user_id: int) -> None:
+    """Keep the existing audio concurrency reservation alive during idle or active turns."""
+    while True:
+        await asyncio.sleep(15)
+        await audio_quota.heartbeat_stream(user_id)
 
 
 async def _run_realtime_loop(websocket: WebSocket, session: RealtimeSession, limits: RealtimeLimits) -> None:
-    outbound_events: asyncio.Queue[RealtimeServerEvent | BaseException] = asyncio.Queue()
+    outbound_events: asyncio.Queue[RealtimeServerEvent | BaseException] = asyncio.Queue(maxsize=16)
     receive_task = asyncio.create_task(websocket.receive())
     generation_task: asyncio.Task[None] | None = None
     outbound_task: asyncio.Task[RealtimeServerEvent | BaseException] | None = None
@@ -81,6 +113,8 @@ async def _run_realtime_loop(websocket: WebSocket, session: RealtimeSession, lim
                 outbound_task = asyncio.create_task(outbound_events.get())
 
             wait_for = [receive_task]
+            if generation_task is not None:
+                wait_for.append(generation_task)
             if outbound_task is not None:
                 wait_for.append(outbound_task)
 
@@ -112,8 +146,19 @@ async def _run_realtime_loop(websocket: WebSocket, session: RealtimeSession, lim
                 else:
                     async for event in session.handle_command(command_or_error):
                         await _send_event(websocket, event)
+                    if isinstance(command_or_error, CancelResponseCommand) and session.active_response_id is None:
+                        if generation_task is not None:
+                            await _observe_generation_task(generation_task)
+                            generation_task = None
+                        if outbound_task is not None:
+                            outbound_task.cancel()
+                            with contextlib.suppress(asyncio.CancelledError):
+                                await outbound_task
+                            outbound_task = None
+                        while not outbound_events.empty():
+                            outbound_events.get_nowait()
 
-            if outbound_task is not None and outbound_task in done:
+            if outbound_task is not None and outbound_task.done():
                 outbound = outbound_task.result()
                 outbound_task = None
                 if isinstance(outbound, BaseException):
@@ -175,7 +220,7 @@ async def _enqueue_session_events(
             await queue.put(event)
     except asyncio.CancelledError:
         raise
-    except BaseException as exc:
+    except Exception as exc:  # noqa: BLE001 - report unexpected session failures through the sender
         await queue.put(exc)
 
 
@@ -201,18 +246,18 @@ def _call_pipeline_factory(
     *,
     principal: Any | None,
     user_id: int | None,
+    request: Any | None = None,
 ) -> Any:
     signature = inspect.signature(pipeline_factory)
     if not signature.parameters:
         return pipeline_factory()
 
     kwargs: dict[str, Any] = {}
-    accepts_kwargs = any(
-        parameter.kind == inspect.Parameter.VAR_KEYWORD
-        for parameter in signature.parameters.values()
-    )
+    accepts_kwargs = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values())
     if accepts_kwargs or "principal" in signature.parameters:
         kwargs["principal"] = principal
     if accepts_kwargs or "user_id" in signature.parameters:
         kwargs["user_id"] = user_id
+    if accepts_kwargs or "request" in signature.parameters:
+        kwargs["request"] = request
     return pipeline_factory(**kwargs)

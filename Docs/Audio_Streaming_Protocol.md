@@ -304,6 +304,11 @@ The realtime speech endpoint exposes a Stage 1 OpenAI-compatible JSON event
 protocol over WebSocket. It bridges committed PCM16 input audio through the
 existing STT -> chat -> TTS pipeline and emits OpenAI-style realtime events.
 
+This is an experimental compatibility subset, not a drop-in implementation of
+the complete OpenAI GA protocol. In particular, Stage 1 requires 16 kHz input
+instead of upstream's 24 kHz PCM input, supports manual turns, and emits both
+text and audio. Clients must use the advertised capabilities and input rate.
+
 ### Routes
 
 - `WS /api/v1/audio/realtime`: native tldw route using the OpenAI-compatible event shape.
@@ -396,8 +401,25 @@ Unsupported client events return an `error` event while keeping the WebSocket op
 
 ### Persistence And Capabilities
 
-Sessions are ephemeral by default. Optional turn persistence is enabled through session metadata:
-`metadata.tldw.persist=true` plus `metadata.tldw.conversation_id=<integer>`. Stage 1 does not persist raw audio.
+Built-in routes are ephemeral and advertise `persistence.supported=false` because they
+use `NoopRealtimePersistenceAdapter`. The adapter interface supports explicit
+`metadata.tldw.persist=true` with a non-empty string or integer `conversation_id`;
+durable storage requires an adapter that authorizes the target conversation. Metadata
+alone does not enable storage on the built-in endpoints. Stage 1 does not persist raw audio.
+
+Completed turns retain the last 20 conversation messages in memory for subsequent
+responses. Persistence metadata is captured when a response starts, so a concurrent
+session update cannot redirect that turn to another conversation.
+
+The production pipeline uses the existing per-user audio concurrency and daily-minute
+controls, STT transcript redaction policy, and scoped chat/TTS provider credentials.
+Provider disable settings and model allowlists apply before dispatch. Outbound queues
+apply backpressure; cancellation drops queued output from the cancelled response.
+
+Output configuration accepts `audio.output.format={"type":"audio/pcm","rate":24000}`
+and `audio.output.voice`. Audio deltas and their transcript share one content part.
+Text and audio are interleaved when the TTS provider supports incremental synthesis;
+the buffered TTS fallback still waits for the full text before starting synthesis.
 
 Use `GET /api/v1/audio/realtime/capabilities` to discover persistence metadata, optional/deferred events, audio
 limits, close codes, and route support.

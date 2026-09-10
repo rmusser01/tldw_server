@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from tldw_Server_API.app.core.Audio.Realtime.constants import (
+    OPENAI_REALTIME_RATE_LIMITS_UPDATED,
     REALTIME_AUTH_FAILURE_CLOSE_CODE,
     REALTIME_ENDPOINT_DENIED_CLOSE_CODE,
     REALTIME_INPUT_AUDIO_FORMAT,
@@ -27,7 +28,6 @@ from tldw_Server_API.app.core.Audio.Realtime.constants import (
     REALTIME_SUPPORTED_CLIENT_EVENTS,
     REALTIME_SUPPORTED_SERVER_EVENTS,
     REALTIME_TLDW_TTS_REQUEST_FORMAT,
-    OPENAI_REALTIME_RATE_LIMITS_UPDATED,
 )
 
 
@@ -117,12 +117,13 @@ def build_realtime_capabilities() -> RealtimeCapabilities:
             "semantics": "tldw quota compatibility; not OpenAI quota parity",
         },
         persistence={
-            "supported": True,
+            "supported": False,
             "default": "ephemeral",
-            "enable_with": {
+            "adapter_metadata": {
                 "metadata.tldw.persist": True,
-                "metadata.tldw.conversation_id": "integer",
+                "metadata.tldw.conversation_id": "string_or_integer",
             },
+            "reason": "Built-in routes use NoopRealtimePersistenceAdapter; durable storage requires an authorized adapter",
             "raw_audio_persistence": False,
         },
         optional_events={

@@ -248,6 +248,8 @@ class ResponseContentPartDoneEvent:
     output_index: int
     content_index: int
     content_type: str
+    text: str | None = None
+    transcript: str | None = None
 
 
 @dataclass(frozen=True)
@@ -257,6 +259,7 @@ class ResponseOutputItemDoneEvent:
     item_id: str
     output_index: int
     status: str = "completed"
+    content: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

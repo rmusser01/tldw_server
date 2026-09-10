@@ -4,7 +4,6 @@ import pytest
 
 from tldw_Server_API.app.core.Audio import streaming_service
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -43,11 +42,29 @@ def _single_user_settings():
 
 
 @pytest.mark.asyncio
+async def test_cookie_realtime_auth_preserves_first_protocol_event(monkeypatch):
+    from tldw_Server_API.app.core.Audio.Realtime.auth import authenticate_realtime_websocket
+    from tldw_Server_API.app.core.AuthNZ import ip_allowlist
+    from tldw_Server_API.app.core.AuthNZ import settings as auth_settings
+
+    ws = DummyWebSocket(first_message='{"type":"session.update","session":{"type":"realtime"}}')
+    ws.state.single_user_session_id = "validated-cookie-session"
+    ws.state.user_id = 1
+    monkeypatch.setattr(streaming_service, "is_multi_user_mode", lambda: False)
+    monkeypatch.setattr(auth_settings, "get_settings", _single_user_settings)
+    monkeypatch.setattr(ip_allowlist, "resolve_client_ip", lambda *_args, **_kwargs: "127.0.0.1")
+
+    assert await authenticate_realtime_websocket(ws, "native") == (True, 1)
+    assert ws.receive_text_calls == 0
+
+
+@pytest.mark.asyncio
 async def test_realtime_openai_compat_auth_does_not_consume_session_update(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app.core.Audio.Realtime.auth import authenticate_realtime_websocket
-    from tldw_Server_API.app.core.AuthNZ import ip_allowlist, settings as auth_settings
+    from tldw_Server_API.app.core.AuthNZ import ip_allowlist
+    from tldw_Server_API.app.core.AuthNZ import settings as auth_settings
 
     ws = DummyWebSocket(first_message='{"type":"session.update","session":{"type":"realtime"}}')
 
@@ -68,7 +85,8 @@ async def test_realtime_openai_compat_auth_does_not_consume_session_update(
 async def test_existing_audio_stream_auth_still_accepts_initial_auth_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tldw_Server_API.app.core.AuthNZ import ip_allowlist, settings as auth_settings
+    from tldw_Server_API.app.core.AuthNZ import ip_allowlist
+    from tldw_Server_API.app.core.AuthNZ import settings as auth_settings
 
     ws = DummyWebSocket(first_message='{"type":"auth","token":"single-user-secret"}')
 

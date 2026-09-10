@@ -6,7 +6,7 @@ Status: Accepted for implementation
 
 ## Summary
 
-Add an adapter-first OpenAI GA Realtime-compatible speech-to-speech WebSocket layer over the existing tldw audio pipeline. The first stage provides strict OpenAI-shaped behavior for the supported core speech lifecycle while keeping protocol details at the edge of the system.
+Add an adapter-first OpenAI-shaped speech-to-speech WebSocket layer over the existing tldw audio pipeline. The first stage is an experimental compatibility subset, with a 16 kHz input requirement and manual turn handling. It does not promise drop-in OpenAI GA client compatibility; the supported differences are documented in `Docs/Audio_Streaming_Protocol.md`.
 
 The roadmap order is:
 
@@ -250,7 +250,7 @@ Supported server events:
 - `conversation.item.added`
 - `conversation.item.done`
 - `response.created`
-- `response.output_item.created`
+- `response.output_item.added`
 - `response.content_part.added`
 - `response.output_audio.delta`
 - `response.output_audio.done`

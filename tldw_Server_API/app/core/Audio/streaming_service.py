@@ -750,6 +750,8 @@ async def _audio_ws_authenticate(
             return False
 
     if cookie_user_id is not None:
+        if not allow_initial_auth_message:
+            return True, cookie_user_id
         try:
             first_message = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
         except asyncio.TimeoutError:

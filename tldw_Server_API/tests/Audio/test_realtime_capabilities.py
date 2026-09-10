@@ -5,8 +5,6 @@ from tldw_Server_API.app.core.Audio.Realtime.capabilities import (
     build_realtime_capabilities,
 )
 from tldw_Server_API.app.core.Audio.Realtime.constants import (
-    REALTIME_AUTH_FAILURE_CLOSE_CODE,
-    REALTIME_ENDPOINT_DENIED_CLOSE_CODE,
     OPENAI_REALTIME_CONVERSATION_ITEM_DONE,
     OPENAI_REALTIME_INPUT_AUDIO_APPEND,
     OPENAI_REALTIME_INPUT_AUDIO_CLEAR,
@@ -31,14 +29,16 @@ from tldw_Server_API.app.core.Audio.Realtime.constants import (
     OPENAI_REALTIME_SESSION_CREATED,
     OPENAI_REALTIME_SESSION_UPDATE,
     OPENAI_REALTIME_SESSION_UPDATED,
+    REALTIME_AUTH_FAILURE_CLOSE_CODE,
+    REALTIME_ENDPOINT_DENIED_CLOSE_CODE,
     REALTIME_INPUT_CHANNELS,
     REALTIME_INPUT_SAMPLE_RATE_HZ,
     REALTIME_INPUT_SAMPLE_WIDTH_BYTES,
+    REALTIME_INTERNAL_ERROR_CLOSE_CODE,
     REALTIME_MAX_BUFFERED_AUDIO_BYTES,
     REALTIME_MAX_BUFFERED_AUDIO_SECONDS,
     REALTIME_MAX_JSON_FRAME_BYTES,
     REALTIME_MAX_OUTPUT_CHUNK_BYTES,
-    REALTIME_INTERNAL_ERROR_CLOSE_CODE,
     REALTIME_NORMAL_CLOSE_CODE,
     REALTIME_OUTPUT_CHANNELS,
     REALTIME_OUTPUT_SAMPLE_RATE_HZ,
@@ -166,12 +166,13 @@ def test_realtime_capabilities_expose_persistence_and_deferred_features():
     payload = _capabilities()
 
     assert payload["persistence"] == {
-        "supported": True,
+        "supported": False,
         "default": "ephemeral",
-        "enable_with": {
+        "adapter_metadata": {
             "metadata.tldw.persist": True,
-            "metadata.tldw.conversation_id": "integer",
+            "metadata.tldw.conversation_id": "string_or_integer",
         },
+        "reason": "Built-in routes use NoopRealtimePersistenceAdapter; durable storage requires an authorized adapter",
         "raw_audio_persistence": False,
     }
     assert payload["optional_events"]["conversation.item.create"] == {

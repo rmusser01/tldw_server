@@ -2,18 +2,20 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
+from tldw_Server_API.app.core.Audio.Realtime.constants import REALTIME_MAX_OUTPUT_CHUNK_BYTES
 from tldw_Server_API.app.core.Audio.Realtime.default_pipeline import (
-    DefaultRealtimePipeline,
     REALTIME_TTS_ROUTE,
+    DefaultRealtimePipeline,
     RealtimePipelineError,
     _call_open_realtime_session,
 )
-from tldw_Server_API.app.core.Audio.Realtime.constants import REALTIME_MAX_OUTPUT_CHUNK_BYTES
 from tldw_Server_API.app.core.Audio.Realtime.models import RealtimeSessionConfig
 from tldw_Server_API.app.core.Audio.Realtime.pipeline import (
     RealtimePipelineAudioDelta,
@@ -24,7 +26,6 @@ from tldw_Server_API.app.core.Audio.Realtime.pipeline import (
     RealtimePipelineTranscriptDone,
     RealtimePipelineTurnDone,
 )
-
 
 pytestmark = pytest.mark.asyncio
 
@@ -132,6 +133,7 @@ def _pipeline(
     stt_transcribe_pcm16: Any = _fake_stt,
     chat_call: Any = _fake_streaming_chat_call,
     tts_service: FakeTTSService | None = None,
+    tts_credential_scope: Any = None,
 ) -> DefaultRealtimePipeline:
     service = tts_service or FakeTTSService(FakeRealtimeTTSSession())
     return DefaultRealtimePipeline(
@@ -143,6 +145,7 @@ def _pipeline(
         chat_provider_hint="openai-chat",
         tts_provider_hint="openai-tts",
         user_id=42,
+        tts_credential_scope=tts_credential_scope,
     )
 
 
@@ -419,3 +422,134 @@ async def test_stream_turn_wraps_tts_errors() -> None:
         _ = [event async for event in pipeline.stream_turn("hello", config=RealtimeSessionConfig())]
 
     assert exc_info.value.stage == "tts"
+
+
+async def test_audio_is_delivered_while_chat_waits_for_next_token() -> None:
+    audio_received = asyncio.Event()
+
+    async def chat(**_kwargs: Any) -> AsyncIterator[str]:
+        async def tokens() -> AsyncIterator[str]:
+            yield "first"
+            await asyncio.wait_for(audio_received.wait(), timeout=1)
+            yield "second"
+
+        return tokens()
+
+    pipeline = _pipeline(chat_call=chat)
+    async for event in pipeline.stream_turn("hello", config=RealtimeSessionConfig()):
+        if isinstance(event, RealtimePipelineAudioDelta):
+            audio_received.set()
+    assert audio_received.is_set()
+
+
+async def test_failed_buffered_tts_does_not_emit_audio_done() -> None:
+    class FailingBufferedService:
+        async def generate_speech(self, _request: OpenAISpeechRequest, **_kwargs: Any) -> AsyncIterator[bytes]:
+            raise RuntimeError("provider failed")
+            yield b""
+
+    async def chat(**_kwargs: Any) -> str:
+        return "hello"
+
+    pipeline = _pipeline(chat_call=chat, tts_service=FailingBufferedService())
+    events = []
+    with pytest.raises(RealtimePipelineError, match="TTS audio failed"):
+        async for event in pipeline.stream_turn("hello", config=RealtimeSessionConfig()):
+            events.append(event)
+    assert not any(isinstance(event, RealtimePipelineAudioDone) for event in events)
+
+
+async def test_closing_stream_cancels_chat_and_closes_tts() -> None:
+    chat_closed = asyncio.Event()
+
+    async def chat(**_kwargs: Any) -> AsyncIterator[str]:
+        async def tokens() -> AsyncIterator[str]:
+            try:
+                yield "first"
+                await asyncio.Event().wait()
+            finally:
+                chat_closed.set()
+
+        return tokens()
+
+    tts = CloseableBlockingRealtimeTTSSession()
+    stream = _pipeline(chat_call=chat, tts_service=FakeTTSService(tts)).stream_turn(
+        "hello", config=RealtimeSessionConfig()
+    )
+    await anext(stream)
+    await stream.aclose()
+    assert chat_closed.is_set()
+    assert tts.closed == 1
+
+
+async def test_second_turn_receives_prior_completed_conversation() -> None:
+    requests = []
+
+    async def chat(**kwargs: Any) -> str:
+        requests.append(kwargs["messages_payload"])
+        return "first answer"
+
+    pipeline = _pipeline(chat_call=chat)
+    for transcript in ("first question", "what did I ask?"):
+        _ = [event async for event in pipeline.stream_turn(transcript, config=RealtimeSessionConfig())]
+    assert requests[1] == [
+        {"role": "user", "content": "first question"},
+        {"role": "assistant", "content": "first answer"},
+        {"role": "user", "content": "what did I ask?"},
+    ]
+
+
+async def test_cancellation_aborts_buffered_worker_before_waiting_for_finish() -> None:
+    release = asyncio.Event()
+    provider_closed = asyncio.Event()
+
+    class SlowBufferedService:
+        async def generate_speech(self, _request, **_kwargs):
+            try:
+                yield b"first audio"
+                await release.wait()
+            finally:
+                provider_closed.set()
+
+    async def chat(**_kwargs):
+        return "hello"
+
+    stream = _pipeline(chat_call=chat, tts_service=SlowBufferedService()).stream_turn(
+        "hello",
+        config=RealtimeSessionConfig(),
+    )
+    while not isinstance(await anext(stream), RealtimePipelineAudioDelta):
+        pass
+    closing = asyncio.create_task(stream.aclose())
+    try:
+        await asyncio.wait_for(asyncio.shield(closing), timeout=0.2)
+        assert provider_closed.is_set()
+    finally:
+        release.set()
+        await closing
+
+
+async def test_cancel_during_credential_usage_recording_closes_opened_tts_session() -> None:
+    marking = asyncio.Event()
+    release = asyncio.Event()
+
+    async def mark_used(_credentials):
+        marking.set()
+        await release.wait()
+
+    @asynccontextmanager
+    async def scope(**_kwargs):
+        yield 42, {}, SimpleNamespace(mark_used=mark_used), object()
+
+    tts = CloseableBlockingRealtimeTTSSession()
+    stream = _pipeline(tts_service=FakeTTSService(tts), tts_credential_scope=scope).stream_turn(
+        "hello",
+        config=RealtimeSessionConfig(),
+    )
+    opening = asyncio.create_task(anext(stream))
+    await asyncio.wait_for(marking.wait(), timeout=1)
+    opening.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await opening
+    assert tts.closed == 1

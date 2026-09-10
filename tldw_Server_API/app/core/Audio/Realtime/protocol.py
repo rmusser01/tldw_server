@@ -197,7 +197,7 @@ def to_openai_server_event(event: RealtimeServerEvent) -> dict[str, Any]:
             "item_id": event.item_id,
             "output_index": event.output_index,
             "content_index": event.content_index,
-            "part": {"type": event.content_type},
+            "part": {"type": _output_content_type(event.content_type)},
         }
     if isinstance(event, ResponseTextDeltaEvent):
         return {
@@ -270,6 +270,11 @@ def to_openai_server_event(event: RealtimeServerEvent) -> dict[str, Any]:
             "transcript": event.transcript,
         }
     if isinstance(event, ResponseContentPartDoneEvent):
+        part = {"type": _output_content_type(event.content_type)}
+        if event.text is not None:
+            part["text"] = event.text
+        if event.transcript is not None:
+            part["transcript"] = event.transcript
         return {
             "type": OPENAI_REALTIME_RESPONSE_CONTENT_PART_DONE,
             "event_id": event.event_id,
@@ -277,7 +282,7 @@ def to_openai_server_event(event: RealtimeServerEvent) -> dict[str, Any]:
             "item_id": event.item_id,
             "output_index": event.output_index,
             "content_index": event.content_index,
-            "part": {"type": event.content_type},
+            "part": part,
         }
     if isinstance(event, ResponseOutputItemDoneEvent):
         return {
@@ -285,7 +290,10 @@ def to_openai_server_event(event: RealtimeServerEvent) -> dict[str, Any]:
             "event_id": event.event_id,
             "response_id": event.response_id,
             "output_index": event.output_index,
-            "item": _response_output_item_payload(event.item_id, "assistant", status=event.status),
+            "item": {
+                **_response_output_item_payload(event.item_id, "assistant", status=event.status),
+                "content": event.content,
+            },
         }
     if isinstance(event, ResponseDoneEvent):
         return {
@@ -390,6 +398,12 @@ def _parse_session_update(payload: dict[str, Any], event_id: str | None) -> Upda
     output_format = output_audio.get("format", REALTIME_OUTPUT_AUDIO_FORMAT)
     output_sample_rate_hz = output_audio.get("sample_rate_hz", REALTIME_OUTPUT_SAMPLE_RATE_HZ)
     output_channels = output_audio.get("channels", REALTIME_OUTPUT_CHANNELS)
+    if isinstance(input_format, dict):
+        input_sample_rate_hz = input_format.get("rate", REALTIME_INPUT_SAMPLE_RATE_HZ)
+        input_format = REALTIME_INPUT_AUDIO_FORMAT if input_format.get("type") == "audio/pcm" else None
+    if isinstance(output_format, dict):
+        output_sample_rate_hz = output_format.get("rate", REALTIME_OUTPUT_SAMPLE_RATE_HZ)
+        output_format = REALTIME_OUTPUT_AUDIO_FORMAT if output_format.get("type") == "audio/pcm" else None
 
     if (
         input_format != REALTIME_INPUT_AUDIO_FORMAT
@@ -432,10 +446,17 @@ def _parse_session_update(payload: dict[str, Any], event_id: str | None) -> Upda
     )
     if invalid_scalar is not None:
         return invalid_scalar
+    invalid_voice = _validate_optional_str_fields(
+        output_audio,
+        {"voice": "session.audio.output.voice must be a string when provided"},
+        event_id,
+    )
+    if invalid_voice is not None:
+        return invalid_voice
 
     config = RealtimeSessionConfig(
         model=_optional_str(session.get("model")),
-        voice=_optional_str(session.get("voice")),
+        voice=_optional_str(output_audio.get("voice", session.get("voice"))),
         instructions=_optional_str(session.get("instructions")),
         input_format=REALTIME_INPUT_AUDIO_FORMAT,
         input_sample_rate_hz=REALTIME_INPUT_SAMPLE_RATE_HZ,
@@ -643,13 +664,21 @@ def _session_payload(session_id: str, model: str | None, voice: str | None) -> d
                 "channels": REALTIME_INPUT_CHANNELS,
             },
             "output": {
-                "format": REALTIME_OUTPUT_AUDIO_FORMAT,
+                "format": {"type": "audio/pcm", "rate": REALTIME_OUTPUT_SAMPLE_RATE_HZ},
+                "voice": voice,
                 "sample_rate_hz": REALTIME_OUTPUT_SAMPLE_RATE_HZ,
                 "channels": REALTIME_OUTPUT_CHANNELS,
             },
         },
         "turn_detection": None,
     }
+
+
+def _output_content_type(content_type: str) -> str:
+    """Translate internal content labels to the supported GA output types."""
+    return {"text": "output_text", "audio": "output_audio", "audio_transcript": "output_audio"}.get(
+        content_type, content_type
+    )
 
 
 def _response_payload(

@@ -116,6 +116,40 @@ class FakeTask:
         self.cancelled = True
 
 
+@pytest.mark.asyncio
+async def test_empty_outputs_never_finish_a_content_part_before_adding_it():
+    session = RealtimeSession(
+        pipeline=FakeRealtimePipeline(
+            events=[
+                RealtimePipelineTextDone(),
+                RealtimePipelineTranscriptDone(),
+                RealtimePipelineAudioDone(),
+                RealtimePipelineTurnDone(),
+            ]
+        )
+    )
+    added = set()
+    async for event in session.create_response(CreateResponseCommand(event_id="empty")):
+        if isinstance(event, ResponseContentPartAddedEvent):
+            added.add(event.content_index)
+        if isinstance(event, ResponseContentPartDoneEvent):
+            assert event.content_index in added
+
+
+@pytest.mark.asyncio
+async def test_audio_and_transcript_share_one_content_part_and_final_response_keeps_text():
+    session = RealtimeSession(pipeline=FakeRealtimePipeline())
+    events = [event async for event in session.create_response(CreateResponseCommand(event_id="turn"))]
+    audio_index = next(event.content_index for event in events if isinstance(event, ResponseAudioDeltaEvent))
+    transcript_index = next(event.content_index for event in events if isinstance(event, ResponseTranscriptDeltaEvent))
+    assert audio_index == transcript_index
+    done = next(event for event in events if isinstance(event, ResponseDoneEvent))
+    assert done.output[0]["content"] == [
+        {"type": "output_text", "text": "hello world"},
+        {"type": "output_audio", "transcript": "assistant transcript"},
+    ]
+
+
 async def _collect(events: AsyncIterator[object]) -> list[object]:
     return [event async for event in events]
 
@@ -266,10 +300,11 @@ async def test_fake_pipeline_chunks_become_internal_response_delta_events():
     assert text_deltas == ["hello ", "world"]
     assert transcript_deltas == ["assistant transcript"]
     assert audio_deltas == [b"\x01\x02"]
-    assert events[-1] == ResponseDoneEvent(
-        event_id="evt_create",
-        response_id=next(event.response_id for event in events if isinstance(event, ResponseCreatedEvent)),
-        status="completed",
+    assert isinstance(events[-1], ResponseDoneEvent)
+    assert events[-1].event_id == "evt_create"
+    assert events[-1].status == "completed"
+    assert events[-1].response_id == next(
+        event.response_id for event in events if isinstance(event, ResponseCreatedEvent)
     )
 
 

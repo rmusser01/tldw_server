@@ -17,7 +17,6 @@ from tldw_Server_API.app.api.v1.router_groups.minimal import iter_minimal_option
 from tldw_Server_API.app.api.v1.router_registry import register_router_specs
 from tldw_Server_API.tests.Audio.ws_test_helpers import ws_client_without_lifespan
 
-
 pytestmark = [pytest.mark.external_api, pytest.mark.local_llm_service]
 
 REQUIRED_PROVIDER_ENV_VARS = (

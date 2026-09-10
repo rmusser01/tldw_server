@@ -17,11 +17,17 @@ router = APIRouter(tags=["Audio Realtime"])
 ws_router = APIRouter(tags=["Audio Realtime"])
 
 
-def _default_realtime_pipeline_factory(principal: Any | None = None, user_id: int | None = None) -> RealtimePipeline:
-    return build_default_realtime_pipeline(principal=principal, user_id=user_id)
+def _default_realtime_pipeline_factory(
+    principal: Any | None = None,
+    user_id: int | None = None,
+    request: Any | None = None,
+) -> RealtimePipeline:
+    """Build a pipeline using the authenticated connection's credential scope."""
+    return build_default_realtime_pipeline(principal=principal, user_id=user_id, request=request)
 
 
 def _default_realtime_persistence_factory() -> NoopRealtimePersistenceAdapter:
+    """Keep built-in realtime sessions ephemeral."""
     return NoopRealtimePersistenceAdapter()
 
 

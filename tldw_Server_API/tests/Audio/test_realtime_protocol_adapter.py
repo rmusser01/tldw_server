@@ -567,7 +567,8 @@ def test_beta_input_audio_format_aliases_return_explicit_errors(payload, expecte
                             "channels": 1,
                         },
                         "output": {
-                            "format": "pcm16",
+                            "format": {"type": "audio/pcm", "rate": 24000},
+                            "voice": "alloy",
                             "sample_rate_hz": 24000,
                             "channels": 1,
                         },
@@ -598,7 +599,8 @@ def test_beta_input_audio_format_aliases_return_explicit_errors(payload, expecte
                             "channels": 1,
                         },
                         "output": {
-                            "format": "pcm16",
+                            "format": {"type": "audio/pcm", "rate": 24000},
+                            "voice": "verse",
                             "sample_rate_hz": 24000,
                             "channels": 1,
                         },
@@ -741,7 +743,7 @@ def test_beta_input_audio_format_aliases_return_explicit_errors(payload, expecte
                 "item_id": "item_2",
                 "output_index": 0,
                 "content_index": 1,
-                "part": {"type": "audio_transcript"},
+                "part": {"type": "output_audio"},
             },
         ),
         (
@@ -872,7 +874,7 @@ def test_beta_input_audio_format_aliases_return_explicit_errors(payload, expecte
                 "item_id": "item_2",
                 "output_index": 0,
                 "content_index": 1,
-                "part": {"type": "audio_transcript"},
+                "part": {"type": "output_audio"},
             },
         ),
         (
@@ -940,3 +942,35 @@ def test_beta_input_audio_format_aliases_return_explicit_errors(payload, expecte
 )
 def test_server_events_serialize_to_exact_openai_dictionaries(event, expected):
     assert to_openai_server_event(event) == expected
+
+
+def test_nested_output_voice_and_pcm_format_are_honored():
+    command = parse_client_event(
+        {
+            "type": "session.update",
+            "session": {
+                "type": "realtime",
+                "audio": {
+                    "output": {
+                        "format": {"type": "audio/pcm", "rate": 24000},
+                        "voice": "verse",
+                    }
+                },
+            },
+        },
+        RealtimeLimits(),
+    )
+    assert isinstance(command, UpdateSessionCommand)
+    assert command.config.voice == "verse"
+
+
+def test_audio_content_part_uses_supported_output_type():
+    event = ResponseContentPartAddedEvent(
+        event_id="part",
+        response_id="response",
+        item_id="item",
+        output_index=0,
+        content_index=1,
+        content_type="audio",
+    )
+    assert to_openai_server_event(event)["part"]["type"] == "output_audio"

@@ -190,8 +190,9 @@ async def test_persistence_uses_turn_snapshot_when_next_audio_commit_starts_befo
     ]
 
 
+@pytest.mark.parametrize("pause_event", [ResponseDoneEvent, ResponseTextDeltaEvent])
 @pytest.mark.asyncio
-async def test_persistence_uses_conversation_snapshot_when_metadata_updates_after_done():
+async def test_persistence_uses_conversation_snapshot_when_metadata_updates_after_done(pause_event):
     adapter = FakeRealtimePersistenceAdapter()
     session = RealtimeSession(
         pipeline=FakeRealtimePipeline(transcript="persisted user"),
@@ -209,7 +210,7 @@ async def test_persistence_uses_conversation_snapshot_when_metadata_updates_afte
     response = session.create_response(CreateResponseCommand(event_id="evt_create"))
     while True:
         event = await anext(response)
-        if isinstance(event, ResponseDoneEvent):
+        if isinstance(event, pause_event):
             break
 
     await session.apply_update(
@@ -219,8 +220,7 @@ async def test_persistence_uses_conversation_snapshot_when_metadata_updates_afte
         )
     )
 
-    with pytest.raises(StopAsyncIteration):
-        await anext(response)
+    _ = [event async for event in response]
 
     assert adapter.writes == [
         {
@@ -256,3 +256,11 @@ async def test_persistence_failure_emits_internal_error_after_streamed_output_an
     assert text_delta_index < done_index < error_index
     assert isinstance(error, RealtimeErrorEvent)
     assert error.code == "internal_error"
+
+
+@pytest.mark.parametrize(
+    "value, expected", [(42, "42"), (" abc ", "abc"), ("", None), ("  ", None), (True, None), (1.5, None)]
+)
+def test_persistence_requires_a_normalized_conversation_id(value, expected):
+    config = persistence_config_from_metadata({"tldw": {"persist": True, "conversation_id": value}})
+    assert config == RealtimePersistenceConfig(enabled=expected is not None, conversation_id=expected)

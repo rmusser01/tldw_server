@@ -2,21 +2,23 @@
 id: TASK-12088
 title: Design OpenAI-compatible realtime speech endpoint
 status: Done
+assignee: []
+created_date: ''
+updated_date: '2026-09-10 01:03'
 labels:
-- audio
-- realtime
-- design
+  - audio
+  - realtime
+  - design
+dependencies: []
 references:
-- https://github.com/huggingface/speech-to-speech
-- https://developers.openai.com/api/docs/guides/realtime
-- https://developers.openai.com/api/docs/guides/realtime-conversations#handling-audio-with-websockets
+  - 'https://github.com/huggingface/speech-to-speech'
+  - 'https://developers.openai.com/api/docs/guides/realtime'
+  - >-
+    https://developers.openai.com/api/docs/guides/realtime-conversations#handling-audio-with-websockets
 documentation:
-- Docs/superpowers/specs/2026-07-01-openai-realtime-speech-endpoint-design.md
-- Docs/superpowers/plans/2026-07-01-openai-realtime-speech-endpoint-implementation-plan.md
-modified_files:
-- Docs/superpowers/specs/2026-07-01-openai-realtime-speech-endpoint-design.md
-- Docs/superpowers/plans/2026-07-01-openai-realtime-speech-endpoint-implementation-plan.md
-- backlog/tasks/task-12088 - Design-OpenAI-compatible-realtime-speech-endpoint.md
+  - Docs/superpowers/specs/2026-07-01-openai-realtime-speech-endpoint-design.md
+  - >-
+    Docs/superpowers/plans/2026-07-01-openai-realtime-speech-endpoint-implementation-plan.md
 ---
 
 ## Description
@@ -27,6 +29,7 @@ Write the design spec for an adapter-first OpenAI GA Realtime-compatible speech-
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 Approved design specifies protocol events, auth, limits, persistence boundary, and staged validation
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -37,10 +40,17 @@ Docs/superpowers/plans/2026-07-01-openai-realtime-speech-endpoint-implementation
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - 2026-07-01: Design accepted for implementation. Runtime work moved forward under TASK-12089 with the adapter-first route strategy, Stage 1 protocol boundary, identifier model, auth behavior, capability metadata, and default pipeline integration.
 - 2026-07-01: Bandit is not applicable to this design-only task. Implementation security verification is recorded on TASK-12089.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+Original touched-file inventory preserved during official CLI normalization:
+- Docs/superpowers/specs/2026-07-01-openai-realtime-speech-endpoint-design.md
+- Docs/superpowers/plans/2026-07-01-openai-realtime-speech-endpoint-implementation-plan.md
+- backlog/tasks/task-12088 - Design-OpenAI-compatible-realtime-speech-endpoint.md
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

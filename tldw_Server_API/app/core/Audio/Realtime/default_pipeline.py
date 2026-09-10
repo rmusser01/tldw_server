@@ -55,6 +55,7 @@ class DefaultRealtimePipeline:
         chat_provider_hint: str | None = None,
         tts_provider_hint: str | None = None,
         user_id: int | None = None,
+        tts_credential_scope: Callable[..., Any] | None = None,
     ) -> None:
         self._stt_transcribe_pcm16 = stt_transcribe_pcm16
         self._chat_call = chat_call
@@ -64,6 +65,8 @@ class DefaultRealtimePipeline:
         self._chat_provider_hint = chat_provider_hint if chat_provider_hint is not None else provider_hint
         self._tts_provider_hint = tts_provider_hint if tts_provider_hint is not None else provider_hint
         self._user_id = user_id
+        self._tts_credential_scope = tts_credential_scope
+        self._history: list[dict[str, str]] = []
 
     async def transcribe_pcm16(self, audio: bytes, *, sample_rate_hz: int, language: str | None) -> str:
         """Transcribe one committed PCM16 audio turn."""
@@ -86,24 +89,31 @@ class DefaultRealtimePipeline:
     ) -> AsyncIterator[RealtimePipelineEvent]:
         """Stream one assistant response turn as text, spoken transcript, and PCM audio."""
 
+        scope_stack = contextlib.AsyncExitStack()
         try:
-            tts_session = await self._open_tts_session(config)
+            tts_session = await self._open_tts_session(config, scope_stack=scope_stack)
+        except asyncio.CancelledError:
+            await scope_stack.aclose()
+            raise
         except Exception as exc:
+            await scope_stack.aclose()
             raise RealtimePipelineError(stage="tts", message="Realtime TTS session failed", cause=exc) from exc
 
-        audio_events: asyncio.Queue[RealtimePipelineAudioDelta | RealtimePipelineAudioDone | BaseException] = (
-            asyncio.Queue()
-        )
-        audio_task = asyncio.create_task(_drain_tts_audio(tts_session, audio_events))
+        events: asyncio.Queue[Any] = asyncio.Queue(maxsize=16)
         tts_finished = False
         stream_completed = False
+        assistant_parts: list[str] = []
 
-        try:
+        async def produce_text() -> None:
+            """Feed TTS while publishing text through the same bounded queue as audio."""
+            nonlocal tts_finished
+            chat_result = None
             try:
                 chat_result = await self._chat_call(**self._chat_kwargs(transcript, config))
                 async for delta in _iter_text_deltas(chat_result):
                     if not delta:
                         continue
+                    assistant_parts.append(delta)
                     try:
                         await tts_session.push_text(delta)
                     except Exception as exc:
@@ -112,37 +122,64 @@ class DefaultRealtimePipeline:
                             message="Realtime TTS text push failed",
                             cause=exc,
                         ) from exc
-                    yield RealtimePipelineTextDelta(delta)
-                    yield RealtimePipelineTranscriptDelta(delta)
-            except RealtimePipelineError:
-                raise
-            except Exception as exc:
-                raise RealtimePipelineError(stage="llm", message="Realtime LLM streaming failed", cause=exc) from exc
+                    await events.put(RealtimePipelineTextDelta(delta))
+                    await events.put(RealtimePipelineTranscriptDelta(delta))
+                try:
+                    await tts_session.commit()
+                    await tts_session.finish()
+                    tts_finished = True
+                except Exception as exc:
+                    raise RealtimePipelineError(stage="tts", message="Realtime TTS commit failed", cause=exc) from exc
+                await events.put(RealtimePipelineTextDone())
+                await events.put(RealtimePipelineTranscriptDone())
+                await events.put(None)
+            except RealtimePipelineError as exc:
+                await events.put(exc)
+            except Exception as exc:  # noqa: BLE001 - normalize arbitrary provider failures at the stream boundary
+                await events.put(RealtimePipelineError(stage="llm", message="Realtime LLM streaming failed", cause=exc))
+            finally:
+                close = getattr(chat_result, "aclose", None)
+                if callable(close):
+                    await close()
 
-            try:
-                await tts_session.commit()
-                await tts_session.finish()
-                tts_finished = True
-            except Exception as exc:
-                raise RealtimePipelineError(stage="tts", message="Realtime TTS commit failed", cause=exc) from exc
-
-            yield RealtimePipelineTextDone()
-            yield RealtimePipelineTranscriptDone()
-
-            async for audio_event in _drain_remaining_audio_events(audio_events, audio_task):
-                yield audio_event
-
-            error = getattr(tts_session, "error", None)
-            if error is not None:
-                raise RealtimePipelineError(stage="tts", message="Realtime TTS audio failed", cause=error) from error
+        audio_task = asyncio.create_task(_drain_tts_audio(tts_session, events))
+        text_task = asyncio.create_task(produce_text())
+        try:
+            finished_producers = 0
+            while finished_producers < 2:
+                event = await events.get()
+                if event is None:
+                    finished_producers += 1
+                elif isinstance(event, BaseException):
+                    raise event
+                else:
+                    yield event
+            await text_task
+            await audio_task
+            self._history.extend(
+                [
+                    {"role": "user", "content": transcript},
+                    {"role": "assistant", "content": "".join(assistant_parts)},
+                ]
+            )
+            self._history = self._history[-20:]
             stream_completed = True
             yield RealtimePipelineTurnDone()
         finally:
-            if not stream_completed:
-                await _cleanup_tts_session(tts_session, audio_task, tts_finished=tts_finished)
+            for task in (text_task, audio_task):
+                if not task.done():
+                    task.cancel()
+            try:
+                if not stream_completed:
+                    await _cleanup_tts_session(tts_session, audio_task, tts_finished=tts_finished)
+            finally:
+                try:
+                    await asyncio.gather(text_task, audio_task, return_exceptions=True)
+                finally:
+                    await scope_stack.aclose()
 
     def _chat_kwargs(self, transcript: str, config: RealtimeSessionConfig) -> dict[str, Any]:
-        messages = [{"role": "user", "content": transcript}]
+        messages = [*self._history, {"role": "user", "content": transcript}]
         return {
             "api_endpoint": self._chat_provider_hint,
             "messages_payload": messages,
@@ -155,12 +192,17 @@ class DefaultRealtimePipeline:
             "user": str(self._user_id) if self._user_id is not None else None,
         }
 
-    async def _open_tts_session(self, config: RealtimeSessionConfig) -> Any:
+    async def _open_tts_session(self, config: RealtimeSessionConfig, *, scope_stack: contextlib.AsyncExitStack) -> Any:
         service = self._tts_service_factory()
         if inspect.isawaitable(service):
             service = await service
 
         request = _build_speech_request(config, default_model=self._default_model, default_voice=self._default_voice)
+        overrides = None
+        if self._tts_credential_scope is not None:
+            _user_id, overrides, _runtime, _credentials = await scope_stack.enter_async_context(
+                self._tts_credential_scope(provider=self._tts_provider_hint, model=request.model)
+            )
         open_realtime_session = getattr(service, "open_realtime_session", None)
         if callable(open_realtime_session):
             handle = await _call_open_realtime_session(
@@ -169,7 +211,16 @@ class DefaultRealtimePipeline:
                 provider_hint=self._tts_provider_hint,
                 route=REALTIME_TTS_ROUTE,
                 user_id=self._user_id,
+                provider_overrides=overrides,
             )
+            if self._tts_credential_scope is not None:
+                from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
+
+                try:
+                    await await_owned_worker(_runtime.mark_used(_credentials))
+                except BaseException:  # noqa: BLE001 - the acquired provider session must close even on cancellation
+                    await _close_tts_session_safely(handle.session)
+                    raise
             return handle.session
 
         from tldw_Server_API.app.core.TTS.realtime_session import BufferedRealtimeSession
@@ -178,6 +229,7 @@ class DefaultRealtimePipeline:
             tts_service=service,
             config=_tts_config_from_request(request, self._tts_provider_hint),
             provider_hint=self._tts_provider_hint,
+            provider_overrides=overrides,
             route=REALTIME_TTS_ROUTE,
             user_id=self._user_id,
         )
@@ -204,7 +256,7 @@ async def _close_tts_session_safely(session: Any) -> None:
             maybe_result = method()
             if inspect.isawaitable(maybe_result):
                 await maybe_result
-        except Exception:
+        except Exception:  # noqa: BLE001 - try the next provider cleanup method if one is unavailable
             cleanup_failed = True
         if not cleanup_failed:
             return
@@ -219,7 +271,7 @@ async def _finish_tts_session_safely(session: Any) -> None:
         maybe_result = finish()
         if inspect.isawaitable(maybe_result):
             await maybe_result
-    except Exception:
+    except Exception:  # noqa: BLE001 - best-effort cleanup for injected provider sessions
         return
 
 
@@ -253,22 +305,90 @@ async def default_stt_transcribe_pcm16(audio: bytes, *, sample_rate_hz: int, lan
     return ""
 
 
-def build_default_realtime_pipeline(principal: Any | None = None, user_id: int | None = None) -> DefaultRealtimePipeline:
+def build_default_realtime_pipeline(
+    principal: Any | None = None,
+    user_id: int | None = None,
+    request: Any | None = None,
+) -> DefaultRealtimePipeline:
     """Build the production realtime pipeline without importing providers at module import time."""
 
+    from functools import partial
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Audio.tts_service import tts_provider_credential_scope
+    from tldw_Server_API.app.core.AuthNZ.byok_helpers import derive_trusted_credential_scope
+    from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import capture_provider_override_call_snapshot
+    from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+        PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+        ProviderCredentialRuntime,
+    )
+    from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
     from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_policy import (
+        apply_transcript_text_policy,
+        resolve_effective_stt_policy,
+    )
     from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
+    from tldw_Server_API.app.core.Usage.audio_quota import consume_daily_minutes
 
     resolved_user_id = _resolve_user_id(principal, user_id)
+    current_user = principal or SimpleNamespace(id=resolved_user_id)
+
+    async def transcribe(audio: bytes, *, sample_rate_hz: int, language: str | None) -> str:
+        """Enforce daily usage and redact before any transcript reaches the session or LLM."""
+        allowed, _remaining = await consume_daily_minutes(
+            resolved_user_id,
+            len(audio) / (2 * sample_rate_hz * 60),
+        )
+        if not allowed:
+            raise RealtimePipelineError(stage="stt", message="Realtime transcription quota exceeded")
+        policy = await resolve_effective_stt_policy(principal=principal, user_id=resolved_user_id, db=None)
+        text = await default_stt_transcribe_pcm16(audio, sample_rate_hz=sample_rate_hz, language=language)
+        return apply_transcript_text_policy(text, policy=policy, is_partial=False)
+
+    async def chat(**kwargs: Any) -> AsyncIterator[Any]:
+        """Retain one authoritative provider credential snapshot until stream cleanup."""
+
+        async def stream() -> AsyncIterator[Any]:
+            runtime_user, teams, orgs, trusted_url = derive_trusted_credential_scope(request, current_user)
+            runtime = ProviderCredentialRuntime(
+                user_id=runtime_user,
+                team_ids=teams,
+                org_ids=orgs,
+                trusted_base_url_override=trusted_url,
+                override_snapshot_resolver=capture_provider_override_call_snapshot,
+            )
+            result = None
+            try:
+                credentials = await await_owned_worker(runtime.resolve(kwargs["api_endpoint"], model=kwargs["model"]))
+                kwargs[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = credentials
+                result = await perform_chat_api_call_async(**kwargs)
+                await await_owned_worker(runtime.mark_used(credentials))
+                if hasattr(result, "__aiter__"):
+                    async for chunk in result:
+                        yield chunk
+                else:
+                    yield result
+            finally:
+                try:
+                    close = getattr(result, "aclose", None)
+                    if callable(close):
+                        await close()
+                finally:
+                    await await_owned_worker(runtime.close())
+
+        return stream()
+
     return DefaultRealtimePipeline(
-        stt_transcribe_pcm16=default_stt_transcribe_pcm16,
-        chat_call=perform_chat_api_call_async,
+        stt_transcribe_pcm16=transcribe,
+        chat_call=chat,
         tts_service_factory=lambda: get_tts_service_v2(),
         default_model=_default_realtime_model(),
         default_voice=_default_realtime_voice(),
         chat_provider_hint=_default_chat_provider_hint(),
         tts_provider_hint=_default_tts_provider_hint(),
         user_id=resolved_user_id,
+        tts_credential_scope=partial(tts_provider_credential_scope, request=request, current_user=current_user),
     )
 
 
@@ -297,6 +417,7 @@ async def _call_open_realtime_session(
     provider_hint: str | None,
     route: str,
     user_id: int | None,
+    provider_overrides: dict[str, Any] | None = None,
 ) -> Any:
     signature = inspect.signature(open_realtime_session)
     if "request" in signature.parameters:
@@ -308,6 +429,7 @@ async def _call_open_realtime_session(
                     "provider_hint": provider_hint,
                     "route": route,
                     "user_id": user_id,
+                    "provider_overrides": provider_overrides,
                 },
             )
         )
@@ -320,6 +442,7 @@ async def _call_open_realtime_session(
                     "provider_hint": provider_hint,
                     "route": route,
                     "user_id": user_id,
+                    "provider_overrides": provider_overrides,
                 },
             )
         )
@@ -347,28 +470,19 @@ def _tts_config_from_request(request: OpenAISpeechRequest, provider_hint: str | 
 
 
 async def _drain_tts_audio(session: Any, queue: asyncio.Queue[Any]) -> None:
+    """Publish audio with backpressure and report failures before completion."""
     try:
         async for chunk in session.audio_stream():
             if chunk:
                 for audio_chunk in _split_output_audio_chunk(bytes(chunk)):
                     await queue.put(RealtimePipelineAudioDelta(audio_chunk))
+        error = getattr(session, "error", None)
+        if error is not None:
+            raise error
         await queue.put(RealtimePipelineAudioDone())
-    except Exception as exc:
-        await queue.put(exc)
-
-
-async def _drain_remaining_audio_events(
-    queue: asyncio.Queue[RealtimePipelineAudioDelta | RealtimePipelineAudioDone | BaseException],
-    audio_task: asyncio.Task[None],
-) -> AsyncIterator[RealtimePipelineAudioDelta | RealtimePipelineAudioDone]:
-    while True:
-        event = await queue.get()
-        if isinstance(event, BaseException):
-            raise RealtimePipelineError(stage="tts", message="Realtime TTS audio failed", cause=event) from event
-        yield event
-        if isinstance(event, RealtimePipelineAudioDone):
-            break
-    await audio_task
+        await queue.put(None)
+    except Exception as exc:  # noqa: BLE001 - provider errors are returned through the bounded stream
+        await queue.put(RealtimePipelineError(stage="tts", message="Realtime TTS audio failed", cause=exc))
 
 
 async def _iter_text_deltas(result: Any) -> AsyncIterator[str]:

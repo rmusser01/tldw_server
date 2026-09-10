@@ -1,29 +1,30 @@
-import base64
 import asyncio
+import base64
 import importlib
-import json
 import queue
 import threading
+from collections.abc import AsyncIterator
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from tldw_Server_API.app.api.v1.router_registry import register_router_specs
 from tldw_Server_API.app.api.v1.router_groups.minimal import iter_minimal_optional_router_specs
+from tldw_Server_API.app.api.v1.router_registry import register_router_specs
+from tldw_Server_API.app.core import config as config_mod
+from tldw_Server_API.app.core.Audio.Realtime.models import RealtimeSessionConfig
 from tldw_Server_API.app.core.Audio.Realtime.pipeline import (
     RealtimePipelineAudioDelta,
     RealtimePipelineAudioDone,
+    RealtimePipelineEvent,
     RealtimePipelineTextDelta,
     RealtimePipelineTextDone,
     RealtimePipelineTranscriptDelta,
     RealtimePipelineTranscriptDone,
     RealtimePipelineTurnDone,
 )
-from tldw_Server_API.app.core import config as config_mod
 from tldw_Server_API.tests.Audio.ws_test_helpers import ws_client_without_lifespan
-
 
 pytestmark = pytest.mark.integration
 
@@ -32,7 +33,9 @@ class FakePipeline:
     async def transcribe_pcm16(self, audio: bytes, *, sample_rate_hz: int, language: str | None) -> str:  # noqa: ARG002
         return "hello realtime"
 
-    async def stream_turn(self, transcript: str, *, config):  # noqa: ANN001, ARG002
+    async def stream_turn(
+        self, transcript: str, *, config: RealtimeSessionConfig
+    ) -> AsyncIterator[RealtimePipelineEvent]:
         yield RealtimePipelineTextDelta("assistant text")
         yield RealtimePipelineTranscriptDelta("assistant transcript")
         yield RealtimePipelineAudioDelta(b"\x01\x02")
@@ -51,7 +54,9 @@ class BlockingPipeline(FakePipeline):
         self.stream_started = threading.Event()
         self.cancelled = threading.Event()
 
-    async def stream_turn(self, transcript: str, *, config):  # noqa: ANN001, ARG002
+    async def stream_turn(
+        self, transcript: str, *, config: RealtimeSessionConfig
+    ) -> AsyncIterator[RealtimePipelineEvent]:
         self.stream_started.set()
         try:
             await asyncio.Event().wait()
@@ -64,8 +69,9 @@ class BlockingPipeline(FakePipeline):
 
 @pytest.fixture(autouse=True)
 def _realtime_test_env(monkeypatch: pytest.MonkeyPatch):
-    from tldw_Server_API.app.core.AuthNZ import ip_allowlist, settings as auth_settings
     from tldw_Server_API.app.core.Audio import streaming_service
+    from tldw_Server_API.app.core.AuthNZ import ip_allowlist
+    from tldw_Server_API.app.core.AuthNZ import settings as auth_settings
 
     monkeypatch.setenv("MINIMAL_TEST_INCLUDE_AUDIO", "1")
     monkeypatch.delenv("ROUTES_DISABLE", raising=False)
@@ -149,7 +155,7 @@ def test_openai_compat_realtime_manual_turn_event_order(monkeypatch: pytest.Monk
             ws.send_json({"type": "input_audio_buffer.commit"})
             observed.extend(_recv_type(ws) for _ in range(4))
             ws.send_json({"type": "response.create"})
-            observed.extend(_recv_type(ws) for _ in range(16))
+            observed.extend(_recv_type(ws) for _ in range(14))
 
     assert observed == [
         "session.created",
@@ -166,12 +172,10 @@ def test_openai_compat_realtime_manual_turn_event_order(monkeypatch: pytest.Monk
         "response.output_text.delta",
         "response.content_part.added",
         "response.output_audio_transcript.delta",
-        "response.content_part.added",
         "response.output_audio.delta",
         "response.output_text.done",
         "response.content_part.done",
         "response.output_audio_transcript.done",
-        "response.content_part.done",
         "response.output_audio.done",
         "response.content_part.done",
         "response.output_item.done",
