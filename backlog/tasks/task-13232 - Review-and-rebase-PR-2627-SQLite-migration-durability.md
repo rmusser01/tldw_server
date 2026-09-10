@@ -4,7 +4,7 @@ title: Review and rebase PR 2627 SQLite migration durability
 status: Done
 assignee: []
 created_date: '2026-09-10 00:43'
-updated_date: '2026-09-10 04:28'
+updated_date: '2026-09-10 04:36'
 labels:
   - db
   - migrations
@@ -162,12 +162,16 @@ Independent review confirmed the public replacement return/reuse assertions dete
 2026-09-10 Qodo review on c2e85b9db6 identifies that process-control BaseException during cached close propagates before detachment. Plan: add interruption regressions for both cleanup APIs, preserving exception propagation while asserting an empty active cache and fresh replacement; move current-handle detachment into finally and simplify it to direct removal of the typed map/thread references under the existing lock. Run focused/full validation and independent review before publication.
 
 2026-09-10 interruption follow-up on c2e85b9db6: cached SQLite handle detachment now runs in finally around close/logging, before KeyboardInterrupt or SystemExit propagates. Directly pop the calling thread map/reference and clear its thread-local handle under the existing RLock; removed defensive private-state suppression and whole-map None pruning because no production assignments of None remain. Docs now guarantee detachment before process-control propagation. Extended existing close-error tests for KeyboardInterrupt/SystemExit across both public cleanup APIs: all four failed on retained active cache before the fix. The fault subclass raises only on its first close so teardown can release resources even in the red version. All ordinary diagnostics remain covered. Final focused pool/legacy suite: 37 passed; expanded 15-module suite: 258 passed, 12 PostgreSQL-unavailable skips, 4 warnings in 38.43s. Ruff across ten Python files, compilation, repository guards, whitespace and packaged-SQL equality pass. Bandit over six application modules reports zero findings. Independent review found no substantive issues. Logs: /tmp/pr2627-interruption-red.log, /tmp/pr2627-interruption-focused.log, /tmp/pr2627-interruption-full.log, /tmp/pr2627-interruption-bandit.json. Some unrelated pytest temp cleanup warnings persisted after passing tests; no manual cleanup performed. Dev remains 177d58ac6f. Await final-head Qodo and required CI before merge.
+
+2026-09-10 Qodo review on df520262c9 requests outcome-accurate naming for interrupted-close cases. Rename the shared test around detachment and name interruption IDs to state propagation without logging, preserving all assertions and production code. Verify collection/execution in the focused pool/legacy suite, lint and security before publication.
+
+2026-09-10 test-naming follow-up on df520262c9: renamed the shared regression to test_sqlite_pool_detaches_rejected_handle_after_close_failure and gave KeyboardInterrupt/SystemExit explicit propagates-without-log case IDs. Assertions and production code are unchanged. Focused pool/legacy suite: 37 passed; Ruff, compilation and whitespace pass. Fresh Bandit over unchanged application scope has zero findings. The preceding expanded 258-pass/12-PostgreSQL-unavailable-skip run still covers the exact application code and unchanged assertions. Logs: /tmp/pr2627-test-names-focused.log and /tmp/pr2627-test-names-bandit.json. Dev remains 177d58ac6f. Publish, resolve naming comment and await final-head Qodo/required CI before authorized merge.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-PR #2627 is rebased onto dev 177d58ac6f and all twenty Qodo findings through c2e85b9db6 are addressed. Cached rejected handles now detach even when close is interrupted, with process-control exceptions preserved. Atomic migration durability, native transaction contexts, original checksums, compatibility and legacy recovery remain useful. Final expanded validation: 258 passed, 12 PostgreSQL-unavailable skips; focused 37 passed, zero Bandit findings, clean lint/guards and independent review. Human Change summary preserved. Await final-head Qodo and required CI before authorized merge.
+PR #2627 is rebased onto dev 177d58ac6f and all twenty-one Qodo findings through df520262c9 are addressed. Latest follow-up clarifies interrupted-close test names only; assertions and production code are unchanged. Expanded application validation: 258 passed, 12 PostgreSQL-unavailable skips; latest focused suite: 37 passed, zero Bandit findings, clean lint/compilation. Human Change summary preserved. Await final-head Qodo and required CI before authorized merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

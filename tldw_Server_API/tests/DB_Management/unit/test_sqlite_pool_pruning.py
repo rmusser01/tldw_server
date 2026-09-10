@@ -61,12 +61,12 @@ def test_sqlite_pool_invalidation_closes_only_the_supplied_connection(
     sqlite3.OperationalError, OSError, RuntimeError, TypeError, ValueError, KeyboardInterrupt, SystemExit,
 ], ids=[
     "sqlite-close-error", "os-close-error", "runtime-close-error", "type-close-error", "value-close-error",
-    "keyboard-interrupt", "system-exit",
+    "keyboard-interrupt-propagates-without-log", "system-exit-propagates-without-log",
 ])
 @pytest.mark.parametrize("operation", ["invalidate_connection", "clear_thread_local_connection"], ids=[
     "invalidate-checkout", "clear-current-checkout",
 ])
-def test_sqlite_pool_logs_close_failure_and_detaches_rejected_handle(
+def test_sqlite_pool_detaches_rejected_handle_after_close_failure(
     sqlite_pool: SQLiteConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     close_error: type[BaseException],
