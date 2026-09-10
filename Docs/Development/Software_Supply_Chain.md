@@ -14,8 +14,12 @@ release failure.
 Implementation is not release certification: current source and image findings
 still block admission. The committed image inventory records exact candidates,
 not an approval to deploy them. Certification requires fresh passing evidence
-or narrowly scoped, human-approved exceptions; the canonical exception list
-remains empty.
+or narrowly scoped, human-approved exceptions. As of September 10, 2026 UTC,
+the canonical policy contains five approved OS applicability exceptions, owned
+by `rmusser01` and valid through September 17 UTC. These cover the exact backend
+Perl and frontend Debian zlib package records documented in the
+[activation evidence](../Evidence/TASK-13013.7.24-os-exception-activation.md).
+All other findings remain subject to the admission gate.
 
 ## Pinned supply-chain tools
 
@@ -195,6 +199,14 @@ The canonical policy is
 `.github/supply-chain/vulnerability-exceptions.json`; its schema is
 `.github/supply-chain/vulnerability-exceptions.schema.json`. The default is an
 empty exception list. Do not add an exception simply to make CI green.
+
+The five current records were explicitly approved in
+[PR #2869](https://github.com/rmusser01/tldw_server/pull/2869#issuecomment-5613359176).
+Their exact record identities and retained-report replay are recorded in
+[TASK-13013.7.24](../Evidence/TASK-13013.7.24-os-exception-activation.md).
+They do not include the conditional Chroma dispositions. Loading this policy
+on September 18, 2026 UTC or later fails until expired records are removed or
+replaced through the renewal process below.
 
 Every exception is one exact vulnerability, component, package URL, installed
 version, and severity. It requires a stable `id`, `vulnerability_id`,
