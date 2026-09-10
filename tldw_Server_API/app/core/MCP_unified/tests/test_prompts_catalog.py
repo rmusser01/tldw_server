@@ -8,14 +8,12 @@ import sys
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import DatabaseError, PromptsDatabase
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
-from tldw_Server_API.app.core.MCP_unified.modules.implementations.prompts_module import (
-    PromptsModule,
-)
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.prompts_catalog import (
     CONFIG_PROMPT_PREFIX,
     DEFAULT_PROMPT_PAGE_SIZE,
@@ -29,6 +27,9 @@ from tldw_Server_API.app.core.MCP_unified.modules.implementations.prompts_catalo
     clamp_prompt_page_size,
     decode_prompt_cursor,
     encode_prompt_cursor,
+)
+from tldw_Server_API.app.core.MCP_unified.modules.implementations.prompts_module import (
+    PromptsModule,
 )
 
 pytestmark = pytest.mark.unit
@@ -294,6 +295,116 @@ def test_formatter_preserves_assistant_messages_from_structured_prompt() -> None
             },
         },
     ]
+
+
+def _recipe_row(*, target_role: str = "user") -> dict:
+    prompt_uuid = "44444444-4444-4444-8444-444444444444"
+    return {
+        "id": 4,
+        "uuid": prompt_uuid,
+        "name": "Recipe",
+        "details": "A reusable recipe.",
+        "version": 3,
+        "keywords": ["recipe"],
+        "prompt_format": "structured",
+        "prompt_schema_version": 2,
+        "system_prompt": "" if target_role == "user" else "## Objective\n\nExplain {{topic}}.",
+        "user_prompt": "## Objective\n\nExplain {{topic}}." if target_role == "user" else "",
+        "prompt_definition": {
+            "schema_version": 2,
+            "format": "structured",
+            "definition_kind": "single_text_recipe",
+            "variables": [
+                {
+                    "name": "topic",
+                    "label": "Topic",
+                    "description": "Subject to explain",
+                    "required": True,
+                    "default_value": None,
+                    "input_type": "text",
+                }
+            ],
+            "blocks": [
+                {
+                    "id": "objective",
+                    "name": "Objective",
+                    "section_key": "objective",
+                    "role": target_role,
+                    "kind": "objective",
+                    "content": "Explain {{topic}}.",
+                    "enabled": True,
+                    "order": 10,
+                    "is_template": True,
+                }
+            ],
+            "assembly_config": {
+                "assembly_mode": "single_text",
+                "target_role": target_role,
+                "render_format": "markdown",
+                "block_separator": "\n\n",
+            },
+        },
+    }
+
+
+def test_formatter_lists_recipe_identity_and_declared_arguments() -> None:
+    formatter = MCPPromptFormatter(max_rendered_chars=10_000)
+
+    prompt = formatter.library_prompt_definition(_recipe_row())
+
+    assert prompt["arguments"] == [
+        {
+            "name": "topic",
+            "title": "Topic",
+            "description": "Subject to explain",
+            "required": True,
+        }
+    ]
+    assert prompt["_meta"]["tldw"] == {
+        "source": "library",
+        "prompt_id": 4,
+        "prompt_uuid": "44444444-4444-4444-8444-444444444444",
+        "version": 3,
+        "tags": ["recipe"],
+        "prompt_format": "structured",
+        "prompt_schema_version": 2,
+        "definition_kind": "single_text_recipe",
+        "target_role": "user",
+        "render_format": "markdown",
+    }
+
+
+@pytest.mark.parametrize("target_role", ["system", "user"])
+def test_formatter_renders_recipe_as_one_exact_protocol_message(target_role: str) -> None:
+    formatter = MCPPromptFormatter(max_rendered_chars=10_000)
+
+    result = formatter.render_library_prompt(
+        _recipe_row(target_role=target_role),
+        {"topic": "SQLite FTS"},
+    )
+
+    assert result["messages"] == [
+        {
+            "role": "user",
+            "content": {
+                "type": "text",
+                "text": "## Objective\n\nExplain SQLite FTS.",
+            },
+        }
+    ]
+    assert result["_meta"]["tldw"]["target_role"] == target_role
+
+
+def test_formatter_rejects_recipe_runtime_values_without_echoing_content() -> None:
+    row = _recipe_row()
+    row["prompt_definition"]["runtime_values"] = {"topic": "PRIVATE_RECIPE_VALUE"}
+    formatter = MCPPromptFormatter(max_rendered_chars=10_000)
+
+    with pytest.raises(PromptCatalogError) as excinfo:
+        formatter.render_library_prompt(row, {})
+
+    assert excinfo.value.code == "invalid_prompt_definition"
+    assert "PRIVATE_RECIPE_VALUE" not in str(excinfo.value)
 
 
 def test_formatter_rejects_non_string_arguments() -> None:

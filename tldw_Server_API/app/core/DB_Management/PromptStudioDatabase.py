@@ -15,8 +15,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional, Union
 
-from pydantic import ValidationError
-
 try:  # psycopg v3 preferred; fall back to psycopg2 if installed
     from psycopg import sql as psycopg_sql  # type: ignore
 except ImportError:  # pragma: no cover
@@ -33,7 +31,6 @@ from ..Prompt_Management.optimization_model_config import (
 from ..Prompt_Management.structured_prompts import (
     PromptDefinition,
     render_legacy_snapshot,
-    validate_prompt_definition,
 )
 from .backends.base import (
     BackendType,
@@ -53,6 +50,10 @@ from .backends.query_utils import (
 
 # Local imports
 from .Prompts_DB import ConflictError, DatabaseError, InputError, PromptsDatabase, SchemaError
+from .prompts_db_helpers import (
+    parse_stored_prompt_definition,
+    prepare_recipe_storage_fields,
+)
 
 _PROMPT_STUDIO_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -208,19 +209,33 @@ def _prepare_prompt_record_fields(
             raise InputError("Structured prompts require prompt_definition.")  # noqa: TRY003
 
         try:
-            definition = PromptDefinition.model_validate(effective_definition)
-        except ValidationError as exc:
-            raise InputError(f"Invalid prompt_definition: {exc}") from exc  # noqa: TRY003
-
-        issues = validate_prompt_definition(definition)
-        if issues:
-            raise InputError(issues[0].message)  # noqa: TRY003
+            definition = parse_stored_prompt_definition(
+                effective_definition,
+                schema_version=effective_schema_version,
+            )
+        except ValueError as exc:
+            raise InputError(str(exc)) from exc  # noqa: TRY003
 
         definition_schema_version = int(definition.schema_version)
         if int(effective_schema_version) != definition_schema_version:
             raise InputError(
                 "prompt_schema_version must match prompt_definition.schema_version."
             )  # noqa: TRY003
+
+        if not isinstance(definition, PromptDefinition):
+            try:
+                return {
+                    "prompt_format": "structured",
+                    **prepare_recipe_storage_fields(
+                        "structured",
+                        definition_schema_version,
+                        definition,
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                    ),
+                }
+            except ValueError as exc:
+                raise InputError(str(exc)) from exc  # noqa: TRY003
 
         derived_system_prompt, derived_user_prompt = _render_definition_legacy_fields(definition)
         return {
@@ -2584,7 +2599,9 @@ class _BackendPromptStudioDatabase(BackendPromptStudioDatabaseBase):
 
         query_template = """
             SELECT id, uuid, version_number, name, change_description,
-                   created_at, parent_version_id
+                   created_at, parent_version_id, prompt_format,
+                   prompt_schema_version, prompt_definition,
+                   system_prompt, user_prompt
             FROM prompt_studio_prompts
             WHERE {where}
             ORDER BY version_number DESC
@@ -6502,7 +6519,9 @@ class _SQLitePromptStudioDatabase(PromptsDatabase):
             cursor.execute(
                 """
                 SELECT id, uuid, version_number, name, change_description,
-                       created_at, parent_version_id
+                       created_at, parent_version_id, prompt_format,
+                       prompt_schema_version, prompt_definition,
+                       system_prompt, user_prompt
                 FROM prompt_studio_prompts
                 WHERE project_id = ? AND name = ? {deleted_clause}
                 ORDER BY version_number DESC

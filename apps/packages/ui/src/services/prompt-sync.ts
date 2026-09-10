@@ -29,10 +29,8 @@ import {
 } from '@/services/prompt-studio'
 import type { ApiSendResponse } from '@/services/api-send'
 import { unwrapApiResponseData } from '@/services/response-envelope'
-import {
-  getPromptStudioDefaults,
-  setPromptStudioDefaults
-} from '@/services/prompt-studio-settings'
+import { getPromptStudioDefaults, setPromptStudioDefaults } from '@/services/prompt-studio-settings'
+import { parseStructuredPromptDefinitionForTransport } from '@/services/structured-prompt-transport'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -65,6 +63,7 @@ type PromptFormat = 'legacy' | 'structured'
 type ComparablePromptPayload = {
   promptFormat: PromptFormat
   promptSchemaVersion: number | null
+  definitionKind: string | null
   promptDefinition: Record<string, any> | null
   systemPrompt: string
   userPrompt: string
@@ -93,12 +92,14 @@ const toFiniteNumberOrNull = (value: unknown): number | null =>
   typeof value === 'number' && Number.isFinite(value) ? value : null
 const toPromptFormat = (value: unknown): PromptFormat =>
   value === 'structured' ? 'structured' : 'legacy'
-const toRecordOrNull = (value: unknown): Record<string, any> | null =>
-  value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, any>)
-    : null
 const toArrayOrNull = <T>(value: unknown): T[] | null =>
   Array.isArray(value) ? (value as T[]) : null
+
+const parseDefinitionForFormat = (
+  value: unknown,
+  promptFormat: PromptFormat
+): Record<string, any> | null =>
+  promptFormat === 'structured' ? parseStructuredPromptDefinitionForTransport(value) : null
 
 const getLocalPromptTextsForConflict = (
   local: LocalPrompt
@@ -108,10 +109,8 @@ const getLocalPromptTextsForConflict = (
   const contentFallback = toText(local.content)
 
   return {
-    systemPrompt:
-      explicitSystem || (local.is_system ? contentFallback : ''),
-    userPrompt:
-      explicitUser || (!local.is_system ? contentFallback : '')
+    systemPrompt: explicitSystem || (local.is_system ? contentFallback : ''),
+    userPrompt: explicitUser || (!local.is_system ? contentFallback : '')
   }
 }
 
@@ -149,14 +148,18 @@ const promptPayloadHash = (payload: ComparablePromptPayload): string => {
   return hash.toString(16).padStart(8, '0')
 }
 
-const getLocalPromptComparablePayload = (
-  local: LocalPrompt
-): ComparablePromptPayload => {
+const getLocalPromptComparablePayload = (local: LocalPrompt): ComparablePromptPayload => {
   const localText = getLocalPromptTextsForConflict(local)
+  const promptFormat = toPromptFormat(local.promptFormat)
+  const promptDefinition = parseDefinitionForFormat(local.structuredPromptDefinition, promptFormat)
   return {
-    promptFormat: toPromptFormat(local.promptFormat),
+    promptFormat,
     promptSchemaVersion: toFiniteNumberOrNull(local.promptSchemaVersion),
-    promptDefinition: toRecordOrNull(local.structuredPromptDefinition),
+    definitionKind:
+      typeof promptDefinition?.definition_kind === 'string'
+        ? promptDefinition.definition_kind
+        : null,
+    promptDefinition,
     systemPrompt: localText.systemPrompt,
     userPrompt: localText.userPrompt,
     fewShotExamples: toArrayOrNull<FewShotExample>(local.fewShotExamples),
@@ -164,14 +167,18 @@ const getLocalPromptComparablePayload = (
   }
 }
 
-const getServerPromptComparablePayload = (
-  server: ServerPrompt
-): ComparablePromptPayload => {
+const getServerPromptComparablePayload = (server: ServerPrompt): ComparablePromptPayload => {
   const serverText = getServerPromptTextsForConflict(server)
+  const promptFormat = toPromptFormat(server.prompt_format)
+  const promptDefinition = parseDefinitionForFormat(server.prompt_definition, promptFormat)
   return {
-    promptFormat: toPromptFormat(server.prompt_format),
+    promptFormat,
     promptSchemaVersion: toFiniteNumberOrNull(server.prompt_schema_version),
-    promptDefinition: toRecordOrNull(server.prompt_definition),
+    definitionKind:
+      typeof promptDefinition?.definition_kind === 'string'
+        ? promptDefinition.definition_kind
+        : null,
+    promptDefinition,
     systemPrompt: serverText.systemPrompt,
     userPrompt: serverText.userPrompt,
     fewShotExamples: toArrayOrNull<FewShotExample>(server.few_shot_examples),
@@ -179,10 +186,7 @@ const getServerPromptComparablePayload = (
   }
 }
 
-const hasPromptContentConflict = (
-  local: LocalPrompt,
-  server: ServerPrompt
-): boolean => {
+const hasPromptContentConflict = (local: LocalPrompt, server: ServerPrompt): boolean => {
   const localPayload = getLocalPromptComparablePayload(local)
   const serverPayload = getServerPromptComparablePayload(server)
   return promptPayloadHash(localPayload) !== promptPayloadHash(serverPayload)
@@ -195,10 +199,7 @@ const hasPromptContentConflict = (
 /**
  * Convert a local prompt to server create payload.
  */
-function localToServerPayload(
-  local: LocalPrompt,
-  projectId: number
-): PromptCreatePayload {
+function localToServerPayload(local: LocalPrompt, projectId: number): PromptCreatePayload {
   const promptFormat = toPromptFormat(local.promptFormat)
   return {
     project_id: projectId,
@@ -207,12 +208,10 @@ function localToServerPayload(
     user_prompt: local.user_prompt,
     prompt_format: promptFormat,
     prompt_schema_version:
-      promptFormat === 'structured'
-        ? toFiniteNumberOrNull(local.promptSchemaVersion)
-        : null,
+      promptFormat === 'structured' ? toFiniteNumberOrNull(local.promptSchemaVersion) : null,
     prompt_definition:
       promptFormat === 'structured'
-        ? toRecordOrNull(local.structuredPromptDefinition)
+        ? parseDefinitionForFormat(local.structuredPromptDefinition, promptFormat)
         : null,
     few_shot_examples: local.fewShotExamples,
     modules_config: local.modulesConfig,
@@ -231,12 +230,10 @@ function localToServerUpdatePayload(local: LocalPrompt): PromptUpdatePayload {
     user_prompt: local.user_prompt,
     prompt_format: promptFormat,
     prompt_schema_version:
-      promptFormat === 'structured'
-        ? toFiniteNumberOrNull(local.promptSchemaVersion)
-        : null,
+      promptFormat === 'structured' ? toFiniteNumberOrNull(local.promptSchemaVersion) : null,
     prompt_definition:
       promptFormat === 'structured'
-        ? toRecordOrNull(local.structuredPromptDefinition)
+        ? parseDefinitionForFormat(local.structuredPromptDefinition, promptFormat)
         : null,
     few_shot_examples: local.fewShotExamples,
     modules_config: local.modulesConfig,
@@ -248,6 +245,7 @@ function localToServerUpdatePayload(local: LocalPrompt): PromptUpdatePayload {
  * Convert server prompt to local prompt fields.
  */
 function serverToLocalFields(server: ServerPrompt): Partial<LocalPrompt> {
+  const promptFormat = toPromptFormat(server.prompt_format)
   return {
     serverId: server.id,
     studioProjectId: server.project_id,
@@ -255,9 +253,9 @@ function serverToLocalFields(server: ServerPrompt): Partial<LocalPrompt> {
     name: server.name,
     system_prompt: server.system_prompt,
     user_prompt: server.user_prompt,
-    promptFormat: toPromptFormat(server.prompt_format),
+    promptFormat,
     promptSchemaVersion: toFiniteNumberOrNull(server.prompt_schema_version),
-    structuredPromptDefinition: toRecordOrNull(server.prompt_definition),
+    structuredPromptDefinition: parseDefinitionForFormat(server.prompt_definition, promptFormat),
     syncPayloadVersion: CURRENT_PROMPT_SYNC_PAYLOAD_VERSION,
     fewShotExamples: toArrayOrNull<FewShotExample>(server.few_shot_examples),
     modulesConfig: toArrayOrNull<PromptModule>(server.modules_config),
@@ -275,6 +273,7 @@ function serverToLocalFields(server: ServerPrompt): Partial<LocalPrompt> {
  */
 function serverToNewLocalPrompt(server: ServerPrompt): LocalPrompt {
   const now = Date.now()
+  const promptFormat = toPromptFormat(server.prompt_format)
   return {
     id: generateID(),
     title: server.name,
@@ -283,9 +282,9 @@ function serverToNewLocalPrompt(server: ServerPrompt): LocalPrompt {
     is_system: !!server.system_prompt,
     system_prompt: server.system_prompt,
     user_prompt: server.user_prompt,
-    promptFormat: toPromptFormat(server.prompt_format),
+    promptFormat,
     promptSchemaVersion: toFiniteNumberOrNull(server.prompt_schema_version),
-    structuredPromptDefinition: toRecordOrNull(server.prompt_definition),
+    structuredPromptDefinition: parseDefinitionForFormat(server.prompt_definition, promptFormat),
     syncPayloadVersion: CURRENT_PROMPT_SYNC_PAYLOAD_VERSION,
     createdAt: now,
     updatedAt: now,
@@ -329,9 +328,7 @@ export async function resolveAutoSyncProjectId(
   }
 
   const projects = await getAvailableProjects()
-  const firstProjectId = projects.find((project) =>
-    isValidProjectId(project.id)
-  )?.id
+  const firstProjectId = projects.find((project) => isValidProjectId(project.id))?.id
 
   if (isValidProjectId(firstProjectId)) {
     await setPromptStudioDefaults({ defaultProjectId: firstProjectId })
@@ -376,9 +373,7 @@ export async function autoSyncPrompt(
     }
   }
 
-  const projectId = await resolveAutoSyncProjectId(
-    preferredProjectId ?? local.studioProjectId
-  )
+  const projectId = await resolveAutoSyncProjectId(preferredProjectId ?? local.studioProjectId)
 
   if (!isValidProjectId(projectId)) {
     await db.prompts.update(localId, {
@@ -416,10 +411,7 @@ export async function autoSyncPrompt(
  * @param projectId - Target Prompt Studio project ID
  * @returns Sync result
  */
-export async function pushToStudio(
-  localId: string,
-  projectId: number
-): Promise<SyncResult> {
+export async function pushToStudio(localId: string, projectId: number): Promise<SyncResult> {
   try {
     const local = await db.prompts.get(localId)
     if (!local) {
@@ -575,10 +567,7 @@ export async function pullFromStudio(
  * @param serverId - Server prompt ID
  * @returns Sync result
  */
-export async function linkPrompts(
-  localId: string,
-  serverId: number
-): Promise<SyncResult> {
+export async function linkPrompts(localId: string, serverId: number): Promise<SyncResult> {
   try {
     const local = await db.prompts.get(localId)
     if (!local) {
@@ -603,6 +592,8 @@ export async function linkPrompts(
         syncStatus: 'local'
       }
     }
+
+    getServerPromptComparablePayload(serverPrompt)
 
     // Link by updating local with server reference
     await db.prompts.update(localId, {
@@ -742,6 +733,7 @@ export async function getConflictInfo(localId: string): Promise<ConflictInfo | n
     const response = await getServerPrompt(local.serverId)
     const serverPrompt = unwrapResponseData<ServerPrompt>(response)
     if (!serverPrompt) return null
+    getServerPromptComparablePayload(serverPrompt)
 
     return {
       localPrompt: local,
@@ -809,15 +801,17 @@ export async function resolveConflict(
 /**
  * Get all prompts with their sync status.
  */
-export async function getAllPromptsWithSyncStatus(): Promise<Array<{
-  prompt: LocalPrompt
-  syncStatus: PromptSyncStatus
-  isSynced: boolean
-}>> {
+export async function getAllPromptsWithSyncStatus(): Promise<
+  Array<{
+    prompt: LocalPrompt
+    syncStatus: PromptSyncStatus
+    isSynced: boolean
+  }>
+> {
   const dbInstance = new PageAssistDatabase()
   const prompts = await dbInstance.getAllPrompts()
 
-  return prompts.map(prompt => ({
+  return prompts.map((prompt) => ({
     prompt,
     syncStatus: prompt.syncStatus || 'local',
     isSynced: prompt.syncStatus === 'synced'
@@ -831,7 +825,7 @@ export async function getPromptsByProject(projectId: number): Promise<LocalPromp
   return await db.prompts
     .where('studioProjectId')
     .equals(projectId)
-    .filter(p => !p.deletedAt)
+    .filter((p) => !p.deletedAt)
     .toArray()
 }
 

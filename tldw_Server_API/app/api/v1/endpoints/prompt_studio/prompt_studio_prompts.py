@@ -69,6 +69,9 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     mark_provider_credential_used,
 )
 from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
+from tldw_Server_API.app.core.DB_Management.prompts_db_helpers import (
+    parse_stored_prompt_definition,
+)
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import (
     ConflictError,
     DatabaseError,
@@ -83,12 +86,16 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_re
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.Prompt_Management.structured_prompts import (
     PromptDefinition,
+    SingleTextRecipeDefinitionV2,
     StructuredPromptAssemblyError,
     assemble_prompt_definition,
     convert_legacy_prompt_to_definition,
     extract_legacy_prompt_variables,
     render_legacy_snapshot,
-    validate_prompt_definition,
+)
+from tldw_Server_API.app.core.Prompt_Management.structured_prompts.single_text_renderer import (
+    SingleTextRecipeRenderResult,
+    render_single_text_recipe_template,
 )
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 
@@ -130,7 +137,12 @@ def _credential_http_exception(exc: ByokResolutionError) -> HTTPException:
     )
 
 
-def _render_definition_legacy_fields(definition: PromptDefinition) -> tuple[str, str]:
+def _render_definition_legacy_fields(
+    definition: PromptDefinition | SingleTextRecipeDefinitionV2,
+) -> tuple[str, str]:
+    if isinstance(definition, SingleTextRecipeDefinitionV2):
+        legacy = render_single_text_recipe_template(definition).legacy
+        return legacy.system_prompt, legacy.user_prompt
     messages = [
         {"role": block.role, "content": block.content}
         for block in sorted(definition.blocks, key=lambda item: item.order)
@@ -150,15 +162,18 @@ def _coerce_structured_definition(
     *,
     prompt_schema_version: int | None,
     prompt_definition_payload: dict[str, Any] | None,
-) -> tuple[PromptDefinition, int]:
+) -> tuple[PromptDefinition | SingleTextRecipeDefinitionV2, int]:
     if prompt_schema_version is None:
         raise InputError("Structured prompts require prompt_schema_version.")
     if not isinstance(prompt_definition_payload, dict):
         raise InputError("Structured prompts require prompt_definition.")
-    definition = PromptDefinition.model_validate(prompt_definition_payload)
-    issues = validate_prompt_definition(definition)
-    if issues:
-        raise InputError(issues[0].message)
+    try:
+        definition = parse_stored_prompt_definition(
+            prompt_definition_payload,
+            schema_version=prompt_schema_version,
+        )
+    except ValueError as exc:
+        raise InputError(str(exc)) from exc
 
     definition_schema_version = int(definition.schema_version)
     if int(prompt_schema_version) != definition_schema_version:
@@ -230,7 +245,9 @@ def _validate_total_message_length(
     )
 
 
-def _validation_variables(definition: PromptDefinition) -> dict[str, Any]:
+def _validation_variables(
+    definition: PromptDefinition | SingleTextRecipeDefinitionV2,
+) -> dict[str, Any]:
     variables: dict[str, Any] = {}
     for variable in definition.variables:
         # Preserve stored defaults during save-time validation so oversized
@@ -267,12 +284,21 @@ def _get_signature_for_project(
 
 def _validate_prompt_content(
     *,
-    definition: PromptDefinition,
+    definition: PromptDefinition | SingleTextRecipeDefinitionV2,
     extras: dict[str, Any],
     security_config: SecurityConfig,
     signature: dict[str, Any] | None = None,
 ) -> None:
     from tldw_Server_API.app.core.Prompt_Management.prompt_studio.prompt_executor import PromptExecutor
+
+    if isinstance(definition, SingleTextRecipeDefinitionV2):
+        rendered = render_single_text_recipe_template(definition)
+        _validate_prompt_lengths(
+            system_prompt=rendered.legacy.system_prompt,
+            user_prompt=rendered.legacy.user_prompt,
+            security_config=security_config,
+        )
+        return
 
     assembly = assemble_prompt_definition(
         definition,
@@ -303,7 +329,7 @@ def _coerce_preview_definition(
     prompt_definition_payload: dict[str, Any] | None,
     system_prompt: str | None,
     user_prompt: str | None,
-) -> tuple[PromptDefinition, str, int | None]:
+) -> tuple[PromptDefinition | SingleTextRecipeDefinitionV2, str, int | None]:
     if prompt_format == "structured":
         definition, definition_schema_version = _coerce_structured_definition(
             prompt_schema_version=prompt_schema_version,
@@ -439,8 +465,9 @@ async def create_prompt(
             "modules_config": modules_payload or [],
         }
         if normalized_prompt_fields["prompt_format"] == "structured":
-            definition = PromptDefinition.model_validate(
-                normalized_prompt_fields["prompt_definition"]
+            definition = parse_stored_prompt_definition(
+                normalized_prompt_fields["prompt_definition"],
+                schema_version=normalized_prompt_fields["prompt_schema_version"],
             )
         else:
             definition = convert_legacy_prompt_to_definition(
@@ -842,17 +869,21 @@ async def preview_prompt(
             "modules_config": [model_dump_compat(module) for module in (payload.modules_config or [])],
         }
         assembly = assemble_prompt_definition(definition, payload.variables, extras=extras)
-        messages = assembly.messages
-
-        signature = _get_signature_for_project(
-            db=db,
-            project_id=payload.project_id,
-            signature_id=payload.signature_id,
-        )
-        if signature is not None:
-            messages = PromptExecutor(db)._apply_signature_to_messages(messages, signature)
-
-        legacy = render_legacy_snapshot(messages, definition)
+        if isinstance(assembly, SingleTextRecipeRenderResult):
+            messages: list[dict[str, str]] = []
+            legacy = assembly.legacy
+            rendered_text: str | None = assembly.rendered_text
+        else:
+            messages = assembly.messages
+            signature = _get_signature_for_project(
+                db=db,
+                project_id=payload.project_id,
+                signature_id=payload.signature_id,
+            )
+            if signature is not None:
+                messages = PromptExecutor(db)._apply_signature_to_messages(messages, signature)
+            legacy = render_legacy_snapshot(messages, definition)
+            rendered_text = None
         _validate_prompt_lengths(
             system_prompt=legacy.system_prompt,
             user_prompt=legacy.user_prompt,
@@ -862,10 +893,12 @@ async def preview_prompt(
             messages=messages,
             security_config=security_config,
         )
-        _validate_total_message_length(messages=messages)
+        if messages:
+            _validate_total_message_length(messages=messages)
         preview_data = StructuredPromptPreviewResponse(
             prompt_format=prompt_format,
             prompt_schema_version=prompt_schema_version,
+            rendered_text=rendered_text,
             assembled_messages=messages,
             legacy_system_prompt=legacy.system_prompt,
             legacy_user_prompt=legacy.user_prompt,
@@ -1080,8 +1113,9 @@ async def update_prompt(
             "modules_config": modules_payload or [],
         }
         if normalized_prompt_fields["prompt_format"] == "structured":
-            definition = PromptDefinition.model_validate(
-                normalized_prompt_fields["prompt_definition"]
+            definition = parse_stored_prompt_definition(
+                normalized_prompt_fields["prompt_definition"],
+                schema_version=normalized_prompt_fields["prompt_schema_version"],
             )
         else:
             definition = convert_legacy_prompt_to_definition(

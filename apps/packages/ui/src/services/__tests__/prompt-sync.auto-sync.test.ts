@@ -68,6 +68,32 @@ vi.mock("@/db/dexie/helpers", () => ({
 
 const importPromptSync = async () => import("@/services/prompt-sync")
 
+const makeRecipeDefinition = () => ({
+  schema_version: 2 as const,
+  format: "structured" as const,
+  definition_kind: "single_text_recipe" as const,
+  variables: [],
+  blocks: [
+    {
+      id: "objective",
+      name: "Objective",
+      section_key: "objective",
+      role: "user" as const,
+      kind: "objective",
+      content: "Explain the task.",
+      enabled: true,
+      order: 10,
+      is_template: false
+    }
+  ],
+  assembly_config: {
+    assembly_mode: "single_text" as const,
+    target_role: "user" as const,
+    render_format: "freeform" as const,
+    block_separator: "\n\n"
+  }
+})
+
 describe("prompt-sync auto-sync defaults", () => {
   beforeEach(() => {
     state.defaults = {
@@ -90,12 +116,16 @@ describe("prompt-sync auto-sync defaults", () => {
     mocks.getPromptStudioDefaults.mockImplementation(async () => ({
       ...state.defaults
     }))
-    mocks.setPromptStudioDefaults.mockImplementation(async (updates: Record<string, unknown>) => {
-      state.defaults = { ...state.defaults, ...updates }
-      return { ...state.defaults }
-    })
+    mocks.setPromptStudioDefaults.mockImplementation(
+      async (updates: Record<string, unknown>) => {
+        state.defaults = { ...state.defaults, ...updates }
+        return { ...state.defaults }
+      }
+    )
     mocks.listProjects.mockResolvedValue({ data: { data: [] } })
-    mocks.createProject.mockResolvedValue({ data: { data: { id: 17, name: "Workspace Prompts" } } })
+    mocks.createProject.mockResolvedValue({
+      data: { data: { id: 17, name: "Workspace Prompts" } }
+    })
     mocks.createPrompt.mockResolvedValue({
       data: {
         data: {
@@ -109,12 +139,16 @@ describe("prompt-sync auto-sync defaults", () => {
         }
       }
     })
-    mocks.promptGet.mockImplementation(async (id: string) => state.prompts.get(id))
-    mocks.promptUpdate.mockImplementation(async (id: string, updates: Record<string, unknown>) => {
-      const current = state.prompts.get(id)
-      if (!current) return
-      state.prompts.set(id, { ...current, ...updates })
-    })
+    mocks.promptGet.mockImplementation(async (id: string) =>
+      state.prompts.get(id)
+    )
+    mocks.promptUpdate.mockImplementation(
+      async (id: string, updates: Record<string, unknown>) => {
+        const current = state.prompts.get(id)
+        if (!current) return
+        state.prompts.set(id, { ...current, ...updates })
+      }
+    )
     mocks.promptWhere.mockImplementation((field: string) => ({
       equals: (value: unknown) => ({
         first: async () => {
@@ -384,6 +418,69 @@ describe("prompt-sync auto-sync defaults", () => {
       expect.objectContaining({
         serverId: 199,
         syncStatus: "synced"
+      })
+    )
+  })
+
+  it("resolveConflict keep_both preserves recipe identity in the new server copy", async () => {
+    const definition = makeRecipeDefinition()
+    state.prompts.set("recipe-keep-both", {
+      id: "recipe-keep-both",
+      title: "Recipe Keep Both",
+      name: "Recipe Keep Both",
+      content: "Explain the task.",
+      is_system: false,
+      system_prompt: "",
+      user_prompt: "Explain the task.",
+      promptFormat: "structured",
+      promptSchemaVersion: 2,
+      structuredPromptDefinition: definition,
+      createdAt: 1,
+      updatedAt: 12,
+      serverId: 299,
+      studioProjectId: 17,
+      syncStatus: "conflict"
+    })
+    mocks.createPrompt.mockResolvedValue({
+      data: {
+        data: {
+          id: 399,
+          project_id: 17,
+          name: "Recipe Keep Both",
+          system_prompt: "",
+          user_prompt: "Explain the task.",
+          prompt_format: "structured",
+          prompt_schema_version: 2,
+          prompt_definition: definition,
+          version_number: 1,
+          updated_at: "2026-02-17T10:15:00Z"
+        }
+      }
+    })
+
+    const { resolveConflict } = await importPromptSync()
+    const result = await resolveConflict("recipe-keep-both", "keep_both")
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        success: true,
+        serverId: 399,
+        syncStatus: "synced"
+      })
+    )
+    expect(mocks.createPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt_format: "structured",
+        prompt_schema_version: 2,
+        prompt_definition: definition
+      })
+    )
+    expect(state.prompts.get("recipe-keep-both")).toEqual(
+      expect.objectContaining({
+        serverId: 399,
+        promptSchemaVersion: 2,
+        structuredPromptDefinition: definition,
+        syncPayloadVersion: 1
       })
     )
   })

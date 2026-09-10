@@ -2,33 +2,76 @@
 # Description:
 #
 # Imports
-import pytest
-from pathlib import Path
 import os
+
+import pytest
+
+from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
+from tldw_Server_API.app.core.DB_Management.prompts_db_helpers import (
+    parse_stored_prompt_definition,
+)
 
 #
 # Local Imports
 from tldw_Server_API.app.core.Prompt_Management.Prompts_Interop import (
-    initialize_interop,
-    shutdown_interop,
-    get_db_instance,
-    is_initialized,
-    add_keyword as interop_add_keyword,
-    add_prompt as interop_add_prompt,
-    fetch_prompt_details as interop_fetch_prompt_details,
+    InputError,
+    PromptsInteropService,
     # Import standalone wrappers
     add_or_update_prompt_interop,
     export_prompts_formatted_interop,
-    DatabaseError,
-    InputError,
+    get_db_instance,
+    initialize_interop,
+    is_initialized,
+    shutdown_interop,
 )
-from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
+from tldw_Server_API.app.core.Prompt_Management.Prompts_Interop import (
+    add_prompt as interop_add_prompt,
+)
+from tldw_Server_API.app.core.Prompt_Management.Prompts_Interop import (
+    fetch_prompt_details as interop_fetch_prompt_details,
+)
 
 #
 #######################################################################################################################
 #
 # Functions:
 TEST_INTEROP_CLIENT_ID = "test_interop_client"
+
+
+def _make_recipe_definition() -> dict:
+    return {
+        "schema_version": 2,
+        "format": "structured",
+        "definition_kind": "single_text_recipe",
+        "variables": [
+            {
+                "name": "topic",
+                "label": "Topic",
+                "required": True,
+                "default_value": None,
+                "input_type": "text",
+            }
+        ],
+        "blocks": [
+            {
+                "id": "objective",
+                "name": "Objective",
+                "section_key": "objective",
+                "role": "user",
+                "kind": "objective",
+                "content": "Explain {{topic}}.",
+                "enabled": True,
+                "order": 10,
+                "is_template": True,
+            }
+        ],
+        "assembly_config": {
+            "assembly_mode": "single_text",
+            "target_role": "user",
+            "render_format": "markdown",
+            "block_separator": "\n\n",
+        },
+    }
 
 
 @pytest.fixture(scope="function")  # function scope to ensure clean init/shutdown for each test
@@ -132,6 +175,143 @@ def test_interop_add_prompt_passes_structured_fields_and_keywords(interop_manage
     assert "structured_kw" in details["keywords"]
 
 
+def test_interop_add_prompt_preserves_recipe_identity(interop_manager):
+    definition = _make_recipe_definition()
+    canonical_definition = parse_stored_prompt_definition(definition).model_dump()
+
+    p_id, p_uuid, msg = interop_add_prompt(
+        name="Interop Recipe",
+        author="Interop",
+        details="Recipe via global instance",
+        prompt_format="structured",
+        prompt_schema_version=2,
+        prompt_definition=definition,
+        keywords=["recipe"],
+    )
+
+    assert p_id is not None
+    assert "added" in msg
+    details = interop_fetch_prompt_details(p_uuid)
+    assert details is not None
+    assert details["prompt_format"] == "structured"
+    assert details["prompt_schema_version"] == 2
+    assert details["prompt_definition"] == canonical_definition
+    assert details["user_prompt"] == "## Objective\n\nExplain {{topic}}."
+
+
+def test_interop_json_export_import_round_trip_preserves_recipe_identity(tmp_path):
+    source = PromptsInteropService(str(tmp_path / "source"), "interop-source")
+    destination = PromptsInteropService(str(tmp_path / "destination"), "interop-destination")
+    definition = _make_recipe_definition()
+    canonical_definition = parse_stored_prompt_definition(definition).model_dump()
+    try:
+        prompt_id = source.create_prompt(
+            name="Portable Recipe",
+            content="Recipe details",
+            author="Interop",
+            keywords=["recipe"],
+            prompt_format="structured",
+            prompt_schema_version=2,
+            prompt_definition=definition,
+        )
+
+        exported = source.bulk_export(prompt_ids=[prompt_id])
+        assert exported["version"] == "1.0"
+        assert exported["prompts"] == [
+            {
+                "name": "Portable Recipe",
+                "content": "Recipe details",
+                "author": "Interop",
+                "keywords": ["recipe"],
+                "prompt_format": "structured",
+                "prompt_schema_version": 2,
+                "prompt_definition": canonical_definition,
+                "system_prompt": "",
+                "user_prompt": "## Objective\n\nExplain {{topic}}.",
+            }
+        ]
+        assert "runtime_values" not in source.export_prompts_json(prompt_ids=[prompt_id])
+
+        result = destination.import_prompts(exported)
+        imported = destination.get_prompt(result["prompt_ids"][0])
+        assert imported["prompt_format"] == "structured"
+        assert imported["prompt_schema_version"] == 2
+        assert imported["prompt_definition"] == canonical_definition
+        assert imported["user_prompt"] == "## Objective\n\nExplain {{topic}}."
+    finally:
+        source.close()
+        destination.close()
+
+
+def test_interop_json_import_rejects_runtime_values_without_partial_write(tmp_path):
+    service = PromptsInteropService(str(tmp_path / "guard"), "interop-guard")
+    unsafe_definition = _make_recipe_definition()
+    unsafe_definition["runtime_values"] = {"topic": "PRIVATE_VALUE"}
+    try:
+        with pytest.raises((InputError, ValueError), match="invalid_recipe_runtime_values"):
+            service.import_prompts(
+                {
+                    "version": "1.0",
+                    "prompts": [
+                        {
+                            "name": "Unsafe Recipe",
+                            "content": "Recipe details",
+                            "author": "Interop",
+                            "keywords": ["recipe"],
+                            "prompt_format": "structured",
+                            "prompt_schema_version": 2,
+                            "prompt_definition": unsafe_definition,
+                            "system_prompt": "",
+                            "user_prompt": "PRIVATE_VALUE",
+                        }
+                    ],
+                }
+            )
+
+        assert service.list_prompts() == []
+    finally:
+        service.close()
+
+
+def test_interop_json_import_rejects_recipe_without_identity_metadata(tmp_path):
+    service = PromptsInteropService(str(tmp_path / "missing-identity"), "interop-identity")
+    try:
+        with pytest.raises(ValueError, match="invalid_recipe_prompt_format"):
+            service.import_prompts(
+                {
+                    "version": "1.0",
+                    "prompts": [
+                        {
+                            "name": "Unlabelled Recipe",
+                            "content": "Recipe details",
+                            "author": "Interop",
+                            "keywords": ["recipe"],
+                            "prompt_definition": _make_recipe_definition(),
+                        }
+                    ],
+                }
+            )
+
+        assert service.list_prompts() == []
+    finally:
+        service.close()
+
+
+@pytest.mark.parametrize("export_format", ["csv", "markdown"])
+def test_interop_lossy_formats_reject_recipe_export(interop_manager, export_format):
+    interop_add_prompt(
+        name="Non-lossy Recipe",
+        author="Interop",
+        details="Must retain schema identity",
+        prompt_format="structured",
+        prompt_schema_version=2,
+        prompt_definition=_make_recipe_definition(),
+    )
+
+    with pytest.raises(InputError, match="single_text_recipe_export_requires_json"):
+        export_prompts_formatted_interop(export_format=export_format)
+
+
 # --- Testing standalone wrapper functions from interop ---
 # These take a db_instance, so we need to provide one.
 # For these, the interop's global instance isn't directly used by the function itself,
@@ -159,7 +339,7 @@ def test_interop_standalone_export_formatted(interop_manager):
     assert "Successfully exported" in status_msg
     assert file_path_str != "None"
     if os.path.exists(file_path_str):  # file_path_str is temp file path
-        with open(file_path_str, "r") as f:
+        with open(file_path_str) as f:
             assert "Export Me Interop" in f.read()
         os.remove(file_path_str)
     else:

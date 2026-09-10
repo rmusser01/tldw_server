@@ -2912,7 +2912,13 @@ def export_prompts_formatted(db_instance: PromptsDatabase,
 
     # --- Fetch Prompts Data ---
     # Build base query parts
-    select_fields = ["p.id", "p.name", "p.uuid"] # Always include id, name, uuid
+    select_fields = [
+        "p.id",
+        "p.name",
+        "p.uuid",
+        "p.prompt_format",
+        "p.prompt_schema_version",
+    ]  # Always include identity required to prevent lossy recipe exports
     if include_author: select_fields.append("p.author")  # noqa: E701
     if include_details: select_fields.append("p.details")  # noqa: E701
     if include_system: select_fields.append("p.system_prompt")  # noqa: E701
@@ -2945,6 +2951,13 @@ def export_prompts_formatted(db_instance: PromptsDatabase,
 
         if not prompts_data:
             return "No prompts found matching the criteria for export.", "None"
+
+        if any(
+            prompt.get("prompt_format") == "structured"
+            and prompt.get("prompt_schema_version") == 2
+            for prompt in prompts_data
+        ):
+            raise InputError("single_text_recipe_export_requires_json")  # noqa: TRY003
 
         # Fetch associated keywords for each prompt if needed
         if include_associated_keywords:

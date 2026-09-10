@@ -1,7 +1,9 @@
 import pytest
 
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.evaluation_manager import EvaluationManager
+from tldw_Server_API.app.core.Prompt_Management.prompt_studio.prompt_executor import PromptExecutor
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_runner import TestRunner
+from tldw_Server_API.app.core.Prompt_Management.structured_prompts import StructuredPromptAssemblyError
 
 
 def _make_prompt_definition_payload() -> dict:
@@ -39,6 +41,34 @@ def _make_prompt_definition_payload() -> dict:
         "assembly_config": {
             "legacy_system_roles": ["system", "developer"],
             "legacy_user_roles": ["user"],
+            "block_separator": "\n\n",
+        },
+    }
+
+
+def _make_recipe_definition_payload() -> dict:
+    return {
+        "schema_version": 2,
+        "format": "structured",
+        "definition_kind": "single_text_recipe",
+        "variables": [],
+        "blocks": [
+            {
+                "id": "objective",
+                "name": "Objective",
+                "section_key": "objective",
+                "role": "user",
+                "kind": "objective",
+                "content": "Explain the task.",
+                "enabled": True,
+                "order": 10,
+                "is_template": False,
+            }
+        ],
+        "assembly_config": {
+            "assembly_mode": "single_text",
+            "target_role": "user",
+            "render_format": "freeform",
             "block_separator": "\n\n",
         },
     }
@@ -160,3 +190,20 @@ def test_evaluation_manager_uses_structured_assembly_for_evaluations(isolated_db
     ]
     assert result["status"] == "completed"
     assert result["metrics"]["average_score"] == 1.0
+
+
+def test_prompt_studio_multimessage_executor_rejects_single_text_recipe(isolated_db):
+    executor = PromptExecutor(isolated_db)
+    prompt = {
+        "prompt_format": "structured",
+        "prompt_schema_version": 2,
+        "prompt_definition": _make_recipe_definition_payload(),
+        "few_shot_examples": None,
+        "modules_config": None,
+    }
+
+    with pytest.raises(StructuredPromptAssemblyError) as excinfo:
+        executor._build_structured_prompt_request(prompt, None, {})
+
+    assert excinfo.value.code == "single_text_recipe_requires_render_apply"
+    assert str(excinfo.value) == "Single-text recipe must be rendered/applied first."
