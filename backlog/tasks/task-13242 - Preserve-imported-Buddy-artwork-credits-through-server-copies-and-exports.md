@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-10 14:16'
-updated_date: '2026-09-10 14:42'
+updated_date: '2026-09-10 14:45'
 labels:
   - buddy
   - persona
@@ -53,6 +53,8 @@ Focused run: 111 passed; PostgreSQL journey reproduced a pre-existing native exp
 PostgreSQL portability import-job storage explicitly raises NotImplementedError (SQLite-only). Revised qualification separates SQLite full import/commit journey from supported PostgreSQL Buddy snapshot/export/preview. Review also found strict native Chatbook manifest rejection of the internal credit key; export now strips that key from a copy, restores source_context.artwork, and explicitly fingerprints credits. No storage/runtime boundary expansion.
 
 Implemented ADR-006: native credit validation/storage, independent attribution snapshots, native-compatible export with credit-sensitive fingerprints, and narrow PostgreSQL timestamp normalization. Resolved both independent-review findings (Chatbook strict-root compatibility and legacy credit-free context). Final portability:45 passed including supported PostgreSQL copy/export; adjacent ownership/manifest/asset tests:72 passed. Ruff/Black passed; Bandit zero findings. Final published Trenchcoat HTTP roundtrip and actual Chatbook importer preserve exact credits and PNG bytes. See Docs/Reviews/2026-09-10-buddy-followup.md and its source-hashed receipt. PostgreSQL import jobs remain unsupported; native terminal/installed extension and physical voice qualification stay open. PR review/merge pending.
+
+Published PR https://github.com/rmusser01/tldw_server/pull/2940 against freshly fetched dev50c1f68957. Implementation commit0e72f25515, no behind-dev commits at publication. Collection installation guidance in tldw-stuff PR18 links the source-bound verification and recovery instructions. Task remains In Progress pending PR review/merge.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
