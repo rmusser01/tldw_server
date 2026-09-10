@@ -187,7 +187,7 @@ class SQLiteConnectionPool(ConnectionPool):
         Raises:
             Exception: Close errors for uncached handles propagate unchanged.
             BaseException: Process-control exceptions during cached close, such
-                as KeyboardInterrupt, are not suppressed.
+                as KeyboardInterrupt, propagate after the handle is detached.
         """
         with self._lock:
             if self._connections.get(threading.get_ident()) is connection:
@@ -208,7 +208,7 @@ class SQLiteConnectionPool(ConnectionPool):
 
         Raises:
             BaseException: Process-control exceptions during close, such as
-                KeyboardInterrupt, are not suppressed.
+                KeyboardInterrupt, propagate after the handle is detached.
         """
         thread_id = threading.get_ident()
         with self._lock:
@@ -223,23 +223,10 @@ class SQLiteConnectionPool(ConnectionPool):
                             "on thread {thread_id}; detaching it to prevent reuse",
                             connection_id=id(conn), thread_id=thread_id,
                         )
-                self._connections[thread_id] = None
-            except (AttributeError, KeyError, RuntimeError, TypeError):
-                pass
-            with suppress(AttributeError, KeyError, RuntimeError, TypeError):
+            finally:
+                self._connections.pop(thread_id, None)
                 self._thread_refs.pop(thread_id, None)
-            try:
-                if hasattr(self._local, 'connection'):
-                    self._local.connection = None
-            except (AttributeError, RuntimeError, TypeError):
-                pass
-            # Prune stale entries to avoid unbounded growth
-            try:
-                stale_keys = [tid for tid, conn in self._connections.items() if conn is None]
-                for tid in stale_keys:
-                    self._connections.pop(tid, None)
-            except (AttributeError, RuntimeError, TypeError):
-                pass
+                self._local.connection = None
 
     @contextmanager
     def connection(self) -> Generator[sqlite3.Connection, None, None]:

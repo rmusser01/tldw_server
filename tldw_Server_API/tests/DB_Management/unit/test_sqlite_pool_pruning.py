@@ -3,6 +3,7 @@
 import sqlite3
 import threading
 from collections.abc import Iterator
+from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
@@ -56,8 +57,11 @@ def test_sqlite_pool_invalidation_closes_only_the_supplied_connection(
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("close_error", [sqlite3.OperationalError, OSError, RuntimeError, TypeError, ValueError], ids=[
+@pytest.mark.parametrize("close_error", [
+    sqlite3.OperationalError, OSError, RuntimeError, TypeError, ValueError, KeyboardInterrupt, SystemExit,
+], ids=[
     "sqlite-close-error", "os-close-error", "runtime-close-error", "type-close-error", "value-close-error",
+    "keyboard-interrupt", "system-exit",
 ])
 @pytest.mark.parametrize("operation", ["invalidate_connection", "clear_thread_local_connection"], ids=[
     "invalidate-checkout", "clear-current-checkout",
@@ -65,16 +69,22 @@ def test_sqlite_pool_invalidation_closes_only_the_supplied_connection(
 def test_sqlite_pool_logs_close_failure_and_detaches_rejected_handle(
     sqlite_pool: SQLiteConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
-    close_error: type[Exception],
+    close_error: type[BaseException],
     operation: str,
 ) -> None:
-    """A failed close is diagnosed and the rejected handle cannot be borrowed again."""
+    """Close failures never permit reuse; ordinary errors log and interruptions propagate."""
+    close_attempted = False
+
     class CloseFailureConnection(sqlite3.Connection):
         """Simulate a driver close failure while keeping real SQLite queries."""
 
         def close(self) -> None:
-            """Leave the handle open to exercise cleanup failure behavior."""
-            raise close_error("close unavailable")
+            """Fail the first close and allow later test teardown to release resources."""
+            nonlocal close_attempted
+            if not close_attempted:
+                close_attempted = True
+                raise close_error("close unavailable")
+            super().close()
 
     failed = sqlite3.connect(sqlite_pool.db_path, factory=CloseFailureConnection)
     messages = []
@@ -83,20 +93,26 @@ def test_sqlite_pool_logs_close_failure_and_detaches_rejected_handle(
         with monkeypatch.context() as patch:
             patch.setattr(sqlite_pool, "_create_connection", lambda: failed)
             checkout = sqlite_pool.get_connection()
-        if operation == "invalidate_connection":
-            sqlite_pool.invalidate_connection(checkout)
-        else:
-            sqlite_pool.clear_thread_local_connection()
+        ordinary_error = issubclass(close_error, Exception)
+        expected = nullcontext() if ordinary_error else pytest.raises(close_error, match="close unavailable")
+        with expected:
+            if operation == "invalidate_connection":
+                sqlite_pool.invalidate_connection(checkout)
+            else:
+                sqlite_pool.clear_thread_local_connection()
         assert sqlite_pool.get_stats()["active_connections"] == 0
         replacement = sqlite_pool.get_connection()
         assert replacement is not failed
         assert replacement.execute("SELECT 1").fetchone()[0] == 1
         records = [message.record for message in messages if "Failed to close" in message.record["message"]]
-        assert len(records) == 1
-        assert records[0]["extra"]["connection_id"] == id(failed)
-        assert records[0]["extra"]["thread_id"] == threading.get_ident()
-        assert records[0]["exception"].type is close_error
-        assert records[0]["exception"].traceback is not None
+        if ordinary_error:
+            assert len(records) == 1
+            assert records[0]["extra"]["connection_id"] == id(failed)
+            assert records[0]["extra"]["thread_id"] == threading.get_ident()
+            assert records[0]["exception"].type is close_error
+            assert records[0]["exception"].traceback is not None
+        else:
+            assert records == []
     finally:
         logger.remove(sink)
         sqlite3.Connection.close(failed)
