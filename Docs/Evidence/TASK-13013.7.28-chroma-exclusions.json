@@ -1,0 +1,856 @@
+{
+  "all_other_findings_preserved": true,
+  "boundary_checks": [
+    {
+      "field": "installed_version",
+      "id": "TASK-13013.7.28-CHROMA-01",
+      "result": "rejected"
+    },
+    {
+      "field": "purl",
+      "id": "TASK-13013.7.28-CHROMA-01",
+      "result": "rejected"
+    },
+    {
+      "field": "severity",
+      "id": "TASK-13013.7.28-CHROMA-01",
+      "result": "rejected"
+    },
+    {
+      "field": "vulnerability_id",
+      "id": "TASK-13013.7.28-CHROMA-01",
+      "result": "rejected"
+    },
+    {
+      "field": "component",
+      "id": "TASK-13013.7.28-CHROMA-01",
+      "result": "rejected"
+    },
+    {
+      "field": "expires_on",
+      "id": "TASK-13013.7.28-CHROMA-01",
+      "result": "rejected"
+    },
+    {
+      "field": "installed_version",
+      "id": "TASK-13013.7.28-CHROMA-02",
+      "result": "rejected"
+    },
+    {
+      "field": "purl",
+      "id": "TASK-13013.7.28-CHROMA-02",
+      "result": "rejected"
+    },
+    {
+      "field": "severity",
+      "id": "TASK-13013.7.28-CHROMA-02",
+      "result": "rejected"
+    },
+    {
+      "field": "vulnerability_id",
+      "id": "TASK-13013.7.28-CHROMA-02",
+      "result": "rejected"
+    },
+    {
+      "field": "component",
+      "id": "TASK-13013.7.28-CHROMA-02",
+      "result": "rejected"
+    },
+    {
+      "field": "expires_on",
+      "id": "TASK-13013.7.28-CHROMA-02",
+      "result": "rejected"
+    },
+    {
+      "field": "installed_version",
+      "id": "TASK-13013.7.28-CHROMA-03",
+      "result": "rejected"
+    },
+    {
+      "field": "purl",
+      "id": "TASK-13013.7.28-CHROMA-03",
+      "result": "rejected"
+    },
+    {
+      "field": "severity",
+      "id": "TASK-13013.7.28-CHROMA-03",
+      "result": "rejected"
+    },
+    {
+      "field": "vulnerability_id",
+      "id": "TASK-13013.7.28-CHROMA-03",
+      "result": "rejected"
+    },
+    {
+      "field": "component",
+      "id": "TASK-13013.7.28-CHROMA-03",
+      "result": "rejected"
+    },
+    {
+      "field": "expires_on",
+      "id": "TASK-13013.7.28-CHROMA-03",
+      "result": "rejected"
+    },
+    {
+      "field": "installed_version",
+      "id": "TASK-13013.7.28-CHROMA-04",
+      "result": "rejected"
+    },
+    {
+      "field": "purl",
+      "id": "TASK-13013.7.28-CHROMA-04",
+      "result": "rejected"
+    },
+    {
+      "field": "severity",
+      "id": "TASK-13013.7.28-CHROMA-04",
+      "result": "rejected"
+    },
+    {
+      "field": "vulnerability_id",
+      "id": "TASK-13013.7.28-CHROMA-04",
+      "result": "rejected"
+    },
+    {
+      "field": "component",
+      "id": "TASK-13013.7.28-CHROMA-04",
+      "result": "rejected"
+    },
+    {
+      "field": "expires_on",
+      "id": "TASK-13013.7.28-CHROMA-04",
+      "result": "rejected"
+    },
+    {
+      "field": "installed_version",
+      "id": "TASK-13013.7.28-CHROMA-05",
+      "result": "rejected"
+    },
+    {
+      "field": "purl",
+      "id": "TASK-13013.7.28-CHROMA-05",
+      "result": "rejected"
+    },
+    {
+      "field": "severity",
+      "id": "TASK-13013.7.28-CHROMA-05",
+      "result": "rejected"
+    },
+    {
+      "field": "vulnerability_id",
+      "id": "TASK-13013.7.28-CHROMA-05",
+      "result": "rejected"
+    },
+    {
+      "field": "component",
+      "id": "TASK-13013.7.28-CHROMA-05",
+      "result": "rejected"
+    },
+    {
+      "field": "expires_on",
+      "id": "TASK-13013.7.28-CHROMA-05",
+      "result": "rejected"
+    },
+    {
+      "field": "installed_version",
+      "id": "TASK-13013.7.28-CHROMA-06",
+      "result": "rejected"
+    },
+    {
+      "field": "purl",
+      "id": "TASK-13013.7.28-CHROMA-06",
+      "result": "rejected"
+    },
+    {
+      "field": "severity",
+      "id": "TASK-13013.7.28-CHROMA-06",
+      "result": "rejected"
+    },
+    {
+      "field": "vulnerability_id",
+      "id": "TASK-13013.7.28-CHROMA-06",
+      "result": "rejected"
+    },
+    {
+      "field": "component",
+      "id": "TASK-13013.7.28-CHROMA-06",
+      "result": "rejected"
+    },
+    {
+      "field": "expires_on",
+      "id": "TASK-13013.7.28-CHROMA-06",
+      "result": "rejected"
+    },
+    {
+      "field": "installed_version",
+      "id": "TASK-13013.7.28-CHROMA-07",
+      "result": "rejected"
+    },
+    {
+      "field": "purl",
+      "id": "TASK-13013.7.28-CHROMA-07",
+      "result": "rejected"
+    },
+    {
+      "field": "severity",
+      "id": "TASK-13013.7.28-CHROMA-07",
+      "result": "rejected"
+    },
+    {
+      "field": "vulnerability_id",
+      "id": "TASK-13013.7.28-CHROMA-07",
+      "result": "rejected"
+    },
+    {
+      "field": "component",
+      "id": "TASK-13013.7.28-CHROMA-07",
+      "result": "rejected"
+    },
+    {
+      "field": "expires_on",
+      "id": "TASK-13013.7.28-CHROMA-07",
+      "result": "rejected"
+    },
+    {
+      "field": "installed_version",
+      "id": "TASK-13013.7.28-CHROMA-08",
+      "result": "rejected"
+    },
+    {
+      "field": "purl",
+      "id": "TASK-13013.7.28-CHROMA-08",
+      "result": "rejected"
+    },
+    {
+      "field": "severity",
+      "id": "TASK-13013.7.28-CHROMA-08",
+      "result": "rejected"
+    },
+    {
+      "field": "vulnerability_id",
+      "id": "TASK-13013.7.28-CHROMA-08",
+      "result": "rejected"
+    },
+    {
+      "field": "component",
+      "id": "TASK-13013.7.28-CHROMA-08",
+      "result": "rejected"
+    },
+    {
+      "field": "expires_on",
+      "id": "TASK-13013.7.28-CHROMA-08",
+      "result": "rejected"
+    },
+    {
+      "field": "installed_version",
+      "id": "TASK-13013.7.28-CHROMA-09",
+      "result": "rejected"
+    },
+    {
+      "field": "purl",
+      "id": "TASK-13013.7.28-CHROMA-09",
+      "result": "rejected"
+    },
+    {
+      "field": "severity",
+      "id": "TASK-13013.7.28-CHROMA-09",
+      "result": "rejected"
+    },
+    {
+      "field": "vulnerability_id",
+      "id": "TASK-13013.7.28-CHROMA-09",
+      "result": "rejected"
+    },
+    {
+      "field": "component",
+      "id": "TASK-13013.7.28-CHROMA-09",
+      "result": "rejected"
+    },
+    {
+      "field": "expires_on",
+      "id": "TASK-13013.7.28-CHROMA-09",
+      "result": "rejected"
+    },
+    {
+      "field": "installed_version",
+      "id": "TASK-13013.7.28-CHROMA-10",
+      "result": "rejected"
+    },
+    {
+      "field": "purl",
+      "id": "TASK-13013.7.28-CHROMA-10",
+      "result": "rejected"
+    },
+    {
+      "field": "severity",
+      "id": "TASK-13013.7.28-CHROMA-10",
+      "result": "rejected"
+    },
+    {
+      "field": "vulnerability_id",
+      "id": "TASK-13013.7.28-CHROMA-10",
+      "result": "rejected"
+    },
+    {
+      "field": "component",
+      "id": "TASK-13013.7.28-CHROMA-10",
+      "result": "rejected"
+    },
+    {
+      "field": "expires_on",
+      "id": "TASK-13013.7.28-CHROMA-10",
+      "result": "rejected"
+    },
+    {
+      "field": "installed_version",
+      "id": "TASK-13013.7.28-CHROMA-11",
+      "result": "rejected"
+    },
+    {
+      "field": "purl",
+      "id": "TASK-13013.7.28-CHROMA-11",
+      "result": "rejected"
+    },
+    {
+      "field": "severity",
+      "id": "TASK-13013.7.28-CHROMA-11",
+      "result": "rejected"
+    },
+    {
+      "field": "vulnerability_id",
+      "id": "TASK-13013.7.28-CHROMA-11",
+      "result": "rejected"
+    },
+    {
+      "field": "component",
+      "id": "TASK-13013.7.28-CHROMA-11",
+      "result": "rejected"
+    },
+    {
+      "field": "expires_on",
+      "id": "TASK-13013.7.28-CHROMA-11",
+      "result": "rejected"
+    },
+    {
+      "field": "installed_version",
+      "id": "TASK-13013.7.28-CHROMA-12",
+      "result": "rejected"
+    },
+    {
+      "field": "purl",
+      "id": "TASK-13013.7.28-CHROMA-12",
+      "result": "rejected"
+    },
+    {
+      "field": "severity",
+      "id": "TASK-13013.7.28-CHROMA-12",
+      "result": "rejected"
+    },
+    {
+      "field": "vulnerability_id",
+      "id": "TASK-13013.7.28-CHROMA-12",
+      "result": "rejected"
+    },
+    {
+      "field": "component",
+      "id": "TASK-13013.7.28-CHROMA-12",
+      "result": "rejected"
+    },
+    {
+      "field": "expires_on",
+      "id": "TASK-13013.7.28-CHROMA-12",
+      "result": "rejected"
+    },
+    {
+      "field": "installed_version",
+      "id": "TASK-13013.7.28-CHROMA-13",
+      "result": "rejected"
+    },
+    {
+      "field": "purl",
+      "id": "TASK-13013.7.28-CHROMA-13",
+      "result": "rejected"
+    },
+    {
+      "field": "severity",
+      "id": "TASK-13013.7.28-CHROMA-13",
+      "result": "rejected"
+    },
+    {
+      "field": "vulnerability_id",
+      "id": "TASK-13013.7.28-CHROMA-13",
+      "result": "rejected"
+    },
+    {
+      "field": "component",
+      "id": "TASK-13013.7.28-CHROMA-13",
+      "result": "rejected"
+    },
+    {
+      "field": "expires_on",
+      "id": "TASK-13013.7.28-CHROMA-13",
+      "result": "rejected"
+    },
+    {
+      "field": "installed_version",
+      "id": "TASK-13013.7.28-CHROMA-14",
+      "result": "rejected"
+    },
+    {
+      "field": "purl",
+      "id": "TASK-13013.7.28-CHROMA-14",
+      "result": "rejected"
+    },
+    {
+      "field": "severity",
+      "id": "TASK-13013.7.28-CHROMA-14",
+      "result": "rejected"
+    },
+    {
+      "field": "vulnerability_id",
+      "id": "TASK-13013.7.28-CHROMA-14",
+      "result": "rejected"
+    },
+    {
+      "field": "component",
+      "id": "TASK-13013.7.28-CHROMA-14",
+      "result": "rejected"
+    },
+    {
+      "field": "expires_on",
+      "id": "TASK-13013.7.28-CHROMA-14",
+      "result": "rejected"
+    },
+    {
+      "field": "installed_version",
+      "id": "TASK-13013.7.28-CHROMA-15",
+      "result": "rejected"
+    },
+    {
+      "field": "purl",
+      "id": "TASK-13013.7.28-CHROMA-15",
+      "result": "rejected"
+    },
+    {
+      "field": "severity",
+      "id": "TASK-13013.7.28-CHROMA-15",
+      "result": "rejected"
+    },
+    {
+      "field": "vulnerability_id",
+      "id": "TASK-13013.7.28-CHROMA-15",
+      "result": "rejected"
+    },
+    {
+      "field": "component",
+      "id": "TASK-13013.7.28-CHROMA-15",
+      "result": "rejected"
+    },
+    {
+      "field": "expires_on",
+      "id": "TASK-13013.7.28-CHROMA-15",
+      "result": "rejected"
+    },
+    {
+      "field": "installed_version",
+      "id": "TASK-13013.7.28-CHROMA-16",
+      "result": "rejected"
+    },
+    {
+      "field": "purl",
+      "id": "TASK-13013.7.28-CHROMA-16",
+      "result": "rejected"
+    },
+    {
+      "field": "severity",
+      "id": "TASK-13013.7.28-CHROMA-16",
+      "result": "rejected"
+    },
+    {
+      "field": "vulnerability_id",
+      "id": "TASK-13013.7.28-CHROMA-16",
+      "result": "rejected"
+    },
+    {
+      "field": "component",
+      "id": "TASK-13013.7.28-CHROMA-16",
+      "result": "rejected"
+    },
+    {
+      "field": "expires_on",
+      "id": "TASK-13013.7.28-CHROMA-16",
+      "result": "rejected"
+    }
+  ],
+  "components": {
+    "image-admin-ui": {
+      "after_blocking": 55,
+      "before_blocking": 55,
+      "excepted": [
+        {
+          "installed_version": "1:1.2.13.dfsg-1",
+          "purl": "pkg:deb/debian/zlib1g@1.2.13.dfsg-1?arch=amd64&distro=debian-12.15&epoch=1",
+          "severity": "CRITICAL",
+          "target": "/input@sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de (debian 12.15)",
+          "vulnerability_id": "CVE-2023-45853"
+        }
+      ],
+      "unmatched_exception_ids": []
+    },
+    "image-app": {
+      "after_blocking": 229,
+      "before_blocking": 233,
+      "excepted": [
+        {
+          "installed_version": "5.40.1-6",
+          "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+          "severity": "CRITICAL",
+          "target": "/input@sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f (debian 13.6)",
+          "vulnerability_id": "CVE-2026-8376"
+        },
+        {
+          "installed_version": "1.5.9",
+          "purl": "pkg:pypi/chromadb@1.5.9",
+          "severity": "CRITICAL",
+          "target": "Python",
+          "vulnerability_id": "CVE-2026-45829"
+        },
+        {
+          "installed_version": "1.5.9",
+          "purl": "pkg:pypi/chromadb@1.5.9",
+          "severity": "CRITICAL",
+          "target": "Python",
+          "vulnerability_id": "CVE-2026-45833"
+        },
+        {
+          "installed_version": "1.5.9",
+          "purl": "pkg:pypi/chromadb@1.5.9",
+          "severity": "HIGH",
+          "target": "Python",
+          "vulnerability_id": "CVE-2026-45830"
+        },
+        {
+          "installed_version": "1.5.9",
+          "purl": "pkg:pypi/chromadb@1.5.9",
+          "severity": "HIGH",
+          "target": "Python",
+          "vulnerability_id": "CVE-2026-45831"
+        }
+      ],
+      "unmatched_exception_ids": []
+    },
+    "image-audio-worker": {
+      "after_blocking": 229,
+      "before_blocking": 233,
+      "excepted": [
+        {
+          "installed_version": "5.40.1-6",
+          "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+          "severity": "CRITICAL",
+          "target": "/input@sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034 (debian 13.6)",
+          "vulnerability_id": "CVE-2026-8376"
+        },
+        {
+          "installed_version": "1.5.9",
+          "purl": "pkg:pypi/chromadb@1.5.9",
+          "severity": "CRITICAL",
+          "target": "Python",
+          "vulnerability_id": "CVE-2026-45829"
+        },
+        {
+          "installed_version": "1.5.9",
+          "purl": "pkg:pypi/chromadb@1.5.9",
+          "severity": "CRITICAL",
+          "target": "Python",
+          "vulnerability_id": "CVE-2026-45833"
+        },
+        {
+          "installed_version": "1.5.9",
+          "purl": "pkg:pypi/chromadb@1.5.9",
+          "severity": "HIGH",
+          "target": "Python",
+          "vulnerability_id": "CVE-2026-45830"
+        },
+        {
+          "installed_version": "1.5.9",
+          "purl": "pkg:pypi/chromadb@1.5.9",
+          "severity": "HIGH",
+          "target": "Python",
+          "vulnerability_id": "CVE-2026-45831"
+        }
+      ],
+      "unmatched_exception_ids": []
+    },
+    "image-webui": {
+      "after_blocking": 55,
+      "before_blocking": 55,
+      "excepted": [
+        {
+          "installed_version": "1:1.2.13.dfsg-1",
+          "purl": "pkg:deb/debian/zlib1g@1.2.13.dfsg-1?arch=amd64&distro=debian-12.15&epoch=1",
+          "severity": "CRITICAL",
+          "target": "/input@sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1 (debian 12.15)",
+          "vulnerability_id": "CVE-2023-45853"
+        }
+      ],
+      "unmatched_exception_ids": []
+    },
+    "image-worker": {
+      "after_blocking": 54,
+      "before_blocking": 58,
+      "excepted": [
+        {
+          "installed_version": "5.40.1-6",
+          "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+          "severity": "CRITICAL",
+          "target": "/input@sha256:240d731cb10be3b21dec0f35b1bc6687dbe1fd3062a30f830fe2c14111cc8e25 (debian 13.6)",
+          "vulnerability_id": "CVE-2026-8376"
+        },
+        {
+          "installed_version": "1.5.9",
+          "purl": "pkg:pypi/chromadb@1.5.9",
+          "severity": "CRITICAL",
+          "target": "Python",
+          "vulnerability_id": "CVE-2026-45829"
+        },
+        {
+          "installed_version": "1.5.9",
+          "purl": "pkg:pypi/chromadb@1.5.9",
+          "severity": "CRITICAL",
+          "target": "Python",
+          "vulnerability_id": "CVE-2026-45833"
+        },
+        {
+          "installed_version": "1.5.9",
+          "purl": "pkg:pypi/chromadb@1.5.9",
+          "severity": "HIGH",
+          "target": "Python",
+          "vulnerability_id": "CVE-2026-45830"
+        },
+        {
+          "installed_version": "1.5.9",
+          "purl": "pkg:pypi/chromadb@1.5.9",
+          "severity": "HIGH",
+          "target": "Python",
+          "vulnerability_id": "CVE-2026-45831"
+        }
+      ],
+      "unmatched_exception_ids": []
+    },
+    "source-admin-ui": {
+      "after_blocking": 0,
+      "before_blocking": 0,
+      "excepted": [],
+      "unmatched_exception_ids": []
+    },
+    "source-apps-workspace": {
+      "after_blocking": 0,
+      "before_blocking": 0,
+      "excepted": [],
+      "unmatched_exception_ids": []
+    },
+    "source-python-root": {
+      "after_blocking": 1,
+      "before_blocking": 5,
+      "excepted": [
+        {
+          "installed_version": "1.5.9",
+          "purl": "pkg:pypi/chromadb@1.5.9",
+          "severity": "CRITICAL",
+          "target": "Python",
+          "vulnerability_id": "CVE-2026-45829"
+        },
+        {
+          "installed_version": "1.5.9",
+          "purl": "pkg:pypi/chromadb@1.5.9",
+          "severity": "CRITICAL",
+          "target": "Python",
+          "vulnerability_id": "CVE-2026-45833"
+        },
+        {
+          "installed_version": "1.5.9",
+          "purl": "pkg:pypi/chromadb@1.5.9",
+          "severity": "HIGH",
+          "target": "Python",
+          "vulnerability_id": "CVE-2026-45830"
+        },
+        {
+          "installed_version": "1.5.9",
+          "purl": "pkg:pypi/chromadb@1.5.9",
+          "severity": "HIGH",
+          "target": "Python",
+          "vulnerability_id": "CVE-2026-45831"
+        }
+      ],
+      "unmatched_exception_ids": []
+    }
+  },
+  "dependency_review_api": {
+    "added_high_critical_by_package": {
+      "chromadb": 4,
+      "hydra-core": 1,
+      "lightning": 1,
+      "nemo-toolkit": 4,
+      "nltk": 1
+    },
+    "allow_ghsas": [
+      "GHSA-2wm9-hf6c-p5cr",
+      "GHSA-36p7-vc44-83pf",
+      "GHSA-f4j7-r4q5-qw2c",
+      "GHSA-xph7-9rjv-w5fr"
+    ],
+    "base_sha": "6cd2745f696af04668a61c20b84ab8a9e69ca5e4",
+    "change_count": 695,
+    "head_sha": "78c3f92228c6411ee4637b9d2df9aa3b50aacdc8",
+    "non_chroma_findings": [
+      {
+        "ghsa": "GHSA-2cp2-2r3c-7p7r",
+        "manifest": "uv.lock",
+        "purl": "pkg:pypi/hydra-core@1.3.2",
+        "severity": "high",
+        "version": "1.3.2"
+      },
+      {
+        "ghsa": "GHSA-qqmf-gpg7-g8gw",
+        "manifest": "uv.lock",
+        "purl": "pkg:pypi/lightning@2.6.5",
+        "severity": "high",
+        "version": "2.6.5"
+      },
+      {
+        "ghsa": "GHSA-9379-mwvr-7wxx",
+        "manifest": "uv.lock",
+        "purl": "pkg:pypi/nemo-toolkit@2.0.0",
+        "severity": "high",
+        "version": "2.0.0"
+      },
+      {
+        "ghsa": "GHSA-hvjw-vp7g-39h5",
+        "manifest": "uv.lock",
+        "purl": "pkg:pypi/nemo-toolkit@2.0.0",
+        "severity": "high",
+        "version": "2.0.0"
+      },
+      {
+        "ghsa": "GHSA-m4jw-wgmf-889x",
+        "manifest": "uv.lock",
+        "purl": "pkg:pypi/nemo-toolkit@2.0.0",
+        "severity": "high",
+        "version": "2.0.0"
+      },
+      {
+        "ghsa": "GHSA-v7v2-m736-cf3c",
+        "manifest": "uv.lock",
+        "purl": "pkg:pypi/nemo-toolkit@2.0.0",
+        "severity": "high",
+        "version": "2.0.0"
+      },
+      {
+        "ghsa": "GHSA-8mgp-746c-j5xp",
+        "manifest": "uv.lock",
+        "purl": "pkg:pypi/nltk@3.10.3",
+        "severity": "high",
+        "version": "3.10.3"
+      }
+    ],
+    "page_count": 1,
+    "raw_pages_sha256": "3c6f6459322a9fd47293ee551a776737f5138131b94200b8eeb27aeb9ba9ccfb"
+  },
+  "evaluation_date_utc": "2026-09-10",
+  "new_scan_or_runtime_execution": false,
+  "policy_sha256": "ab56e0ad531d99c2f2376b554cbea369a3a3930810823c51cabbd13f4321fd40",
+  "reviewed_scan_head": "78c3f92228c6411ee4637b9d2df9aa3b50aacdc8",
+  "script_sha256": "853bf9777a6f1290a56ecd68bb3b01e002ad4c0b8da842e572a96af967e5dd5d",
+  "task": "TASK-13013.7.28",
+  "verified_artifacts": [
+    {
+      "artifact": "container-admission-app",
+      "members": 6,
+      "sha256": "7acf62766a675e54b8f721419a4d80371c31ca15056e57aabf2e3a0b5ce23ef8"
+    },
+    {
+      "artifact": "container-admission-worker",
+      "members": 6,
+      "sha256": "f1833864ecde4526276884702b0eb74c81126f76fd1873ea2c169afafd92a4ea"
+    },
+    {
+      "artifact": "container-admission-audio-worker",
+      "members": 6,
+      "sha256": "7611c8f6b54a928a5e72af991aeaec602c8044bbf94ae2a638ac8e6a27fe5fea"
+    },
+    {
+      "artifact": "container-admission-webui",
+      "members": 5,
+      "sha256": "ff2488f2b32aad8027a33a90984446b19985e91f4a2390e749f09203951e261a"
+    },
+    {
+      "artifact": "container-admission-admin-ui",
+      "members": 5,
+      "sha256": "81f84f323c2760399e2ba1c3a43e64712a210fcab3602bccf39de688c064bed2"
+    },
+    {
+      "artifact": "source-sbom-aggregate",
+      "members": 6,
+      "sha256": "04961ac46cf289d207e7a7ca497974621226dd7232bf6b86e01d12778871959e"
+    },
+    {
+      "artifact": "source-sbom-scans",
+      "members": 9,
+      "sha256": "06b887a22906577f7eef1aa6459bf45b654313286e7f69f3226e50e196000053"
+    }
+  ],
+  "dependency_review_upstream": {
+    "action_commit": "2031cfc080254a8a887f58cffee85186f0e49e48",
+    "filter_source_sha256": "9108d24d04bd0dc87df612a1bcf401f10ae9dbc291f222932a02fd2630cd85c2",
+    "filter_source": "https://github.com/actions/dependency-review-action/blob/2031cfc080254a8a887f58cffee85186f0e49e48/src/filter.ts",
+    "raw_output_preserved": true,
+    "fetch_action_commit": "ed597411d8f924073f98dfc5c65a23a2325f34cd",
+    "fetch_action_ref_verified": "refs/tags/v8"
+  },
+  "verification": {
+    "integrated_tests": {
+      "passed": 163,
+      "failed": 0,
+      "log_sha256": "986521a9ae14a0432e49fa79131f89b8f650519d5fa9ae4afb79ac78e50e92af"
+    },
+    "production_bandit": {
+      "findings": 0,
+      "errors": 0
+    },
+    "test_bandit_raw_counts": {
+      "B404": 2,
+      "B101": 212,
+      "B105": 2,
+      "B607": 5,
+      "B603": 6
+    },
+    "test_bandit_disposition": "Pytest assertions, deterministic local subprocess fixtures, and unchanged existing workflow-credential string assertions; no production input or new exploitable findings.",
+    "black_new_files": "pass",
+    "existing_ci_black": "33 pre-existing formatting hunks; no added hunks",
+    "ruff_touched_python": "pass",
+    "actionlint_with_shellcheck": "pass",
+    "policy_json_schema": "pass",
+    "protected_input_count": 9,
+    "protected_inputs_sha256": {
+      ".github/supply-chain/vulnerability-exceptions.schema.json": "0f36741f71d326f86d675eaf97984a69fd03cc66b8d8380f6234ceeae30a1eed",
+      "Docs/Evidence/TASK-13013.7.23-applicability-dispositions.json": "d0fcaff69d7f248628ddb1d199ef016b3d45797ac1062d4ecd9ca6544d0ac039",
+      "Helper_Scripts/Supply_Chain/exception_policy.py": "9bf192fa6c8c4e48c22a816d82229de0177f9b3ae54711fe0596f1d43eb6ed96",
+      "Helper_Scripts/Supply_Chain/runtime_probe.py": "decdde660b68345f1d51a3350724bfc337bf30c6cfd36860c2c549058c4c624b",
+      ".github/workflows/sbom.yml": "5dad2bd88b20ee009412c9aed8ec25558bf52dc5f9ce0b7aa78d043cadd87634",
+      ".github/workflows/publish-docker.yml": "1fcbf84525a62221fb04b15031f0df33fb76d686c2e6ed3c9188bdc2029676ba",
+      ".github/workflows/publish-ghcr-main.yml": "76725210fbf47e15d3527eacf2584d0ae000eef9965407d69d925052d1f00ac1",
+      "pyproject.toml": "9689bb626d595033bffb43f18e6103a06f1f62c98a8e0f698ecb1b6acb03c87a",
+      "uv.lock": "d565706e62c808e55fa03e2861ce4795603c5d42a4d7f487a93b89f3899ce9bd"
+    },
+    "touched_input_sha256": {
+      ".github/supply-chain/vulnerability-exceptions.json": "ab56e0ad531d99c2f2376b554cbea369a3a3930810823c51cabbd13f4321fd40",
+      ".github/workflows/security-required.yml": "948d48d65f733804613ce6196d57b007fcb5e30a348c0d7638ba5aba08277885",
+      "Helper_Scripts/Supply_Chain/dependency_review.py": "db60e93e5a497b795a3bf0624fc7623c5e40bd2038f40b3a1a0a701c0425e7de",
+      "tldw_Server_API/tests/Supply_Chain/test_chroma_dispositions.py": "cf27aa324a9269c3da285a4597bfb16da6854527ce920a17dd4fe295d1415fa8",
+      "tldw_Server_API/tests/Supply_Chain/test_dependency_review.py": "b404d36ee48bd9da22948466257deb0ced717de2df7c604e1cf2780b9496dcc8",
+      "tldw_Server_API/tests/CI/test_license_first_workflow_contracts.py": "4e1129af5739cb7474ba78a1651d0d94fcc6e20487210757c3999112dd80edd4"
+    },
+    "live_ci_run": false,
+    "image_runtime_or_new_scans": false
+  }
+}
