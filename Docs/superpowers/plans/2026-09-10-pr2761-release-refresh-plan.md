@@ -11,12 +11,12 @@
 
 | Item | Recorded state |
 | --- | --- |
-| Integrated release code and verified blocker fixes | `eeb69d440fdf8204c9e560b8b89b94112c094c8d` |
+| Integrated release code and verified blocker fixes | `433f18091ef1921d1a0e3b8d4eec6a82db9a4284` |
 | Latest observed CI head | `6150040801bc697acd79e2b2e90aae3337879612`; backend/security/E2E/licensing and all five container builds pass. All eight frontend shards pass; frontend aggregate and coverage still run. CodeQL remains failed. Further source changes require fresh-head CI. |
-| Protected source snapshot | `eeb69d440fdf8204c9e560b8b89b94112c094c8d`, 7,106 files |
+| Protected source snapshot | `433f18091ef1921d1a0e3b8d4eec6a82db9a4284`, 7,109 files |
 | PR branch / target | `codex/release-main-0.1.42` → `main` |
 | PR state at inspection | Draft; no merge or publication performed |
-| Remote CI snapshot | On `6150040801`, 70 checks succeeded, four run, 37 skipped and CodeQL failed. Container aggregate and all five images pass. The open CodeQL inventory is temporarily mixed: 447 instances across `6150040801` and `c97cb2a1ab` while default Python analysis runs. The aggregate reports missing Python analysis; this is not a completed current-head security count. |
+| Remote CI snapshot | On `6150040801`, container aggregate/all five images, E2E, backend/security/license and all eight frontend shards pass; frontend aggregate and coverage still run. Completed CodeQL inventory: 447 open instances, all on `6150040801` (7 critical, 437 high, 3 medium). Its failed changed-code aggregate reports 424 alerts; that is a different measure from all open PR instances. |
 | Latest metadata checks | 37 passed, one local docs-build test deselected due host multiprocessing failure; unchanged standard test/build passes remotely. Other scoped verification is recorded below. |
 | Standard docs evidence | Unchanged standard build and docs suite pass in CI [run 34491682436](https://github.com/rmusser01/tldw_server/actions/runs/34491682436/job/102919740634). |
 | Latest observed GitHub publication | v0.1.38; no remote v0.1.39–v0.1.42 tags |

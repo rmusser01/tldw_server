@@ -188,3 +188,14 @@ and diff checks pass. No dependency, suppression or alert state changed. A fresh
 analysis must confirm alert closure. The intermediate `6150040801` inventory
 contains 447 open instances across that head and `c97cb2a1ab` while Python runs;
 it is not a completed current-head security result.
+
+The subsequent completed observation reports **447 open instances**, all on
+`6150040801bc697acd79e2b2e90aae3337879612`: 7 critical, 437 high and 3 medium.
+The [aggregate check](https://github.com/rmusser01/tldw_server/runs/103036686733)
+now includes Python and reports **424 changed-code alerts** (7 critical,
+414 high, 3 medium). This is a different measure from all open PR instances.
+The five open audio-path findings include a newly located result after the
+normalizer repair; runtime regression success does not establish analyzer
+closure. Alerts 2119–2121 and 2599 remain absent from the open PR inventory.
+The new fixture corrections need analysis of their later source commit.
+Snapshot: `/tmp/pr2761-fourth-codeql.json`. No alert state was changed.
