@@ -11,6 +11,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pytest
+
 from tldw_Server_API.app.core.DB_Management.db_migration import DatabaseMigrator, Migration, MigrationError
 
 
@@ -187,6 +189,7 @@ class TestMigrations(unittest.TestCase):
         self.assertEqual(len(result["migrations_applied"]), 1)
         self.assertEqual(result["migrations_applied"][0]["direction"], "down")
 
+    @pytest.mark.unit
     def test_no_migrations_upgrade_rejects_missing_chain(self):
         """Reject an unavailable upgrade before changing the schema version."""
         with sqlite3.connect(self.db_path) as conn:

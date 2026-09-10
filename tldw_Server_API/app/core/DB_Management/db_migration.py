@@ -329,13 +329,13 @@ class DatabaseMigrator:
 
     @staticmethod
     def _strip_sql_comments(sql: str) -> str:
-        lines = []
-        for line in sql.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("--"):
-                continue
-            lines.append(line)
-        return "\n".join(lines).strip()
+        """Remove comments for classification while preserving quoted SQL tokens."""
+        return re.sub(
+            r"('(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|`(?:``|[^`])*`|\[[^\]]*\])"
+            r"|--[^\n]*|/\*[\s\S]*?(?:\*/|$)",
+            lambda match: match.group(1) or " ",
+            sql,
+        ).strip()
 
     @classmethod
     def _split_sql_statements(cls, sql: str) -> list[str]:

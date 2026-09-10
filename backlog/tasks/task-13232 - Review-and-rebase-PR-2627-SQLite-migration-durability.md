@@ -4,7 +4,7 @@ title: Review and rebase PR 2627 SQLite migration durability
 status: Done
 assignee: []
 created_date: '2026-09-10 00:43'
-updated_date: '2026-09-10 01:21'
+updated_date: '2026-09-10 01:37'
 labels:
   - db
   - migrations
@@ -61,6 +61,12 @@ Tracking: TASK-13232, created through Backlog CLI with the old PR task history b
 **Success Criteria**: BOM-prefixed wrapped files execute, source/checksum remain unchanged, new tests meet repository conventions, and public SQL effects replace parser call-count assertions.
 **Tests**: Three BOM cases fail before the execution-only normalization and pass after; unit selection, expanded migration/CLI/bootstrap/backup suite, lint/security and independent review.
 **Status**: Complete (171 passed, 7 PostgreSQL-unavailable skips; final remote review/CI are merge gates).
+
+## Stage 5: Commented boundary compatibility
+**Goal**: Accept comments on legacy wrappers and FK boundaries while retaining transaction ownership.
+**Success Criteria**: SQL comments outside quoted tokens normalize for classification; body SQL and checksum source stay original; modified internal test participates in unit selection.
+**Tests**: Eight public file migration cases for comment locations with commit/rollback, seven lexer output cases, expanded migration/CLI/bootstrap/backup suite and independent SQLite comparisons.
+**Status**: Complete (186 passed, 7 PostgreSQL-unavailable skips; after unrelated latest-dev rebase, 39 selected unit tests pass).
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -87,12 +93,18 @@ Merge assessment: still useful because dev retains the partial-DDL durability de
 Addressed the five test-maintenance findings with shared initialized/versioned SQLite fixtures, exactly one unit classification marker and docstrings on each added planning test, descriptive parameter IDs, and public database-effects tests replacing the parser spy and FK extraction assertion. Independent review found all six Qodo findings addressed and no remaining substantive correctness/security issues.
 Validation after activating the project .venv: python -m pytest on the same 11 migration/CLI/bootstrap/backup modules recorded above -q -rs => 171 passed, 7 skipped (PostgreSQL unavailable), 4 warnings in 36.20s. Marker-selected planning and legacy tests => 23 passed, 5 pre-existing unclassified tests deselected. Ruff, py_compile, both repository guards and git diff --check pass; Bandit on the same touched application scope => 0 findings, 1297 LOC. Packaged SQL remains unchanged against latest dev. Results: /tmp/pr2627-qodo-full-tests.log and /tmp/pr2627-qodo-bandit.json.
 The requester supplied the human-written Change summary, now preserved verbatim in the PR description, and explicitly authorized final rebase, Qodo remediation, review replies and merge. Local implementation is complete; a new review covering the published final head and all required GitHub checks remain necessary before merging.
+
+2026-09-10 final-head Qodo review on 6e5fefe258 reported two follow-ups: the modified internal missing-chain regression needs a unit marker, and valid comments around outer transaction/FK-PRAGMA boundaries prevent compatibility classification. Plan: reproduce accepted boundary-comment failures and rollback behavior with public file-backed migrations; normalize only comments outside quoted SQL tokens for classification while retaining original executable SQL/checksums; add the marker; rerun relevant regression, lint/security and independent review before publication and another final-head review.
+
+2026-09-10 boundary-comment follow-up: Qodo review on 6e5fefe258 had two findings. Added the unit marker to the modified internal missing-chain regression. Replaced full-line-only comment stripping with quote-aware comment normalization for classification: quoted strings/identifiers remain intact, comments become whitespace, and original SQL still executes and supplies checksums. Added eight public file-backed cases for leading/embedded block comments and inline comments before/after semicolons on outer BEGIN/COMMIT and FK PRAGMAs. Each comment mode verifies success or forced schema-version-write rollback, ledger/version consistency and original source/checksum integrity. Seven lexer output cases protect single/double/backtick/bracket quoting and escaped quotes. Red run: 13 failed, 2 passed; green unit selection: 39 passed, 16 pre-existing unclassified tests deselected.
+Expanded 11-module migration/CLI/bootstrap/backup suite (same command above) => 186 passed, 7 PostgreSQL-unavailable skips, 4 warnings in 35.15s. Ruff, compilation, repository guards and whitespace checks pass. Bandit touched application scope => 0 findings over 1299 LOC. Logs: /tmp/pr2627-comments-full-tests.log and /tmp/pr2627-comments-bandit.json. Independent review found no substantive issues and confirmed SQLite semantics with eight executed quote/comment comparisons.
+Dev advanced to f0248aaa00047d2ffcc3bde295d9fbb8296add8a (audio test and task records only). Rebased with no conflicts; range-diff preserves all five prior patches. Post-rebase unit selection again passes 39 tests, with 16 pre-existing unclassified tests deselected; whitespace and shipped-SQL equality checks pass. Log: /tmp/pr2627-comments-rebased-unit.log. Human Change summary remains accepted and unchanged. Publish fixes and resolve both findings, then require completed final-head Qodo review and required GitHub gates before authorized merge.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Rebased PR #2627 onto dev 456eafb7a6 and completed Qodo remediation, including BOM-prefixed legacy wrapper support without changing shipped SQL or checksums. Migration SQL, success ledger and schema version remain atomic; legacy recovery and idempotent compatibility are preserved. Verification: 171 passed, 7 PostgreSQL-unavailable skips, zero Bandit findings; independent review confirms all six Qodo findings addressed. The requester-owned Change summary is present. Ready for final-head Qodo review and required GitHub checks before the authorized merge.
+Rebased PR #2627 onto dev f0248aaa00 and addressed Qodo findings through the review on 6e5fefe258: BOM/commented legacy wrappers are compatible, SQL/checksums and transaction ownership remain intact, and tests meet classification/documentation conventions. Expanded validation: 186 passed, 7 PostgreSQL-unavailable skips; post-rebase selected unit tests: 39 passed; zero Bandit findings and no substantive independent-review issues. The requester-owned Change summary is present. Final-head Qodo review and required GitHub checks remain merge gates.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

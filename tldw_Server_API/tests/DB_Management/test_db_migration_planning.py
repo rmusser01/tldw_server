@@ -300,6 +300,90 @@ PRAGMA foreign_keys(ON);
         assert conn.execute("SELECT version FROM schema_version").fetchone() == (1,)
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize("boundaries", [
+    pytest.param(
+        ("/* leading FK */ PRAGMA foreign_keys(OFF);", "/* leading begin */ BEGIN;",
+         "/* leading commit */ COMMIT;", "/* trailing FK */ PRAGMA foreign_keys(ON);"),
+        id="leading-block-comments",
+    ),
+    pytest.param(
+        ("PRAGMA /* FK name */ foreign_keys /* value */ (OFF);",
+         "BEGIN /* transaction mode */ IMMEDIATE /* wrapper */ TRANSACTION;",
+         "COMMIT /* wrapper */ TRANSACTION;", "PRAGMA foreign_keys /* value */ = ON;"),
+        id="embedded-block-comments",
+    ),
+    pytest.param(
+        ("PRAGMA foreign_keys(OFF) -- disable FK\n;", "BEGIN -- open wrapper\n;",
+         "COMMIT -- close wrapper\n;", "PRAGMA foreign_keys(ON) -- enable FK\n;"),
+        id="inline-comments-before-semicolons",
+    ),
+    pytest.param(
+        ("PRAGMA foreign_keys(OFF); -- disable FK\n", "BEGIN; -- open wrapper\n",
+         "COMMIT; -- close wrapper\n", "PRAGMA foreign_keys(ON); -- enable FK\n"),
+        id="inline-comments-after-semicolons",
+    ),
+])
+@pytest.mark.parametrize("fail_version_write", [False, True], ids=["commit", "rollback"])
+def test_commented_migration_boundaries_preserve_atomic_execution(
+    versioned_migration_db: tuple[Path, DatabaseMigrator],
+    boundaries: tuple[str, str, str, str],
+    fail_version_write: bool,
+) -> None:
+    """Comments on legacy boundaries preserve SQL, ledger, and version atomicity."""
+    db_path, migrator = versioned_migration_db
+    if fail_version_write:
+        with sqlite3.connect(db_path) as conn:
+            conn.executescript("""
+                CREATE TRIGGER reject_version BEFORE UPDATE ON schema_version
+                BEGIN SELECT RAISE(ABORT, 'version write failed'); END;
+            """)
+    before, begin, end, after = boundaries
+    source_sql = "\n".join((before, begin, """
+        CREATE TABLE widgets (value TEXT);
+        INSERT INTO widgets VALUES ('/* literal */ -- still literal');
+    """, end, after))
+    source_path = Path(migrator.migrations_dir) / "001_widgets.sql"
+    source_path.write_text(source_sql, encoding="utf-8")
+    original = db_migration_module.Migration(1, "widgets", source_sql)
+
+    if fail_version_write:
+        with pytest.raises(MigrationError, match="version write failed"):
+            migrator.migrate_to_version(1, create_backup=False)
+        with sqlite3.connect(db_path) as conn:
+            assert conn.execute("SELECT name FROM sqlite_master WHERE name='widgets'").fetchall() == []
+            assert conn.execute("SELECT version, success FROM schema_migrations").fetchall() == [(1, 0)]
+            assert conn.execute("SELECT version FROM schema_version").fetchone() == (0,)
+    else:
+        result = migrator.migrate_to_version(1, create_backup=False)
+        assert result["status"] == "success"
+        with sqlite3.connect(db_path) as conn:
+            assert conn.execute("SELECT value FROM widgets").fetchall() == [("/* literal */ -- still literal",)]
+            assert conn.execute("SELECT checksum, success FROM schema_migrations").fetchall() == [
+                (original.checksum, 1),
+            ]
+            assert conn.execute("SELECT version FROM schema_version").fetchone() == (1,)
+    assert source_path.read_text(encoding="utf-8") == source_sql
+    assert migrator.load_migrations()[0].up_sql == source_sql
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("quoted_value", [
+    pytest.param("'/* block-like literal */'", id="single-quoted-block"),
+    pytest.param("'-- line-like literal'", id="single-quoted-line"),
+    pytest.param("'quote''/* still literal */'", id="escaped-single-quote"),
+    pytest.param('"-- quoted identifier"', id="double-quoted-identifier"),
+    pytest.param('"quote""/* identifier */"', id="escaped-double-quote"),
+    pytest.param('`/* quoted identifier */`', id="backtick-identifier"),
+    pytest.param('[-- quoted identifier]', id="bracket-identifier"),
+])
+def test_comment_normalization_preserves_quoted_sql_tokens(quoted_value: str) -> None:
+    """Removing SQL comments leaves literal and identifier contents intact."""
+    sql = f"/* leading */ SELECT {quoted_value}; -- trailing\n/* final */"
+    normalized = DatabaseMigrator._strip_sql_comments(sql)
+    assert normalized == f"SELECT {quoted_value};"
+
+
 def test_migrate_to_version_rejects_rollback_without_down_sql(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
