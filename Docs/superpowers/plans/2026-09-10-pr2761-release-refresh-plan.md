@@ -12,11 +12,11 @@
 | Item | Recorded state |
 | --- | --- |
 | Integrated release code and verified blocker fixes | `50dcf5453b1ba10b0eabb505ff32b831f47f8185` |
-| Latest executable-fix/metadata push | `44c6b45c85` (source `50dcf5453b`); subsequent evidence-only commits may advance the PR head |
+| Latest executable-fix/metadata push | `decdf9db77` (source `50dcf5453b`); blocker closure below is in progress |
 | Protected source snapshot | `50dcf5453b1ba10b0eabb505ff32b831f47f8185`, 7,099 files |
 | PR branch / target | `codex/release-main-0.1.42` → `main` |
 | PR state at inspection | Draft; no merge or publication performed |
-| Remote CI snapshot | On `30338ef7de`, backend/security/coverage/container/E2E/license/docs and seven frontend shards pass. Shard 5 reminder validation failed; the complete repaired suite passes 50 tests locally. CodeQL remains unresolved. Image startup separately exposed a missing package despite the passing build gate. |
+| Remote CI snapshot | On `decdf9db77`, backend/security/coverage/container/E2E/license/docs and seven frontend shards pass. Shard 6 has one failing Flashcard cloze-template assertion (538 shared-UI tests pass in that shard); the prior reminder and Research failures pass. CodeQL remains unresolved. |
 | Latest metadata checks | 36 passed, one local docs-build test deselected due host multiprocessing failure; unchanged standard test/build passes remotely. Other scoped verification is recorded below. |
 | Standard docs evidence | Unchanged standard build and docs suite pass in CI [run 34491682436](https://github.com/rmusser01/tldw_server/actions/runs/34491682436/job/102919740634). |
 | Latest observed GitHub publication | v0.1.38; no remote v0.1.39–v0.1.42 tags |
@@ -68,6 +68,38 @@ Run tests with the project virtual environment activated and execute from this w
 **Success Criteria:** Every unchecked item below is completed or has a requester-approved scope decision recorded in its owning task; no failed or stale required check is accepted as green.
 **Tests:** Current-head GitHub checks, standard strict docs build, dependency-task verification, publication inventory, migration/restore rehearsal, and human review.
 **Status:** In Progress
+
+### Active closure batch following `decdf9db77`
+
+Requester explicitly authorized addressing all issues and blockers. Work is
+tracked in the existing owning tasks; no release scope exception was granted.
+
+- [Frontend hardening](../../Evidence/PR2761-frontend-hardening.md): Flashcard
+  template suite 8 passes; five shared dependency majors aligned with 38
+  persistence/Markdown/Dexie tests and both client typechecks passing. A required
+  strict TypeScript project covers four shared URL/API-key/error utilities;
+  use-memo is re-enabled after repairing Timeline dependency expressions.
+  Whole-WebUI strictness and the remaining six compiler-era hook rules stay open.
+- [CodeQL fixes](../../Evidence/PR2761-critical-CodeQL-assessment.md): three
+  reproduced raw-exception disclosures repaired in ACP and embedding requeue
+  responses; credential reads separated from the TTS preference tuple.
+  31 backend and 42 frontend tests pass. Alert closure awaits the next scan;
+  path-injection and Actions findings still need individual investigation.
+- [Worker packaging](../../Evidence/PR2761-worker-packaging.md): both workers
+  include canonical config/local packages/license inputs; the container gate
+  builds all five images and checks backend imports in isolated containers.
+  40 contracts pass and both workflow files pass Actionlint. Worker images still
+  require actual fresh CI builds. Four ChromaDB advisories have no published
+  patched version; no speculative upgrade or exception was added.
+- [Lifecycle recovery](../../Evidence/PR2761-dsr-erasure.md): DSR honors SQLite
+  foreign keys and excludes raw error text; 26 tests pass. Real Sync object GC
+  verifies deletion, restart after failure before/after unlink and isolation of
+  equal-content data belonging to another owner; 68 tests pass. Coordinated
+  whole-account attachment/history/backup erasure is not yet certified.
+- The published 0.1.38 startup failure, unknown deployed rollback baseline,
+  measured production capacity envelope, supply-chain vulnerability disposition
+  and final human review remain explicit prerequisites. Passing candidate
+  same-image restoration does not replace them.
 
 ### 4.1 Current-head CI and local docs failure — agent
 

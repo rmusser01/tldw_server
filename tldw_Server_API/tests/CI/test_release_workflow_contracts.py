@@ -121,16 +121,40 @@ def test_publish_ghcr_main_preserves_backend_publish_controls() -> None:
     }
 
 
-def test_container_build_check_remains_three_image_build_only_validation() -> None:
+def test_container_build_check_covers_workers_without_publishing_images() -> None:
     workflow = _load(".github/workflows/container-build-check.yml")
     job = workflow["jobs"]["build"]
     matrix = job["strategy"]["matrix"]["include"]
     build = _get_step(job["steps"], "Build container images")
 
-    assert [entry["name"] for entry in matrix] == ["app", "webui", "admin-ui"]
+    assert [entry["name"] for entry in matrix] == ["app", "worker", "audio-worker", "webui", "admin-ui"]
     assert [entry["dockerfile"] for entry in matrix] == [
         "Dockerfiles/Dockerfile.prod",
+        "Dockerfiles/Dockerfile.worker",
+        "Dockerfiles/Dockerfile.audio_gpu_worker",
         "Dockerfiles/Dockerfile.webui",
         "Dockerfiles/Dockerfile.admin-ui",
     ]
     assert build["with"]["push"] is False
+    assert workflow["permissions"] == {"contents": "read"}
+    assert [entry["backend"] for entry in matrix] == [True, True, True, False, False]
+    assert build["with"]["load"] == "${{ matrix.backend }}"
+
+
+def test_container_backend_smoke_uses_the_built_image_and_isolated_imports() -> None:
+    """Backend packaging omissions must fail before the matrix result is green."""
+    workflow = _load(".github/workflows/container-build-check.yml")
+    steps = workflow["jobs"]["build"]["steps"]
+    build = _get_step(steps, "Build container images")
+    smoke = _get_step(steps, "Verify backend local package imports")
+
+    assert steps.index(smoke) > steps.index(build)
+    assert smoke["if"] == "matrix.backend"
+    assert smoke["env"]["IMAGE_REF"] == build["with"]["tags"]
+    assert "docker image inspect --format" in smoke["run"]
+    assert '"$image_id" -I -c' in smoke["run"]
+    assert "--entrypoint python" in smoke["run"]
+    assert "import mcp_unified; import tldw_profile_core" in smoke["run"]
+    assert "--network none" in smoke["run"]
+    assert "--read-only" in smoke["run"]
+    assert not smoke.get("continue-on-error", False)

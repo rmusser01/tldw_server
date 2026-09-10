@@ -4,7 +4,7 @@ title: 'Re-enable frontend type-safety and lint gates, harden persisted stores'
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-09-10 16:32'
+updated_date: '2026-09-10 19:27'
 labels:
   - tech-debt
   - high
@@ -36,7 +36,7 @@ This is a phased hardening ticket; land incrementally so each step keeps CI gree
 - [ ] #2 `strict` is turned on incrementally (start with `noImplicitAny`, then `strictNullChecks`), with a tracked path to `strict: true`.
 - [ ] #3 `react-hooks/rules-of-hooks` is re-enabled and violations fixed; the remaining `react-hooks` rules are re-enabled or individually justified.
 - [x] #4 Every persisted Zustand store declares a `version` + `migrate` (or a documented reason it needs neither).
-- [ ] #5 Shared-code dependency majors are aligned between frontend and extension (or hoisted to one workspace-level version), with a note on the reconciliation.
+- [x] #5 Shared-code dependency majors are aligned between frontend and extension (or hoisted to one workspace-level version), with a note on the reconciliation.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -50,4 +50,8 @@ PR2761 refresh: repairing the real nonincremental WebUI TypeScript baseline, the
 Verified all9 named persisted Zustand stores already declare version1 plus identity migrate in this candidate (playground-session, persona-buddy-shell, notes-dock, ui-mode, actor, quick-ingest-session, folder, feedback, acp-sessions). Existing five-suite persistence/store selection passed17tests. Criterion4 closed for the current unchanged schema; this does not claim forward-schema migrations. WebUI nonincremental tsc also passes; CI gate added but criterion1 awaits new-head CI evidence. Strictness/additional hook rules/dependency-major alignment remain open.
 
 30338follow-up: typecheck remains skipped because frontend aggregate stops after shard5 failure; criterion1 stays open. Measured separate flags: noImplicitAny948diagnostics/252files; strictNullChecks664/177. Seven disabled compiler-hook rules add25diagnostics/14files in328file sample. Five runtime major mismatches remain (zustand,dexie-react-hooks,marked,d3-dsv,property-information). Baseline logs under/tmp/pr2761-*baseline.log; plan records counts. No broad strictness/dependency change made.
+
+Continuing requester-authorized release blocker closure. Investigating shared dependency major alignment and individually justified React compiler hook rules while current-head typecheck awaits frontend test repair; no gate suppression or wholesale strictness claim.
+
+Aligned five shared runtime dependency majors and peer ranges; frozen install resolves identical zustand5.0.10/dexie-react-hooks4.2.0/marked17.0.1/d3-dsv3.0.1/property-information7.1.0 in extension/WebUI/UI. 28 persistence-Markdown plus10Dexie-TTS tests pass; full WebUI and existing extension strict compile pass. Added required strict project for four shared security/error utilities; actual compiler rejects implicit-any and null probes. Re-enabled use-memo after fixing two Timeline dependency expressions. Other strictness/hooks criteria remain open; detailed scope and full baseline in Docs/Evidence/PR2761-frontend-hardening.md.
 <!-- SECTION:NOTES:END -->

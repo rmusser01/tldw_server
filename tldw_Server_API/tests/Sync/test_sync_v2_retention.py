@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
+from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteBackend
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Notes_Tasks.projection_markers import (
@@ -18,7 +19,7 @@ from tldw_Server_API.app.core.Notes_Tasks.projection_markers import (
 )
 from tldw_Server_API.app.core.Sync.v2 import service as service_module
 from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
-from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
+from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore, SyncBlobStoreError
 from tldw_Server_API.app.core.Sync.v2.materializers import NotesTaskMaterializer
 from tldw_Server_API.app.core.Sync.v2.models import (
     SyncBlobObjectCreate,
@@ -1782,8 +1783,12 @@ def test_retention_compact_records_domain_checkpoint_without_deleting_envelopes(
     assert len(sync_service.store.list_envelopes_after("dataset-1", 0, limit=10)) == 2
 
 
-def test_retention_compact_soft_deletes_eligible_blob_metadata(
+@pytest.mark.parametrize("failure_stage", [None, "before_delete", "after_delete"])
+def test_retention_compact_physically_deletes_blob_and_recovers_after_restart(
     sync_service: SyncV2Service,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str | None,
 ) -> None:
     upsert = sync_service.push(
         user_id="user-1",
@@ -1851,6 +1856,72 @@ def test_retention_compact_soft_deletes_eligible_blob_metadata(
             ],
         )
 
+    assert sync_service.blob_store is not None
+    blob_before = sync_service.store.list_blob_objects_for_dataset("dataset-1")[0]
+    target = sync_service.blob_store.resolve_storage_key(blob_before.storage_key)
+    assert target.read_bytes() == b"paper payload"
+    sync_service.store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="other-owner-dataset",
+            owner_user_id="user-2",
+            scope_type="personal",
+            encryption_policy="server_trusted_v1",
+            domains=["attachment.ref"],
+        )
+    )
+    other_key = _namespaced_storage_key(
+        sync_service,
+        dataset_id="other-owner-dataset",
+        owner_user_id="user-2",
+        payload_hash=payload_hash,
+        payload=b"paper payload",
+    )
+    other_target = sync_service.blob_store.resolve_storage_key(other_key)
+    sync_service.store.complete_blob_upload(
+        SyncBlobObjectCreate(
+            blob_id="other-owner-blob",
+            dataset_id="other-owner-dataset",
+            owner_user_id="user-2",
+            attachment_id="other-owner-attachment",
+            payload_hash=payload_hash,
+            content_type="application/pdf",
+            size_bytes=13,
+            storage_backend="local_fs",
+            storage_key=other_key,
+        )
+    )
+    other_before = sync_service.store.list_blob_objects_for_dataset("other-owner-dataset")
+    if failure_stage:
+        original_delete = sync_service.blob_store.delete_namespace_blob
+
+        def interrupted_delete(**kwargs):
+            if failure_stage == "after_delete":
+                original_delete(**kwargs)
+            raise SyncBlobStoreError("simulated interrupted deletion")
+
+        monkeypatch.setattr(sync_service.blob_store, "delete_namespace_blob", interrupted_delete)
+        failed = sync_service.retention_compact(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            confirm=True,
+            apply_envelope_compaction=False,
+            apply_tombstone_prune=False,
+            apply_blob_gc=True,
+        )
+        assert failed.blob_gc == []
+        assert failed.blocker_counts["retention_blob_delete_retry"] == 1
+        pending = sync_service.store.list_blob_objects_for_dataset("dataset-1", status=None)
+        assert pending[0].status == "deleting"
+        assert target.exists() is (failure_stage == "before_delete")
+        sync_service.store.db.backend.get_pool().close_all()
+        sync_service = SyncV2Service(
+            store=SyncV2Store(SyncDatabase(backend=SQLiteBackend(sync_service.store.db.backend.config))),
+            adapters=sync_service.adapters,
+            clock=_clock,
+            blob_store=LocalSyncBlobStore(tmp_path / "sync_blobs"),
+            settings=sync_service.settings,
+        )
+
     result = sync_service.retention_compact(
         user_id="user-1",
         dataset_id="dataset-1",
@@ -1874,6 +1945,9 @@ def test_retention_compact_soft_deletes_eligible_blob_metadata(
     deleted_blobs = sync_service.store.list_blob_objects_for_dataset("dataset-1", status=None)
     assert len(deleted_blobs) == 1
     assert deleted_blobs[0].status == "deleted"
+    assert not target.exists()
+    assert other_target.read_bytes() == b"paper payload"
+    assert sync_service.store.list_blob_objects_for_dataset("other-owner-dataset") == other_before
 
 
 def test_retention_compact_endpoint_returns_redacted_apply_summary(

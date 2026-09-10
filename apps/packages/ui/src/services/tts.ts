@@ -495,14 +495,13 @@ export const setTldwTTSNormalizePlurals = async (value: boolean) => {
   await setSetting(TLDW_TTS_NORMALIZE_PLURALS_SETTING, value)
 }
 
-export const getTTSSettings = async () => {
+const getTTSPreferences = async () => {
   const [
     ttsEnabled,
     ttsProvider,
     browserTTSVoices,
     voice,
     ssmlEnabled,
-    elevenLabsApiKey,
     elevenLabsVoiceId,
     elevenLabsModel,
     elevenLabsKeyValid,
@@ -511,7 +510,6 @@ export const getTTSSettings = async () => {
     removeReasoningTagTTS,
     // OPENAI
     openAITTSBaseUrl,
-    openAITTSApiKey,
     openAITTSModel,
     openAITTSVoice,
     openAITTSKeyValid,
@@ -541,7 +539,6 @@ export const getTTSSettings = async () => {
     getBrowserTTSVoices(),
     getVoice(),
     isSSMLEnabled(),
-    getElevenLabsApiKey(),
     getElevenLabsVoiceId(),
     getElevenLabsModel(),
     getElevenLabsKeyValid(),
@@ -550,7 +547,6 @@ export const getTTSSettings = async () => {
     getRemoveReasoningTagTTS(),
     // OPENAI
     getOpenAITTSBaseUrl(),
-    getOpenAITTSApiKey(),
     getOpenAITTSModel(),
     getOpenAITTSVoice(),
     getOpenAITTSKeyValid(),
@@ -582,7 +578,6 @@ export const getTTSSettings = async () => {
     browserTTSVoices,
     voice,
     ssmlEnabled,
-    elevenLabsApiKey,
     elevenLabsVoiceId,
     elevenLabsModel,
     elevenLabsKeyValid,
@@ -591,7 +586,6 @@ export const getTTSSettings = async () => {
     removeReasoningTagTTS,
     // OPENAI
     openAITTSBaseUrl,
-    openAITTSApiKey,
     openAITTSModel,
     openAITTSVoice,
     openAITTSKeyValid,
@@ -613,6 +607,23 @@ export const getTTSSettings = async () => {
     tldwTtsNormalizeEmails,
     tldwTtsNormalizePhones,
     tldwTtsNormalizePlurals
+  }
+}
+
+/** Read preferences and credentials concurrently without mixing their result tuples. */
+export const getTTSSettings = async () => {
+  const preferences = getTTSPreferences()
+  const elevenLabsApiKey = getElevenLabsApiKey()
+  const openAITTSApiKey = getOpenAITTSApiKey()
+
+  // Attach rejection handlers to every read immediately. Keep each result tied
+  // to its named promise so credential values cannot become preference fields.
+  await Promise.all([preferences, elevenLabsApiKey, openAITTSApiKey])
+
+  return {
+    ...(await preferences),
+    elevenLabsApiKey: await elevenLabsApiKey,
+    openAITTSApiKey: await openAITTSApiKey
   }
 }
 

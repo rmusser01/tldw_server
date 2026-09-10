@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.data_subject_requests_repo import (
 )
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
 from tldw_Server_API.app.services import admin_scope_service
 
 _CATEGORY_DEFS: tuple[dict[str, str], ...] = (
@@ -439,6 +440,7 @@ def _sqlite_hard_delete_sync(path: Path, statements: list[tuple[str, tuple]]) ->
         return 0
     total = 0
     with sqlite3.connect(path) as conn:
+        configure_sqlite_connection(conn, use_wal=False, synchronous=None)
         for sql, params in statements:
             cursor = conn.execute(sql, params)
             total += cursor.rowcount
@@ -617,8 +619,8 @@ async def execute_dsr_erasure(
         try:
             count = await handler(user_id)
             results[category] = {"deleted_count": count, "status": "ok"}
-        except Exception as exc:
-            logger.error("DSR erasure failed for category '{}' user {}: {}", category, user_id, exc)
+        except Exception:
+            logger.error("DSR erasure failed for category '{}' user {}", category, user_id)
             errors[category] = "Erasure handler failed"
             results[category] = {
                 "deleted_count": 0,

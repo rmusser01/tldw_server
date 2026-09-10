@@ -76,6 +76,12 @@ and this project adheres to Some kind of Versioning
 
 ### Fixed
 
+- **Release Hardening** — Repaired worker package/configuration inputs and added
+  backend image import checks. Enforced SQLite foreign keys during erasure and
+  removed raw exception details from DSR logs, ACP health, and embedding requeue
+  warnings. Aligned shared frontend dependency majors and added strict checks
+  for URL/API-key guards.
+
 - **Authentication And Data Integrity** — Hardened trusted-proxy identity and
   login lockout isolation, embeddings authentication/metrics access, SQLite
   migration atomicity and recovery, media-original cleanup, and session-schema

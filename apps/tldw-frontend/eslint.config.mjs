@@ -81,7 +81,7 @@ export default [
       "react-hooks/refs": "off",
       "react-hooks/set-state-in-effect": "off",
       "react-hooks/static-components": "off",
-      "react-hooks/use-memo": "off",
+      "react-hooks/use-memo": "error",
       "@typescript-eslint/no-explicit-any": "warn",
       "@typescript-eslint/no-unused-vars": [
         "warn",

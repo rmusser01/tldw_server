@@ -1,11 +1,10 @@
 """Tests for ACP health check and setup-guide endpoints (Phase 0)."""
 import importlib.machinery
-import os
 import sys
 import types
 
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 
 pytestmark = pytest.mark.unit
 
@@ -172,10 +171,29 @@ def test_acp_health_returns_structured_response(client_user_only, stub_runner_cl
     assert data["runner"]["status"] in ("ok", "missing", "error")
 
 
+def test_acp_health_sanitizes_runner_config_failure(client_user_only, monkeypatch):
+    """Config failure diagnostics must not expose credentials or local paths."""
+    from tldw_Server_API.app.core.Agent_Client_Protocol import config as acp_config
+
+    def fail_config():
+        raise ValueError("secret-token in /private/acp/config.json")
+
+    monkeypatch.setattr(acp_config, "load_acp_runner_config", fail_config)
+
+    response = client_user_only.get("/api/v1/acp/health")
+
+    assert response.status_code == 200
+    assert response.json()["runner"] == {
+        "status": "error", "detail": "ACP runner configuration could not be loaded"
+    }
+    assert response.json()["overall"] == "unavailable"
+    assert "secret-token" not in response.text
+    assert "/private/acp/config.json" not in response.text
+
+
 def test_acp_health_runner_missing(client_user_only, stub_runner_client, monkeypatch):
     """Health endpoint reports missing runner."""
     import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_mod
-    from tldw_Server_API.app.core.Agent_Client_Protocol.config import ACPRunnerConfig
 
     def _check_missing():
         return {"status": "missing", "detail": "No runner configured"}

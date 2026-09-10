@@ -1,7 +1,25 @@
+import json
 from pathlib import Path
 
 import pytest
 import yaml
+
+
+def test_frontend_required_enforces_strict_shared_security_boundaries() -> None:
+    """The incremental strict project must execute as a failing merge gate."""
+    data = yaml.safe_load(Path(".github/workflows/frontend-required.yml").read_text())
+    step = next(
+        step for step in data["jobs"]["frontend-required"]["steps"]
+        if step.get("name") == "Run strict shared-boundary typecheck"
+    )
+    assert step["if"] == "needs.changes.outputs.tldw_frontend_changed == 'true'"
+    assert step["working-directory"] == "apps/tldw-frontend"
+    assert step["run"] == "bunx tsc --project tsconfig.strict.json"
+    assert not step.get("continue-on-error", False)
+    strict_project = json.loads(Path("apps/tldw-frontend/tsconfig.strict.json").read_text())
+    assert strict_project["compilerOptions"]["strict"] is True
+    assert "../packages/ui/src/utils/absolute-url-guard.ts" in strict_project["include"]
+    assert "../packages/ui/src/utils/api-key.ts" in strict_project["include"]
 
 
 def test_frontend_required_gates_webui_typecheck() -> None:

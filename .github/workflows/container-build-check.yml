@@ -54,8 +54,18 @@ jobs:
           - name: app
             dockerfile: Dockerfiles/Dockerfile.prod
             build_args: ""
+            backend: true
+          - name: worker
+            dockerfile: Dockerfiles/Dockerfile.worker
+            build_args: ""
+            backend: true
+          - name: audio-worker
+            dockerfile: Dockerfiles/Dockerfile.audio_gpu_worker
+            build_args: ""
+            backend: true
           - name: webui
             dockerfile: Dockerfiles/Dockerfile.webui
+            backend: false
             build_args: |
               NEXT_PUBLIC_API_URL=
               NEXT_PUBLIC_API_BASE_URL=
@@ -65,6 +75,7 @@ jobs:
               TLDW_INTERNAL_API_ORIGIN=http://app:8000
           - name: admin-ui
             dockerfile: Dockerfiles/Dockerfile.admin-ui
+            backend: false
             build_args: |
               NEXT_PUBLIC_API_URL=http://app:8000
               NEXT_PUBLIC_API_VERSION=v1
@@ -88,6 +99,19 @@ jobs:
           file: ${{ matrix.dockerfile }}
           build-args: ${{ matrix.build_args }}
           push: false
+          load: ${{ matrix.backend }}
+          tags: tldw-container-check:${{ matrix.name }}
+
+      - name: Verify backend local package imports
+        if: matrix.backend
+        env:
+          IMAGE_REF: tldw-container-check:${{ matrix.name }}
+        run: |
+          image_id="$(docker image inspect --format '{{.Id}}' "$IMAGE_REF")"
+          docker run --rm --network none --read-only \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --entrypoint python "$image_id" -I -c \
+            "import mcp_unified; import tldw_profile_core"
 
   container-build-check:
     name: container-build-check

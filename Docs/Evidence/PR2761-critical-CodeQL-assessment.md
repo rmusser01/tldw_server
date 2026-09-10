@@ -72,3 +72,32 @@ The branch-open snapshot changed from **448 to 449**: old 2655 disappeared, repl
 All three current-source analyses completed without ingestion errors: Python `1756055450` (564 results), JavaScript `1755993012` (85), Actions `1755924298` (239). The prior 7c79 Python analysis also completed with 564 results. The partial-scan caveats above describe that earlier observation only.
 
 The branch alert API now reports **448 open instances**: 172 Python, 37 JavaScript and 239 Actions; severity distribution is 7 critical, 435 high and 6 medium. **Slash-regex alert 2599 is fixed** for this PR. Old Speech 2655 is fixed and replacement 2668 remains open as assessed above. The aggregate [check 102941684745](https://github.com/rmusser01/tldw_server/runs/102941684745) still reports failure and 379 changed-code alerts (7 critical, 367 high, 5 medium). Its output timestamp predates the completed Python scan; do not equate its total with the branch-open inventory or manufacture a green result. No alerts were dismissed. Snapshot: `/tmp/pr2761-30338-all-alerts.json`.
+
+## Follow-up: verified source fixes after decdf9db77
+
+The fresh `decdf9db7756031c379d5b019b0436711b9068b1` inventory still has **448 open alerts** (7 critical, 435 high, 6 medium), all with instances on that exact commit. Python analysis `1756430231` (564 results), JavaScript `1756419893` (85), and Actions `1756356894` (239) completed without ingestion errors. [Aggregate check 102966050262](https://github.com/rmusser01/tldw_server/runs/102966050262) still fails with 379 changed-code alerts. This is a source/security gate failure, not a missing-language or upload failure. Snapshots: `/tmp/pr2761-fresh-codeql-{head,alerts,analyses,check}.json`.
+
+### Exception details exposed in responses
+
+Three additional high-severity alerts have concrete, locally reproduced disclosure paths:
+
+- [2120](https://github.com/rmusser01/tldw_server/security/code-scanning/2120) and [2121](https://github.com/rmusser01/tldw_server/security/code-scanning/2121): single and bulk DLQ requeue handlers interpolated the complete schema-validation exception into response warnings. A real `jsonschema` rejection included the invalid input value, schema, and instance details. The regression supplies a synthetic secret/path as an invalid media ID and reproduces its inclusion in both successful admin responses.
+- [2119](https://github.com/rmusser01/tldw_server/security/code-scanning/2119): `_check_runner_binary` returned the configuration-loader exception verbatim, which reached the authenticated ACP health response. The regression supplies a configuration error with a synthetic secret and local path and reproduces their disclosure.
+
+The handlers now return fixed messages and log only the exception class at these sites. DLQ requeue still returns HTTP 200, moves the item, deletes the requested DLQ entry, closes the Redis client, and includes a warning. ACP health still returns HTTP 200 with an error runner status and an unavailable overall status. These are response-disclosure fixes; they do not change the existing authorization requirements or classify all diagnostic endpoints as safe.
+
+All three regression cases failed for the expected sensitive-response mismatch before the source changes. After the fixes and scoped Ruff cleanup, **31 tests pass** across the DLQ admin, DLQ quarantine, and ACP health suites. Two existing warnings remain: the Starlette/httpx deprecation and unknown pytest `plugins` configuration. Touched Python source and tests pass Ruff; Bandit reports zero findings with test assertions (`B101`) excluded. Runtime-only baseline Bandit also reported zero findings. Logs: `/tmp/pr2761-codeql-disclosure-{red,final}.log`, `/tmp/bandit_pr2761_disclosure_final.json`.
+
+### Speech credential/preference separation
+
+`getTTSSettings` now reads noncredential preferences in a private helper and keeps each credential result tied to its own named promise. All reads start concurrently; one `Promise.all` barrier attaches rejection handling without destructuring its mixed results. The public settings shape is unchanged. This removes the specific credential-to-preference tuple path described for alert 2668 without adding a suppression.
+
+New service tests verify distinct credential/preference sentinels, concurrent read initiation, and failure propagation while preferences remain pending. These tests also passed before the refactor: the runtime pairing was already correct, and this change makes the source boundary explicit. The Speech UI still legitimately reads credentials for provider setup; this is not a claim that credential access or credential persistence elsewhere was eliminated. After the aligned dependency installation, **42 tests pass** across TTS defaults and both Speech suites; the final defaults-only run passes **7 tests**. Logs: `/tmp/pr2761-tts-aligned-after.log`, `/tmp/pr2761-tts-defaults-final.log`.
+
+### Remaining work and disposition boundary
+
+None of the four targeted alerts is claimed fixed by GitHub until a new analysis includes these source changes. No alert has been dismissed, and no query, threshold, workflow trigger, or suppression was changed.
+
+The remaining inventory is not wholly an external/manual blocker. In particular, **151 path-injection alerts** still require source/sink-specific boundary investigation, and **238 cache-poisoning alerts** span mixed-event workflows and composite actions. Separating privileged/manual execution from PR execution is a possible source-level remediation, but is a substantial workflow change that must preserve admission, exact commit selection, cache ownership, and required gate behavior. The observed cross-event modeling limitation does not justify blanket dismissal or imply that all cache-writing paths are safe. The separate trusted-license checkout alert also remains unresolved.
+
+The bounded MIME validation behind alert 2598 already rejects inputs longer than 255 characters; the remaining two exponential-regex alerts occur in deliberate adversarial regex tests. The seven critical transport/XPath/browser findings retain the guarded/intentional-expression assessments above. Those observations support focused review, not a clean security verdict. Current-head analyzer execution is external evidence; security disposition requires individual review. Further source remediation remains agent work where a bypass or inadequate boundary is demonstrated.
