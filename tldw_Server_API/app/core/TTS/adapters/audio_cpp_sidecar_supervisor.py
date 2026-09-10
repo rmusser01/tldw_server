@@ -15,7 +15,7 @@ from typing import Any
 from loguru import logger
 
 from ..tts_exceptions import TTSError, TTSProviderInitializationError
-from .audio_cpp_client import AudioCppClient
+from .audio_cpp_client import AudioCppClient, is_healthy_response
 from .audio_cpp_config import PROVIDER_KEY, AudioCppConfig, validate_managed_host
 
 _SUBPROCESS_ENV_ALLOWLIST = {
@@ -64,7 +64,7 @@ class AudioCppSidecarSupervisor:
         self._host = validate_managed_host(self._server.get("host"))
         self._start_port = int(self._server.get("port") or 8080)
         self._autoselect_port = self._as_bool(self._server.get("autoselect_port"), default=True)
-        self._port_probe_max = max(0, int(self._server.get("port_probe_max") or 10))
+        self._port_probe_max = max(0, int(self._server.get("port_probe_max", 10)))
         self._startup_timeout_seconds = float(self._server.get("startup_timeout_seconds") or 30.0)
         self._healthcheck_interval_seconds = float(self._server.get("healthcheck_interval_seconds") or 0.25)
         self._startup_backoff_seconds = float(self._server.get("startup_backoff_seconds") or 5.0)
@@ -107,34 +107,48 @@ class AudioCppSidecarSupervisor:
                         error_code="SIDECAR_BACKOFF",
                     )
 
-            selected_port = self._select_port()
-            await asyncio.to_thread(self._write_server_config, selected_port)
-            base_url = self._build_base_url(self._host, selected_port)
-            try:
-                self._port = selected_port
-                self._base_url = base_url
-                self._process = await self._spawn_sidecar()
-                self._client = AudioCppClient(
-                    base_url=base_url,
-                    timeout=max(self._healthcheck_interval_seconds, 0.01),
-                    allow_remote_base_url=False,
-                )
-                await self._wait_for_ready()
-            except asyncio.CancelledError:
-                await self._stop_process_locked()
-                await self._close_client()
-                raise
-            except Exception as exc:
-                self._record_failure()
-                await self._stop_process_locked()
-                await self._close_client()
-                raise TTSProviderInitializationError(
-                    "audio.cpp sidecar did not reach /health",
-                    provider=PROVIDER_KEY,
-                    error_code="SIDECAR_STARTUP_FAILED",
-                ) from exc
+            next_port = self._start_port
+            while True:
+                try:
+                    selected_port = self._select_port(start_port=next_port)
+                except TTSProviderInitializationError:
+                    self._record_failure()
+                    raise
+                await asyncio.to_thread(self._write_server_config, selected_port)
+                base_url = self._build_base_url(self._host, selected_port)
+                try:
+                    self._port = selected_port
+                    self._base_url = base_url
+                    self._process = await self._spawn_sidecar()
+                    self._client = AudioCppClient(
+                        base_url=base_url,
+                        timeout=max(self._healthcheck_interval_seconds, 0.01),
+                        allow_remote_base_url=False,
+                    )
+                    await self._wait_for_ready()
+                except asyncio.CancelledError:
+                    await self._stop_process_locked()
+                    await self._close_client()
+                    raise
+                except Exception as exc:
+                    await self._stop_process_locked()
+                    await self._close_client()
+                    if (
+                        self._autoselect_port
+                        and selected_port < self._start_port + self._port_probe_max
+                        and not is_port_free(self._host, selected_port)
+                    ):
+                        logger.debug("audio.cpp startup port was claimed; trying the next candidate")
+                        next_port = selected_port + 1
+                        continue
+                    self._record_failure()
+                    raise TTSProviderInitializationError(
+                        "audio.cpp sidecar did not reach /health",
+                        provider=PROVIDER_KEY,
+                        error_code="SIDECAR_STARTUP_FAILED",
+                    ) from exc
 
-            return base_url
+                return base_url
 
     async def shutdown(self) -> None:
         async with self._lock:
@@ -184,7 +198,8 @@ class AudioCppSidecarSupervisor:
             ) from exc
         return resolved.with_name(f"{resolved.stem}.{uuid.uuid4().hex}{resolved.suffix}")
 
-    def _select_port(self) -> int:
+    def _select_port(self, *, start_port: int | None = None) -> int:
+        """Probe the remaining candidates within the configured port range."""
         if not self._autoselect_port:
             if not is_port_free(self._host, self._start_port):
                 raise TTSProviderInitializationError(
@@ -194,8 +209,7 @@ class AudioCppSidecarSupervisor:
                 )
             return self._start_port
 
-        for offset in range(self._port_probe_max + 1):
-            candidate = self._start_port + offset
+        for candidate in range(start_port or self._start_port, self._start_port + self._port_probe_max + 1):
             if is_port_free(self._host, candidate):
                 return candidate
 
@@ -242,7 +256,7 @@ class AudioCppSidecarSupervisor:
             if self._process is not None and self._process.returncode is not None:
                 raise RuntimeError("audio.cpp sidecar exited during startup")
             health = await self._probe_health()
-            if health:
+            if health and self._is_process_running():
                 return
             await asyncio.sleep(self._healthcheck_interval_seconds)
 
@@ -254,10 +268,7 @@ class AudioCppSidecarSupervisor:
         except (TTSError, RuntimeError) as exc:
             logger.debug("audio.cpp sidecar health probe failed: {}", type(exc).__name__)
             return False
-        if not isinstance(payload, dict):
-            return False
-        status = str(payload.get("status") or payload.get("state") or "ok").strip().lower()
-        return status not in {"error", "failed", "unhealthy"}
+        return is_healthy_response(payload)
 
     def _is_process_running(self) -> bool:
         return self._process is not None and self._process.returncode is None

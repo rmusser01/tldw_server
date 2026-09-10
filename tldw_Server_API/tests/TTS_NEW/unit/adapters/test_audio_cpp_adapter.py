@@ -23,6 +23,19 @@ def _wav_bytes(*, rate=24000, channels=1, frames=b"\x01\x00" * 100):
 WAV_BYTES = _wav_bytes()
 
 
+@pytest.mark.unit
+async def test_initialization_rejects_unrecognized_health_status():
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.TTS.tts_exceptions import TTSProviderInitializationError
+
+    client = _FakeAudioCppClient()
+    client.health = AsyncMock(return_value={"status": "starting"})
+    adapter = AudioCppTTSAdapter(_provider_config(client=client))
+    with pytest.raises(TTSProviderInitializationError, match="health"):
+        await adapter.ensure_initialized()
+
+
 class _FakeAudioCppClient:
     def __init__(self, *, audio_bytes: bytes = WAV_BYTES, models: list[str] | None = None) -> None:
         self.audio_bytes = audio_bytes

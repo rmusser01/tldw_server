@@ -272,3 +272,105 @@ def test_supervisors_do_not_share_generated_config_paths(tmp_path):
     first = AudioCppSidecarSupervisor(_provider_config(tmp_path), repo_root=tmp_path)
     second = AudioCppSidecarSupervisor(_provider_config(tmp_path), repo_root=tmp_path)
     assert first.server_config_path != second.server_config_path
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("payload", [{}, {"service": "other"}, {"status": "starting"}, {"status": "unknown"}])
+async def test_sidecar_rejects_health_without_positive_status(payload, tmp_path):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.TTS.adapters.audio_cpp_sidecar_supervisor import AudioCppSidecarSupervisor
+
+    supervisor = AudioCppSidecarSupervisor(_provider_config(tmp_path), repo_root=tmp_path)
+    supervisor._client = AsyncMock()
+    supervisor._client.health.return_value = payload
+    assert not await supervisor._probe_health()
+
+
+@pytest.mark.unit
+async def test_sidecar_retries_next_port_after_bind_race(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.TTS.adapters import audio_cpp_sidecar_supervisor as module
+
+    occupied = set()
+    spawned_ports = []
+    clients = []
+
+    class Client(_ReadyClient):
+        closed = False
+
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            clients.append(self)
+
+        async def close(self):
+            self.closed = True
+
+    async def spawn(*args, **kwargs):
+        port = json.loads(Path(args[2]).read_text())["port"]
+        spawned_ports.append(port)
+        process = _FakeProcess()
+        if len(spawned_ports) == 1:
+            occupied.add(port)
+            process.returncode = 1
+        return process
+
+    monkeypatch.setattr(module, "is_port_free", lambda host, port: port not in occupied)
+    monkeypatch.setattr(module, "AudioCppClient", Client)
+    monkeypatch.setattr(module.asyncio, "create_subprocess_exec", spawn)
+    supervisor = module.AudioCppSidecarSupervisor(_provider_config(tmp_path), repo_root=tmp_path)
+    try:
+        assert await supervisor.ensure_started() == "http://127.0.0.1:8081"
+        assert spawned_ports == [8080, 8081]
+        assert clients[0].closed
+        assert supervisor.last_failure_at is None
+    finally:
+        await supervisor.shutdown()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("autoselect,probe_max", [(True, 1), (False, 3), (True, 0)])
+async def test_port_race_retries_are_bounded(monkeypatch, tmp_path, autoselect, probe_max):
+    from tldw_Server_API.app.core.TTS.adapters import audio_cpp_sidecar_supervisor as module
+
+    occupied = set()
+
+    async def spawn(*args, **kwargs):
+        occupied.add(json.loads(Path(args[2]).read_text())["port"])
+        process = _FakeProcess()
+        process.returncode = 1
+        return process
+
+    config = _provider_config(tmp_path)
+    config["extra_params"]["server"].update(autoselect_port=autoselect, port_probe_max=probe_max)
+    monkeypatch.setattr(module, "is_port_free", lambda host, port: port not in occupied)
+    monkeypatch.setattr(module, "AudioCppClient", _ReadyClient)
+    monkeypatch.setattr(module.asyncio, "create_subprocess_exec", spawn)
+    supervisor = module.AudioCppSidecarSupervisor(config, repo_root=tmp_path)
+    with pytest.raises(TTSProviderInitializationError):
+        await supervisor.ensure_started()
+    assert len(occupied) == (probe_max + 1 if autoselect else 1)
+    assert supervisor.last_failure_at is not None
+    assert supervisor.base_url is None
+    assert not supervisor.server_config_path.exists()
+
+
+@pytest.mark.unit
+async def test_exhausted_ports_after_collision_record_backoff(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.TTS.adapters import audio_cpp_sidecar_supervisor as module
+
+    spawned = False
+
+    async def spawn(*args, **kwargs):
+        nonlocal spawned
+        spawned = True
+        process = _FakeProcess()
+        process.returncode = 1
+        return process
+
+    monkeypatch.setattr(module, "is_port_free", lambda host, port: not spawned)
+    monkeypatch.setattr(module, "AudioCppClient", _ReadyClient)
+    monkeypatch.setattr(module.asyncio, "create_subprocess_exec", spawn)
+    supervisor = module.AudioCppSidecarSupervisor(_provider_config(tmp_path), repo_root=tmp_path)
+    with pytest.raises(TTSProviderInitializationError):
+        await supervisor.ensure_started()
+    assert supervisor.last_failure_at is not None

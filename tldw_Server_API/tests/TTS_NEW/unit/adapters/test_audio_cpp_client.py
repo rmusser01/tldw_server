@@ -117,3 +117,14 @@ async def test_http_errors_never_expose_arbitrary_upstream_body(status):
             await client.speech({"input": "hello"})
     assert "private-credential" not in str(error.value.details)
     assert "private-token" not in str(error.value.details)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("body", [b"", b"{}", b"null", b"[]", b'"ok"', b'{"status":"starting"}'])
+async def test_health_rejects_missing_or_unrecognized_status(body):
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, content=body))
+    ) as http_client:
+        client = AudioCppClient(base_url="http://127.0.0.1:8080", http_client=http_client)
+        with pytest.raises(TTSProviderError, match="health"):
+            await client.health()

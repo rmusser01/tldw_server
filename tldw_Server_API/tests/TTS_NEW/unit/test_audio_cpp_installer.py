@@ -194,3 +194,84 @@ def test_installer_enables_only_selected_backend(backend, tmp_path):
     command = build_cmake_configure_command(source_dir=tmp_path, build_dir=tmp_path / "build", backend=backend)
     enabled = [arg for arg in command if arg.startswith("-DENGINE_ENABLE_") and arg.endswith("=ON")]
     assert enabled == ([] if backend == "cpu" else [f"-DENGINE_ENABLE_{backend.upper()}=ON"])
+
+
+@pytest.mark.unit
+def test_installer_keeps_original_config_when_atomic_replace_fails(tmp_path, monkeypatch):
+    from Helper_Scripts.TTS_Installers import install_tts_audio_cpp as installer
+
+    config = tmp_path / "providers.yaml"
+    original = "providers:\n  openai:\n    enabled: true\n"
+    config.write_text(original)
+
+    def failed_replace(self, target):
+        raise OSError("replacement interrupted")
+
+    monkeypatch.setattr(Path, "replace", failed_replace)
+    with pytest.raises(OSError, match="replacement interrupted"):
+        installer.patch_tts_config(
+            config_path=config, layout=installer.build_runtime_layout(Path("models/audio_cpp"), tmp_path)
+        )
+    assert config.read_text() == original
+    assert list(tmp_path.iterdir()) == [config]
+
+
+@pytest.mark.unit
+def test_installer_preserves_config_permissions_and_symlink(tmp_path):
+    import os
+    import stat
+
+    from Helper_Scripts.TTS_Installers import install_tts_audio_cpp as installer
+
+    if os.name == "nt":
+        pytest.skip("POSIX permissions and unprivileged symlinks")
+    config = tmp_path / "providers.yaml"
+    config.write_text("providers:\n")
+    config.chmod(0o640)
+    alias = tmp_path / "linked.yaml"
+    alias.symlink_to(config)
+    installer.patch_tts_config(
+        config_path=alias, layout=installer.build_runtime_layout(Path("models/audio_cpp"), tmp_path)
+    )
+    assert alias.is_symlink()
+    assert "audio_cpp:" in config.read_text()
+    assert stat.S_IMODE(config.stat().st_mode) == 0o640
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("ownership_failure", [False, True])
+def test_installer_preserves_target_ownership_before_replacing_config(tmp_path, monkeypatch, ownership_failure):
+    import os
+
+    from Helper_Scripts.TTS_Installers import install_tts_audio_cpp as installer
+
+    if not hasattr(os, "chown"):
+        pytest.skip("POSIX file ownership")
+    config = tmp_path / "providers.yaml"
+    original = "providers:\n"
+    config.write_text(original)
+    original_stat = Path.stat
+    target_fields = list(config.stat())
+    target_fields[4] += 1
+    target_fields[5] += 1
+    target_stat = os.stat_result(target_fields)
+    monkeypatch.setattr(
+        Path, "stat", lambda path, **kwargs: target_stat if path == config else original_stat(path, **kwargs)
+    )
+    ownership_changes = []
+
+    def chown(path, uid, gid):
+        ownership_changes.append((uid, gid))
+        if ownership_failure:
+            raise PermissionError("cannot preserve config ownership")
+
+    monkeypatch.setattr(os, "chown", chown)
+    layout = installer.build_runtime_layout(Path("models/audio_cpp"), tmp_path)
+    if ownership_failure:
+        with pytest.raises(PermissionError, match="ownership"):
+            installer.patch_tts_config(config_path=config, layout=layout)
+        assert config.read_text() == original
+    else:
+        installer.patch_tts_config(config_path=config, layout=layout)
+        assert ownership_changes == [(target_stat.st_uid, target_stat.st_gid)]
+    assert list(tmp_path.iterdir()) == [config]

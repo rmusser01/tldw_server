@@ -23,7 +23,7 @@ from ..tts_exceptions import (
     TTSProviderNotConfiguredError,
     TTSValidationError,
 )
-from .audio_cpp_client import AudioCppClient, AudioCppSpeechResult
+from .audio_cpp_client import AudioCppClient, AudioCppSpeechResult, is_healthy_response
 from .audio_cpp_config import PROVIDER_KEY as AUDIO_CPP_PROVIDER_KEY
 from .audio_cpp_config import AudioCppConfig, filter_request_options
 from .audio_cpp_sidecar_supervisor import AudioCppSidecarSupervisor
@@ -131,14 +131,11 @@ class AudioCppTTSAdapter(TTSAdapter):
             self._owns_client = True
 
         health = await self._client.health()
-        if isinstance(health, dict):
-            status = str(health.get("status") or health.get("state") or "ok").strip().lower()
-            if status in {"error", "failed", "unhealthy"}:
-                raise TTSProviderInitializationError(
-                    "audio.cpp server health check failed",
-                    provider=self.PROVIDER_KEY,
-                    details={"status": status},
-                )
+        if not is_healthy_response(health):
+            raise TTSProviderInitializationError(
+                "audio.cpp server health check failed",
+                provider=self.PROVIDER_KEY,
+            )
 
         self._available_models = await self._client.list_models()
         self._validate_configured_model_available()

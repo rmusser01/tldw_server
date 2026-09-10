@@ -17,6 +17,14 @@ from ..tts_exceptions import (
 from .audio_cpp_config import PROVIDER_KEY, validate_base_url
 
 
+def is_healthy_response(payload: Any) -> bool:
+    """Require an explicit positive health status from the upstream server."""
+    if not isinstance(payload, dict):
+        return False
+    status = str(payload.get("status") or payload.get("state") or "").strip().lower()
+    return status in {"ok", "ready", "healthy"}
+
+
 @dataclass(frozen=True)
 class AudioCppSpeechResult:
     """Decoded audio.cpp speech response."""
@@ -94,14 +102,20 @@ class AudioCppClient:
         )
 
     async def health(self) -> dict[str, Any]:
+        """Read health without treating empty or unrelated responses as ready."""
         response = await self._request("GET", "/health")
         self._raise_for_status(response)
-        if not response.content:
-            return {"status": "ok"}
         try:
-            return dict(response.json())
+            payload = response.json()
         except ValueError:
-            return {"status": response.text.strip() or "ok"}
+            payload = {"status": response.text.strip()}
+        if not is_healthy_response(payload):
+            raise TTSProviderError(
+                "audio.cpp /health did not report a ready status",
+                provider=PROVIDER_KEY,
+                error_code="INVALID_HEALTH_RESPONSE",
+            )
+        return payload
 
     async def list_models(self) -> list[str]:
         response = await self._request("GET", "/v1/models")

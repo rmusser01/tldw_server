@@ -445,8 +445,10 @@ The generated sidecar config stays under `models/audio_cpp`, binds to
 `127.0.0.1`, autoselects a free port by default, waits for `/health`, backs off
 after startup failure, and restarts a crashed child before the next request.
 Each supervisor uses a unique generated config file to avoid config overwrites
-between workers. Port selection remains a bind probe; simultaneous starts can
-race and a failed startup uses the configured retry/backoff. Normal speech requests
+between workers. If another process claims a probed port before startup, automatic
+port selection retries the remaining configured candidates. Fixed-port mode and
+other startup failures use the configured backoff. Health checks require an explicit
+positive status. Normal speech requests
 cannot inject extra command arguments or environment variables.
 
 #### Build And Model Package Commands

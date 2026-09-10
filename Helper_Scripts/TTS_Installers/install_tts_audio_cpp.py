@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import os
+import stat
 import subprocess  # nosec B404 - installer CLI intentionally runs explicit argv lists
 import sys
+import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -221,6 +224,7 @@ def patch_tts_config(
         logger.warning("Config file not found at {}; skipping update.", config_path)
         return False
 
+    config_path = config_path.resolve()
     lines = config_path.read_text(encoding="utf-8").splitlines()
     block_start, block_end, block_indent = _find_provider_block(lines, PROVIDER_NAME)
     if block_indent is None:
@@ -242,7 +246,25 @@ def patch_tts_config(
     else:
         lines[insert_at:insert_at] = block_lines
 
-    config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=config_path.parent, prefix=f".{config_path.name}.", delete=False
+        ) as output:
+            temporary_path = Path(output.name)
+            output.write("\n".join(lines) + "\n")
+            output.flush()
+            os.fsync(output.fileno())
+        target_stat = config_path.stat()
+        if hasattr(os, "chown"):
+            temporary_stat = temporary_path.stat()
+            if (temporary_stat.st_uid, temporary_stat.st_gid) != (target_stat.st_uid, target_stat.st_gid):
+                os.chown(temporary_path, target_stat.st_uid, target_stat.st_gid)
+        temporary_path.chmod(stat.S_IMODE(target_stat.st_mode))
+        temporary_path.replace(config_path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
     logger.info("Updated audio.cpp provider configuration at {}", config_path)
     return True
 
