@@ -189,7 +189,8 @@ def test_exact_new_dispositions_preserve_all_322_prior_records() -> None:
     assert {(r["component"], r["purl"], r["installed_version"], r["vulnerability_id"]) for r in added} == set(
         IDENTITIES
     )
-    raw["exceptions"] = [r for r in raw["exceptions"] if r not in added]
+    # TASK42 separately verifies preservation of all 336 records present after TASK40.
+    raw["exceptions"] = [r for r in raw["exceptions"] if r not in added and not r["id"].startswith("TASK-13013.7.42-")]
     assert len(raw["exceptions"]) == 322
     assert (
         hashlib.sha256((json.dumps(raw, indent=2, sort_keys=True) + "\n").encode()).hexdigest()
