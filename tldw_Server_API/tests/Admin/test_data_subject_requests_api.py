@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
-import uuid
-from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException
@@ -33,22 +32,17 @@ async def _reset_auth_state() -> None:
     await reset_session_manager()
 
 
-async def _seed_user(*, user_id: int, username: str, email: str) -> int:
+async def _seed_user(*, username: str, email: str) -> int:
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+    from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
     pool = await get_db_pool()
-    await pool.execute(
-        """
-        INSERT OR REPLACE INTO users (id, uuid, username, email, password_hash, is_active)
-        VALUES (?, ?, ?, ?, ?, 1)
-        """,
-        user_id,
-        str(uuid.uuid4()),
-        username,
-        email,
-        "x",
-    )
-    return int(user_id)
+    # Reserve the login principal before allocating a separate subject. Startup
+    # initializes the principal's real stores; these subject stores are scoped fixtures.
+    await AuthnzUsersRepo(pool).ensure_single_user_admin_user(user_id=get_settings().SINGLE_USER_FIXED_ID)
+    return await ensure_test_user(pool, username, email)
 
 
 def _seed_subject_store_data(*, tmp_path, user_id: int, media_count: int, note_count: int, message_count: int, audit_count: int) -> None:
@@ -171,11 +165,11 @@ async def test_preview_returns_404_for_unknown_requester(tmp_path):
 async def test_preview_returns_500_when_subject_store_query_fails(tmp_path):
     _setup_env(tmp_path)
     await _reset_auth_state()
-    await _seed_user(user_id=7, username="subject_user", email="subject@example.com")
+    user_id = await _seed_user(username="subject_user", email="subject@example.com")
 
     from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
-    media_db_path = DatabasePaths.get_media_db_path(7)
+    media_db_path = DatabasePaths.get_media_db_path(user_id)
     media_db_path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(media_db_path) as conn:
         conn.execute("CREATE TABLE IF NOT EXISTS unrelated_table (id INTEGER PRIMARY KEY)")
@@ -197,7 +191,7 @@ async def test_preview_returns_500_when_subject_store_query_fails(tmp_path):
 async def test_preview_returns_500_when_subject_store_is_missing(tmp_path):
     _setup_env(tmp_path)
     await _reset_auth_state()
-    await _seed_user(user_id=7, username="subject_user", email="subject@example.com")
+    await _seed_user(username="subject_user", email="subject@example.com")
 
     headers = {"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]}
 
@@ -212,13 +206,86 @@ async def test_preview_returns_500_when_subject_store_is_missing(tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["preview", "intake"])
+@pytest.mark.parametrize("failure_at", ["manager", "list", "count"])
+async def test_embedding_coverage_failure_is_sanitized_and_does_not_record_intake(
+    monkeypatch, tmp_path, operation, failure_at
+):
+    from tldw_Server_API.app.core.config import settings
+    from tldw_Server_API.app.services import admin_data_subject_requests_service as service
+
+    _setup_env(tmp_path)
+    monkeypatch.setitem(settings, "USER_DB_BASE_DIR", str(tmp_path / "user_dbs"))
+    await _reset_auth_state()
+    user_id = await _seed_user(username="subject_user", email="subject@example.com")
+    _seed_subject_store_data(
+        tmp_path=tmp_path, user_id=user_id, media_count=1, note_count=1, message_count=1, audit_count=1
+    )
+    (tmp_path / "user_dbs" / str(user_id) / "chroma_storage").mkdir(parents=True)
+    private_marker = "private-subject-embedding-content"
+    manager = MagicMock()
+    collection = MagicMock()
+    collection.count.side_effect = RuntimeError(private_marker)
+    manager.list_collections.return_value = [collection]
+    get_manager = MagicMock(return_value=manager)
+    if failure_at == "manager":
+        get_manager.side_effect = ImportError(private_marker)
+    elif failure_at == "list":
+        manager.list_collections.side_effect = RuntimeError(private_marker)
+    monkeypatch.setattr(service, "_get_chroma_manager_for_user", get_manager)
+    payload = {
+        "requester_identifier": "subject@example.com",
+        "request_type": "erasure",
+        "categories": ["embeddings"],
+    }
+    url = "/api/v1/admin/data-subject-requests"
+    if operation == "preview":
+        url += "/preview"
+    else:
+        payload["client_request_id"] = "unavailable-embedding-intake"
+
+    with TestClient(app, headers={"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]}) as client:
+        response = client.post(url, json=payload)
+        history = client.get("/api/v1/admin/data-subject-requests")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "requester_data_unavailable"
+    assert private_marker not in response.text
+    assert history.status_code == 200, history.text
+    assert history.json()["items"] == []
+
+
+@pytest.mark.asyncio
+async def test_notes_only_preview_succeeds_with_unrelated_stores_missing(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+    from tldw_Server_API.app.services import admin_data_subject_requests_service as service
+
+    _setup_env(tmp_path)
+    await _reset_auth_state()
+    user_id = await _seed_user(username="subject_user", email="subject@example.com")
+    with sqlite3.connect(DatabasePaths.get_chacha_db_path(user_id)) as conn:
+        conn.execute("CREATE TABLE notes (id TEXT PRIMARY KEY, deleted INTEGER DEFAULT 0)")
+        conn.execute("INSERT INTO notes VALUES ('kept', 0), ('deleted', 1)")
+    monkeypatch.setattr(service, "_get_chroma_manager_for_user", MagicMock(side_effect=RuntimeError("unavailable")))
+
+    with TestClient(app, headers={"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]}) as client:
+        response = client.post(
+            "/api/v1/admin/data-subject-requests/preview",
+            json={"requester_identifier": "subject@example.com", "categories": ["notes"]},
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["counts"] == {"notes": 1}
+
+
+@pytest.mark.asyncio
 async def test_create_records_request_and_reuses_client_request_id(monkeypatch, tmp_path):
     _setup_env(tmp_path)
     await _reset_auth_state()
-    await _seed_user(user_id=7, username="subject_user", email="subject@example.com")
+    user_id = await _seed_user(username="subject_user", email="subject@example.com")
     _seed_subject_store_data(
         tmp_path=tmp_path,
-        user_id=7,
+        user_id=user_id,
         media_count=3,
         note_count=2,
         message_count=4,
@@ -281,11 +348,11 @@ async def test_list_returns_newest_first_with_limit_offset(monkeypatch, tmp_path
     _setup_env(tmp_path)
     await _reset_auth_state()
 
-    await _seed_user(user_id=7, username="subject_one", email="subject1@example.com")
-    await _seed_user(user_id=8, username="subject_two", email="subject2@example.com")
-    await _seed_user(user_id=9, username="subject_three", email="subject3@example.com")
+    first_user_id = await _seed_user(username="subject_one", email="subject1@example.com")
+    second_user_id = await _seed_user(username="subject_two", email="subject2@example.com")
+    third_user_id = await _seed_user(username="subject_three", email="subject3@example.com")
 
-    for user_id in (7, 8, 9):
+    for user_id in (first_user_id, second_user_id, third_user_id):
         _seed_subject_store_data(
             tmp_path=tmp_path,
             user_id=user_id,
@@ -371,10 +438,10 @@ def test_data_subject_request_list_response_defaults_pagination_aliases():
 async def test_preview_enforces_admin_scope(monkeypatch, tmp_path):
     _setup_env(tmp_path)
     await _reset_auth_state()
-    await _seed_user(user_id=7, username="subject_user", email="subject@example.com")
+    user_id = await _seed_user(username="subject_user", email="subject@example.com")
     _seed_subject_store_data(
         tmp_path=tmp_path,
-        user_id=7,
+        user_id=user_id,
         media_count=1,
         note_count=1,
         message_count=1,
@@ -405,10 +472,10 @@ async def test_preview_enforces_admin_scope(monkeypatch, tmp_path):
 async def test_preview_hides_out_of_scope_requesters_before_counting(monkeypatch, tmp_path):
     _setup_env(tmp_path)
     await _reset_auth_state()
-    await _seed_user(user_id=7, username="subject_user", email="subject@example.com")
+    user_id = await _seed_user(username="subject_user", email="subject@example.com")
     _seed_subject_store_data(
         tmp_path=tmp_path,
-        user_id=7,
+        user_id=user_id,
         media_count=1,
         note_count=1,
         message_count=1,
@@ -446,10 +513,10 @@ async def test_preview_hides_out_of_scope_requesters_before_counting(monkeypatch
 async def test_create_hides_out_of_scope_requesters_before_counting(monkeypatch, tmp_path):
     _setup_env(tmp_path)
     await _reset_auth_state()
-    await _seed_user(user_id=7, username="subject_user", email="subject@example.com")
+    user_id = await _seed_user(username="subject_user", email="subject@example.com")
     _seed_subject_store_data(
         tmp_path=tmp_path,
-        user_id=7,
+        user_id=user_id,
         media_count=1,
         note_count=1,
         message_count=1,

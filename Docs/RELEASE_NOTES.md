@@ -77,6 +77,10 @@ complete grouped rollup and the release-refresh plan for outstanding gates.
 
 ### Operations and CI
 
+- DSR previews query only requested categories and explicitly fail when embedding
+  coverage cannot be counted, preventing misleading zero/partial intake summaries.
+- RAG search input ownership now passes compiler ref validation without changing
+  query, filter or focus behavior.
 - Notification counts recover after account changes while keeping previous
   account data hidden. Notification adapters support immutable shared APIs;
   web-clipper extension storage now has required strict TypeScript coverage.

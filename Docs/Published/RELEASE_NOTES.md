@@ -25,6 +25,8 @@ Published release notes entry point.
   zero token counts. Additional DSR failure diagnostics exclude private text.
 - Notification counts recover safely after account changes, notification APIs
   remain immutable, and web-clipper extension storage has strict type coverage.
+- DSR previews query selected categories and fail on unavailable embedding counts;
+  RAG input focus retains its behavior under compiler ref validation.
 - Verify installed artifact digests: repository rollups 0.1.39–0.1.41 do not
   establish publication. At preparation, GitHub/GHCR app latest was 0.1.38
   and public PyPI listed 0.1.32.

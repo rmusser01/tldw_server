@@ -103,8 +103,12 @@ class TestCountEmbeddings:
             assert result == 50
 
     @pytest.mark.asyncio
-    async def test_count_embeddings_returns_zero_on_failure(self):
-        """_count_embeddings should return 0 when ChromaDBManager fails."""
+    async def test_count_embeddings_returns_zero_when_unavailable_and_storage_absent(self, monkeypatch, tmp_path):
+        """An unavailable optional Chroma manager is empty only with no storage."""
+        from tldw_Server_API.app.core.config import settings
+
+        monkeypatch.setitem(settings, "USER_DB_BASE_DIR", str(tmp_path))
+        monkeypatch.setenv("TLDW_DB_ALLOWED_BASE_DIRS", str(tmp_path))
         with patch(
             "tldw_Server_API.app.services.admin_data_subject_requests_service._get_chroma_manager_for_user",
             side_effect=RuntimeError("no chroma"),
@@ -124,8 +128,15 @@ class TestCountEmbeddings:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure_at", ["manager", "list", "count", "erasure_count"])
-async def test_embedding_failure_logs_exclude_private_exception_content(monkeypatch, _mock_chroma_manager, failure_at):
+async def test_embedding_failure_logs_exclude_private_exception_content(
+    monkeypatch, tmp_path, _mock_chroma_manager, failure_at
+):
+    from tldw_Server_API.app.core.config import settings
     from tldw_Server_API.app.services import admin_data_subject_requests_service as service
+
+    monkeypatch.setitem(settings, "USER_DB_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("TLDW_DB_ALLOWED_BASE_DIRS", str(tmp_path))
+    (tmp_path / "7" / "chroma_storage").mkdir(parents=True)
 
     private_marker = "private-subject-embedding-content"
     failure = RuntimeError(private_marker)
@@ -145,8 +156,11 @@ async def test_embedding_failure_logs_exclude_private_exception_content(monkeypa
         filter=lambda record: record["name"] == service.__name__,
     )
     try:
-        handler = service._erase_embeddings if failure_at == "erasure_count" else service._count_embeddings
-        assert await handler(7) == 0
+        if failure_at == "erasure_count":
+            assert await service._erase_embeddings(7) == 0
+        else:
+            with pytest.raises(service.DataSubjectRequestCoverageUnavailableError):
+                await service._count_embeddings(7)
     finally:
         service.logger.remove(sink)
 

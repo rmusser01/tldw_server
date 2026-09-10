@@ -108,6 +108,11 @@ and this project adheres to Some kind of Versioning
   changes without displaying the previous account's data. Notification adapters
   preserve shared APIs, and web-clipper extension storage is checked under strict
   TypeScript while retaining callback and Promise compatibility.
+- **DSR Preview Coverage** — Query only requested data categories and report
+  unavailable embedding counts instead of zero or partial totals. Failed coverage
+  prevents intake records from storing a misleading preview.
+- **RAG Hook Validation** — Keep the search input ref in its owning component,
+  preserving focus behavior while clearing the search-state refs diagnostic cluster.
 
 ### Upgrade And Release Readiness
 

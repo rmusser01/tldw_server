@@ -4,7 +4,7 @@ title: 'Re-enable frontend type-safety and lint gates, harden persisted stores'
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-09-10 20:50'
+updated_date: '2026-09-10 21:00'
 labels:
   - tech-debt
   - high
@@ -84,4 +84,8 @@ Handoff import inspection shows PendingClipDraft reaches capture/parser/screensh
 PR2761 bounded web-clipper storage strictness verified: extracted existing extension get/set/remove adapter, captured optional methods with receiver-preserving .call, and added the complete runtime module to the required strict project with a precise local optional Chrome shape. Six TS2722/TS18048 diagnostics reproduced before fix; strict gate now passes. 12 behavior characterizations passed before/after extraction; final suite13 passes including conflicting callback/Promise results. Scoped ESLint passes with existing Next pages-discovery warning; git diff check passes. Bandit attempted in root venv but reports two TS parser errors, not a successful security scan. Wider handoff import graph retains two screenshot implicit-any diagnostics plus missing Turndown declaration; AC2 remains open. Evidence Docs/Evidence/PR2761-web-clipper-storage-strictness.md. No commits, pushes, manifests, dependency changes, or global declarations changed; parent integrates.
 
 PR2761 fourth batch independently reviewed: notification account-switch recovery/race/privacy and immutable Antd adapter25WebUItests plus23overlapping shared tests pass, WebUI/installed-Plasmo scoped typechecks clean. Strict extension storage adapter13tests and required strict project pass, clearing6optional-method diagnostics. Full WebUI nonincremental tsc passes; required three-rule shared-hook gate scans5160files with0failures,1379unrelated ESLinterrors. Four remaining compiler rules pass only touched notification scope; whole-WebUI strictness/global compiler closure remain open. Evidence PR2761-notification-hooks.md and PR2761-web-clipper-storage-strictness.md; source/metadata batch prepared by parent.
+
+PR2761 bounded RAG hook boundary plan: reproduced exactly128 react-hooks/refs diagnostics in RagSearchBar. Its searchInputRef is declared/returned by useRagSearchState but only attached/read by RagSearchBar. Move the DOM ref into its owning component and remove it from the general search-state return object; preserve all state/search behavior and existing effect timing. Verify input autofocus lifecycle with focused characterizations, scoped compiler-rule ESLint, existing RAG suites, and typecheck. No rule ignores/disables, global rule flips, release metadata, commits, pushes, builds, installs, or subagents.
+
+PR2761 RAG input-ref boundary verified: moved the UI-only InputRef into RagSearchBar and removed it from useRagSearchState return, preserving focus effect/dependencies and all search state. Exactly128 scoped refs errors reproduced before; final component/hook/test four-rule lint exits0 with25 existing warnings. Four runtime characterizations plus seven existing RAG tests pass (11 total); full WebUI nonincremental typecheck and separate new-test typecheck pass; diff check passes. Bandit invoked from project venv reports three TypeScript AST parser errors, not a successful scan. Evidence: Docs/Evidence/PR2761-rag-input-ref.md. No suppressions, global rules, dependencies, release metadata, commits, or pushes changed; broader AC2/AC3 remain open. Source frozen for parent review/integration.
 <!-- SECTION:NOTES:END -->

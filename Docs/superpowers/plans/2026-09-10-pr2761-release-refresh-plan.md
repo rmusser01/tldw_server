@@ -12,7 +12,7 @@
 | Item | Recorded state |
 | --- | --- |
 | Integrated release code and verified blocker fixes | `433f18091ef1921d1a0e3b8d4eec6a82db9a4284` |
-| Latest observed CI head | `6150040801bc697acd79e2b2e90aae3337879612`; backend/security/E2E/licensing and all five container builds pass. All eight frontend shards pass; frontend aggregate and coverage still run. CodeQL remains failed. Further source changes require fresh-head CI. |
+| Latest observed CI head | `0929b44a5af3bed60142550719f610d048bec3e2`; 65 checks pass, eight run, 37 skip and CodeQL fails. Backend/security/container pass; remaining frontend/coverage/E2E lanes run. Further source changes require fresh-head CI. |
 | Protected source snapshot | `433f18091ef1921d1a0e3b8d4eec6a82db9a4284`, 7,109 files |
 | PR branch / target | `codex/release-main-0.1.42` → `main` |
 | PR state at inspection | Draft; no merge or publication performed |
@@ -108,6 +108,38 @@ inventory remain open; these scoped fixes do not close TASK-12116.
 Current container evidence is [run 34526384567](https://github.com/rmusser01/tldw_server/actions/runs/34526384567).
 The separate supply-chain PR #2869 remains at `78c3f92228` with nine failed
 checks; its unverified concurrent work is not integrated.
+
+The next bounded batch after pushed `0929b44a5a` is verified:
+
+- [RAG ref ownership](../../Evidence/PR2761-rag-input-ref.md) moves the unused
+  hook-exported input ref into its sole component consumer. All 128 scoped
+  refs diagnostics disappear; focus/query/filter behavior is unchanged, with
+  11 RAG tests, the full WebUI typecheck and independent review passing.
+- A complete 5,161-file four-rule rescan now reports **265 findings across
+  138 files**: refs 105, set-state-in-effect 90, immutability 21 and
+  preserve-manual-memoization 49. This replaces the earlier 403 count as the
+  current inventory. [Every remaining finding and affected-source hashes](../../Evidence/PR2761-remaining-hook-findings.json)
+  are recorded, including the additional ACP permission-clock effect finding
+  from the earlier purity correction. No global rule is enabled or suppressed
+  by this inventory; each remaining cluster still requires investigation.
+- [DSR preview coverage](../../Evidence/PR2761-dsr-preview-coverage.md) now
+  queries only selected categories. Existing/unknown embedding storage and
+  failed collection counts reject coverage instead of producing zero or
+  partial totals. Confirmed absent optional storage still returns zero.
+  Six service and seven API regressions failed before the fix; 50 DSR tests
+  plus four existing endpoint sanitizer tests pass after it. Preview/intake
+  return the fixed error and failed coverage stores no intake record.
+  Independent review, Ruff/changed-range formatting and Bandit pass.
+
+The DSR API fixture now uses the canonical account bootstrap/seeding helper
+instead of a raw insert rejected by the profile-write guard. An intermediate
+validation run was invalidated by host disk exhaustion; about 695 MiB of known
+completed synthetic test directories were reclaimed, and the final isolated
+run passed. Private backup artifacts and unrelated caches/builds remain intact.
+Actual erasure/attachment restrictions and whole-account lifecycle certification
+are outside this preview correction. Fresh source metadata and CI are required
+before release. The previous frontend aggregate was superseded by the branch
+update and was never recorded as passing.
 
 - [Frontend hardening](../../Evidence/PR2761-frontend-hardening.md): Flashcard
   template suite 8 passes; five shared dependency majors aligned with 38

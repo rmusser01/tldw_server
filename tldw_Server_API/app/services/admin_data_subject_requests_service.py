@@ -204,30 +204,43 @@ def _get_chroma_manager_for_user(user_id: int):
 
 
 async def _count_embeddings(user_id: int) -> int:
-    """Count vector embeddings across all ChromaDB collections for a user."""
+    """Count every collection, rejecting unavailable or partial coverage."""
 
     def _count_sync() -> int:
         try:
             manager = _get_chroma_manager_for_user(user_id)
         except Exception as exc:
             logger.debug("ChromaDB not available for user {}: {}", user_id, type(exc).__name__)
-            return 0
+            # Match the manager's configured base and path policy without creating
+            # storage. Only confirmed absence makes an unavailable optional store empty.
+            try:
+                from tldw_Server_API.app.core.config import settings as app_settings
+
+                user_db_base = app_settings.get("USER_DB_BASE_DIR") or (
+                    Path(__file__).resolve().parents[3] / "Databases" / "user_databases"
+                )
+                chroma_dir = (
+                    DatabasePaths.resolve_user_base_directory(user_id, base_dir_override=user_db_base)
+                    / "chroma_storage"
+                )
+                try:
+                    chroma_dir.stat()
+                except FileNotFoundError:
+                    return 0
+            except Exception as storage_exc:
+                raise DataSubjectRequestCoverageUnavailableError(
+                    "DSR embedding storage availability could not be determined"
+                ) from storage_exc
+            raise DataSubjectRequestCoverageUnavailableError("DSR embedding store could not be opened") from exc
         try:
             collections = manager.list_collections()
             total = 0
             for col in collections:
-                try:
-                    total += col.count()
-                except Exception as exc:
-                    logger.debug(
-                        "Failed to count ChromaDB collection for user {}: {}",
-                        user_id,
-                        type(exc).__name__,
-                    )
+                total += col.count()
             return total
         except Exception as exc:
             logger.debug("Failed to count embeddings for user {}: {}", user_id, type(exc).__name__)
-            return 0
+            raise DataSubjectRequestCoverageUnavailableError("DSR embedding count unavailable") from exc
 
     return await asyncio.to_thread(_count_sync)
 
@@ -255,28 +268,22 @@ async def _build_summary_for_user(
     user_id: int,
     selected_categories: list[str],
 ) -> list[dict[str, Any]]:
-    media_records, chat_messages, notes, audit_events, embeddings = await asyncio.gather(
-        _count_media_records(user_id),
-        _count_chat_messages(user_id),
-        _count_notes(user_id),
-        _count_audit_events(user_id),
-        _count_embeddings(user_id),
-    )
-    count_map = {
-        "media_records": media_records,
-        "chat_messages": chat_messages,
-        "notes": notes,
-        "audit_events": audit_events,
-        "embeddings": embeddings,
+    counters = {
+        "media_records": _count_media_records,
+        "chat_messages": _count_chat_messages,
+        "notes": _count_notes,
+        "audit_events": _count_audit_events,
+        "embeddings": _count_embeddings,
     }
+    selected_entries = [entry for entry in _CATEGORY_DEFS if entry["key"] in selected_categories]
+    counts = await asyncio.gather(*(counters[entry["key"]](user_id) for entry in selected_entries))
     return [
         {
             "key": entry["key"],
             "label": entry["label"],
-            "count": int(count_map.get(entry["key"], 0)),
+            "count": int(count),
         }
-        for entry in _CATEGORY_DEFS
-        if entry["key"] in selected_categories
+        for entry, count in zip(selected_entries, counts)
     ]
 
 
