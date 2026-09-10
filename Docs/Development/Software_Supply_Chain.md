@@ -15,12 +15,17 @@ Implementation is not release certification: current source and image findings
 still block admission. The committed image inventory records exact candidates,
 not an approval to deploy them. Certification requires fresh passing evidence
 or narrowly scoped, human-approved exceptions. As of September 10, 2026 UTC,
-the canonical policy contains 77 OS applicability exceptions and sixteen
+the canonical policy contains 252 native-package applicability exceptions and sixteen
 Chroma exceptions for the supported embedded deployment, owned by `rmusser01`
 and valid through September 17 UTC. Exact scope and authorization are recorded
 in the [initial OS activation](../Evidence/TASK-13013.7.24-os-exception-activation.md),
 [Chroma disposition](../Evidence/TASK-13013.7.28-chroma-exclusions.md), and
-[binary-package applicability review](../Evidence/TASK-13013.7.29-deployment-applicability.md).
+[binary-package applicability review](../Evidence/TASK-13013.7.29-deployment-applicability.md), and
+[native build and usage review](../Evidence/TASK-13013.7.30-native-applicability.md).
+The latest 175 records distinguish absent affected code/features (153), current
+librist dependency usage despite shipped affected code (10), current first-party
+Perl usage despite shipped core code (10), and Expat's compiled parser entropy
+path despite an unused helper remaining in the library (2).
 All other scanner matches remain subject to the admission gate. An unexcepted
 scanner match is not proof of exploitable impact in the supported deployment.
 
@@ -243,6 +248,11 @@ The requester directed continued remediation and exclusion of confirmed
 non-applicable findings. A further 72 exact image records, supported by package
 contents, absent affected features or incompatible ABI prerequisites, are recorded
 in [TASK-13013.7.29](../Evidence/TASK-13013.7.29-deployment-applicability.md).
+Another 175 exact native-package records are documented in
+[TASK-13013.7.30](../Evidence/TASK-13013.7.30-native-applicability.md), preserving
+the prior 93 records. Current librist usage exclusions require reassessment when
+native consumers or direct library calls change; Perl usage exclusions similarly
+require reassessment for new Perl subprocesses or services. Neither claims absent code.
 The old OS-only comment does not authorize these later records; the linked
 evidence records the conversation authorization and the PR review location.
 Loading this policy
