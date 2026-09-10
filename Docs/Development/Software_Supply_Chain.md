@@ -15,10 +15,11 @@ Implementation is not release certification: current source and image findings
 still block admission. The committed image inventory records exact candidates,
 not an approval to deploy them. Certification requires fresh passing evidence
 or narrowly scoped, human-approved exceptions. As of September 10, 2026 UTC,
-the canonical policy contains five approved OS applicability exceptions, owned
-by `rmusser01` and valid through September 17 UTC. These cover the exact backend
-Perl and frontend Debian zlib package records documented in the
-[activation evidence](../Evidence/TASK-13013.7.24-os-exception-activation.md).
+the canonical policy contains five OS applicability exceptions and sixteen
+Chroma exceptions for the supported embedded deployment, owned by `rmusser01`
+and valid through September 17 UTC. Exact scope and authorization are recorded
+in the [OS activation evidence](../Evidence/TASK-13013.7.24-os-exception-activation.md)
+and [Chroma disposition](../Evidence/TASK-13013.7.28-chroma-exclusions.md).
 All other findings remain subject to the admission gate.
 
 ## Pinned supply-chain tools
@@ -228,11 +229,15 @@ The canonical policy is
 `.github/supply-chain/vulnerability-exceptions.schema.json`. The default is an
 empty exception list. Do not add an exception simply to make CI green.
 
-The five current records were explicitly approved in
+The five OS records were explicitly approved in
 [PR #2869](https://github.com/rmusser01/tldw_server/pull/2869#issuecomment-5613359176).
 Their exact record identities and retained-report replay are recorded in
 [TASK-13013.7.24](../Evidence/TASK-13013.7.24-os-exception-activation.md).
-They do not include the conditional Chroma dispositions. Loading this policy
+The requester subsequently directed activation of the sixteen exact Chroma
+non-applicability records for the supported embedded profile; that authorization,
+source/deployment scope and replay are recorded in
+[TASK-13013.7.28](../Evidence/TASK-13013.7.28-chroma-exclusions.md).
+The old OS-only comment does not authorize these new records. Loading this policy
 on September 18, 2026 UTC or later fails until expired records are removed or
 replaced through the renewal process below.
 

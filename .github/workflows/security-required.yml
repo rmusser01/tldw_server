@@ -125,13 +125,95 @@ jobs:
         if: needs.changes.outputs.security_relevant_changed != 'true'
         run: echo "No security-relevant paths changed; bandit scan skipped by policy."
 
+      - name: Fetch complete dependency comparison
+        id: dependency_review_compare
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_run'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        env:
+          BASE_SHA: ${{ needs.admission.outputs.base_sha || github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ needs.admission.outputs.head_sha || github.event.pull_request.head.sha || github.sha }}
+        with:
+          script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const base = process.env.BASE_SHA;
+            const head = process.env.HEAD_SHA;
+            if (!/^[0-9a-f]{40}$/.test(base) || !/^[0-9a-f]{40}$/.test(head)) {
+              throw new Error('Dependency comparison requires exact base and head SHAs');
+            }
+            const evidence = path.join(process.env.RUNNER_TEMP, 'dependency-review');
+            fs.mkdirSync(evidence, {recursive: true});
+            const pages = [];
+            for await (const response of github.paginate.iterator(
+              'GET /repos/{owner}/{repo}/dependency-graph/compare/{basehead}',
+              {...context.repo, basehead: `${base}...${head}`, per_page: 100}
+            )) {
+              pages.push(response.data);
+            }
+            fs.writeFileSync(path.join(evidence, 'compare-pages.json'), JSON.stringify(pages));
+            if (!pages.length || pages.some(page => !Array.isArray(page))) {
+              throw new Error('Dependency comparison returned missing or malformed pages');
+            }
+
+      - name: Derive scoped dependency review allowances
+        id: dependency_review_prepare
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_run'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m Helper_Scripts.Supply_Chain.dependency_review \
+            --policy .github/supply-chain/vulnerability-exceptions.json \
+            --changes "$RUNNER_TEMP/dependency-review/compare-pages.json" \
+            --paginated --github-output "$GITHUB_OUTPUT" \
+            > "$RUNNER_TEMP/dependency-review/prepared-allowances.json"
+
       - name: Dependency review (high/critical)
+        id: dependency_review
         if: github.event_name == 'pull_request' || github.event_name == 'workflow_run'
         uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48
         with:
           base-ref: ${{ needs.admission.outputs.base_sha || github.event.pull_request.base.sha }}
           head-ref: ${{ needs.admission.outputs.head_sha || github.event.pull_request.head.sha || github.sha }}
           fail-on-severity: high
+          allow-ghsas: ${{ steps.dependency_review_prepare.outputs.allow-ghsas }}
+
+      - name: Validate dependency review allowance scope
+        id: dependency_review_validate
+        if: always() && (github.event_name == 'pull_request' || github.event_name == 'workflow_run')
+        shell: bash
+        env:
+          ALLOW_GHSAS: ${{ steps.dependency_review_prepare.outputs.allow-ghsas }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/dependency-review"
+          # Encode the output as one JSON string: no shell expansion or environment-size limit.
+          cat > "$RUNNER_TEMP/dependency-review/action-output-string.json" <<'DEPENDENCY_REVIEW_OUTPUT_JSON'
+          ${{ toJSON(steps.dependency_review.outputs.dependency-changes) }}
+          DEPENDENCY_REVIEW_OUTPUT_JSON
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          evidence = Path(os.environ["RUNNER_TEMP"]) / "dependency-review"
+          raw = json.loads((evidence / "action-output-string.json").read_text(encoding="utf-8"))
+          if not isinstance(raw, str):
+              raise SystemExit("Dependency review action output must be a JSON string")
+          (evidence / "dependency-changes.json").write_text(raw, encoding="utf-8")
+          PY
+          python -m Helper_Scripts.Supply_Chain.dependency_review \
+            --policy .github/supply-chain/vulnerability-exceptions.json \
+            --changes "$RUNNER_TEMP/dependency-review/dependency-changes.json" \
+            --allow-ghsas "$ALLOW_GHSAS" \
+            > "$RUNNER_TEMP/dependency-review/validated-allowances.json"
+
+      - name: Upload dependency review evidence
+        if: always() && (github.event_name == 'pull_request' || github.event_name == 'workflow_run')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: dependency-review-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/dependency-review/
+          if-no-files-found: error
 
       - name: Run Bandit scan
         if: needs.changes.outputs.security_relevant_changed == 'true'
