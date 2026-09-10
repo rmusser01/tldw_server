@@ -8,6 +8,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from tldw_Server_API.app.core.DB_Management.sqlite_schema_helpers import ordinary_sqlite_table_names
+
 SQLITE_MAGIC = b"SQLite format 3\x00"
 
 REQUIRED_SCHEMA: dict[str, set[str]] = {
@@ -116,12 +118,7 @@ def validate_openwebui_file_schema(conn: sqlite3.Connection) -> None:
 
 def _validate_required_schema(conn: sqlite3.Connection, required_schema: dict[str, set[str]]) -> None:
     """Require ordinary source tables; virtual tables can execute uploaded views."""
-    # sqlite_master also labels virtual tables as "table". Use parsed metadata
-    # instead of interpreting attacker-controlled CREATE statements or rootpages.
-    table_rows = conn.execute("PRAGMA main.table_list").fetchall()
-    if not table_rows:
-        raise ValueError("OpenWebUI database imports require SQLite 3.37 or newer")
-    tables = {str(row["name"]) for row in table_rows if row["type"] == "table"}
+    tables = ordinary_sqlite_table_names(conn)
     missing_tables = sorted(set(required_schema) - tables)
     if missing_tables:
         missing = ", ".join(missing_tables)

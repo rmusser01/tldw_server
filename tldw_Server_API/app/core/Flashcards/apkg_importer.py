@@ -14,6 +14,7 @@ import zipfile
 from datetime import datetime, timezone
 from typing import Any
 
+from tldw_Server_API.app.core.DB_Management.sqlite_schema_helpers import ordinary_sqlite_table_names
 from tldw_Server_API.app.core.Flashcards.asset_refs import build_flashcard_asset_markdown
 
 
@@ -282,6 +283,13 @@ def import_rows_from_apkg_bytes(
             raise APKGImportError("Failed to open APKG collection database") from exc
         try:
             with conn:
+                try:
+                    tables = {name.lower() for name in ordinary_sqlite_table_names(conn)}
+                except ValueError as exc:
+                    raise APKGImportError(str(exc)) from exc
+                missing = sorted({"col", "notes", "cards"} - tables)
+                if missing:
+                    raise APKGImportError(f"APKG is missing required ordinary table: {', '.join(missing)}")
                 col_row = conn.execute("SELECT crt, models, decks FROM col LIMIT 1").fetchone()
                 if not col_row:
                     raise APKGImportError("APKG collection metadata is missing")
