@@ -1,0 +1,722 @@
+{
+  "advisory_review": {
+    "advisory": "GHSA-8mgp-746c-j5xp",
+    "advisory_prerequisite": "Application relies on enabled pathsec containment and lets untrusted workflows select paths for the affected model import/export APIs.",
+    "affected_apis": [
+      "TransitionParser.train",
+      "TransitionParser.parse",
+      "AveragedPerceptron.save",
+      "AveragedPerceptron.load",
+      "PerceptronTagger.save_to_json",
+      "save_maxent_params"
+    ],
+    "conclusion": "No concrete contrary call path identified. Reviewed consumer APIs accept text, tokens, or fixed/allowlisted corpus identifiers; no untrusted model import/export path reaches a listed affected API. The prerequisites for this specific sandbox-bypass advisory are absent in the reviewed supported usage. No installed-package test or generic runtime-closure demand is needed to support this API-usage disposition.",
+    "cve": "CVE-2026-81726",
+    "database_url": "https://github.com/advisories/GHSA-8mgp-746c-j5xp",
+    "disposition": "not-applicable-with-scope",
+    "evidence": [
+      {
+        "detail": "Ten fixed language mappings and english fallback at 294 determine the resource name passed to data.load at 297; request language cannot become an arbitrary model pathname.",
+        "file": "tldw_Server_API/app/core/Chunking/strategies/semantic.py",
+        "line": 281
+      },
+      {
+        "detail": "Resource/download helper callers supply constant punkt, wordnet, stopwords keys (142,147,152). Text flows into word_tokenize (224) and WordNet lookups (676,920); stopword language is fixed english (208).",
+        "file": "tldw_Server_API/app/core/RAG/rag_service/query_features.py",
+        "line": 140
+      },
+      {
+        "detail": "TweetTokenizer and pos_tag consume words (161-162); corpus and tagger resource lookup/download keys are literals at 22-28. No affected model persistence API is used by this consumer.",
+        "file": "g2p-en--g2p_en__g2p.py",
+        "line": 7
+      },
+      {
+        "detail": "sent_tokenize receives text; tokenizers.py:47 optionally instantiates PorterStemmer. No caller-selected NLTK model pathname.",
+        "file": "rouge-score--rouge_score-0.1.2__rouge_score__rouge_scorer.py",
+        "line": 140
+      },
+      {
+        "detail": "Language determines whether to use English CMU corpus; find/download keys are fixed cmudict identifiers and dict() takes no input pathname.",
+        "file": "textstat--textstat__backend__utils___get_cmudict.py",
+        "line": 21
+      },
+      {
+        "detail": "Optional rake_nltk path instantiates Rake without caller-supplied NLTK paths. rake-nltk is absent from uv.lock; no claim is extended to its custom installation.",
+        "file": "tldw_Server_API/app/core/Workflows/adapters/text/nlp.py",
+        "line": 74
+      }
+    ],
+    "findings": [],
+    "independent_verification": {
+      "additional_optional_nltk_parents": [],
+      "all_declared_external_direct_parents": [
+        "g2p-en==2.1.0",
+        "rouge-score==0.1.2",
+        "textstat==0.7.13"
+      ],
+      "app_search_sha256": "bc36b0f61b07a9af35012183ee0e2388e5825c7216ad14a88c3ee2ad9034a48c",
+      "app_source_hashes": {
+        "tldw_Server_API/app/core/Chunking/strategies/semantic.py": "468fa767f8b62b335cb469bcf585e68ce36e2005ea21d12fd99dd367e9797f97",
+        "tldw_Server_API/app/core/RAG/rag_service/query_features.py": "540a1296bc17d95d31ed2b054e36e0eb142dbeb1b241ba1fdf8e9a42cfe838c5",
+        "tldw_Server_API/app/core/Workflows/adapters/text/nlp.py": "bf9e1d50727d4ed27f55f91bd5ba9a8c6f9c2ed4367e7ea869bcd476427a3988"
+      },
+      "consumer_bindings_sha256": "5cf3ce095c495ad91814ababe51fc30f34cb90670385d85e315925e78695fd2b",
+      "external_archives_hash_url_verified": true,
+      "extracted_source_matches_archive": [
+        {
+          "file": "g2p-en--g2p_en__g2p.py",
+          "matches_archive_member": "g2p_en/g2p.py",
+          "sha256": "fc2548b855e102f774506a6afe4f4bc88424229b69701ab6040aa16710ddff3a"
+        },
+        {
+          "file": "rouge-score--rouge_score-0.1.2__rouge_score__rouge_scorer.py",
+          "matches_archive_member": "rouge_score-0.1.2/rouge_score/rouge_scorer.py",
+          "sha256": "9484c5fd05e22cd28b5053bf9de586b3620cf65b0c38052b8690badd51f31d1a"
+        },
+        {
+          "file": "rouge-score--rouge_score-0.1.2__rouge_score__rouge_scorer_test.py",
+          "matches_archive_member": "rouge_score-0.1.2/rouge_score/rouge_scorer_test.py",
+          "sha256": "383b1c631072dccd398321f501e3a7dfd89dd51a8299b42e621fd2cb24ed90da"
+        },
+        {
+          "file": "rouge-score--rouge_score-0.1.2__rouge_score__tokenizers.py",
+          "matches_archive_member": "rouge_score-0.1.2/rouge_score/tokenizers.py",
+          "sha256": "2b7b9dae505ce8739064ba8e4791b871b13aa1f65bc54e25692f1a9ba8600508"
+        },
+        {
+          "file": "rouge-score--rouge_score-0.1.2__setup.py",
+          "matches_archive_member": "rouge_score-0.1.2/setup.py",
+          "sha256": "c6942fba16f1e883b2c2fcb6210022fba246124644d05c855436c85909ba8386"
+        },
+        {
+          "file": "textstat--textstat__backend__utils___get_cmudict.py",
+          "matches_archive_member": "textstat/backend/utils/_get_cmudict.py",
+          "sha256": "5b88acc0077b9b23a708b2a7b2299f23c96335010b516292da98252b5fcf4fb5"
+        }
+      ],
+      "python_archive_members_scanned": 147,
+      "uv_lock_sha256": "d565706e62c808e55fa03e2861ce4795603c5d42a4d7f487a93b89f3899ce9bd"
+    },
+    "limits": [
+      "Static application/consumer usage review only; no NLTK source, installed wheel, model artifact, imports, API invocation, payload construction, tests, or backport qualification used.",
+      "An incidental broad configuration grep returned several pathsec-setting lines in an excluded legacy candidate controls file. That branch was immediately stopped and those lines are not used as review evidence.",
+      "This is specific advisory non-applicability for reviewed supported usage, not a patched-version or package-wide safety assertion."
+    ],
+    "package": "pkg:pypi/nltk@3.10.3",
+    "primary_url": "https://github.com/nltk/nltk/security/advisories/GHSA-8mgp-746c-j5xp",
+    "reviewed_head": "0ab9945619dcb6199a41d8734c5c7d333d1c0936",
+    "scope": {
+      "basis": "Supported repository API usage plus all external declared direct NLTK consumers in current uv.lock. Component installed-presence/report bindings are supplied by parent; this review does not re-open NLTK package artifacts. No extension to arbitrary custom deployments or added model-management workflows.",
+      "components": [
+        "source",
+        "image-app",
+        "image-worker",
+        "image-audio-worker"
+      ]
+    },
+    "status": "supported-scoped-non-applicability"
+  },
+  "assessed_on": "2026-09-10",
+  "authorization": "Requester directed continued remediation and exclusion of confirmed non-applicable findings in this conversation. PR2869 is the review location. No new GitHub approval comment is claimed.",
+  "baseline_policy_sha256": "daab37448b4ea0dea26300422862b433e5a08231ac8a518afca8e1b2bac5e00b",
+  "baseline_record_ids": [
+    "TASK-13013.7.23-OS-01",
+    "TASK-13013.7.23-OS-02",
+    "TASK-13013.7.23-OS-03",
+    "TASK-13013.7.23-OS-04",
+    "TASK-13013.7.23-OS-05",
+    "TASK-13013.7.28-CHROMA-01",
+    "TASK-13013.7.28-CHROMA-02",
+    "TASK-13013.7.28-CHROMA-03",
+    "TASK-13013.7.28-CHROMA-04",
+    "TASK-13013.7.28-CHROMA-05",
+    "TASK-13013.7.28-CHROMA-06",
+    "TASK-13013.7.28-CHROMA-07",
+    "TASK-13013.7.28-CHROMA-08",
+    "TASK-13013.7.28-CHROMA-09",
+    "TASK-13013.7.28-CHROMA-10",
+    "TASK-13013.7.28-CHROMA-11",
+    "TASK-13013.7.28-CHROMA-12",
+    "TASK-13013.7.28-CHROMA-13",
+    "TASK-13013.7.28-CHROMA-14",
+    "TASK-13013.7.28-CHROMA-15",
+    "TASK-13013.7.28-CHROMA-16",
+    "TASK-13013.7.29-OS-01",
+    "TASK-13013.7.29-OS-02",
+    "TASK-13013.7.29-OS-03",
+    "TASK-13013.7.29-OS-04",
+    "TASK-13013.7.29-OS-05",
+    "TASK-13013.7.29-OS-06",
+    "TASK-13013.7.29-OS-07",
+    "TASK-13013.7.29-OS-08",
+    "TASK-13013.7.29-OS-09",
+    "TASK-13013.7.29-OS-10",
+    "TASK-13013.7.29-OS-11",
+    "TASK-13013.7.29-OS-12",
+    "TASK-13013.7.29-OS-13",
+    "TASK-13013.7.29-OS-14",
+    "TASK-13013.7.29-OS-15",
+    "TASK-13013.7.29-OS-16",
+    "TASK-13013.7.29-OS-17",
+    "TASK-13013.7.29-OS-18",
+    "TASK-13013.7.29-OS-19",
+    "TASK-13013.7.29-OS-20",
+    "TASK-13013.7.29-OS-21",
+    "TASK-13013.7.29-OS-22",
+    "TASK-13013.7.29-OS-23",
+    "TASK-13013.7.29-OS-24",
+    "TASK-13013.7.29-OS-25",
+    "TASK-13013.7.29-OS-26",
+    "TASK-13013.7.29-OS-27",
+    "TASK-13013.7.29-OS-28",
+    "TASK-13013.7.29-OS-29",
+    "TASK-13013.7.29-OS-30",
+    "TASK-13013.7.29-OS-31",
+    "TASK-13013.7.29-OS-32",
+    "TASK-13013.7.29-OS-33",
+    "TASK-13013.7.29-OS-34",
+    "TASK-13013.7.29-OS-35",
+    "TASK-13013.7.29-OS-36",
+    "TASK-13013.7.29-OS-37",
+    "TASK-13013.7.29-OS-38",
+    "TASK-13013.7.29-OS-39",
+    "TASK-13013.7.29-OS-40",
+    "TASK-13013.7.29-OS-41",
+    "TASK-13013.7.29-OS-42",
+    "TASK-13013.7.29-OS-43",
+    "TASK-13013.7.29-OS-44",
+    "TASK-13013.7.29-OS-45",
+    "TASK-13013.7.29-OS-46",
+    "TASK-13013.7.29-OS-47",
+    "TASK-13013.7.29-OS-48",
+    "TASK-13013.7.29-OS-49",
+    "TASK-13013.7.29-OS-50",
+    "TASK-13013.7.29-OS-51",
+    "TASK-13013.7.29-OS-52",
+    "TASK-13013.7.29-OS-53",
+    "TASK-13013.7.29-OS-54",
+    "TASK-13013.7.29-OS-55",
+    "TASK-13013.7.29-OS-56",
+    "TASK-13013.7.29-OS-57",
+    "TASK-13013.7.29-OS-58",
+    "TASK-13013.7.29-OS-59",
+    "TASK-13013.7.29-OS-60",
+    "TASK-13013.7.29-OS-61",
+    "TASK-13013.7.29-OS-62",
+    "TASK-13013.7.29-OS-63",
+    "TASK-13013.7.29-OS-64",
+    "TASK-13013.7.29-OS-65",
+    "TASK-13013.7.29-OS-66",
+    "TASK-13013.7.29-OS-67",
+    "TASK-13013.7.29-OS-68",
+    "TASK-13013.7.29-OS-69",
+    "TASK-13013.7.29-OS-70",
+    "TASK-13013.7.29-OS-71",
+    "TASK-13013.7.29-OS-72",
+    "TASK-13013.7.30-NATIVE-001",
+    "TASK-13013.7.30-NATIVE-002",
+    "TASK-13013.7.30-NATIVE-003",
+    "TASK-13013.7.30-NATIVE-004",
+    "TASK-13013.7.30-NATIVE-005",
+    "TASK-13013.7.30-NATIVE-006",
+    "TASK-13013.7.30-NATIVE-007",
+    "TASK-13013.7.30-NATIVE-008",
+    "TASK-13013.7.30-NATIVE-009",
+    "TASK-13013.7.30-NATIVE-010",
+    "TASK-13013.7.30-NATIVE-011",
+    "TASK-13013.7.30-NATIVE-012",
+    "TASK-13013.7.30-NATIVE-013",
+    "TASK-13013.7.30-NATIVE-014",
+    "TASK-13013.7.30-NATIVE-015",
+    "TASK-13013.7.30-NATIVE-016",
+    "TASK-13013.7.30-NATIVE-017",
+    "TASK-13013.7.30-NATIVE-018",
+    "TASK-13013.7.30-NATIVE-019",
+    "TASK-13013.7.30-NATIVE-020",
+    "TASK-13013.7.30-NATIVE-021",
+    "TASK-13013.7.30-NATIVE-022",
+    "TASK-13013.7.30-NATIVE-023",
+    "TASK-13013.7.30-NATIVE-024",
+    "TASK-13013.7.30-NATIVE-025",
+    "TASK-13013.7.30-NATIVE-026",
+    "TASK-13013.7.30-NATIVE-027",
+    "TASK-13013.7.30-NATIVE-028",
+    "TASK-13013.7.30-NATIVE-029",
+    "TASK-13013.7.30-NATIVE-030",
+    "TASK-13013.7.30-NATIVE-031",
+    "TASK-13013.7.30-NATIVE-032",
+    "TASK-13013.7.30-NATIVE-033",
+    "TASK-13013.7.30-NATIVE-034",
+    "TASK-13013.7.30-NATIVE-035",
+    "TASK-13013.7.30-NATIVE-036",
+    "TASK-13013.7.30-NATIVE-037",
+    "TASK-13013.7.30-NATIVE-038",
+    "TASK-13013.7.30-NATIVE-039",
+    "TASK-13013.7.30-NATIVE-040",
+    "TASK-13013.7.30-NATIVE-041",
+    "TASK-13013.7.30-NATIVE-042",
+    "TASK-13013.7.30-NATIVE-043",
+    "TASK-13013.7.30-NATIVE-044",
+    "TASK-13013.7.30-NATIVE-045",
+    "TASK-13013.7.30-NATIVE-046",
+    "TASK-13013.7.30-NATIVE-047",
+    "TASK-13013.7.30-NATIVE-048",
+    "TASK-13013.7.30-NATIVE-049",
+    "TASK-13013.7.30-NATIVE-050",
+    "TASK-13013.7.30-NATIVE-051",
+    "TASK-13013.7.30-NATIVE-052",
+    "TASK-13013.7.30-NATIVE-053",
+    "TASK-13013.7.30-NATIVE-054",
+    "TASK-13013.7.30-NATIVE-055",
+    "TASK-13013.7.30-NATIVE-056",
+    "TASK-13013.7.30-NATIVE-057",
+    "TASK-13013.7.30-NATIVE-058",
+    "TASK-13013.7.30-NATIVE-059",
+    "TASK-13013.7.30-NATIVE-060",
+    "TASK-13013.7.30-NATIVE-061",
+    "TASK-13013.7.30-NATIVE-062",
+    "TASK-13013.7.30-NATIVE-063",
+    "TASK-13013.7.30-NATIVE-064",
+    "TASK-13013.7.30-NATIVE-065",
+    "TASK-13013.7.30-NATIVE-066",
+    "TASK-13013.7.30-NATIVE-067",
+    "TASK-13013.7.30-NATIVE-068",
+    "TASK-13013.7.30-NATIVE-069",
+    "TASK-13013.7.30-NATIVE-070",
+    "TASK-13013.7.30-NATIVE-071",
+    "TASK-13013.7.30-NATIVE-072",
+    "TASK-13013.7.30-NATIVE-073",
+    "TASK-13013.7.30-NATIVE-074",
+    "TASK-13013.7.30-NATIVE-075",
+    "TASK-13013.7.30-NATIVE-076",
+    "TASK-13013.7.30-NATIVE-077",
+    "TASK-13013.7.30-NATIVE-078",
+    "TASK-13013.7.30-NATIVE-079",
+    "TASK-13013.7.30-NATIVE-080",
+    "TASK-13013.7.30-NATIVE-081",
+    "TASK-13013.7.30-NATIVE-082",
+    "TASK-13013.7.30-NATIVE-083",
+    "TASK-13013.7.30-NATIVE-084",
+    "TASK-13013.7.30-NATIVE-085",
+    "TASK-13013.7.30-NATIVE-086",
+    "TASK-13013.7.30-NATIVE-087",
+    "TASK-13013.7.30-NATIVE-088",
+    "TASK-13013.7.30-NATIVE-089",
+    "TASK-13013.7.30-NATIVE-090",
+    "TASK-13013.7.30-NATIVE-091",
+    "TASK-13013.7.30-NATIVE-092",
+    "TASK-13013.7.30-NATIVE-093",
+    "TASK-13013.7.30-NATIVE-094",
+    "TASK-13013.7.30-NATIVE-095",
+    "TASK-13013.7.30-NATIVE-096",
+    "TASK-13013.7.30-NATIVE-097",
+    "TASK-13013.7.30-NATIVE-098",
+    "TASK-13013.7.30-NATIVE-099",
+    "TASK-13013.7.30-NATIVE-100",
+    "TASK-13013.7.30-NATIVE-101",
+    "TASK-13013.7.30-NATIVE-102",
+    "TASK-13013.7.30-NATIVE-103",
+    "TASK-13013.7.30-NATIVE-104",
+    "TASK-13013.7.30-NATIVE-105",
+    "TASK-13013.7.30-NATIVE-106",
+    "TASK-13013.7.30-NATIVE-107",
+    "TASK-13013.7.30-NATIVE-108",
+    "TASK-13013.7.30-NATIVE-109",
+    "TASK-13013.7.30-NATIVE-110",
+    "TASK-13013.7.30-NATIVE-111",
+    "TASK-13013.7.30-NATIVE-112",
+    "TASK-13013.7.30-NATIVE-113",
+    "TASK-13013.7.30-NATIVE-114",
+    "TASK-13013.7.30-NATIVE-115",
+    "TASK-13013.7.30-NATIVE-116",
+    "TASK-13013.7.30-NATIVE-117",
+    "TASK-13013.7.30-NATIVE-118",
+    "TASK-13013.7.30-NATIVE-119",
+    "TASK-13013.7.30-NATIVE-120",
+    "TASK-13013.7.30-NATIVE-121",
+    "TASK-13013.7.30-NATIVE-122",
+    "TASK-13013.7.30-NATIVE-123",
+    "TASK-13013.7.30-NATIVE-124",
+    "TASK-13013.7.30-NATIVE-125",
+    "TASK-13013.7.30-NATIVE-126",
+    "TASK-13013.7.30-NATIVE-127",
+    "TASK-13013.7.30-NATIVE-128",
+    "TASK-13013.7.30-NATIVE-129",
+    "TASK-13013.7.30-NATIVE-130",
+    "TASK-13013.7.30-NATIVE-131",
+    "TASK-13013.7.30-NATIVE-132",
+    "TASK-13013.7.30-NATIVE-133",
+    "TASK-13013.7.30-NATIVE-134",
+    "TASK-13013.7.30-NATIVE-135",
+    "TASK-13013.7.30-NATIVE-136",
+    "TASK-13013.7.30-NATIVE-137",
+    "TASK-13013.7.30-NATIVE-138",
+    "TASK-13013.7.30-NATIVE-139",
+    "TASK-13013.7.30-NATIVE-140",
+    "TASK-13013.7.30-NATIVE-141",
+    "TASK-13013.7.30-NATIVE-142",
+    "TASK-13013.7.30-NATIVE-143",
+    "TASK-13013.7.30-NATIVE-144",
+    "TASK-13013.7.30-NATIVE-145",
+    "TASK-13013.7.30-NATIVE-146",
+    "TASK-13013.7.30-NATIVE-147",
+    "TASK-13013.7.30-NATIVE-148",
+    "TASK-13013.7.30-NATIVE-149",
+    "TASK-13013.7.30-NATIVE-150",
+    "TASK-13013.7.30-NATIVE-151",
+    "TASK-13013.7.30-NATIVE-152",
+    "TASK-13013.7.30-NATIVE-153",
+    "TASK-13013.7.30-NATIVE-154",
+    "TASK-13013.7.30-NATIVE-155",
+    "TASK-13013.7.30-NATIVE-156",
+    "TASK-13013.7.30-NATIVE-157",
+    "TASK-13013.7.30-NATIVE-158",
+    "TASK-13013.7.30-NATIVE-159",
+    "TASK-13013.7.30-NATIVE-160",
+    "TASK-13013.7.30-NATIVE-161",
+    "TASK-13013.7.30-NATIVE-162",
+    "TASK-13013.7.30-NATIVE-163",
+    "TASK-13013.7.30-NATIVE-164",
+    "TASK-13013.7.30-NATIVE-165",
+    "TASK-13013.7.30-NATIVE-166",
+    "TASK-13013.7.30-NATIVE-167",
+    "TASK-13013.7.30-NATIVE-168",
+    "TASK-13013.7.30-NATIVE-169",
+    "TASK-13013.7.30-NATIVE-170",
+    "TASK-13013.7.30-NATIVE-171",
+    "TASK-13013.7.30-NATIVE-172",
+    "TASK-13013.7.30-NATIVE-173",
+    "TASK-13013.7.30-NATIVE-174",
+    "TASK-13013.7.30-NATIVE-175"
+  ],
+  "consumer_archive_bindings": [
+    {
+      "archive": "/private/tmp/task-13013-7-nltk-consumer-static/g2p_en-2.1.0-py3-none-any.whl",
+      "hash": "sha256:2a7aabf1fc7f270fcc3349881407988c9245173c2413debbe5432f4a4f31319f",
+      "name": "g2p-en",
+      "size": 3117464,
+      "upload-time": "2019-12-31T01:16:03.286Z",
+      "url": "https://files.pythonhosted.org/packages/d7/d9/b77dc634a7a0c0c97716ba97dd0a28cbfa6267c96f359c4f27ed71cbd284/g2p_en-2.1.0-py3-none-any.whl",
+      "version": "2.1.0"
+    },
+    {
+      "archive": "/private/tmp/task-13013-7-nltk-consumer-static/rouge_score-0.1.2.tar.gz",
+      "hash": "sha256:c7d4da2683e68c9abf0135ef915d63a46643666f848e558a1b9f7ead17ff0f04",
+      "name": "rouge-score",
+      "size": 17400,
+      "upload-time": "2022-07-22T22:46:22.909Z",
+      "url": "https://files.pythonhosted.org/packages/e2/c5/9136736c37022a6ad27fea38f3111eb8f02fe75d067f9a985cc358653102/rouge_score-0.1.2.tar.gz",
+      "version": "0.1.2"
+    },
+    {
+      "archive": "/private/tmp/task-13013-7-nltk-consumer-static/textstat-0.7.13-py3-none-any.whl",
+      "hash": "sha256:04b1ec995d1e8b2e628759497e6b23204a9ec91dcd652447d8cbba9478f25471",
+      "name": "textstat",
+      "size": 177050,
+      "upload-time": "2026-02-18T21:07:38.163Z",
+      "url": "https://files.pythonhosted.org/packages/ca/31/0eb4cc5bb021b4ceaaa602c59ba16ce99256b9dd30981bef3f3a53d8555f/textstat-0.7.13-py3-none-any.whl",
+      "version": "0.7.13"
+    }
+  ],
+  "independent_review_sha256": "e15f20ab521abb69ddd8a3321eb3e5a25a881f4f448e82dbb12bc77d3f5442d8",
+  "retained_finding_bindings": [
+    {
+      "component": "source-python-root",
+      "fingerprint": "sha256:a93f09b31d5d606e5997464b2cec3aec188132685d45ccfb1ecd2fcd6385a84e",
+      "installed_version": "3.10.3",
+      "layer": null,
+      "package_identifier": {
+        "BOMRef": "nltk-139@3.10.3",
+        "PURL": "pkg:pypi/nltk@3.10.3",
+        "UID": "894f8c0c36069739"
+      },
+      "package_path": null,
+      "record_id": "TASK-13013.7.32-NLTK-01",
+      "report_binding": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/source-scans.zip",
+        "archive_sha256": "sha256:06b887a22906577f7eef1aa6459bf45b654313286e7f69f3226e50e196000053",
+        "member": "trivy-source-python-root.json",
+        "member_sha256": "914a6c3ea35734da3df35b79ba2e55aa05969d480d59062ecdb95ea6b4a232bb"
+      },
+      "severity": "HIGH",
+      "subject": [],
+      "target": "Python",
+      "vulnerability_id": "CVE-2026-81726"
+    },
+    {
+      "component": "image-app",
+      "fingerprint": "sha256:d28e6fe184b3b06632498eaa61ed475548fa934584e47a9eb32df86acf47ae65",
+      "installed_version": "3.10.3",
+      "layer": {
+        "DiffID": "sha256:2572cc3a34a3ef6c9a059bf2f215abd1d7a64aa4cb1193aa920eb9169f890bb8",
+        "Digest": "sha256:8a8224a5138f24dce2c926009eee867317ed3ce93c048cabd9e80062a3d75a0e"
+      },
+      "package_identifier": {
+        "PURL": "pkg:pypi/nltk@3.10.3",
+        "UID": "fe3bcb814f017d31"
+      },
+      "package_path": "opt/tldw-venv/lib/python3.12/site-packages/nltk-3.10.3.dist-info/METADATA",
+      "record_id": "TASK-13013.7.32-NLTK-02",
+      "report_binding": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-app.zip",
+        "archive_sha256": "sha256:7acf62766a675e54b8f721419a4d80371c31ca15056e57aabf2e3a0b5ce23ef8",
+        "member": "trivy-image-app.json",
+        "member_sha256": "f88d77cf89a0f1b8a9a7e91b2eb58970b64e8094f593cf01e0252bfa825802da"
+      },
+      "severity": "HIGH",
+      "subject": [],
+      "target": "Python",
+      "vulnerability_id": "CVE-2026-81726"
+    },
+    {
+      "component": "image-worker",
+      "fingerprint": "sha256:754ecbb2081821c898b381903fa63404f448e730e8ea747cf5f95b48cfad5824",
+      "installed_version": "3.10.3",
+      "layer": {
+        "DiffID": "sha256:f8b2465868f429f928980978ced127c15616e00382aa4ecbd63bc886abf00ae2",
+        "Digest": "sha256:92807a7fd7b336c0f37a2498d4db437a5dad5869dfa2b8cf57ba1b7a1d79d5af"
+      },
+      "package_identifier": {
+        "PURL": "pkg:pypi/nltk@3.10.3",
+        "UID": "c597791ffed5dd19"
+      },
+      "package_path": "opt/tldw-venv/lib/python3.11/site-packages/nltk-3.10.3.dist-info/METADATA",
+      "record_id": "TASK-13013.7.32-NLTK-03",
+      "report_binding": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-worker.zip",
+        "archive_sha256": "sha256:f1833864ecde4526276884702b0eb74c81126f76fd1873ea2c169afafd92a4ea",
+        "member": "trivy-image-worker.json",
+        "member_sha256": "8899e5580af6b7fefc061d972a1f63f10e93d57235edaedaf9e5f572c8cc3bf3"
+      },
+      "severity": "HIGH",
+      "subject": [],
+      "target": "Python",
+      "vulnerability_id": "CVE-2026-81726"
+    },
+    {
+      "component": "image-audio-worker",
+      "fingerprint": "sha256:bba60468a1aa0c0ba2e3cfa6e819aeffdbf9e3d84ae56ecc7940cdb43e76c992",
+      "installed_version": "3.10.3",
+      "layer": {
+        "DiffID": "sha256:3fbdcce93a7c648fe4891978e907d519f0d09387219a5e769a6b99d496ef5e85",
+        "Digest": "sha256:2b33d70b96b9a80fcca004a56c6c16d2e73257430affcbaa92c36a6b134f17e1"
+      },
+      "package_identifier": {
+        "PURL": "pkg:pypi/nltk@3.10.3",
+        "UID": "c597791ffed5dd19"
+      },
+      "package_path": "opt/tldw-venv/lib/python3.11/site-packages/nltk-3.10.3.dist-info/METADATA",
+      "record_id": "TASK-13013.7.32-NLTK-04",
+      "report_binding": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-audio-worker.zip",
+        "archive_sha256": "sha256:7611c8f6b54a928a5e72af991aeaec602c8044bbf94ae2a638ac8e6a27fe5fea",
+        "member": "trivy-image-audio-worker.json",
+        "member_sha256": "4c01e656130515310e5396aec02a2de5fc974c495591d4b90a033496920c81f6"
+      },
+      "severity": "HIGH",
+      "subject": [],
+      "target": "Python",
+      "vulnerability_id": "CVE-2026-81726"
+    }
+  ],
+  "scope": "Current supported first-party application and all external direct locked NLTK consumers; no custom model-management workflows.",
+  "supported_dispositions": [
+    {
+      "approval": "https://github.com/rmusser01/tldw_server/pull/2869",
+      "component": "source-python-root",
+      "created_on": "2026-09-10",
+      "expires_on": "2026-09-17",
+      "id": "TASK-13013.7.32-NLTK-01",
+      "installed_version": "3.10.3",
+      "mitigation": "Scoped to current supported application usage and exact package identity. Reassess changes to NLTK callers, direct consumers, model-management APIs or custom workflows. This is non-applicability, not a patched-package or runtime-qualification claim. Evidence and conversation authorization: Docs/Evidence/TASK-13013.7.32-nltk-applicability.md.",
+      "owner": "rmusser01",
+      "purl": "pkg:pypi/nltk@3.10.3",
+      "rationale": "The advisory requires untrusted model import/export path selection at affected persistence APIs under pathsec containment. Reviewed first-party usage and all three external direct locked consumers use text/token APIs or fixed/allowlisted corpus resources; none provides the affected model-path boundary.",
+      "severity": "HIGH",
+      "supersedes": null,
+      "vulnerability_id": "CVE-2026-81726"
+    },
+    {
+      "approval": "https://github.com/rmusser01/tldw_server/pull/2869",
+      "component": "image-app",
+      "created_on": "2026-09-10",
+      "expires_on": "2026-09-17",
+      "id": "TASK-13013.7.32-NLTK-02",
+      "installed_version": "3.10.3",
+      "mitigation": "Scoped to current supported application usage and exact package identity. Reassess changes to NLTK callers, direct consumers, model-management APIs or custom workflows. This is non-applicability, not a patched-package or runtime-qualification claim. Evidence and conversation authorization: Docs/Evidence/TASK-13013.7.32-nltk-applicability.md.",
+      "owner": "rmusser01",
+      "purl": "pkg:pypi/nltk@3.10.3",
+      "rationale": "The advisory requires untrusted model import/export path selection at affected persistence APIs under pathsec containment. Reviewed first-party usage and all three external direct locked consumers use text/token APIs or fixed/allowlisted corpus resources; none provides the affected model-path boundary.",
+      "severity": "HIGH",
+      "supersedes": null,
+      "vulnerability_id": "CVE-2026-81726"
+    },
+    {
+      "approval": "https://github.com/rmusser01/tldw_server/pull/2869",
+      "component": "image-worker",
+      "created_on": "2026-09-10",
+      "expires_on": "2026-09-17",
+      "id": "TASK-13013.7.32-NLTK-03",
+      "installed_version": "3.10.3",
+      "mitigation": "Scoped to current supported application usage and exact package identity. Reassess changes to NLTK callers, direct consumers, model-management APIs or custom workflows. This is non-applicability, not a patched-package or runtime-qualification claim. Evidence and conversation authorization: Docs/Evidence/TASK-13013.7.32-nltk-applicability.md.",
+      "owner": "rmusser01",
+      "purl": "pkg:pypi/nltk@3.10.3",
+      "rationale": "The advisory requires untrusted model import/export path selection at affected persistence APIs under pathsec containment. Reviewed first-party usage and all three external direct locked consumers use text/token APIs or fixed/allowlisted corpus resources; none provides the affected model-path boundary.",
+      "severity": "HIGH",
+      "supersedes": null,
+      "vulnerability_id": "CVE-2026-81726"
+    },
+    {
+      "approval": "https://github.com/rmusser01/tldw_server/pull/2869",
+      "component": "image-audio-worker",
+      "created_on": "2026-09-10",
+      "expires_on": "2026-09-17",
+      "id": "TASK-13013.7.32-NLTK-04",
+      "installed_version": "3.10.3",
+      "mitigation": "Scoped to current supported application usage and exact package identity. Reassess changes to NLTK callers, direct consumers, model-management APIs or custom workflows. This is non-applicability, not a patched-package or runtime-qualification claim. Evidence and conversation authorization: Docs/Evidence/TASK-13013.7.32-nltk-applicability.md.",
+      "owner": "rmusser01",
+      "purl": "pkg:pypi/nltk@3.10.3",
+      "rationale": "The advisory requires untrusted model import/export path selection at affected persistence APIs under pathsec containment. Reviewed first-party usage and all three external direct locked consumers use text/token APIs or fixed/allowlisted corpus resources; none provides the affected model-path boundary.",
+      "severity": "HIGH",
+      "supersedes": null,
+      "vulnerability_id": "CVE-2026-81726"
+    }
+  ],
+  "task": "TASK-13013.7.32",
+  "verification": {
+    "app_and_uv_lock_hashes_verified": true,
+    "bandit_production": {
+      "errors": [],
+      "findings": {}
+    },
+    "bandit_tests": {
+      "errors": [],
+      "findings": {
+        "B101": 11
+      }
+    },
+    "candidate_or_production_dependencies_changed": false,
+    "consumer_archive_hashes_verified": true,
+    "dependency_review": {
+      "allow_ghsas": [
+        "GHSA-2wm9-hf6c-p5cr",
+        "GHSA-36p7-vc44-83pf",
+        "GHSA-8mgp-746c-j5xp",
+        "GHSA-f4j7-r4q5-qw2c",
+        "GHSA-xph7-9rjv-w5fr"
+      ],
+      "change_count": 695,
+      "raw_changes_preserved": true,
+      "raw_pages": "/private/tmp/task-13013-7-28-chroma.tFu6fO/github-dependency-diff-pages.json",
+      "remaining_advisories": [
+        {
+          "ghsa": "GHSA-2cp2-2r3c-7p7r",
+          "name": "hydra-core",
+          "version": "1.3.2"
+        },
+        {
+          "ghsa": "GHSA-qqmf-gpg7-g8gw",
+          "name": "lightning",
+          "version": "2.6.5"
+        },
+        {
+          "ghsa": "GHSA-9379-mwvr-7wxx",
+          "name": "nemo-toolkit",
+          "version": "2.0.0"
+        },
+        {
+          "ghsa": "GHSA-hvjw-vp7g-39h5",
+          "name": "nemo-toolkit",
+          "version": "2.0.0"
+        },
+        {
+          "ghsa": "GHSA-m4jw-wgmf-889x",
+          "name": "nemo-toolkit",
+          "version": "2.0.0"
+        },
+        {
+          "ghsa": "GHSA-v7v2-m736-cf3c",
+          "name": "nemo-toolkit",
+          "version": "2.0.0"
+        }
+      ],
+      "sha256": "3c6f6459322a9fd47293ee551a776737f5138131b94200b8eeb27aeb9ba9ccfb"
+    },
+    "independent_integration_review": {
+      "file": "/private/tmp/task-13013-7-nltk-consumer-static/final-integration-review.json",
+      "result": "Approved; start-date finding resolved by TASK-13013.7.35",
+      "sha256": "e8c5d007ee27bddb45da516ebe63c8bbf6fc91d1ba1edbb45f2bba1cb0df56d0"
+    },
+    "nltk_imported_or_executed": false,
+    "policy_sha256": "fd0e8adbe6ca346d6c0dec2b5ceacb979ab23fb53109725f1879396297a6a659",
+    "protected_inputs": {
+      "intentional_TASK_13013_7_35_change": {
+        "Helper_Scripts/Supply_Chain/exception_policy.py": {
+          "after": "75644b98c6b98adc5fa7492dfd3b1b416f36d06648d7f476793ee6726c83feaf",
+          "before": "9bf192fa6c8c4e48c22a816d82229de0177f9b3ae54711fe0596f1d43eb6ed96"
+        }
+      },
+      "unchanged": {
+        ".github/supply-chain/vulnerability-exceptions.schema.json": "0f36741f71d326f86d675eaf97984a69fd03cc66b8d8380f6234ceeae30a1eed",
+        ".github/workflows/publish-docker.yml": "1fcbf84525a62221fb04b15031f0df33fb76d686c2e6ed3c9188bdc2029676ba",
+        ".github/workflows/publish-ghcr-main.yml": "76725210fbf47e15d3527eacf2584d0ae000eef9965407d69d925052d1f00ac1",
+        ".github/workflows/sbom.yml": "5dad2bd88b20ee009412c9aed8ec25558bf52dc5f9ce0b7aa78d043cadd87634",
+        "Docs/Evidence/TASK-13013.7.23-applicability-dispositions.json": "d0fcaff69d7f248628ddb1d199ef016b3d45797ac1062d4ecd9ca6544d0ac039",
+        "Helper_Scripts/Supply_Chain/runtime_probe.py": "decdde660b68345f1d51a3350724bfc337bf30c6cfd36860c2c549058c4c624b",
+        "pyproject.toml": "9689bb626d595033bffb43f18e6103a06f1f62c98a8e0f698ecb1b6acb03c87a",
+        "uv.lock": "d565706e62c808e55fa03e2861ce4795603c5d42a4d7f487a93b89f3899ce9bd"
+      }
+    },
+    "raw_reports_preserved": true,
+    "report_and_archive_hashes_verified": true,
+    "restricted_qualification_resumed": false,
+    "retained_report_replay": {
+      "image-admin-ui": {
+        "after": 5,
+        "before": 5,
+        "raw_sha256": "f238929e5ace33d170f37cebd0faaf8418b96fb89b0ebc517d5f2f629be51d26"
+      },
+      "image-app": {
+        "after": 176,
+        "before": 177,
+        "raw_sha256": "f88d77cf89a0f1b8a9a7e91b2eb58970b64e8094f593cf01e0252bfa825802da"
+      },
+      "image-audio-worker": {
+        "after": 176,
+        "before": 177,
+        "raw_sha256": "4c01e656130515310e5396aec02a2de5fc974c495591d4b90a033496920c81f6"
+      },
+      "image-webui": {
+        "after": 5,
+        "before": 5,
+        "raw_sha256": "f1e0e15a4966175f8fd08c682f75c02143bf2fd17748a8ff36e5c2b8cf668869"
+      },
+      "image-worker": {
+        "after": 10,
+        "before": 11,
+        "raw_sha256": "8899e5580af6b7fefc061d972a1f63f10e93d57235edaedaf9e5f572c8cc3bf3"
+      },
+      "source-admin-ui": {
+        "after": 0,
+        "before": 0,
+        "raw_sha256": "f3b2d0cbd7f87b1d3d8dad3e6b1afd8b4320f20fdff57052436b4e31f63fd0b7"
+      },
+      "source-apps-workspace": {
+        "after": 0,
+        "before": 0,
+        "raw_sha256": "a26319262f82d9f6e809a858e3c3140527cd1b6ef731ebfaa09be27b102a614b"
+      },
+      "source-python-root": {
+        "after": 0,
+        "before": 1,
+        "raw_sha256": "914a6c3ea35734da3df35b79ba2e55aa05969d480d59062ecdb95ea6b4a232bb"
+      }
+    },
+    "schema": "pass",
+    "tests": {
+      "failed": 0,
+      "log_sha256": "98c4f584aba457fc1fddbcfa781eec42848f5eac736e2b05b443ebb9d13c3eef",
+      "passed": 460
+    }
+  }
+}
