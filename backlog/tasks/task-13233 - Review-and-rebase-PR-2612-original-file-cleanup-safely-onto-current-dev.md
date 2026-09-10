@@ -4,7 +4,7 @@ title: Review and rebase PR 2612 original-file cleanup safely onto current dev
 status: In Progress
 assignee: []
 created_date: '2026-09-10 00:49'
-updated_date: '2026-09-10 01:55'
+updated_date: '2026-09-10 02:29'
 labels:
   - media
   - storage
@@ -49,12 +49,18 @@ Final post-rebase validation also passed: 153 tests, 8 existing warnings, 74.50 
 Requester explicitly authorized rebasing onto latest dev, addressing all issues/comments after Qodo posts, and merging. Their human-written Change summary is published verbatim. Starting from local c39a1a798d; remote PR is now ready for review at d0806eeeea with Qodo review pending. Preserve and inspect the intervening remote update before rebasing; use an explicit push lease and final-head merge guard.
 
 Rebased all nine PR commits onto dev f0248aaa00047d2ffcc3bde295d9fbb8296add8a without conflicts. Range-diff confirms unchanged commits; code tree matches GitHub merge head d0806eeeea exactly, apart from this task record. Fresh targeted/adjacent verification including latest-dev audio download regression: 156 passed, 8 existing warnings, 83.21 seconds. Bandit 0 findings/0 errors across four production files. Qodo review started at 2026-09-10T01:51:12Z and remains pending. Publish with explicit lease against d0806eeeeab8d0b0bf281a4715ff82f24989ab1f; address posted feedback and pass final-head required checks before authorized merge.
+
+Qodo posted nine findings in issuecomment-5611521549. Validating each rather than applying speculative changes: fixed snapshot row IDs contradict the claimed all-originals deletion interleaving; StorageBackend.delete already specifies False for absent objects. Investigating shared paths and supported late path reuse. Planned corrections cover cross-media reference protection, off-event-loop database cleanup, traceback logging, explicit test annotations/docstrings, and a documented public cleanup operation with observable-behavior tests. Add interleaving regressions and preserve existing replacement semantics.
+
+Qodo remediation reproduced and corrected shared references, slow synchronous DB work, traceback loss, and deterministic OpenWebUI path reuse; all new tests annotated/documented and cleanup exposed as a supported public operation. Disputed stale-cleaner data-loss claim and missing-blob retry claim have behavior/contract evidence. Follow-up review found shared-path retirement orphaning and UUID failed-attempt leaks; all three new regressions failed before correction, and focused replacement/hydration suite now passes 46 tests. Final adjacent suite and independent review pending.
+
+Final Qodo correction validation: 190 targeted/adjacent tests passed with 8 existing warnings (81.43 seconds); Bandit 0 findings/0 errors over all five production files; Ruff no new diagnostics against dev; AST audit found no missing annotations/docstrings in added functions; Black, applicable pre-commit, syntax, and diff checks pass. Independent final review found no remaining actionable findings and recommends publishing. All nine Qodo dispositions are ready to post, including evidence-backed rebuttals of findings 1 and 9. Final-head CI and merge remain pending.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Latest requested merge pass is in progress. Latest-dev rebase and 156-test verification are complete; Qodo feedback and final-head CI are pending. The requester supplied the Change summary and explicitly authorized merge after all issues/comments are addressed. Latest-only binary replacement is implemented; the independent pre-existing quota-root follow-up remains TASK-13233.2.
+Qodo code corrections are complete and independently reviewed. All 190 targeted/adjacent tests pass, Bandit is clean, and no new lint diagnostics were introduced. Latest dev remains f0248aaa00047d2ffcc3bde295d9fbb8296add8a. Publishing corrections and resolving review threads precedes final-head CI and the already-authorized merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

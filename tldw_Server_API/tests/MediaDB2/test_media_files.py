@@ -11,6 +11,7 @@ Tests cover:
 """
 import pytest
 from unittest.mock import MagicMock
+from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
@@ -105,7 +106,8 @@ class TestGetMediaFile:
 
     @pytest.mark.unit
     @pytest.mark.parametrize("delete_latest", [False, True])
-    def test_get_media_file_selects_latest_matching_registration(self, db_with_media, delete_latest):
+    def test_get_media_file_selects_latest_matching_registration(self, db_with_media: tuple[MediaDatabase, int], delete_latest: bool) -> None:
+        """Reads choose the newest matching row and honor soft-deletion filtering."""
         db, media_id = db_with_media
         db.insert_media_file(media_id, "original", "previous.pdf")
         db.insert_media_file(media_id, "original", "latest.pdf")
@@ -281,13 +283,15 @@ class TestSoftDeleteMediaFile:
 
 class TestMediaFilesRepository:
     @pytest.mark.unit
-    def test_hard_delete_rolls_back_when_sync_logging_fails(self, db_with_media, monkeypatch):
+    def test_hard_delete_rolls_back_when_sync_logging_fails(self, db_with_media: tuple[MediaDatabase, int], monkeypatch: pytest.MonkeyPatch) -> None:
+        """A sync-log failure restores the file row so deletion can be retried."""
         db, media_id = db_with_media
         db.insert_media_file(media_id, "original", "old.pdf")
         old_id = db.get_media_file(media_id)["id"]
         db.insert_media_file(media_id, "original", "new.pdf")
 
-        def fail_sync(*_args, **_kwargs):
+        def fail_sync(*_args: Any, **_kwargs: Any) -> None:
+            """Fail sync logging inside the deletion transaction."""
             raise RuntimeError("sync log unavailable")
 
         with monkeypatch.context() as patch:
@@ -300,7 +304,8 @@ class TestMediaFilesRepository:
         assert [row["storage_path"] for row in db.get_media_files(media_id, include_deleted=True)] == ["new.pdf"]
 
     @pytest.mark.unit
-    def test_single_file_hard_delete_is_scoped_and_idempotent(self, db_with_media):
+    def test_single_file_hard_delete_is_scoped_and_idempotent(self, db_with_media: tuple[MediaDatabase, int]) -> None:
+        """Deleting one original twice preserves other artifacts and emits one deletion event."""
         db, media_id = db_with_media
         old_uuid = db.insert_media_file(media_id, "original", "old.pdf")
         old_id = db.get_media_file(media_id)["id"]

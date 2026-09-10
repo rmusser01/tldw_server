@@ -58,6 +58,7 @@ class _FakeStorage:
         return f"storage/{media_id}/{filename}"
 
     async def delete(self, path: str) -> bool:
+        """Record attempted compensating deletion and simulate its configured outcome."""
         self.delete_calls.append(path)
         if self.delete_error is not None:
             raise self.delete_error
@@ -74,15 +75,20 @@ class _FakeDB:
         self.insert_calls.append(kwargs)
 
     def get_media_files(self, media_id: int, *, include_deleted: bool = False) -> list[dict[str, Any]]:
+        """Return no previous originals for this minimal registration fixture."""
         return []
 
 
 class _FailingMediaFileDB(_FakeDB):
+    """Expose the attempted registration while simulating its database failure."""
+
     def __init__(self, error: BaseException | None = None) -> None:
+        """Configure the registration exception used by failure-path tests."""
         super().__init__()
         self.error = error or RuntimeError("media file registration failed")
 
     def insert_media_file(self, **kwargs: Any) -> None:
+        """Record registration arguments before raising the configured failure."""
         super().insert_media_file(**kwargs)
         raise self.error
 
@@ -123,7 +129,9 @@ def fake_db() -> _FakeDB:
 
 @pytest.fixture(autouse=True)
 def _isolate_external_services(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep collection hooks and upload quotas independent of cached external services."""
     def _noop(*_args: Any, **_kwargs: Any) -> None:
+        """Replace unrelated collection synchronization with a no-op."""
         return None
 
     monkeypatch.setattr(
@@ -268,11 +276,13 @@ async def test_original_storage_uses_processing_source(monkeypatch, fake_db, fak
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_original_storage_deletes_blob_when_media_file_registration_fails(monkeypatch, fake_storage):
+async def test_original_storage_deletes_blob_when_media_file_registration_fails(monkeypatch: pytest.MonkeyPatch, fake_storage: _FakeStorage) -> None:
+    """A failed registration removes its attempted blob and reports original storage failure."""
     storage = fake_storage
     db = _FailingMediaFileDB()
 
-    async def fake_save_uploaded_files(_files, temp_dir, **_kwargs):
+    async def fake_save_uploaded_files(_files: list[Any], temp_dir: str | Path, **_kwargs: Any) -> tuple[list[dict[str, Any]], list[Any]]:
+        """Stage one uploaded PDF and preserve its original filename."""
         file_path = Path(temp_dir) / "stored_one.pdf"
         file_path.write_bytes(b"file-one")
         return [{"path": file_path, "original_filename": "source.pdf"}], []
@@ -284,6 +294,7 @@ async def test_original_storage_deletes_blob_when_media_file_registration_fails(
         media_type: Any,
         **_kwargs: Any,
     ) -> dict[str, Any]:
+        """Report a successfully persisted document without external document processing."""
         return {
             "status": "Success",
             "input_ref": item_input_ref,
@@ -334,8 +345,9 @@ async def test_original_storage_deletes_blob_when_media_file_registration_fails(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cancellation_stage", [None, "store", "cleanup"])
 async def test_original_storage_preserves_registration_errors_and_cancellation(
-    monkeypatch, fake_storage, cancellation_stage
-):
+    monkeypatch: pytest.MonkeyPatch, fake_storage: _FakeStorage, cancellation_stage: str | None
+) -> None:
+    """Generic cleanup errors preserve registration failure while cancellation propagates."""
     storage = fake_storage
     storage.delete_error = (
         asyncio.CancelledError("cleanup cancelled")
@@ -345,7 +357,8 @@ async def test_original_storage_preserves_registration_errors_and_cancellation(
         storage.store_error = asyncio.CancelledError("storage cancelled")
     db = _FailingMediaFileDB(error=Exception("generic registration failure"))
 
-    async def fake_save_uploaded_files(_files, temp_dir, **_kwargs):
+    async def fake_save_uploaded_files(_files: list[Any], temp_dir: str | Path, **_kwargs: Any) -> tuple[list[dict[str, Any]], list[Any]]:
+        """Stage one uploaded PDF and preserve its original filename."""
         file_path = Path(temp_dir) / "stored_one.pdf"
         file_path.write_bytes(b"file-one")
         return [{"path": file_path, "original_filename": "source.pdf"}], []
@@ -357,6 +370,7 @@ async def test_original_storage_preserves_registration_errors_and_cancellation(
         media_type: Any,
         **_kwargs: Any,
     ) -> dict[str, Any]:
+        """Report a successfully persisted document without external document processing."""
         return {
             "status": "Success",
             "input_ref": item_input_ref,
@@ -425,12 +439,13 @@ async def test_original_storage_preserves_registration_errors_and_cancellation(
     ],
 )
 async def test_original_storage_cleanup_failure_is_logged_without_masking_registration_error(
-    monkeypatch,
-    fake_storage,
-    delete_error,
-    delete_result,
-    expected_log,
-):
+    monkeypatch: pytest.MonkeyPatch,
+    fake_storage: _FakeStorage,
+    delete_error: Exception | None,
+    delete_result: bool,
+    expected_log: str,
+) -> None:
+    """Failed compensation is logged without replacing the original registration error."""
     storage = fake_storage
     storage.delete_error = delete_error
     storage.delete_result = delete_result
@@ -441,7 +456,8 @@ async def test_original_storage_cleanup_failure_is_logged_without_masking_regist
         level="WARNING",
     )
 
-    async def fake_save_uploaded_files(_files, temp_dir, **_kwargs):
+    async def fake_save_uploaded_files(_files: list[Any], temp_dir: str | Path, **_kwargs: Any) -> tuple[list[dict[str, Any]], list[Any]]:
+        """Stage one uploaded PDF and preserve its original filename."""
         file_path = Path(temp_dir) / "stored_one.pdf"
         file_path.write_bytes(b"file-one")
         return [{"path": file_path, "original_filename": "source.pdf"}], []
@@ -453,6 +469,7 @@ async def test_original_storage_cleanup_failure_is_logged_without_masking_regist
         media_type: Any,
         **_kwargs: Any,
     ) -> dict[str, Any]:
+        """Report a successfully persisted document without external document processing."""
         return {
             "status": "Success",
             "input_ref": item_input_ref,
@@ -509,8 +526,9 @@ async def test_original_storage_cleanup_failure_is_logged_without_masking_regist
 @pytest.mark.parametrize("failure_stage", [None, "registration", "cleanup", "snapshot"])
 @pytest.mark.parametrize("previous_filename", ["original.pdf", "original-previous.pdf"])
 async def test_original_storage_replaces_binary_and_preserves_plaintext_history(
-    monkeypatch, tmp_path, failure_stage, previous_filename
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure_stage: str | None, previous_filename: str
+) -> None:
+    """Replace binary content safely across failures while leaving plaintext versions unchanged."""
     registration_fails = failure_stage == "registration"
     storage = FileSystemStorage(base_path=tmp_path / "storage")
     db = create_media_database(db_path=str(tmp_path / "media.db"), client_id="original-storage-test")
@@ -525,13 +543,15 @@ async def test_original_storage_replaces_binary_and_preserves_plaintext_history(
         assert len(plaintext_versions) == 2
         upload_dirs = []
 
-        async def save_uploads(_files, temp_dir, **_kwargs):
+        async def save_uploads(_files: list[Any], temp_dir: str | Path, **_kwargs: Any) -> tuple[list[dict[str, Any]], list[Any]]:
+            """Stage replacement bytes and record the temporary directory for cleanup checks."""
             upload_dirs.append(Path(temp_dir))
             source = Path(temp_dir) / "upload.pdf"
             source.write_bytes(b"new original")
             return [{"path": source, "original_filename": "source.pdf"}], []
 
-        async def process_document(**kwargs):
+        async def process_document(**kwargs: Any) -> dict[str, Any]:
+            """Reuse the existing media record as a successful document-processing result."""
             return {
                 "status": "Success",
                 "db_id": media_id,
@@ -540,10 +560,12 @@ async def test_original_storage_replaces_binary_and_preserves_plaintext_history(
                 "media_type": "pdf",
             }
 
-        def fail_registration(**_kwargs):
+        def fail_registration(**_kwargs: Any) -> None:
+            """Fail file registration after the replacement blob has been stored."""
             raise RuntimeError("media file registration failed")
 
-        async def fail_cleanup(*_args, **_kwargs):
+        async def fail_cleanup(*_args: Any, **_kwargs: Any) -> Any:
+            """Simulate an ordinary post-registration cleanup failure."""
             raise RuntimeError("cleanup unavailable")
 
         monkeypatch.setattr(input_sourcing, "save_uploaded_files", save_uploads)
@@ -553,11 +575,11 @@ async def test_original_storage_replaces_binary_and_preserves_plaintext_history(
         if registration_fails:
             monkeypatch.setattr(db, "insert_media_file", fail_registration)
         delete = storage.delete
-        cleanup = ingestion_persistence._cleanup_superseded_original_files
+        cleanup = ingestion_persistence.cleanup_superseded_original_files
         if failure_stage == "cleanup":
             monkeypatch.setattr(storage, "delete", fail_cleanup)
         elif failure_stage == "snapshot":
-            monkeypatch.setattr(ingestion_persistence, "_cleanup_superseded_original_files", fail_cleanup)
+            monkeypatch.setattr(ingestion_persistence, "cleanup_superseded_original_files", fail_cleanup)
 
         response = await ingestion_persistence.add_media_orchestrate(
             background_tasks=BackgroundTasks(),

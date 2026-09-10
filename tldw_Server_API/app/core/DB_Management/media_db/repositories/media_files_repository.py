@@ -102,7 +102,6 @@ class MediaFilesRepository:
         include_deleted: bool = False,
     ) -> list[dict[str, Any]]:
         db = self.session
-        conn = db.get_connection()
         clauses: list[str] = ["media_id = :media_id"]
         params: dict[str, Any] = {"media_id": media_id}
         if not include_deleted:
@@ -110,9 +109,31 @@ class MediaFilesRepository:
         where_sql = " AND ".join(clauses)
         sql = f"SELECT * FROM MediaFiles WHERE {where_sql} ORDER BY file_type, id"  # nosec B608
         try:
-            return db._fetchall_with_connection(conn, sql, params)
+            # execute_query owns its connection, including when called from a worker.
+            return db.execute_query(sql, params).fetchall()
         except Exception as exc:
             raise DatabaseError(f"Failed to list MediaFiles for media_id={media_id}: {exc}") from exc  # noqa: TRY003
+
+    def has_retained_references(self, storage_path: str, excluded_file_ids: set[int]) -> bool:
+        """Protect artifacts and originals that have no newer active replacement.
+
+        Superseded originals cannot protect each other during concurrent retirement:
+        otherwise both cleaners could discard their rows and leave an untracked blob.
+        Deleted originals without an active replacement remain recoverable.
+        """
+        rows = self.session.execute_query(
+            """SELECT ref.id FROM MediaFiles AS ref
+               WHERE ref.storage_path = :storage_path
+                 AND (ref.file_type <> 'original' OR NOT EXISTS (
+                     SELECT 1 FROM MediaFiles AS newer
+                     WHERE newer.media_id = ref.media_id
+                       AND newer.file_type = 'original'
+                       AND newer.deleted = 0
+                       AND newer.id > ref.id
+                 ))""",
+            {"storage_path": storage_path},
+        ).fetchall()
+        return any(row["id"] not in excluded_file_ids for row in rows)
 
     def has_original_file(self, media_id: int) -> bool:
         return self.get_for_media(media_id, "original", include_deleted=False) is not None

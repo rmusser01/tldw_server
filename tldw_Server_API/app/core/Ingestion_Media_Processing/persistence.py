@@ -39,6 +39,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
     InputError,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_files_repository import MediaFilesRepository
 from tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts import (
     upsert_transcript,
 )
@@ -2605,11 +2606,17 @@ def determine_add_media_final_status(results: list[dict[str, Any]]) -> int:
     return status.HTTP_207_MULTI_STATUS
 
 
-async def _cleanup_superseded_original_files(
+async def cleanup_superseded_original_files(
     db: Any, storage: Any, media_id: int, *, user_id: str | None = None,
 ) -> list[str]:
-    """Remove older original blobs after registration; retain failed cleanup rows for retry."""
-    files = db.get_media_files(media_id, include_deleted=True)
+    """Retire older originals after a replacement commits, preserving plaintext history.
+
+    Shared paths remain available to retained registrations, including recoverable
+    originals. Return warnings and retain failed cleanup rows for retry on the next
+    replacement. Cancellation propagates. Storage backends must honor the delete
+    contract that an absent file returns False.
+    """
+    files = await asyncio.to_thread(db.get_media_files, media_id, include_deleted=True)
     active_originals = [row for row in files if row["file_type"] == "original" and not row["deleted"]]
     if not active_originals:
         return []
@@ -2625,9 +2632,13 @@ async def _cleanup_superseded_original_files(
             retained_paths.add(row["storage_path"])
 
     warnings = []
+    repository = MediaFilesRepository.from_legacy_db(db)
     for path, rows in obsolete.items():
         try:
-            if path and path not in retained_paths:
+            shared_path = path in retained_paths or await asyncio.to_thread(
+                repository.has_retained_references, path, {row["id"] for row in rows},
+            )
+            if path and not shared_path:
                 delete_storage = storage
                 if path.startswith("imported_media/"):
                     # Chatbook originals are relative to this user's data directory.
@@ -2641,11 +2652,13 @@ async def _cleanup_superseded_original_files(
                 # False means already absent, including overlapping cleanup attempts.
                 await delete_storage.delete(path)
             for row in rows:
-                db.soft_delete_media_file(row["id"], hard_delete=True)
+                await asyncio.to_thread(db.soft_delete_media_file, row["id"], hard_delete=True)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - retirement must not invalidate a committed replacement
-            logger.warning("Failed to clean up superseded original {} for media_id={}: {}", path, media_id, exc)
+            logger.opt(exception=True).warning(
+                "Failed to clean up superseded original {} for media_id={}: {}", path, media_id, exc,
+            )
             warnings.append("Original stored, but cleanup of an older original failed.")
     return warnings
 
@@ -3401,7 +3414,7 @@ async def add_media_orchestrate(
                             logger.info(f"Stored original file for media_id={media_id}: {storage_path}")
                             result["original_file_stored"] = True
                             try:
-                                cleanup_warnings = await _cleanup_superseded_original_files(
+                                cleanup_warnings = await cleanup_superseded_original_files(
                                     db, storage, media_id, user_id=user_id_str,
                                 )
                                 if cleanup_warnings:
@@ -3409,7 +3422,7 @@ async def add_media_orchestrate(
                             except asyncio.CancelledError:
                                 raise
                             except Exception as cleanup_err:  # noqa: BLE001 - preserve committed replacement on cleanup errors
-                                logger.warning(
+                                logger.opt(exception=True).warning(
                                     "Failed to clean up superseded originals for media_id={}: {}", media_id, cleanup_err,
                                 )
                                 _ensure_warnings_list(result).append(
