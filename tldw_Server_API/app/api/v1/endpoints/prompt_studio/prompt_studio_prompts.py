@@ -71,6 +71,7 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
 from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
 from tldw_Server_API.app.core.DB_Management.prompts_db_helpers import (
     parse_stored_prompt_definition,
+    reject_recipe_runtime_values,
 )
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import (
     ConflictError,
@@ -114,6 +115,15 @@ router = APIRouter(
 )
 ########################################################################################################################
 # Prompt CRUD Endpoints
+
+
+async def _reject_persisted_recipe_runtime_values(request: Request) -> None:
+    """Inspect raw saves before request models can discard unknown keys."""
+    payload = await request.json()
+    try:
+        reject_recipe_runtime_values(payload)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from None
 
 
 def _credential_http_exception(exc: ByokResolutionError) -> HTTPException:
@@ -344,7 +354,11 @@ def _coerce_preview_definition(
     return definition, "legacy", None
 
 # Compatibility: simple POST on base path returns prompt object directly
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(_reject_persisted_recipe_runtime_values)],
+)
 async def create_prompt_simple(
     prompt_data: PromptCreate,
     db: PromptStudioDatabase = Depends(get_prompt_studio_db),
@@ -363,6 +377,7 @@ async def create_prompt_simple(
     "/create",
     response_model=StandardResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(_reject_persisted_recipe_runtime_values)],
     openapi_extra={
         "requestBody": {
             "content": {
@@ -520,9 +535,11 @@ async def create_prompt(
         if not prompt_record:
             raise DatabaseError("Prompt creation returned empty record")
 
-        logger.info(f"User {user_context['user_id']} created prompt: {prompt_data.name} (project_id={prompt_data.project_id})")
-        with contextlib.suppress(Exception):
-            logger.info("Created prompt record: {}", prompt_record)
+        logger.info(
+            "Prompt Studio prompt created (project_id={}, prompt_id={})",
+            prompt_data.project_id,
+            prompt_record.get("id"),
+        )
 
         # Record idempotency mapping if provided
         if idempotency_key and prompt_record.get("id"):
@@ -1004,6 +1021,7 @@ async def get_prompt(
 @router.put(
     "/update/{prompt_id}",
     response_model=StandardResponse,
+    dependencies=[Depends(_reject_persisted_recipe_runtime_values)],
     openapi_extra={
         "requestBody": {
             "content": {

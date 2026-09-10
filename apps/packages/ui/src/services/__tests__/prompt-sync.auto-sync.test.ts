@@ -244,6 +244,27 @@ describe("prompt-sync auto-sync defaults", () => {
     )
   })
 
+  it("keeps the legacy pending result when an unlinked server create is empty", async () => {
+    state.prompts.set("local-empty-create", {
+      id: "local-empty-create",
+      title: "Pending prompt",
+      name: "Pending prompt",
+      content: "test",
+      is_system: false,
+      createdAt: 1,
+      updatedAt: 1,
+      syncStatus: "local"
+    })
+    mocks.createPrompt.mockResolvedValueOnce({ data: { data: null } })
+    const { pushToStudio } = await importPromptSync()
+
+    const result = await pushToStudio("local-empty-create", 17)
+
+    expect(result.success).toBe(false)
+    expect(result.syncStatus).toBe("pending")
+    expect(mocks.promptUpdate).not.toHaveBeenCalled()
+  })
+
   it("returns conflict details with both local and server prompts", async () => {
     state.prompts.set("local-conflict-info", {
       id: "local-conflict-info",
@@ -369,7 +390,7 @@ describe("prompt-sync auto-sync defaults", () => {
     )
   })
 
-  it("resolveConflict keep_both unlinks local and creates a new server prompt", async () => {
+  it("resolveConflict keep_both creates the server copy before one atomic local update", async () => {
     state.prompts.set("local-keep-both", {
       id: "local-keep-both",
       title: "Prompt Keep Both",
@@ -401,12 +422,10 @@ describe("prompt-sync auto-sync defaults", () => {
 
     expect(result.success).toBe(true)
     expect(result.syncStatus).toBe("synced")
-    expect(mocks.promptUpdate).toHaveBeenCalledWith(
+    expect(mocks.promptUpdate).toHaveBeenCalledTimes(1)
+    expect(mocks.promptUpdate).not.toHaveBeenCalledWith(
       "local-keep-both",
-      expect.objectContaining({
-        serverId: null,
-        syncStatus: "local"
-      })
+      expect.objectContaining({ serverId: null })
     )
     expect(mocks.createPrompt).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -483,7 +502,80 @@ describe("prompt-sync auto-sync defaults", () => {
         syncPayloadVersion: 1
       })
     )
+    expect(mocks.promptUpdate).toHaveBeenCalledTimes(1)
+    expect(JSON.stringify(mocks.createPrompt.mock.calls[0][0])).not.toMatch(
+      /runtime_values|variable_values|resolved_values/
+    )
   })
+
+  it.each(["validation", "network", "empty response", "malicious response"])(
+    "resolveConflict keep_both is failure-atomic on %s failure",
+    async (failure) => {
+      const definition = makeRecipeDefinition()
+      if (failure === "validation") {
+        definition.schema_version = 1 as 2
+      }
+      const original = {
+        id: `keep-both-${failure}`,
+        title: "Atomic Recipe",
+        name: "Atomic Recipe",
+        content: "Explain the task.",
+        is_system: false,
+        system_prompt: "",
+        user_prompt: "Explain the task.",
+        promptFormat: "structured" as const,
+        promptSchemaVersion: 2,
+        structuredPromptDefinition: definition,
+        createdAt: 1,
+        updatedAt: 12,
+        serverId: 499,
+        studioProjectId: 17,
+        studioPromptId: 499,
+        sourceSystem: "studio",
+        syncStatus: "conflict" as const,
+        lastSyncedAt: 11,
+        serverUpdatedAt: "2026-02-17T10:00:00Z"
+      }
+      state.prompts.set(original.id, structuredClone(original))
+      const before = JSON.stringify(state.prompts.get(original.id))
+
+      if (failure === "network") {
+        mocks.createPrompt.mockRejectedValueOnce(new Error("network failed"))
+      } else if (failure === "empty response") {
+        mocks.createPrompt.mockResolvedValueOnce({ data: { data: null } })
+      } else if (failure === "malicious response") {
+        mocks.createPrompt.mockResolvedValueOnce({
+          data: {
+            data: {
+              id: 599,
+              project_id: 17,
+              name: "Atomic Recipe",
+              system_prompt: "",
+              user_prompt: "PRIVATE_SERVER_VALUE",
+              prompt_format: "structured",
+              prompt_schema_version: 2,
+              prompt_definition: {
+                ...makeRecipeDefinition(),
+                resolved_values: { topic: "PRIVATE_SERVER_VALUE" }
+              },
+              version_number: 1,
+              updated_at: "2026-02-17T10:15:00Z"
+            }
+          }
+        })
+      }
+
+      const { resolveConflict } = await importPromptSync()
+      const result = await resolveConflict(original.id, "keep_both")
+
+      expect(result.success).toBe(false)
+      expect(JSON.stringify(state.prompts.get(original.id))).toBe(before)
+      expect(mocks.promptUpdate).not.toHaveBeenCalled()
+      if (failure === "validation") {
+        expect(mocks.createPrompt).not.toHaveBeenCalled()
+      }
+    }
+  )
 
   it("getSyncStatus does not flag metadata-only server updates as conflicts", async () => {
     state.prompts.set("status-metadata-only", {

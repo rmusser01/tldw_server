@@ -52,6 +52,7 @@ from tldw_Server_API.app.core.DB_Management.Prompts_DB import (
 )
 from tldw_Server_API.app.core.DB_Management.prompts_db_helpers import (
     parse_stored_prompt_definition,
+    reject_recipe_runtime_values,
 )
 
 #
@@ -386,6 +387,10 @@ class PromptsInteropService:
     @staticmethod
     def _structured_fields(record: dict[str, Any]) -> dict[str, Any]:
         """Validate and copy optional structured identity without runtime values."""
+        try:
+            reject_recipe_runtime_values(record)
+        except ValueError as error:
+            raise InputError(str(error)) from None
         prompt_format = record.get("prompt_format") or "legacy"
         if prompt_format != "structured":
             if (

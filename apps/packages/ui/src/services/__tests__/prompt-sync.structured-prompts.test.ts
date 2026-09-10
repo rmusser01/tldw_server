@@ -492,6 +492,49 @@ describe("prompt-sync structured prompt support", () => {
     expect(state.prompts.get(original.id)).toEqual(original)
   })
 
+  it.each([
+    ["outer version mismatch", makeRecipeDefinition(), 1],
+    [
+      "malformed recipe block",
+      (() => {
+        const value = makeRecipeDefinition()
+        value.blocks[0].id = "   "
+        return value
+      })(),
+      2
+    ],
+    ["future outer version", makeRecipeDefinition(), 99]
+  ])(
+    "rejects invalid local transport identity (%s) before any request",
+    async (_caseName, definition, outerVersion) => {
+      const original = {
+        id: `invalid-local-${outerVersion}-${_caseName}`,
+        title: "Invalid Local Recipe",
+        name: "Invalid Local Recipe",
+        content: "safe snapshot",
+        is_system: false,
+        user_prompt: "safe snapshot",
+        promptFormat: "structured" as const,
+        promptSchemaVersion: outerVersion,
+        structuredPromptDefinition: definition,
+        createdAt: 1,
+        updatedAt: 1,
+        syncStatus: "local" as const
+      }
+      state.prompts.set(original.id, structuredClone(original))
+      const before = JSON.stringify(state.prompts.get(original.id))
+
+      const { pushToStudio } = await importPromptSync()
+      const result = await pushToStudio(original.id, 42)
+
+      expect(result.success).toBe(false)
+      expect(mocks.createPrompt).not.toHaveBeenCalled()
+      expect(mocks.updatePrompt).not.toHaveBeenCalled()
+      expect(mocks.promptUpdate).not.toHaveBeenCalled()
+      expect(JSON.stringify(state.prompts.get(original.id))).toBe(before)
+    }
+  )
+
   it("rejects a malicious server recipe without overwriting a good local record", async () => {
     const goodDefinition = makeRecipeDefinition("Keep {{topic}} safe.")
     const original = {
@@ -542,6 +585,56 @@ describe("prompt-sync structured prompt support", () => {
     expect(mocks.promptUpdate).not.toHaveBeenCalled()
     expect(state.prompts.get(original.id)).toEqual(original)
   })
+
+  it.each(["pull", "link"])(
+    "%s rejects mismatched server transport identity without local or link mutation",
+    async (operation) => {
+      const goodDefinition = makeRecipeDefinition("Keep {{topic}} safe.")
+      const original = {
+        id: `server-mismatch-${operation}`,
+        title: "Good Recipe",
+        name: "Good Recipe",
+        content: "safe snapshot",
+        is_system: false,
+        user_prompt: "safe snapshot",
+        promptFormat: "structured" as const,
+        promptSchemaVersion: 2,
+        structuredPromptDefinition: goodDefinition,
+        createdAt: 1,
+        updatedAt: 10,
+        serverId: operation === "pull" ? 704 : undefined,
+        syncStatus: "synced" as const
+      }
+      state.prompts.set(original.id, structuredClone(original))
+      const before = JSON.stringify(state.prompts.get(original.id))
+      mocks.getPrompt.mockResolvedValue({
+        data: {
+          data: {
+            id: 704,
+            project_id: 42,
+            name: "Mismatched Recipe",
+            system_prompt: "",
+            user_prompt: "server snapshot",
+            prompt_format: "structured",
+            prompt_schema_version: 1,
+            prompt_definition: goodDefinition,
+            version_number: 2,
+            updated_at: "2026-03-10T01:00:00Z"
+          }
+        }
+      })
+
+      const { linkPrompts, pullFromStudio } = await importPromptSync()
+      const result =
+        operation === "pull"
+          ? await pullFromStudio(704, original.id)
+          : await linkPrompts(original.id, 704)
+
+      expect(result.success).toBe(false)
+      expect(mocks.promptUpdate).not.toHaveBeenCalled()
+      expect(JSON.stringify(state.prompts.get(original.id))).toBe(before)
+    }
+  )
 
   it("hashes recipe identity and compiled snapshots into conflict detection", async () => {
     state.prompts.set("recipe-identity-conflict", {

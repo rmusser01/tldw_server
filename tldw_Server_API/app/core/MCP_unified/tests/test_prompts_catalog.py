@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import DatabaseError, PromptsDatabase
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
@@ -405,6 +406,74 @@ def test_formatter_rejects_recipe_runtime_values_without_echoing_content() -> No
 
     assert excinfo.value.code == "invalid_prompt_definition"
     assert "PRIVATE_RECIPE_VALUE" not in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    ("prompt_format", "outer_schema", "definition"),
+    [
+        ("structured", 2, None),
+        ("structured", 2, {}),
+        ("structured", 2, []),
+        ("structured", 99, None),
+        ("structured", 99, {"schema_version": 99}),
+        ("structured", 1, _recipe_row()["prompt_definition"]),
+        ("legacy", 2, None),
+        (None, 2, None),
+        ("legacy", 1, None),
+        (None, 1, None),
+        ("legacy", None, {}),
+        (None, None, []),
+    ],
+)
+@pytest.mark.parametrize("operation", ["list", "render"])
+def test_formatter_never_falls_back_when_structured_identity_is_present_but_falsy_or_invalid(
+    prompt_format: object,
+    outer_schema: object,
+    definition: object,
+    operation: str,
+) -> None:
+    marker = "PRIVATE_MCP_SNAPSHOT_SENTINEL"
+    row = {
+        **_recipe_row(),
+        "prompt_format": prompt_format,
+        "prompt_schema_version": outer_schema,
+        "prompt_definition": definition,
+        "system_prompt": marker,
+        "user_prompt": marker,
+    }
+    formatter = MCPPromptFormatter(max_rendered_chars=10_000)
+    captured: list[str] = []
+    sink_id = logger.add(captured.append, format="{message}")
+    try:
+        with pytest.raises(PromptCatalogError) as excinfo:
+            if operation == "list":
+                formatter.library_prompt_definition(row)
+            else:
+                formatter.render_library_prompt(row, {})
+    finally:
+        logger.remove(sink_id)
+
+    assert excinfo.value.code == "invalid_prompt_definition"
+    assert marker not in str(excinfo.value)
+    assert marker not in "\n".join(captured)
+
+
+def test_formatter_explicit_genuinely_legacy_identity_retains_legacy_projection() -> None:
+    row = {
+        **_recipe_row(),
+        "prompt_format": "legacy",
+        "prompt_schema_version": None,
+        "prompt_definition": None,
+        "system_prompt": "Legacy system",
+        "user_prompt": "Legacy user",
+    }
+    formatter = MCPPromptFormatter(max_rendered_chars=10_000)
+
+    result = formatter.render_library_prompt(row, {})
+
+    assert result["messages"][0]["content"]["text"] == (
+        "System instructions:\nLegacy system\n\nUser prompt:\nLegacy user"
+    )
 
 
 def test_formatter_rejects_non_string_arguments() -> None:

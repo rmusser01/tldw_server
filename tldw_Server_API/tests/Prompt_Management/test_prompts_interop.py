@@ -2,9 +2,11 @@
 # Description:
 #
 # Imports
+import json
 import os
 
 import pytest
+from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
 from tldw_Server_API.app.core.DB_Management.prompts_db_helpers import (
@@ -248,7 +250,7 @@ def test_interop_json_import_rejects_runtime_values_without_partial_write(tmp_pa
     unsafe_definition = _make_recipe_definition()
     unsafe_definition["runtime_values"] = {"topic": "PRIVATE_VALUE"}
     try:
-        with pytest.raises((InputError, ValueError), match="invalid_recipe_runtime_values"):
+        with pytest.raises(InputError, match="invalid_recipe_runtime_values"):
             service.import_prompts(
                 {
                     "version": "1.0",
@@ -269,6 +271,83 @@ def test_interop_json_import_rejects_runtime_values_without_partial_write(tmp_pa
             )
 
         assert service.list_prompts() == []
+    finally:
+        service.close()
+
+
+def _interop_state(service: PromptsInteropService) -> str:
+    db = service._ensure_db()
+    return json.dumps(
+        {
+            "prompts": service.list_prompts(),
+            "sync": db.get_sync_log_entries(),
+            "names": service._name_overrides,
+            "keywords": service._orig_keywords,
+        },
+        sort_keys=True,
+        default=str,
+    )
+
+
+@pytest.mark.parametrize("runtime_key", ["runtime_values", "variable_values", "resolved_values"])
+@pytest.mark.parametrize("unsafe_index", [0, 1])
+def test_interop_json_import_rejects_runtime_maps_on_every_record_before_first_mutation(
+    tmp_path,
+    runtime_key: str,
+    unsafe_index: int,
+) -> None:
+    service = PromptsInteropService(str(tmp_path / f"batch-{runtime_key}-{unsafe_index}"), "interop-batch")
+    try:
+        service.create_prompt(name="Good Local", content="Preserve me", author="Interop")
+        good_import = {
+            "name": "Good Import",
+            "content": "runtime_values variable_values resolved_values are authored words",
+            "author": "Interop",
+            "keywords": [],
+        }
+        marker = f"SECRET_INTEROP_{runtime_key}_{unsafe_index}"
+        unsafe_import = {
+            "name": "Unsafe Import",
+            "content": "Unsafe",
+            "author": "Interop",
+            "keywords": [],
+            runtime_key: {"topic": marker},
+        }
+        records = [good_import, unsafe_import]
+        if unsafe_index == 0:
+            records.reverse()
+        before = _interop_state(service)
+        captured: list[str] = []
+        sink_id = logger.add(captured.append, format="{message}")
+        try:
+            with pytest.raises(InputError, match="^invalid_recipe_runtime_values$"):
+                service.import_prompts({"version": "1.0", "prompts": records})
+        finally:
+            logger.remove(sink_id)
+
+        assert _interop_state(service) == before
+        assert marker not in "\n".join(captured)
+    finally:
+        service.close()
+
+
+def test_interop_json_import_allows_runtime_key_words_inside_authored_strings(tmp_path) -> None:
+    service = PromptsInteropService(str(tmp_path / "authored-words"), "interop-words")
+    try:
+        result = service.import_prompts(
+            {
+                "version": "1.0",
+                "prompts": [
+                    {
+                        "name": "Authored Words",
+                        "content": "runtime_values variable_values resolved_values",
+                        "author": "Interop",
+                        "keywords": [],
+                    }
+                ],
+            }
+        )
+        assert result["imported"] == 1
     finally:
         service.close()
 

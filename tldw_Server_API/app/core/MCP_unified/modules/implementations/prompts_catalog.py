@@ -280,11 +280,20 @@ class MCPPromptFormatter:
         row: Mapping[str, Any],
     ) -> PromptDefinition | SingleTextRecipeDefinitionV2:
         raw_definition = row.get("prompt_definition")
-        if raw_definition:
+        prompt_format = row.get("prompt_format")
+        schema_version = row.get("prompt_schema_version")
+        genuinely_legacy = (
+            raw_definition is None
+            and prompt_format in (None, "legacy")
+            and schema_version is None
+        )
+        if not genuinely_legacy:
             try:
+                if prompt_format not in (None, "structured"):
+                    raise ValueError("invalid_prompt_definition")
                 return parse_stored_prompt_definition(
                     raw_definition,
-                    schema_version=row.get("prompt_schema_version"),
+                    schema_version=schema_version,
                 )
             except ValueError as exc:
                 raise PromptCatalogError(

@@ -299,8 +299,14 @@ export type SingleTextRecipeRenderResult = {
   legacy: { system_prompt: string; user_prompt: string }
 }
 
-// Renderer-facing subset of models.py limits; shared fixtures lock the boundaries.
+// Shared transport/renderer mirror of the backend's SINGLE_TEXT_RECIPE_LIMITS.
 export const SINGLE_TEXT_RECIPE_LIMITS = Object.freeze({
+  max_blocks: 100,
+  max_variables: 100,
+  max_label_length: 200,
+  max_key_length: 128,
+  max_content_length: 20000,
+  max_separator_length: 20,
   max_abs_order: 9007199254740991,
   max_rendered_output_length: 100000
 })
@@ -317,12 +323,20 @@ export class SingleTextRecipeRenderError extends Error {
   }
 }
 
-const codePointLength = (text: string): number => {
+export const singleTextRecipeCodePointLength = (text: string): number => {
   let length = 0
   // Iterate without allocating an array of characters for oversized inputs.
   for (const _character of text) length += 1
   return length
 }
+
+export const extractSingleTextRecipeTemplateVariables = (
+  text: string
+): string[] =>
+  Array.from(
+    text.matchAll(new RegExp(RECIPE_TEMPLATE_PATTERN.source, "g")),
+    (match) => match[1]
+  )
 
 /**
  * Compile a prevalidated v2 definition to one string, never a message array.
@@ -354,9 +368,9 @@ export const renderSingleTextRecipe = (
   // Match backend validation: disabled templates still require declared names.
   for (const block of blocks) {
     if (!block.is_template) continue
-    for (const match of block.content.matchAll(RECIPE_TEMPLATE_PATTERN)) {
-      if (!declaredNames.has(match[1])) {
-        throw new SingleTextRecipeRenderError("unknown_variable_reference", match[1])
+    for (const variableName of extractSingleTextRecipeTemplateVariables(block.content)) {
+      if (!declaredNames.has(variableName)) {
+        throw new SingleTextRecipeRenderError("unknown_variable_reference", variableName)
       }
     }
   }
@@ -381,7 +395,7 @@ export const renderSingleTextRecipe = (
 
   const config = definition.assembly_config
   const separator = config.block_separator ?? "\n\n"
-  const separatorLength = codePointLength(separator)
+  const separatorLength = singleTextRecipeCodePointLength(separator)
   const valueLengths = new Map<string, number>()
   const rendered: string[] = []
   let outputLength = 0
@@ -389,13 +403,13 @@ export const renderSingleTextRecipe = (
     .sort((left, right) => left.block.order - right.block.order || left.index - right.index)
   for (const { block } of ordered) {
     if (block.enabled === false) continue
-    let contentLength = codePointLength(block.content)
+    let contentLength = singleTextRecipeCodePointLength(block.content)
     if (block.is_template) {
       for (const match of block.content.matchAll(RECIPE_TEMPLATE_PATTERN)) {
         if (!valueLengths.has(match[1])) {
-          valueLengths.set(match[1], codePointLength(resolved.get(match[1])!))
+          valueLengths.set(match[1], singleTextRecipeCodePointLength(resolved.get(match[1])!))
         }
-        contentLength += valueLengths.get(match[1])! - codePointLength(match[0])
+        contentLength += valueLengths.get(match[1])! - singleTextRecipeCodePointLength(match[0])
       }
     }
     let prefix = ""
@@ -406,7 +420,7 @@ export const renderSingleTextRecipe = (
     } else if (config.render_format === "markdown") {
       prefix = `## ${block.name}\n\n`
     }
-    outputLength += contentLength + codePointLength(prefix) + codePointLength(suffix)
+    outputLength += contentLength + singleTextRecipeCodePointLength(prefix) + singleTextRecipeCodePointLength(suffix)
       + (rendered.length ? separatorLength : 0)
     if (outputLength > SINGLE_TEXT_RECIPE_LIMITS.max_rendered_output_length) {
       throw new SingleTextRecipeRenderError("rendered_output_too_large")
