@@ -5,46 +5,84 @@ type StructuredPromptVariable = {
   name: string
   required?: boolean
   input_type?: string
-  label?: string
-  description?: string
+  label?: string | null
+  description?: string | null
+  default_value?: unknown
+  options?: string[] | null
+  max_length?: number | null
 }
 
 type VariableEditorPanelProps = {
   variables: StructuredPromptVariable[]
   previewValues: Record<string, string>
-  onVariablesChange: (variables: StructuredPromptVariable[]) => void
-  onPreviewValuesChange: (values: Record<string, string>) => void
+  onVariablesChange?: (variables: StructuredPromptVariable[]) => void
+  onPreviewValuesChange?: (values: Record<string, string>) => void
+  runtimeValues?: Readonly<Record<string, string>>
+  onVariableChange?: (
+    variableName: string,
+    updates: Partial<StructuredPromptVariable>
+  ) => void
+  onAddVariable?: () => void
+  onRemoveVariable?: (variableName: string) => void
+  onRuntimeValueChange?: (variableName: string, value: string) => void
+  showDeclarationFields?: boolean
+  variableNameDrafts?: Readonly<Record<string, string>>
+  variableNameErrors?: Readonly<Record<string, string>>
+  onVariableNameDraftChange?: (variableName: string, value: string) => void
+  onVariableNameCommit?: (variableName: string) => void
 }
 
 export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
   variables,
   previewValues,
   onVariablesChange,
-  onPreviewValuesChange
+  onPreviewValuesChange,
+  runtimeValues,
+  onVariableChange,
+  onAddVariable,
+  onRemoveVariable,
+  onRuntimeValueChange,
+  showDeclarationFields = false,
+  variableNameDrafts,
+  variableNameErrors,
+  onVariableNameDraftChange,
+  onVariableNameCommit
 }) => {
   const updateVariable = (
     index: number,
     updates: Partial<StructuredPromptVariable>
   ) => {
+    if (onVariableChange) {
+      onVariableChange(variables[index].name, updates)
+      return
+    }
     const next = variables.map((variable, currentIndex) =>
       currentIndex === index ? { ...variable, ...updates } : variable
     )
-    onVariablesChange(next)
+    onVariablesChange?.(next)
   }
 
   const removeVariable = (index: number) => {
-    const next = variables.filter((_, currentIndex) => currentIndex !== index)
-    onVariablesChange(next)
-    const nextPreviewValues = { ...previewValues }
     const removedName = variables[index]?.name
+    if (removedName && onRemoveVariable) {
+      onRemoveVariable(removedName)
+      return
+    }
+    const next = variables.filter((_, currentIndex) => currentIndex !== index)
+    onVariablesChange?.(next)
+    const nextPreviewValues = { ...previewValues }
     if (removedName) {
       delete nextPreviewValues[removedName]
-      onPreviewValuesChange(nextPreviewValues)
+      onPreviewValuesChange?.(nextPreviewValues)
     }
   }
 
   const addVariable = () => {
-    onVariablesChange([
+    if (onAddVariable) {
+      onAddVariable()
+      return
+    }
+    onVariablesChange?.([
       ...variables,
       {
         name: `variable_${variables.length + 1}`,
@@ -52,6 +90,16 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
         input_type: "text"
       }
     ])
+  }
+
+  const currentValues = runtimeValues ?? previewValues
+
+  const updateCurrentValue = (name: string, value: string) => {
+    if (onRuntimeValueChange) {
+      onRuntimeValueChange(name, value)
+      return
+    }
+    onPreviewValuesChange?.({ ...previewValues, [name]: value })
   }
 
   return (
@@ -93,6 +141,7 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
               <button
                 type="button"
                 onClick={() => removeVariable(index)}
+                aria-label={`Remove ${variable.label || variable.name || `variable ${index + 1}`}`}
                 className="rounded border border-border p-1 text-danger hover:bg-danger/5"
               >
                 <Trash2 className="size-3" />
@@ -106,13 +155,37 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
                 </span>
                 <input
                   type="text"
-                  value={variable.name}
-                  onChange={(event) =>
-                    updateVariable(index, { name: event.target.value })
+                  aria-label="Variable name"
+                  aria-invalid={Boolean(variableNameErrors?.[variable.name])}
+                  aria-describedby={
+                    variableNameErrors?.[variable.name]
+                      ? `structured-variable-name-error-${index}`
+                      : undefined
                   }
+                  value={variableNameDrafts?.[variable.name] ?? variable.name}
+                  onChange={(event) => {
+                    if (onVariableNameDraftChange) {
+                      onVariableNameDraftChange(
+                        variable.name,
+                        event.target.value
+                      )
+                    } else {
+                      updateVariable(index, { name: event.target.value })
+                    }
+                  }}
+                  onBlur={() => onVariableNameCommit?.(variable.name)}
                   data-testid={`structured-variable-name-${index}`}
-                  className="w-full rounded-md border border-border bg-surface1 px-3 py-2 text-sm text-text"
+                  className="w-full rounded-md border border-border bg-surface1 px-3 py-2 text-sm text-text aria-invalid:border-danger"
                 />
+                {variableNameErrors?.[variable.name] ? (
+                  <span
+                    id={`structured-variable-name-error-${index}`}
+                    role="alert"
+                    className="mt-1 block text-xs text-danger"
+                  >
+                    {variableNameErrors[variable.name]}
+                  </span>
+                ) : null}
               </label>
 
               <label className="block">
@@ -120,6 +193,7 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
                   Input type
                 </span>
                 <select
+                  aria-label="Variable input type"
                   value={variable.input_type || "text"}
                   onChange={(event) =>
                     updateVariable(index, { input_type: event.target.value })
@@ -136,9 +210,120 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
               </label>
             </div>
 
+            {showDeclarationFields ? (
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-text-muted">
+                    Label
+                  </span>
+                  <input
+                    type="text"
+                    aria-label="Variable label"
+                    value={variable.label ?? ""}
+                    onChange={(event) =>
+                      updateVariable(index, {
+                        label: event.target.value || null
+                      })
+                    }
+                    className="w-full rounded-md border border-border bg-surface1 px-3 py-2 text-sm text-text"
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-text-muted">
+                    Maximum length
+                  </span>
+                  <input
+                    type="number"
+                    min={1}
+                    aria-label="Variable maximum length"
+                    value={variable.max_length ?? ""}
+                    onChange={(event) =>
+                      updateVariable(index, {
+                        max_length: event.target.value
+                          ? Number(event.target.value)
+                          : null
+                      })
+                    }
+                    className="w-full rounded-md border border-border bg-surface1 px-3 py-2 text-sm text-text"
+                  />
+                </label>
+                <label className="block sm:col-span-2">
+                  <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-text-muted">
+                    Description
+                  </span>
+                  <input
+                    type="text"
+                    aria-label="Variable description"
+                    value={variable.description ?? ""}
+                    onChange={(event) =>
+                      updateVariable(index, {
+                        description: event.target.value || null
+                      })
+                    }
+                    className="w-full rounded-md border border-border bg-surface1 px-3 py-2 text-sm text-text"
+                  />
+                </label>
+                <label className="block sm:col-span-2">
+                  <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-text-muted">
+                    Options, one per line
+                  </span>
+                  <textarea
+                    rows={2}
+                    aria-label="Variable options"
+                    value={(variable.options ?? []).join("\n")}
+                    onChange={(event) =>
+                      updateVariable(index, {
+                        options: event.target.value
+                          .split("\n")
+                          .map((option) => option.trim())
+                          .filter(Boolean)
+                      })
+                    }
+                    className="w-full rounded-md border border-border bg-surface1 px-3 py-2 text-sm text-text"
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-sm text-text sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    aria-label={`Use a saved starter default for ${variable.label || variable.name}`}
+                    checked={variable.default_value != null}
+                    onChange={(event) =>
+                      updateVariable(index, {
+                        default_value: event.target.checked ? "" : null
+                      })
+                    }
+                  />
+                  Save a starter default
+                </label>
+                {variable.default_value != null ? (
+                  <label className="block sm:col-span-2">
+                    <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-text-muted">
+                      Starter default (saved)
+                    </span>
+                    <textarea
+                      rows={2}
+                      aria-label={`Starter default for ${variable.label || variable.name} (saved)`}
+                      value={
+                        typeof variable.default_value === "string"
+                          ? variable.default_value
+                          : ""
+                      }
+                      onChange={(event) =>
+                        updateVariable(index, {
+                          default_value: event.target.value
+                        })
+                      }
+                      className="w-full rounded-md border border-border bg-surface1 px-3 py-2 text-sm text-text"
+                    />
+                  </label>
+                ) : null}
+              </div>
+            ) : null}
+
             <label className="mt-3 flex items-center gap-2 text-sm text-text">
               <input
                 type="checkbox"
+                aria-label="Variable required"
                 checked={!!variable.required}
                 onChange={(event) =>
                   updateVariable(index, { required: event.target.checked })
@@ -155,26 +340,45 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
           <div>
             <h4 className="text-sm font-semibold text-text">Preview inputs</h4>
             <p className="text-xs text-text-muted">
-              Sample values passed to the backend preview endpoint.
+              {runtimeValues
+                ? "Current inputs used only for this preview. They are not saved."
+                : "Sample values passed to the backend preview endpoint."}
             </p>
           </div>
           {variables.map((variable) => (
             <label key={`preview-${variable.name}`} className="block">
               <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-text-muted">
-                {variable.name}
+                {runtimeValues
+                  ? `${variable.label || variable.name} current value (not saved)`
+                  : variable.name}
               </span>
-              <input
-                type="text"
-                value={previewValues[variable.name] || ""}
-                onChange={(event) =>
-                  onPreviewValuesChange({
-                    ...previewValues,
-                    [variable.name]: event.target.value
-                  })
-                }
-                data-testid={`structured-preview-variable-${variable.name}`}
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-text"
-              />
+              {variable.input_type === "textarea" ? (
+                <textarea
+                  rows={2}
+                  aria-label={`Current value for ${variable.label || variable.name} (not saved)`}
+                  value={currentValues[variable.name] || ""}
+                  onChange={(event) =>
+                    updateCurrentValue(variable.name, event.target.value)
+                  }
+                  data-testid={`structured-preview-variable-${variable.name}`}
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-text"
+                />
+              ) : (
+                <input
+                  type="text"
+                  aria-label={
+                    runtimeValues
+                      ? `Current value for ${variable.label || variable.name} (not saved)`
+                      : undefined
+                  }
+                  value={currentValues[variable.name] || ""}
+                  onChange={(event) =>
+                    updateCurrentValue(variable.name, event.target.value)
+                  }
+                  data-testid={`structured-preview-variable-${variable.name}`}
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-text"
+                />
+              )}
             </label>
           ))}
         </div>
