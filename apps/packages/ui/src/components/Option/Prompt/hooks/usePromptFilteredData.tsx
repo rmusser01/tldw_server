@@ -263,22 +263,17 @@ export function usePromptFilteredData(deps: UsePromptFilteredDataDeps) {
     return mapServerSearchItemsToLocalPrompts(serverSearchData.items, baseFilteredData)
   }, [baseFilteredData, serverSearchData, serverSearchStatus, shouldUseServerSearch])
 
-  const localRecipeSearchData = useMemo(
-    () =>
-      localSearchFilteredData.filter(
-        (prompt: any) => classifyPromptRecipe(prompt).kind === "recipe"
-      ),
-    [localSearchFilteredData]
-  )
-
   const hasLocalRecipeSearchOverlay = useMemo(
     () =>
       shouldUseServerSearch &&
-      localRecipeSearchData.some((prompt: any) => {
+      localSearchFilteredData.some((prompt: any) => {
         const syncStatus = prompt?.syncStatus ?? "local"
-        return syncStatus === "local" || syncStatus === "pending"
+        return (
+          classifyPromptRecipe(prompt).kind === "recipe" &&
+          (syncStatus === "local" || syncStatus === "pending")
+        )
       }),
-    [localRecipeSearchData, shouldUseServerSearch]
+    [localSearchFilteredData, shouldUseServerSearch]
   )
 
   const useServerSearchResults =
@@ -290,13 +285,8 @@ export function usePromptFilteredData(deps: UsePromptFilteredDataDeps) {
     if (useServerSearchResults) {
       return serverSearchMappedData
     }
-    if (hasLocalRecipeSearchOverlay) {
-      return localRecipeSearchData
-    }
     return localSearchFilteredData
   }, [
-    hasLocalRecipeSearchOverlay,
-    localRecipeSearchData,
     localSearchFilteredData,
     serverSearchMappedData,
     useServerSearchResults

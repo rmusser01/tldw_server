@@ -839,7 +839,8 @@ describe("PromptBody server search and pagination", () => {
     await waitFor(() =>
       expect(getVisibleRowNames()).toEqual([
         "Synced title-only recipe",
-        "Local title-only recipe"
+        "Local title-only recipe",
+        "Ordinary title-only prompt"
       ])
     )
 
@@ -848,49 +849,59 @@ describe("PromptBody server search and pagination", () => {
     await waitFor(() =>
       expect(getVisibleRowNames()).toEqual([
         "Synced title-only recipe",
-        "Pending recipe"
+        "Pending recipe",
+        "Ordinary title-only prompt"
       ])
     )
   })
 
-  it("paginates a local recipe overlay as one stable unique result set", async () => {
-    const syncedRecipes = Array.from({ length: 21 }, (_, index) =>
-      savedRecipeRecord({
-        id: `recipe-synced-${index + 1}`,
-        name: `Overlay recipe ${String(index + 1).padStart(2, "0")}`,
-        title: `Overlay recipe ${String(index + 1).padStart(2, "0")}`,
-        serverId: 301 + index,
-        syncStatus: "synced",
-        createdAt: 1_000 - index
-      })
-    )
+  it("paginates the complete mixed local result set when a recipe overlay is present", async () => {
+    const ordinarySynced = Array.from({ length: 20 }, (_, index) => ({
+      id: `ordinary-synced-${index + 1}`,
+      name: `Mixed overlay match ${String(index + 1).padStart(2, "0")}`,
+      title: `Mixed overlay match ${String(index + 1).padStart(2, "0")}`,
+      content: "ordinary synced result",
+      is_system: false,
+      serverId: 301 + index,
+      syncStatus: "synced",
+      createdAt: 1_000 - index
+    }))
+    const syncedRecipe = savedRecipeRecord({
+      id: "recipe-overlay-synced",
+      name: "Mixed overlay match synced recipe",
+      title: "Mixed overlay match synced recipe",
+      serverId: 321,
+      syncStatus: "synced",
+      createdAt: 980
+    })
     const localOnly = savedRecipeRecord({
       id: "recipe-overlay-local",
-      name: "Overlay recipe local only",
-      title: "Overlay recipe local only",
+      name: "Mixed overlay match local only",
+      title: "Mixed overlay match local only",
       serverId: null,
       syncStatus: "local",
       createdAt: 2
     })
     const pending = savedRecipeRecord({
       id: "recipe-overlay-pending",
-      name: "Overlay recipe pending edit",
-      title: "Overlay recipe pending edit",
+      name: "Mixed overlay match pending edit",
+      title: "Mixed overlay match pending edit",
       serverId: 399,
       syncStatus: "pending",
       createdAt: 1
     })
-    state.prompts = [...syncedRecipes, localOnly, pending]
+    const syncedRecords = [...ordinarySynced, syncedRecipe]
+    state.prompts = [...syncedRecords, localOnly, pending]
     mocks.getAllPrompts.mockResolvedValue(state.prompts)
     mocks.searchPromptsServer.mockImplementation(async (params: any) => ({
       items:
         params.page === 1
-          ? syncedRecipes.slice(0, 20).map((prompt) => ({
+          ? syncedRecords.slice(0, 20).map((prompt) => ({
               id: prompt.serverId,
               uuid: `server-${prompt.serverId}`,
               name: prompt.name
             }))
-          : syncedRecipes.slice(20).map((prompt) => ({
+          : syncedRecords.slice(20).map((prompt) => ({
               id: prompt.serverId,
               uuid: `server-${prompt.serverId}`,
               name: prompt.name
@@ -903,7 +914,7 @@ describe("PromptBody server search and pagination", () => {
     renderPromptBody()
     fireEvent.change(
       await screen.findByRole("textbox", { name: "Search prompts..." }),
-      { target: { value: "overlay recipe" } }
+      { target: { value: "mixed overlay match" } }
     )
     await new Promise((resolve) => setTimeout(resolve, 320))
 
@@ -926,9 +937,9 @@ describe("PromptBody server search and pagination", () => {
     )
     const secondPage = getVisibleRowNames()
     expect(secondPage).toEqual([
-      "Overlay recipe 21",
-      "Overlay recipe local only",
-      "Overlay recipe pending edit"
+      "Mixed overlay match synced recipe",
+      "Mixed overlay match local only",
+      "Mixed overlay match pending edit"
     ])
     expect(new Set([...firstPage, ...secondPage]).size).toBe(23)
   })
