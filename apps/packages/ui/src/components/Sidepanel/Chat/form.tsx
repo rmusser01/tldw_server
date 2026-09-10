@@ -52,7 +52,10 @@ import { appendDictationTranscript } from "@/components/Chat/composer/utils"
 import { useTemporaryChatToggle } from "@/hooks/useTemporaryChatToggle"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
-import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
+import {
+  buildChatSurfaceScopeKeyFromConfig,
+  derivePromptAssistAuthorizationRevision
+} from "@/services/chat-surface-scope"
 import { useComposerVoiceChat } from "@/components/Chat/composer/hooks/useComposerVoiceChat"
 import {
   COMPOSER_CONSTANTS,
@@ -313,6 +316,13 @@ export const SidepanelForm = ({
       canonicalConnectionLoading || !canonicalConnectionConfig
         ? null
         : buildChatSurfaceScopeKeyFromConfig(canonicalConnectionConfig),
+    [canonicalConnectionConfig, canonicalConnectionLoading]
+  )
+  const promptAssistAuthorizationRevision = React.useMemo(
+    () =>
+      canonicalConnectionLoading || !canonicalConnectionConfig
+        ? null
+        : derivePromptAssistAuthorizationRevision(canonicalConnectionConfig),
     [canonicalConnectionConfig, canonicalConnectionLoading]
   )
   const [ttsProvider] = useStorage("ttsProvider", "browser")
@@ -3385,6 +3395,9 @@ export const SidepanelForm = ({
                                 ? `local:${historyId}`
                                 : "local:sidepanel-draft"}
                             promptAssistBackendKey={promptAssistBackendKey}
+                            promptAssistAuthorizationRevision={
+                              promptAssistAuthorizationRevision
+                            }
                             sending={isSending || streaming}
                             surfaceOpen
                             narrow
@@ -3414,6 +3427,9 @@ export const SidepanelForm = ({
                                     : "local:sidepanel-draft"
                               }
                               promptAssistBackendKey={promptAssistBackendKey}
+                              promptAssistAuthorizationRevision={
+                                promptAssistAuthorizationRevision
+                              }
                               conversationContextComposition={
                                 conversationContextComposition.composition
                               }

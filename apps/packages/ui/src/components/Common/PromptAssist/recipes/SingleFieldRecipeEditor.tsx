@@ -201,11 +201,10 @@ export function SingleFieldRecipeEditor({
   useLayoutEffect(() => {
     if (previousOwnerKey.current === ownerKey) return;
     previousOwnerKey.current = ownerKey;
-    persistenceRequest.current += 1;
-    persistencePending.current = false;
-    setPersistenceAction(null);
-    setPersistenceError(null);
-    setPersistenceUncertain(false);
+    if (!persistencePending.current) {
+      setPersistenceAction(null);
+      setPersistenceError(null);
+    }
     const next = createRecipeWorkingCopy(initialSource, target);
     setState(next);
     setVariableNameDrafts({});
@@ -262,10 +261,10 @@ export function SingleFieldRecipeEditor({
     );
     if (!source) return;
     const next = createRecipeWorkingCopy(source, target);
-    persistenceRequest.current += 1;
-    persistencePending.current = false;
-    setPersistenceAction(null);
-    setPersistenceError(null);
+    if (!persistencePending.current) {
+      setPersistenceAction(null);
+      setPersistenceError(null);
+    }
     setState(next);
     setVariableNameDrafts({});
     setVariableNameErrors({});
@@ -437,13 +436,13 @@ export function SingleFieldRecipeEditor({
     try {
       await persist();
     } catch (error) {
-      if (request === persistenceRequest.current) {
-        const uncertain =
-          error instanceof Error && error.message === "recipe_sync_uncertain";
+      const uncertain =
+        error instanceof Error && error.message === "recipe_sync_uncertain";
+      if (uncertain) setPersistenceUncertain(true);
+      if (request === persistenceRequest.current || uncertain) {
         const rollbackFailed =
           error instanceof Error &&
           error.message === `recipe_${action}_rollback_failed`;
-        if (uncertain) setPersistenceUncertain(true);
         setPersistenceError(
           uncertain
             ? action === "save"

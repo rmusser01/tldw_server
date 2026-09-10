@@ -836,7 +836,7 @@ describe("SingleFieldRecipeEditor", () => {
     expect(content).toHaveValue("Working copy");
   });
 
-  it("resets pending persistence feedback when prop ownership changes", async () => {
+  it("keeps persistence pending until the request settles after prop ownership changes", async () => {
     const first = savedRecipe();
     const second = savedRecipe({ id: "saved-second", name: "Saved second" });
     const pending = deferred<void>();
@@ -861,13 +861,20 @@ describe("SingleFieldRecipeEditor", () => {
     );
     expect(
       screen.getByRole("button", { name: "Save as new recipe" }),
-    ).toBeEnabled();
+    ).toBeDisabled();
 
     await act(async () => {
       pending.reject(new Error("stale request"));
       await pending.promise.catch(() => undefined);
     });
-    expect(screen.queryByRole("alert")).toBeNull();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Save as new recipe" }),
+      ).toBeEnabled(),
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Could not save the recipe. Try again.",
+    );
     expect(screen.getByRole("combobox", { name: "Recipe source" })).toHaveValue(
       "saved:saved-second",
     );

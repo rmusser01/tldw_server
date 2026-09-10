@@ -52,6 +52,7 @@ type Props = {
   currentProvider?: string | null
   promptAssistContextKey?: string
   promptAssistBackendKey?: string | null
+  promptAssistAuthorizationRevision?: string | null
   onSelectModel?: () => void
   className?: string
   iconClassName?: string
@@ -76,6 +77,7 @@ export const PromptSelect: React.FC<Props> = ({
   currentProvider,
   promptAssistContextKey = "system-prompt",
   promptAssistBackendKey = null,
+  promptAssistAuthorizationRevision = null,
   onSelectModel,
   className = "text-text-muted",
   iconClassName = "size-5"
@@ -122,6 +124,8 @@ export const PromptSelect: React.FC<Props> = ({
 
   const normalizedPromptAssistBackendKey =
     promptAssistBackendKey?.trim() || null
+  const normalizedPromptAssistAuthorizationRevision =
+    promptAssistAuthorizationRevision?.trim() || null
   const editorLifecycleKey = JSON.stringify([
     promptAssistContextKey,
     selectedSystemPrompt ?? "",
@@ -140,7 +144,11 @@ export const PromptSelect: React.FC<Props> = ({
     isFetching: promptCapabilitiesFetching,
     refetch: refetchPromptCapabilities
   } = useQuery({
-    queryKey: ["promptCapabilities", normalizedPromptAssistBackendKey],
+    queryKey: [
+      "promptCapabilities",
+      normalizedPromptAssistBackendKey,
+      normalizedPromptAssistAuthorizationRevision
+    ],
     queryFn: fetchPromptCapabilities,
     enabled: Boolean(normalizedPromptAssistBackendKey),
     retry: false

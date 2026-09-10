@@ -32,6 +32,7 @@ import {
 } from ".."
 import { ModelNickname } from "./nickname"
 import { ModelDb } from "./models"
+import { clearRecipePersistenceUncertainty } from "@/services/recipe-persistence-uncertainty"
 
 // Helper function to generate IDs (keeping the same format)
 export const generateID = () => {
@@ -604,6 +605,7 @@ export const permanentlyDeletePrompt = async (id: string) => {
   const db = new PageAssistDatabase()
   await db.permanentlyDeletePrompt(id)
   await deletePromptByIdFB(id)
+  clearRecipePersistenceUncertainty(id)
   return id
 }
 

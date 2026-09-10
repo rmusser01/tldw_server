@@ -37,6 +37,7 @@ import {
   parseStructuredPromptDefinitionForTransport,
   type ParsedStructuredPromptDefinition
 } from '@/services/structured-prompt-transport'
+import { clearRecipePersistenceUncertainty } from '@/services/recipe-persistence-uncertainty'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -428,6 +429,7 @@ async function createServerCopy(
       failureKind: 'transient'
     }
   }
+  clearRecipePersistenceUncertainty(localId)
   return {
     success: true,
     localId,
@@ -656,6 +658,7 @@ export async function pushToStudio(
         failureKind: 'transient'
       }
     }
+    clearRecipePersistenceUncertainty(localId)
     return {
       success: true,
       localId,
@@ -698,6 +701,7 @@ export async function pullFromStudio(
       if (local) {
         const updateFields = serverToLocalFields(serverPrompt)
         await db.prompts.update(existingLocalId, updateFields)
+        clearRecipePersistenceUncertainty(existingLocalId)
 
         return {
           success: true,
@@ -713,6 +717,7 @@ export async function pullFromStudio(
     if (existing) {
       const updateFields = serverToLocalFields(serverPrompt)
       await db.prompts.update(existing.id, updateFields)
+      clearRecipePersistenceUncertainty(existing.id)
 
       return {
         success: true,
@@ -725,6 +730,7 @@ export async function pullFromStudio(
     // Create new local prompt
     const newLocal = serverToNewLocalPrompt(serverPrompt)
     await db.prompts.add(newLocal)
+    clearRecipePersistenceUncertainty(newLocal.id)
 
     return {
       success: true,

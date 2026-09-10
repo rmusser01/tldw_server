@@ -18,6 +18,11 @@ import {
   autoSyncPrompt,
   shouldAutoSyncWorkspacePrompts,
 } from "@/services/prompt-sync";
+import {
+  clearRecipePersistenceUncertainty,
+  isRecipePersistenceUncertain,
+  markRecipePersistenceUncertain,
+} from "@/services/recipe-persistence-uncertainty";
 import type { PromptCapabilities } from "@/services/prompts-api";
 import { isFireFoxPrivateMode } from "@/utils/is-private-mode";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -123,7 +128,12 @@ export function PromptRecipeBuilder({
         ) {
           return [];
         }
-        return [cloneSavedRecipeSource(prompt)];
+        const source = cloneSavedRecipeSource(prompt);
+        return [
+          isRecipePersistenceUncertain(source.id)
+            ? { ...source, syncStatus: "error" as const }
+            : source,
+        ];
       }),
     [prompts, target],
   );
@@ -139,13 +149,16 @@ export function PromptRecipeBuilder({
     if (!(await shouldAutoSyncWorkspacePrompts())) return false;
     const result = await autoSyncPrompt(id);
     if (!result.success && result.failureKind === "invalid_server_payload") {
+      markRecipePersistenceUncertain(id);
       try {
         await markPromptSyncError(id);
+        clearRecipePersistenceUncertainty(id);
       } catch {
         // The remote write is still uncertain, so local rollback is never safe.
       }
       throw uncertainSyncFailure;
     }
+    if (result.success) clearRecipePersistenceUncertainty(id);
     return acceptSyncResult(result);
   }, []);
 

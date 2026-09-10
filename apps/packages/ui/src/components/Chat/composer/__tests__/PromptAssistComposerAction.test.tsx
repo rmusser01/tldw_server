@@ -186,6 +186,7 @@ type HarnessProps = {
   modelSelection?: PromptImproveModelSelection | null
   promptAssistContextKey?: string
   promptAssistBackendKey?: string | null
+  promptAssistAuthorizationRevision?: string | null
   sending?: boolean
   surfaceOpen?: boolean
   narrow?: boolean
@@ -203,6 +204,7 @@ function Harness({
   },
   promptAssistContextKey = "conversation-1",
   promptAssistBackendKey = "backend-a",
+  promptAssistAuthorizationRevision = "authorization-one",
   sending = false,
   surfaceOpen = true,
   narrow = false,
@@ -295,6 +297,7 @@ function Harness({
         modelSelection={modelSelection}
         promptAssistContextKey={promptAssistContextKey}
         promptAssistBackendKey={promptAssistBackendKey}
+        promptAssistAuthorizationRevision={promptAssistAuthorizationRevision}
         sending={sending || sendPending}
         surfaceOpen={surfaceOpen}
         narrow={narrow}
@@ -442,6 +445,35 @@ describe("PromptAssistComposerAction entry and request contract", () => {
     expect(
       screen.getByRole("button", { name: "Save as new recipe" })
     ).toBeDisabled()
+  })
+
+  it("isolates capability cache when authorization changes within one backend scope", async () => {
+    const nextCapabilities = createDeferred<
+      typeof availableCapabilities
+    >()
+    mocks.fetchPromptCapabilities
+      .mockResolvedValueOnce(availableCapabilities)
+      .mockReturnValueOnce(nextCapabilities.promise)
+    const user = userEvent.setup()
+    const view = renderHarness({
+      promptAssistBackendKey: "stable-backend",
+      promptAssistAuthorizationRevision: "authorization-one"
+    })
+    await waitFor(() =>
+      expect(mocks.fetchPromptCapabilities).toHaveBeenCalledTimes(1)
+    )
+    await openActions(user)
+    expect(screen.getByRole("button", { name: /Improve now/ })).toBeEnabled()
+
+    view.rerenderHarness({
+      promptAssistBackendKey: "stable-backend",
+      promptAssistAuthorizationRevision: "authorization-two"
+    })
+
+    await waitFor(() =>
+      expect(mocks.fetchPromptCapabilities).toHaveBeenCalledTimes(2)
+    )
+    expect(screen.getByRole("button", { name: /Improve now/ })).toBeDisabled()
   })
 
   it("discards unapplied runtime values when the recipe builder closes and reopens", async () => {

@@ -4,7 +4,6 @@ import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { OPEN_PROMPT_SELECT_EVENT } from "@/utils/prompt-select-events"
-import { buildChatSurfaceScopeKey } from "@/services/chat-surface-scope"
 
 const mocks = vi.hoisted(() => ({
   getAllPrompts: vi.fn(async () => []),
@@ -1234,24 +1233,6 @@ describe("PromptSelect system prompt modal", () => {
 
   it("does not reuse supported capabilities for the same user after credential claims change", async () => {
     const user = userEvent.setup()
-    const firstToken =
-      "eyJhbGciOiJub25lIn0.eyJzdWIiOiJ1c2VyLTQyIiwiaWF0IjoxfQ.first-signature"
-    const refreshedToken =
-      "eyJhbGciOiJub25lIn0.eyJzdWIiOiJ1c2VyLTQyIiwiaWF0IjoyfQ.refreshed-signature"
-    const firstBackendKey = buildChatSurfaceScopeKey({
-      serverUrl: "https://server.example",
-      authMode: "multi-user",
-      orgId: null,
-      userId: null,
-      accessToken: firstToken
-    })
-    const refreshedBackendKey = buildChatSurfaceScopeKey({
-      serverUrl: "https://server.example",
-      authMode: "multi-user",
-      orgId: null,
-      userId: null,
-      accessToken: refreshedToken
-    })
     const backendB = createDeferred<{
       availability: "available"
       prompt_improvement_v1: { supported: false; limits: null }
@@ -1264,9 +1245,11 @@ describe("PromptSelect system prompt modal", () => {
         single_text_recipe_v2: { supported: false }
       })
       .mockReturnValueOnce(backendB.promise)
-    const rendered = renderPromptSelect({
-      promptAssistBackendKey: firstBackendKey
-    })
+    const firstProps = {
+      promptAssistBackendKey: "stable-backend",
+      promptAssistAuthorizationRevision: "authorization-one"
+    }
+    const rendered = renderPromptSelect(firstProps)
 
     await openEditor(user)
     await user.click(screen.getByRole("button", { name: "Improve prompt" }))
@@ -1278,7 +1261,8 @@ describe("PromptSelect system prompt modal", () => {
       <QueryClientProvider client={rendered.queryClient}>
         <PromptSelect
           {...rendered.props}
-          promptAssistBackendKey={refreshedBackendKey}
+          promptAssistBackendKey="stable-backend"
+          promptAssistAuthorizationRevision="authorization-two"
         />
       </QueryClientProvider>
     )
@@ -1287,11 +1271,13 @@ describe("PromptSelect system prompt modal", () => {
     expect(mocks.fetchPromptCapabilities).toHaveBeenCalledTimes(2)
     expect(
       rendered.queryClient.getQueryCache().find({
-        queryKey: ["promptCapabilities", refreshedBackendKey]
+        queryKey: [
+          "promptCapabilities",
+          "stable-backend",
+          "authorization-two"
+        ]
       })?.options.retry
     ).toBe(false)
-    expect(firstBackendKey).not.toContain(firstToken)
-    expect(refreshedBackendKey).not.toContain(refreshedToken)
   })
 
   it("ignores an old backend capability response while the new backend is unresolved", async () => {

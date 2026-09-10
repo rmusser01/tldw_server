@@ -68,6 +68,7 @@ interface ControlRowProps {
   serverChatId?: string | null
   promptAssistContextKey?: string
   promptAssistBackendKey?: string | null
+  promptAssistAuthorizationRevision?: string | null
   conversationContextComposition?: ConversationContextComposition | null
   conversationContextStatus?: ConversationContextCompositionStatus
   conversationContextSaveSelection?: (
@@ -114,6 +115,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   serverChatId,
   promptAssistContextKey,
   promptAssistBackendKey,
+  promptAssistAuthorizationRevision,
   conversationContextComposition,
   conversationContextStatus = "idle",
   conversationContextSaveSelection,
@@ -1136,6 +1138,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
             promptAssistContextKey ?? serverChatId ?? "sidepanel-draft"
           }
           promptAssistBackendKey={promptAssistBackendKey}
+          promptAssistAuthorizationRevision={promptAssistAuthorizationRevision}
           onSelectModel={openSidepanelModelSelector}
           iconClassName="size-4"
           className="px-2 text-text-muted hover:text-text"

@@ -39,6 +39,7 @@ export type PromptAssistComposerActionProps = {
   modelSelection: PromptImproveModelSelection | null
   promptAssistContextKey: string
   promptAssistBackendKey?: string | null
+  promptAssistAuthorizationRevision?: string | null
   sending?: boolean
   surfaceOpen?: boolean
   narrow?: boolean
@@ -54,6 +55,7 @@ export function PromptAssistComposerAction({
   modelSelection,
   promptAssistContextKey,
   promptAssistBackendKey = null,
+  promptAssistAuthorizationRevision = null,
   sending = false,
   surfaceOpen = true,
   narrow = false,
@@ -68,6 +70,8 @@ export function PromptAssistComposerAction({
     React.useState(false)
   const [recipeUndo, setRecipeUndo] = React.useState<{ draft: string } | null>(null)
   const normalizedBackendKey = promptAssistBackendKey?.trim() || null
+  const normalizedAuthorizationRevision =
+    promptAssistAuthorizationRevision?.trim() || null
   const modelSelectionRef = React.useRef(modelSelection)
   const controllerMutationRef = React.useRef<ControllerMutation | null>(null)
   const observedRevisionRef = React.useRef(promptAssistMutation.revision)
@@ -84,7 +88,11 @@ export function PromptAssistComposerAction({
     isFetching: promptCapabilitiesFetching,
     refetch: refetchPromptCapabilities
   } = useQuery({
-    queryKey: ["promptCapabilities", normalizedBackendKey],
+    queryKey: [
+      "promptCapabilities",
+      normalizedBackendKey,
+      normalizedAuthorizationRevision
+    ],
     queryFn: fetchPromptCapabilities,
     enabled: Boolean(normalizedBackendKey),
     retry: false

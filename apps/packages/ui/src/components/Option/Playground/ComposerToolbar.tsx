@@ -104,6 +104,7 @@ export type ComposerToolbarProps = {
   serverChatId: string | null
   promptAssistContextKey?: string
   promptAssistBackendKey?: string | null
+  promptAssistAuthorizationRevision?: string | null
   promptAssistComposer?: Omit<
     PromptAssistComposerActionProps,
     "narrow" | "onSelectModel"
@@ -191,6 +192,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     serverChatId,
     promptAssistContextKey,
     promptAssistBackendKey,
+    promptAssistAuthorizationRevision,
     promptAssistComposer,
     showServerPersistenceHint,
     onDismissServerPersistenceHint,
@@ -549,6 +551,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           promptAssistContextKey ?? serverChatId ?? "playground-draft"
         }
         promptAssistBackendKey={promptAssistBackendKey}
+        promptAssistAuthorizationRevision={promptAssistAuthorizationRevision}
         onSelectModel={() =>
           openModelSelector({
             returnFocusSelector: "[data-testid='chat-prompt-select']"
@@ -564,6 +567,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       currentProvider,
       promptAssistContextKey,
       promptAssistBackendKey,
+      promptAssistAuthorizationRevision,
       serverChatId,
       setSelectedQuickPrompt,
       setSelectedSystemPrompt,

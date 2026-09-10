@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -85,6 +85,14 @@ const recipeRecord = (id: string, name: string, target: "system" | "user") => ({
   },
 });
 
+const createDeferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+};
+
 const renderBuilder = (
   props: Partial<React.ComponentProps<typeof PromptRecipeBuilder>> = {},
 ) => {
@@ -93,7 +101,7 @@ const renderBuilder = (
   });
   const onApply = vi.fn();
   const onBack = vi.fn();
-  render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <PromptRecipeBuilder
         target="system"
@@ -104,7 +112,7 @@ const renderBuilder = (
       />
     </QueryClientProvider>,
   );
-  return { onApply, onBack, queryClient };
+  return { ...view, onApply, onBack, queryClient };
 };
 
 describe("PromptRecipeBuilder", () => {
@@ -136,7 +144,9 @@ describe("PromptRecipeBuilder", () => {
   it("requires positive create and update authorization independently", async () => {
     const user = userEvent.setup();
     renderBuilder({ capabilities: capabilities(true, true, false) });
-    await screen.findByRole("combobox", { name: "Recipe source" });
+    const source = await screen.findByRole("combobox", {
+      name: "Recipe source",
+    });
 
     expect(
       screen.getByRole("button", { name: "Save as new recipe" }),
@@ -352,6 +362,133 @@ describe("PromptRecipeBuilder", () => {
     expect(mocks.restorePromptSnapshot).not.toHaveBeenCalled();
   });
 
+  it("keeps every persistence write locked when an in-flight Save settles uncertain after a source change", async () => {
+    const user = userEvent.setup();
+    const sync = createDeferred<{
+      success: false;
+      localId: string;
+      syncStatus: "pending";
+      failureKind: "invalid_server_payload";
+      error: string;
+    }>();
+    mocks.shouldAutoSyncWorkspacePrompts.mockResolvedValue(true);
+    mocks.autoSyncPrompt.mockReturnValue(sync.promise);
+    renderBuilder();
+    const source = await screen.findByRole("combobox", {
+      name: "Recipe source",
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    );
+    await waitFor(() => expect(mocks.autoSyncPrompt).toHaveBeenCalledTimes(1));
+    await user.selectOptions(source, "saved:system-id");
+
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Update recipe" }),
+    ).toBeDisabled();
+
+    await act(async () => {
+      sync.resolve({
+        success: false,
+        localId: "new-exact-id",
+        syncStatus: "pending",
+        failureKind: "invalid_server_payload",
+        error: "missing response identity",
+      });
+      await sync.promise;
+    });
+
+    expect(
+      await screen.findByText(/saved locally.*server outcome.*not.*verified/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Update recipe" }),
+    ).toBeDisabled();
+    await user.type(
+      screen.getByRole("textbox", {
+        name: "Current value for Task (not saved)",
+      }),
+      "local apply",
+    );
+    expect(
+      screen.getByRole("button", { name: "Apply to system prompt" }),
+    ).toBeEnabled();
+    expect(mocks.savePrompt).toHaveBeenCalledTimes(1);
+    expect(mocks.updatePrompt).not.toHaveBeenCalled();
+    expect(mocks.autoSyncPrompt).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps every persistence write locked when an in-flight Update settles uncertain after a source change", async () => {
+    const user = userEvent.setup();
+    const sync = createDeferred<{
+      success: false;
+      localId: string;
+      syncStatus: "pending";
+      failureKind: "invalid_server_payload";
+      error: string;
+    }>();
+    mocks.shouldAutoSyncWorkspacePrompts.mockResolvedValue(true);
+    mocks.autoSyncPrompt.mockReturnValue(sync.promise);
+    renderBuilder();
+    const source = await screen.findByRole("combobox", {
+      name: "Recipe source",
+    });
+    await waitFor(() =>
+      expect(
+        within(source).getByRole("option", { name: "System saved" }),
+      ).toBeTruthy(),
+    );
+    await user.selectOptions(source, "saved:system-id");
+
+    await user.click(screen.getByRole("button", { name: "Update recipe" }));
+    await waitFor(() => expect(mocks.autoSyncPrompt).toHaveBeenCalledTimes(1));
+    await user.selectOptions(source, "built_in:blank");
+
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    ).toBeDisabled();
+
+    await act(async () => {
+      sync.resolve({
+        success: false,
+        localId: "system-id",
+        syncStatus: "pending",
+        failureKind: "invalid_server_payload",
+        error: "malformed response",
+      });
+      await sync.promise;
+    });
+
+    expect(
+      await screen.findByText(/updated locally.*server outcome.*not.*verified/i),
+    ).toBeInTheDocument();
+    await user.selectOptions(source, "saved:system-id");
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Update recipe" }),
+    ).toBeDisabled();
+    await user.type(
+      screen.getByRole("textbox", {
+        name: "Current value for Task (not saved)",
+      }),
+      "local apply",
+    );
+    expect(
+      screen.getByRole("button", { name: "Apply to system prompt" }),
+    ).toBeEnabled();
+    expect(mocks.updatePrompt).toHaveBeenCalledTimes(1);
+    expect(mocks.autoSyncPrompt).toHaveBeenCalledTimes(1);
+  });
+
   it("retains an uncertain Save locally, invalidates both queries, and locks retry", async () => {
     const user = userEvent.setup();
     const records = [recipeRecord("system-id", "System saved", "system")];
@@ -411,18 +548,30 @@ describe("PromptRecipeBuilder", () => {
     ).toBeDisabled();
   });
 
-  it("never rolls back an uncertain remote result when marking local error fails", async () => {
+  it("keeps the exact uncertain record locked after marker failure and builder reopen", async () => {
     const user = userEvent.setup();
+    const records = [recipeRecord("system-id", "System saved", "system")];
+    mocks.getAllPrompts.mockImplementation(async () => structuredClone(records));
+    mocks.savePrompt.mockImplementation(async (fields) => {
+      const saved = {
+        ...recipeRecord("marker-failed-id", fields.title, "system"),
+        ...fields,
+        id: "marker-failed-id",
+        syncStatus: "local",
+      };
+      records.push(saved);
+      return saved;
+    });
     mocks.shouldAutoSyncWorkspacePrompts.mockResolvedValue(true);
     mocks.autoSyncPrompt.mockResolvedValue({
       success: false,
-      localId: "new-exact-id",
+      localId: "marker-failed-id",
       syncStatus: "pending",
       failureKind: "invalid_server_payload",
       error: "missing response identity",
     });
     mocks.markPromptSyncError.mockRejectedValue(new Error("storage blocked"));
-    renderBuilder();
+    const first = renderBuilder();
     await screen.findByRole("combobox", { name: "Recipe source" });
 
     await user.click(
@@ -437,6 +586,37 @@ describe("PromptRecipeBuilder", () => {
     expect(
       screen.getByRole("button", { name: "Save as new recipe" }),
     ).toBeDisabled();
+
+    first.unmount();
+    const reopened = renderBuilder();
+    const source = await screen.findByRole("combobox", {
+      name: "Recipe source",
+    });
+    await waitFor(() =>
+      expect(
+        within(source).getByRole("option", { name: "Untitled recipe" }),
+      ).toBeTruthy(),
+    );
+    await user.selectOptions(source, "saved:marker-failed-id");
+
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Update recipe" }),
+    ).toBeDisabled();
+    await user.type(
+      screen.getByRole("textbox", {
+        name: "Current value for Task (not saved)",
+      }),
+      "local apply",
+    );
+    expect(
+      screen.getByRole("button", { name: "Apply to system prompt" }),
+    ).toBeEnabled();
+    expect(mocks.savePrompt).toHaveBeenCalledTimes(1);
+    expect(mocks.autoSyncPrompt).toHaveBeenCalledTimes(1);
+    reopened.unmount();
   });
 
   it("retains an uncertain Update, marks it error, and locks both writes", async () => {

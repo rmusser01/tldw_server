@@ -55,7 +55,10 @@ import { useVoiceChatStream } from "@/hooks/useVoiceChatStream";
 // useQueuedRequests moved to usePlaygroundQueueManagement
 import type { ChatDocuments } from "@/models/ChatTypes";
 import { clearSetting, getSetting } from "@/services/settings/registry";
-import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope";
+import {
+  buildChatSurfaceScopeKeyFromConfig,
+  derivePromptAssistAuthorizationRevision,
+} from "@/services/chat-surface-scope";
 import {
   DISCUSS_MEDIA_PROMPT_SETTING,
   DISCUSS_WATCHLIST_PROMPT_SETTING,
@@ -756,6 +759,13 @@ export const PlaygroundForm = ({
       canonicalConnectionLoading || !canonicalConnectionConfig
         ? null
         : buildChatSurfaceScopeKeyFromConfig(canonicalConnectionConfig),
+    [canonicalConnectionConfig, canonicalConnectionLoading],
+  );
+  const promptAssistAuthorizationRevision = React.useMemo(
+    () =>
+      canonicalConnectionLoading || !canonicalConnectionConfig
+        ? null
+        : derivePromptAssistAuthorizationRevision(canonicalConnectionConfig),
     [canonicalConnectionConfig, canonicalConnectionLoading],
   );
   const [ttsProvider] = useStorage("ttsProvider", "browser");
@@ -6052,6 +6062,9 @@ export const PlaygroundForm = ({
                                       : "local:playground-draft"
                                 }
                                 promptAssistBackendKey={promptAssistBackendKey}
+                                promptAssistAuthorizationRevision={
+                                  promptAssistAuthorizationRevision
+                                }
                                 promptAssistComposer={{
                                   form,
                                   messageRevision,
@@ -6070,6 +6083,7 @@ export const PlaygroundForm = ({
                                       ? `local:${historyId}`
                                       : "local:playground-draft",
                                   promptAssistBackendKey,
+                                  promptAssistAuthorizationRevision,
                                   sending: isSending,
                                   surfaceOpen: true,
                                   onReturnFocus: textAreaFocus,
