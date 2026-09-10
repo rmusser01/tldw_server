@@ -4,7 +4,7 @@ title: Review and rebase PR 2612 original-file cleanup safely onto current dev
 status: In Progress
 assignee: []
 created_date: '2026-09-10 00:49'
-updated_date: '2026-09-10 01:52'
+updated_date: '2026-09-10 01:55'
 labels:
   - media
   - storage
@@ -47,12 +47,14 @@ User clarified latest-only binaries; the prior retention decision is superseded 
 Final post-rebase validation also passed: 153 tests, 8 existing warnings, 74.50 seconds. Range-diff shows all seven commits unchanged by the final rebase. Latest-only original replacement TASK-13233.1 is complete; old binary retention is no longer the normal successful-upload policy.
 
 Requester explicitly authorized rebasing onto latest dev, addressing all issues/comments after Qodo posts, and merging. Their human-written Change summary is published verbatim. Starting from local c39a1a798d; remote PR is now ready for review at d0806eeeea with Qodo review pending. Preserve and inspect the intervening remote update before rebasing; use an explicit push lease and final-head merge guard.
+
+Rebased all nine PR commits onto dev f0248aaa00047d2ffcc3bde295d9fbb8296add8a without conflicts. Range-diff confirms unchanged commits; code tree matches GitHub merge head d0806eeeea exactly, apart from this task record. Fresh targeted/adjacent verification including latest-dev audio download regression: 156 passed, 8 existing warnings, 83.21 seconds. Bandit 0 findings/0 errors across four production files. Qodo review started at 2026-09-10T01:51:12Z and remains pending. Publish with explicit lease against d0806eeeeab8d0b0bf281a4715ff82f24989ab1f; address posted feedback and pass final-head required checks before authorized merge.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-PR #2612 remains applicable and useful. Failed registrations clean up only their own upload; successful replacements remove earlier original binaries and their file registrations while preserving plaintext database history. The user-approved replacement policy is implemented in TASK-13233.1 and supersedes the earlier retention tradeoff. Rebased onto dev 456eafb7a6, with independent review approval and targeted/adjacent verification. TASK-13233.2 separately tracks pre-existing quota calculation across configured roots. Keep draft until final-head GitHub checks pass and a human-written Change summary is supplied.
+Latest requested merge pass is in progress. Latest-dev rebase and 156-test verification are complete; Qodo feedback and final-head CI are pending. The requester supplied the Change summary and explicitly authorized merge after all issues/comments are addressed. Latest-only binary replacement is implemented; the independent pre-existing quota-root follow-up remains TASK-13233.2.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
