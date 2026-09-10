@@ -19,6 +19,10 @@ publication. Before publication, the branch was rebased onto dev commit
 implementation plan is removed when work is complete; this note retains the
 design, audit, and verification record.
 
+Published as [PR #2939](https://github.com/rmusser01/tldw_server/pull/2939),
+targeting dev. The PR records the repository's human-written Change summary
+requirement before merge.
+
 ## Related-pattern audit
 
 The PostgreSQL array audit followed `ANY`/`ALL` queries through their actual
