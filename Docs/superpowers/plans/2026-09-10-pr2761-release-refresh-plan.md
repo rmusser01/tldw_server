@@ -7,12 +7,12 @@
 
 ## Current release status
 
-**Release is not ready to merge or publish.** This document is the active execution plan for [PR #2761](https://github.com/rmusser01/tldw_server/pull/2761), including unfinished work. The July design is historical; its source/date values are superseded here.
+**Release is not ready to merge or publish.** The candidate same-image backup/restore smoke now passes; the published rollback baseline is broken. See [recovery evidence](../../Evidence/PR2761-candidate-recovery.md). This document is the active execution plan for [PR #2761](https://github.com/rmusser01/tldw_server/pull/2761), including unfinished work. The July design is historical; its source/date values are superseded here.
 
 | Item | Recorded state |
 | --- | --- |
 | Integrated release code and verified blocker fixes | `50dcf5453b1ba10b0eabb505ff32b831f47f8185` |
-| Latest pushed candidate at this update | `30338ef7de` (Research readiness fix and refreshed protected-source record) |
+| Latest executable-fix/metadata push | `44c6b45c85` (source `50dcf5453b`); subsequent evidence-only commits may advance the PR head |
 | Protected source snapshot | `50dcf5453b1ba10b0eabb505ff32b831f47f8185`, 7,099 files |
 | PR branch / target | `codex/release-main-0.1.42` → `main` |
 | PR state at inspection | Draft; no merge or publication performed |
@@ -113,6 +113,7 @@ Inspect existing child work and merged evidence before starting duplicate implem
 - [ ] Select a verified deployed rollback version and its immutable image/package identity. `v0.1.38` being GitHub's latest release does not prove it is the deployed rollback target.
 - [ ] Assess authentication, conversation, notes-sync, presentation, personal-context and webhook schema changes from that target to the candidate; record configuration changes and incompatible downgrade paths.
 - [ ] Rehearse backup, upgrade/health verification, and restore using representative data. Cover databases, uploaded content and configuration. Record backup checksums, restore commands and results. Do not assume an older binary can read migrated databases.
+- [x] Complete a separately scoped candidate same-image SQLite/Redis backup/restore smoke: authenticated account/note/conversation/attachment checks, config-byte equality, Redis RDB→AOF recovery, and all 12 databases passing integrity before and after. [Evidence](../../Evidence/PR2761-candidate-recovery.md). The published 0.1.38 startup failure still blocks the cross-version item above.
 
 Use [Production Reference Deployment](../../Deployment/Production_Reference_Deployment.md), [Admin Webhooks Migration Runbook](../../Admin_Webhooks_Migration_Runbook.md), and [Standalone HTML Presentations](../../Deployment/Standalone_HTML_Presentations.md). Keep standalone HTML generation disabled until its documented schema-v2 backup and rollout prerequisites are met.
 
@@ -242,3 +243,13 @@ Final metadata verification: **36 passed, 1 host-limited docs test deselected, 4
 - TASK-12116 remaining strictness baseline is now measured: separate flag runs produce **948 noImplicitAny diagnostics in 252 files** and **664 strictNullChecks diagnostics in 177 files**. A 328-file hook sample adds **25 diagnostics in 14 files** under the seven disabled compiler rules. Five shared runtime dependency-major mismatches remain. Enabling all these gates is substantial uncompleted work, not a passing current baseline.
 
 Package/reminder source commit: **`50dcf5453b1ba10b0eabb505ff32b831f47f8185`**. Protected manifest regenerated across **7,099 files**, SHA-256 **`2e495751c4c3ad02842881167da31ab15a4e0f665f0f872c5906590dc213b099`**; legal/date bytes unchanged. Local image uses clean `0cec0bb409` plus the identical Dockerfile fix; later changes are evidence, metadata and tests. This diagnostic artifact is not the final published artifact or full supply-chain certification.
+
+## Completed candidate recovery smoke
+
+The [recovery report](../../Evidence/PR2761-candidate-recovery.md), [machine-readable evidence](../../Evidence/PR2761-candidate-recovery.json), and [286-entry dependency inventory](../../Evidence/PR2761-candidate-dependencies.txt) are retained in the repository. Tested image `sha256:e01578be89000870b86c09164ad724160654f410a755a44fb84500857977b630` starts successfully. It restored the exact authenticated synthetic account, note, conversation and 34-byte attachment into a second volume set. All **12 SQLite databases** passed integrity checks before and after; runtime config bytes were identical and the Redis marker survived RDB restoration, AOF reconstruction and restart.
+
+The temporary controller initially omitted volume-root ownership and was corrected; an early readiness request also preceded completed startup. All final acceptance checks passed after those corrections. Rehearsal containers/network are removed; private backups, own test volumes and images are retained. No production data/configuration, unrelated fixture server or active dependency worktree was modified.
+
+This local diagnostic image uses clean `0cec0bb409` plus the exact Dockerfile repair. Its application runtime source equals `50dcf5453b`; embedded tests/docs/metadata are older and this is not a published artifact. The published 0.1.38 image failed importing `mcp_unified`, so a working deployed rollback baseline and seeded cross-version upgrade/restore remain open. PostgreSQL production-reference/Caddy, multi-worker/provider load, encrypted personal-context data, full lifecycle and capacity certification are not covered by this smoke.
+
+PR #2869 remains unchanged at `78c3f92228c6411ee4637b9d2df9aa3b50aacdc8`, with conflicts and nine failed image/source/security checks. Its active separate work is not integrated. At `44c6b45c85`, backend, security, app-container build and five frontend shards pass; other frontend shards, coverage and E2E were still running at this snapshot. Final current-head gate results are maintained in the PR description; this evidence update does not waive fresh checks.
