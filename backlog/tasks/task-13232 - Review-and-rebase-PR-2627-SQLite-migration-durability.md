@@ -4,7 +4,7 @@ title: Review and rebase PR 2627 SQLite migration durability
 status: Done
 assignee: []
 created_date: '2026-09-10 00:43'
-updated_date: '2026-09-10 02:30'
+updated_date: '2026-09-10 02:40'
 labels:
   - db
   - migrations
@@ -70,6 +70,7 @@ Tracking: TASK-13232, created through Backlog CLI with the old PR task history b
 Legacy rejection follow-up: use the existing pool invalidation API to close/remove only the rejected startup thread connection. Real factory-backed regressions verify empty pool stats, closed old handle, fresh usable acquisition, and preserved data/version. Complete: three failures before the fix; four legacy tests and 186 expanded tests pass afterward, with seven PostgreSQL-unavailable skips.
 Injected-pool compatibility follow-up: provide invalidate_connection through the shared pool contract, with a close default and matching-current-handle SQLite override. Exercise compliant injected pools and current/stale/external ownership. Complete: focused red/green and expanded 14-module verification, 227 passed and 12 PostgreSQL-related skips; lint/security/independent review pass.
 Pool contract completion: delegate PostgreSQL invalidation to existing discard bookkeeping and document all implementations with ownership, return and error behavior. Complete: both PostgreSQL modes reproduced bookkeeping loss before the override, 19 focused tests and 237 expanded tests pass afterward, with 12 unavailable-PostgreSQL integration skips; security/review pass.
+Final fallback-test maintenance: replace private-container assertions with observable return/reuse behavior so storage refactors remain possible and the lost-capacity regression stays detectable. Complete: close-only mutation fails on replacement closure; restored code passes all 19 focused tests, lint/security and review.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -118,12 +119,18 @@ Expanded the prior 11-module command with tests/DB_Management/unit/test_sqlite_p
 
 2026-09-10 PostgreSQL/docs follow-up: Qodo review on 3be82e42fe had two findings. Added PostgreSQLConnectionPool.invalidate_connection as a thin delegate to existing discard_connection, preserving psycopg putconn pairing and fallback managed/free-list removal. Parameterized the existing psycopg/fallback discard regressions for both API names, adding unit markers and descriptive IDs. The two invalidation cases failed before the override with missing putconn/retained managed capacity and pass afterward; 19 focused pool/legacy tests pass. Expanded base, SQLite and PostgreSQL invalidation docstrings with Args, Returns, Raises, caller ownership, cache behavior and accurate close-error policies.
 Repository search confirms SQLite and PostgreSQL are the only production implementations of this ConnectionPool interface and both now override invalidation. Independent review found no substantive issues and confirmed the documentation matches behavior. Expanded the prior 14-module command with tests/DB_Management/unit/test_postgres_pool_fallback.py: 237 passed, 12 PostgreSQL-unavailable skips, 4 warnings in 34.53s. Ruff across all ten changed Python files, compilation, repository guards, whitespace and shipped-SQL equality checks pass. Bandit includes all six touched application modules: zero findings over 3836 LOC (existing nosec-on-unflagged-line warnings only). Logs: /tmp/pr2627-postgres-invalidation-red.log, /tmp/pr2627-postgres-invalidation-green.log, /tmp/pr2627-postgres-invalidation-full-tests.log, /tmp/pr2627-postgres-invalidation-bandit.json. Remote dev remains f0248aaa00, observed PR head 3be82e42fe. Human Change summary is preserved; final-head Qodo and required CI remain merge gates.
+
+2026-09-10 Qodo review on f86e1e15ec reports zero bugs and one test-maintenance finding: the parameterized PostgreSQL fallback regression asserts private tracking lists. Plan: replace those assertions with observable managed replacement return/reuse behavior. Merely checking a distinct new handle is insufficient because the fallback permits overflow, so verify the replacement remains open on return and is reusable; confirm the old close-only invalidation still fails this public regression. Production code remains unchanged.
+
+2026-09-10 Qodo test-maintenance follow-up on f86e1e15ec (zero bugs, one rule): removed private _connections/_free assertions from the parameterized fallback removal test. The replacement must now remain open after return and be borrowed again, proving it has managed capacity rather than being an overflow connection. Merely obtaining a distinct new handle would not catch the prior capacity leak because overflow is permitted. Verified the old close-only invalidation fails this public assertion, then restored production exactly and passed 19 focused pool/legacy tests (4 warnings, 0.69s). No application code changed in this follow-up; the preceding expanded 237-pass/12-PostgreSQL-skip validation still covers that exact application code. Ruff, compilation, whitespace and fresh Bandit over all six application modules pass with zero findings. Logs: /tmp/pr2627-public-capacity-red.log, /tmp/pr2627-public-capacity-green.log, /tmp/pr2627-public-capacity-bandit.json. Await final-head Qodo review and required GitHub gates before merge.
+
+Independent review confirmed the public replacement return/reuse assertions detect lost managed capacity without depending on internal containers; no findings. Production diff is empty.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Rebased PR #2627 onto dev f0248aaa00 and addressed Qodo feedback through reviewed head 3be82e42fe. Both SQLite and PostgreSQL now honor the documented invalidation contract while legacy SQLite rejection preserves recovery guidance and closes handles. Migration transaction durability, script/checksum compatibility and recovery coverage remain intact. Latest expanded migration/backend/pool validation: 237 passed, 12 PostgreSQL-unavailable skips; zero Bandit findings and no substantive independent-review issues. Requester-owned Change summary is present. Await completed final-head Qodo review and required GitHub gates before the authorized merge.
+Rebased PR #2627 onto dev f0248aaa00 and addressed Qodo feedback through reviewed head f86e1e15ec. Atomic migration execution, unchanged SQL/checksums, wrapper compatibility, recovery guidance and backend-neutral invalidation are implemented. Final fallback regression verifies public replacement reuse instead of private storage. Expanded application validation: 237 passed, 12 PostgreSQL-unavailable skips; latest test-only follow-up: 19 focused tests passed with application code unchanged and zero Bandit findings. Requester-owned Change summary is present. Await final-head Qodo review and required checks before the authorized merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

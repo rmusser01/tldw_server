@@ -76,13 +76,13 @@ def test_fallback_pool_discard_replaces_poisoned_managed_connection(
     getattr(pool, operation)(poisoned)
 
     assert poisoned.closed is True
-    assert poisoned not in pool._connections
-    assert poisoned not in pool._free
 
     replacement = pool.get_connection()
     assert replacement is not poisoned
     assert replacement.closed is False
     pool.return_connection(replacement)
+    assert replacement.closed is False
+    assert pool.get_connection() is replacement
     pool.close_all()
 
 
