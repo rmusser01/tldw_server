@@ -306,6 +306,10 @@ class ConnectionPool(ABC):
         """Return a connection to the pool."""
         pass
 
+    def invalidate_connection(self, connection: Any) -> None:
+        """Close a failed connection; caching pools must also discard its reference."""
+        connection.close()
+
     @abstractmethod
     @contextmanager
     def connection(self) -> Generator[Any, None, None]:

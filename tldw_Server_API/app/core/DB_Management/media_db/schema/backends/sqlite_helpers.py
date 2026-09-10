@@ -5,10 +5,9 @@ from __future__ import annotations
 import os
 import sqlite3
 import threading
-from typing import Any, Protocol, cast
+from typing import Any, Protocol
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseBackend
-from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteConnectionPool
 from tldw_Server_API.app.core.DB_Management.db_migration import DatabaseMigrator, MigrationError
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
@@ -277,7 +276,7 @@ def bootstrap_sqlite_schema(db: SupportsSqlitePostCoreStructures) -> None:
                         < MIN_SUPPORTED_SQLITE_MEDIA_DB_MIGRATION_VERSION
                     ):
                         # Failed startup must not leave an open or stale pooled handle.
-                        cast(SQLiteConnectionPool, db.backend.get_pool()).clear_thread_local_connection()
+                        db.backend.get_pool().invalidate_connection(conn)
                         raise SchemaError(
                             "unsupported legacy Media DB schema version "
                             f"{current_db_version}; minimum supported automatic "

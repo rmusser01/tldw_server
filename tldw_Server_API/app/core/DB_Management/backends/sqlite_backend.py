@@ -169,6 +169,14 @@ class SQLiteConnectionPool(ConnectionPool):
         """SQLite connections are thread-local, no action needed."""
         pass
 
+    def invalidate_connection(self, connection: sqlite3.Connection) -> None:
+        """Invalidate a borrowed handle without discarding a different current handle."""
+        with self._lock:
+            if self._connections.get(threading.get_ident()) is connection:
+                self.clear_thread_local_connection()
+            else:
+                connection.close()
+
     def clear_thread_local_connection(self) -> None:
         """Clear the current thread's connection reference from the pool.
 

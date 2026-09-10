@@ -1,7 +1,57 @@
+"""Tests for SQLite pool cleanup and connection ownership."""
+
+import sqlite3
 import threading
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteConnectionPool
+
+
+@pytest.fixture
+def sqlite_pool(tmp_path: Path) -> Iterator[SQLiteConnectionPool]:
+    """Provide an isolated SQLite pool and close all its connections after each test."""
+    db_path = tmp_path / "invalidation.db"
+    config = DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=str(db_path))
+    pool = SQLiteConnectionPool(str(db_path), config)
+    try:
+        yield pool
+    finally:
+        pool.close_all()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("connection_kind", ["current", "stale", "external"], ids=[
+    "invalidate-current-handle", "preserve-replacement-handle", "preserve-unrelated-handle",
+])
+def test_sqlite_pool_invalidation_closes_only_the_supplied_connection(
+    sqlite_pool: SQLiteConnectionPool, connection_kind: str,
+) -> None:
+    """Invalidation clears the matching cache entry without closing a different live handle."""
+    current = sqlite_pool.get_connection()
+    supplied = current
+    if connection_kind == "stale":
+        sqlite_pool.clear_thread_local_connection()
+        current = sqlite_pool.get_connection()
+    elif connection_kind == "external":
+        supplied = sqlite3.connect(sqlite_pool.db_path)
+    try:
+        sqlite_pool.invalidate_connection(supplied)
+        with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+            supplied.execute("SELECT 1")
+        if connection_kind == "current":
+            assert sqlite_pool.get_stats()["active_connections"] == 0
+            replacement = sqlite_pool.get_connection()
+            assert replacement is not supplied
+            assert replacement.execute("SELECT 1").fetchone()[0] == 1
+        else:
+            assert sqlite_pool.get_connection() is current
+            assert current.execute("SELECT 1").fetchone()[0] == 1
+    finally:
+        supplied.close()
 
 
 def test_sqlite_pool_prunes_dead_threads(tmp_path):

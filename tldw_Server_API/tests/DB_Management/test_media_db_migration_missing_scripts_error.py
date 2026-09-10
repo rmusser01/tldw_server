@@ -2,11 +2,17 @@
 
 import pathlib
 import sqlite3
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from typing import Any, cast
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    BackendType,
+    ConnectionPool,
+    DatabaseConfig,
+)
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteConnectionPool
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
@@ -14,6 +20,64 @@ from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDa
 from tldw_Server_API.app.core.DB_Management.media_db.schema.backends import (
     sqlite_helpers as sqlite_helpers_module,
 )
+
+
+@pytest.fixture
+def uncached_sqlite_pool(tmp_path: pathlib.Path) -> ConnectionPool:
+    """Provide a compliant injected pool without SQLite-specific cache methods."""
+    class UncachedPool(ConnectionPool):
+        """Open one SQLite connection per borrow without retaining cached handles."""
+
+        def get_connection(self) -> sqlite3.Connection:
+            """Open an independently owned connection."""
+            conn = sqlite3.connect(tmp_path / "injected.db")
+            conn.row_factory = sqlite3.Row
+            return conn
+
+        def return_connection(self, connection: sqlite3.Connection) -> None:
+            """Close an independently borrowed connection."""
+            connection.close()
+
+        @contextmanager
+        def connection(self) -> Iterator[sqlite3.Connection]:
+            """Close the borrowed connection when its context ends."""
+            with closing(self.get_connection()) as conn:
+                yield conn
+
+        def close_all(self) -> None:
+            """There are no cached connections to close."""
+
+        def get_stats(self) -> dict[str, Any]:
+            """Report that this pool retains no cached handles."""
+            return {"total_connections": 0}
+
+    return UncachedPool()
+
+
+@pytest.mark.unit
+def test_injected_sqlite_pool_retains_legacy_guidance_and_closes_connection(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    uncached_sqlite_pool: ConnectionPool,
+) -> None:
+    """An injected generic pool closes failed startup handles and preserves recovery guidance."""
+    db_path = tmp_path / "injected.db"
+    with uncached_sqlite_pool.connection() as conn:
+        conn.execute("CREATE TABLE schema_version (version INTEGER)")
+        conn.execute("INSERT INTO schema_version VALUES (21)")
+        conn.commit()
+
+    backend = DatabaseBackendFactory.create_backend(
+        DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=str(db_path)),
+    )
+    monkeypatch.setattr(backend, "get_pool", lambda: uncached_sqlite_pool)
+    with closing(uncached_sqlite_pool.get_connection()) as startup_conn:
+        monkeypatch.setattr(uncached_sqlite_pool, "get_connection", lambda: startup_conn)
+        with pytest.raises(DatabaseError, match="unsupported legacy Media DB schema version 21") as exc_info:
+            MediaDatabase(db_path=str(db_path), client_id="injected-legacy", backend=backend)
+        assert "Docs/Database_Migrations.md" in str(exc_info.value)
+        with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+            startup_conn.execute("SELECT 1")
 
 
 @pytest.mark.unit

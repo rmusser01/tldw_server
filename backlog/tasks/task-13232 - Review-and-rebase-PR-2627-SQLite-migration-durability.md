@@ -4,7 +4,7 @@ title: Review and rebase PR 2627 SQLite migration durability
 status: Done
 assignee: []
 created_date: '2026-09-10 00:43'
-updated_date: '2026-09-10 01:56'
+updated_date: '2026-09-10 02:11'
 labels:
   - db
   - migrations
@@ -68,6 +68,7 @@ Tracking: TASK-13232, created through Backlog CLI with the old PR task history b
 **Tests**: Eight public file migration cases for comment locations with commit/rollback, seven lexer output cases, expanded migration/CLI/bootstrap/backup suite and independent SQLite comparisons.
 **Status**: Complete (186 passed, 7 PostgreSQL-unavailable skips; after unrelated latest-dev rebase, 39 selected unit tests pass).
 Legacy rejection follow-up: use the existing pool invalidation API to close/remove only the rejected startup thread connection. Real factory-backed regressions verify empty pool stats, closed old handle, fresh usable acquisition, and preserved data/version. Complete: three failures before the fix; four legacy tests and 186 expanded tests pass afterward, with seven PostgreSQL-unavailable skips.
+Injected-pool compatibility follow-up: provide invalidate_connection through the shared pool contract, with a close default and matching-current-handle SQLite override. Exercise compliant injected pools and current/stale/external ownership. Complete: focused red/green and expanded 14-module verification, 227 passed and 12 PostgreSQL-related skips; lint/security/independent review pass.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -105,12 +106,18 @@ Dev advanced to f0248aaa00047d2ffcc3bde295d9fbb8296add8a (audio test and task re
 
 2026-09-10 legacy-pool cleanup: Qodo review on 23f6ee25e5 identified a retained connection on unsupported legacy rejection. Extended the existing real 1/8/21 cases through the shared backend factory: all three failed before the change with one active connection remaining. The rejection branch now uses SQLiteConnectionPool.clear_thread_local_connection(), which closes and invalidates only the current thread handle while leaving the pool reusable. Tests verify active count zero, ProgrammingError on the old closed handle, a distinct usable replacement, preserved version/data and no migrator invocation. Four focused legacy tests pass. Successful migration and in-memory lifecycles are untouched; independent review found no actionable issues.
 Fresh expanded migration/CLI/bootstrap/backup validation (same 11-module command above): 186 passed, 7 PostgreSQL-unavailable skips, 4 warnings in 35.64s. Ruff, py_compile, repository guards, whitespace and shipped-SQL equality checks pass. Bandit touched application scope: zero findings over 1303 LOC. Logs: /tmp/pr2627-cleanup-red.log, /tmp/pr2627-cleanup-green.log, /tmp/pr2627-cleanup-full-tests.log, /tmp/pr2627-cleanup-bandit.json. Remote dev remains f0248aaa00047d2ffcc3bde295d9fbb8296add8a and observed PR head is 23f6ee25e53f28e098f59c8c1df40706440da860. The human Change summary is preserved; final-head Qodo review and required checks remain merge gates.
+
+2026-09-10 Qodo review on 3eece86be8 identified a valid injected-backend contract gap: casting a generic pool to SQLiteConnectionPool can hide recovery guidance when an injected pool lacks that concrete API. Plan: add a non-abstract invalidate_connection default to ConnectionPool (close supplied handle), override SQLite caching behavior using existing current-thread invalidation, and call the shared contract from bootstrap. Reproduce with a compliant injected pool and retain current/stale connection isolation tests; validate affected backend and migration scopes before publication.
+
+2026-09-10 injected-pool compatibility: Qodo review on 3eece86be8 identified that the concrete SQLiteConnectionPool cast bypassed recovery guidance for other compliant injected pools. Added non-abstract ConnectionPool.invalidate_connection(connection), whose default closes the supplied connection. SQLite overrides it with identity-checked current-thread cache invalidation under the existing RLock, using the existing clear helper; stale/external handles close without discarding a different live current handle. Bootstrap now calls the shared contract with its acquired connection, with no concrete cast/import. The only production caller acquires/invalidates synchronously on the same thread.
+Added a compliant injected pool regression that verifies recovery guidance and handle closure, plus current/stale/external SQLite invalidation cases using a shared fixture. The fixture needed sqlite3.Row to satisfy the existing Media DB query contract; after correcting that test setup, the old concrete call reproduced the reported AttributeError. New pool cases initially failed because invalidate_connection was absent. Final focused tests: 9 passed. Independent review found no actionable scoped issues.
+Expanded the prior 11-module command with tests/DB_Management/unit/test_sqlite_pool_pruning.py, test_database_backends.py and test_sqlite_shared_backend_registry.py: 227 passed, 12 PostgreSQL-related skips, 4 warnings in 37.16s. Ruff across all eight changed Python files, compilation, both repository guards, whitespace and shipped-SQL equality checks pass. Bandit now also covers backends/base.py and backends/sqlite_backend.py: zero findings over 2471 LOC (existing nosec-on-unflagged-line warning only). Logs: /tmp/pr2627-injected-contract-red.log, /tmp/pr2627-pool-contract-green.log, /tmp/pr2627-pool-contract-full-tests.log, /tmp/pr2627-pool-contract-bandit.json. Dev remains f0248aaa00 and observed remote PR head 3eece86be8. Human Change summary remains accepted/preserved; await final-head Qodo and required CI before merge.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Rebased PR #2627 onto dev f0248aaa00 and addressed Qodo findings through reviewed head 23f6ee25e5, including closing/invalidation of pooled connections on legacy rejection. Migration execution/bookkeeping stay atomic, BOM/commented wrappers remain compatible, SQL/checksums are preserved, and regression tests cover rollback, retries, quoting and cleanup. Latest expanded verification: 186 passed, 7 PostgreSQL-unavailable skips; zero Bandit findings and no substantive independent-review issues. The requester-owned Change summary is present. Await completed final-head Qodo review and required GitHub checks before the authorized merge.
+Rebased PR #2627 onto dev f0248aaa00 and addressed Qodo feedback through reviewed head 3eece86be8. Final cleanup uses a backend-neutral pool invalidation contract, preserving injected-backend guidance and SQLite cache ownership. Atomic migration execution/bookkeeping, BOM/commented wrapper compatibility, unchanged SQL/checksums and recovery guidance remain covered. Latest expanded migration/backend validation: 227 passed, 12 PostgreSQL-related skips; zero Bandit findings and no substantive independent-review issues. Requester-owned Change summary is present. Final-head Qodo review and required GitHub checks remain merge gates.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
