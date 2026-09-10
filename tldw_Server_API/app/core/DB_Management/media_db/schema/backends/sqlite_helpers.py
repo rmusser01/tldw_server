@@ -7,22 +7,23 @@ import sqlite3
 import threading
 from typing import Any, Protocol
 
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseBackend
 from tldw_Server_API.app.core.DB_Management.db_migration import DatabaseMigrator, MigrationError
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
     SchemaError,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.schema.features.fts import (
-    ensure_sqlite_fts_structures,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media import (
-    apply_sqlite_core_media_schema,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
+    MEDIA_NONCRITICAL_EXCEPTIONS,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.schema.document_workspace_schema import (
     ensure_sqlite_document_workspace_schema,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
-    MEDIA_NONCRITICAL_EXCEPTIONS,
+from tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media import (
+    apply_sqlite_core_media_schema,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.features.fts import (
+    ensure_sqlite_fts_structures,
 )
 
 try:
@@ -124,12 +125,15 @@ CREATE VIRTUAL TABLE IF NOT EXISTS content_items_fts USING fts5(
 );
 """
 
+MIN_SUPPORTED_SQLITE_MEDIA_DB_MIGRATION_VERSION = 22
+
 
 class _SupportsExecutescript(Protocol):
     def executescript(self, script: str) -> Any: ...
 
 
 class SupportsSqlitePostCoreStructures(Protocol):
+    backend: DatabaseBackend
     _CLAIMS_TABLE_SQL: str
     _MEDIA_FILES_TABLE_SQL: str
     _TTS_HISTORY_TABLE_SQL: str
@@ -267,6 +271,28 @@ def bootstrap_sqlite_schema(db: SupportsSqlitePostCoreStructures) -> None:
                     apply_sqlite_core_media_schema(db, conn)
                     ensure_sqlite_post_core_structures(db, conn)
                 else:
+                    if (
+                        current_db_version
+                        < MIN_SUPPORTED_SQLITE_MEDIA_DB_MIGRATION_VERSION
+                    ):
+                        # Cleanup must not mask the primary unsupported-schema error.
+                        try:
+                            db.backend.get_pool().invalidate_connection(conn)
+                        except Exception:
+                            logger.exception(
+                                "Failed to invalidate rejected legacy Media DB connection "
+                                f"(schema_version={current_db_version}, connection_id={id(conn)})"
+                            )
+                        raise SchemaError(
+                            "unsupported legacy Media DB schema version "
+                            f"{current_db_version}; minimum supported automatic "
+                            "upgrade version is "
+                            f"{MIN_SUPPORTED_SQLITE_MEDIA_DB_MIGRATION_VERSION}. "
+                            "Create a backup and follow the legacy SQLite Media DB "
+                            "recovery workflow in Docs/Database_Migrations.md "
+                            "before starting this server version."
+                        )
+
                     conn.close()
 
                     migrations_dir = None

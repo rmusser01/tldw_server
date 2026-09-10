@@ -294,6 +294,26 @@ class PostgreSQLConnectionPool(ConnectionPool):
         with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
             connection.close()
 
+    def invalidate_connection(self, connection: Any) -> None:
+        """Discard a failed checkout while preserving pool capacity bookkeeping.
+
+        Delegates to ``discard_connection()``: psycopg receives the closed
+        checkout through ``putconn``; fallback tracking and free lists drop it.
+
+        Args:
+            connection: Checkout owned by the caller from this pool, or None
+                for a no-op. The caller must not reuse or return it afterward.
+
+        Returns:
+            None.
+
+        Raises:
+            Exception: Unexpected close or pool errors outside the backend's
+                noncritical exception set propagate. Known driver and cleanup
+                errors are suppressed by ``discard_connection()``.
+        """
+        self.discard_connection(connection)
+
     def discard_connection(self, connection: Any) -> None:
         """Remove a poisoned checkout without making it reusable."""
 

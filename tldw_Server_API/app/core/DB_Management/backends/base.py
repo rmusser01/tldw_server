@@ -306,6 +306,25 @@ class ConnectionPool(ABC):
         """Return a connection to the pool."""
         pass
 
+    def invalidate_connection(self, connection: Any) -> None:
+        """Close a failed checkout that the caller will no longer use.
+
+        Caching pools must override this default to remove the checkout from
+        their tracking structures as well as closing it.
+
+        Args:
+            connection: Connection borrowed from this pool and owned by the
+                caller. The caller must not reuse or return it afterward.
+
+        Returns:
+            None.
+
+        Raises:
+            Exception: Any driver or wrapper error from ``connection.close()``
+                propagates unchanged; this default does not suppress errors.
+        """
+        connection.close()
+
     @abstractmethod
     @contextmanager
     def connection(self) -> Generator[Any, None, None]:
