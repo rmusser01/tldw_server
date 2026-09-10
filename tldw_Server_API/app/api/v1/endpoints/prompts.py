@@ -18,7 +18,7 @@ from typing import Any, Optional, Union
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 from loguru import logger
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from starlette.requests import ClientDisconnect
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
@@ -55,6 +55,8 @@ from tldw_Server_API.app.core.DB_Management.Prompts_DB import (
 from tldw_Server_API.app.core.DB_Management.prompts_db_helpers import (
     parse_stored_prompt_definition,
     reject_recipe_runtime_values,
+    render_v1_authored_snapshot,
+    validate_prompt_text_fields,
 )
 from tldw_Server_API.app.core.LLM_Calls.routing import InMemoryRoutingDecisionStore
 from tldw_Server_API.app.core.Prompt_Management.prompt_improvement import (
@@ -82,7 +84,6 @@ from tldw_Server_API.app.core.Prompt_Management.structured_prompts import (
     assemble_prompt_definition,
     convert_legacy_prompt_to_definition,
     extract_legacy_prompt_variables,
-    render_legacy_snapshot,
 )
 from tldw_Server_API.app.core.Prompt_Management.structured_prompts.models import (
     SINGLE_TEXT_RECIPE_LIMITS,
@@ -232,12 +233,7 @@ def _render_definition_legacy_fields(definition: PromptDefinition | SingleTextRe
         except SingleTextRecipeRenderError as error:
             raise InputError(error.code) from error
         return legacy.system_prompt, legacy.user_prompt
-    messages = [
-        {"role": block.role, "content": block.content}
-        for block in sorted(definition.blocks, key=lambda item: item.order)
-        if block.enabled
-    ]
-    legacy = render_legacy_snapshot(messages, definition)
+    legacy = render_v1_authored_snapshot(definition)
     return legacy.system_prompt, legacy.user_prompt
 
 
@@ -276,8 +272,12 @@ def _coerce_preview_definition(
             prompt_schema_version,
             prompt_definition_payload,
         )
+        _validate_request_text(
+            system_prompt, user_prompt, is_recipe=isinstance(definition, SingleTextRecipeDefinitionV2)
+        )
         return definition, "structured", definition_schema_version
 
+    _validate_request_text(system_prompt, user_prompt)
     definition = convert_legacy_prompt_to_definition(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
@@ -316,6 +316,7 @@ def _prepare_prompt_storage_payload(
             prompt_definition_payload,
         )
 
+        _validate_request_text(payload.get("system_prompt"), payload.get("user_prompt"), is_recipe=isinstance(definition, SingleTextRecipeDefinitionV2))
         system_prompt, user_prompt = _render_definition_legacy_fields(definition)
         payload["prompt_definition"] = definition.model_dump()
         payload["prompt_schema_version"] = definition_schema_version
@@ -329,6 +330,7 @@ def _prepare_prompt_storage_payload(
     if prompt_schema_version is not None:
         raise InputError("Legacy prompts cannot include prompt_schema_version.")
 
+    _validate_request_text(payload.get("system_prompt"), payload.get("user_prompt"))
     payload["prompt_format"] = "legacy"
     payload["prompt_schema_version"] = None
     payload["prompt_definition"] = None
@@ -1182,19 +1184,93 @@ async def export_keywords_api(
 
 async def _reject_persisted_recipe_runtime_values(request: Request) -> None:
     """Inspect the raw envelope before request models can discard unknown keys."""
+    payload = await request.json()
     try:
-        reject_recipe_runtime_values(await request.json())
+        reject_recipe_runtime_values(payload)
     except ValueError as error:
-        raise HTTPException(status_code=400, detail="invalid_recipe_runtime_values") from error
+        raise HTTPException(status_code=400, detail=str(error)) from None
+
+
+def _validate_request_text(system_prompt: Any, user_prompt: Any, *, is_recipe: bool = False) -> None:
+    try:
+        validate_prompt_text_fields(system_prompt, user_prompt, is_recipe=is_recipe)
+    except ValueError:
+        raise InputError("invalid_prompt_text") from None
+
+
+def _validate_structured_transport(payload: Any, request_model: type[BaseModel]) -> None:
+    """Avoid value-rich framework errors when validating a structured envelope."""
+    if isinstance(payload, dict):
+        try:
+            validate_prompt_text_fields(payload.get("system_prompt"), payload.get("user_prompt"), is_recipe=True)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid_prompt_text") from None
+    if isinstance(payload, dict) and (
+        "prompt_definition" in payload
+        or "prompt_schema_version" in payload
+        or ("prompt_format" in payload and payload["prompt_format"] != "legacy")
+    ):
+        try:
+            request_model.model_validate(payload)
+        except ValidationError:
+            raise HTTPException(status_code=400, detail="invalid_prompt_definition") from None
+
+
+async def _prevalidate_prompt_save(request: Request) -> None:
+    """Sanitize request-model errors before ordinary create/update coercion."""
+    _validate_structured_transport(await request.json(), schemas.PromptCreate)
+
+
+async def _prevalidate_prompt_preview(request: Request) -> None:
+    """Sanitize preview request-model errors without rejecting ephemeral values."""
+    _validate_structured_transport(await request.json(), schemas.StructuredPromptPreviewRequest)
+
+
+async def _reject_structured_legacy_input(request: Request) -> None:
+    """Reject unsupported identity before legacy models discard it or a batch writes."""
+    payload = await request.json()
+    items = [payload]
+    if isinstance(payload, dict) and isinstance(payload.get("prompts"), list):
+        items.extend(payload["prompts"])
+    identity_keys = {
+        "prompt_schema_version",
+        "prompt_definition",
+        "schema_version",
+        "definition_kind",
+        "assembly_config",
+        "assembly_mode",
+        "target_role",
+        "render_format",
+        "section_key",
+        "blocks",
+    }
+    for item in items:
+        if isinstance(item, dict) and (
+            identity_keys.intersection(item)
+            or ("prompt_format" in item and item["prompt_format"] != "legacy")
+            or ("format" in item and item["format"] != "legacy")
+        ):
+            raise HTTPException(status_code=400, detail="structured_prompt_not_supported_on_legacy_route")
+    for item in items:
+        if isinstance(item, dict):
+            try:
+                validate_prompt_text_fields(item.get("system_prompt"), item.get("user_prompt"))
+            except ValueError:
+                raise HTTPException(status_code=400, detail="invalid_prompt_text") from None
 
 
 # === Import Endpoints ===
+
 
 @router.post(
     "/import",
     response_model=schemas.PromptImportResponse,
     summary="Import prompts from JSON",
-    dependencies=[Depends(verify_prompts_user), Depends(_reject_persisted_recipe_runtime_values)]
+    dependencies=[
+        Depends(verify_prompts_user),
+        Depends(_reject_persisted_recipe_runtime_values),
+        Depends(_reject_structured_legacy_input),
+    ],
 )
 async def import_prompts_api(
     payload: schemas.PromptImportRequest = Body(...),
@@ -1311,7 +1387,7 @@ async def render_template_api(
     response_model=schemas.StructuredPromptPreviewResponse,
     response_model_exclude_unset=True,
     summary="Preview assembled prompt messages",
-    dependencies=[Depends(verify_prompts_user)],
+    dependencies=[Depends(verify_prompts_user), Depends(_prevalidate_prompt_preview)],
 )
 async def preview_prompt_api(
     payload: schemas.StructuredPromptPreviewRequest = Body(...),
@@ -1480,7 +1556,7 @@ async def bulk_update_prompt_keywords(
     "/create",
     summary="Create a prompt (legacy payload)",
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(verify_prompts_user), Depends(_reject_persisted_recipe_runtime_values)]
+    dependencies=[Depends(verify_prompts_user), Depends(_reject_persisted_recipe_runtime_values), Depends(_reject_structured_legacy_input)]
 )
 async def legacy_create_prompt(
     payload: schemas.LegacyPromptCreateRequest = Body(...),
@@ -1517,14 +1593,14 @@ async def legacy_create_prompt(
     response_model=schemas.PromptResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new prompt",
-    dependencies=[Depends(verify_prompts_user), Depends(_reject_persisted_recipe_runtime_values)]
+    dependencies=[Depends(verify_prompts_user), Depends(_reject_persisted_recipe_runtime_values), Depends(_prevalidate_prompt_save)]
 )
 @router.post(
     "",
     response_model=schemas.PromptResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new prompt [no-slash alias]",
-    dependencies=[Depends(verify_prompts_user), Depends(_reject_persisted_recipe_runtime_values)]
+    dependencies=[Depends(verify_prompts_user), Depends(_reject_persisted_recipe_runtime_values), Depends(_prevalidate_prompt_save)]
 )
 async def create_prompt(
     prompt_data: schemas.PromptCreate,
@@ -1574,13 +1650,13 @@ async def create_prompt(
         return schemas.PromptResponse(**created_prompt_dict)
 
     except (InputError, ConflictError, DatabaseError) as e:
-        logger.error(f"Database error creating prompt: {e}", exc_info=True)
+        logger.error("Database error creating prompt: {}", type(e).__name__)
         raise map_db_error_to_http(
             e,
             default_detail="Database error during prompt creation.",
         ) from e
     except _PROMPTS_DB_OPERATION_EXCEPTIONS as e:  # Catch-all for other unexpected errors
-        logger.error(f"Unexpected error creating prompt: {e}", exc_info=True)
+        logger.error("Unexpected error creating prompt: {}", type(e).__name__)
         # Avoid leaking the raw 'msg' variable if it was a NameError
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred.") from e
 
@@ -1775,7 +1851,7 @@ async def get_prompt(
     "/{prompt_identifier}",
     response_model=schemas.PromptResponse,
     summary="Update an existing prompt (or create if name matches and overwrite=true logic used)",
-    dependencies=[Depends(verify_prompts_user), Depends(_reject_persisted_recipe_runtime_values)]
+    dependencies=[Depends(verify_prompts_user), Depends(_reject_persisted_recipe_runtime_values), Depends(_prevalidate_prompt_save)]
 )
 async def update_prompt(
     prompt_identifier: Union[int, str],
@@ -1828,7 +1904,7 @@ async def update_prompt(
         return schemas.PromptResponse(**final_updated_prompt)
 
     except (InputError, ConflictError, DatabaseError) as e:
-        logger.error(f"Database error updating prompt '{prompt_identifier}': {e}", exc_info=True)
+        logger.error("Database error updating prompt: {}", type(e).__name__)
         raise map_db_error_to_http(
             e,
             default_detail="Database error during prompt update.",
@@ -1836,7 +1912,7 @@ async def update_prompt(
     except HTTPException:  # Re-raise
         raise
     except _PROMPTS_DB_OPERATION_EXCEPTIONS as e:
-        logger.error(f"Unexpected error updating prompt '{prompt_identifier}': {e}", exc_info=True)
+        logger.error("Unexpected error updating prompt: {}", type(e).__name__)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail="An unexpected error occurred during prompt update.") from e
 

@@ -5,8 +5,10 @@
 import json
 import os
 import re
+import signal
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import FrozenInstanceError
 from pathlib import Path
@@ -50,6 +52,97 @@ from tldw_Server_API.app.core.Prompt_Management.service_prompts import (
 
 TEST_CLIENT_ID = "test_db_client"
 SENSITIVE_SQLITE_ERROR = "PROMPT_BODY_MUST_NOT_APPEAR /private/DB_PATH_MUST_NOT_APPEAR.db"
+
+
+@contextmanager
+def _bounded_structural_check():
+    """Interrupt an accidentally unbounded guard, restoring the process timer."""
+
+    def expired(_signum, _frame):
+        raise TimeoutError("Structural validation did not terminate")
+
+    previous = signal.signal(signal.SIGALRM, expired)
+    old_timer = signal.setitimer(signal.ITIMER_REAL, 0.5)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, *old_timer)
+        signal.signal(signal.SIGALRM, previous)
+
+
+def _hostile_structure(kind):
+    if kind == "mapping_cycle":
+        value = {}
+        value["self"] = value
+    elif kind == "list_cycle":
+        value = []
+        value.append(value)
+    elif kind == "dag":
+        value = []
+        for _ in range(25):
+            value = [value, value]
+    elif kind == "deep":
+        value = None
+        for _ in range(200):
+            value = [value]
+    elif kind == "wide":
+        value = [None] * 20001
+    elif kind == "json_depth":
+        return "[" * 1200 + "null" + "]" * 1200
+    else:
+        value = object()
+    definition = _recipe_definition()
+    definition["variables"][0]["default_value"] = value
+    return definition
+
+
+@pytest.mark.parametrize(
+    "kind", ["mapping_cycle", "list_cycle", "dag", "deep", "wide", "json_depth", "unsupported_type"]
+)
+@pytest.mark.parametrize("operation", ["create", "overwrite", "update", "serialize", "parse"])
+def test_structural_inputs_are_bounded_and_never_mutate_storage(memory_db, kind, operation):
+    from tldw_Server_API.app.core.DB_Management.prompts_db_helpers import (
+        parse_stored_prompt_definition,
+        serialize_prompt_definition,
+    )
+
+    prompt_id, _, _ = memory_db.add_prompt("Good", None, None, system_prompt="Keep")
+    before = memory_db.get_prompt_by_id(prompt_id)
+    events = memory_db.get_sync_log_entries()
+    definition = _hostile_structure(kind)
+    with _bounded_structural_check(), pytest.raises(ValueError) as caught:
+        if operation == "serialize":
+            serialize_prompt_definition(definition)
+        elif operation == "parse":
+            parse_stored_prompt_definition(definition)
+        elif operation == "update":
+            memory_db.update_prompt_by_id(
+                prompt_id, {"prompt_format": "structured", "prompt_schema_version": 2, "prompt_definition": definition}
+            )
+        else:
+            memory_db.add_prompt(
+                "New" if operation == "create" else "Good",
+                None,
+                None,
+                prompt_format="structured",
+                prompt_schema_version=2,
+                prompt_definition=definition,
+                overwrite=operation == "overwrite",
+            )
+    assert str(caught.value) in {"invalid_prompt_definition_structure", "invalid_prompt_definition"}
+    if operation in {"create", "overwrite", "update"}:
+        assert isinstance(caught.value, InputError)
+    assert memory_db.get_prompt_by_id(prompt_id) == before
+    assert memory_db.get_sync_log_entries() == events
+    assert memory_db.get_prompt_by_name("New") is None
+
+
+def test_guard_rejects_shared_containers_even_without_a_cycle():
+    from tldw_Server_API.app.core.DB_Management.prompts_db_helpers import reject_recipe_runtime_values
+
+    shared = {"safe": "authored"}
+    with _bounded_structural_check(), pytest.raises(ValueError, match="^invalid_prompt_definition_structure$"):
+        reject_recipe_runtime_values([shared, shared])
 
 
 def _recipe_definition(target="system"):

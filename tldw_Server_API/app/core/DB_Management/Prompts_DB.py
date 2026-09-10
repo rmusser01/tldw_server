@@ -1355,7 +1355,13 @@ class PromptsDatabase:
         current_time = self._get_current_utc_timestamp_str()
         client_id = self.client_id
         try:
-            recipe_fields = prepare_recipe_storage_fields(prompt_format, prompt_schema_version, prompt_definition)
+            recipe_fields = prepare_recipe_storage_fields(
+                prompt_format,
+                prompt_schema_version,
+                prompt_definition,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+            )
             if recipe_fields:
                 prompt_definition = recipe_fields["prompt_definition"]
                 prompt_schema_version = recipe_fields["prompt_schema_version"]
@@ -1513,7 +1519,7 @@ class PromptsDatabase:
                 return prompt_id, prompt_uuid, msg
 
         except (InputError, ConflictError, DatabaseError, sqlite3.Error) as e:
-            logger.error(f"Error adding/updating prompt '{name}': {e}", exc_info=True)
+            logger.error("Error adding/updating prompt: {}", type(e).__name__)
             if isinstance(e, (InputError, ConflictError, DatabaseError)): raise  # noqa: E701
             else: raise DatabaseError(f"Failed to process prompt '{name}': {e}") from e  # noqa: E701, TRY003
 
@@ -1635,6 +1641,8 @@ class PromptsDatabase:
                             update_data.get("prompt_format", existing_prompt_state["prompt_format"]),
                             update_data.get("prompt_schema_version", existing_prompt_state["prompt_schema_version"]),
                             update_data.get("prompt_definition", existing_definition),
+                            system_prompt=update_data.get("system_prompt"),
+                            user_prompt=update_data.get("user_prompt"),
                         )
                     )
                 except ValueError as error:
@@ -1690,7 +1698,10 @@ class PromptsDatabase:
                     params.append(update_data.get('prompt_schema_version'))
                 if 'prompt_definition' in update_data:
                     set_clauses.append("prompt_definition_json = ?")
-                    params.append(self._serialize_prompt_definition(update_data.get('prompt_definition')))
+                    try:
+                        params.append(self._serialize_prompt_definition(update_data.get('prompt_definition')))
+                    except ValueError as error:
+                        raise InputError(str(error)) from error
                 if 'usage_count' in update_data:
                     usage_count = update_data.get('usage_count')
                     if usage_count is not None:
@@ -1746,7 +1757,7 @@ class PromptsDatabase:
                 return original_uuid, f"Prompt ID {prompt_id} updated successfully to version {new_version}."
 
         except (InputError, ConflictError, DatabaseError, sqlite3.Error) as e:
-            logger.error(f"Error updating prompt ID {prompt_id}: {e}", exc_info=True)
+            logger.error("Error updating prompt ID {}: {}", prompt_id, type(e).__name__)
             if isinstance(e, (InputError, ConflictError, DatabaseError)):
                 raise
             raise DatabaseError(f"Failed to update prompt ID {prompt_id}: {e}") from e  # noqa: TRY003

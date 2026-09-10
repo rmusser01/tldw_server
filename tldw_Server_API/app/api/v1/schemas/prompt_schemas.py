@@ -281,8 +281,17 @@ class PromptBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255, description="Unique name of the prompt.")
     author: Optional[str] = Field(None, max_length=100, description="Author of the prompt.")
     details: Optional[str] = Field(None, max_length=4000, description="Detailed description or notes about the prompt.")
-    system_prompt: Optional[str] = Field(None, max_length=20000, description="The system part of the prompt.")
-    user_prompt: Optional[str] = Field(None, max_length=20000, description="The user part of the prompt.")
+    # Transport allows v2 snapshots; routes retain the legacy/v1 20k input bound.
+    system_prompt: Optional[str] = Field(
+        None,
+        max_length=SINGLE_TEXT_RECIPE_LIMITS["max_rendered_output_length"],
+        description="The system part of the prompt.",
+    )
+    user_prompt: Optional[str] = Field(
+        None,
+        max_length=SINGLE_TEXT_RECIPE_LIMITS["max_rendered_output_length"],
+        description="The user part of the prompt.",
+    )
     prompt_format: Literal["legacy", "structured"] = Field(
         "legacy",
         description="Whether the prompt is stored as legacy text fields or a structured definition.",
@@ -438,8 +447,8 @@ class TemplateRenderResponse(BaseModel):
 # --- Structured Prompt Preview / Conversion ---
 class StructuredPromptPreviewRequest(BaseModel):
     prompt_format: Literal["legacy", "structured"] = "legacy"
-    system_prompt: Optional[str] = Field(None, max_length=20000)
-    user_prompt: Optional[str] = Field(None, max_length=20000)
+    system_prompt: Optional[str] = Field(None, max_length=SINGLE_TEXT_RECIPE_LIMITS["max_rendered_output_length"])
+    user_prompt: Optional[str] = Field(None, max_length=SINGLE_TEXT_RECIPE_LIMITS["max_rendered_output_length"])
     prompt_schema_version: Optional[int] = Field(None, ge=1)
     prompt_definition: Optional[dict[str, Any]] = None
     variables: dict[str, Any] = Field(default_factory=dict)

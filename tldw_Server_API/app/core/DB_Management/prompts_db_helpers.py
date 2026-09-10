@@ -3,14 +3,17 @@
 import json
 import re
 import unicodedata
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from contextlib import suppress
 from typing import Any, Optional
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
+from tldw_Server_API.app.core.Prompt_Management.structured_prompts.legacy_renderer import render_legacy_snapshot
 from tldw_Server_API.app.core.Prompt_Management.structured_prompts.models import (
+    SINGLE_TEXT_RECIPE_LIMITS,
     PromptDefinition,
+    PromptLegacySnapshot,
     SingleTextRecipeDefinitionV2,
     parse_prompt_definition,
 )
@@ -20,20 +23,79 @@ from tldw_Server_API.app.core.Prompt_Management.structured_prompts.single_text_r
 from tldw_Server_API.app.core.Prompt_Management.structured_prompts.validator import validate_prompt_definition
 
 _RUNTIME_VALUE_KEYS = frozenset({"runtime_values", "variable_values", "resolved_values"})
+_RECIPE_MARKER_KEYS = frozenset({"definition_kind", "assembly_mode", "target_role", "render_format", "section_key"})
 _LEGACY_SCHEMA_VERSION = TypeAdapter(int)
+# Bound every save envelope/definition walk, including direct Python callers.
+# Repeated containers are rejected (not skipped): JSON would expand aliases.
+PROMPT_STRUCTURE_MAX_DEPTH = 32
+PROMPT_STRUCTURE_MAX_NODES = 10000
+LEGACY_PROMPT_TEXT_LIMIT = 20000
+
+
+def validate_prompt_text_fields(system_prompt: Any, user_prompt: Any, *, is_recipe: bool = False) -> None:
+    """Bound transport/storage text without including authored content in errors."""
+    limit = SINGLE_TEXT_RECIPE_LIMITS["max_rendered_output_length"] if is_recipe else LEGACY_PROMPT_TEXT_LIMIT
+    for value in (system_prompt, user_prompt):
+        if value is not None and (not isinstance(value, str) or len(value) > limit):
+            raise ValueError("invalid_prompt_text")
+
+
+def render_v1_authored_snapshot(definition: PromptDefinition) -> PromptLegacySnapshot:
+    """Keep the original authored v1 snapshot derivation shared with API saves."""
+    messages = [
+        {"role": block.role, "content": block.content}
+        for block in sorted(definition.blocks, key=lambda item: item.order)
+        if block.enabled
+    ]
+    return render_legacy_snapshot(messages, definition)
+
+
+def _walk_prompt_containers(value: Any) -> Iterator[Any]:
+    """Visit a JSON-shaped tree with bounded work; reject cycles and all aliases."""
+    stack = [(iter((value,)), 0)]
+    seen: set[int] = set()
+    nodes = 0
+    while stack:
+        iterator, depth = stack[-1]
+        try:
+            item = next(iterator)
+        except StopIteration:
+            stack.pop()
+            continue
+        nodes += 1
+        if nodes > PROMPT_STRUCTURE_MAX_NODES:
+            raise ValueError("invalid_prompt_definition_structure")
+        if isinstance(item, BaseModel):
+            children = vars(item).values()
+        elif isinstance(item, Mapping):
+            children = item.values()
+        elif isinstance(item, (list, tuple)):
+            children = item
+        elif item is None or isinstance(item, (str, int, float, bool)):
+            continue
+        else:
+            raise ValueError("invalid_prompt_definition")
+        if id(item) in seen or depth > PROMPT_STRUCTURE_MAX_DEPTH or len(children) > PROMPT_STRUCTURE_MAX_NODES - nodes:
+            raise ValueError("invalid_prompt_definition_structure")
+        seen.add(id(item))
+        yield item
+        stack.append((iter(children), depth + 1))
 
 
 def reject_recipe_runtime_values(value: Any) -> None:
     """Reject structural ephemeral-value keys, never words inside authored text."""
-    pending = [value]
-    while pending:
-        item = pending.pop()
+    for item in _walk_prompt_containers(value):
         if isinstance(item, Mapping):
-            if _RUNTIME_VALUE_KEYS.intersection(item):
+            if any(key in item for key in _RUNTIME_VALUE_KEYS):
                 raise ValueError("invalid_recipe_runtime_values")
-            pending.extend(item.values())
-        elif isinstance(item, (list, tuple)):
-            pending.extend(item)
+
+
+def has_recipe_markers(value: Any) -> bool:
+    """Recognize recipe-only keys regardless of their values or missing identity."""
+    return any(
+        isinstance(item, Mapping) and any(key in item for key in _RECIPE_MARKER_KEYS)
+        for item in _walk_prompt_containers(value)
+    )
 
 
 def parse_stored_prompt_definition(value: Any) -> PromptDefinition | SingleTextRecipeDefinitionV2:
@@ -41,13 +103,20 @@ def parse_stored_prompt_definition(value: Any) -> PromptDefinition | SingleTextR
     if isinstance(value, str):
         try:
             value = json.loads(value)
+        except RecursionError as error:
+            raise ValueError("invalid_prompt_definition_structure") from error
         except (ValueError, TypeError) as error:
             raise ValueError("invalid_prompt_definition") from error
+    reject_recipe_runtime_values(value)
     if isinstance(value, (PromptDefinition, SingleTextRecipeDefinitionV2)):
-        value = value.model_dump()
+        try:
+            value = value.model_dump()
+        except (ValueError, TypeError, RecursionError) as error:
+            raise ValueError("invalid_prompt_definition") from error
     if not isinstance(value, Mapping):
         raise ValueError("invalid_prompt_definition")
     reject_recipe_runtime_values(value)
+    recipe_like = has_recipe_markers(value)
     # Preserve the original v1 int-field acceptance only when it selects v1.
     try:
         version = _LEGACY_SCHEMA_VERSION.validate_python(value.get("schema_version", 1))
@@ -62,7 +131,7 @@ def parse_stored_prompt_definition(value: Any) -> PromptDefinition | SingleTextR
     try:
         definition = parse_prompt_definition(value)
     except ValidationError as error:
-        if version == 1 and "definition_kind" not in value:
+        if version == 1 and not recipe_like:
             raise ValueError(f"Invalid prompt_definition: {error}") from error
         raise ValueError("invalid_prompt_definition") from error
     issues = validate_prompt_definition(definition)
@@ -71,20 +140,40 @@ def parse_stored_prompt_definition(value: Any) -> PromptDefinition | SingleTextR
     return definition
 
 
-def prepare_recipe_storage_fields(prompt_format: str, schema_version: Any, definition: Any) -> dict[str, Any]:
+def prepare_recipe_storage_fields(
+    prompt_format: str,
+    schema_version: Any,
+    definition: Any,
+    *,
+    system_prompt: Any = None,
+    user_prompt: Any = None,
+) -> dict[str, Any]:
     """Validate definitions at DB ingestion, compiling only v2 authored snapshots.
 
     V1 bytes and legacy fields remain caller-owned as before; v2 snapshots are
     always derived so a direct DB caller cannot persist a filled instance there.
     """
     if definition is None:
+        validate_prompt_text_fields(system_prompt, user_prompt)
         if schema_version not in (None, 1):
             raise ValueError("invalid_prompt_definition")
         return {}
     parsed = parse_stored_prompt_definition(definition)
+    validate_prompt_text_fields(system_prompt, user_prompt, is_recipe=True)
     if isinstance(parsed, PromptDefinition):
         if schema_version not in (None, 1):
             raise ValueError("prompt_schema_version must match prompt_definition.schema_version.")
+        # API-authored v1 snapshots may exceed the old request-field bound.
+        # Verify exact derivation rather than trusting a caller-provided flag.
+        oversized = {
+            key: value
+            for key, value in {"system_prompt": system_prompt, "user_prompt": user_prompt}.items()
+            if value is not None and len(value) > LEGACY_PROMPT_TEXT_LIMIT
+        }
+        if oversized:
+            snapshot = render_v1_authored_snapshot(parsed)
+            if any(value != getattr(snapshot, key) for key, value in oversized.items()):
+                raise ValueError("invalid_prompt_text")
         return {}
     if prompt_format != "structured":
         raise ValueError("invalid_recipe_prompt_format")
@@ -104,11 +193,18 @@ def serialize_prompt_definition(prompt_definition: Any) -> Optional[str]:
     if prompt_definition is None:
         return None
     if isinstance(prompt_definition, str):
-        with suppress(json.JSONDecodeError):
+        try:
             reject_recipe_runtime_values(json.loads(prompt_definition))
+        except json.JSONDecodeError:
+            pass  # Preserve the existing standalone opaque-string serializer contract.
+        except RecursionError as error:
+            raise ValueError("invalid_prompt_definition_structure") from error
         return prompt_definition
     reject_recipe_runtime_values(prompt_definition)
-    return json.dumps(prompt_definition, sort_keys=True)
+    try:
+        return json.dumps(prompt_definition, sort_keys=True)
+    except (ValueError, TypeError, RecursionError) as error:
+        raise ValueError("invalid_prompt_definition") from error
 
 
 def deserialize_prompt_record(prompt_data: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
