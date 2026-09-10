@@ -4,6 +4,7 @@ import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { OPEN_PROMPT_SELECT_EVENT } from "@/utils/prompt-select-events"
+import { buildChatSurfaceScopeKey } from "@/services/chat-surface-scope"
 
 const mocks = vi.hoisted(() => ({
   getAllPrompts: vi.fn(async () => []),
@@ -307,6 +308,60 @@ describe("PromptSelect system prompt modal", () => {
     expect(props.setSystemPrompt).toHaveBeenLastCalledWith(original)
     expect(props.setSelectedSystemPrompt).toHaveBeenLastCalledWith("prompt-1")
     expect(screen.getByLabelText("Enter system prompt")).toHaveValue(original)
+  })
+
+  it("gates cached recipe authorization while open-time revalidation is pending and revoked", async () => {
+    const user = userEvent.setup()
+    const revoked = createDeferred<{
+      availability: "available"
+      prompt_improvement_v1: { supported: true; limits: null }
+      single_text_recipe_v2: { supported: true }
+      prompt_persistence: {
+        create_authorized: false
+        update_authorized: false
+      }
+    }>()
+    mocks.fetchPromptCapabilities
+      .mockResolvedValueOnce({
+        availability: "available",
+        prompt_improvement_v1: { supported: true, limits: null },
+        single_text_recipe_v2: { supported: true },
+        prompt_persistence: {
+          create_authorized: true,
+          update_authorized: true
+        }
+      })
+      .mockReturnValueOnce(revoked.promise)
+    renderPromptSelect()
+    await waitFor(() =>
+      expect(mocks.fetchPromptCapabilities).toHaveBeenCalledTimes(1)
+    )
+
+    await openEditor(user)
+    await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+    await user.click(screen.getByRole("button", { name: /Build from recipe/ }))
+    await waitFor(() =>
+      expect(mocks.fetchPromptCapabilities).toHaveBeenCalledTimes(2)
+    )
+    expect(
+      await screen.findByRole("button", { name: "Save as new recipe" })
+    ).toBeDisabled()
+
+    await act(async () => {
+      revoked.resolve({
+        availability: "available",
+        prompt_improvement_v1: { supported: true, limits: null },
+        single_text_recipe_v2: { supported: true },
+        prompt_persistence: {
+          create_authorized: false,
+          update_authorized: false
+        }
+      })
+      await revoked.promise
+    })
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" })
+    ).toBeDisabled()
   })
 
   it("returns from recipe mode without changing an empty system draft", async () => {
@@ -1169,10 +1224,34 @@ describe("PromptSelect system prompt modal", () => {
 
     expect(screen.getByRole("button", { name: /Improve now/ })).toBeDisabled()
     expect(mocks.fetchPromptCapabilities).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole("button", { name: /Build from recipe/ }))
+    expect(
+      await screen.findByRole("button", { name: "Save as new recipe" })
+    ).toBeDisabled()
+    expect(mocks.fetchPromptCapabilities).not.toHaveBeenCalled()
   })
 
-  it("does not reuse supported capabilities after the backend identity changes", async () => {
+  it("does not reuse supported capabilities for the same user after credential claims change", async () => {
     const user = userEvent.setup()
+    const firstToken =
+      "eyJhbGciOiJub25lIn0.eyJzdWIiOiJ1c2VyLTQyIiwiaWF0IjoxfQ.first-signature"
+    const refreshedToken =
+      "eyJhbGciOiJub25lIn0.eyJzdWIiOiJ1c2VyLTQyIiwiaWF0IjoyfQ.refreshed-signature"
+    const firstBackendKey = buildChatSurfaceScopeKey({
+      serverUrl: "https://server.example",
+      authMode: "multi-user",
+      orgId: null,
+      userId: null,
+      accessToken: firstToken
+    })
+    const refreshedBackendKey = buildChatSurfaceScopeKey({
+      serverUrl: "https://server.example",
+      authMode: "multi-user",
+      orgId: null,
+      userId: null,
+      accessToken: refreshedToken
+    })
     const backendB = createDeferred<{
       availability: "available"
       prompt_improvement_v1: { supported: false; limits: null }
@@ -1185,7 +1264,9 @@ describe("PromptSelect system prompt modal", () => {
         single_text_recipe_v2: { supported: false }
       })
       .mockReturnValueOnce(backendB.promise)
-    const rendered = renderPromptSelect()
+    const rendered = renderPromptSelect({
+      promptAssistBackendKey: firstBackendKey
+    })
 
     await openEditor(user)
     await user.click(screen.getByRole("button", { name: "Improve prompt" }))
@@ -1195,7 +1276,10 @@ describe("PromptSelect system prompt modal", () => {
 
     rendered.rerender(
       <QueryClientProvider client={rendered.queryClient}>
-        <PromptSelect {...rendered.props} promptAssistBackendKey="backend-b" />
+        <PromptSelect
+          {...rendered.props}
+          promptAssistBackendKey={refreshedBackendKey}
+        />
       </QueryClientProvider>
     )
 
@@ -1203,9 +1287,11 @@ describe("PromptSelect system prompt modal", () => {
     expect(mocks.fetchPromptCapabilities).toHaveBeenCalledTimes(2)
     expect(
       rendered.queryClient.getQueryCache().find({
-        queryKey: ["promptCapabilities", "backend-b"]
+        queryKey: ["promptCapabilities", refreshedBackendKey]
       })?.options.retry
     ).toBe(false)
+    expect(firstBackendKey).not.toContain(firstToken)
+    expect(refreshedBackendKey).not.toContain(refreshedToken)
   })
 
   it("ignores an old backend capability response while the new backend is unresolved", async () => {

@@ -409,6 +409,7 @@ export const canSaveRecipeAsNew = (state: RecipeEditorState): boolean =>
 export const canUpdateRecipe = (state: RecipeEditorState): boolean =>
   state.source.source_kind === "saved" &&
   state.source.syncStatus !== "conflict" &&
+  state.source.syncStatus !== "error" &&
   isValidRecipeDefinition(state.definition);
 
 export const serializeRecipeDefinitionForSave = (

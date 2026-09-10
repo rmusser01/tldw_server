@@ -615,6 +615,13 @@ export const restorePromptSnapshot = async (snapshot: Prompt) => {
   return restored.id
 }
 
+export const markPromptSyncError = async (id: string) => {
+  const db = new PageAssistDatabase()
+  await db.updatePromptSyncStatus(id, { syncStatus: "error" })
+  await updatePromptFB({ id, syncStatus: "error" })
+  return id
+}
+
 export const restorePrompt = async (id: string) => {
   // Restore from trash
   const db = new PageAssistDatabase()

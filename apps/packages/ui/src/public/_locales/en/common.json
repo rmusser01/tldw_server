@@ -1693,5 +1693,14 @@
   },
   "promptAssist_recipeUpdateRollbackFailed": {
     "message": "Could not update the recipe, and its local rollback also failed. Refresh the prompt library before retrying."
+  },
+  "promptAssist_recipeSaveUnverified": {
+    "message": "The recipe was saved locally, but the server outcome could not be verified. Reconcile this recipe before saving or updating again."
+  },
+  "promptAssist_recipeUpdateUnverified": {
+    "message": "The recipe was updated locally, but the server outcome could not be verified. Reconcile this recipe before saving or updating again."
+  },
+  "promptAssist_recipePersistenceUnverified": {
+    "message": "This recipe exists locally, but its server outcome is unverified. Reconcile it before saving or updating again."
   }
 }

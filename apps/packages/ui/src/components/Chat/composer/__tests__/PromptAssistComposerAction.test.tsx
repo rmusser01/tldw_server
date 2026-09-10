@@ -378,6 +378,72 @@ describe("PromptAssistComposerAction entry and request contract", () => {
     expect((screen.getByLabelText("User draft") as HTMLTextAreaElement).value).toBe(original)
   })
 
+  it("keeps persistence unknown without an authoritative backend identity", async () => {
+    const user = userEvent.setup()
+    renderHarness({ promptAssistBackendKey: null })
+
+    await openActions(user)
+    await user.click(screen.getByRole("button", { name: /Build from recipe/ }))
+
+    expect(
+      await screen.findByRole("button", { name: "Save as new recipe" })
+    ).toBeDisabled()
+    expect(mocks.fetchPromptCapabilities).not.toHaveBeenCalled()
+  })
+
+  it("gates cached recipe authorization while open-time revalidation is pending and revoked", async () => {
+    const revoked = createDeferred<{
+      availability: "available"
+      prompt_improvement_v1: { supported: true; limits: null }
+      single_text_recipe_v2: { supported: true }
+      prompt_persistence: {
+        create_authorized: false
+        update_authorized: false
+      }
+    }>()
+    mocks.fetchPromptCapabilities
+      .mockResolvedValueOnce({
+        availability: "available",
+        prompt_improvement_v1: { supported: true, limits: null },
+        single_text_recipe_v2: { supported: true },
+        prompt_persistence: {
+          create_authorized: true,
+          update_authorized: true
+        }
+      })
+      .mockReturnValueOnce(revoked.promise)
+    const user = userEvent.setup()
+    renderHarness()
+    await waitFor(() =>
+      expect(mocks.fetchPromptCapabilities).toHaveBeenCalledTimes(1)
+    )
+
+    await openActions(user)
+    await user.click(screen.getByRole("button", { name: /Build from recipe/ }))
+    await waitFor(() =>
+      expect(mocks.fetchPromptCapabilities).toHaveBeenCalledTimes(2)
+    )
+    expect(
+      await screen.findByRole("button", { name: "Save as new recipe" })
+    ).toBeDisabled()
+
+    await act(async () => {
+      revoked.resolve({
+        availability: "available",
+        prompt_improvement_v1: { supported: true, limits: null },
+        single_text_recipe_v2: { supported: true },
+        prompt_persistence: {
+          create_authorized: false,
+          update_authorized: false
+        }
+      })
+      await revoked.promise
+    })
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" })
+    ).toBeDisabled()
+  })
+
   it("discards unapplied runtime values when the recipe builder closes and reopens", async () => {
     const user = userEvent.setup()
     renderHarness({ initialDraft: "" })

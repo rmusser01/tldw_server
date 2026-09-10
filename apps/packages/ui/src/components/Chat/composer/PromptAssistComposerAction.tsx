@@ -64,6 +64,8 @@ export function PromptAssistComposerAction({
   const [panelOpen, setPanelOpen] = React.useState(false)
   const [inspectionOpen, setInspectionOpen] = React.useState(false)
   const [recipeOpen, setRecipeOpen] = React.useState(false)
+  const [recipeAuthorizationRefreshing, setRecipeAuthorizationRefreshing] =
+    React.useState(false)
   const [recipeUndo, setRecipeUndo] = React.useState<{ draft: string } | null>(null)
   const normalizedBackendKey = promptAssistBackendKey?.trim() || null
   const modelSelectionRef = React.useRef(modelSelection)
@@ -77,7 +79,11 @@ export function PromptAssistComposerAction({
   const setFieldValue = form.setFieldValue
   modelSelectionRef.current = modelSelection
 
-  const { data: promptCapabilities } = useQuery({
+  const {
+    data: promptCapabilities,
+    isFetching: promptCapabilitiesFetching,
+    refetch: refetchPromptCapabilities
+  } = useQuery({
     queryKey: ["promptCapabilities", normalizedBackendKey],
     queryFn: fetchPromptCapabilities,
     enabled: Boolean(normalizedBackendKey),
@@ -89,6 +95,12 @@ export function PromptAssistComposerAction({
         promptCapabilities.prompt_improvement_v1.supported
       ? "supported"
       : "unsupported"
+  const recipeCapabilities =
+    !normalizedBackendKey ||
+    recipeAuthorizationRefreshing ||
+    promptCapabilitiesFetching
+    ? undefined
+    : promptCapabilities
 
   const adapter = React.useMemo<PromptTargetAdapter>(
     () => ({
@@ -252,7 +264,12 @@ export function PromptAssistComposerAction({
     setPanelOpen(false)
     setInspectionOpen(false)
     setRecipeOpen(true)
-  }, [dismissPromptAssist])
+    if (!normalizedBackendKey) return
+    setRecipeAuthorizationRefreshing(true)
+    void refetchPromptCapabilities().finally(() => {
+      setRecipeAuthorizationRefreshing(false)
+    })
+  }, [dismissPromptAssist, normalizedBackendKey, refetchPromptCapabilities])
   const closeRecipeBuilder = React.useCallback(() => {
     pendingDrawerFocusRef.current = true
     setRecipeOpen(false)
@@ -383,7 +400,7 @@ export function PromptAssistComposerAction({
               }>
               <PromptRecipeBuilder
                 target="user_message"
-                capabilities={promptCapabilities}
+                capabilities={recipeCapabilities}
                 onApply={applyRecipe}
                 onBack={closeRecipeBuilder}
               />

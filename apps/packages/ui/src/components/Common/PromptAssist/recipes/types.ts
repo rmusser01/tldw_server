@@ -30,7 +30,7 @@ export type SavedRecipeSource = {
   id: string;
   name: string;
   definition: unknown;
-  syncStatus?: "local" | "synced" | "pending" | "conflict";
+  syncStatus?: "local" | "synced" | "pending" | "conflict" | "error";
 };
 
 export type RecipeSource = BuiltInRecipe | SavedRecipeSource;

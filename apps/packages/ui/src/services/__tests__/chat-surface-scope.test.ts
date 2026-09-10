@@ -8,6 +8,8 @@ import {
 
 const JWT_WITH_SUB =
   "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJ1c2VyLTQyIn0.signature"
+const REFRESHED_JWT_WITH_SAME_SUB =
+  "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJ1c2VyLTQyIiwiaWF0IjoyfQ.refreshed-signature"
 
 describe("chat-surface-scope", () => {
   afterEach(() => {
@@ -41,6 +43,25 @@ describe("chat-surface-scope", () => {
         accessToken: JWT_WITH_SUB
       })
     ).toContain("user:user-42")
+  })
+
+  it("changes scope for refreshed authority with the same subject without exposing either credential", () => {
+    const firstScope = buildChatSurfaceScopeKeyFromConfig({
+      serverUrl: "https://prod.example.com",
+      authMode: "multi-user",
+      orgId: 7,
+      accessToken: JWT_WITH_SUB
+    })
+    const refreshedScope = buildChatSurfaceScopeKeyFromConfig({
+      serverUrl: "https://prod.example.com",
+      authMode: "multi-user",
+      orgId: 7,
+      accessToken: REFRESHED_JWT_WITH_SAME_SUB
+    })
+
+    expect(firstScope).not.toBe(refreshedScope)
+    expect(firstScope).not.toContain(JWT_WITH_SUB)
+    expect(refreshedScope).not.toContain(REFRESHED_JWT_WITH_SAME_SUB)
   })
 
   it("changes single-user scope keys when the API key changes without leaking the raw key", () => {

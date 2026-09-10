@@ -153,6 +153,7 @@ export function SingleFieldRecipeEditor({
     "save" | "update" | null
   >(null);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
+  const [persistenceUncertain, setPersistenceUncertain] = useState(false);
 
   const sources = useMemo(() => {
     const all: RecipeSource[] = [...BUILT_IN_RECIPES];
@@ -204,6 +205,7 @@ export function SingleFieldRecipeEditor({
     persistencePending.current = false;
     setPersistenceAction(null);
     setPersistenceError(null);
+    setPersistenceUncertain(false);
     const next = createRecipeWorkingCopy(initialSource, target);
     setState(next);
     setVariableNameDrafts({});
@@ -436,11 +438,24 @@ export function SingleFieldRecipeEditor({
       await persist();
     } catch (error) {
       if (request === persistenceRequest.current) {
+        const uncertain =
+          error instanceof Error && error.message === "recipe_sync_uncertain";
         const rollbackFailed =
           error instanceof Error &&
           error.message === `recipe_${action}_rollback_failed`;
+        if (uncertain) setPersistenceUncertain(true);
         setPersistenceError(
-          rollbackFailed
+          uncertain
+            ? action === "save"
+              ? t(
+                  "common:promptAssist.recipeSaveUnverified",
+                  "The recipe was saved locally, but the server outcome could not be verified. Reconcile this recipe before saving or updating again.",
+                )
+              : t(
+                  "common:promptAssist.recipeUpdateUnverified",
+                  "The recipe was updated locally, but the server outcome could not be verified. Reconcile this recipe before saving or updating again.",
+                )
+            : rollbackFailed
             ? action === "save"
               ? t(
                   "common:promptAssist.recipeSaveRollbackFailed",
@@ -470,11 +485,6 @@ export function SingleFieldRecipeEditor({
   const variableNamesReady =
     Object.keys(variableNameErrors).length === 0 &&
     !Object.entries(variableNameDrafts).some(([name, value]) => name !== value);
-  const saveEnabled =
-    savePersistenceAvailable === true &&
-    preview.definitionValid &&
-    variableNamesReady &&
-    Boolean(onSaveAsNew);
   const refreshedSavedSource =
     state.source.source_kind === "saved"
       ? savedRecipes.find(
@@ -490,8 +500,17 @@ export function SingleFieldRecipeEditor({
   const sourceHasConflict =
     state.source.source_kind === "saved" &&
     liveSelectedSyncStatus === "conflict";
+  const persistenceWriteLocked =
+    persistenceUncertain || liveSelectedSyncStatus === "error";
+  const saveEnabled =
+    savePersistenceAvailable === true &&
+    !persistenceWriteLocked &&
+    preview.definitionValid &&
+    variableNamesReady &&
+    Boolean(onSaveAsNew);
   const updateEnabled =
     updatePersistenceAvailable === true &&
+    !persistenceWriteLocked &&
     preview.definitionValid &&
     variableNamesReady &&
     state.source.source_kind === "saved" &&
@@ -678,7 +697,14 @@ export function SingleFieldRecipeEditor({
         </section>
       </div>
 
-      {savePersistenceAvailable !== true ||
+      {persistenceWriteLocked && !persistenceError ? (
+        <p role="status" className="text-sm text-warn">
+          {t(
+            "common:promptAssist.recipePersistenceUnverified",
+            "This recipe exists locally, but its server outcome is unverified. Reconcile it before saving or updating again.",
+          )}
+        </p>
+      ) : savePersistenceAvailable !== true ||
       (state.source.source_kind === "saved" &&
         updatePersistenceAvailable !== true) ? (
         <p role="status" className="text-sm text-warn">

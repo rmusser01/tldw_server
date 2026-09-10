@@ -140,7 +140,8 @@ export const cloneSavedRecipeSource = (prompt: unknown): SavedRecipeSource => {
     ...(syncStatus === "local" ||
     syncStatus === "synced" ||
     syncStatus === "pending" ||
-    syncStatus === "conflict"
+    syncStatus === "conflict" ||
+    syncStatus === "error"
       ? { syncStatus }
       : {})
   }

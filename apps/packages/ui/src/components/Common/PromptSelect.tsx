@@ -90,6 +90,8 @@ export const PromptSelect: React.FC<Props> = ({
   const [editorTemplateContent, setEditorTemplateContent] = useState("")
   const [editorOverrideActive, setEditorOverrideActive] = useState(false)
   const [recipeMode, setRecipeMode] = useState(false)
+  const [recipeAuthorizationRefreshing, setRecipeAuthorizationRefreshing] =
+    useState(false)
   const [recipeUndo, setRecipeUndo] = useState<RecipeSystemPromptUndoSnapshot | null>(null)
   const searchInputRef = useRef<InputRef | null>(null)
   const editorInputRef = useRef<TextAreaRef | null>(null)
@@ -133,7 +135,11 @@ export const PromptSelect: React.FC<Props> = ({
     editorLookupEpochRef.current += 1
   }
 
-  const { data: promptCapabilities } = useQuery({
+  const {
+    data: promptCapabilities,
+    isFetching: promptCapabilitiesFetching,
+    refetch: refetchPromptCapabilities
+  } = useQuery({
     queryKey: ["promptCapabilities", normalizedPromptAssistBackendKey],
     queryFn: fetchPromptCapabilities,
     enabled: Boolean(normalizedPromptAssistBackendKey),
@@ -145,6 +151,12 @@ export const PromptSelect: React.FC<Props> = ({
         promptCapabilities.prompt_improvement_v1.supported
       ? "supported"
       : "unsupported"
+  const recipeCapabilities =
+    !normalizedPromptAssistBackendKey ||
+    recipeAuthorizationRefreshing ||
+    promptCapabilitiesFetching
+    ? undefined
+    : promptCapabilities
 
   const updateEditorDraft = React.useCallback((nextDraft: string) => {
     editorLookupEpochRef.current += 1
@@ -429,7 +441,16 @@ export const PromptSelect: React.FC<Props> = ({
   const enterRecipeMode = React.useCallback(() => {
     promptAssist.dismiss()
     setRecipeMode(true)
-  }, [promptAssist])
+    if (!normalizedPromptAssistBackendKey) return
+    setRecipeAuthorizationRefreshing(true)
+    void refetchPromptCapabilities().finally(() => {
+      setRecipeAuthorizationRefreshing(false)
+    })
+  }, [
+    normalizedPromptAssistBackendKey,
+    promptAssist,
+    refetchPromptCapabilities
+  ])
 
   const leaveRecipeMode = React.useCallback(() => {
     setRecipeMode(false)
@@ -875,7 +896,7 @@ export const PromptSelect: React.FC<Props> = ({
             }>
             <PromptRecipeBuilder
               target="system"
-              capabilities={promptCapabilities}
+              capabilities={recipeCapabilities}
               onApply={applyRecipe}
               onBack={leaveRecipeMode}
             />

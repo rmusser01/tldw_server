@@ -28,30 +28,11 @@ const normalizeOrgScope = (orgId: string | number | null | undefined): string =>
   return normalized ? `org:${normalized}` : "org:none"
 }
 
-const fnv1a36 = (value: string): string => {
-  let hash = 2166136261
-  for (let i = 0; i < value.length; i += 1) {
-    hash ^= value.charCodeAt(i)
-    hash +=
-      (hash << 1) +
-      (hash << 4) +
-      (hash << 7) +
-      (hash << 8) +
-      (hash << 24)
-  }
-  return (hash >>> 0).toString(36)
-}
-
-const deriveSingleUserApiKeyScope = (
-  authMode: string | null | undefined,
-  apiKey: string | null | undefined
-): string | null => {
-  if (normalizeAuthMode(authMode) !== "single-user") {
-    return null
-  }
-
-  const normalizedKey = String(apiKey || "").trim()
-  return normalizedKey ? `key:${fnv1a36(normalizedKey)}` : "key:none"
+const sha256CredentialScope = (kind: "key" | "token", value: string): string => {
+  const digest = sha256(
+    utf8ToBytes(`tldw:chat-surface-${kind}:v1\0${value}`)
+  )
+  return `${kind}:sha256:${bytesToHex(digest)}`
 }
 
 export const deriveSingleUserApiKeyCredentialScope = (
@@ -65,12 +46,18 @@ export const deriveSingleUserApiKeyCredentialScope = (
   const normalizedKey = String(apiKey || "").trim()
   if (!normalizedKey) return "key:none"
 
-  const digest = sha256(
-    utf8ToBytes(
-      `tldw:service-prompt-single-user-api-key:v1\0${normalizedKey}`
-    )
-  )
-  return `key:sha256:${bytesToHex(digest)}`
+  return sha256CredentialScope("key", normalizedKey)
+}
+
+const deriveMultiUserTokenCredentialScope = (
+  authMode: string | null | undefined,
+  accessToken: string | null | undefined
+): string | null => {
+  if (normalizeAuthMode(authMode) !== "multi-user") return null
+  const normalizedToken = String(accessToken || "").trim()
+  return normalizedToken
+    ? sha256CredentialScope("token", normalizedToken)
+    : "token:none"
 }
 
 export const buildChatSurfaceScopeKey = (
@@ -84,13 +71,15 @@ export const buildChatSurfaceScopeKey = (
     authMode: input.authMode,
     accessToken: input.accessToken ?? null
   })
-  const singleUserApiKeyScope = deriveSingleUserApiKeyScope(
-    input.authMode,
-    input.apiKey ?? null
-  )
+  const credentialScope =
+    deriveSingleUserApiKeyCredentialScope(input.authMode, input.apiKey ?? null) ??
+    deriveMultiUserTokenCredentialScope(
+      input.authMode,
+      input.accessToken ?? null
+    )
 
-  return singleUserApiKeyScope
-    ? `${serverFingerprint}:${authScope}:${orgScope}:${userScope}:${singleUserApiKeyScope}`
+  return credentialScope
+    ? `${serverFingerprint}:${authScope}:${orgScope}:${userScope}:${credentialScope}`
     : `${serverFingerprint}:${authScope}:${orgScope}:${userScope}`
 }
 

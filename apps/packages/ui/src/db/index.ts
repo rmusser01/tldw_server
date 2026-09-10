@@ -139,7 +139,7 @@ type Prompt = {
   serverId?: number | null
   studioProjectId?: number | null
   studioPromptId?: number | null
-  syncStatus?: "local" | "synced" | "pending" | "conflict"
+  syncStatus?: "local" | "synced" | "pending" | "conflict" | "error"
   sourceSystem?: "workspace" | "studio" | "copilot"
   lastSyncedAt?: number | null
   serverUpdatedAt?: string | null
@@ -406,13 +406,13 @@ export class PageAssitDatabase {
       keywords: mergedKeywords ?? prompt.keywords ?? prompt.tags
     }
     const newPrompts = [normalized, ...prompts]
-    this.db.set({ prompts: newPrompts })
+    await this.db.set({ prompts: newPrompts })
   }
 
   async deletePrompt(id: string) {
     const prompts = await this.getAllPrompts()
     const newPrompts = prompts.filter((prompt) => prompt.id !== id)
-    this.db.set({ prompts: newPrompts })
+    await this.db.set({ prompts: newPrompts })
   }
 
   async restorePromptSnapshot(snapshot: Prompt) {
@@ -461,7 +461,7 @@ export class PageAssitDatabase {
       }
       return prompt
     })
-    this.db.set({ prompts: newPrompts })
+    await this.db.set({ prompts: newPrompts })
   }
 
   async getPromptById(id: string) {

@@ -9,6 +9,7 @@ import { CLEAR_TASK_RECIPE } from "../built-in-recipes";
 const state = vi.hoisted(() => ({ online: true, privateMode: false }));
 const mocks = vi.hoisted(() => ({
   getAllPrompts: vi.fn(),
+  markPromptSyncError: vi.fn(),
   permanentlyDeletePrompt: vi.fn(),
   restorePromptSnapshot: vi.fn(),
   savePrompt: vi.fn(),
@@ -29,6 +30,7 @@ vi.mock("@/utils/is-private-mode", () => ({
 
 vi.mock("@/db/dexie/helpers", () => ({
   getAllPrompts: mocks.getAllPrompts,
+  markPromptSyncError: mocks.markPromptSyncError,
   permanentlyDeletePrompt: mocks.permanentlyDeletePrompt,
   restorePromptSnapshot: mocks.restorePromptSnapshot,
   savePrompt: mocks.savePrompt,
@@ -121,6 +123,7 @@ describe("PromptRecipeBuilder", () => {
     mocks.savePrompt.mockResolvedValue({ id: "new-exact-id" });
     mocks.updatePrompt.mockImplementation(async ({ id }) => id);
     mocks.permanentlyDeletePrompt.mockResolvedValue(undefined);
+    mocks.markPromptSyncError.mockResolvedValue(undefined);
     mocks.restorePromptSnapshot.mockResolvedValue(undefined);
     mocks.shouldAutoSyncWorkspacePrompts.mockResolvedValue(false);
     mocks.autoSyncPrompt.mockResolvedValue({
@@ -133,9 +136,7 @@ describe("PromptRecipeBuilder", () => {
   it("requires positive create and update authorization independently", async () => {
     const user = userEvent.setup();
     renderBuilder({ capabilities: capabilities(true, true, false) });
-    const source = await screen.findByRole("combobox", {
-      name: "Recipe source",
-    });
+    await screen.findByRole("combobox", { name: "Recipe source" });
 
     expect(
       screen.getByRole("button", { name: "Save as new recipe" }),
@@ -349,6 +350,189 @@ describe("PromptRecipeBuilder", () => {
     expect(screen.queryByText(/Could not save/)).not.toBeInTheDocument();
     expect(mocks.permanentlyDeletePrompt).not.toHaveBeenCalled();
     expect(mocks.restorePromptSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("retains an uncertain Save locally, invalidates both queries, and locks retry", async () => {
+    const user = userEvent.setup();
+    const records = [recipeRecord("system-id", "System saved", "system")];
+    mocks.getAllPrompts.mockImplementation(async () => structuredClone(records));
+    mocks.savePrompt.mockImplementation(async (fields) => {
+      const saved = {
+        ...recipeRecord("uncertain-new", fields.title, "system"),
+        ...fields,
+        id: "uncertain-new",
+        syncStatus: "local",
+      };
+      records.push(saved);
+      return saved;
+    });
+    mocks.markPromptSyncError.mockImplementation(async (id) => {
+      const record = records.find((item) => item.id === id);
+      if (record) record.syncStatus = "error";
+    });
+    mocks.shouldAutoSyncWorkspacePrompts.mockResolvedValue(true);
+    mocks.autoSyncPrompt.mockResolvedValue({
+      success: false,
+      localId: "uncertain-new",
+      syncStatus: "pending",
+      failureKind: "invalid_server_payload",
+      error: "missing response identity",
+    });
+    const { queryClient } = renderBuilder();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const source = await screen.findByRole("combobox", {
+      name: "Recipe source",
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    );
+
+    expect(
+      await screen.findByText(/saved locally.*server outcome.*not.*verified/i),
+    ).toBeInTheDocument();
+    expect(records.find((item) => item.id === "uncertain-new")?.syncStatus).toBe(
+      "error",
+    );
+    expect(mocks.permanentlyDeletePrompt).not.toHaveBeenCalled();
+    expect(mocks.restorePromptSnapshot).not.toHaveBeenCalled();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["fetchAllPrompts"] });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ["getAllPromptsForSelect"],
+    });
+    const save = screen.getByRole("button", { name: "Save as new recipe" });
+    expect(save).toBeDisabled();
+    await user.click(save);
+    expect(mocks.savePrompt).toHaveBeenCalledTimes(1);
+
+    await user.selectOptions(source, "built_in:blank");
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    ).toBeDisabled();
+  });
+
+  it("never rolls back an uncertain remote result when marking local error fails", async () => {
+    const user = userEvent.setup();
+    mocks.shouldAutoSyncWorkspacePrompts.mockResolvedValue(true);
+    mocks.autoSyncPrompt.mockResolvedValue({
+      success: false,
+      localId: "new-exact-id",
+      syncStatus: "pending",
+      failureKind: "invalid_server_payload",
+      error: "missing response identity",
+    });
+    mocks.markPromptSyncError.mockRejectedValue(new Error("storage blocked"));
+    renderBuilder();
+    await screen.findByRole("combobox", { name: "Recipe source" });
+
+    await user.click(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    );
+
+    expect(
+      await screen.findByText(/saved locally.*server outcome.*not.*verified/i),
+    ).toBeInTheDocument();
+    expect(mocks.permanentlyDeletePrompt).not.toHaveBeenCalled();
+    expect(mocks.restorePromptSnapshot).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    ).toBeDisabled();
+  });
+
+  it("retains an uncertain Update, marks it error, and locks both writes", async () => {
+    const user = userEvent.setup();
+    const records = [recipeRecord("system-id", "System saved", "system")];
+    mocks.getAllPrompts.mockImplementation(async () => structuredClone(records));
+    mocks.updatePrompt.mockImplementation(async (fields) => {
+      records[0] = { ...records[0], ...structuredClone(fields) };
+      return fields.id;
+    });
+    mocks.markPromptSyncError.mockImplementation(async (id) => {
+      const record = records.find((item) => item.id === id);
+      if (record) record.syncStatus = "error";
+    });
+    mocks.shouldAutoSyncWorkspacePrompts.mockResolvedValue(true);
+    mocks.autoSyncPrompt.mockResolvedValue({
+      success: false,
+      localId: "system-id",
+      syncStatus: "pending",
+      failureKind: "invalid_server_payload",
+      error: "malformed response",
+    });
+    const { queryClient } = renderBuilder();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const source = await screen.findByRole("combobox", {
+      name: "Recipe source",
+    });
+    await waitFor(() =>
+      expect(
+        within(source).getByRole("option", { name: "System saved" }),
+      ).toBeTruthy(),
+    );
+    await user.selectOptions(source, "saved:system-id");
+    await user.clear(screen.getByRole("textbox", { name: "Block name" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Block name" }),
+      "Locally retained change",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Update recipe" }));
+
+    expect(
+      await screen.findByText(/updated locally.*server outcome.*not.*verified/i),
+    ).toBeInTheDocument();
+    expect(records[0].syncStatus).toBe("error");
+    expect(mocks.restorePromptSnapshot).not.toHaveBeenCalled();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["fetchAllPrompts"] });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ["getAllPromptsForSelect"],
+    });
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    ).toBeDisabled();
+    const update = screen.getByRole("button", { name: "Update recipe" });
+    expect(update).toBeDisabled();
+    await user.click(update);
+    expect(mocks.updatePrompt).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a reopened error-state recipe write-locked while Apply stays local", async () => {
+    const user = userEvent.setup();
+    mocks.getAllPrompts.mockResolvedValue([
+      {
+        ...recipeRecord("error-id", "Unverified recipe", "system"),
+        syncStatus: "error",
+      },
+    ]);
+    const { onApply } = renderBuilder();
+    const source = await screen.findByRole("combobox", {
+      name: "Recipe source",
+    });
+    await waitFor(() =>
+      expect(
+        within(source).getByRole("option", { name: "Unverified recipe" }),
+      ).toBeTruthy(),
+    );
+    await user.selectOptions(source, "saved:error-id");
+
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Update recipe" }),
+    ).toBeDisabled();
+    await user.type(
+      screen.getByRole("textbox", {
+        name: "Current value for Task (not saved)",
+      }),
+      "Apply remains available",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Apply to system prompt" }),
+    );
+    expect(onApply).toHaveBeenCalledTimes(1);
+    expect(mocks.savePrompt).not.toHaveBeenCalled();
+    expect(mocks.updatePrompt).not.toHaveBeenCalled();
   });
 
   it("rolls back a non-transient Save, invalidates both queries, and retries without a duplicate", async () => {

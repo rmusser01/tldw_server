@@ -6,6 +6,7 @@ import {
 } from "@/components/Option/Prompt/prompt-recipe-library";
 import {
   getAllPrompts,
+  markPromptSyncError,
   permanentlyDeletePrompt,
   restorePromptSnapshot,
   savePrompt,
@@ -45,6 +46,11 @@ const acceptSyncResult = (
 
 const rollbackFailure = (action: "save" | "update") =>
   new Error(`recipe_${action}_rollback_failed`);
+
+const uncertainSyncFailure = new Error("recipe_sync_uncertain");
+
+const isUncertainSyncFailure = (error: unknown) =>
+  error instanceof Error && error.message === uncertainSyncFailure.message;
 
 export function PromptRecipeBuilder({
   target,
@@ -131,7 +137,16 @@ export function PromptRecipeBuilder({
 
   const syncIfEnabled = React.useCallback(async (id: string) => {
     if (!(await shouldAutoSyncWorkspacePrompts())) return false;
-    return acceptSyncResult(await autoSyncPrompt(id));
+    const result = await autoSyncPrompt(id);
+    if (!result.success && result.failureKind === "invalid_server_payload") {
+      try {
+        await markPromptSyncError(id);
+      } catch {
+        // The remote write is still uncertain, so local rollback is never safe.
+      }
+      throw uncertainSyncFailure;
+    }
+    return acceptSyncResult(result);
   }, []);
 
   const saveAsNew = React.useCallback(
@@ -146,6 +161,7 @@ export function PromptRecipeBuilder({
         try {
           setSyncPendingNotice(await syncIfEnabled(saved.id));
         } catch (error) {
+          if (isUncertainSyncFailure(error)) throw error;
           try {
             await permanentlyDeletePrompt(saved.id);
           } catch {
@@ -189,6 +205,7 @@ export function PromptRecipeBuilder({
         if (id !== savedSourceId) throw new Error("recipe_identity_changed");
         setSyncPendingNotice(await syncIfEnabled(savedSourceId));
       } catch (error) {
+        if (isUncertainSyncFailure(error)) throw error;
         try {
           await restorePromptSnapshot(snapshot);
         } catch {
