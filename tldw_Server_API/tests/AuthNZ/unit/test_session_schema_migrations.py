@@ -1,6 +1,9 @@
+"""Check SQLite session activity defaults, legacy backfills, and repository writes."""
+
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -15,13 +18,17 @@ pytestmark = pytest.mark.unit
 
 
 class _SQLitePool:
+    """Expose the repository transaction interface over a test SQLite connection."""
+
     pool = None
 
     def __init__(self, connection: aiosqlite.Connection) -> None:
+        """Keep the caller-owned connection available for repository transactions."""
         self._connection = connection
 
     @asynccontextmanager
-    async def transaction(self):
+    async def transaction(self) -> AsyncIterator[aiosqlite.Connection]:
+        """Commit successful repository writes and roll back failed transactions."""
         try:
             yield self._connection
             await self._connection.commit()
@@ -35,6 +42,7 @@ def _create_legacy_database(
     *,
     include_last_activity: bool,
 ) -> None:
+    """Build a version-97 database with an optional legacy activity column."""
     last_activity_column = ", last_activity TIMESTAMP" if include_last_activity else ""
     with sqlite3.connect(db_path) as conn:
         conn.execute(
@@ -93,6 +101,7 @@ def _create_legacy_database(
 
 
 def test_fresh_sqlite_sessions_have_last_activity_default(tmp_path: Path) -> None:
+    """New sessions receive a timestamp from the initial schema's activity default."""
     db_path = tmp_path / "fresh-sessions.db"
 
     apply_authnz_migrations(db_path, target_version=2)
@@ -118,6 +127,7 @@ def test_fresh_sqlite_sessions_have_last_activity_default(tmp_path: Path) -> Non
 def test_sqlite_session_upgrade_adds_and_backfills_last_activity(
     tmp_path: Path,
 ) -> None:
+    """The activity migration runs once and backfills from session creation time."""
     db_path = tmp_path / "legacy-sessions.db"
     _create_legacy_database(db_path, include_last_activity=False)
     with sqlite3.connect(db_path) as conn:
@@ -143,6 +153,7 @@ def test_sqlite_session_upgrade_adds_and_backfills_last_activity(
 def test_sqlite_session_upgrade_preserves_existing_activity_values(
     tmp_path: Path,
 ) -> None:
+    """An upgrade fills null activity values while preserving recorded activity."""
     db_path = tmp_path / "partial-sessions.db"
     _create_legacy_database(db_path, include_last_activity=True)
     with sqlite3.connect(db_path) as conn:
@@ -173,6 +184,7 @@ def test_sqlite_session_upgrade_preserves_existing_activity_values(
 async def test_sqlite_session_writer_initializes_activity_after_legacy_upgrade(
     tmp_path: Path,
 ) -> None:
+    """Repository writes initialize activity when an upgraded column has no default."""
     db_path = tmp_path / "upgraded-session-writer.db"
     _create_legacy_database(db_path, include_last_activity=False)
     apply_authnz_migrations(db_path)

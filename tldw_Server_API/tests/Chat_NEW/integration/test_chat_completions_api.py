@@ -5,19 +5,30 @@ Tests the full request/response flow with real database and minimal mocking.
 Only external LLM APIs are mocked to avoid actual API calls.
 """
 
+import asyncio
+import configparser
+import json
 import os
+from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi import status
+from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHARACTER_NAME, get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
+from tldw_Server_API.app.core.Chat_Macros.branch_runner import ChatMacroLLMBranchRunner
+from tldw_Server_API.app.core.Chat_Macros.context_snapshot import snapshot_from_mapping
 from tldw_Server_API.app.core.Chat_Macros.repository import ChatMacroRepository
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.tests.chat_macros_test_helpers import FakeJobManager
 
 
-def _install_isolated_chat_db(test_client, tmp_path, monkeypatch):
+def _install_isolated_chat_db(
+    test_client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> CharactersRAGDB:
+    """Install a real per-user database for durable chat-macro acceptance checks."""
     user_base = tmp_path / "user_databases" / "1"
     user_base.mkdir(parents=True)
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_databases"))
@@ -218,6 +229,130 @@ class TestChatCompletionsEndpoint:
             assert queued["job_type"] == "chat_macro_run"
             assert queued["payload"]["macro_run_id"] == macro_meta["run_id"]
             assert queued["payload"]["normalized_args"]["question"] == ["What changed?"]
+        finally:
+            test_client.app.dependency_overrides.pop(get_chacha_db_for_user, None)
+            test_client.app.dependency_overrides.pop(try_get_job_manager, None)
+            db.close_all_connections()
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("streaming", [False, True])
+    @pytest.mark.parametrize("request_model", [None, "   ", "explicit-model"])
+    @pytest.mark.parametrize("default_source", ["environment", "chat-config", "administrator"])
+    def test_queued_macro_preserves_request_time_model_after_default_changes(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        test_client: TestClient,
+        auth_headers: dict[str, str],
+        tmp_path: Path,
+        streaming: bool,
+        request_model: str | None,
+        default_source: str,
+    ) -> None:
+        """Queued branches use the persisted effective model, including omitted defaults."""
+        from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
+
+        monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
+        monkeypatch.delenv("DEFAULT_MODEL_LOCAL_LLM", raising=False)
+        config = configparser.ConfigParser()
+        administrator: dict[str, str | None] = {"model": None}
+        monkeypatch.setattr(chat_endpoint, "_config", config)
+        monkeypatch.setattr(chat_endpoint, "get_override_default_model", lambda _provider: administrator["model"])
+        monkeypatch.setattr(chat_endpoint, "get_llm_provider_override", lambda _provider: None)
+        if default_source == "environment":
+            monkeypatch.setenv("DEFAULT_MODEL_LOCAL_LLM", "request-time-model")
+        elif default_source == "chat-config":
+            config["Chat-Module"] = {"default_model_local_llm": "request-time-model"}
+        else:
+            administrator["model"] = "request-time-model"
+
+        db = _install_isolated_chat_db(test_client, tmp_path, monkeypatch)
+        job_manager = FakeJobManager()
+        test_client.app.dependency_overrides[try_get_job_manager] = lambda: job_manager
+        expected_model = "explicit-model" if request_model == "explicit-model" else "request-time-model"
+
+        async def model_echo(**kwargs: Any) -> dict[str, Any]:
+            """Return the selected model as the provider's observable branch response."""
+            return {"choices": [{"message": {"content": kwargs.get("model", "later-model")}}]}
+
+        try:
+            response = test_client.post(
+                "/api/v1/chat/completions",
+                json={
+                    "api_provider": "local-llm",
+                    "model": request_model,
+                    "messages": [{"role": "user", "content": "/wrapup"}],
+                    "stream": streaming,
+                },
+                headers=auth_headers,
+            )
+            assert response.status_code == status.HTTP_200_OK, response.text
+            if streaming:
+                frames = [line[6:] for line in response.text.splitlines() if line.startswith("data: ")]
+                assert frames[-1] == "[DONE]"
+                body = json.loads(frames[0])
+                message = body["choices"][0]["delta"]
+            else:
+                body = response.json()
+                message = body["choices"][0]["message"]
+            run_id = message["metadata"]["chat_macro"]["run_id"]
+
+            # Change every possible request-time source before reading/executing the run.
+            monkeypatch.setenv("DEFAULT_MODEL_LOCAL_LLM", "later-model")
+            config["Chat-Module"] = {"default_model_local_llm": "later-model"}
+            administrator["model"] = "later-model"
+            run = ChatMacroRepository(db).get_run(run_id)
+            assert run is not None
+            assert run.model_selection == {"api_provider": "local-llm", "model": expected_model}
+            assert run.context_snapshot["model_selection"] == run.model_selection
+            assert body["model"] == expected_model
+            result = asyncio.run(
+                ChatMacroLLMBranchRunner(chat_call=model_echo).run_branch(
+                    prompt="Summarize the conversation.",
+                    snapshot=snapshot_from_mapping(run.context_snapshot),
+                    model_selection=run.model_selection,
+                )
+            )
+            assert result.text == expected_model
+        finally:
+            test_client.app.dependency_overrides.pop(get_chacha_db_for_user, None)
+            test_client.app.dependency_overrides.pop(try_get_job_manager, None)
+            db.close_all_connections()
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("streaming", [False, True])
+    @pytest.mark.parametrize("request_model", [None, "   "])
+    def test_macro_without_configured_model_rejected_before_persistence(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        test_client: TestClient,
+        auth_headers: dict[str, str],
+        tmp_path: Path,
+        streaming: bool,
+        request_model: str | None,
+    ) -> None:
+        """A macro without an execution model returns 400 without creating queued work."""
+        from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
+
+        monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
+        monkeypatch.setattr(chat_endpoint, "_get_default_model_for_provider_name", lambda _provider: None)
+        db = _install_isolated_chat_db(test_client, tmp_path, monkeypatch)
+        job_manager = FakeJobManager()
+        test_client.app.dependency_overrides[try_get_job_manager] = lambda: job_manager
+        try:
+            response = test_client.post(
+                "/api/v1/chat/completions",
+                json={
+                    "api_provider": "local-llm",
+                    "model": request_model,
+                    "messages": [{"role": "user", "content": "/wrapup"}],
+                    "stream": streaming,
+                },
+                headers=auth_headers,
+            )
+            assert response.status_code == status.HTTP_400_BAD_REQUEST, response.text
+            assert "Model is required" in response.json()["detail"]
+            assert db.execute_query("SELECT COUNT(*) FROM chat_macro_runs").fetchone()[0] == 0
+            assert job_manager.created == []
         finally:
             test_client.app.dependency_overrides.pop(get_chacha_db_for_user, None)
             test_client.app.dependency_overrides.pop(try_get_job_manager, None)

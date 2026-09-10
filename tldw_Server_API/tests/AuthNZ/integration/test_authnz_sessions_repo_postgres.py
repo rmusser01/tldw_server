@@ -1,16 +1,21 @@
+"""Exercise session validation, refresh, and revocation against isolated PostgreSQL."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.repos.sessions_repo import AuthnzSessionsRepo
 from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 
 pytestmark = pytest.mark.integration
 
 
-async def _create_user(pool, username: str) -> int:
+async def _create_user(pool: DatabasePool, username: str) -> int:
+    """Create the user that owns the session records under test."""
     users_db = UsersDB(pool)
     await users_db.initialize()
     created = await users_db.create_user(
@@ -27,8 +32,8 @@ async def _create_user(pool, username: str) -> int:
 
 @pytest.mark.asyncio
 async def test_authnz_sessions_repo_validation_and_refresh_postgres(
-    isolated_test_environment,
-):
+    isolated_test_environment: tuple[TestClient, str],
+) -> None:
     """AuthnzSessionsRepo validation/refresh helpers should work on Postgres."""
     _client, _db_name = isolated_test_environment
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
@@ -136,8 +141,8 @@ async def test_authnz_sessions_repo_validation_and_refresh_postgres(
 
 @pytest.mark.asyncio
 async def test_authnz_sessions_repo_bulk_revocation_postgres(
-    isolated_test_environment,
-):
+    isolated_test_environment: tuple[TestClient, str],
+) -> None:
     """AuthnzSessionsRepo bulk revocation helpers should work on Postgres."""
     _client, _db_name = isolated_test_environment
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool

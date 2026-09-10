@@ -26,6 +26,10 @@ from tldw_Server_API.app.core.AuthNZ.sqlite_profile_version_schema import (
     rebuild_sqlite_users_with_profile_version,
     validate_sqlite_profile_version_readiness,
 )
+from tldw_Server_API.app.core.DB_Management.authnz_session_schema import (
+    create_sqlite_sessions_table,
+    ensure_sqlite_session_last_activity,
+)
 from tldw_Server_API.app.core.DB_Management.migrations import Migration, MigrationManager
 from tldw_Server_API.app.core.Infrastructure.distributed_lock import acquire_migration_lock
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime as _is_explicit_pytest_runtime
@@ -91,32 +95,7 @@ def migration_001_create_users_table(conn: sqlite3.Connection) -> None:
 
 def migration_002_create_sessions_table(conn: sqlite3.Connection) -> None:
     """Create the sessions table for session management"""
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS sessions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            token_hash TEXT NOT NULL,
-            refresh_token_hash TEXT,
-            encrypted_token TEXT,
-            encrypted_refresh TEXT,
-            expires_at TIMESTAMP NOT NULL,
-            refresh_expires_at TIMESTAMP,
-            ip_address TEXT,
-            user_agent TEXT,
-            device_id TEXT,
-            is_active INTEGER DEFAULT 1,
-            is_revoked INTEGER DEFAULT 0,
-            revoked_at TIMESTAMP,
-            revoked_by INTEGER,
-            revoke_reason TEXT,
-            access_jti TEXT,
-            refresh_jti TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        )
-    """)
+    create_sqlite_sessions_table(conn)
 
     # Create indexes
     try:
@@ -141,12 +120,7 @@ def migration_002_create_sessions_table(conn: sqlite3.Connection) -> None:
         add_col('revoked_at', "revoked_at TIMESTAMP")
         add_col('revoked_by', "revoked_by INTEGER")
         add_col('revoke_reason', "revoke_reason TEXT")
-        add_col('last_activity', "last_activity TIMESTAMP")
-        conn.execute(
-            "UPDATE sessions "
-            "SET last_activity = COALESCE(created_at, CURRENT_TIMESTAMP) "
-            "WHERE last_activity IS NULL"
-        )
+        ensure_sqlite_session_last_activity(conn)
     except _AUTHNZ_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
         pass
 
@@ -6566,26 +6540,16 @@ def migration_097_backfill_user_uuid(conn: sqlite3.Connection) -> None:
 
 
 def migration_098_add_session_last_activity(conn: sqlite3.Connection) -> None:
-    """Add and backfill the session activity timestamp for legacy databases."""
-    if not _sqlite_table_exists(conn, "sessions"):
-        return
+    """Add and backfill the session activity timestamp for legacy databases.
 
-    columns = {
-        str(row[1]) for row in conn.execute("PRAGMA table_info(sessions)").fetchall()
-    }
-    if "last_activity" not in columns:
-        conn.execute("ALTER TABLE sessions ADD COLUMN last_activity TIMESTAMP")
-    if "created_at" in columns:
-        conn.execute(
-            "UPDATE sessions "
-            "SET last_activity = COALESCE(created_at, CURRENT_TIMESTAMP) "
-            "WHERE last_activity IS NULL"
-        )
-    else:
-        conn.execute(
-            "UPDATE sessions SET last_activity = CURRENT_TIMESTAMP "
-            "WHERE last_activity IS NULL"
-        )
+    Args:
+        conn: SQLite connection supplied by the AuthNZ migration runner.
+
+    Returns:
+        None. Existing activity values and missing session tables are unchanged;
+        the migration runner owns the transaction and its commit or rollback.
+    """
+    ensure_sqlite_session_last_activity(conn)
 
 
 def apply_authnz_migrations(db_path: Path, target_version: int = None) -> None:

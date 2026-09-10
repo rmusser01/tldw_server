@@ -1041,14 +1041,20 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         }
         assert shard_path_sets["media-core-api"] == {
             "tldw_Server_API/tests/Media/test_archive_member_cap.py",
+            "tldw_Server_API/tests/Media/test_audio_summary_service_prompt.py",
             "tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py",
             "tldw_Server_API/tests/Media/test_cache_index.py",
+            "tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py",
+            "tldw_Server_API/tests/Media/test_email_summary_service_prompt.py",
             "tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py",
             "tldw_Server_API/tests/Media/test_json_*.py",
             "tldw_Server_API/tests/Media/test_media_*.py",
             "tldw_Server_API/tests/Media/test_navigation_policy_contract.py",
+            "tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py",
             "tldw_Server_API/tests/Media/test_process_code_and_uploads.py",
             "tldw_Server_API/tests/Media/test_upload_sink_security.py",
+            "tldw_Server_API/tests/Media/test_video_summary_service_prompt.py",
+            "tldw_Server_API/tests/Media/test_web_summary_service_prompt.py",
             "tldw_Server_API/tests/Media/unit",
         }
         assert shard_path_sets["media-ingestion-new-ocr"] == {
@@ -1073,6 +1079,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_original_file_replacement.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py",
         }
         assert shard_path_sets["media-ingestion-new-unit-mediawiki"] == {
@@ -1393,6 +1400,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         # a feature directory rather than a DB-specific one).
         auth_db_extra_files = {
             "tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py",
+            "tldw_Server_API/tests/Workspaces/test_workspace_assistant_creation.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py",

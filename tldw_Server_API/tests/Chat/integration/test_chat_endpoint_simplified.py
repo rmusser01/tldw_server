@@ -7,6 +7,7 @@ import json
 import os
 import sqlite3
 import threading
+from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from contextvars import ContextVar
@@ -16,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 from fastapi import HTTPException, status
+from fastapi.testclient import TestClient
 from loguru import logger
 from starlette.requests import Request
 from starlette.responses import StreamingResponse
@@ -48,6 +50,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatProviderError,
 )
 from tldw_Server_API.app.core.Chat.streaming_utils import StreamingResponseHandler
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.exceptions import ProviderCredentialTerminalError
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RouterRequest, RoutingPolicy
 from tldw_Server_API.app.main import app
@@ -1022,34 +1025,36 @@ def test_chat_completion_default_model_tracks_model(authenticated_client, mock_c
     ],
 )
 def test_chat_completion_omitted_model_uses_provider_configuration_in_payload(
-    authenticated_client,
-    mock_chacha_db,
-    setup_dependencies,
-    monkeypatch,
-    streaming,
-    provider,
-    snapshot,
-    expected_model,
-    request_model,
-):
+    authenticated_client: TestClient,
+    mock_chacha_db: CharactersRAGDB,
+    setup_dependencies: None,
+    monkeypatch: pytest.MonkeyPatch,
+    streaming: bool,
+    provider: str,
+    snapshot: dict[str, dict[str, str]],
+    expected_model: str,
+    request_model: str | None,
+) -> None:
+    """Both response modes send configured defaults instead of missing execution models."""
     captured: dict[str, object] = {}
     runtime_type = _credential_runtime_double(api_keys={provider: None})
     provider_manager = MagicMock()
-    provider_manager.circuit_breakers = {
-        provider: SimpleNamespace(can_attempt_call=lambda: True)
-    }
+    provider_manager.circuit_breakers = {provider: SimpleNamespace(can_attempt_call=lambda: True)}
 
-    async def execute_non_stream(**kwargs):
+    async def execute_non_stream(**kwargs: Any) -> dict[str, Any]:
+        """Capture the outgoing provider payload and return a normal completion."""
         captured.update(kwargs["cleaned_args"])
         return {
             "id": "chatcmpl-default-model",
             "choices": [{"message": {"role": "assistant", "content": "ok"}}],
         }
 
-    async def execute_stream(**kwargs):
+    async def execute_stream(**kwargs: Any) -> StreamingResponse:
+        """Capture the outgoing provider payload and return a completed SSE stream."""
         captured.update(kwargs["cleaned_args"])
 
-        async def body():
+        async def body() -> AsyncIterator[str]:
+            """Yield one provider delta followed by the completion marker."""
             yield 'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'
             yield "data: [DONE]\n\n"
 
@@ -1060,7 +1065,8 @@ def test_chat_completion_omitted_model_uses_provider_configuration_in_payload(
         raising=False,
     )
 
-    def default_model(target_provider):
+    def default_model(target_provider: str) -> str | None:
+        """Resolve the supplied provider snapshot through the production default policy."""
         return chat_target_resolution.get_default_model_for_provider(
             target_provider,
             config_loader=lambda: None,
@@ -1097,12 +1103,13 @@ def test_chat_completion_omitted_model_uses_provider_configuration_in_payload(
 @pytest.mark.parametrize("streaming", [False, True])
 @pytest.mark.parametrize("request_model", [None, "", "   "])
 def test_chat_completion_omitted_model_without_configuration_fails_before_dispatch(
-    authenticated_client,
-    mock_chacha_db,
-    setup_dependencies,
-    streaming,
-    request_model,
-):
+    authenticated_client: TestClient,
+    mock_chacha_db: CharactersRAGDB,
+    setup_dependencies: None,
+    streaming: bool,
+    request_model: str | None,
+) -> None:
+    """Missing defaults fail before either provider execution path is entered."""
     provider_call = AsyncMock()
     with (
         patch.object(chat_endpoint, "_get_default_model_for_provider_name", return_value=None),
@@ -1126,29 +1133,31 @@ def test_chat_completion_omitted_model_without_configuration_fails_before_dispat
 
 @pytest.mark.parametrize("streaming", [False, True])
 def test_chat_completion_explicit_model_precedes_provider_configuration(
-    authenticated_client,
-    mock_chacha_db,
-    setup_dependencies,
-    streaming,
-):
+    authenticated_client: TestClient,
+    mock_chacha_db: CharactersRAGDB,
+    setup_dependencies: None,
+    streaming: bool,
+) -> None:
+    """Explicit model selection bypasses configured defaults in both response modes."""
     captured: dict[str, object] = {}
     runtime_type = _credential_runtime_double(api_keys={"ollama": None})
     provider_manager = MagicMock()
-    provider_manager.circuit_breakers = {
-        "ollama": SimpleNamespace(can_attempt_call=lambda: True)
-    }
+    provider_manager.circuit_breakers = {"ollama": SimpleNamespace(can_attempt_call=lambda: True)}
 
-    async def execute_non_stream(**kwargs):
+    async def execute_non_stream(**kwargs: Any) -> dict[str, Any]:
+        """Capture the outgoing provider payload and return a normal completion."""
         captured.update(kwargs["cleaned_args"])
         return {
             "id": "chatcmpl-explicit-model",
             "choices": [{"message": {"role": "assistant", "content": "ok"}}],
         }
 
-    async def execute_stream(**kwargs):
+    async def execute_stream(**kwargs: Any) -> StreamingResponse:
+        """Capture the outgoing provider payload and return a completed SSE stream."""
         captured.update(kwargs["cleaned_args"])
 
-        async def body():
+        async def body() -> AsyncIterator[str]:
+            """Yield one provider delta followed by the completion marker."""
             yield 'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'
             yield "data: [DONE]\n\n"
 

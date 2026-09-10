@@ -6,6 +6,8 @@ import os
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from loguru import logger
+
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     DEFAULT_LLM_PROVIDER,
 )
@@ -127,15 +129,27 @@ def get_default_model_for_provider(
             )
             if isinstance(configured, str) and configured.strip():
                 return configured.strip()
-    except (AttributeError, KeyError, TypeError, ValueError):
-        pass
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        # Configuration diagnostics can contain credentials; log context and type only.
+        # The provider snapshot may still supply a usable default after this failure.
+        logger.warning(
+            "Default model lookup failed: provider={}, source=Chat-Module, error_type={}; trying provider snapshot",
+            normalized_provider,
+            type(exc).__name__,
+        )
 
     try:
         return configured_provider_model_from_snapshot(
             normalized_provider,
             provider_config_loader(),
         )
-    except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
+    except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        # Retain the missing-model result so callers apply their existing request error.
+        logger.warning(
+            "Default model lookup failed: provider={}, source=provider snapshot, error_type={}; no default available",
+            normalized_provider,
+            type(exc).__name__,
+        )
         return None
 
 

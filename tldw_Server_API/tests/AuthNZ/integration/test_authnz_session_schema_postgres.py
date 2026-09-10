@@ -1,3 +1,5 @@
+"""Verify production PostgreSQL bootstrap creates and upgrades session activity storage."""
+
 from __future__ import annotations
 
 import uuid
@@ -5,11 +7,13 @@ from datetime import datetime, timedelta, timezone
 
 import asyncpg
 import pytest
+from fastapi.testclient import TestClient
 
 pytestmark = pytest.mark.integration
 
 
 async def _seed_user(connection: asyncpg.Connection, username: str) -> int:
+    """Insert a user for session schema checks in the fixture's isolated database."""
     return int(
         await connection.fetchval(
             """
@@ -26,8 +30,9 @@ async def _seed_user(connection: asyncpg.Connection, username: str) -> int:
 
 @pytest.mark.asyncio
 async def test_postgres_production_bootstrap_creates_usable_session_activity_schema(
-    isolated_test_environment,
+    isolated_test_environment: tuple[TestClient, str],
 ) -> None:
+    """Fresh session tables support activity reads, touches, and token refreshes."""
     _client, _db_name = isolated_test_environment
 
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
@@ -128,8 +133,9 @@ async def test_postgres_production_bootstrap_creates_usable_session_activity_sch
 
 @pytest.mark.asyncio
 async def test_postgres_production_bootstrap_backfills_legacy_session_rows_idempotently(
-    isolated_test_environment,
+    isolated_test_environment: tuple[TestClient, str],
 ) -> None:
+    """Repeated bootstrap backfills missing activity without replacing existing values."""
     _client, _db_name = isolated_test_environment
 
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool

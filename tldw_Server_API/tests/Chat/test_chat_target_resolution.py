@@ -1,3 +1,5 @@
+"""Provider and model resolution across server defaults and configuration failures."""
+
 from __future__ import annotations
 
 import configparser
@@ -5,13 +7,58 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
+from loguru import logger
 
 from tldw_Server_API.app.api.v1.endpoints import sharing
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 
 
-def _empty_override(_provider: str):
+def _empty_override(_provider: str) -> None:
+    """Represent an absent administrator override for provider-default regressions."""
     return None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("source", ["Chat-Module", "provider snapshot"])
+def test_model_configuration_failure_is_logged_without_leaking_exception_text(
+    monkeypatch: pytest.MonkeyPatch, source: str
+) -> None:
+    """Failed default lookups remain diagnosable without exposing configuration secrets."""
+    from tldw_Server_API.app.core.Chat.chat_target_resolution import get_default_model_for_provider
+
+    monkeypatch.delenv("DEFAULT_MODEL_OLLAMA", raising=False)
+    messages: list[str] = []
+    # Synthetic diagnostic content verifies that configuration secrets stay out of logs.
+    exception_secret = "private-value-from-broken-provider-config"  # nosec B105
+
+    def fail_config_load() -> configparser.ConfigParser:
+        """Simulate a parsing failure whose message contains sensitive config text."""
+        raise ValueError(exception_secret)
+
+    def fail_snapshot_load() -> dict[str, object]:
+        """Simulate a provider snapshot failure with sensitive diagnostic details."""
+        raise RuntimeError(exception_secret)
+
+    handler = logger.add(lambda message: messages.append(str(message)), format="{message}", level="WARNING")
+    try:
+        result = get_default_model_for_provider(
+            " OLLAMA ",
+            override_default_resolver=_empty_override,
+            override_resolver=_empty_override,
+            config_loader=fail_config_load if source == "Chat-Module" else configparser.ConfigParser,
+            provider_config_loader=(
+                fail_snapshot_load
+                if source == "provider snapshot"
+                else lambda: {"ollama_api": {"model": "fallback-model"}}
+            ),
+        )
+    finally:
+        logger.remove(handler)
+
+    assert result == ("fallback-model" if source == "Chat-Module" else None)
+    assert any(source in message and "ollama" in message for message in messages)
+    assert any(("ValueError" if source == "Chat-Module" else "RuntimeError") in message for message in messages)
+    assert all(exception_secret not in message for message in messages)
 
 
 @pytest.mark.unit
