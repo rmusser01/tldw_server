@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -17,10 +18,12 @@ EVIDENCE = json.loads(Path("Docs/Evidence/TASK-13013.7.29-deployment-applicabili
 RECORDS = EVIDENCE["supported_dispositions"]
 NATIVE_EVIDENCE = json.loads(Path("Docs/Evidence/TASK-13013.7.30-native-applicability.json").read_text())
 NATIVE_RECORDS = NATIVE_EVIDENCE["supported_dispositions"]
+CONSUMER_EVIDENCE = json.loads(Path("Docs/Evidence/TASK-13013.7.34-native-consumers.json").read_text())
+CONSUMER_RECORDS = CONSUMER_EVIDENCE["supported_dispositions"]
 TODAY = date(2026, 9, 10)
 
 
-@pytest.mark.parametrize("record", RECORDS + NATIVE_RECORDS, ids=lambda record: record["id"])
+@pytest.mark.parametrize("record", RECORDS + NATIVE_RECORDS + CONSUMER_RECORDS, ids=lambda record: record["id"])
 def test_verified_package_match_is_excepted_without_hiding_other_findings(record: dict) -> None:
     finding = {
         "VulnerabilityID": record["vulnerability_id"],
@@ -110,8 +113,44 @@ def test_related_native_findings_outside_the_supported_scope_remain_blocking(rec
             }
         ]
     }
+    # This is TASK30's historical boundary; later reviewed decisions are separate.
+    historical_ids = set(NATIVE_EVIDENCE["baseline_record_ids"]) | {r["id"] for r in NATIVE_RECORDS}
+    policy = load_policy(POLICY, today=TODAY)
+    policy = replace(policy, exceptions=tuple(r for r in policy.exceptions if r.id in historical_ids))
+    decision = evaluate_trivy_report(report, component=record["component"], policy=policy, today=TODAY)
+    assert len(decision.blocking) == 1
+    assert not decision.excepted
+
+
+def test_consumer_dispositions_preserve_prior_records_and_approved_interval() -> None:
+    policy = json.loads(POLICY.read_text())
+    added = [r for r in policy["exceptions"] if r["id"].startswith("TASK-13013.7.34-")]
+    assert added == CONSUMER_RECORDS and len(added) == 35
+    assert all(r["created_on"] == "2026-09-10" and r["expires_on"] == "2026-09-17" for r in added)
+    policy["exceptions"] = [r for r in policy["exceptions"] if r["id"] in CONSUMER_EVIDENCE["baseline_record_ids"]]
+    assert len(policy["exceptions"]) == 272
+    serialized = (json.dumps(policy, indent=2, sort_keys=True) + "\n").encode()
+    assert hashlib.sha256(serialized).hexdigest() == CONSUMER_EVIDENCE["baseline_policy_sha256"]
+
+
+@pytest.mark.parametrize("record", CONSUMER_EVIDENCE["retained_unresolved"])
+def test_unresolved_backend_privileged_path_cases_remain_gated(record: dict) -> None:
+    report = {
+        "Results": [
+            {
+                "Target": "Debian",
+                "Vulnerabilities": [
+                    {
+                        "VulnerabilityID": record["vulnerability_id"],
+                        "PkgIdentifier": {"PURL": record["purl"]},
+                        "InstalledVersion": record["installed_version"],
+                        "Severity": record["severity"],
+                    }
+                ],
+            }
+        ]
+    }
     decision = evaluate_trivy_report(
         report, component=record["component"], policy=load_policy(POLICY, today=TODAY), today=TODAY
     )
-    assert len(decision.blocking) == 1
-    assert not decision.excepted
+    assert len(decision.blocking) == 1 and not decision.excepted
