@@ -138,7 +138,7 @@ def test_consumer_dispositions_preserve_prior_records_and_approved_interval() ->
 
 
 @pytest.mark.parametrize("record", CONSUMER_EVIDENCE["retained_unresolved"])
-def test_unresolved_backend_privileged_path_cases_remain_gated(record: dict) -> None:
+def test_privileged_path_cases_remain_gated_without_fresh_mount_approval(record: dict) -> None:
     report = {
         "Results": [
             {
@@ -154,9 +154,11 @@ def test_unresolved_backend_privileged_path_cases_remain_gated(record: dict) -> 
             }
         ]
     }
-    decision = evaluate_trivy_report(
-        report, component=record["component"], policy=load_policy(POLICY, today=TODAY), today=TODAY
-    )
+    policy = load_policy(POLICY, today=TODAY)
+    # TASK39 adds explicit approval after collecting the previously missing image
+    # facts. Earlier native dispositions alone must still leave these rows gated.
+    policy = replace(policy, exceptions=tuple(r for r in policy.exceptions if not r.id.startswith("TASK-13013.7.39-")))
+    decision = evaluate_trivy_report(report, component=record["component"], policy=policy, today=TODAY)
     assert len(decision.blocking) == 1 and not decision.excepted
 
 
@@ -173,4 +175,4 @@ def test_rng_dispositions_preserve_prior_policy_and_expiry() -> None:
 
 @pytest.mark.parametrize("record", RNG_EVIDENCE["retained_other_native"])
 def test_xml_and_tiff_matches_are_not_waived_by_rng_review(record: dict) -> None:
-    test_unresolved_backend_privileged_path_cases_remain_gated(record)
+    test_privileged_path_cases_remain_gated_without_fresh_mount_approval(record)
