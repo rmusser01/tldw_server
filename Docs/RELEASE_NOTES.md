@@ -29,6 +29,12 @@ complete grouped rollup and the release-refresh plan for outstanding gates.
   deployment with health, backup, and rollback checks.
 - Hardened trusted-proxy login isolation, embeddings authentication, migration
   durability, media cleanup, schema compatibility, and required CI enforcement.
+- Repaired full-account export of registered media artifacts and excluded
+  unexpected credential fields from saved speech preferences. Slash-command
+  parsing also avoids quadratic backtracking on malformed multiline input.
+- Repository rollups 0.1.39–0.1.41 are not published-artifact evidence. At
+  candidate preparation, GitHub and GHCR app `latest` were 0.1.38; public PyPI
+  listed 0.1.32. Identify the installed digest before choosing a rollback baseline.
 - Back up persistent databases, content, and configuration before upgrading.
   Conversation, authentication, notes sync, personal-context, presentations, and
   webhook schemas have changed. Use a compatible backup for rollback; see
@@ -64,6 +70,10 @@ complete grouped rollup and the release-refresh plan for outstanding gates.
 - Hardened Jobs admission transactions, quotas, idempotency, and concurrent
   capacity enforcement.
 - Added strict live-integration certification for Skills.
+- Added a required WebUI TypeScript check and a reusable capacity runner with
+  explicit overload/recovery and resource-measurement thresholds. See
+  `Docs/Development/Release_Capacity_Soak.md`; a real artifact run is still
+  required to establish a supported operating envelope.
 - Established the protected frontend source-available boundary, trusted license
   gate, protected-branch prerequisites, and license-first PR sequencing.
 

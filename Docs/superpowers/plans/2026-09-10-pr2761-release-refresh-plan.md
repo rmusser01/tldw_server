@@ -12,12 +12,12 @@
 | Item | Recorded state |
 | --- | --- |
 | Integrated release code | `b3287b5437c122a12edf0dcafb155578b978a2ae` |
-| Pushed candidate including generated-doc synchronization | `e5ad549c211ba96a1873e356b20f4883358b4476` |
+| Pushed candidate before ongoing blocker fixes | `7d7a2e708dd2e2621199bfbcaa709f9e44e76026` |
 | PR branch / target | `codex/release-main-0.1.42` → `main` |
 | PR state at inspection | Draft, `UNSTABLE`; no merge or publication performed |
-| Remote CI snapshot for e5ad549c21 | 17 successful checks, 49 pending; one failed **CodeQL** check ([run](https://github.com/rmusser01/tldw_server/runs/102918248263)) |
+| Remote CI snapshot for 7d7a2e708d | Backend, security, container, E2E, trusted license and standard docs pass; frontend shards 1/2/6 and CodeQL fail; coverage and other jobs pending. Fixes underway below. |
 | Local focused checks | 241 passed; one docs-build test unpassed due host multiprocessing failure |
-| Local docs alternative | Strict serial build passed; standard build still needs successful evidence |
+| Standard docs evidence | Unchanged standard build and docs suite pass in CI [run 34491682436](https://github.com/rmusser01/tldw_server/actions/runs/34491682436/job/102919740634). |
 | Latest observed GitHub publication | v0.1.38; no remote v0.1.39–v0.1.42 tags |
 | Primary checkout | `dev`, unchanged; its local `a27ecb12f0` tracking commit is outside this release freeze |
 
@@ -40,7 +40,7 @@ CI counts are an observation, not a permanent state. Documentation follow-ups ad
 **Goal:** Make the release notes, license record, manifest, and tests describe the frozen source.
 **Success Criteria:** Version surfaces agree on 0.1.42; protected trees match frozen dev; manifest covers every tracked protected file.
 **Tests:** Release helpers, licensing policy, release documentation contracts, docs regeneration idempotence.
-**Status:** Complete
+**Status:** In Progress — final source/manifest refresh follows blocker fixes
 
 - Requester approved `today/now` on 2026-09-10 for the refreshed dates.
 - Release date: `2026-09-10`; Countdown start: `2028-09-10T12:00:00Z`, preserving the original two-year interval and the verbatim template's fixed noon UTC activation.
@@ -70,10 +70,10 @@ Run tests with the project virtual environment activated and execute from this w
 
 ### 4.1 Current-head CI and local docs failure — agent
 
-- [ ] Inspect the failed [CodeQL check](https://github.com/rmusser01/tldw_server/runs/102918248263), retain its failure details, and determine whether it is a code, configuration, permission, or infrastructure failure. The snapshot alone does not establish the cause.
+- [x] Inspect the failed [CodeQL check](https://github.com/rmusser01/tldw_server/runs/102918248263), retain its failure details, and determine whether it is a code, configuration, permission, or infrastructure failure. The snapshot alone does not establish the cause.
 - [ ] Read all current-head check results and fix actionable regressions. Do not cancel required checks to manufacture readiness. After changes, push and revalidate the new head.
 - [ ] Record success and run URLs for `backend-required`, `security-required`, `coverage-required`, `frontend-required`, `e2e-required`, `container-build-check`, and `frontend-license-policy/trusted/main`; capture remaining failing review/security checks as well.
-- [ ] Re-run `test_strict_local_build_preserves_canonical_site_sources` and the unchanged strict MkDocs command on a host or CI runner that can allocate multiprocessing semaphores. Attach successful evidence for the candidate. The serial build is useful evidence but does not close this failed test.
+- [x] Re-run `test_strict_local_build_preserves_canonical_site_sources` and the unchanged strict MkDocs command on a host or CI runner that can allocate multiprocessing semaphores. Attach successful evidence for the candidate. The serial build is useful evidence but does not close this failed test.
 
 Read-only status commands:
 
@@ -101,7 +101,7 @@ Inspect existing child work and merged evidence before starting duplicate implem
 | [TASK-13013.7](../../../backlog/tasks/task-13013.7%20-%20Close-dependency-and-software-supply-chain-release-gaps.md) | Prove the supported frontend security baseline; Bun dependency-update and SBOM coverage; reproducible Python production resolution; immutable base images/artifact provenance; vulnerability scans and explicit exceptions. Record exact versions, digests, reports, and tested source SHA. |
 | [TASK-13013.8](../../../backlog/tasks/task-13013.8%20-%20Prove-reusable-tenant-isolation-and-data-lifecycle-primitives.md) | Run cross-user and cross-organization negative tests for selected API/job/media/note/RAG/storage paths. Verify export, deletion, durable cleanup and partial-failure recovery, including logs/jobs/caches/backups. Record the tested profile and results. |
 | [TASK-13013.9](../../../backlog/tasks/task-13013.9%20-%20Create-a-reusable-release-capacity-and-soak-test-harness.md) | Supply and run the reproducible capacity/soak profile with datasets, duration, pass thresholds and artifact output. Measure authentication/workflow load, queue depth, database pools, storage and overload recovery against an exact artifact. Record the supported operating envelope. |
-| [TASK-12116](../../../backlog/tasks/task-12116%20-%20Re-enable-frontend-type-safety-and-lint-gates.md) | Reconcile TypeScript merge gating/strictness, React hooks enforcement, persisted Zustand version/migration contracts, and shared dependency majors. Link actual CI and migration-test evidence; a frontend build alone is insufficient. |
+| [TASK-12116](../../../backlog/tasks/task-12116%20-%20Re-enable-frontend-type-safety-and-lint-gates-harden-persisted-stores.md) | Reconcile TypeScript merge gating/strictness, React hooks enforcement, persisted Zustand version/migration contracts, and shared dependency majors. Link actual CI and migration-test evidence; a frontend build alone is insufficient. |
 
 - [ ] Close each dependency with its required evidence, or obtain an explicit requester decision specifying what is outside this release's supported scope, why, and what risk remains. Record decisions in both the owning task and this plan. None has been granted in this session.
 
@@ -148,7 +148,7 @@ These are future execution steps, not authorization to merge or publish while St
 
 ## Verification evidence (2026-09-10)
 
-- Focused release/helper/docs/licensing/CI suite: **241 passed, 1 deselected, 4 warnings**. The deselected test, `test_strict_local_build_preserves_canonical_site_sources`, was run both sandboxed and unsandboxed and failed with host multiprocessing `SemLock` / `OSError: [Errno 28] No space left on device`. It remains an explicit unpassed gate, not a skipped release requirement.
+- Focused release/helper/docs/licensing/CI suite: **241 passed, 1 deselected, 4 warnings**. The deselected test, `test_strict_local_build_preserves_canonical_site_sources`, was run both sandboxed and unsandboxed and failed with host multiprocessing `SemLock` / `OSError: [Errno 28] No space left on device`. The host limitation remains; the unchanged standard test/build subsequently passed on candidate 7d7a2e708d in CI run 34491682436, closing this docs blocker.
 - Strict MkDocs API build passed with only the git-date plugin switched to serial processing in memory; repository configuration was unchanged. Two historical git timestamp warnings remain. Output: `/tmp/pr2761-docs-site`.
 - `bash Helper_Scripts/refresh_docs_published.sh` is idempotent across all 453 generated files.
 - Actionlint **1.7.12** passed across all workflows; Ruff passed on touched Python tests.
@@ -159,3 +159,46 @@ These are future execution steps, not authorization to merge or publish while St
 - Working refresh diff whitespace check passed. Full accumulated merge diff contains inherited whitespace warnings in the June Claims plan, pinned MCP protocol schema fixtures, and recurring-question models; these upstream files were preserved.
 - Remote tag inventory contains v0.1.37 and v0.1.38 but no v0.1.39, v0.1.40, v0.1.41, or v0.1.42. Main rulesets require the trusted main license context and merge commits; the six documented core gates are enforced on dev, and remain required readiness evidence for this candidate.
 - Raw logs are in `/tmp/pr2761-final-tests.log`, `/tmp/pr2761-docs-unsandboxed.log`, `/tmp/pr2761-mkdocs-serial.log`, and `/tmp/pr2761-actionlint.log`.
+
+## Stage 4 execution update — 2026-09-10
+
+All results below precede the next fix commit. Required remote checks must be repeated on the final pushed head.
+
+### CI fixes and security triage
+
+- Standard docs gate closed: [onboarding-docs-gate](https://github.com/rmusser01/tldw_server/actions/runs/34491682436/job/102919740634) runs the unchanged docs tests and strict MkDocs successfully.
+- At `7d7a2e708d`, [backend](https://github.com/rmusser01/tldw_server/actions/runs/34491682522/job/102920038746), [security](https://github.com/rmusser01/tldw_server/actions/runs/34491682130/job/102922117075), [container](https://github.com/rmusser01/tldw_server/actions/runs/34491682218/job/102922254677), [E2E](https://github.com/rmusser01/tldw_server/actions/runs/34491682309/job/102921012296) and trusted main licensing pass. Coverage is pending.
+- Frontend shard 6: repaired stale character-routing fixtures (assistant metadata/setters and optional request-scope argument); image-event and adjacent character suites plus locale parity now **23 passed**. No production routing bypass was added.
+- Frontend shard 2: restored three missing role-play failure messages in the extension English locale mirror.
+- Frontend shard 1: repaired Notes connection/principal fixtures and made Companion loading-state timing deterministic. **21 tests pass**; added a negative test proving note reads wait for verified identity. Existing backlink/card assertions remain. Shard 5 scheduled-reminder validation now awaits the asynchronous timezone error before asserting no create request; **50 tests pass** in the complete file. All known frontend unit regressions have local fixes.
+- CodeQL Actions analysis reports 238 findings: 232 poisonable steps, five direct cache writes, one inherited untrusted checkout. Cache queries combine workflow-wide dispatch/schedule triggers and PR-head checkout expressions without evaluating event guards; no reachable workflow-run cache-write exploit was demonstrated. Ten checkout jobs lack direct admission dependencies, so deleting raw-event fallbacks would select the wrong SHA. Alerts remain unresolved; no suppressions or dismissals applied.
+- JavaScript scan identified a real Speech Playground persistence problem: object spread admitted unexpected API-key/credential properties. Explicit persisted-field projection replaces that spread; regression reproduced red then passed, **78 tests** across five suites. Three avatar regressions confirm existing normalization rejects javascript/SVG-data URLs and accepts HTTPS; no duplicate sanitizer was added.
+- TASK-12116: valid frozen Bun install exposed a bounded WebUI TypeScript baseline. Typed mock contracts and structured-presentation narrowing are repaired: the full nonincremental WebUI typecheck passes, alongside **105 Skills script tests**, **57 presentation tests**, and collection of **39 Playwright security cases**. An explicit nonincremental typecheck now gates frontend-required; **7 workflow contract tests** and Actionlint pass. All nine named persisted stores already declare version 1 plus identity migration; five existing store suites pass **17 tests**, closing TASK-12116 criterion 4 for the current schema. Strictness, additional hook rules and dependency-major alignment remain open.
+
+### Readiness dependencies
+
+- TASK-13013.7 remains owned by active PR #2869 and its separate supply-chain worktree. That worktree contains additional unpushed native-applicability work; its published head still fails scans. Do not integrate it blindly. Its latest evidence records 93 scoped exceptions expiring September 17 and retained vulnerability replay rows; final publication needs current scans/exception review.
+- TASK-13013.8: initial cross-user API/cache/permission selection **38 passed**. Additional storage/lifecycle selection initially **37 passed, 4 failed, 17 errors**; investigations found missing allowed-root setup and missing AuthNZ account fixtures. These failures are repaired: **76 tests pass** across Sharing, Chatbooks export/import and MediaFiles. Beyond fixture setup, a real repository contract violation returned RowAdapter objects instead of dictionaries, silently omitting export artifacts; dictionary conversion plus a serialization regression fixes it. Production Bandit has zero findings; test baseline adds only assertions. Account deactivation is not erasure; partial primitives do not close full lifecycle certification. Active Reading cleanup PR #2903 remains separate and unfinished.
+- TASK-13013.9: implemented [capacity harness](../../Development/Release_Capacity_Soak.md), with [dedicated plan](2026-09-10-release-capacity-soak-harness.md), **30 passing behavioral tests**, zero production Bandit findings and zero test findings with B101 assertions excluded. Independent review caught a final-sample recovery false pass; regression and fix included. This proves runner behavior, not a release operating envelope. A real artifact, fresh collector measurements and representative workload run remain required. Existing full-suite Helper_Scripts directory selection includes the new tests.
+
+### Distribution and recovery findings
+
+- Public PyPI lists only **0.1.32**; versions 0.1.38–0.1.42 return 404. GitHub release labels and repository metadata do not imply PyPI publication.
+- GHCR app `0.1.38`/`latest`: `sha256:70fb5ef2ce0e7bd11d0c359d16ccacae5493bf3c3064a5f4eefd86d99a06f933`, source `ffb6f106e9a96fc6214191135c4afc7d916c5b29`, [publication](https://github.com/rmusser01/tldw_server/actions/runs/28827294234). Worker and audio-worker builds failed in that run.
+- GHCR app `main`/`sha-7a23be3`: `sha256:16ea0dbc11f5493f730451007f8b25933cfb79c966f37d5cf658bfd4f95dba4c`, source `7a23be3202e360f2d8e7cfe208e13ba406cf0507`, [publication](https://github.com/rmusser01/tldw_server/actions/runs/29559405432). Current main image publication was cancelled.
+- App 0.1.39–0.1.42 tags are absent; worker/audio-worker inventory returns 403 and authenticated package access lacks read:packages. Their version-collision status is **unverified**, not absent. Recheck before publication.
+- OCI/SLSA metadata matches these source/workflow identities; this is metadata inspection, not cryptographic attestation verification. No actual user's deployed rollback version has been inferred.
+- Recovery selection repaired the CLI stderr test to use a real subprocess because Loguru retains its import-time stream. **86 tests pass** across SQLite/WAL recovery, app archives, Redis-file restore, deployment ordering and webhook recovery. Ruff/Black pass; Bandit baseline and final findings are identical. This is not a live full-stack PostgreSQL/Redis deployment rehearsal.
+- Remaining Stage 4.3 work: complete private worker inventory; assess schema/config changes against selected immutable rollback artifact; rehearse full backup/upgrade/restore in a disposable deployment with checksummed databases/uploads/configuration; record authenticated acceptance checks. Publication and human review remain later stages.
+
+Raw local evidence: `/tmp/pr2761-checks-latest.json`, `/tmp/pr2761-chat-locale-final.log`, `/tmp/pr2761-ui-security-final.log`, `/tmp/pr2761-repository-recovery-final-results.xml`, `/tmp/pr2761-ghcr-summary.json`, `/tmp/pr2761-pypi-lineage.json`. Important findings and external run identities are retained above so resumption does not depend on temporary files.
+
+The final protected source identity must advance from frozen dev to the verified blocker-fix source commit. Regenerate all tracked protected-file hashes and the legal record, update the licensing regression source pin, and verify tree equality before pushing the final batch. Source and metadata commits are prepared together; never publish the intermediate record.
+
+### Final local blocker-fix verification
+
+- Slash-command parsing: CodeQL alert #2599 reproduces quadratic rejection of a 32 KiB malformed argument (about 5.5 seconds). Requiring the argument's first non-whitespace character removes ambiguous separator backtracking; fixed raw match is about 0.3 ms. **65 router/injection/endpoint/replace-mode tests pass**; 111,111 short inputs preserve previous captures. Production Bandit reports zero findings. The regex is inherited, and this release adds a call site; no claim that every alert is a new vulnerability.
+- CodeQL completed all three language jobs on `7d7a2e708d`; Python reports 566 results and 173 open alerts, including 142 alert IDs already open on main. Further reviewed path/hash reports did not demonstrate an exploit. Findings are not dismissed; final-source rescan and remaining security review stay open.
+- Harness independent review initially found one test violating the normal HTTP-mocking guard. Replaced that constructor monkeypatch with a real ephemeral loopback collector. **30 tests now pass under the normal repository configuration**, with four existing warnings; production/test Bandit reports are clean (test assertions excluded). No guard or test configuration was disabled.
+- Complete ScheduledTasks suite: **50 passed**. Notes/Companion: **21 passed**. Chat/image/locale: **23 passed**. Full WebUI nonincremental typecheck: **passed**. Standard docs contracts after release-note edits: **18 passed**, host-limited build test separately covered by remote standard docs success.
+- Real bugs repaired in this batch: speech credential-field persistence, registered media artifacts omitted from export, and slash-command regex backtracking. Other frontend changes repair types, missing locale copy, incomplete fixtures and asynchronous test assertions.

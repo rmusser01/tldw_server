@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter } from "react-router-dom"
 
@@ -393,13 +393,19 @@ describe("CompanionHomePage", () => {
   })
 
   it("renders the default core dashboard cards", async () => {
+    const snapshot = createDeferred<ReturnType<typeof buildSnapshot>>()
+    mocks.fetchCompanionHomeSnapshot.mockReturnValueOnce(snapshot.promise)
     renderPage()
 
     await waitFor(() => {
       expect(mocks.fetchCompanionHomeSnapshot).toHaveBeenCalledWith("options")
     })
 
-    expect(screen.getByRole("heading", { name: "Inbox Preview" })).toBeInTheDocument()
+    expect(screen.getByText("Loading your companion home dashboard.")).toBeInTheDocument()
+    await act(async () => {
+      snapshot.resolve(buildSnapshot())
+    })
+    expect(await screen.findByRole("heading", { name: "Inbox Preview" })).toBeInTheDocument()
     expect(screen.getByRole("heading", { name: "Automation Inbox" })).toBeInTheDocument()
     expect(screen.getByRole("heading", { name: "Needs Attention" })).toBeInTheDocument()
     expect(screen.getByRole("heading", { name: "Resume Work" })).toBeInTheDocument()

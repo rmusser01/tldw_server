@@ -32,6 +32,12 @@ function createHarness({
   probeProcessTree = vi.fn(async () => false),
   probeTimeoutMs = 50,
   stopProcessTree = vi.fn(async () => undefined),
+}: {
+  closeTimeoutMs?: number;
+  platform?: NodeJS.Platform;
+  probeProcessTree?: ReturnType<typeof vi.fn<(target: number) => boolean | Promise<boolean>>>;
+  probeTimeoutMs?: number;
+  stopProcessTree?: ReturnType<typeof vi.fn<(record: ReturnType<typeof command>) => Promise<unknown>>>;
 } = {}) {
   const spawnLoggedProcess = vi.fn((specification) => ({
     ...specification,

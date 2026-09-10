@@ -222,6 +222,30 @@ describe("AssistantSelect behavior", () => {
     })
   })
 
+  it.each(["javascript:alert(1)", "data:image/svg+xml,<svg onload='alert(1)'/>"])(
+    "does not render an unsafe assistant avatar: %s",
+    async (avatar_url) => {
+      mocks.listAllCharacters.mockResolvedValue([
+        { id: "char-1", name: "Alpha", avatar_url }
+      ])
+      renderAssistantSelect({ variant: "inline" })
+
+      await screen.findByRole("button", { name: "Alpha" })
+      expect(screen.queryByRole("img", { name: "Alpha" })).not.toBeInTheDocument()
+    }
+  )
+
+  it("renders an allowed assistant avatar", async () => {
+    mocks.listAllCharacters.mockResolvedValue([
+      { id: "char-1", name: "Alpha", avatar_url: "https://example.com/alpha.png" }
+    ])
+    renderAssistantSelect({ variant: "inline" })
+
+    expect(await screen.findByRole("img", { name: "Alpha" })).toHaveAttribute(
+      "src", "https://example.com/alpha.png"
+    )
+  })
+
   it("stages a controlled selection without changing the active chat or stored assistant", async () => {
     const user = userEvent.setup()
     const onSelectionChange = vi.fn()

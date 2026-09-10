@@ -1,6 +1,6 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
@@ -20,7 +20,9 @@ const {
   mockInitialize,
   mockGetChat,
   mockListChatMessages,
-  mockGetCharacter
+  mockGetCharacter,
+  mockGetConfig,
+  mockGetCurrentUser
 } = vi.hoisted(() => ({
   mockBgRequest: vi.fn(),
   mockMessageSuccess: vi.fn(),
@@ -37,7 +39,9 @@ const {
   mockInitialize: vi.fn(),
   mockGetChat: vi.fn(),
   mockListChatMessages: vi.fn(),
-  mockGetCharacter: vi.fn()
+  mockGetCharacter: vi.fn(),
+  mockGetConfig: vi.fn(),
+  mockGetCurrentUser: vi.fn()
 }))
 
 vi.mock("react-i18next", () => ({
@@ -127,10 +131,15 @@ vi.mock("@/services/settings/registry", async (importOriginal) => {
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: mockInitialize,
+    getConfig: mockGetConfig,
     getChat: mockGetChat,
     listChatMessages: mockListChatMessages,
     getCharacter: mockGetCharacter
   }
+}))
+
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: { getCurrentUser: mockGetCurrentUser }
 }))
 
 const renderPage = () => {
@@ -184,6 +193,16 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     mockGetAllNoteKeywordStats.mockResolvedValue([])
     mockSearchNoteKeywords.mockResolvedValue([])
     mockInitialize.mockResolvedValue(undefined)
+    mockGetConfig.mockResolvedValue({
+      serverUrl: "https://notes.example.test",
+      authMode: "single-user",
+      authSource: "cookie-session"
+    })
+    mockGetCurrentUser.mockResolvedValue({
+      id: 1,
+      username: "notes-user",
+      is_active: true
+    })
     mockListChatMessages.mockResolvedValue([])
     mockGetCharacter.mockResolvedValue(null)
   })
@@ -219,6 +238,31 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
       return {}
     })
   }
+
+  it("waits for a verified principal before reading linked notes", async () => {
+    configureCommonRequests("conv-verified")
+    mockGetChat.mockResolvedValue({ id: "conv-verified", title: "Verified session" })
+    let resolvePrincipal!: (user: {
+      id: number
+      username: string
+      is_active: boolean
+    }) => void
+    mockGetCurrentUser.mockReturnValueOnce(new Promise((resolve) => {
+      resolvePrincipal = resolve
+    }))
+
+    renderPage()
+    await waitFor(() => expect(mockGetCurrentUser).toHaveBeenCalled())
+    expect(screen.queryByText("Verified session")).not.toBeInTheDocument()
+    expect(mockBgRequest.mock.calls.some(([request]) =>
+      request.path?.startsWith("/api/v1/notes/?")
+    )).toBe(false)
+
+    await act(async () => {
+      resolvePrincipal({ id: 1, username: "notes-user", is_active: true })
+    })
+    expect(await screen.findByText("Verified session")).toBeInTheDocument()
+  })
 
   it("shows conversation title labels with UUID debug tooltip in list and header", async () => {
     configureCommonRequests("conv-1234")

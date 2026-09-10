@@ -929,6 +929,15 @@
   "composer_rolePlayLayers": {
     "message": "Role-play layers"
   },
+  "composer_rolePlaySaveError": {
+    "message": "Scene settings could not be saved. Your draft is still here; retry Apply."
+  },
+  "composer_rolePlayApplyError": {
+    "message": "Settings could not be applied. Your draft is still here; retry Apply."
+  },
+  "composer_rolePlayRestoreError": {
+    "message": "Settings could not be applied, and the previous scene could not be restored. Keep this drawer open and retry Apply."
+  },
   "composer_chooseBehaviorTemplate": {
     "message": "Choose behavior template"
   },

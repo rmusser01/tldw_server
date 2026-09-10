@@ -35,7 +35,24 @@ function childFromRecord(record) {
   return record?.child ?? record;
 }
 
-/** Track every spawned command until its child emits close. */
+/**
+ * @typedef {import('node:events').EventEmitter & {
+ *   pid?: number, exitCode: number | null, signalCode: NodeJS.Signals | null
+ * }} ManagedChild
+ * @typedef {{child: ManagedChild, loggingErrors?: unknown[]}} ManagedProcess
+ */
+
+/** Track every spawned command until its child emits close.
+ * @param {{
+ *   closeTimeoutMs?: number,
+ *   platform?: NodeJS.Platform,
+ *   probeProcessTree?: (target: number) => boolean | Promise<boolean>,
+ *   probeTimeoutMs?: number,
+ *   spawnLoggedProcess?: (specification: Parameters<typeof onboardingSpawnLoggedProcess>[0]) => ManagedProcess,
+ *   stopProcessTree?: (record: ManagedProcess, options: {timeoutMs: number}) => unknown | Promise<unknown>,
+ *   stopTimeoutMs?: number
+ * }} [options]
+ */
 export function createProcessRegistry({
   closeTimeoutMs = 10_000,
   platform = process.platform,
@@ -202,7 +219,13 @@ export function createProcessRegistry({
   return { spawn, stop, teardown, wait };
 }
 
-/** Install removable SIGINT and SIGTERM handlers that share registry teardown. */
+/** Install removable SIGINT and SIGTERM handlers that share registry teardown.
+ * @param {{
+ *   onSignal?: (signal: NodeJS.Signals, teardown: Promise<void>) => void,
+ *   processObject?: Pick<import('node:events').EventEmitter, 'on' | 'off' | 'removeListener'>,
+ *   registry?: Pick<ReturnType<typeof createProcessRegistry>, 'teardown'>
+ * }} [options]
+ */
 export function installCertificationSignalHandlers({
   onSignal,
   processObject = process,

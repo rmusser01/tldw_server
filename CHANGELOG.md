@@ -56,6 +56,10 @@ and this project adheres to Some kind of Versioning
   facade and hardened its runtime and CI contracts.
 - **Skills Live Certification** — Added strict live-integration certification
   for Skills discovery and execution.
+- **Capacity Measurements** — Added a reusable HTTP steady/overload/recovery
+  runner with explicit workload thresholds, artifact identity checks and fresh
+  queue, pool and storage observations. A passing profile measures only its
+  configured operating envelope.
 
 ### Changed
 
@@ -81,12 +85,20 @@ and this project adheres to Some kind of Versioning
   and repaired frontend test and live-UAT regressions (#2834, #2836, #2837,
   #2847, #2848, #2849, #2854, #2822, #2911, #2924).
 
-- **Release And Workflow Reliability** — Closed the `0.1.41` release records,
-  synchronized released `main` back to `dev`, and corrected workflow
-  prerequisites required for the protected release train.
+- **Release Candidate Repairs** — Excluded unexpected credential fields from
+  persisted speech settings, restored missing extension role-play error copy,
+  restored media artifact dictionaries used by full-account export, and
+  prevented quadratic slash-command parsing on malformed multiline input.
+- **Frontend Type Safety** — Repaired WebUI type errors and added a required
+  nonincremental TypeScript check to the frontend CI gate.
 
 ### Upgrade And Release Readiness
 
+- Repository entries for 0.1.39–0.1.41 describe development rollups, not proof
+  of distribution publication. At candidate preparation, GitHub's latest
+  release and GHCR app `latest` were 0.1.38, while public PyPI listed 0.1.32.
+  Verify the installed artifact's version and digest before selecting a
+  migration or rollback baseline.
 - Back up databases, uploaded content, and configuration before upgrading. The
   accumulated release train changes authentication, conversation, notes-sync,
   personal-context, presentation, and webhook schemas. Rollback must restore a

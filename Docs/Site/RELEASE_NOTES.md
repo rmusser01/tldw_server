@@ -11,6 +11,11 @@ Published release notes entry point.
   durable webhooks, production deployment checks, and reliability fixes.
 - Back up persistent data before upgrading; the accumulated train includes
   schema changes. See the repository deployment and migration runbooks.
+- Candidate repairs cover speech preference persistence, exported media
+  artifacts, extension error copy and the required WebUI TypeScript check.
+- Verify installed artifact digests: repository rollups 0.1.39–0.1.41 do not
+  establish publication. At preparation, GitHub/GHCR app latest was 0.1.38
+  and public PyPI listed 0.1.32.
 - The source release's protected frontend material remains source-available
   under PolyForm Perimeter 1.0.1. Its release-specific Countdown grant adds
   `AGPL-3.0-only` on September 10, 2028 at 12:00 UTC; see

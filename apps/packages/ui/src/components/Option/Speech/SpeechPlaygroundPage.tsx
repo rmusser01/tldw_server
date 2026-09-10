@@ -1059,7 +1059,9 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
         localStorage.setItem(
           "tts-last-render-config",
           JSON.stringify({
-            ...selection,
+            provider: selection.provider,
+            voice: selection.voice,
+            model: selection.model,
             backend:
               selection.backend ??
               (selection.provider === "tldw" ? selectedTldwBackend || undefined : undefined),

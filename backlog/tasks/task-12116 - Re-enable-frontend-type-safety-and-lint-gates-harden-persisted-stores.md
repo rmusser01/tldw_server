@@ -1,15 +1,19 @@
 ---
 id: TASK-12116
-title: Re-enable frontend type-safety and lint gates, harden persisted stores
+title: 'Re-enable frontend type-safety and lint gates, harden persisted stores'
 status: In Progress
+assignee: []
+created_date: ''
+updated_date: '2026-09-10 15:20'
 labels:
-- tech-debt
-- high
-- frontend
-- ci
-- packages-ui
+  - tech-debt
+  - high
+  - frontend
+  - ci
+  - packages-ui
+dependencies: []
 documentation:
-- apps/FRONTEND_AUDIT.md
+  - apps/FRONTEND_AUDIT.md
 ---
 
 ## Description
@@ -31,11 +35,17 @@ This is a phased hardening ticket; land incrementally so each step keeps CI gree
 - [ ] #1 A TypeScript typecheck runs in CI and gates merges (either remove `ignoreBuildErrors` once `packages/ui` typechecks, or add a separate `tsc --noEmit` gate).
 - [ ] #2 `strict` is turned on incrementally (start with `noImplicitAny`, then `strictNullChecks`), with a tracked path to `strict: true`.
 - [ ] #3 `react-hooks/rules-of-hooks` is re-enabled and violations fixed; the remaining `react-hooks` rules are re-enabled or individually justified.
-- [ ] #4 Every persisted Zustand store declares a `version` + `migrate` (or a documented reason it needs neither).
+- [x] #4 Every persisted Zustand store declares a `version` + `migrate` (or a documented reason it needs neither).
 - [ ] #5 Shared-code dependency majors are aligned between frontend and extension (or hoisted to one workspace-level version), with a note on the reconciliation.
 <!-- AC:END -->
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+PR2761 refresh: repairing the real nonincremental WebUI TypeScript baseline, then adding an explicit failing typecheck step to frontend-required. No tsconfig relaxation; remaining strictness/hooks/dependency-major work stays open. Persisted version/migration work from PR2575 and661b is present in frozen candidate and should be verified before closing criterion4.
+
+Verified all9 named persisted Zustand stores already declare version1 plus identity migrate in this candidate (playground-session, persona-buddy-shell, notes-dock, ui-mode, actor, quick-ingest-session, folder, feedback, acp-sessions). Existing five-suite persistence/store selection passed17tests. Criterion4 closed for the current unchanged schema; this does not claim forward-schema migrations. WebUI nonincremental tsc also passes; CI gate added but criterion1 awaits new-head CI evidence. Strictness/additional hook rules/dependency-major alignment remain open.
+<!-- SECTION:NOTES:END -->

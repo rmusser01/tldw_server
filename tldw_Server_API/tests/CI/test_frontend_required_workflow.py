@@ -4,6 +4,17 @@ import pytest
 import yaml
 
 
+def test_frontend_required_gates_webui_typecheck() -> None:
+    data = yaml.safe_load(Path(".github/workflows/frontend-required.yml").read_text())
+    step = next(
+        step for step in data["jobs"]["frontend-required"]["steps"] if step.get("name") == "Run WebUI typecheck"
+    )
+    assert step["if"] == "needs.changes.outputs.tldw_frontend_changed == 'true'"
+    assert step["working-directory"] == "apps/tldw-frontend"
+    assert step["run"] == "bun run typecheck --incremental false"
+    assert not step.get("continue-on-error", False)
+
+
 @pytest.mark.unit
 def test_frontend_required_budget_covers_broad_changed_suite() -> None:
     workflow_path = Path(".github/workflows/frontend-required.yml")
@@ -17,21 +28,14 @@ def test_frontend_required_handles_indirect_pathological_expansion() -> None:
     workflow_path = Path(".github/workflows/frontend-required.yml")
     data = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
     steps = data["jobs"]["frontend-unit-tests"]["steps"]
-    unit_step = next(
-        step
-        for step in steps
-        if step.get("name") == "Run package-owned frontend unit tests"
-    )
+    unit_step = next(step for step in steps if step.get("name") == "Run package-owned frontend unit tests")
     script = unit_step["run"]
 
     assert 'IMPACTED_TEST_LIMIT="500"' in script
     assert 'bunx vitest list --changed="${BASE_SHA}" --filesOnly' in script
     assert 'git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA"' in script
     assert "USE_DIRECT_TESTS=1" in script
-    assert (
-        'package_vitest_args=("${direct_test_files[@]}" "${common_vitest_args[@]}")'
-        in script
-    )
+    assert 'package_vitest_args=("${direct_test_files[@]}" "${common_vitest_args[@]}")' in script
     assert '"${head_command[@]}"' in script
     assert "No directly changed frontend tests were found" not in script
     assert "retaining the sharded dependency-impact set" in script
@@ -81,11 +85,7 @@ def test_frontend_required_fails_closed_on_unit_shard_outcomes() -> None:
     assert "needs.changes.outputs.tldw_frontend_changed == 'true'" in unit_job["if"]
     assert final_job["needs"] == ["changes", "admission", "frontend-unit-tests"]
 
-    guard = next(
-        step
-        for step in final_job["steps"]
-        if step.get("name") == "Require frontend unit shard success"
-    )
+    guard = next(step for step in final_job["steps"] if step.get("name") == "Require frontend unit shard success")
     assert guard["env"] == {
         "TLDW_FRONTEND_CHANGED": "${{ needs.changes.outputs.tldw_frontend_changed }}",
         "UNIT_SHARDS_RESULT": "${{ needs.frontend-unit-tests.result }}",
@@ -103,9 +103,7 @@ def test_frontend_coverage_report_cannot_starve_required_gates() -> None:
     data = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
     steps = data["jobs"]["frontend-required"]["steps"]
 
-    coverage_step = next(
-        step for step in steps if step.get("name") == "Frontend coverage summary (report-only)"
-    )
+    coverage_step = next(step for step in steps if step.get("name") == "Frontend coverage summary (report-only)")
 
     assert coverage_step["continue-on-error"] is True
     assert coverage_step["timeout-minutes"] == 17

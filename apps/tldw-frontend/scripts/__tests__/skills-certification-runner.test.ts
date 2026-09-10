@@ -9,6 +9,9 @@ import {
 const webName = 'skills-cert-web';
 const extensionName = 'skills-cert-extension';
 
+type HarnessCommand = { name: string };
+type HarnessRecord = { command: HarnessCommand };
+
 function result(status: 'passed' | 'failed' | 'running', categories: string[] = []) {
   return { categories, status };
 }
@@ -17,14 +20,16 @@ function report(stats = { expected: 1, flaky: 0, skipped: 0, unexpected: 0 }) {
   return { stats };
 }
 
-function harness(overrides: Record<string, unknown> = {}) {
+function harness<Overrides extends Record<string, unknown> = Record<never, never>>(
+  overrides?: Overrides
+) {
   const calls: string[] = [];
   const files = new Map<string, unknown>();
   const registry = {
-    spawn: vi.fn((command) => ({ command })),
-    stop: vi.fn(async () => undefined),
+    spawn: vi.fn((command: HarnessCommand, _logPath?: string) => ({ command })),
+    stop: vi.fn(async (_record: HarnessRecord) => undefined),
     teardown: vi.fn(async () => undefined),
-    wait: vi.fn(async () => ({ code: 0, signal: null })),
+    wait: vi.fn(async (_record: HarnessRecord) => ({ code: 0, signal: null })),
   };
   const evidence = {
     extensionDir: '/evidence/extension',
@@ -61,12 +66,12 @@ function harness(overrides: Record<string, unknown> = {}) {
   };
   Object.entries(defaultResults).forEach(([key, value]) => files.set(key, value));
   const operations = {
-    buildCommands: vi.fn(() => commands),
+    buildCommands: vi.fn((_input: { ports: { backend: number; web: number } }) => commands),
     buildEnvironments: vi.fn(() => ({})),
     createEvidence: vi.fn(() => evidence),
-    createProfile: vi.fn(() => profile),
+    createProfile: vi.fn((_input: { temporaryBase: string }) => profile),
     createRegistry: vi.fn(() => registry),
-    fetch: vi.fn(async (url: string) => {
+    fetch: vi.fn(async (url: string, _init?: RequestInit) => {
       calls.push(`fetch:${new URL(url).pathname}`);
       if (url.includes('/trash'))
         return { json: async () => ({ skills: [], total: 0 }), status: 200 };
@@ -91,7 +96,7 @@ function harness(overrides: Record<string, unknown> = {}) {
       const record = activeRegistry.spawn(command, `/evidence/logs/${command.name}.log`);
       return activeRegistry.wait(record);
     }),
-    startChild: vi.fn((activeRegistry: typeof registry, command: { name: string }) => {
+    startChild: vi.fn((activeRegistry: typeof registry, command: HarnessCommand): HarnessRecord | Promise<HarnessRecord> => {
       calls.push(command.name);
       return activeRegistry.spawn(command, `/evidence/logs/${command.name}.log`);
     }),
@@ -971,8 +976,10 @@ describe('Skills certification runner', () => {
       markerPath: '/runtime/root/.marker',
       root: '/runtime/root',
     };
-    const error = new AggregateError([new Error('setup'), new Error('rollback')], 'profile failed');
-    error.runtime = runtime;
+    const error = Object.assign(
+      new AggregateError([new Error('setup'), new Error('rollback')], 'profile failed'),
+      { runtime }
+    );
     const test = harness({
       createProfile: vi.fn(() => {
         throw error;
@@ -1121,13 +1128,13 @@ describe('Skills certification runner', () => {
     let onSignal: () => void;
     let release: () => void;
     const test = harness({
+      removeRuntime: vi.fn(() => true),
+      removeEvidence: vi.fn(() => true),
       installHandlers: vi.fn(({ onSignal: captured }) => {
         onSignal = captured;
         return vi.fn();
       }),
     });
-    test.operations.removeRuntime = vi.fn(() => true);
-    test.operations.removeEvidence = vi.fn(() => true);
     test.operations.finalize = vi
       .fn()
       .mockImplementationOnce(
@@ -1156,13 +1163,13 @@ describe('Skills certification runner', () => {
   it('uses safe fallback when handler-removal refresh finalization rejects', async () => {
     let removals = 0;
     const test = harness({
+      removeRuntime: vi.fn(() => true),
+      removeEvidence: vi.fn(() => true),
       installHandlers: vi.fn(() => () => {
         removals += 1;
         if (removals === 1) throw new Error('partial removal');
       }),
     });
-    test.operations.removeRuntime = vi.fn(() => true);
-    test.operations.removeEvidence = vi.fn(() => true);
     test.operations.finalize = vi
       .fn()
       .mockResolvedValueOnce({

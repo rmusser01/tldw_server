@@ -55,6 +55,9 @@ const safeBaseEnvKeys = Object.freeze([
 const chromiumProbeSource =
   'const { chromium } = await import("@playwright/test"); const browser = await chromium.launch({ headless: true }); await browser.close()';
 
+/** @param {Record<string, string | undefined>} baseEnv
+ * @returns {Record<string, string>}
+ */
 function safeBaseEnvironment(baseEnv) {
   const env = {};
   for (const key of safeBaseEnvKeys) {
@@ -268,6 +271,8 @@ export function createSkillsCertificationProfile({ repoRoot, temporaryBase, remo
 
 /**
  * Build independent allowlisted environments for every certification child.
+ * @param {{profile: ReturnType<typeof createSkillsCertificationProfile>, ports: {backend: number, web: number}, baseEnv?: Record<string, string | undefined>}} options
+ * @returns {Record<'authInitEnv' | 'backendEnv' | 'frontendEnv' | 'webuiPlaywrightEnv' | 'extensionBuildEnv' | 'extensionPlaywrightEnv' | 'webuiChromiumProbeEnv' | 'extensionChromiumProbeEnv', Record<string, string>>}
  */
 export function buildSkillsCertificationEnvironments({ profile, ports, baseEnv = process.env }) {
   if (!profile || !ports?.backend || !ports?.web) {
@@ -348,6 +353,7 @@ export function buildSkillsCertificationEnvironments({ profile, ports, baseEnv =
 
 /**
  * Build fixed executable, argv, cwd, and environment records for certification.
+ * @param {{repoRoot: string, frontendRoot?: string, extensionRoot?: string, profile: ReturnType<typeof createSkillsCertificationProfile>, ports: {backend: number, web: number}, baseEnv?: Record<string, string | undefined>}} options
  */
 export function buildSkillsCertificationCommands({
   repoRoot,

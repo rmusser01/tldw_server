@@ -121,7 +121,7 @@ vi.mock("@/utils/selected-character-storage", () => ({
   selectedCharacterSyncStorage: {
     get: vi.fn(async () => null)
   },
-  parseSelectedCharacterValue: vi.fn(() => null)
+  parseSelectedCharacterValue: vi.fn((value: unknown) => value)
 }))
 
 vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
@@ -156,6 +156,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     createChat: createChatMock,
     streamCharacterChatCompletion: streamCharacterChatCompletionMock,
     persistCharacterCompletion: persistCharacterCompletionMock,
+    getChatSettings: vi.fn(async () => ({ settings: null })),
     initialize: vi.fn(async () => null),
     getMessage: vi.fn(async () => ({ version: 1 })),
     editMessage: vi.fn(async () => null)
@@ -244,6 +245,9 @@ const createHookOptions = (
     serverChatId: "server-chat-1",
     serverChatTitle: "Image Sync Chat",
     serverChatCharacterId: null,
+    serverChatAssistantKind: null,
+    serverChatAssistantId: null,
+    serverChatPersonaMemoryMode: null,
     serverChatState: "in-progress",
     serverChatTopic: null,
     serverChatClusterId: null,
@@ -252,6 +256,9 @@ const createHookOptions = (
     setServerChatId: vi.fn(),
     setServerChatTitle: vi.fn(),
     setServerChatCharacterId: vi.fn(),
+    setServerChatAssistantKind: vi.fn(),
+    setServerChatAssistantId: vi.fn(),
+    setServerChatPersonaMemoryMode: vi.fn(),
     setServerChatMetaLoaded: vi.fn(),
     setServerChatState: vi.fn(),
     setServerChatVersion: vi.fn(),
@@ -542,7 +549,9 @@ describe("useChatActions image event sync integration", () => {
         id: 7,
         name: "Guide"
       },
-      serverChatCharacterId: 7
+      serverChatCharacterId: 7,
+      serverChatAssistantKind: "character",
+      serverChatAssistantId: "7"
     })
     const { result } = renderHook(() => useChatActions(options))
 
@@ -556,6 +565,7 @@ describe("useChatActions image event sync integration", () => {
       })
     })
 
+    expect(options.notification.error.mock.calls).toEqual([])
     expect(streamCharacterChatCompletionMock).toHaveBeenCalledTimes(1)
     expect(streamCharacterChatCompletionMock.mock.calls[0]?.[1]).toEqual(
       expect.objectContaining({
@@ -610,6 +620,12 @@ describe("useChatActions character stream throttling integration", () => {
     const { options, setMessages, getCurrentMessages } = createHookOptions([])
     options.serverChatId = null
     options.serverChatCharacterId = null
+    options.selectedAssistant = {
+      kind: "character",
+      id: "101",
+      name: "Stream Character",
+      metadata: { selectionMode: "tracked" }
+    }
     options.selectedCharacter = {
       id: 101,
       name: "Stream Character",
@@ -629,6 +645,7 @@ describe("useChatActions character stream throttling integration", () => {
 
     // Fake timers freeze the throttle window so this bound stays deterministic in CI.
     expect(setMessages.mock.calls.length).toBeLessThan(40)
+    expect(options.notification.error.mock.calls).toEqual([])
     expect(streamCharacterChatCompletionMock).toHaveBeenCalledTimes(1)
     expect(normalChatModeMock).not.toHaveBeenCalled()
 
@@ -665,6 +682,9 @@ describe("useChatActions character stream throttling integration", () => {
 
     const { options } = createHookOptions([])
     options.serverChatId = "chat-character-1"
+    options.serverChatCharacterId = 101
+    options.serverChatAssistantKind = "character"
+    options.serverChatAssistantId = "101"
     options.selectedCharacter = {
       id: 101,
       name: "Stream Character",
@@ -685,7 +705,8 @@ describe("useChatActions character stream throttling integration", () => {
       expect.any(String),
       expect.objectContaining({
         assistant_message_id: expect.any(String)
-      })
+      }),
+      undefined
     )
     expect(
       addChatMessageMock.mock.calls.filter(
@@ -718,6 +739,9 @@ describe("useChatActions character stream throttling integration", () => {
 
     const { options } = createHookOptions([])
     options.serverChatId = "server-chat-1"
+    options.serverChatCharacterId = 101
+    options.serverChatAssistantKind = "character"
+    options.serverChatAssistantId = "101"
     options.selectedCharacter = {
       id: 101,
       name: "Stream Character",

@@ -2074,13 +2074,12 @@ describe("ScheduledTasksPage", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Timezone" }), {
       target: { value: "Mars/Olympus" }
     })
-    await user.click(screen.getByRole("button", { name: "Save reminder" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save reminder" }))
 
-    await waitFor(() => {
-      expect(mocks.createScheduledTaskReminder).not.toHaveBeenCalled()
-    })
+    // The cron preview renders before asynchronous form submission validation.
+    expect(await screen.findByText("Timezone must be a valid IANA timezone.")).toBeInTheDocument()
     expect(screen.getAllByText("Cron minute must be between 0 and 59.").length).toBeGreaterThan(0)
-    expect(screen.getByText("Timezone must be a valid IANA timezone.")).toBeInTheDocument()
+    expect(mocks.createScheduledTaskReminder).not.toHaveBeenCalled()
   }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
   it("does not create a one-time reminder with whitespace-only run_at", async () => {

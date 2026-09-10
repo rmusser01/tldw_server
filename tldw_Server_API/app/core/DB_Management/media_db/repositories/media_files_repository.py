@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import uuid
 from contextlib import suppress
 from datetime import datetime, timezone
-import uuid
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
@@ -16,7 +16,7 @@ class MediaFilesRepository:
         self.session = session
 
     @classmethod
-    def from_legacy_db(cls, db: MediaDbLike) -> "MediaFilesRepository":
+    def from_legacy_db(cls, db: MediaDbLike) -> MediaFilesRepository:
         return cls(session=db)
 
     def insert(
@@ -110,7 +110,7 @@ class MediaFilesRepository:
         sql = f"SELECT * FROM MediaFiles WHERE {where_sql} ORDER BY file_type, id"  # nosec B608
         try:
             # execute_query owns its connection, including when called from a worker.
-            return db.execute_query(sql, params).fetchall()
+            return [dict(row) for row in db.execute_query(sql, params).fetchall()]
         except Exception as exc:
             raise DatabaseError(f"Failed to list MediaFiles for media_id={media_id}: {exc}") from exc  # noqa: TRY003
 

@@ -1237,23 +1237,32 @@ def test_rollback_rejects_unverified_or_mismatched_state_before_start(
 
 def test_rollback_cli_requires_explicit_restore_artifacts(
     tmp_path: Path,
-    capfd: pytest.CaptureFixture[str],
 ) -> None:
     env_file = tmp_path / "production.env"
     env_file.write_text(f"TLDW_BACKUP_DIR={tmp_path / 'backups'}\n", encoding="utf-8")
     env_file.chmod(0o600)
 
-    result = production_deploy.main(
+    # A fresh CLI process binds Loguru to its own stderr instead of pytest's
+    # collection-time stream, which can bypass a later capfd fixture.
+    result = subprocess.run(  # nosec B603 - fixed interpreter/CLI and test-owned paths.
         (
+            sys.executable,
+            "-m",
+            "Helper_Scripts.Deployment.production_deploy",
             "rollback",
             "--env-file",
             str(env_file),
             "--manifest",
             str(tmp_path / "manifest.json"),
-        )
+        ),
+        cwd=Path(__file__).resolve().parents[3],
+        env={**os.environ, "PATH": str(tmp_path)},  # No deployment tools are available.
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
     )
 
-    captured = capfd.readouterr()
-    assert result == 1
-    assert "requires --restore-artifacts" in captured.err
-    assert "TLDW_BACKUP_DIR" not in captured.err
+    assert (result.returncode, result.stdout) == (1, "")
+    assert "requires --restore-artifacts" in result.stderr
+    assert "TLDW_BACKUP_DIR" not in result.stderr
