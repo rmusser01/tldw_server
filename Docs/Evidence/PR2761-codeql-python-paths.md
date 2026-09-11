@@ -618,3 +618,33 @@ This follow-up does not change alert states or queries and does not claim
 protection against filesystem replacement races or all Windows reparse-point
 types. Hosted results and active-ref status must be reconciled after the
 parent integrates this source change.
+
+## Shared-workspace configuration alerts 2686/2687
+
+Python analysis **1759364372** on `49cce1c853` cleared the preceding ten
+snapshot, Research and checkpoint alerts. It reported two new shared-guard
+sinks; all four exact flows originate at POST `/shared-workspaces` with
+`payload.absolute_root`. These are privileged root-configuration operations.
+The endpoint requires administrator role or `system.configure`/`*` permission
+before calling the service. This is not a claim that an arbitrary tainted base
+passed to `safe_join` becomes trusted.
+
+- **2686**, one flow, `safe_join`:45: the caller passes dirname plus nonempty
+  basename of a normalized absolute path. Its joined candidate cannot equal
+  the parent directory; the reported equality-branch probe is unreachable.
+- **2687**, three flows, `safe_join`:63: the selected root's symlink validation
+  is intentional administrator configuration. Optional allowed roots are
+  enforced before persistence. No unprivileged file read/write is exposed.
+
+The actual endpoint rejected three principals lacking mutation permission
+before any service call. The actual normalizer accepted an intentionally
+selected root without an allowlist, rejected a leaf symlink, and rejected a
+configured-outside root. Two existing root-policy regressions passed. Runtime
+proof: `/tmp/pr2761-safe-join-new-alert-runtime.log`; tests:
+`/tmp/pr2761-safe-join-new-alert-tests.log`.
+
+Both fresh instance lists contain only PR2761/head. Independent review approves
+individual false-positive dispositions, with all ordered flows, source hashes,
+instance scope and exact proposed comments in
+[the trace record](PR2761-codeql-workspace-root-traces.json). No generic CodeQL
+barrier, query exclusion or source suppression is introduced.
