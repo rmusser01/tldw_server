@@ -72,3 +72,29 @@ Review concerns:
 
 - Verifier calls are now split by distinct cited-document sets, increasing provider calls for stations whose units cite different evidence sets. This is required to prevent unrelated selected sources from grounding mis-cited claims.
 - OSCE profile availability remains `planned` as required; import, UI, and release work remain out of scope.
+
+## Review Fix Round 2
+
+Implemented in commit `ed38b7d0dd` (`fix(quizzes): bound OSCE verification budgets`). OSCE verification now enforces the shared quiz artifact limit of 80 total evidence units before resolving or grouping cited documents. Artifacts with 81 or more units fail as `osce_verification_failure` without verifier calls or persistence.
+
+Verifier fan-out remains sequential and is capped at 16 distinct cited-document groups per artifact. This is one fifth of the full unit budget and bounds the maximum provider-call count while preserving the per-unit cited-source isolation added in round 1. A 16-group artifact succeeds; a 17-group artifact fails before the first verifier call.
+
+Media exact-timestamp matching now uses `math.isclose(..., rel_tol=0.0, abs_tol=0.001)`, preventing large timestamp values from acquiring an unintended relative tolerance.
+
+Round 2 RED evidence:
+
+- Targeted tests: `3 failed, 5 passed`. The 81-unit two-source artifact persisted, the 17-group artifact invoked verification, and a 100-second mismatch at a large timestamp was accepted.
+
+Round 2 GREEN evidence:
+
+- Targeted cap/fan-out/locator tests: `8 passed`, `39 deselected`, `4 warnings`.
+- Final Task 6 generation/profile matrix: `167 passed`, `4 warnings`.
+- Neighboring question-generation regressions: `67 passed`, `4 warnings`.
+- Total across the non-overlapping final suites: `234 passed`, no skips.
+- Ruff and `compileall` passed on all touched Python files. Bandit analyzed 714 production lines with zero findings and zero skipped checks. `git diff --check` passed.
+- PostgreSQL was not required because no persistence or dialect-dependent code changed.
+
+Round 2 residual concerns:
+
+- A valid artifact may still make up to 16 sequential verifier calls when every allowed cited-document set is distinct. The hard cap makes this bounded; no concurrency was introduced.
+- The production `osce_scenario` profile remains `planned`.
