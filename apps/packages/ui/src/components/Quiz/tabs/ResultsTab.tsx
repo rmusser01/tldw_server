@@ -9,6 +9,7 @@ import {
   List,
   Modal,
   Progress,
+  Segmented,
   Skeleton,
   Statistic,
   Tag,
@@ -59,6 +60,7 @@ import { QuizMarkdown } from "../components/QuizMarkdown"
 import { SourceCitations } from "../components/SourceCitations"
 import { formatFillBlankAcceptedAnswers } from "../utils/fillBlankAnswer"
 import { formatMatchingAnswer } from "../utils/matchingAnswer"
+import { OsceResultsPanel } from "../osce/OsceResultsPanel"
 
 const { Text } = Typography
 
@@ -66,6 +68,7 @@ const DEFAULT_PASSING_SCORE = 70
 type PassFilterKey = "all" | "pass" | "fail"
 type DateRangeFilterKey = "all" | "7d" | "30d" | "90d"
 type DeckTargetValue = number | "__new__" | null
+type ResultsView = "quiz" | "osce"
 
 const normalizeMultiSelectAnswer = (value: unknown): number[] => {
   if (Array.isArray(value)) {
@@ -151,6 +154,7 @@ export const ResultsTab: React.FC<ResultsTabProps> = ({ onRetakeQuiz }) => {
   const { t } = useTranslation(["option", "common"])
   const navigate = useNavigate()
   const [messageApi, contextHolder] = message.useMessage()
+  const [resultsView, setResultsView] = React.useState<ResultsView>("quiz")
 
   const [page, setPage] = React.useState(() => readStoredResultsFilterPrefs().page)
   const [pageSize, setPageSize] = React.useState(() => readStoredResultsFilterPrefs().pageSize)
@@ -1367,11 +1371,38 @@ export const ResultsTab: React.FC<ResultsTabProps> = ({ onRetakeQuiz }) => {
     </Modal>
   )
 
+  const resultsViewSwitcher = (
+    <Segmented<ResultsView>
+      block
+      aria-label="Results type"
+      value={resultsView}
+      onChange={setResultsView}
+      options={[
+        { value: "quiz", label: t("option:quiz.quizAttemptsSegment", { defaultValue: "Quiz attempts" }) },
+        { value: "osce", label: t("option:quiz.oscePracticeSegment", { defaultValue: "OSCE practice" }) }
+      ]}
+      className="w-full sm:w-auto"
+    />
+  )
+
+  if (resultsView === "osce") {
+    return (
+      <>
+        {contextHolder}
+        <div className="space-y-5">
+          {resultsViewSwitcher}
+          <OsceResultsPanel />
+        </div>
+      </>
+    )
+  }
+
   if (isLoading) {
     return (
       <>
         {contextHolder}
         <div className="space-y-4 py-2" data-testid="results-loading-skeleton">
+          {resultsViewSwitcher}
           <Card size="small">
             <Skeleton active paragraph={{ rows: 2 }} />
           </Card>
@@ -1390,6 +1421,7 @@ export const ResultsTab: React.FC<ResultsTabProps> = ({ onRetakeQuiz }) => {
     return (
       <>
         {contextHolder}
+        <div className="mb-4">{resultsViewSwitcher}</div>
         <Empty
           description={
             <div className="space-y-2">
@@ -1431,6 +1463,7 @@ export const ResultsTab: React.FC<ResultsTabProps> = ({ onRetakeQuiz }) => {
     <>
       {contextHolder}
       <div className="space-y-6">
+        {resultsViewSwitcher}
         {renderAttemptDetailsModal()}
         {renderFlashcardConversionModal()}
         {/* Stats summary */}

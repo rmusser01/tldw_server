@@ -13,11 +13,27 @@ import {
   startOsceAttempt,
   updateOsceStation,
   type OsceAttemptFilters,
+  type OsceAttemptSummary,
   type OsceAttemptPatch,
   type OsceStationCreateRequest,
   type OsceStationListParams,
   type OsceStationPatchRequest
 } from "@/services/osce"
+
+const ACTIVE_OSCE_STATES = ["in_progress", "self_assessment"] as const
+
+export const selectMostRecentlyModifiedOsceAttempt = (
+  attempts: OsceAttemptSummary[]
+): OsceAttemptSummary | null => {
+  if (attempts.length === 0) return null
+  return [...attempts].sort((left, right) => {
+    const leftTime = Date.parse(left.last_modified_at)
+    const rightTime = Date.parse(right.last_modified_at)
+    const normalizedLeft = Number.isFinite(leftTime) ? leftTime : Number.NEGATIVE_INFINITY
+    const normalizedRight = Number.isFinite(rightTime) ? rightTime : Number.NEGATIVE_INFINITY
+    return normalizedRight - normalizedLeft || right.id - left.id
+  })[0]
+}
 
 export const osceKeys = {
   all: ["quizzes", "osce"] as const,
@@ -136,6 +152,21 @@ export const useOsceAttemptsQuery = (
   staleTime: 30_000,
   refetchOnWindowFocus: false
 })
+
+export const useActiveOsceAttemptsQuery = (
+  quizId?: number | null,
+  options?: { enabled?: boolean; limit?: number }
+) => useOsceAttemptsQuery({
+  quiz_id: quizId ?? undefined,
+  states: [...ACTIVE_OSCE_STATES],
+  limit: options?.limit ?? 200,
+  offset: 0
+}, options)
+
+export const useCompletedOsceAttemptsQuery = (
+  filters: Omit<OsceAttemptFilters, "states"> = {},
+  options?: { enabled?: boolean }
+) => useOsceAttemptsQuery({ ...filters, states: ["completed"] }, options)
 
 export const useOsceAttemptQuery = (
   attemptId: number | null | undefined,
