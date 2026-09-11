@@ -268,6 +268,7 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY'
+          import hashlib
           import json
           import os
           from dataclasses import asdict
@@ -275,6 +276,7 @@ jobs:
           from pathlib import Path
 
           from Helper_Scripts.Supply_Chain.exception_policy import (
+              ExceptionPolicy,
               evaluate_trivy_report,
               load_policy,
           )
@@ -286,6 +288,31 @@ jobs:
               Path(".github/supply-chain/vulnerability-exceptions.json"),
               today=date.today(),
           )
+          ci_ids = []
+          ci_sha256 = None
+          if name in {"app", "audio-worker"}:
+              ci_path = Path(".github/supply-chain/ci-image-risk-acceptance.json")
+              ci_policy = load_policy(ci_path, today=date.today())
+              if any(
+                  item.component not in {"image-app", "image-audio-worker"}
+                  for item in ci_policy.exceptions
+              ):
+                  raise SystemExit("CI risk acceptance has an unauthorized component")
+              if {item.id for item in policy.exceptions} & {
+                  item.id for item in ci_policy.exceptions
+              }:
+                  raise SystemExit("CI risk acceptance duplicates a canonical exception ID")
+              ci_bytes = ci_path.read_bytes()
+              ci_sha256 = hashlib.sha256(ci_bytes).hexdigest()
+              (root / "ci-image-risk-acceptance.json").write_bytes(ci_bytes)
+              ci_ids = [
+                  item.id
+                  for item in ci_policy.exceptions
+                  if item.component == os.environ["COMPONENT"]
+              ]
+              policy = ExceptionPolicy(
+                  policy.schema_version, policy.exceptions + ci_policy.exceptions
+              )
           decision = evaluate_trivy_report(
               report,
               component=os.environ["COMPONENT"],
@@ -294,6 +321,8 @@ jobs:
           )
           payload = {
               "component": decision.component,
+              "ci_risk_acceptance_ids": ci_ids,
+              "ci_risk_acceptance_policy_sha256": ci_sha256,
               "blocking": [asdict(item) for item in decision.blocking],
               "excepted": [asdict(item) for item in decision.excepted],
               "unmatched_exception_ids": list(decision.unmatched_exception_ids),
@@ -319,6 +348,9 @@ jobs:
               > SHA256SUMS-image-${{ matrix.name }}
             if test "${{ matrix.python_runtime }}" = "true"; then
               sha256sum runtime-image-${{ matrix.name }}.json >> SHA256SUMS-image-${{ matrix.name }}
+            fi
+            if test -f ci-image-risk-acceptance.json; then
+              sha256sum ci-image-risk-acceptance.json >> SHA256SUMS-image-${{ matrix.name }}
             fi
             sha256sum -c SHA256SUMS-image-${{ matrix.name }}
           )
