@@ -60,6 +60,20 @@ New rescan alerts are assessed separately; this approval does not authorize
 dismissing an accurate operator-credential or path-boundary finding as a test
 fixture or accepting its risk.
 
-The 417 dispositions are not an assertion that the release is ready. The
+The reviewed dispositions are not an assertion that the release is ready. The
 current-source rescan still requires reconciliation of repaired and newly
 identified flows, and the separate release gates remain in force.
+
+Two final PR-only shared-guard alerts, **2686/2687**, were independently
+reviewed against all four flows and actual endpoint/root-policy behavior.
+Their base is deliberately selected by an administrator; no generic tainted
+base sanitization is asserted. Both individual false-positive updates were
+verified against fresh identity, source path, PR-only instance scope, returned
+state and exact comment. The ledger now totals **424 dispositions: 410 false
+positives and 14 synthetic-test findings**. See the
+[workspace-root trace proof](PR2761-codeql-workspace-root-traces.json).
+
+Python analysis **1759364372** on `49cce1c853` cleared the ten previous snapshot,
+Research and checkpoint alerts. Its three remaining Whisper reports were
+repaired in `2e037be445`; hosted confirmation is pending. No additional real
+finding was dismissed.
