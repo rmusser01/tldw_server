@@ -1,17 +1,18 @@
+import { autoSyncPrompt, pullFromStudio } from "@/services/prompt-sync";
+import {
+  clearRecipePersistenceUncertainty,
+  getRecipeAuthenticatedPrincipal,
+  isRecipePersistenceUncertain,
+  markRecipePersistenceUncertain,
+} from "@/services/recipe-persistence-uncertainty";
+import { tldwRequest } from "@/services/tldw/request-core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
 import { PromptRecipeBuilder } from "../PromptRecipeBuilder";
 import { CLEAR_TASK_RECIPE } from "../built-in-recipes";
-import { autoSyncPrompt, pullFromStudio } from "@/services/prompt-sync";
-import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope";
-import {
-  clearRecipePersistenceUncertainty,
-  markRecipePersistenceUncertain,
-  isRecipePersistenceUncertain,
-} from "@/services/recipe-persistence-uncertainty";
-import { tldwRequest } from "@/services/tldw/request-core";
 
 const mocks = vi.hoisted(() => ({
   config: {} as Record<string, unknown>,
@@ -113,7 +114,27 @@ const switchedOwners = [
   config("https://b.test", "alice"),
   config("https://a.test", "bob"),
 ];
-const ownerScope = buildChatSurfaceScopeKeyFromConfig(owner);
+// Hand-checked owner fixtures use authoritative /auth/me IDs, not JWT subjects.
+const ownerScope =
+  "recipe-owner:sha256:5b2ffba615c995b4d48f10792412bf3107311878ebde8dc5f456aa15bd1e272e";
+const switchedScopes = [
+  "recipe-owner:sha256:ac377847397194455771f75d58d05b33df00a4790feea64143871b76ba4eadd0",
+  "recipe-owner:sha256:a300c788423de96bdbd3ebd8d2327bb1ef101fba64fa1d58fbedf37c31e68bf4",
+];
+const promptRequests = () =>
+  mocks.fetch.mock.calls.filter(([url]) =>
+    new URL(String(url)).pathname.startsWith("/api/v1/prompt-studio/prompts/"),
+  );
+const promptMutations = () =>
+  promptRequests().filter(([, init]) => init.method !== "GET");
+const principalResponse = (init: RequestInit) => {
+  const bearer = new Headers(init.headers).get("Authorization");
+  if (bearer === `Bearer ${owner.accessToken}`)
+    return jsonResponse({ id: "authoritative-alice" });
+  if (bearer === `Bearer ${switchedOwners[1].accessToken}`)
+    return jsonResponse({ id: "authoritative-bob" });
+  return jsonResponse({ detail: "Not authenticated" }, 401);
+};
 const deferred = () => {
   let resolve!: () => void;
   const promise = new Promise<void>((done) => {
@@ -141,8 +162,7 @@ const renderBuilder = (scope: string) =>
     <QueryClientProvider
       client={
         new QueryClient({ defaultOptions: { queries: { retry: false } } })
-      }
-    >
+      }>
       <PromptRecipeBuilder
         target="system"
         persistenceScope={scope}
@@ -178,11 +198,13 @@ describe("recipe dispatch ownership through real sync and transport", () => {
     mocks.extension = false;
     mocks.markerFails = true;
     mocks.resolveConfig.mockImplementation(async () => mocks.config);
-    mocks.fetch.mockImplementation(async () =>
-      jsonResponse({
-        success: true,
-        data: { ...serverRecord(), prompt_schema_version: 999 },
-      }),
+    mocks.fetch.mockImplementation(async (url, init) =>
+      new URL(String(url)).pathname === "/api/v1/auth/me"
+        ? principalResponse(init)
+        : jsonResponse({
+            success: true,
+            data: { ...serverRecord(), prompt_schema_version: 999 },
+          }),
     );
     vi.stubGlobal("fetch", mocks.fetch);
     delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE;
@@ -190,11 +212,8 @@ describe("recipe dispatch ownership through real sync and transport", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
-    for (const cfg of [owner, ...switchedOwners])
-      clearRecipePersistenceUncertainty(
-        "dispatch-id",
-        buildChatSurfaceScopeKeyFromConfig(cfg),
-      );
+    for (const scope of [ownerScope, ...switchedScopes])
+      clearRecipePersistenceUncertainty("dispatch-id", scope);
   });
 
   it.each(["create", "update", "pull"])(
@@ -222,22 +241,25 @@ describe("recipe dispatch ownership through real sync and transport", () => {
         ...(operation === "update" ? { serverId: 101 } : {}),
       });
       markRecipePersistenceUncertain("dispatch-id", ownerScope);
-      mocks.fetch.mockImplementation(async () =>
-        jsonResponse({
-          success: true,
-          data: {
-            ...serverRecord(),
-            prompt_schema_version: 1,
-            prompt_definition: definition,
-          },
-        }),
+      mocks.fetch.mockImplementation(async (url, init) =>
+        new URL(String(url)).pathname === "/api/v1/auth/me"
+          ? principalResponse(init)
+          : jsonResponse({
+              success: true,
+              data: {
+                ...serverRecord(),
+                prompt_schema_version: 1,
+                prompt_definition: definition,
+              },
+            }),
       );
       const result =
         operation === "pull"
           ? await pullFromStudio(101, "dispatch-id")
           : await autoSyncPrompt("dispatch-id", 42);
       expect(result).toMatchObject({ success: true, persistenceScope: null });
-      expect(mocks.fetch).toHaveBeenCalledTimes(1);
+      expect(promptRequests()).toHaveLength(1);
+      expect(promptMutations()).toHaveLength(operation === "pull" ? 0 : 1);
       expect(isRecipePersistenceUncertain("dispatch-id", ownerScope)).toBe(
         true,
       );
@@ -262,7 +284,7 @@ describe("recipe dispatch ownership through real sync and transport", () => {
         failureKind: "validation",
         persistenceScope: null,
       });
-      expect(mocks.fetch).not.toHaveBeenCalled();
+      expect(promptRequests()).toHaveLength(0);
       expect(isRecipePersistenceUncertain("dispatch-id", ownerScope)).toBe(
         false,
       );
@@ -271,7 +293,7 @@ describe("recipe dispatch ownership through real sync and transport", () => {
 
   for (const operation of ["create", "update"] as const) {
     for (const [index, nextOwner] of switchedOwners.entries()) {
-      it(`${operation}: ${index === 0 ? "backend" : "principal"} switch before dispatch locks only the actual owner and reconciles`, async () => {
+      it(`${operation}: ${index === 0 ? "backend" : "principal"} switch fails before mutation until legacy sync supplies owner and local ID`, async () => {
         const user = userEvent.setup();
         if (operation === "update")
           mocks.rows.set("dispatch-id", {
@@ -288,6 +310,7 @@ describe("recipe dispatch ownership through real sync and transport", () => {
               CLEAR_TASK_RECIPE.definition,
             ),
           });
+        const originalRow = structuredClone(mocks.rows.get("dispatch-id"));
         const view = renderBuilder(ownerScope);
         if (operation === "update") await selectSaved(user);
         const gate = deferred();
@@ -301,52 +324,51 @@ describe("recipe dispatch ownership through real sync and transport", () => {
         await waitFor(() => expect(mocks.beforeRead).toHaveBeenCalled());
         mocks.config = nextOwner;
         gate.resolve();
-        await screen.findByText(/server outcome.*not.*verified/i);
-        const scope = buildChatSurfaceScopeKeyFromConfig(nextOwner);
-        expect(mocks.fetch).toHaveBeenCalledTimes(1);
-        expect(mocks.fetch.mock.calls[0][0]).toMatch(
-          new RegExp(`^${nextOwner.serverUrl}`),
+        await screen.findByText(
+          operation === "create"
+            ? "Could not save the recipe. Try again."
+            : "Could not update the recipe. Try again.",
         );
-        expect(mocks.fetch.mock.calls[0][1].headers.Authorization).toBe(
+        const scope = switchedScopes[index];
+        expect(promptRequests()).toHaveLength(0);
+        const authRequest = mocks.fetch.mock.calls.find(
+          ([url]) => new URL(String(url)).pathname === "/api/v1/auth/me",
+        );
+        expect(authRequest?.[0]).toBe(`${nextOwner.serverUrl}/api/v1/auth/me`);
+        expect(new Headers(authRequest?.[1].headers).get("Authorization")).toBe(
           `Bearer ${nextOwner.accessToken}`,
         );
-        expect(isRecipePersistenceUncertain("dispatch-id", scope)).toBe(true);
+        expect(isRecipePersistenceUncertain("dispatch-id", scope)).toBe(false);
         expect(isRecipePersistenceUncertain("dispatch-id", ownerScope)).toBe(
           false,
         );
+        expect(mocks.rows.get("dispatch-id")).toEqual(originalRow);
         view.unmount();
         const actualView = renderBuilder(scope);
-        await selectSaved(user);
+        if (operation === "update") await selectSaved(user);
         expect(
           screen.getByRole("button", { name: "Save as new recipe" }),
-        ).toBeDisabled();
-        expect(
-          screen.getByRole("button", { name: "Update recipe" }),
-        ).toBeDisabled();
+        ).toBeEnabled();
         await user.click(
-          screen.getByRole("button", { name: "Save as new recipe" }),
+          screen.getByRole("button", {
+            name:
+              operation === "create" ? "Save as new recipe" : "Update recipe",
+          }),
         );
-        expect(mocks.fetch).toHaveBeenCalledTimes(1);
+        await screen.findByText(
+          operation === "create"
+            ? "Could not save the recipe. Try again."
+            : "Could not update the recipe. Try again.",
+        );
+        expect(promptMutations()).toHaveLength(0);
+        expect(isRecipePersistenceUncertain("dispatch-id", scope)).toBe(false);
         actualView.unmount();
         const staleView = renderBuilder(ownerScope);
-        await selectSaved(user);
+        if (operation === "update") await selectSaved(user);
         expect(
           screen.getByRole("button", { name: "Save as new recipe" }),
         ).toBeEnabled();
         staleView.unmount();
-        mocks.fetch.mockImplementation(async () =>
-          jsonResponse({ success: true, data: serverRecord() }),
-        );
-        await pullFromStudio(101, "dispatch-id");
-        expect(isRecipePersistenceUncertain("dispatch-id", scope)).toBe(false);
-        renderBuilder(scope);
-        await selectSaved(user);
-        expect(
-          screen.getByRole("button", { name: "Update recipe" }),
-        ).toBeEnabled();
-        expect(
-          mocks.fetch.mock.calls.filter(([, init]) => init.method !== "GET"),
-        ).toHaveLength(1);
       });
     }
   }
@@ -367,10 +389,14 @@ describe("recipe dispatch ownership through real sync and transport", () => {
       const result = await autoSyncPrompt("dispatch-id", 42);
       expect(result).toMatchObject({
         failureKind: "invalid_server_payload",
-        persistenceScope: buildChatSurfaceScopeKeyFromConfig(switchedOwners[0]),
+        persistenceScope: switchedScopes[0],
         localId: "dispatch-id",
       });
-      expect(mocks.fetch).toHaveBeenCalledTimes(1);
+      expect(promptRequests()).toHaveLength(1);
+      expect(promptMutations()).toHaveLength(1);
+      expect(String(promptRequests()[0][0])).toMatch(
+        /^https:\/\/b\.test\/api\/v1\/prompt-studio\/prompts\//,
+      );
     },
   );
 
@@ -385,15 +411,34 @@ describe("recipe dispatch ownership through real sync and transport", () => {
       tldwRequest(payload, {
         getConfig: async () => switchedOwners[1],
         useRuntimeAuthOverride: false,
+        getAuthenticatedPrincipal: getRecipeAuthenticatedPrincipal,
       }),
     );
     const result = await autoSyncPrompt("dispatch-id", 42);
     expect(result).toMatchObject({
       failureKind: "invalid_server_payload",
-      persistenceScope: buildChatSurfaceScopeKeyFromConfig(switchedOwners[1]),
+      persistenceScope: switchedScopes[1],
     });
-    expect(mocks.fetch.mock.calls[0][1].headers.Authorization).toBe(
-      `Bearer ${switchedOwners[1].accessToken}`,
-    );
+    expect(
+      new Headers(promptRequests()[0][1].headers).get("Authorization"),
+    ).toBe(`Bearer ${switchedOwners[1].accessToken}`);
+    expect(promptMutations()).toHaveLength(1);
+  });
+
+  it("does not fall back to direct prompt writes after ambiguous extension delivery", async () => {
+    mocks.extension = true;
+    mocks.rows.set("dispatch-id", {
+      id: "dispatch-id",
+      title: "Task",
+      syncStatus: "local",
+    });
+    mocks.sendMessage.mockRejectedValue(new Error("message channel closed"));
+    expect(await autoSyncPrompt("dispatch-id", 42)).toMatchObject({
+      success: false,
+      failureKind: "invalid_server_payload",
+      persistenceScope: null,
+    });
+    expect(promptMutations()).toHaveLength(0);
+    expect(mocks.fetch).not.toHaveBeenCalled();
   });
 });

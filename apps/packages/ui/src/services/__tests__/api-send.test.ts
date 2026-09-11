@@ -66,6 +66,24 @@ describe("apiSend timeout fallback policy", () => {
     })
   })
 
+  it("does not replace unavailable extension reconciliation with page-local authority", async () => {
+    mocks.sendMessage.mockRejectedValue(
+      new Error("receiving end does not exist")
+    )
+    mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200 })
+    const { apiSend } = await importApiSend()
+    const result = await apiSend({
+      path: "/api/v1/prompts/123",
+      method: "GET",
+      recipePersistence: { mode: "capture" }
+    })
+    expect(mocks.tldwRequest).not.toHaveBeenCalled()
+    expect(result.recipePersistence).toEqual({
+      state: "unknown",
+      actualOwnerId: null
+    })
+  })
+
   it("does not coalesce captured reconciliation with an unowned GET", async () => {
     let finish!: (value: unknown) => void
     mocks.sendMessage.mockReturnValue(
@@ -270,8 +288,9 @@ describe("apiSend timeout fallback policy", () => {
   it("forwards Prompt Studio recipe policy only as client-local metadata", async () => {
     mocks.runtimeId = null
     mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200 })
-    const { createPrompt, getPrompt, updatePrompt } =
-      await import("@/services/prompt-studio")
+    const { createPrompt, getPrompt, updatePrompt } = await import(
+      "@/services/prompt-studio"
+    )
     const required = {
       recipePersistence: {
         mode: "require" as const,

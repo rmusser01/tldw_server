@@ -7,6 +7,12 @@ import { tldwAuth } from "@/services/tldw/TldwAuth";
 import { tldwModels } from "@/services/tldw";
 import { apiSend } from "@/services/api-send";
 import { tldwRequest } from "@/services/tldw/request-core";
+import { RecipePersistenceRegistry } from "@/services/recipe-persistence-registry";
+import {
+  getRecipeAuthenticatedPrincipal,
+  isRecipePersistenceMessage,
+  resolveRecipeOwnerWithConfig,
+} from "@/services/recipe-persistence-uncertainty";
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode";
 import {
   hasNewerCurrentAccessToken,
@@ -1670,6 +1676,7 @@ export default defineBackground({
       }
     };
 
+    const recipeRegistry = new RecipePersistenceRegistry();
     const runTldwRequest = async (
       payload: any,
       requestAbortSignal?: AbortSignal,
@@ -1699,6 +1706,10 @@ export default defineBackground({
       > | undefined;
       try {
         return await tldwRequest(requestPayload, {
+          getAuthenticatedPrincipal: getRecipeAuthenticatedPrincipal,
+          dispatchAuthority: {
+            markDispatched: (id, ownerId) => recipeRegistry.markScoped(id, ownerId),
+          },
           // IMPORTANT: getConfig must fetch fresh config each time it's called
           // (not pre-fetch once), because the config may not be seeded yet when
           // runTldwRequest is first invoked, but may be available on retry. A
@@ -3485,6 +3496,34 @@ export default defineBackground({
     });
 
     handleRuntimeMessageRef = async (message: any, sender: any) => {
+      if (
+        typeof message?.type === "string" &&
+        (message.type.startsWith("tldw:recipe-owner:") ||
+          message.type.startsWith("tldw:recipe-uncertainty:"))
+      ) {
+        if (!isRecipePersistenceMessage(message)) {
+          return { ok: false, error: "Invalid recipe authority message" };
+        }
+        switch (message.type) {
+          case "tldw:recipe-owner:resolve":
+            return await resolveRecipeOwnerWithConfig(getEffectiveConfig);
+          case "tldw:recipe-uncertainty:read":
+            return recipeRegistry.read(message.id, message.ownerId);
+          case "tldw:recipe-uncertainty:mark-scoped":
+            recipeRegistry.markScoped(message.id, message.ownerId);
+            break;
+          case "tldw:recipe-uncertainty:clear-scoped":
+            recipeRegistry.clearScoped(message.id, message.ownerId);
+            break;
+          case "tldw:recipe-uncertainty:mark-unknown":
+            recipeRegistry.markUnknown(message.id);
+            break;
+          case "tldw:recipe-uncertainty:forget-unknown":
+            recipeRegistry.forgetUnknown(message.id);
+            break;
+        }
+        return { ok: true };
+      }
       // Simple ping for E2E tests - verifies message handler is working
       if (message.type === "tldw:ping") {
         return { ok: true, pong: true, timestamp: Date.now() };

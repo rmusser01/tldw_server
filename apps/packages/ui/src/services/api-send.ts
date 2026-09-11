@@ -1,3 +1,7 @@
+import {
+  directRecipeRequestAuthority,
+  hasRecipeExtensionRuntime
+} from "@/services/recipe-persistence-uncertainty"
 import { resolveDirectBrowserConfig as resolveDirectConfig } from "@/services/tldw/direct-browser-config"
 import type {
   AllowedMethodFor,
@@ -110,6 +114,20 @@ async function apiSendImpl<
   P extends PathOrUrl = PathOrUrl,
   M extends AllowedMethodFor<P> = AllowedMethodFor<P>
 >(payload: ApiSendPayload<P, M>): Promise<ApiSendResponse<T>> {
+  const recipeExtension = Boolean(
+    payload.recipePersistence && hasRecipeExtensionRuntime()
+  )
+  if (
+    recipeExtension &&
+    !(browser?.runtime?.sendMessage && browser?.runtime?.id)
+  ) {
+    return {
+      ok: false,
+      status: 0,
+      error: "Recipe background authority unavailable",
+      recipePersistence: { state: "not_dispatched", actualOwnerId: null }
+    }
+  }
   const methodIsSafeFallback = isSafeFallbackMethod(
     payload?.method ? String(payload.method) : "GET"
   )
@@ -134,13 +152,16 @@ async function apiSendImpl<
       if (resp) {
         return resp as ApiSendResponse<T>
       }
-      if (!methodIsSafeFallback) {
+      if (!methodIsSafeFallback || recipeExtension) {
         throw new Error("Extension messaging timeout")
       }
       // If resp is null (timeout), fall through to direct request for safe methods.
     }
   } catch (err) {
-    if (payload.recipePersistence && !methodIsSafeFallback) {
+    if (
+      payload.recipePersistence &&
+      (!methodIsSafeFallback || recipeExtension)
+    ) {
       // The background may already have written. Never replay this mutation or
       // invent its owner from the page's independently selected connection.
       return {
@@ -164,6 +185,7 @@ async function apiSendImpl<
   }
   const storage = createSafeStorage({ area: "local" })
   return await tldwRequest(payload, {
+    ...directRecipeRequestAuthority,
     // IMPORTANT: getConfig must fetch fresh config each time it's called
     // (not pre-fetch once), because the config may change or not be seeded yet.
     getConfig: () => resolveDirectConfig(storage)
