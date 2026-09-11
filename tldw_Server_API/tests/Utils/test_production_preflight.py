@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import re
+import sys
 from pathlib import Path
 from urllib.parse import quote
 
@@ -9,6 +10,7 @@ import pytest
 import yaml
 from Helper_Scripts.Deployment.production_preflight import (
     PreflightIssue,
+    is_digest_pinned_image,
     load_raw_env,
     main,
     run_preflight,
@@ -17,6 +19,9 @@ from Helper_Scripts.Deployment.production_preflight import (
     validate_proxy,
     validate_rendered_compose,
 )
+from loguru import logger
+
+pytestmark = pytest.mark.unit
 
 COMPOSE_PATH = Path("Dockerfiles/docker-compose.production.yml")
 PROXY_PATH = Path("Dockerfiles/Production/Caddyfile")
@@ -47,11 +52,14 @@ def _valid_env(tmp_path: Path) -> dict[str, str]:
         "TLDW_SETUP_COMPLETED": "true",
         "TLDW_EDGE_SUBNET": "172.30.0.0/24",
         "TLDW_BACKEND_SUBNET": "172.31.0.0/24",
-        "TLDW_APP_IMAGE": "registry.acme.internal/tldw@sha256:" + "a" * 64,
-        "TLDW_ROLLBACK_IMAGE": "registry.acme.internal/tldw@sha256:" + "b" * 64,
-        "CADDY_IMAGE": "caddy:2.10.2-alpine",
-        "POSTGRES_IMAGE": "postgres:18.0-bookworm",
-        "REDIS_IMAGE": "redis:7.4.1-alpine",
+        "TLDW_APP_IMAGE": "registry.acme.internal/tldw:0.1.0@sha256:" + "a" * 64,
+        "TLDW_ROLLBACK_IMAGE": "registry.acme.internal/tldw:0.0.9@sha256:" + "b" * 64,
+        "CADDY_IMAGE": "caddy:2.10.2-alpine@sha256:" + "c" * 64,
+        "POSTGRES_IMAGE": "postgres:18.0-bookworm@sha256:" + "d" * 64,
+        "REDIS_IMAGE": "redis:7.4.1-alpine@sha256:" + "e" * 64,
+        "PROMETHEUS_IMAGE": "prom/prometheus:v2.55.1@sha256:" + "f" * 64,
+        "ALERTMANAGER_IMAGE": "prom/alertmanager:v0.30.1@sha256:" + "1" * 64,
+        "GRAFANA_IMAGE": "grafana/grafana:11.5.2@sha256:" + "2" * 64,
         "TLDW_BACKUP_DIR": str(backup_dir),
     }
 
@@ -136,6 +144,64 @@ def _write_env(path: Path, values: dict[str, str]) -> None:
 
 def _codes(issues: tuple[PreflightIssue, ...]) -> set[str]:
     return {issue.code for issue in issues}
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    (
+        ("registry.example:5000/team/tldw:0.1.0@sha256:" + "a" * 64, True),
+        ("registry.example/team/tldw:0.1.0", False),
+        ("registry.example/team/tldw@sha256:" + "a" * 64, False),
+        ("registry.example/team/tldw:0.1.0@sha256:" + "A" * 64, False),
+        ("registry.example/team/tldw:0.1.0@sha256:" + "a" * 63, False),
+        ("registry.example/team/tldw:latest@sha256:" + "a" * 64, False),
+        (" registry.example/team/tldw:0.1.0@sha256:" + "a" * 64, False),
+        ("registry.example/team/tldw:0.1.0@sha256:" + "a" * 64 + " ", False),
+    ),
+)
+def test_digest_pinned_image_predicate(value: str, expected: bool) -> None:
+    """Accept tag-plus-digest identity, including registries with ports."""
+    assert is_digest_pinned_image(value) is expected
+
+
+@pytest.mark.parametrize(
+    "field",
+    (
+        "TLDW_APP_IMAGE",
+        "TLDW_ROLLBACK_IMAGE",
+        "CADDY_IMAGE",
+        "POSTGRES_IMAGE",
+        "REDIS_IMAGE",
+        "PROMETHEUS_IMAGE",
+        "ALERTMANAGER_IMAGE",
+        "GRAFANA_IMAGE",
+    ),
+)
+@pytest.mark.parametrize(
+    "value",
+    (
+        "example/image:1.2.3",
+        "example/image@sha256:" + "a" * 64,
+        "example/image:1.2.3@sha256:" + "A" * 64,
+        "example/image:1.2.3@sha256:" + "a" * 63,
+        "example/image:latest@sha256:" + "a" * 64,
+        " example/image:1.2.3@sha256:" + "a" * 64,
+    ),
+)
+def test_environment_rejects_noncanonical_image_identity(
+    tmp_path: Path,
+    field: str,
+    value: str,
+) -> None:
+    """All deployment images fail under one sanitized immutable-image code."""
+    values = _valid_env(tmp_path)
+    values[field] = value
+
+    issues = validate_environment(values, env_path=tmp_path / "production.env")
+    field_issues = [issue for issue in issues if issue.field == field]
+
+    assert any(issue.code == "immutable_image_required" for issue in field_issues)
+    assert value not in "\n".join(issue.message for issue in field_issues)
 
 
 def test_load_raw_env_preserves_literal_values_without_expansion(tmp_path: Path) -> None:
@@ -329,9 +395,9 @@ def test_environment_rejects_origin_with_a_path(tmp_path: Path) -> None:
         ("TLDW_EDGE_SUBNET", "0.0.0.0/0", "unsafe_network"),
         ("TLDW_BACKEND_SUBNET", "172.30.0.0/24", "overlapping_network"),
         ("TLDW_SETUP_COMPLETED", "false", "setup_incomplete"),
-        ("TLDW_APP_IMAGE", "registry/tldw:latest", "mutable_image"),
-        ("TLDW_ROLLBACK_IMAGE", "registry/tldw:prod", "mutable_image"),
-        ("CADDY_IMAGE", "caddy:2", "inexact_third_party_image"),
+        ("TLDW_APP_IMAGE", "registry/tldw:latest", "immutable_image_required"),
+        ("TLDW_ROLLBACK_IMAGE", "registry/tldw:prod", "immutable_image_required"),
+        ("CADDY_IMAGE", "caddy:2", "immutable_image_required"),
     ),
 )
 def test_environment_rejects_each_unsafe_value(tmp_path: Path, field: str, value: str, expected_code: str) -> None:
@@ -1148,6 +1214,17 @@ def test_rendered_compose_fail_closed_edge_shapes(
     assert expected_code in _codes(issues)
 
 
+def test_core_preflight_does_not_require_monitoring_companion_images(tmp_path: Path) -> None:
+    """A core-only deployment must not depend on optional monitoring inputs."""
+    values = _valid_env(tmp_path)
+    for field in ("PROMETHEUS_IMAGE", "ALERTMANAGER_IMAGE", "GRAFANA_IMAGE"):
+        del values[field]
+    env_file = tmp_path / "production.env"
+    _write_env(env_file, values)
+
+    assert run_preflight(env_file, COMPOSE_PATH, PROXY_PATH).ok
+
+
 def test_run_preflight_accepts_a_complete_offline_fixture(tmp_path: Path) -> None:
     values = _valid_env(tmp_path)
     env_file = tmp_path / "production.env"
@@ -1169,17 +1246,23 @@ def test_cli_accepts_compose_injected_environment_without_raw_file(
     for name, value in values.items():
         monkeypatch.setenv(name, value)
 
-    exit_code = main(
-        [
-            "--from-environment",
-            "--compose-file",
-            str(COMPOSE_PATH),
-            "--proxy-file",
-            str(PROXY_PATH),
-            "--runtime-backup-dir",
-            str(tmp_path / "backups"),
-        ]
-    )
+    # Other endpoint imports may bind global sinks to an earlier capture stream.
+    # Own only this sink, leaving the rest of the application's logging intact.
+    sink_id = logger.add(sys.stderr, format="{message}")
+    try:
+        exit_code = main(
+            [
+                "--from-environment",
+                "--compose-file",
+                str(COMPOSE_PATH),
+                "--proxy-file",
+                str(PROXY_PATH),
+                "--runtime-backup-dir",
+                str(tmp_path / "backups"),
+            ]
+        )
+    finally:
+        logger.remove(sink_id)
 
     captured = capfd.readouterr()
     assert exit_code == 0

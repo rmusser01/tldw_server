@@ -1,0 +1,424 @@
+{
+  "ac2_complete": false,
+  "aggregate_component_count": 1334,
+  "apps_component_count": 993,
+  "archives": [
+    {
+      "local_name": "aggregate.zip",
+      "member_hashes": {
+        "SHA256SUMS.source": "ed21b49460df63f30083c3a8ff8748647689a4022578813e12ea5a06aa7d384e",
+        "sbom-admin-ui.cdx.json": "2328b1d3f61b6f00ee31c93e0ac22b9cd023a93cbfee3c1d28ce34337d500288",
+        "sbom-apps-workspace.cdx.json": "451c50536e390765629eb2ed7e1acaf6b786e2480db945ef3a408993b7bd7100",
+        "sbom-python-root.cdx.json": "d54860f02f3fcb7e9007b5cbe95da69493df324aac1115750c69e630d347cc96",
+        "sbom-source-aggregate.cdx.json": "a64436b7b257808b0d658618b905cb6530ef719a365d8589e094be02e259f172",
+        "source-component-counts.json": "086103dd0615f73dda0cac361157c7ea5a192571c7fdf353809ea73353bb6da2"
+      },
+      "metadata": {
+        "archive_download_url": "https://api.github.com/repos/rmusser01/tldw_server/actions/artifacts/10071830773/zip",
+        "created_at": "2026-09-08T18:56:31Z",
+        "digest": "sha256:2a5c48c14258f54b0a0b7b01153fad346ffcf84fa070a22fb488070285b68662",
+        "expired": false,
+        "expires_at": "2026-12-07T18:53:10Z",
+        "id": 10071830773,
+        "name": "source-sbom-aggregate",
+        "node_id": "MDg6QXJ0aWZhY3QxMDA3MTgzMDc3Mw==",
+        "size_in_bytes": 1092966,
+        "updated_at": "2026-09-08T18:56:31Z",
+        "url": "https://api.github.com/repos/rmusser01/tldw_server/actions/artifacts/10071830773",
+        "workflow_run": {
+          "head_branch": "codex/task-13013-7-supply-chain-design",
+          "head_repository_id": 794199679,
+          "head_sha": "f2136ba63bb1d9c7109644aa7ca798af35e5e2e3",
+          "id": 34265694779,
+          "repository_id": 794199679
+        }
+      }
+    },
+    {
+      "local_name": "apps.zip",
+      "member_hashes": {
+        "sbom-apps-workspace.cdx.json": "451c50536e390765629eb2ed7e1acaf6b786e2480db945ef3a408993b7bd7100",
+        "sbom-apps-workspace.cdx.json.sha256": "c4859fde60a6da3faea45bbe284a05de5432aa9323b86a3cd3060fa76226157f"
+      },
+      "metadata": {
+        "archive_download_url": "https://api.github.com/repos/rmusser01/tldw_server/actions/artifacts/10071815367/zip",
+        "created_at": "2026-09-08T18:56:07Z",
+        "digest": "sha256:834f2ce466d94fbcb631c6ca4c4a1a5a81e90e7c53305e6d5461b55e0a614297",
+        "expired": false,
+        "expires_at": "2026-12-07T18:53:10Z",
+        "id": 10071815367,
+        "name": "source-sbom-apps-workspace",
+        "node_id": "MDg6QXJ0aWZhY3QxMDA3MTgxNTM2Nw==",
+        "size_in_bytes": 143859,
+        "updated_at": "2026-09-08T18:56:07Z",
+        "url": "https://api.github.com/repos/rmusser01/tldw_server/actions/artifacts/10071815367",
+        "workflow_run": {
+          "head_branch": "codex/task-13013-7-supply-chain-design",
+          "head_repository_id": 794199679,
+          "head_sha": "f2136ba63bb1d9c7109644aa7ca798af35e5e2e3",
+          "id": 34265694779,
+          "repository_id": 794199679
+        }
+      }
+    },
+    {
+      "local_name": "admin.zip",
+      "member_hashes": {
+        "sbom-admin-ui.cdx.json": "2328b1d3f61b6f00ee31c93e0ac22b9cd023a93cbfee3c1d28ce34337d500288",
+        "sbom-admin-ui.cdx.json.sha256": "f38d745562d90f31e86964c63557274c6cc55dc227fbf43e3b259a87260e713d"
+      },
+      "metadata": {
+        "archive_download_url": "https://api.github.com/repos/rmusser01/tldw_server/actions/artifacts/10071795675/zip",
+        "created_at": "2026-09-08T18:55:36Z",
+        "digest": "sha256:20e7512d660564401a10f94939fea967b5afde65c4693629a39694c81791fdf7",
+        "expired": false,
+        "expires_at": "2026-12-07T18:53:10Z",
+        "id": 10071795675,
+        "name": "source-sbom-admin-ui",
+        "node_id": "MDg6QXJ0aWZhY3QxMDA3MTc5NTY3NQ==",
+        "size_in_bytes": 46527,
+        "updated_at": "2026-09-08T18:55:36Z",
+        "url": "https://api.github.com/repos/rmusser01/tldw_server/actions/artifacts/10071795675",
+        "workflow_run": {
+          "head_branch": "codex/task-13013-7-supply-chain-design",
+          "head_repository_id": 794199679,
+          "head_sha": "f2136ba63bb1d9c7109644aa7ca798af35e5e2e3",
+          "id": 34265694779,
+          "repository_id": 794199679
+        }
+      }
+    },
+    {
+      "local_name": "scans.zip",
+      "member_hashes": {
+        "SHA256SUMS.scan": "e0848dc8d4a9e6f3b68674b3e9f568f15785b7892498fd94d6e78f372d5db193",
+        "scan-decision-source-admin-ui.json": "e6d7a60281e28bb516212633e4b4dbda932b5318306eff9774dc42b1796ee0bc",
+        "scan-decision-source-apps-workspace.json": "06421ad684ab4f44362b64623ce891d8c1977d447324ed982fadb38d9d9a98bc",
+        "scan-decision-source-python-root.json": "02040af668a0c3fb4a49860bc89edb159cc190caa9b12624ac0bb303e3944427",
+        "trivy-db-metadata.json": "d0374f585b601c1f5ff4127a6fb6f1f161bbc8e5e5086dc0ceea386b6358cdc1",
+        "trivy-source-admin-ui.json": "81ec6eb71d1d6c99ea374ce494b5334b19916c5bbe66375e161a0d529993955a",
+        "trivy-source-apps-workspace.json": "f8350e4a0994e2ea353eeb4c6f6c3bd22d9e53856369addc9b4abf473ce4fd2c",
+        "trivy-source-python-root.json": "d94e7e0189486ddd24f104987dad42dfbfd5d14db646073d623caae5ca4cc8d0",
+        "trivy-version.txt": "41e22ed321a4c139a4fae57e92d8fa971cf7e91a8c1c4444d9a948c52a72c73a"
+      },
+      "metadata": {
+        "archive_download_url": "https://api.github.com/repos/rmusser01/tldw_server/actions/artifacts/10071853561/zip",
+        "created_at": "2026-09-08T18:57:08Z",
+        "digest": "sha256:07e18a0b5e838f82c14b5e853b48dd252c51c485568932d0e172f7e5dabd7a4a",
+        "expired": false,
+        "expires_at": "2026-12-07T18:53:10Z",
+        "id": 10071853561,
+        "name": "source-sbom-scans",
+        "node_id": "MDg6QXJ0aWZhY3QxMDA3MTg1MzU2MQ==",
+        "size_in_bytes": 203113,
+        "updated_at": "2026-09-08T18:57:08Z",
+        "url": "https://api.github.com/repos/rmusser01/tldw_server/actions/artifacts/10071853561",
+        "workflow_run": {
+          "head_branch": "codex/task-13013-7-supply-chain-design",
+          "head_repository_id": 794199679,
+          "head_sha": "f2136ba63bb1d9c7109644aa7ca798af35e5e2e3",
+          "id": 34265694779,
+          "repository_id": 794199679
+        }
+      }
+    }
+  ],
+  "commands": {
+    "contracts": "source /private/tmp/task-13013-7-pyjwt-verification-venv/bin/activate && python -m pytest tldw_Server_API/tests/Supply_Chain/test_dependency_lock_contracts.py tldw_Server_API/tests/CI/test_sbom_workflow_contracts.py -q -o 'addopts=--import-mode=importlib --strict-markers --tb=short'",
+    "lock_check": "/private/tmp/task-13013-7-pinned-uv.ZtCsHu/uv-aarch64-apple-darwin/uv lock --check --offline --no-cache",
+    "python_export": "/private/tmp/task-13013-7-pinned-uv.ZtCsHu/uv-aarch64-apple-darwin/uv export --locked --offline --no-cache --no-dev --no-editable --format cyclonedx1.5 --output-file /private/tmp/task-13013-7-ac2.VIPgMv/sbom-python-current.cdx.json"
+  },
+  "contract_result": {
+    "new_regression_tests_written": false,
+    "passed": 51,
+    "seconds": 5.08,
+    "warnings": [
+      "Starlette httpx test-client deprecation from inherited verification environment",
+      "Original Passlib crypt deprecation from inherited verification environment"
+    ]
+  },
+  "eventemitter3_versions": [
+    "4.0.7",
+    "5.0.4"
+  ],
+  "inspected_head": "cb195dd451a5bed6dd4ca089f6dd7bc4f5729c10",
+  "missing_workspace_names": [
+    "@tldw/voice-assistant-sdk"
+  ],
+  "production_workflow_modified": false,
+  "python_export": {
+    "added": [
+      [
+        "",
+        "libpass",
+        "1.9.3"
+      ]
+    ],
+    "count": 293,
+    "removed": [
+      [
+        "",
+        "passlib",
+        "1.7.4"
+      ]
+    ],
+    "schema_validation_performed": false,
+    "sha256": "18d7b59dddf731d811ce7a760ff96a4344fac31a38ee422b48a7c98a398ee87c",
+    "tools": [
+      {
+        "name": "uv",
+        "vendor": "Astral Software Inc.",
+        "version": "0.12.7"
+      }
+    ]
+  },
+  "raw_directory": "/private/tmp/task-13013-7-ac2.VIPgMv",
+  "raw_files": [
+    {
+      "path": "/private/tmp/task-13013-7-ac2.VIPgMv/admin.zip",
+      "sha256": "20e7512d660564401a10f94939fea967b5afde65c4693629a39694c81791fdf7"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-ac2.VIPgMv/aggregate.zip",
+      "sha256": "2a5c48c14258f54b0a0b7b01153fad346ffcf84fa070a22fb488070285b68662"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-ac2.VIPgMv/apps.zip",
+      "sha256": "834f2ce466d94fbcb631c6ca4c4a1a5a81e90e7c53305e6d5461b55e0a614297"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-ac2.VIPgMv/container-run.json",
+      "sha256": "2274d3fd6921fc70a852f6feff55b12c2b9287157b4feb2b81633bd70edc8700"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-ac2.VIPgMv/contracts.log",
+      "sha256": "d27d747df9c6dbaefd787074359a8bd137dc6b9b2b080c12ebed9d278ad42939"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-ac2.VIPgMv/remote-artifacts.json",
+      "sha256": "2ae8ec2355b08d74f72271c3983987f2d804e15df0dde35a55a7fe2463644200"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-ac2.VIPgMv/sbom-python-current.cdx.json",
+      "sha256": "18d7b59dddf731d811ce7a760ff96a4344fac31a38ee422b48a7c98a398ee87c"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-ac2.VIPgMv/scans.zip",
+      "sha256": "07e18a0b5e838f82c14b5e853b48dd252c51c485568932d0e172f7e5dabd7a4a"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-ac2.VIPgMv/source-run.json",
+      "sha256": "00a3ef50c169f0410ef8bc52f65edf33d1e3e98ff9cc08b8b78f4c518543979b"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-ac2.VIPgMv/uv-export.log",
+      "sha256": "1bf4997c43e1223457e88b9a67f766a5e212d85940c669b8a27755f7f8e5a23d"
+    },
+    {
+      "path": "/private/tmp/task-13013-7-ac2.VIPgMv/uv-lock-check.log",
+      "sha256": "921d4c629c0d284d0037d8ebba6e6f4a0d2966148504056a9d78429bb7eae8dc"
+    }
+  ],
+  "remote_head": "f2136ba63bb1d9c7109644aa7ca798af35e5e2e3",
+  "repository_inputs": [
+    {
+      "path": ".github/dependabot.yml",
+      "remote_sha256": "88674b0d1f1d5965304e06bb92e845c2aba85b7975291ccf2e3ff3136c1f9d34",
+      "sha256": "88674b0d1f1d5965304e06bb92e845c2aba85b7975291ccf2e3ff3136c1f9d34",
+      "unchanged_since_remote": true
+    },
+    {
+      "path": ".github/workflows/sbom.yml",
+      "remote_sha256": "58b5aecf64d99b9807f48d8594aa08dcec1b935e87340def0902453833a3d586",
+      "sha256": "58b5aecf64d99b9807f48d8594aa08dcec1b935e87340def0902453833a3d586",
+      "unchanged_since_remote": true
+    },
+    {
+      "path": "apps/bun.lock",
+      "remote_sha256": "196b07372dcf1ea5c0d88dc4dc117777e53b5524771105e8ec79547a9ffa9eb2",
+      "sha256": "196b07372dcf1ea5c0d88dc4dc117777e53b5524771105e8ec79547a9ffa9eb2",
+      "unchanged_since_remote": true
+    },
+    {
+      "path": "admin-ui/bun.lock",
+      "remote_sha256": "f7fb5bdbb6d5265ddc0ed248b13c0de7ba71e693c133a2b243e1a8617c558bc6",
+      "sha256": "f7fb5bdbb6d5265ddc0ed248b13c0de7ba71e693c133a2b243e1a8617c558bc6",
+      "unchanged_since_remote": true
+    },
+    {
+      "path": "apps/package.json",
+      "remote_sha256": "ccccd4b4e801096cb47a77b51860b095aacd4efd96957ed19342f6ba28f3e150",
+      "sha256": "ccccd4b4e801096cb47a77b51860b095aacd4efd96957ed19342f6ba28f3e150",
+      "unchanged_since_remote": true
+    },
+    {
+      "path": "apps/tldw-frontend/package.json",
+      "remote_sha256": "0c049fbd465815dc5cb93408bb941846349599a3a6e40164e940676dda55ddfa",
+      "sha256": "0c049fbd465815dc5cb93408bb941846349599a3a6e40164e940676dda55ddfa",
+      "unchanged_since_remote": true
+    },
+    {
+      "path": "apps/extension/package.json",
+      "remote_sha256": "fc21ded4282e6dd57aa4a5fe90146e32d446d0227a84acdf6d2f3ff9cbaa2dc0",
+      "sha256": "fc21ded4282e6dd57aa4a5fe90146e32d446d0227a84acdf6d2f3ff9cbaa2dc0",
+      "unchanged_since_remote": true
+    },
+    {
+      "path": "apps/packages/ui/package.json",
+      "remote_sha256": "4ab92688af46a9e2555123aed2c25d1415cf334d7b256d6879ddf7d5099d51e8",
+      "sha256": "4ab92688af46a9e2555123aed2c25d1415cf334d7b256d6879ddf7d5099d51e8",
+      "unchanged_since_remote": true
+    },
+    {
+      "path": "apps/packages/voice-assistant-sdk/package.json",
+      "remote_sha256": "b5ebe51be544d4f24d63330b4c2883900c176b6faf27e92880ad30bd06761db8",
+      "sha256": "b5ebe51be544d4f24d63330b4c2883900c176b6faf27e92880ad30bd06761db8",
+      "unchanged_since_remote": true
+    },
+    {
+      "path": "admin-ui/package.json",
+      "remote_sha256": "61c9295eb067500a24dd2b9dc7e9c5fda18f6eb1a2683f7a2e0bb2700aa7f705",
+      "sha256": "61c9295eb067500a24dd2b9dc7e9c5fda18f6eb1a2683f7a2e0bb2700aa7f705",
+      "unchanged_since_remote": true
+    },
+    {
+      "path": "Dockerfiles/Dockerfile.prod",
+      "remote_sha256": "41b089583aea3d2133988dca751a0ab8c4f31d4e7be9510c02790d919058db74",
+      "sha256": "41b089583aea3d2133988dca751a0ab8c4f31d4e7be9510c02790d919058db74",
+      "unchanged_since_remote": true
+    },
+    {
+      "path": "Dockerfiles/Dockerfile.worker",
+      "remote_sha256": "ad33d289e1f0c7954e9aeeb36aeeb7c7b85138ed426185534bff218b9c126577",
+      "sha256": "ad33d289e1f0c7954e9aeeb36aeeb7c7b85138ed426185534bff218b9c126577",
+      "unchanged_since_remote": true
+    },
+    {
+      "path": "Dockerfiles/Dockerfile.audio_gpu_worker",
+      "remote_sha256": "164c292971453bd23c251b302e4e5b1c1f8921d31bdaf4af7eebd823786ed852",
+      "sha256": "164c292971453bd23c251b302e4e5b1c1f8921d31bdaf4af7eebd823786ed852",
+      "unchanged_since_remote": true
+    },
+    {
+      "path": "Dockerfiles/Dockerfile.webui",
+      "remote_sha256": "310aa64552ec6435edd4b7b6dbaef9aba42926bbc7e94fb4d9c96db7b8e64660",
+      "sha256": "310aa64552ec6435edd4b7b6dbaef9aba42926bbc7e94fb4d9c96db7b8e64660",
+      "unchanged_since_remote": true
+    },
+    {
+      "path": "Dockerfiles/Dockerfile.admin-ui",
+      "remote_sha256": "80cd25e797acfd6c7e2bf710ed094ec9a56f0ac6be98f31eef5b8befedad0e08",
+      "sha256": "80cd25e797acfd6c7e2bf710ed094ec9a56f0ac6be98f31eef5b8befedad0e08",
+      "unchanged_since_remote": true
+    },
+    {
+      "path": "pyproject.toml",
+      "remote_sha256": "5df894f6b8d5520a8fd3085f66b68c38a5a1c934de30e63776d2550f02c4ddcc",
+      "sha256": "dd92d6c67c28e1fec148cbc10a0fe83c45a19c0c460edd9e470234a86f4fbd4f",
+      "unchanged_since_remote": false
+    },
+    {
+      "path": "uv.lock",
+      "remote_sha256": "d20cc63d6086c9c03e3ec58c8ca4c377a4d5fc467fae338c5fb31d65be30f09e",
+      "sha256": "54a87906885483eac91ce27990f1a0be4035996d2040942b66c2920db83ae07a",
+      "unchanged_since_remote": false
+    }
+  ],
+  "represented_workspace_names": [
+    "@tldw/ui",
+    "tldw-assistant",
+    "tldw-frontend"
+  ],
+  "retained_scan_decisions": {
+    "scan-decision-source-admin-ui.json": {
+      "blocking": [],
+      "component": "source-admin-ui",
+      "excepted": [],
+      "raw_severity_counts": {},
+      "unmatched_exception_ids": []
+    },
+    "scan-decision-source-apps-workspace.json": {
+      "blocking": [],
+      "component": "source-apps-workspace",
+      "excepted": [],
+      "raw_severity_counts": {
+        "LOW": 3,
+        "MEDIUM": 5
+      },
+      "unmatched_exception_ids": []
+    },
+    "scan-decision-source-python-root.json": {
+      "blocking": [
+        {
+          "installed_version": "1.5.9",
+          "purl": "pkg:pypi/chromadb@1.5.9",
+          "severity": "CRITICAL",
+          "target": "Python",
+          "vulnerability_id": "CVE-2026-45829"
+        },
+        {
+          "installed_version": "1.5.9",
+          "purl": "pkg:pypi/chromadb@1.5.9",
+          "severity": "CRITICAL",
+          "target": "Python",
+          "vulnerability_id": "CVE-2026-45833"
+        },
+        {
+          "installed_version": "1.5.9",
+          "purl": "pkg:pypi/chromadb@1.5.9",
+          "severity": "HIGH",
+          "target": "Python",
+          "vulnerability_id": "CVE-2026-45830"
+        },
+        {
+          "installed_version": "1.5.9",
+          "purl": "pkg:pypi/chromadb@1.5.9",
+          "severity": "HIGH",
+          "target": "Python",
+          "vulnerability_id": "CVE-2026-45831"
+        },
+        {
+          "installed_version": "3.10.3",
+          "purl": "pkg:pypi/nltk@3.10.3",
+          "severity": "HIGH",
+          "target": "Python",
+          "vulnerability_id": "CVE-2026-81726"
+        }
+      ],
+      "component": "source-python-root",
+      "excepted": [],
+      "raw_severity_counts": {
+        "CRITICAL": 2,
+        "HIGH": 3
+      },
+      "unmatched_exception_ids": []
+    }
+  },
+  "security_admission": false,
+  "uv_binary": {
+    "offline": true,
+    "path": "/private/tmp/task-13013-7-pinned-uv.ZtCsHu/uv-aarch64-apple-darwin/uv",
+    "python_selected": "3.13.6",
+    "schema_validation_performed": false,
+    "sha256": "55936a60bff5de7ac04facb72f9e6fd0ffd9661063480224c3ab321c3f10caff",
+    "version": "0.12.7 (61291a8ca 2026-08-27 aarch64-apple-darwin)"
+  },
+  "workspace_manifests": {
+    "@tldw/ui": {
+      "path": "apps/packages/ui",
+      "version": "0.1.0"
+    },
+    "@tldw/voice-assistant-sdk": {
+      "path": "apps/packages/voice-assistant-sdk",
+      "version": "0.1.0"
+    },
+    "tldw-assistant": {
+      "path": "apps/extension",
+      "version": "0.1.0"
+    },
+    "tldw-frontend": {
+      "path": "apps/tldw-frontend",
+      "version": "0.1.0"
+    }
+  }
+}

@@ -202,7 +202,10 @@ export function captureAllApiCalls(page: Page): {
     try { requestBody = request.postDataJSON() } catch { /* no body */ }
 
     let responseBody: unknown = null
-    try { responseBody = await response.json() } catch { /* non-json */ }
+    const contentType = response.headers()["content-type"]?.toLowerCase() ?? ""
+    if (!contentType.includes("text/event-stream")) {
+      try { responseBody = await response.json() } catch { /* non-json */ }
+    }
 
     calls.push({
       method: request.method(),

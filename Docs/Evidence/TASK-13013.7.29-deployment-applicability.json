@@ -1,0 +1,2484 @@
+{
+  "archives": [
+    {
+      "digest": "sha256:7acf62766a675e54b8f721419a4d80371c31ca15056e57aabf2e3a0b5ce23ef8",
+      "id": 10109529322,
+      "local_path": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-app.zip",
+      "member_sha256": {
+        "SHA256SUMS-image-app": "5d2f52ec6c5140b97d1a360d70f51452430e2bfd91d251190bf199040da837a3",
+        "oci-subject-app.json": "22ab9f0e25fac9a6926aa3422e5824c31e571d2efef9e601339b25292d93a247",
+        "runtime-image-app.json": "0c2173091753a31b2eec3c10a2603f5d685509e2dd1e2a9a112e467197394a5e",
+        "sbom-image-app.cdx.json": "9563c805c26a6295b167353800fa3d6679a5a36014b1b6fc4add8ae0a8860477",
+        "scan-decision-image-app.json": "50f5651699b55d0cc80a2105edc42872ea962a7d30d6b350a212484026fe7bb5",
+        "trivy-image-app.json": "f88d77cf89a0f1b8a9a7e91b2eb58970b64e8094f593cf01e0252bfa825802da"
+      },
+      "name": "container-admission-app",
+      "run_id": 34362968533
+    },
+    {
+      "digest": "sha256:f1833864ecde4526276884702b0eb74c81126f76fd1873ea2c169afafd92a4ea",
+      "id": 10109884293,
+      "local_path": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-worker.zip",
+      "member_sha256": {
+        "SHA256SUMS-image-worker": "f44b94549c835e830cd934859148e00c5dfa893c423c2cde1269e77bb043bc1d",
+        "oci-subject-worker.json": "89c425ecee26d37e29449306f5679b07d9d8942c1855f434099f6327463f0380",
+        "runtime-image-worker.json": "8b7d6ebfa66a325506f6e6782cb3f3285848196f82165c31ec749969a651d7eb",
+        "sbom-image-worker.cdx.json": "ec67416c996ba6d8097217be0e4b513032ca767cfa66da5fd9024ff9bd8c6bda",
+        "scan-decision-image-worker.json": "fd93478c160b420e34ac6f6d7bbf5724211d583ff7ac97644755145821a70871",
+        "trivy-image-worker.json": "8899e5580af6b7fefc061d972a1f63f10e93d57235edaedaf9e5f572c8cc3bf3"
+      },
+      "name": "container-admission-worker",
+      "run_id": 34362968533
+    },
+    {
+      "digest": "sha256:7611c8f6b54a928a5e72af991aeaec602c8044bbf94ae2a638ac8e6a27fe5fea",
+      "id": 10109943070,
+      "local_path": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-audio-worker.zip",
+      "member_sha256": {
+        "SHA256SUMS-image-audio-worker": "09311f765bebaa3f361bccb5bbc284153a3ac0fe5faf5a624cde8025b4d80361",
+        "oci-subject-audio-worker.json": "c2c3c7c0fd015e04d875e3dea64eae2f31dd57941c7d4623ac19e76a8ba47aee",
+        "runtime-image-audio-worker.json": "943ea84005766f3f0309439a228aa3859de513e0d738b8e87dbe2e867ef24e9d",
+        "sbom-image-audio-worker.cdx.json": "d1d4479aef9c3953400773d051cbbca417d15061c90d5d61d897cdc5d3b4a866",
+        "scan-decision-image-audio-worker.json": "93e691703289a35e01077d0c6eb2192502a9556dcbe062fee477d3943d0b4388",
+        "trivy-image-audio-worker.json": "4c01e656130515310e5396aec02a2de5fc974c495591d4b90a033496920c81f6"
+      },
+      "name": "container-admission-audio-worker",
+      "run_id": 34362968533
+    },
+    {
+      "digest": "sha256:ff2488f2b32aad8027a33a90984446b19985e91f4a2390e749f09203951e261a",
+      "id": 10109080595,
+      "local_path": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-webui.zip",
+      "member_sha256": {
+        "SHA256SUMS-image-webui": "190a4703e6d5ce6c55d1578cb567047b12c954a532134019f63be9bf3c184d73",
+        "oci-subject-webui.json": "583873c0f0408f1947efbeb5a5c22dd10df325a60dfaaf5eafe382b19c40575a",
+        "sbom-image-webui.cdx.json": "6bf3ab88a9c5ef2d822736b5c4fefd48a5fe0fa0535b6ceb65282423f2bc218f",
+        "scan-decision-image-webui.json": "d8347470af794a6f7d1ee5a5b321a937bb003ab8b34cfe3ffa4d469354bf20c0",
+        "trivy-image-webui.json": "f1e0e15a4966175f8fd08c682f75c02143bf2fd17748a8ff36e5c2b8cf668869"
+      },
+      "name": "container-admission-webui",
+      "run_id": 34362968533
+    },
+    {
+      "digest": "sha256:81f84f323c2760399e2ba1c3a43e64712a210fcab3602bccf39de688c064bed2",
+      "id": 10108713427,
+      "local_path": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-admin.zip",
+      "member_sha256": {
+        "SHA256SUMS-image-admin-ui": "e5853454a08adf54463e17941f9b634a4da9cd09928ca2b99c391eb6ab98f1bd",
+        "oci-subject-admin-ui.json": "012ae5aa2cd8255ca9f14c32830ece37fd2ddd0efa354032976032c6ff6c4fb1",
+        "sbom-image-admin-ui.cdx.json": "b6a39fb6fb56e345c6a4777888ea80d6d39fce46984e0dd455db4ec5fbf4020e",
+        "scan-decision-image-admin-ui.json": "bebf2116ac1773202b10b18d2ac085a7109fe722c7a2cb0990d4310448e6484e",
+        "trivy-image-admin-ui.json": "f238929e5ace33d170f37cebd0faaf8418b96fb89b0ebc517d5f2f629be51d26"
+      },
+      "name": "container-admission-admin-ui",
+      "run_id": 34362968533
+    },
+    {
+      "digest": "sha256:04961ac46cf289d207e7a7ca497974621226dd7232bf6b86e01d12778871959e",
+      "id": 10108780400,
+      "local_path": "/private/tmp/task-13013-7-current-ci.bvZLBs/source-aggregate.zip",
+      "member_sha256": {
+        "SHA256SUMS.source": "8b0f602ca7ac02ded39af163b6f380956a641c3ec84107ad7386fb9c860664e6",
+        "sbom-admin-ui.cdx.json": "6630aaf45776c72f279f8e35001437e330a03f9bf9b85e24157a4f1cc2a0b508",
+        "sbom-apps-workspace.cdx.json": "ea53548e048f419cd6985f035d7cc3b9eee58cbc8dadfaca1eb837ef2ef93b95",
+        "sbom-python-root.cdx.json": "c5d0e8393b4d30e033372f6510c09944388ac663cfeb58d9725dbd5ee453ef50",
+        "sbom-source-aggregate.cdx.json": "f256259e051373cd1f6cddddff687c62ea9f43c1713563d507f3442bc7340c4b",
+        "source-component-counts.json": "086103dd0615f73dda0cac361157c7ea5a192571c7fdf353809ea73353bb6da2"
+      },
+      "name": "source-sbom-aggregate",
+      "run_id": 34362968663
+    },
+    {
+      "digest": "sha256:06b887a22906577f7eef1aa6459bf45b654313286e7f69f3226e50e196000053",
+      "id": 10108803808,
+      "local_path": "/private/tmp/task-13013-7-current-ci.bvZLBs/source-scans.zip",
+      "member_sha256": {
+        "SHA256SUMS.scan": "ae3410fc1ed6788113cab12f1c3c884cb6893dd8b4c83a365f586c7d6ae2468f",
+        "scan-decision-source-admin-ui.json": "bc811ee0df123757a753cb6edb3e295cc49ec9f9f3172ecaf9ce89ddf430143b",
+        "scan-decision-source-apps-workspace.json": "06421ad684ab4f44362b64623ce891d8c1977d447324ed982fadb38d9d9a98bc",
+        "scan-decision-source-python-root.json": "6c1d40117214521a5c882ba66cdf393e27d6495bcc9195bb6ed34e7df180232f",
+        "trivy-db-metadata.json": "940cecc4ccb849f843ede6587241c3ec3b9fdbdf49816c61830406d192e49ea5",
+        "trivy-source-admin-ui.json": "f3b2d0cbd7f87b1d3d8dad3e6b1afd8b4320f20fdff57052436b4e31f63fd0b7",
+        "trivy-source-apps-workspace.json": "a26319262f82d9f6e809a858e3c3140527cd1b6ef731ebfaa09be27b102a614b",
+        "trivy-source-python-root.json": "914a6c3ea35734da3df35b79ba2e55aa05969d480d59062ecdb95ea6b4a232bb",
+        "trivy-version.txt": "41e22ed321a4c139a4fae57e92d8fa971cf7e91a8c1c4444d9a948c52a72c73a"
+      },
+      "name": "source-sbom-scans",
+      "run_id": 34362968663
+    }
+  ],
+  "authorization": {
+    "new_github_approval_comment": false,
+    "review_location": "https://github.com/rmusser01/tldw_server/pull/2869",
+    "scope": "Local exact non-applicability policy update; no push, dispatch, publication or merge.",
+    "source": "Current requester conversation: continue remediation and exclude confirmed non-applicable findings; report security issues only with confirmed impact."
+  },
+  "baseline_policy_sha256": "ab56e0ad531d99c2f2376b554cbea369a3a3930810823c51cabbd13f4321fd40",
+  "before_after": [
+    {
+      "after": 216,
+      "before": 229,
+      "component": "image-app",
+      "newly_excepted": 13,
+      "total_excepted": 18
+    },
+    {
+      "after": 44,
+      "before": 54,
+      "component": "image-worker",
+      "newly_excepted": 10,
+      "total_excepted": 15
+    },
+    {
+      "after": 216,
+      "before": 229,
+      "component": "image-audio-worker",
+      "newly_excepted": 13,
+      "total_excepted": 18
+    },
+    {
+      "after": 37,
+      "before": 55,
+      "component": "image-webui",
+      "newly_excepted": 18,
+      "total_excepted": 19
+    },
+    {
+      "after": 37,
+      "before": 55,
+      "component": "image-admin-ui",
+      "newly_excepted": 18,
+      "total_excepted": 19
+    },
+    {
+      "after": 0,
+      "before": 0,
+      "component": "source-admin-ui",
+      "newly_excepted": 0,
+      "total_excepted": 0
+    },
+    {
+      "after": 0,
+      "before": 0,
+      "component": "source-apps-workspace",
+      "newly_excepted": 0,
+      "total_excepted": 0
+    },
+    {
+      "after": 1,
+      "before": 1,
+      "component": "source-python-root",
+      "newly_excepted": 0,
+      "total_excepted": 4
+    }
+  ],
+  "deduplicated_inventory_before": [
+    {
+      "raw_rows": 5,
+      "source_package": "acl",
+      "vulnerability_id": "CVE-2026-54369"
+    },
+    {
+      "raw_rows": 2,
+      "source_package": "cjson",
+      "vulnerability_id": "CVE-2026-16554"
+    },
+    {
+      "raw_rows": 2,
+      "source_package": "cjson",
+      "vulnerability_id": "CVE-2026-29036"
+    },
+    {
+      "raw_rows": 2,
+      "source_package": "cjson",
+      "vulnerability_id": "CVE-2026-67215"
+    },
+    {
+      "raw_rows": 2,
+      "source_package": "cjson",
+      "vulnerability_id": "CVE-2026-67216"
+    },
+    {
+      "raw_rows": 2,
+      "source_package": "expat",
+      "vulnerability_id": "CVE-2026-76956"
+    },
+    {
+      "raw_rows": 2,
+      "source_package": "expat",
+      "vulnerability_id": "CVE-2026-76957"
+    },
+    {
+      "raw_rows": 18,
+      "source_package": "ffmpeg",
+      "vulnerability_id": "CVE-2026-58049"
+    },
+    {
+      "raw_rows": 18,
+      "source_package": "ffmpeg",
+      "vulnerability_id": "CVE-2026-64830"
+    },
+    {
+      "raw_rows": 18,
+      "source_package": "ffmpeg",
+      "vulnerability_id": "CVE-2026-64831"
+    },
+    {
+      "raw_rows": 18,
+      "source_package": "ffmpeg",
+      "vulnerability_id": "CVE-2026-64832"
+    },
+    {
+      "raw_rows": 18,
+      "source_package": "ffmpeg",
+      "vulnerability_id": "CVE-2026-64833"
+    },
+    {
+      "raw_rows": 18,
+      "source_package": "ffmpeg",
+      "vulnerability_id": "CVE-2026-64834"
+    },
+    {
+      "raw_rows": 18,
+      "source_package": "ffmpeg",
+      "vulnerability_id": "CVE-2026-64835"
+    },
+    {
+      "raw_rows": 18,
+      "source_package": "ffmpeg",
+      "vulnerability_id": "CVE-2026-66036"
+    },
+    {
+      "raw_rows": 18,
+      "source_package": "ffmpeg",
+      "vulnerability_id": "CVE-2026-66039"
+    },
+    {
+      "raw_rows": 18,
+      "source_package": "ffmpeg",
+      "vulnerability_id": "CVE-2026-66040"
+    },
+    {
+      "raw_rows": 18,
+      "source_package": "ffmpeg",
+      "vulnerability_id": "CVE-2026-66041"
+    },
+    {
+      "raw_rows": 18,
+      "source_package": "ffmpeg",
+      "vulnerability_id": "CVE-2026-70628"
+    },
+    {
+      "raw_rows": 18,
+      "source_package": "ffmpeg",
+      "vulnerability_id": "CVE-2026-70632"
+    },
+    {
+      "raw_rows": 18,
+      "source_package": "ffmpeg",
+      "vulnerability_id": "CVE-2026-75142"
+    },
+    {
+      "raw_rows": 18,
+      "source_package": "ffmpeg",
+      "vulnerability_id": "CVE-2026-75143"
+    },
+    {
+      "raw_rows": 18,
+      "source_package": "ffmpeg",
+      "vulnerability_id": "CVE-2026-75144"
+    },
+    {
+      "raw_rows": 18,
+      "source_package": "ffmpeg",
+      "vulnerability_id": "CVE-2026-75146"
+    },
+    {
+      "raw_rows": 2,
+      "source_package": "glib2.0",
+      "vulnerability_id": "CVE-2026-58010"
+    },
+    {
+      "raw_rows": 2,
+      "source_package": "glib2.0",
+      "vulnerability_id": "CVE-2026-58011"
+    },
+    {
+      "raw_rows": 2,
+      "source_package": "glib2.0",
+      "vulnerability_id": "CVE-2026-58012"
+    },
+    {
+      "raw_rows": 2,
+      "source_package": "glib2.0",
+      "vulnerability_id": "CVE-2026-58013"
+    },
+    {
+      "raw_rows": 2,
+      "source_package": "glib2.0",
+      "vulnerability_id": "CVE-2026-58014"
+    },
+    {
+      "raw_rows": 2,
+      "source_package": "glib2.0",
+      "vulnerability_id": "CVE-2026-58015"
+    },
+    {
+      "raw_rows": 2,
+      "source_package": "glib2.0",
+      "vulnerability_id": "CVE-2026-58016"
+    },
+    {
+      "raw_rows": 5,
+      "source_package": "gzip",
+      "vulnerability_id": "CVE-2026-41992"
+    },
+    {
+      "raw_rows": 2,
+      "source_package": "libsndfile",
+      "vulnerability_id": "CVE-2026-37555"
+    },
+    {
+      "raw_rows": 2,
+      "source_package": "libxml2",
+      "vulnerability_id": "CVE-2026-6653"
+    },
+    {
+      "raw_rows": 2,
+      "source_package": "libxml2",
+      "vulnerability_id": "CVE-2026-86140"
+    },
+    {
+      "raw_rows": 2,
+      "source_package": "mbedtls",
+      "vulnerability_id": "CVE-2026-25835"
+    },
+    {
+      "raw_rows": 2,
+      "source_package": "mbedtls",
+      "vulnerability_id": "CVE-2026-34872"
+    },
+    {
+      "raw_rows": 2,
+      "source_package": "mbedtls",
+      "vulnerability_id": "CVE-2026-34873"
+    },
+    {
+      "raw_rows": 2,
+      "source_package": "mbedtls",
+      "vulnerability_id": "CVE-2026-34875"
+    },
+    {
+      "raw_rows": 18,
+      "source_package": "ncurses",
+      "vulnerability_id": "CVE-2025-69720"
+    },
+    {
+      "raw_rows": 4,
+      "source_package": "nltk",
+      "vulnerability_id": "CVE-2026-81726"
+    },
+    {
+      "raw_rows": 5,
+      "source_package": "perl",
+      "vulnerability_id": "CVE-2026-13221"
+    },
+    {
+      "raw_rows": 5,
+      "source_package": "perl",
+      "vulnerability_id": "CVE-2026-42496"
+    },
+    {
+      "raw_rows": 5,
+      "source_package": "perl",
+      "vulnerability_id": "CVE-2026-42497"
+    },
+    {
+      "raw_rows": 5,
+      "source_package": "perl",
+      "vulnerability_id": "CVE-2026-48962"
+    },
+    {
+      "raw_rows": 5,
+      "source_package": "perl",
+      "vulnerability_id": "CVE-2026-57432"
+    },
+    {
+      "raw_rows": 5,
+      "source_package": "perl",
+      "vulnerability_id": "CVE-2026-57433"
+    },
+    {
+      "raw_rows": 2,
+      "source_package": "perl",
+      "vulnerability_id": "CVE-2026-8376"
+    },
+    {
+      "raw_rows": 5,
+      "source_package": "perl",
+      "vulnerability_id": "CVE-2026-9538"
+    },
+    {
+      "raw_rows": 3,
+      "source_package": "sqlite3",
+      "vulnerability_id": "CVE-2026-11822"
+    },
+    {
+      "raw_rows": 3,
+      "source_package": "sqlite3",
+      "vulnerability_id": "CVE-2026-11824"
+    },
+    {
+      "raw_rows": 10,
+      "source_package": "systemd",
+      "vulnerability_id": "CVE-2026-16742"
+    },
+    {
+      "raw_rows": 2,
+      "source_package": "tiff",
+      "vulnerability_id": "CVE-2026-36849"
+    },
+    {
+      "raw_rows": 2,
+      "source_package": "tiff",
+      "vulnerability_id": "CVE-2026-52490"
+    },
+    {
+      "raw_rows": 16,
+      "source_package": "util-linux",
+      "vulnerability_id": "CVE-2026-53613"
+    },
+    {
+      "raw_rows": 43,
+      "source_package": "util-linux",
+      "vulnerability_id": "CVE-2026-76642"
+    },
+    {
+      "raw_rows": 43,
+      "source_package": "util-linux",
+      "vulnerability_id": "CVE-2026-78408"
+    },
+    {
+      "raw_rows": 43,
+      "source_package": "util-linux",
+      "vulnerability_id": "CVE-2026-78409"
+    },
+    {
+      "raw_rows": 43,
+      "source_package": "util-linux",
+      "vulnerability_id": "CVE-2026-78410"
+    }
+  ],
+  "frontend_perl_proof": {
+    "archive_expected_hash_source": "Docs/Evidence/TASK-13013.7.15-native-frontend-qualification.md",
+    "archive_sha256": "d743e4db27dde5d33b6e45787bd233e3c10578b6dbb1b7beaa30aece833a115d",
+    "binding": "Both current frontend Trivy Metadata.Layers and perl-base Package.Layer reference the same compressed digest and uncompressed DiffID. Both were recomputed from the retained blob. The older whole image is not substituted for either current image. Its content-addressed base blob is reused as byte evidence.",
+    "config": {
+      "path": "/usr/lib/x86_64-linux-gnu/perl-base/Config_heavy.pl",
+      "sha256": "1c4a678536480cef046b6c9feac356dd22e86dc88094b44433ae1cf1fd019681",
+      "values": {
+        "archname": "x86_64-linux-gnu-thread-multi",
+        "ivsize": "8",
+        "ivtype": "long",
+        "ptrsize": "8",
+        "sizesize": "8",
+        "ssizetype": "ssize_t",
+        "static_ext": " ",
+        "use64bitall": "define",
+        "use64bitint": "define"
+      }
+    },
+    "manifest_file_count": 620,
+    "md5_manifest_matches_current_installed_file_inventory_for_both_frontends": true,
+    "md5_purpose": "Package membership corroboration only; archive/layer SHA256 supplies integrity.",
+    "package_status": {
+      "architecture": "amd64",
+      "name": "perl-base",
+      "status": "install ok installed",
+      "version": "5.36.0-7+deb12u3"
+    },
+    "payload_md5_matches_package_manifest": true,
+    "perl_binary": {
+      "elf_class": 64,
+      "elf_machine": 62,
+      "path": "/usr/bin/perl",
+      "sha256": "f01fa7776dc21c9e4b5f60b2d231ca4d96dab958b8d06aff611cb1c16f871574"
+    },
+    "retained_archive": "/private/tmp/task-13013-7-15-native-run-34263320099.9cl3Je/admin-ui/baseline.oci.tar",
+    "shared_layer_diffid_sha256": "1d69a5fd31932841d7825ef4780c06f008eea65aaa9f3110fe09d5832ed5c7d8",
+    "shared_layer_sha256": "a8ac7f6c67abc236e4c745052c404112b8fab6fe8ac3a329d1ef3b867ad67c71"
+  },
+  "independent_review": {
+    "hash_scope_note": "Review hashes refer to files before verification closeout metadata/text was appended; supported disposition records and policy were not changed.",
+    "report": {
+      "findings": [],
+      "independent_binding_artifact": "/private/tmp/task-13013-7-applicability.8kX3cp/policy-independent-bindings.json",
+      "limits": [
+        "Hashes describe reviewed files before the parent adds final verification/review metadata.",
+        "Initial full targeted suite passed74 tests; after the one-line test fix, reran the expiry test and negative control only; parent owns the final integrated suite.",
+        "No repository edits or restricted investigations were performed."
+      ],
+      "resolved_findings": [
+        {
+          "body": "The test only expects loading the entire policy on September18 to fail. Prior records already expire September17, so they cause this error even if a new HIGH exception is extended. A temporary policy mutation changing TASK-13013.7.29-OS-01 expiry to 2026-09-18 still passed the complete test_only_the_72_verified_records_are_added_and_expire_on_schedule function. Assert every new record expires_on equals date(2026,9,17), or test expiry with a policy containing only the new records. The current policy dates are correct; this is a demonstrated regression-test gap.",
+          "end": 63,
+          "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/tests/Supply_Chain/test_os_package_dispositions.py",
+          "priority": "P2",
+          "resolution": "Parent added explicit created_on and expires_on assertions for every new record at line59; verified the valid policy passes and the same September18 extension mutation is now rejected.",
+          "start": 62,
+          "title": "Check expiry of the new records independently of the old records"
+        }
+      ],
+      "review_result": "supported_after_test_fix",
+      "reviewed_base": "db38d9ce531d0f17a025c65cb1698dbd1d69efd7",
+      "reviewed_hashes": {
+        ".github/supply-chain/vulnerability-exceptions.json": "25cf9e8c276d2537ec59ed53fd31065da77343875b8fce4f6e54ebe414dc0bff",
+        ".github/supply-chain/vulnerability-exceptions.schema.json": "0f36741f71d326f86d675eaf97984a69fd03cc66b8d8380f6234ceeae30a1eed",
+        "Docs/Development/Software_Supply_Chain.md": "d061fa1e765da31c38f38edd2226893c3d07d98935cc0249a9de718c285bee5b",
+        "Docs/Evidence/TASK-13013.7.29-deployment-applicability.json": "dbcccf8ff37b37b58c386562d709dd8bd74afea46ff846877558043c70013b20",
+        "Docs/Evidence/TASK-13013.7.29-deployment-applicability.md": "7136fc077fc4c0a44113e1623265fc3f95c4fc447d59ec6ecbcfbfb530f056a8",
+        "Helper_Scripts/Supply_Chain/exception_policy.py": "9bf192fa6c8c4e48c22a816d82229de0177f9b3ae54711fe0596f1d43eb6ed96",
+        "tldw_Server_API/tests/Supply_Chain/test_os_package_dispositions.py": "e57f162a0d4c02c150c80246bd74f34c9f86bf7680b3adf94110923cd5a8f3a2"
+      },
+      "tests": {
+        "command": "source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Supply_Chain/test_os_package_dispositions.py --basetemp=/private/tmp/task-13013-7-applicability.8kX3cp/policy-review-pytest",
+        "expiry_negative_control": "Initially demonstrated the gap; after the parent fix the normal policy passes and a new HIGH record extended to September18 raises AssertionError as required.",
+        "result": "74 passed, 2 warnings"
+      },
+      "verified": [
+        "All72 new tuples equal the disjoint OS37 + parent-library6 + utilities29 evidence tuples.",
+        "Each exact component/PURL/version/CVE/severity tuple appears in a retained report whose ZIP and report-member SHA256 were independently checked against TASK-13013.7.23 bindings.",
+        "All21 previous exception records are unchanged; new records are exclusively Debian image tuples with no optional Python or configuration-dependent allowances.",
+        "Schema and evaluator bytes match the reviewed base.",
+        "All72 current new records expire2026-09-17.",
+        "All72 boundary tests pass and require CVE/version/PURL-architecture/severity/component mismatches to remain blocking, while preserving serialized raw input.",
+        "Draft authorization explicitly cites current requester conversation, limits changes to local policy work, records the PR as review location, and does not claim the old OS-only comment approves these additions.",
+        "All eight review_input_hashes in the draft evidence matched task-owned source reports.",
+        "Evidence Markdown reviewed after creation: non-applicability remains bound to exact absent-code/ABI tuples; no optional-Python or configuration-dependent allowances; no unsupported deployment-impact claim or old-comment authorization attribution found."
+      ]
+    },
+    "report_sha256": "e1b711406f8a91d15979c9b09e0c02a568a0e65eafef1e11215761a15731ce1d"
+  },
+  "policy_sha256": "25cf9e8c276d2537ec59ed53fd31065da77343875b8fce4f6e54ebe414dc0bff",
+  "python_review": {
+    "base_image_reason": "hydra-core, lightning, pytorch-lightning, and nemo-toolkit are absent from all three retained supported backend image SBOMs and the base source-export SBOM. This does not cover optional extras installed after build or different deployed images.",
+    "base_image_status": "not-applicable-with-scope",
+    "findings": [
+      {
+        "affected_api": "hydra.utils.instantiate(config), with attacker-controlled _target_ and arguments",
+        "base_image_status": "not-applicable-with-scope",
+        "cve": "CVE-2026-68508",
+        "evidence": [
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py:1325",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Streaming_Unified.py:2778",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Streaming_Unified.py:1618",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Streaming_Unified.py:1652",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Streaming_Unified.py:1299",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-common.py:746",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-common.py:765",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-common.py:840",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-save_restore_connector.py:159",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-save_restore_connector.py:182",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-common.py:491"
+        ],
+        "ghsa": "GHSA-2cp2-2r3c-7p7r",
+        "missing_prerequisites": "A deployment actually installing the affected optional STT graph, successfully reaching RNNT initialization after initial standard Parakeet loading, and able to retrieve the attacker-selected model. These are not present/proven in retained base images.",
+        "optional_source_finding": "Static attacker-input chain exists through authenticated NeMo Parakeet RNNT streaming: client model identifier -> arbitrary Hugging Face model namespace -> restore_from -> archive model YAML -> from_config_dict -> hydra.utils.instantiate. This is stronger than a mere package match, but no installed/working optional deployment was established.",
+        "package": "hydra-core",
+        "primary_urls": [
+          "https://github.com/hydra-ecosystem/hydra/security/advisories/GHSA-2cp2-2r3c-7p7r"
+        ],
+        "status": "unresolved",
+        "version": "1.3.2"
+      },
+      {
+        "advisory_metadata_note": "GitHub advisory affected-version table shows legacy lightning <2022.6.15 while prose and upstream fix identify through2.6.5; this inconsistency is not used as an exclusion.",
+        "affected_api": "LightningModule.load_from_checkpoint -> _load_state, with checkpoint hyperparameters._instantiator selecting an imported callable",
+        "base_image_status": "not-applicable-with-scope",
+        "cve": "CVE-2026-58659",
+        "evidence": [
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/pyproject.toml:320",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/uv.lock:9715",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Workflows/adapters/audio/diarize.py:84",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/pyannote-4.0.7-model.py:621",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/lightning-2.6.5-saving.py:157",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/lightning-2.6.5-saving.py:167",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-save_restore_connector.py:182",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-save_restore_connector.py:221",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/pyannote-4.0.7-pipeline.py:278",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/pyannote-4.0.7-speaker_diarization.py:222",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/pyannote-4.0.7-getter.py:115"
+        ],
+        "ghsa": "GHSA-qqmf-gpg7-g8gw",
+        "missing_prerequisites": "No repository-controlled path from attacker input to a Lightning checkpoint or its _instantiator was established. This scoped conclusion assumes integrity of the fixed model source/cache and excludes custom checkpoint workflows or modified deployment code.",
+        "optional_source_finding": "Optional diarization -> pyannote-audio4.0.7 -> lightning2.6.5. Pyannote Model.from_pretrained does call Klass.load_from_checkpoint, so the API is transitively used. The repository workflow supplies the fixed pyannote/speaker-diarization-3.1 identifier; client input is the audio and speaker counts, not the checkpoint identifier/metadata. NeMo restore_from instead uses its connector and load_state_dict, not Lightning load_from_checkpoint.",
+        "package": "lightning",
+        "primary_urls": [
+          "https://github.com/Lightning-AI/pytorch-lightning/pull/21832",
+          "https://github.com/Lightning-AI/pytorch-lightning/commit/d710d68",
+          "https://raw.githubusercontent.com/Lightning-AI/pytorch-lightning/2.6.5/src/lightning/pytorch/core/saving.py",
+          "https://raw.githubusercontent.com/pyannote/pyannote-audio/4.0.7/src/pyannote/audio/core/pipeline.py",
+          "https://raw.githubusercontent.com/pyannote/pyannote-audio/4.0.7/src/pyannote/audio/pipelines/speaker_diarization.py",
+          "https://raw.githubusercontent.com/pyannote/pyannote-audio/4.0.7/src/pyannote/audio/pipelines/utils/getter.py"
+        ],
+        "status": "not-applicable-with-scope",
+        "version": "2.6.5"
+      },
+      {
+        "affected_api": "NeMo model/checkpoint deserialization; NVIDIA Curator notes associate this CVE pair with ASRModel.from_pretrained and torch.load/pickle.load.",
+        "base_image_status": "not-applicable-with-scope",
+        "cve": "CVE-2025-33245",
+        "evidence": [
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py:1325",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Streaming_Unified.py:2778",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Streaming_Unified.py:1618",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Streaming_Unified.py:1652",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Streaming_Unified.py:1299",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-common.py:746",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-common.py:765",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-common.py:840",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-save_restore_connector.py:159",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_Nemo.py:416",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_Nemo.py:495",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_Nemo.py:603",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-save_restore_connector.py:682"
+        ],
+        "ghsa": "GHSA-9379-mwvr-7wxx",
+        "missing_prerequisites": "Vendor bulletin does not distinguish the precise vulnerable function for this CVE from the other February deserialization issues. The inspected restore helper omits weights_only; current locked torch2.13.0 defaults that call to weights_only=True. A specific reachable unsafe deserializer under this exact optional graph has not been established. Installed and functioning optional deployment evidence is also absent.",
+        "optional_source_finding": "Optional STT_All/STT_Parakeet graph contains NeMo2.0.0. Authenticated streaming can supply a model ID to from_pretrained; controlled local execution calls restore_from on an explicit .nemo artifact. Neither is an audio upload being interpreted directly as a model checkpoint.",
+        "package": "nemo-toolkit",
+        "primary_urls": [
+          "https://nvidia.custhelp.com/app/answers/detail/a_id/5762",
+          "https://docs.nvidia.com/nemo/curator/latest/about/release-notes"
+        ],
+        "status": "unresolved",
+        "version": "2.0.0"
+      },
+      {
+        "affected_api": "Loading a malicious file through NeMo model/checkpoint deserialization; NVIDIA Curator notes associate this CVE pair with ASRModel.from_pretrained and torch.load/pickle.load.",
+        "base_image_status": "not-applicable-with-scope",
+        "cve": "CVE-2025-33253",
+        "evidence": [
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py:1325",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Streaming_Unified.py:2778",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Streaming_Unified.py:1618",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Streaming_Unified.py:1652",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Streaming_Unified.py:1299",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-common.py:746",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-common.py:765",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-common.py:840",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-save_restore_connector.py:159",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_Nemo.py:416",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_Nemo.py:495",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_Nemo.py:603",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-save_restore_connector.py:682"
+        ],
+        "ghsa": "GHSA-hvjw-vp7g-39h5",
+        "missing_prerequisites": "Vendor bulletin does not identify the exact CVE-specific callable. The observed torch.load helper has no explicit unsafe override, and locked torch2.13.0 defaults to weights_only=True. The separate pickle.load path and exact prerequisite were not proven reachable. Installed and functioning optional deployment evidence is also absent.",
+        "optional_source_finding": "Optional STT_All/STT_Parakeet graph contains NeMo2.0.0. Authenticated streaming can supply a model ID to from_pretrained; controlled local execution calls restore_from on an explicit .nemo artifact. Neither is an audio upload being interpreted directly as a model checkpoint.",
+        "package": "nemo-toolkit",
+        "primary_urls": [
+          "https://nvidia.custhelp.com/app/answers/detail/a_id/5762",
+          "https://docs.nvidia.com/nemo/curator/latest/about/release-notes"
+        ],
+        "status": "unresolved",
+        "version": "2.0.0"
+      },
+      {
+        "affected_api": "Checkpoint parsing/deserialization of untrusted data; vendor and reporting researcher do not identify a precise function.",
+        "base_image_status": "not-applicable-with-scope",
+        "cve": "CVE-2026-24157",
+        "evidence": [
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py:1325",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Streaming_Unified.py:2778",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Streaming_Unified.py:1618",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Streaming_Unified.py:1652",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Streaming_Unified.py:1299",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-common.py:746",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-common.py:765",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-common.py:840",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-save_restore_connector.py:159",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_Nemo.py:416",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_Nemo.py:495",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_Nemo.py:603",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-save_restore_connector.py:682"
+        ],
+        "ghsa": "GHSA-m4jw-wgmf-889x",
+        "missing_prerequisites": "The published primary sources identify checkpoint parsing but do not map the CVE to an exact callable or patched diff. A repository-specific unsafe checkpoint path for this CVE under the current optional dependency graph remains unproven. Installed and functioning optional deployment evidence is also absent.",
+        "optional_source_finding": "Optional STT_All/STT_Parakeet graph contains NeMo2.0.0. Authenticated streaming can supply a model ID to from_pretrained; controlled local execution calls restore_from on an explicit .nemo artifact. Neither is an audio upload being interpreted directly as a model checkpoint.",
+        "package": "nemo-toolkit",
+        "primary_urls": [
+          "https://nvidia.custhelp.com/app/answers/detail/a_id/5800",
+          "https://www.zerodayinitiative.com/advisories/ZDI-26-429/"
+        ],
+        "status": "unresolved",
+        "version": "2.0.0"
+      },
+      {
+        "affected_api": "Vendor identifies NeMo untrusted deserialization (CWE-502) RCE but does not publish the exact API.",
+        "base_image_status": "not-applicable-with-scope",
+        "cve": "CVE-2026-24159",
+        "evidence": [
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py:1325",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Streaming_Unified.py:2778",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Streaming_Unified.py:1618",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Streaming_Unified.py:1652",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Streaming_Unified.py:1299",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-common.py:746",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-common.py:765",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-common.py:840",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-save_restore_connector.py:159",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_Nemo.py:416",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_Nemo.py:495",
+          "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_Nemo.py:603",
+          "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-save_restore_connector.py:682"
+        ],
+        "ghsa": "GHSA-v7v2-m736-cf3c",
+        "missing_prerequisites": "A primary-source mapping to the exact affected API/prerequisite was not obtained; do not infer that this CVE is Hydra _target_ solely from unrelated exploit descriptions. Installed and functioning optional deployment evidence is also absent.",
+        "optional_source_finding": "Optional STT_All/STT_Parakeet graph contains NeMo2.0.0. Authenticated streaming can supply a model ID to from_pretrained; controlled local execution calls restore_from on an explicit .nemo artifact. Neither is an audio upload being interpreted directly as a model checkpoint.",
+        "package": "nemo-toolkit",
+        "primary_urls": [
+          "https://nvidia.custhelp.com/app/answers/detail/a_id/5800"
+        ],
+        "status": "unresolved",
+        "version": "2.0.0"
+      }
+    ],
+    "inventory_evidence": "inventory.json",
+    "method": "Static repository/upstream source inspection and SHA256-bound retained SBOM inspection; no ML imports, execution, model downloads, or image runs.",
+    "review_date": "2026-09-10",
+    "reviewed_head": "db38d9ce531d0f17a025c65cb1698dbd1d69efd7",
+    "scope_limits": [
+      "No current image was rebuilt or rescanned; retained artifacts are the 2026-09-09 images bound by TASK-13013.7.23.",
+      "These six are GitHub dependency-review matches in the full uv.lock; they are not findings in the retained base source-export/image inventories.",
+      "No exception, scanner suppression, upgrade, source change, or security impact claim is authorized or produced by this report."
+    ],
+    "source_artifacts": [
+      {
+        "file": "lightning-2.6.5-saving.py",
+        "sha256": "3e440ec318bbc088f672f3bb0e90d90d9c74135b73f481da94979da5529a4730"
+      },
+      {
+        "file": "nemo-2.0.0-common.py",
+        "sha256": "2558e22f5794078566a78710a8378eb9fb511f60d32473bd2150c4dfb48a2097"
+      },
+      {
+        "file": "nemo-2.0.0-save_restore_connector.py",
+        "sha256": "5847379f0a4f26a7f794f4fda6c198d41521c04998a9987acb7802215fcccec4"
+      },
+      {
+        "file": "pyannote-4.0.7-getter.py",
+        "sha256": "42bc13a1ba61a7a297e311c0f881f2e5abb8cff6dad219ed7ea654752480eab5"
+      },
+      {
+        "file": "pyannote-4.0.7-model.py",
+        "sha256": "baef26b0d3bcb0027b179f9d472cc5795f77073fa8e5210bdd2ce53a267275e3"
+      },
+      {
+        "file": "pyannote-4.0.7-pipeline.py",
+        "sha256": "c126c1ecf3a7172be311e61616145f45fbb5e52f06307adb28ac11103c8ee615"
+      },
+      {
+        "file": "pyannote-4.0.7-speaker_diarization.py",
+        "sha256": "cbb358abedef5042fcc71bb970b12a2936a16686be4bda15691a224f172656fd"
+      }
+    ],
+    "torch_prerequisite_source": "https://raw.githubusercontent.com/pytorch/pytorch/v2.13.0/torch/serialization.py"
+  },
+  "retained_report_replay": {
+    "all_component_exception_ids_matched": true,
+    "all_original_reports_preserved": true,
+    "date_utc": "2026-09-10",
+    "new_scan": false,
+    "schema_valid": true
+  },
+  "retained_scan_head": "78c3f92228c6411ee4637b9d2df9aa3b50aacdc8",
+  "review_date_utc": "2026-09-10",
+  "review_input_hashes": {
+    "/private/tmp/task-13013-7-applicability.8kX3cp/os/applicability.json": "800f247b7c94c4b077433b2b9b5111d3ea2da4859f2edc504aa062c5ec22dc4d",
+    "/private/tmp/task-13013-7-applicability.8kX3cp/os/inventory-evidence.json": "54d554eeb62e53e11e5f491f3752931de49e0ee8e85ad6a99122400886704455",
+    "/private/tmp/task-13013-7-applicability.8kX3cp/os/parent-library-independent-review.json": "2118565554085ca92b8490869e275dc0787d86bd316c221d500900f1af72dd26",
+    "/private/tmp/task-13013-7-applicability.8kX3cp/parent-library-dispositions.json": "9d9c6657f4e4764cda5bb217b160beb5c89751f83623a620f3beb5bb1c38bba5",
+    "/private/tmp/task-13013-7-applicability.8kX3cp/python/findings.json": "2a2638ea033ca2972655656804763bca4b9d7a871f3bc3497e3a33f400193657",
+    "/private/tmp/task-13013-7-applicability.8kX3cp/python/inventory.json": "3bf2a6c0b822a5de44c583ee0a7dadbe9ba1ef607071f68b53e602d71570549d",
+    "/private/tmp/task-13013-7-applicability.8kX3cp/utilities/hard-disposition-evidence.md": "8546aaca12ddbcdea831dca830ea530f43700aab4d033a31891da4c3587066c8",
+    "/private/tmp/task-13013-7-applicability.8kX3cp/utilities/hard-dispositions.json": "1fee922ad1d23fd3df9b7e4b0ce8f000a222426e0ad5046a809ec66e36e71662"
+  },
+  "reviewed_head": "db38d9ce531d0f17a025c65cb1698dbd1d69efd7",
+  "summary": {
+    "canonical_exception_count": 93,
+    "confirmed_deployment_impact_established_in_this_pass": 0,
+    "family_cve_pairs_before": 59,
+    "new_exact_dispositions": 72,
+    "remaining_rows_before": 623,
+    "remaining_unverified_scanner_rows_after": 551,
+    "unique_cves_before": 59
+  },
+  "supported_dispositions": [
+    {
+      "component": "image-admin-ui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-01",
+      "installed_version": "6.4-4",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-admin.zip",
+        "archive_sha256": "sha256:81f84f323c2760399e2ba1c3a43e64712a210fcab3602bccf39de688c064bed2",
+        "member": "trivy-image-admin-ui.json",
+        "member_sha256": "f238929e5ace33d170f37cebd0faaf8418b96fb89b0ebc517d5f2f629be51d26"
+      },
+      "package": "libtinfo6",
+      "primary_sources": [
+        "https://raw.githubusercontent.com/ThomasDickey/ncurses-snapshots/master/progs/infocmp.c",
+        "https://github.com/ThomasDickey/ncurses-snapshots/blob/master/progs/Makefile.in",
+        "https://packages.debian.org/trixie/amd64/ncurses-bin/filelist",
+        "https://security-tracker.debian.org/tracker/CVE-2025-69720"
+      ],
+      "purl": "pkg:deb/debian/libtinfo6@6.4-4?arch=amd64&distro=debian-12.15",
+      "reason": "The described affected function, analyze_string, is a static function in progs/infocmp.c, compiled into the infocmp executable by progs/Makefile.in; it is not part of the libtinfo6 library/data package. Retained InstalledFiles for this exact package contain no infocmp executable or executable program paths. The same image ships infocmp in ncurses-bin, whose CVE-2025-69720 finding is deliberately retained. This is a package-specific code-location exclusion, not an image-wide finding of non-applicability.",
+      "severity": "HIGH",
+      "source_package": "ncurses",
+      "subject_digest": "sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de",
+      "vulnerability_id": "CVE-2025-69720"
+    },
+    {
+      "component": "image-admin-ui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-02",
+      "installed_version": "6.4-4",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-admin.zip",
+        "archive_sha256": "sha256:81f84f323c2760399e2ba1c3a43e64712a210fcab3602bccf39de688c064bed2",
+        "member": "trivy-image-admin-ui.json",
+        "member_sha256": "f238929e5ace33d170f37cebd0faaf8418b96fb89b0ebc517d5f2f629be51d26"
+      },
+      "package": "ncurses-base",
+      "primary_sources": [
+        "https://raw.githubusercontent.com/ThomasDickey/ncurses-snapshots/master/progs/infocmp.c",
+        "https://github.com/ThomasDickey/ncurses-snapshots/blob/master/progs/Makefile.in",
+        "https://packages.debian.org/trixie/amd64/ncurses-bin/filelist",
+        "https://security-tracker.debian.org/tracker/CVE-2025-69720"
+      ],
+      "purl": "pkg:deb/debian/ncurses-base@6.4-4?arch=all&distro=debian-12.15",
+      "reason": "The described affected function, analyze_string, is a static function in progs/infocmp.c, compiled into the infocmp executable by progs/Makefile.in; it is not part of the ncurses-base library/data package. Retained InstalledFiles for this exact package contain no infocmp executable or executable program paths. The same image ships infocmp in ncurses-bin, whose CVE-2025-69720 finding is deliberately retained. This is a package-specific code-location exclusion, not an image-wide finding of non-applicability.",
+      "severity": "HIGH",
+      "source_package": "ncurses",
+      "subject_digest": "sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de",
+      "vulnerability_id": "CVE-2025-69720"
+    },
+    {
+      "component": "image-admin-ui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-03",
+      "installed_version": "252.39-1~deb12u2",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-admin.zip",
+        "archive_sha256": "sha256:81f84f323c2760399e2ba1c3a43e64712a210fcab3602bccf39de688c064bed2",
+        "member": "trivy-image-admin-ui.json",
+        "member_sha256": "f238929e5ace33d170f37cebd0faaf8418b96fb89b0ebc517d5f2f629be51d26"
+      },
+      "package": "libsystemd0",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-16742"
+      ],
+      "purl": "pkg:deb/debian/libsystemd0@252.39-1~deb12u2?arch=amd64&distro=debian-12.15",
+      "reason": "The advisory affects the homed manager authentication path; the exact binary packages contain only client libraries and documentation, and the complete OS package/file inventory contains no homed service, helper, homectl or corresponding systemd service package.",
+      "severity": "HIGH",
+      "source_package": "systemd",
+      "subject_digest": "sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de",
+      "vulnerability_id": "CVE-2026-16742"
+    },
+    {
+      "component": "image-admin-ui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-04",
+      "installed_version": "252.39-1~deb12u2",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-admin.zip",
+        "archive_sha256": "sha256:81f84f323c2760399e2ba1c3a43e64712a210fcab3602bccf39de688c064bed2",
+        "member": "trivy-image-admin-ui.json",
+        "member_sha256": "f238929e5ace33d170f37cebd0faaf8418b96fb89b0ebc517d5f2f629be51d26"
+      },
+      "package": "libudev1",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-16742"
+      ],
+      "purl": "pkg:deb/debian/libudev1@252.39-1~deb12u2?arch=amd64&distro=debian-12.15",
+      "reason": "The advisory affects the homed manager authentication path; the exact binary packages contain only client libraries and documentation, and the complete OS package/file inventory contains no homed service, helper, homectl or corresponding systemd service package.",
+      "severity": "HIGH",
+      "source_package": "systemd",
+      "subject_digest": "sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de",
+      "vulnerability_id": "CVE-2026-16742"
+    },
+    {
+      "component": "image-admin-ui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-05",
+      "installed_version": "5.36.0-7+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-admin.zip",
+        "archive_sha256": "sha256:81f84f323c2760399e2ba1c3a43e64712a210fcab3602bccf39de688c064bed2",
+        "member": "trivy-image-admin-ui.json",
+        "member_sha256": "f238929e5ace33d170f37cebd0faaf8418b96fb89b0ebc517d5f2f629be51d26"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-42496"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.36.0-7%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "The affected Archive::Tar module is not shipped by this perl-base binary package. The complete OS package inventory contains no other Perl source package or separately packaged affected module, and all recorded installed file lists have zero affected-module matches.",
+      "severity": "CRITICAL",
+      "source_package": "perl",
+      "subject_digest": "sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de",
+      "vulnerability_id": "CVE-2026-42496"
+    },
+    {
+      "component": "image-admin-ui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-06",
+      "installed_version": "5.36.0-7+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-admin.zip",
+        "archive_sha256": "sha256:81f84f323c2760399e2ba1c3a43e64712a210fcab3602bccf39de688c064bed2",
+        "member": "trivy-image-admin-ui.json",
+        "member_sha256": "f238929e5ace33d170f37cebd0faaf8418b96fb89b0ebc517d5f2f629be51d26"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-42497"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.36.0-7%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "The affected Archive::Tar module is not shipped by this perl-base binary package. The complete OS package inventory contains no other Perl source package or separately packaged affected module, and all recorded installed file lists have zero affected-module matches.",
+      "severity": "HIGH",
+      "source_package": "perl",
+      "subject_digest": "sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de",
+      "vulnerability_id": "CVE-2026-42497"
+    },
+    {
+      "component": "image-admin-ui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-07",
+      "installed_version": "5.36.0-7+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-admin.zip",
+        "archive_sha256": "sha256:81f84f323c2760399e2ba1c3a43e64712a210fcab3602bccf39de688c064bed2",
+        "member": "trivy-image-admin-ui.json",
+        "member_sha256": "f238929e5ace33d170f37cebd0faaf8418b96fb89b0ebc517d5f2f629be51d26"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-48962"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.36.0-7%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "The affected IO::Compress / File::GlobMapper module is not shipped by this perl-base binary package. The complete OS package inventory contains no other Perl source package or separately packaged affected module, and all recorded installed file lists have zero affected-module matches.",
+      "severity": "HIGH",
+      "source_package": "perl",
+      "subject_digest": "sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de",
+      "vulnerability_id": "CVE-2026-48962"
+    },
+    {
+      "component": "image-admin-ui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-08",
+      "installed_version": "5.36.0-7+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-admin.zip",
+        "archive_sha256": "sha256:81f84f323c2760399e2ba1c3a43e64712a210fcab3602bccf39de688c064bed2",
+        "member": "trivy-image-admin-ui.json",
+        "member_sha256": "f238929e5ace33d170f37cebd0faaf8418b96fb89b0ebc517d5f2f629be51d26"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-57433"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.36.0-7%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "The affected Storable module is not shipped by this perl-base binary package. The complete OS package inventory contains no other Perl source package or separately packaged affected module, and all recorded installed file lists have zero affected-module matches.",
+      "severity": "HIGH",
+      "source_package": "perl",
+      "subject_digest": "sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de",
+      "vulnerability_id": "CVE-2026-57433"
+    },
+    {
+      "component": "image-admin-ui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-09",
+      "installed_version": "1:2.38.1-5+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-admin.zip",
+        "archive_sha256": "sha256:81f84f323c2760399e2ba1c3a43e64712a210fcab3602bccf39de688c064bed2",
+        "member": "trivy-image-admin-ui.json",
+        "member_sha256": "f238929e5ace33d170f37cebd0faaf8418b96fb89b0ebc517d5f2f629be51d26"
+      },
+      "package": "bsdutils",
+      "primary_sources": [
+        "https://github.com/util-linux/util-linux/security/advisories/GHSA-55fx-f4gg-cfhj"
+      ],
+      "purl": "pkg:deb/debian/bsdutils@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15&epoch=1",
+      "reason": "Affected code is absent in this exact frontend util-linux source-package version (2.38.1-5+deb12u3). Upstream identifies nsenter --join-cgroup as introduced in util-linux 2.40 and explicitly states Debian 12 util-linux 2.38 predates it. The retained frontend executable is non-SUID and static strings show only the separate --cgroup namespace option, with neither --join-cgroup nor cgroup.procs. This disposition applies only to this component/package/version/CVE tuple; it does not cover backend util-linux 2.41.5.",
+      "severity": "HIGH",
+      "source_package": "util-linux",
+      "subject_digest": "sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de",
+      "vulnerability_id": "CVE-2026-78408"
+    },
+    {
+      "component": "image-admin-ui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-10",
+      "installed_version": "2.38.1-5+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-admin.zip",
+        "archive_sha256": "sha256:81f84f323c2760399e2ba1c3a43e64712a210fcab3602bccf39de688c064bed2",
+        "member": "trivy-image-admin-ui.json",
+        "member_sha256": "f238929e5ace33d170f37cebd0faaf8418b96fb89b0ebc517d5f2f629be51d26"
+      },
+      "package": "libblkid1",
+      "primary_sources": [
+        "https://github.com/util-linux/util-linux/security/advisories/GHSA-55fx-f4gg-cfhj"
+      ],
+      "purl": "pkg:deb/debian/libblkid1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "Affected code is absent in this exact frontend util-linux source-package version (2.38.1-5+deb12u3). Upstream identifies nsenter --join-cgroup as introduced in util-linux 2.40 and explicitly states Debian 12 util-linux 2.38 predates it. The retained frontend executable is non-SUID and static strings show only the separate --cgroup namespace option, with neither --join-cgroup nor cgroup.procs. This disposition applies only to this component/package/version/CVE tuple; it does not cover backend util-linux 2.41.5.",
+      "severity": "HIGH",
+      "source_package": "util-linux",
+      "subject_digest": "sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de",
+      "vulnerability_id": "CVE-2026-78408"
+    },
+    {
+      "component": "image-admin-ui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-11",
+      "installed_version": "2.38.1-5+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-admin.zip",
+        "archive_sha256": "sha256:81f84f323c2760399e2ba1c3a43e64712a210fcab3602bccf39de688c064bed2",
+        "member": "trivy-image-admin-ui.json",
+        "member_sha256": "f238929e5ace33d170f37cebd0faaf8418b96fb89b0ebc517d5f2f629be51d26"
+      },
+      "package": "libmount1",
+      "primary_sources": [
+        "https://github.com/util-linux/util-linux/security/advisories/GHSA-55fx-f4gg-cfhj"
+      ],
+      "purl": "pkg:deb/debian/libmount1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "Affected code is absent in this exact frontend util-linux source-package version (2.38.1-5+deb12u3). Upstream identifies nsenter --join-cgroup as introduced in util-linux 2.40 and explicitly states Debian 12 util-linux 2.38 predates it. The retained frontend executable is non-SUID and static strings show only the separate --cgroup namespace option, with neither --join-cgroup nor cgroup.procs. This disposition applies only to this component/package/version/CVE tuple; it does not cover backend util-linux 2.41.5.",
+      "severity": "HIGH",
+      "source_package": "util-linux",
+      "subject_digest": "sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de",
+      "vulnerability_id": "CVE-2026-78408"
+    },
+    {
+      "component": "image-admin-ui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-12",
+      "installed_version": "2.38.1-5+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-admin.zip",
+        "archive_sha256": "sha256:81f84f323c2760399e2ba1c3a43e64712a210fcab3602bccf39de688c064bed2",
+        "member": "trivy-image-admin-ui.json",
+        "member_sha256": "f238929e5ace33d170f37cebd0faaf8418b96fb89b0ebc517d5f2f629be51d26"
+      },
+      "package": "libsmartcols1",
+      "primary_sources": [
+        "https://github.com/util-linux/util-linux/security/advisories/GHSA-55fx-f4gg-cfhj"
+      ],
+      "purl": "pkg:deb/debian/libsmartcols1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "Affected code is absent in this exact frontend util-linux source-package version (2.38.1-5+deb12u3). Upstream identifies nsenter --join-cgroup as introduced in util-linux 2.40 and explicitly states Debian 12 util-linux 2.38 predates it. The retained frontend executable is non-SUID and static strings show only the separate --cgroup namespace option, with neither --join-cgroup nor cgroup.procs. This disposition applies only to this component/package/version/CVE tuple; it does not cover backend util-linux 2.41.5.",
+      "severity": "HIGH",
+      "source_package": "util-linux",
+      "subject_digest": "sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de",
+      "vulnerability_id": "CVE-2026-78408"
+    },
+    {
+      "component": "image-admin-ui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-13",
+      "installed_version": "2.38.1-5+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-admin.zip",
+        "archive_sha256": "sha256:81f84f323c2760399e2ba1c3a43e64712a210fcab3602bccf39de688c064bed2",
+        "member": "trivy-image-admin-ui.json",
+        "member_sha256": "f238929e5ace33d170f37cebd0faaf8418b96fb89b0ebc517d5f2f629be51d26"
+      },
+      "package": "libuuid1",
+      "primary_sources": [
+        "https://github.com/util-linux/util-linux/security/advisories/GHSA-55fx-f4gg-cfhj"
+      ],
+      "purl": "pkg:deb/debian/libuuid1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "Affected code is absent in this exact frontend util-linux source-package version (2.38.1-5+deb12u3). Upstream identifies nsenter --join-cgroup as introduced in util-linux 2.40 and explicitly states Debian 12 util-linux 2.38 predates it. The retained frontend executable is non-SUID and static strings show only the separate --cgroup namespace option, with neither --join-cgroup nor cgroup.procs. This disposition applies only to this component/package/version/CVE tuple; it does not cover backend util-linux 2.41.5.",
+      "severity": "HIGH",
+      "source_package": "util-linux",
+      "subject_digest": "sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de",
+      "vulnerability_id": "CVE-2026-78408"
+    },
+    {
+      "component": "image-admin-ui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-14",
+      "installed_version": "2.38.1-5+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-admin.zip",
+        "archive_sha256": "sha256:81f84f323c2760399e2ba1c3a43e64712a210fcab3602bccf39de688c064bed2",
+        "member": "trivy-image-admin-ui.json",
+        "member_sha256": "f238929e5ace33d170f37cebd0faaf8418b96fb89b0ebc517d5f2f629be51d26"
+      },
+      "package": "mount",
+      "primary_sources": [
+        "https://github.com/util-linux/util-linux/security/advisories/GHSA-55fx-f4gg-cfhj"
+      ],
+      "purl": "pkg:deb/debian/mount@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "Affected code is absent in this exact frontend util-linux source-package version (2.38.1-5+deb12u3). Upstream identifies nsenter --join-cgroup as introduced in util-linux 2.40 and explicitly states Debian 12 util-linux 2.38 predates it. The retained frontend executable is non-SUID and static strings show only the separate --cgroup namespace option, with neither --join-cgroup nor cgroup.procs. This disposition applies only to this component/package/version/CVE tuple; it does not cover backend util-linux 2.41.5.",
+      "severity": "HIGH",
+      "source_package": "util-linux",
+      "subject_digest": "sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de",
+      "vulnerability_id": "CVE-2026-78408"
+    },
+    {
+      "component": "image-admin-ui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-admin.zip",
+        "archive_sha256": "sha256:81f84f323c2760399e2ba1c3a43e64712a210fcab3602bccf39de688c064bed2",
+        "member": "trivy-image-admin-ui.json",
+        "member_sha256": "f238929e5ace33d170f37cebd0faaf8418b96fb89b0ebc517d5f2f629be51d26"
+      },
+      "package": "util-linux-extra",
+      "primary_sources": [
+        "https://github.com/util-linux/util-linux/security/advisories/GHSA-55fx-f4gg-cfhj"
+      ],
+      "purl": "pkg:deb/debian/util-linux-extra@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "Affected code is absent in this exact frontend util-linux source-package version (2.38.1-5+deb12u3). Upstream identifies nsenter --join-cgroup as introduced in util-linux 2.40 and explicitly states Debian 12 util-linux 2.38 predates it. The retained frontend executable is non-SUID and static strings show only the separate --cgroup namespace option, with neither --join-cgroup nor cgroup.procs. This disposition applies only to this component/package/version/CVE tuple; it does not cover backend util-linux 2.41.5.",
+      "severity": "HIGH",
+      "source_package": "util-linux",
+      "subject_digest": "sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de",
+      "vulnerability_id": "CVE-2026-78408"
+    },
+    {
+      "component": "image-admin-ui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-16",
+      "installed_version": "2.38.1-5+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-admin.zip",
+        "archive_sha256": "sha256:81f84f323c2760399e2ba1c3a43e64712a210fcab3602bccf39de688c064bed2",
+        "member": "trivy-image-admin-ui.json",
+        "member_sha256": "f238929e5ace33d170f37cebd0faaf8418b96fb89b0ebc517d5f2f629be51d26"
+      },
+      "package": "util-linux",
+      "primary_sources": [
+        "https://github.com/util-linux/util-linux/security/advisories/GHSA-55fx-f4gg-cfhj"
+      ],
+      "purl": "pkg:deb/debian/util-linux@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "Affected code is absent in this exact frontend util-linux source-package version (2.38.1-5+deb12u3). Upstream identifies nsenter --join-cgroup as introduced in util-linux 2.40 and explicitly states Debian 12 util-linux 2.38 predates it. The retained frontend executable is non-SUID and static strings show only the separate --cgroup namespace option, with neither --join-cgroup nor cgroup.procs. This disposition applies only to this component/package/version/CVE tuple; it does not cover backend util-linux 2.41.5.",
+      "severity": "HIGH",
+      "source_package": "util-linux",
+      "subject_digest": "sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de",
+      "vulnerability_id": "CVE-2026-78408"
+    },
+    {
+      "component": "image-admin-ui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-17",
+      "installed_version": "5.36.0-7+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-admin.zip",
+        "archive_sha256": "sha256:81f84f323c2760399e2ba1c3a43e64712a210fcab3602bccf39de688c064bed2",
+        "member": "trivy-image-admin-ui.json",
+        "member_sha256": "f238929e5ace33d170f37cebd0faaf8418b96fb89b0ebc517d5f2f629be51d26"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-8376"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.36.0-7%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "The exact package-providing OCI layer has ELF64 x86-64 Perl and its matching Config_heavy.pl declares ivsize=8, ptrsize=8 and sizesize=8; the advisory requires a 32-bit Perl build.",
+      "severity": "CRITICAL",
+      "source_package": "perl",
+      "subject_digest": "sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de",
+      "vulnerability_id": "CVE-2026-8376"
+    },
+    {
+      "component": "image-admin-ui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-18",
+      "installed_version": "5.36.0-7+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-admin.zip",
+        "archive_sha256": "sha256:81f84f323c2760399e2ba1c3a43e64712a210fcab3602bccf39de688c064bed2",
+        "member": "trivy-image-admin-ui.json",
+        "member_sha256": "f238929e5ace33d170f37cebd0faaf8418b96fb89b0ebc517d5f2f629be51d26"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-9538"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.36.0-7%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "The affected Archive::Tar module is not shipped by this perl-base binary package. The complete OS package inventory contains no other Perl source package or separately packaged affected module, and all recorded installed file lists have zero affected-module matches.",
+      "severity": "HIGH",
+      "source_package": "perl",
+      "subject_digest": "sha256:15ee76b92e1d9dc2d1b9de9943ed0c380e319a807f7000d4c580273cfc0e61de",
+      "vulnerability_id": "CVE-2026-9538"
+    },
+    {
+      "component": "image-app",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-19",
+      "installed_version": "6.5+20250216-2",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-app.zip",
+        "archive_sha256": "sha256:7acf62766a675e54b8f721419a4d80371c31ca15056e57aabf2e3a0b5ce23ef8",
+        "member": "trivy-image-app.json",
+        "member_sha256": "f88d77cf89a0f1b8a9a7e91b2eb58970b64e8094f593cf01e0252bfa825802da"
+      },
+      "package": "libncursesw6",
+      "primary_sources": [
+        "https://raw.githubusercontent.com/ThomasDickey/ncurses-snapshots/master/progs/infocmp.c",
+        "https://github.com/ThomasDickey/ncurses-snapshots/blob/master/progs/Makefile.in",
+        "https://packages.debian.org/trixie/amd64/ncurses-bin/filelist",
+        "https://security-tracker.debian.org/tracker/CVE-2025-69720"
+      ],
+      "purl": "pkg:deb/debian/libncursesw6@6.5%2B20250216-2?arch=amd64&distro=debian-13.6",
+      "reason": "The described affected function, analyze_string, is a static function in progs/infocmp.c, compiled into the infocmp executable by progs/Makefile.in; it is not part of the libncursesw6 library/data package. Retained InstalledFiles for this exact package contain no infocmp executable or executable program paths. The same image ships infocmp in ncurses-bin, whose CVE-2025-69720 finding is deliberately retained. This is a package-specific code-location exclusion, not an image-wide finding of non-applicability.",
+      "severity": "HIGH",
+      "source_package": "ncurses",
+      "subject_digest": "sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f",
+      "vulnerability_id": "CVE-2025-69720"
+    },
+    {
+      "component": "image-app",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-20",
+      "installed_version": "6.5+20250216-2",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-app.zip",
+        "archive_sha256": "sha256:7acf62766a675e54b8f721419a4d80371c31ca15056e57aabf2e3a0b5ce23ef8",
+        "member": "trivy-image-app.json",
+        "member_sha256": "f88d77cf89a0f1b8a9a7e91b2eb58970b64e8094f593cf01e0252bfa825802da"
+      },
+      "package": "libtinfo6",
+      "primary_sources": [
+        "https://raw.githubusercontent.com/ThomasDickey/ncurses-snapshots/master/progs/infocmp.c",
+        "https://github.com/ThomasDickey/ncurses-snapshots/blob/master/progs/Makefile.in",
+        "https://packages.debian.org/trixie/amd64/ncurses-bin/filelist",
+        "https://security-tracker.debian.org/tracker/CVE-2025-69720"
+      ],
+      "purl": "pkg:deb/debian/libtinfo6@6.5%2B20250216-2?arch=amd64&distro=debian-13.6",
+      "reason": "The described affected function, analyze_string, is a static function in progs/infocmp.c, compiled into the infocmp executable by progs/Makefile.in; it is not part of the libtinfo6 library/data package. Retained InstalledFiles for this exact package contain no infocmp executable or executable program paths. The same image ships infocmp in ncurses-bin, whose CVE-2025-69720 finding is deliberately retained. This is a package-specific code-location exclusion, not an image-wide finding of non-applicability.",
+      "severity": "HIGH",
+      "source_package": "ncurses",
+      "subject_digest": "sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f",
+      "vulnerability_id": "CVE-2025-69720"
+    },
+    {
+      "component": "image-app",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-21",
+      "installed_version": "6.5+20250216-2",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-app.zip",
+        "archive_sha256": "sha256:7acf62766a675e54b8f721419a4d80371c31ca15056e57aabf2e3a0b5ce23ef8",
+        "member": "trivy-image-app.json",
+        "member_sha256": "f88d77cf89a0f1b8a9a7e91b2eb58970b64e8094f593cf01e0252bfa825802da"
+      },
+      "package": "ncurses-base",
+      "primary_sources": [
+        "https://raw.githubusercontent.com/ThomasDickey/ncurses-snapshots/master/progs/infocmp.c",
+        "https://github.com/ThomasDickey/ncurses-snapshots/blob/master/progs/Makefile.in",
+        "https://packages.debian.org/trixie/amd64/ncurses-bin/filelist",
+        "https://security-tracker.debian.org/tracker/CVE-2025-69720"
+      ],
+      "purl": "pkg:deb/debian/ncurses-base@6.5%2B20250216-2?arch=all&distro=debian-13.6",
+      "reason": "The described affected function, analyze_string, is a static function in progs/infocmp.c, compiled into the infocmp executable by progs/Makefile.in; it is not part of the ncurses-base library/data package. Retained InstalledFiles for this exact package contain no infocmp executable or executable program paths. The same image ships infocmp in ncurses-bin, whose CVE-2025-69720 finding is deliberately retained. This is a package-specific code-location exclusion, not an image-wide finding of non-applicability.",
+      "severity": "HIGH",
+      "source_package": "ncurses",
+      "subject_digest": "sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f",
+      "vulnerability_id": "CVE-2025-69720"
+    },
+    {
+      "component": "image-app",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-22",
+      "installed_version": "1.7.18-3.1+deb13u1",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-app.zip",
+        "archive_sha256": "sha256:7acf62766a675e54b8f721419a4d80371c31ca15056e57aabf2e3a0b5ce23ef8",
+        "member": "trivy-image-app.json",
+        "member_sha256": "f88d77cf89a0f1b8a9a7e91b2eb58970b64e8094f593cf01e0252bfa825802da"
+      },
+      "package": "libcjson1",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-16554"
+      ],
+      "purl": "pkg:deb/debian/libcjson1@1.7.18-3.1%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+      "reason": "The advisory requires 32-bit size_t overflow. This is the official Debian amd64 package with native x86_64 library path, whose ABI has 64-bit size_t; it is not an affected 32-bit build.",
+      "severity": "HIGH",
+      "source_package": "cjson",
+      "subject_digest": "sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f",
+      "vulnerability_id": "CVE-2026-16554"
+    },
+    {
+      "component": "image-app",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-23",
+      "installed_version": "257.13-1~deb13u1",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-app.zip",
+        "archive_sha256": "sha256:7acf62766a675e54b8f721419a4d80371c31ca15056e57aabf2e3a0b5ce23ef8",
+        "member": "trivy-image-app.json",
+        "member_sha256": "f88d77cf89a0f1b8a9a7e91b2eb58970b64e8094f593cf01e0252bfa825802da"
+      },
+      "package": "libsystemd0",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-16742"
+      ],
+      "purl": "pkg:deb/debian/libsystemd0@257.13-1~deb13u1?arch=amd64&distro=debian-13.6",
+      "reason": "The advisory affects the homed manager authentication path; the exact binary packages contain only client libraries and documentation, and the complete OS package/file inventory contains no homed service, helper, homectl or corresponding systemd service package.",
+      "severity": "HIGH",
+      "source_package": "systemd",
+      "subject_digest": "sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f",
+      "vulnerability_id": "CVE-2026-16742"
+    },
+    {
+      "component": "image-app",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-24",
+      "installed_version": "257.13-1~deb13u1",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-app.zip",
+        "archive_sha256": "sha256:7acf62766a675e54b8f721419a4d80371c31ca15056e57aabf2e3a0b5ce23ef8",
+        "member": "trivy-image-app.json",
+        "member_sha256": "f88d77cf89a0f1b8a9a7e91b2eb58970b64e8094f593cf01e0252bfa825802da"
+      },
+      "package": "libudev1",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-16742"
+      ],
+      "purl": "pkg:deb/debian/libudev1@257.13-1~deb13u1?arch=amd64&distro=debian-13.6",
+      "reason": "The advisory affects the homed manager authentication path; the exact binary packages contain only client libraries and documentation, and the complete OS package/file inventory contains no homed service, helper, homectl or corresponding systemd service package.",
+      "severity": "HIGH",
+      "source_package": "systemd",
+      "subject_digest": "sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f",
+      "vulnerability_id": "CVE-2026-16742"
+    },
+    {
+      "component": "image-app",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-25",
+      "installed_version": "3.6.5-0.1~deb13u1",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-app.zip",
+        "archive_sha256": "sha256:7acf62766a675e54b8f721419a4d80371c31ca15056e57aabf2e3a0b5ce23ef8",
+        "member": "trivy-image-app.json",
+        "member_sha256": "f88d77cf89a0f1b8a9a7e91b2eb58970b64e8094f593cf01e0252bfa825802da"
+      },
+      "package": "libmbedcrypto16",
+      "primary_sources": [
+        "https://mbed-tls.readthedocs.io/en/latest/security-advisories/mbedtls-security-advisory-2026-03-client-impersonation-while-resuming-tls13-session/"
+      ],
+      "purl": "pkg:deb/debian/libmbedcrypto16@3.6.5-0.1~deb13u1?arch=amd64&distro=debian-13.6",
+      "reason": "Affected libmbedtls.so program/library is absent; matched source package is not the affected binary.",
+      "severity": "CRITICAL",
+      "source_package": "mbedtls",
+      "subject_digest": "sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f",
+      "vulnerability_id": "CVE-2026-34873"
+    },
+    {
+      "component": "image-app",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-26",
+      "installed_version": "5.40.1-6",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-app.zip",
+        "archive_sha256": "sha256:7acf62766a675e54b8f721419a4d80371c31ca15056e57aabf2e3a0b5ce23ef8",
+        "member": "trivy-image-app.json",
+        "member_sha256": "f88d77cf89a0f1b8a9a7e91b2eb58970b64e8094f593cf01e0252bfa825802da"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-42496"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+      "reason": "The affected Archive::Tar module is not shipped by this perl-base binary package. The complete OS package inventory contains no other Perl source package or separately packaged affected module, and all recorded installed file lists have zero affected-module matches.",
+      "severity": "CRITICAL",
+      "source_package": "perl",
+      "subject_digest": "sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f",
+      "vulnerability_id": "CVE-2026-42496"
+    },
+    {
+      "component": "image-app",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-27",
+      "installed_version": "5.40.1-6",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-app.zip",
+        "archive_sha256": "sha256:7acf62766a675e54b8f721419a4d80371c31ca15056e57aabf2e3a0b5ce23ef8",
+        "member": "trivy-image-app.json",
+        "member_sha256": "f88d77cf89a0f1b8a9a7e91b2eb58970b64e8094f593cf01e0252bfa825802da"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-42497"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+      "reason": "The affected Archive::Tar module is not shipped by this perl-base binary package. The complete OS package inventory contains no other Perl source package or separately packaged affected module, and all recorded installed file lists have zero affected-module matches.",
+      "severity": "HIGH",
+      "source_package": "perl",
+      "subject_digest": "sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f",
+      "vulnerability_id": "CVE-2026-42497"
+    },
+    {
+      "component": "image-app",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-28",
+      "installed_version": "5.40.1-6",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-app.zip",
+        "archive_sha256": "sha256:7acf62766a675e54b8f721419a4d80371c31ca15056e57aabf2e3a0b5ce23ef8",
+        "member": "trivy-image-app.json",
+        "member_sha256": "f88d77cf89a0f1b8a9a7e91b2eb58970b64e8094f593cf01e0252bfa825802da"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-48962"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+      "reason": "The affected IO::Compress / File::GlobMapper module is not shipped by this perl-base binary package. The complete OS package inventory contains no other Perl source package or separately packaged affected module, and all recorded installed file lists have zero affected-module matches.",
+      "severity": "HIGH",
+      "source_package": "perl",
+      "subject_digest": "sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f",
+      "vulnerability_id": "CVE-2026-48962"
+    },
+    {
+      "component": "image-app",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-29",
+      "installed_version": "4.7.0-3+deb13u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-app.zip",
+        "archive_sha256": "sha256:7acf62766a675e54b8f721419a4d80371c31ca15056e57aabf2e3a0b5ce23ef8",
+        "member": "trivy-image-app.json",
+        "member_sha256": "f88d77cf89a0f1b8a9a7e91b2eb58970b64e8094f593cf01e0252bfa825802da"
+      },
+      "package": "libtiff6",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-52490"
+      ],
+      "purl": "pkg:deb/debian/libtiff6@4.7.0-3%2Bdeb13u3?arch=amd64&distro=debian-13.6",
+      "reason": "The affected process_command_opts function belongs to tools/tiffcrop.c. This exact libtiff6 binary package contains the shared library and documentation, not tiffcrop; no tiffcrop occurs in the complete installed OS file inventory.",
+      "severity": "HIGH",
+      "source_package": "tiff",
+      "subject_digest": "sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f",
+      "vulnerability_id": "CVE-2026-52490"
+    },
+    {
+      "component": "image-app",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-30",
+      "installed_version": "5.40.1-6",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-app.zip",
+        "archive_sha256": "sha256:7acf62766a675e54b8f721419a4d80371c31ca15056e57aabf2e3a0b5ce23ef8",
+        "member": "trivy-image-app.json",
+        "member_sha256": "f88d77cf89a0f1b8a9a7e91b2eb58970b64e8094f593cf01e0252bfa825802da"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-57433"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+      "reason": "The affected Storable module is not shipped by this perl-base binary package. The complete OS package inventory contains no other Perl source package or separately packaged affected module, and all recorded installed file lists have zero affected-module matches.",
+      "severity": "HIGH",
+      "source_package": "perl",
+      "subject_digest": "sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f",
+      "vulnerability_id": "CVE-2026-57433"
+    },
+    {
+      "component": "image-app",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-31",
+      "installed_version": "5.40.1-6",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-app.zip",
+        "archive_sha256": "sha256:7acf62766a675e54b8f721419a4d80371c31ca15056e57aabf2e3a0b5ce23ef8",
+        "member": "trivy-image-app.json",
+        "member_sha256": "f88d77cf89a0f1b8a9a7e91b2eb58970b64e8094f593cf01e0252bfa825802da"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-9538"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+      "reason": "The affected Archive::Tar module is not shipped by this perl-base binary package. The complete OS package inventory contains no other Perl source package or separately packaged affected module, and all recorded installed file lists have zero affected-module matches.",
+      "severity": "HIGH",
+      "source_package": "perl",
+      "subject_digest": "sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f",
+      "vulnerability_id": "CVE-2026-9538"
+    },
+    {
+      "component": "image-audio-worker",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-32",
+      "installed_version": "6.5+20250216-2",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-audio-worker.zip",
+        "archive_sha256": "sha256:7611c8f6b54a928a5e72af991aeaec602c8044bbf94ae2a638ac8e6a27fe5fea",
+        "member": "trivy-image-audio-worker.json",
+        "member_sha256": "4c01e656130515310e5396aec02a2de5fc974c495591d4b90a033496920c81f6"
+      },
+      "package": "libncursesw6",
+      "primary_sources": [
+        "https://raw.githubusercontent.com/ThomasDickey/ncurses-snapshots/master/progs/infocmp.c",
+        "https://github.com/ThomasDickey/ncurses-snapshots/blob/master/progs/Makefile.in",
+        "https://packages.debian.org/trixie/amd64/ncurses-bin/filelist",
+        "https://security-tracker.debian.org/tracker/CVE-2025-69720"
+      ],
+      "purl": "pkg:deb/debian/libncursesw6@6.5%2B20250216-2?arch=amd64&distro=debian-13.6",
+      "reason": "The described affected function, analyze_string, is a static function in progs/infocmp.c, compiled into the infocmp executable by progs/Makefile.in; it is not part of the libncursesw6 library/data package. Retained InstalledFiles for this exact package contain no infocmp executable or executable program paths. The same image ships infocmp in ncurses-bin, whose CVE-2025-69720 finding is deliberately retained. This is a package-specific code-location exclusion, not an image-wide finding of non-applicability.",
+      "severity": "HIGH",
+      "source_package": "ncurses",
+      "subject_digest": "sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034",
+      "vulnerability_id": "CVE-2025-69720"
+    },
+    {
+      "component": "image-audio-worker",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-33",
+      "installed_version": "6.5+20250216-2",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-audio-worker.zip",
+        "archive_sha256": "sha256:7611c8f6b54a928a5e72af991aeaec602c8044bbf94ae2a638ac8e6a27fe5fea",
+        "member": "trivy-image-audio-worker.json",
+        "member_sha256": "4c01e656130515310e5396aec02a2de5fc974c495591d4b90a033496920c81f6"
+      },
+      "package": "libtinfo6",
+      "primary_sources": [
+        "https://raw.githubusercontent.com/ThomasDickey/ncurses-snapshots/master/progs/infocmp.c",
+        "https://github.com/ThomasDickey/ncurses-snapshots/blob/master/progs/Makefile.in",
+        "https://packages.debian.org/trixie/amd64/ncurses-bin/filelist",
+        "https://security-tracker.debian.org/tracker/CVE-2025-69720"
+      ],
+      "purl": "pkg:deb/debian/libtinfo6@6.5%2B20250216-2?arch=amd64&distro=debian-13.6",
+      "reason": "The described affected function, analyze_string, is a static function in progs/infocmp.c, compiled into the infocmp executable by progs/Makefile.in; it is not part of the libtinfo6 library/data package. Retained InstalledFiles for this exact package contain no infocmp executable or executable program paths. The same image ships infocmp in ncurses-bin, whose CVE-2025-69720 finding is deliberately retained. This is a package-specific code-location exclusion, not an image-wide finding of non-applicability.",
+      "severity": "HIGH",
+      "source_package": "ncurses",
+      "subject_digest": "sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034",
+      "vulnerability_id": "CVE-2025-69720"
+    },
+    {
+      "component": "image-audio-worker",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-34",
+      "installed_version": "6.5+20250216-2",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-audio-worker.zip",
+        "archive_sha256": "sha256:7611c8f6b54a928a5e72af991aeaec602c8044bbf94ae2a638ac8e6a27fe5fea",
+        "member": "trivy-image-audio-worker.json",
+        "member_sha256": "4c01e656130515310e5396aec02a2de5fc974c495591d4b90a033496920c81f6"
+      },
+      "package": "ncurses-base",
+      "primary_sources": [
+        "https://raw.githubusercontent.com/ThomasDickey/ncurses-snapshots/master/progs/infocmp.c",
+        "https://github.com/ThomasDickey/ncurses-snapshots/blob/master/progs/Makefile.in",
+        "https://packages.debian.org/trixie/amd64/ncurses-bin/filelist",
+        "https://security-tracker.debian.org/tracker/CVE-2025-69720"
+      ],
+      "purl": "pkg:deb/debian/ncurses-base@6.5%2B20250216-2?arch=all&distro=debian-13.6",
+      "reason": "The described affected function, analyze_string, is a static function in progs/infocmp.c, compiled into the infocmp executable by progs/Makefile.in; it is not part of the ncurses-base library/data package. Retained InstalledFiles for this exact package contain no infocmp executable or executable program paths. The same image ships infocmp in ncurses-bin, whose CVE-2025-69720 finding is deliberately retained. This is a package-specific code-location exclusion, not an image-wide finding of non-applicability.",
+      "severity": "HIGH",
+      "source_package": "ncurses",
+      "subject_digest": "sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034",
+      "vulnerability_id": "CVE-2025-69720"
+    },
+    {
+      "component": "image-audio-worker",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-35",
+      "installed_version": "1.7.18-3.1+deb13u1",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-audio-worker.zip",
+        "archive_sha256": "sha256:7611c8f6b54a928a5e72af991aeaec602c8044bbf94ae2a638ac8e6a27fe5fea",
+        "member": "trivy-image-audio-worker.json",
+        "member_sha256": "4c01e656130515310e5396aec02a2de5fc974c495591d4b90a033496920c81f6"
+      },
+      "package": "libcjson1",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-16554"
+      ],
+      "purl": "pkg:deb/debian/libcjson1@1.7.18-3.1%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+      "reason": "The advisory requires 32-bit size_t overflow. This is the official Debian amd64 package with native x86_64 library path, whose ABI has 64-bit size_t; it is not an affected 32-bit build.",
+      "severity": "HIGH",
+      "source_package": "cjson",
+      "subject_digest": "sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034",
+      "vulnerability_id": "CVE-2026-16554"
+    },
+    {
+      "component": "image-audio-worker",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-36",
+      "installed_version": "257.13-1~deb13u1",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-audio-worker.zip",
+        "archive_sha256": "sha256:7611c8f6b54a928a5e72af991aeaec602c8044bbf94ae2a638ac8e6a27fe5fea",
+        "member": "trivy-image-audio-worker.json",
+        "member_sha256": "4c01e656130515310e5396aec02a2de5fc974c495591d4b90a033496920c81f6"
+      },
+      "package": "libsystemd0",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-16742"
+      ],
+      "purl": "pkg:deb/debian/libsystemd0@257.13-1~deb13u1?arch=amd64&distro=debian-13.6",
+      "reason": "The advisory affects the homed manager authentication path; the exact binary packages contain only client libraries and documentation, and the complete OS package/file inventory contains no homed service, helper, homectl or corresponding systemd service package.",
+      "severity": "HIGH",
+      "source_package": "systemd",
+      "subject_digest": "sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034",
+      "vulnerability_id": "CVE-2026-16742"
+    },
+    {
+      "component": "image-audio-worker",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-37",
+      "installed_version": "257.13-1~deb13u1",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-audio-worker.zip",
+        "archive_sha256": "sha256:7611c8f6b54a928a5e72af991aeaec602c8044bbf94ae2a638ac8e6a27fe5fea",
+        "member": "trivy-image-audio-worker.json",
+        "member_sha256": "4c01e656130515310e5396aec02a2de5fc974c495591d4b90a033496920c81f6"
+      },
+      "package": "libudev1",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-16742"
+      ],
+      "purl": "pkg:deb/debian/libudev1@257.13-1~deb13u1?arch=amd64&distro=debian-13.6",
+      "reason": "The advisory affects the homed manager authentication path; the exact binary packages contain only client libraries and documentation, and the complete OS package/file inventory contains no homed service, helper, homectl or corresponding systemd service package.",
+      "severity": "HIGH",
+      "source_package": "systemd",
+      "subject_digest": "sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034",
+      "vulnerability_id": "CVE-2026-16742"
+    },
+    {
+      "component": "image-audio-worker",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-38",
+      "installed_version": "3.6.5-0.1~deb13u1",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-audio-worker.zip",
+        "archive_sha256": "sha256:7611c8f6b54a928a5e72af991aeaec602c8044bbf94ae2a638ac8e6a27fe5fea",
+        "member": "trivy-image-audio-worker.json",
+        "member_sha256": "4c01e656130515310e5396aec02a2de5fc974c495591d4b90a033496920c81f6"
+      },
+      "package": "libmbedcrypto16",
+      "primary_sources": [
+        "https://mbed-tls.readthedocs.io/en/latest/security-advisories/mbedtls-security-advisory-2026-03-client-impersonation-while-resuming-tls13-session/"
+      ],
+      "purl": "pkg:deb/debian/libmbedcrypto16@3.6.5-0.1~deb13u1?arch=amd64&distro=debian-13.6",
+      "reason": "Affected libmbedtls.so program/library is absent; matched source package is not the affected binary.",
+      "severity": "CRITICAL",
+      "source_package": "mbedtls",
+      "subject_digest": "sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034",
+      "vulnerability_id": "CVE-2026-34873"
+    },
+    {
+      "component": "image-audio-worker",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-39",
+      "installed_version": "5.40.1-6",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-audio-worker.zip",
+        "archive_sha256": "sha256:7611c8f6b54a928a5e72af991aeaec602c8044bbf94ae2a638ac8e6a27fe5fea",
+        "member": "trivy-image-audio-worker.json",
+        "member_sha256": "4c01e656130515310e5396aec02a2de5fc974c495591d4b90a033496920c81f6"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-42496"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+      "reason": "The affected Archive::Tar module is not shipped by this perl-base binary package. The complete OS package inventory contains no other Perl source package or separately packaged affected module, and all recorded installed file lists have zero affected-module matches.",
+      "severity": "CRITICAL",
+      "source_package": "perl",
+      "subject_digest": "sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034",
+      "vulnerability_id": "CVE-2026-42496"
+    },
+    {
+      "component": "image-audio-worker",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-40",
+      "installed_version": "5.40.1-6",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-audio-worker.zip",
+        "archive_sha256": "sha256:7611c8f6b54a928a5e72af991aeaec602c8044bbf94ae2a638ac8e6a27fe5fea",
+        "member": "trivy-image-audio-worker.json",
+        "member_sha256": "4c01e656130515310e5396aec02a2de5fc974c495591d4b90a033496920c81f6"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-42497"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+      "reason": "The affected Archive::Tar module is not shipped by this perl-base binary package. The complete OS package inventory contains no other Perl source package or separately packaged affected module, and all recorded installed file lists have zero affected-module matches.",
+      "severity": "HIGH",
+      "source_package": "perl",
+      "subject_digest": "sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034",
+      "vulnerability_id": "CVE-2026-42497"
+    },
+    {
+      "component": "image-audio-worker",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-41",
+      "installed_version": "5.40.1-6",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-audio-worker.zip",
+        "archive_sha256": "sha256:7611c8f6b54a928a5e72af991aeaec602c8044bbf94ae2a638ac8e6a27fe5fea",
+        "member": "trivy-image-audio-worker.json",
+        "member_sha256": "4c01e656130515310e5396aec02a2de5fc974c495591d4b90a033496920c81f6"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-48962"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+      "reason": "The affected IO::Compress / File::GlobMapper module is not shipped by this perl-base binary package. The complete OS package inventory contains no other Perl source package or separately packaged affected module, and all recorded installed file lists have zero affected-module matches.",
+      "severity": "HIGH",
+      "source_package": "perl",
+      "subject_digest": "sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034",
+      "vulnerability_id": "CVE-2026-48962"
+    },
+    {
+      "component": "image-audio-worker",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-42",
+      "installed_version": "4.7.0-3+deb13u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-audio-worker.zip",
+        "archive_sha256": "sha256:7611c8f6b54a928a5e72af991aeaec602c8044bbf94ae2a638ac8e6a27fe5fea",
+        "member": "trivy-image-audio-worker.json",
+        "member_sha256": "4c01e656130515310e5396aec02a2de5fc974c495591d4b90a033496920c81f6"
+      },
+      "package": "libtiff6",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-52490"
+      ],
+      "purl": "pkg:deb/debian/libtiff6@4.7.0-3%2Bdeb13u3?arch=amd64&distro=debian-13.6",
+      "reason": "The affected process_command_opts function belongs to tools/tiffcrop.c. This exact libtiff6 binary package contains the shared library and documentation, not tiffcrop; no tiffcrop occurs in the complete installed OS file inventory.",
+      "severity": "HIGH",
+      "source_package": "tiff",
+      "subject_digest": "sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034",
+      "vulnerability_id": "CVE-2026-52490"
+    },
+    {
+      "component": "image-audio-worker",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-43",
+      "installed_version": "5.40.1-6",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-audio-worker.zip",
+        "archive_sha256": "sha256:7611c8f6b54a928a5e72af991aeaec602c8044bbf94ae2a638ac8e6a27fe5fea",
+        "member": "trivy-image-audio-worker.json",
+        "member_sha256": "4c01e656130515310e5396aec02a2de5fc974c495591d4b90a033496920c81f6"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-57433"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+      "reason": "The affected Storable module is not shipped by this perl-base binary package. The complete OS package inventory contains no other Perl source package or separately packaged affected module, and all recorded installed file lists have zero affected-module matches.",
+      "severity": "HIGH",
+      "source_package": "perl",
+      "subject_digest": "sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034",
+      "vulnerability_id": "CVE-2026-57433"
+    },
+    {
+      "component": "image-audio-worker",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-44",
+      "installed_version": "5.40.1-6",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-audio-worker.zip",
+        "archive_sha256": "sha256:7611c8f6b54a928a5e72af991aeaec602c8044bbf94ae2a638ac8e6a27fe5fea",
+        "member": "trivy-image-audio-worker.json",
+        "member_sha256": "4c01e656130515310e5396aec02a2de5fc974c495591d4b90a033496920c81f6"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-9538"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+      "reason": "The affected Archive::Tar module is not shipped by this perl-base binary package. The complete OS package inventory contains no other Perl source package or separately packaged affected module, and all recorded installed file lists have zero affected-module matches.",
+      "severity": "HIGH",
+      "source_package": "perl",
+      "subject_digest": "sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034",
+      "vulnerability_id": "CVE-2026-9538"
+    },
+    {
+      "component": "image-webui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-45",
+      "installed_version": "6.4-4",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-webui.zip",
+        "archive_sha256": "sha256:ff2488f2b32aad8027a33a90984446b19985e91f4a2390e749f09203951e261a",
+        "member": "trivy-image-webui.json",
+        "member_sha256": "f1e0e15a4966175f8fd08c682f75c02143bf2fd17748a8ff36e5c2b8cf668869"
+      },
+      "package": "libtinfo6",
+      "primary_sources": [
+        "https://raw.githubusercontent.com/ThomasDickey/ncurses-snapshots/master/progs/infocmp.c",
+        "https://github.com/ThomasDickey/ncurses-snapshots/blob/master/progs/Makefile.in",
+        "https://packages.debian.org/trixie/amd64/ncurses-bin/filelist",
+        "https://security-tracker.debian.org/tracker/CVE-2025-69720"
+      ],
+      "purl": "pkg:deb/debian/libtinfo6@6.4-4?arch=amd64&distro=debian-12.15",
+      "reason": "The described affected function, analyze_string, is a static function in progs/infocmp.c, compiled into the infocmp executable by progs/Makefile.in; it is not part of the libtinfo6 library/data package. Retained InstalledFiles for this exact package contain no infocmp executable or executable program paths. The same image ships infocmp in ncurses-bin, whose CVE-2025-69720 finding is deliberately retained. This is a package-specific code-location exclusion, not an image-wide finding of non-applicability.",
+      "severity": "HIGH",
+      "source_package": "ncurses",
+      "subject_digest": "sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1",
+      "vulnerability_id": "CVE-2025-69720"
+    },
+    {
+      "component": "image-webui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-46",
+      "installed_version": "6.4-4",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-webui.zip",
+        "archive_sha256": "sha256:ff2488f2b32aad8027a33a90984446b19985e91f4a2390e749f09203951e261a",
+        "member": "trivy-image-webui.json",
+        "member_sha256": "f1e0e15a4966175f8fd08c682f75c02143bf2fd17748a8ff36e5c2b8cf668869"
+      },
+      "package": "ncurses-base",
+      "primary_sources": [
+        "https://raw.githubusercontent.com/ThomasDickey/ncurses-snapshots/master/progs/infocmp.c",
+        "https://github.com/ThomasDickey/ncurses-snapshots/blob/master/progs/Makefile.in",
+        "https://packages.debian.org/trixie/amd64/ncurses-bin/filelist",
+        "https://security-tracker.debian.org/tracker/CVE-2025-69720"
+      ],
+      "purl": "pkg:deb/debian/ncurses-base@6.4-4?arch=all&distro=debian-12.15",
+      "reason": "The described affected function, analyze_string, is a static function in progs/infocmp.c, compiled into the infocmp executable by progs/Makefile.in; it is not part of the ncurses-base library/data package. Retained InstalledFiles for this exact package contain no infocmp executable or executable program paths. The same image ships infocmp in ncurses-bin, whose CVE-2025-69720 finding is deliberately retained. This is a package-specific code-location exclusion, not an image-wide finding of non-applicability.",
+      "severity": "HIGH",
+      "source_package": "ncurses",
+      "subject_digest": "sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1",
+      "vulnerability_id": "CVE-2025-69720"
+    },
+    {
+      "component": "image-webui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-47",
+      "installed_version": "252.39-1~deb12u2",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-webui.zip",
+        "archive_sha256": "sha256:ff2488f2b32aad8027a33a90984446b19985e91f4a2390e749f09203951e261a",
+        "member": "trivy-image-webui.json",
+        "member_sha256": "f1e0e15a4966175f8fd08c682f75c02143bf2fd17748a8ff36e5c2b8cf668869"
+      },
+      "package": "libsystemd0",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-16742"
+      ],
+      "purl": "pkg:deb/debian/libsystemd0@252.39-1~deb12u2?arch=amd64&distro=debian-12.15",
+      "reason": "The advisory affects the homed manager authentication path; the exact binary packages contain only client libraries and documentation, and the complete OS package/file inventory contains no homed service, helper, homectl or corresponding systemd service package.",
+      "severity": "HIGH",
+      "source_package": "systemd",
+      "subject_digest": "sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1",
+      "vulnerability_id": "CVE-2026-16742"
+    },
+    {
+      "component": "image-webui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-48",
+      "installed_version": "252.39-1~deb12u2",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-webui.zip",
+        "archive_sha256": "sha256:ff2488f2b32aad8027a33a90984446b19985e91f4a2390e749f09203951e261a",
+        "member": "trivy-image-webui.json",
+        "member_sha256": "f1e0e15a4966175f8fd08c682f75c02143bf2fd17748a8ff36e5c2b8cf668869"
+      },
+      "package": "libudev1",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-16742"
+      ],
+      "purl": "pkg:deb/debian/libudev1@252.39-1~deb12u2?arch=amd64&distro=debian-12.15",
+      "reason": "The advisory affects the homed manager authentication path; the exact binary packages contain only client libraries and documentation, and the complete OS package/file inventory contains no homed service, helper, homectl or corresponding systemd service package.",
+      "severity": "HIGH",
+      "source_package": "systemd",
+      "subject_digest": "sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1",
+      "vulnerability_id": "CVE-2026-16742"
+    },
+    {
+      "component": "image-webui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-49",
+      "installed_version": "5.36.0-7+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-webui.zip",
+        "archive_sha256": "sha256:ff2488f2b32aad8027a33a90984446b19985e91f4a2390e749f09203951e261a",
+        "member": "trivy-image-webui.json",
+        "member_sha256": "f1e0e15a4966175f8fd08c682f75c02143bf2fd17748a8ff36e5c2b8cf668869"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-42496"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.36.0-7%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "The affected Archive::Tar module is not shipped by this perl-base binary package. The complete OS package inventory contains no other Perl source package or separately packaged affected module, and all recorded installed file lists have zero affected-module matches.",
+      "severity": "CRITICAL",
+      "source_package": "perl",
+      "subject_digest": "sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1",
+      "vulnerability_id": "CVE-2026-42496"
+    },
+    {
+      "component": "image-webui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-50",
+      "installed_version": "5.36.0-7+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-webui.zip",
+        "archive_sha256": "sha256:ff2488f2b32aad8027a33a90984446b19985e91f4a2390e749f09203951e261a",
+        "member": "trivy-image-webui.json",
+        "member_sha256": "f1e0e15a4966175f8fd08c682f75c02143bf2fd17748a8ff36e5c2b8cf668869"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-42497"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.36.0-7%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "The affected Archive::Tar module is not shipped by this perl-base binary package. The complete OS package inventory contains no other Perl source package or separately packaged affected module, and all recorded installed file lists have zero affected-module matches.",
+      "severity": "HIGH",
+      "source_package": "perl",
+      "subject_digest": "sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1",
+      "vulnerability_id": "CVE-2026-42497"
+    },
+    {
+      "component": "image-webui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-51",
+      "installed_version": "5.36.0-7+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-webui.zip",
+        "archive_sha256": "sha256:ff2488f2b32aad8027a33a90984446b19985e91f4a2390e749f09203951e261a",
+        "member": "trivy-image-webui.json",
+        "member_sha256": "f1e0e15a4966175f8fd08c682f75c02143bf2fd17748a8ff36e5c2b8cf668869"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-48962"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.36.0-7%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "The affected IO::Compress / File::GlobMapper module is not shipped by this perl-base binary package. The complete OS package inventory contains no other Perl source package or separately packaged affected module, and all recorded installed file lists have zero affected-module matches.",
+      "severity": "HIGH",
+      "source_package": "perl",
+      "subject_digest": "sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1",
+      "vulnerability_id": "CVE-2026-48962"
+    },
+    {
+      "component": "image-webui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-52",
+      "installed_version": "5.36.0-7+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-webui.zip",
+        "archive_sha256": "sha256:ff2488f2b32aad8027a33a90984446b19985e91f4a2390e749f09203951e261a",
+        "member": "trivy-image-webui.json",
+        "member_sha256": "f1e0e15a4966175f8fd08c682f75c02143bf2fd17748a8ff36e5c2b8cf668869"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-57433"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.36.0-7%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "The affected Storable module is not shipped by this perl-base binary package. The complete OS package inventory contains no other Perl source package or separately packaged affected module, and all recorded installed file lists have zero affected-module matches.",
+      "severity": "HIGH",
+      "source_package": "perl",
+      "subject_digest": "sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1",
+      "vulnerability_id": "CVE-2026-57433"
+    },
+    {
+      "component": "image-webui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-53",
+      "installed_version": "1:2.38.1-5+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-webui.zip",
+        "archive_sha256": "sha256:ff2488f2b32aad8027a33a90984446b19985e91f4a2390e749f09203951e261a",
+        "member": "trivy-image-webui.json",
+        "member_sha256": "f1e0e15a4966175f8fd08c682f75c02143bf2fd17748a8ff36e5c2b8cf668869"
+      },
+      "package": "bsdutils",
+      "primary_sources": [
+        "https://github.com/util-linux/util-linux/security/advisories/GHSA-55fx-f4gg-cfhj"
+      ],
+      "purl": "pkg:deb/debian/bsdutils@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15&epoch=1",
+      "reason": "Affected code is absent in this exact frontend util-linux source-package version (2.38.1-5+deb12u3). Upstream identifies nsenter --join-cgroup as introduced in util-linux 2.40 and explicitly states Debian 12 util-linux 2.38 predates it. The retained frontend executable is non-SUID and static strings show only the separate --cgroup namespace option, with neither --join-cgroup nor cgroup.procs. This disposition applies only to this component/package/version/CVE tuple; it does not cover backend util-linux 2.41.5.",
+      "severity": "HIGH",
+      "source_package": "util-linux",
+      "subject_digest": "sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1",
+      "vulnerability_id": "CVE-2026-78408"
+    },
+    {
+      "component": "image-webui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-54",
+      "installed_version": "2.38.1-5+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-webui.zip",
+        "archive_sha256": "sha256:ff2488f2b32aad8027a33a90984446b19985e91f4a2390e749f09203951e261a",
+        "member": "trivy-image-webui.json",
+        "member_sha256": "f1e0e15a4966175f8fd08c682f75c02143bf2fd17748a8ff36e5c2b8cf668869"
+      },
+      "package": "libblkid1",
+      "primary_sources": [
+        "https://github.com/util-linux/util-linux/security/advisories/GHSA-55fx-f4gg-cfhj"
+      ],
+      "purl": "pkg:deb/debian/libblkid1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "Affected code is absent in this exact frontend util-linux source-package version (2.38.1-5+deb12u3). Upstream identifies nsenter --join-cgroup as introduced in util-linux 2.40 and explicitly states Debian 12 util-linux 2.38 predates it. The retained frontend executable is non-SUID and static strings show only the separate --cgroup namespace option, with neither --join-cgroup nor cgroup.procs. This disposition applies only to this component/package/version/CVE tuple; it does not cover backend util-linux 2.41.5.",
+      "severity": "HIGH",
+      "source_package": "util-linux",
+      "subject_digest": "sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1",
+      "vulnerability_id": "CVE-2026-78408"
+    },
+    {
+      "component": "image-webui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-55",
+      "installed_version": "2.38.1-5+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-webui.zip",
+        "archive_sha256": "sha256:ff2488f2b32aad8027a33a90984446b19985e91f4a2390e749f09203951e261a",
+        "member": "trivy-image-webui.json",
+        "member_sha256": "f1e0e15a4966175f8fd08c682f75c02143bf2fd17748a8ff36e5c2b8cf668869"
+      },
+      "package": "libmount1",
+      "primary_sources": [
+        "https://github.com/util-linux/util-linux/security/advisories/GHSA-55fx-f4gg-cfhj"
+      ],
+      "purl": "pkg:deb/debian/libmount1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "Affected code is absent in this exact frontend util-linux source-package version (2.38.1-5+deb12u3). Upstream identifies nsenter --join-cgroup as introduced in util-linux 2.40 and explicitly states Debian 12 util-linux 2.38 predates it. The retained frontend executable is non-SUID and static strings show only the separate --cgroup namespace option, with neither --join-cgroup nor cgroup.procs. This disposition applies only to this component/package/version/CVE tuple; it does not cover backend util-linux 2.41.5.",
+      "severity": "HIGH",
+      "source_package": "util-linux",
+      "subject_digest": "sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1",
+      "vulnerability_id": "CVE-2026-78408"
+    },
+    {
+      "component": "image-webui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-56",
+      "installed_version": "2.38.1-5+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-webui.zip",
+        "archive_sha256": "sha256:ff2488f2b32aad8027a33a90984446b19985e91f4a2390e749f09203951e261a",
+        "member": "trivy-image-webui.json",
+        "member_sha256": "f1e0e15a4966175f8fd08c682f75c02143bf2fd17748a8ff36e5c2b8cf668869"
+      },
+      "package": "libsmartcols1",
+      "primary_sources": [
+        "https://github.com/util-linux/util-linux/security/advisories/GHSA-55fx-f4gg-cfhj"
+      ],
+      "purl": "pkg:deb/debian/libsmartcols1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "Affected code is absent in this exact frontend util-linux source-package version (2.38.1-5+deb12u3). Upstream identifies nsenter --join-cgroup as introduced in util-linux 2.40 and explicitly states Debian 12 util-linux 2.38 predates it. The retained frontend executable is non-SUID and static strings show only the separate --cgroup namespace option, with neither --join-cgroup nor cgroup.procs. This disposition applies only to this component/package/version/CVE tuple; it does not cover backend util-linux 2.41.5.",
+      "severity": "HIGH",
+      "source_package": "util-linux",
+      "subject_digest": "sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1",
+      "vulnerability_id": "CVE-2026-78408"
+    },
+    {
+      "component": "image-webui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-57",
+      "installed_version": "2.38.1-5+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-webui.zip",
+        "archive_sha256": "sha256:ff2488f2b32aad8027a33a90984446b19985e91f4a2390e749f09203951e261a",
+        "member": "trivy-image-webui.json",
+        "member_sha256": "f1e0e15a4966175f8fd08c682f75c02143bf2fd17748a8ff36e5c2b8cf668869"
+      },
+      "package": "libuuid1",
+      "primary_sources": [
+        "https://github.com/util-linux/util-linux/security/advisories/GHSA-55fx-f4gg-cfhj"
+      ],
+      "purl": "pkg:deb/debian/libuuid1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "Affected code is absent in this exact frontend util-linux source-package version (2.38.1-5+deb12u3). Upstream identifies nsenter --join-cgroup as introduced in util-linux 2.40 and explicitly states Debian 12 util-linux 2.38 predates it. The retained frontend executable is non-SUID and static strings show only the separate --cgroup namespace option, with neither --join-cgroup nor cgroup.procs. This disposition applies only to this component/package/version/CVE tuple; it does not cover backend util-linux 2.41.5.",
+      "severity": "HIGH",
+      "source_package": "util-linux",
+      "subject_digest": "sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1",
+      "vulnerability_id": "CVE-2026-78408"
+    },
+    {
+      "component": "image-webui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-58",
+      "installed_version": "2.38.1-5+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-webui.zip",
+        "archive_sha256": "sha256:ff2488f2b32aad8027a33a90984446b19985e91f4a2390e749f09203951e261a",
+        "member": "trivy-image-webui.json",
+        "member_sha256": "f1e0e15a4966175f8fd08c682f75c02143bf2fd17748a8ff36e5c2b8cf668869"
+      },
+      "package": "mount",
+      "primary_sources": [
+        "https://github.com/util-linux/util-linux/security/advisories/GHSA-55fx-f4gg-cfhj"
+      ],
+      "purl": "pkg:deb/debian/mount@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "Affected code is absent in this exact frontend util-linux source-package version (2.38.1-5+deb12u3). Upstream identifies nsenter --join-cgroup as introduced in util-linux 2.40 and explicitly states Debian 12 util-linux 2.38 predates it. The retained frontend executable is non-SUID and static strings show only the separate --cgroup namespace option, with neither --join-cgroup nor cgroup.procs. This disposition applies only to this component/package/version/CVE tuple; it does not cover backend util-linux 2.41.5.",
+      "severity": "HIGH",
+      "source_package": "util-linux",
+      "subject_digest": "sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1",
+      "vulnerability_id": "CVE-2026-78408"
+    },
+    {
+      "component": "image-webui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-59",
+      "installed_version": "2.38.1-5+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-webui.zip",
+        "archive_sha256": "sha256:ff2488f2b32aad8027a33a90984446b19985e91f4a2390e749f09203951e261a",
+        "member": "trivy-image-webui.json",
+        "member_sha256": "f1e0e15a4966175f8fd08c682f75c02143bf2fd17748a8ff36e5c2b8cf668869"
+      },
+      "package": "util-linux-extra",
+      "primary_sources": [
+        "https://github.com/util-linux/util-linux/security/advisories/GHSA-55fx-f4gg-cfhj"
+      ],
+      "purl": "pkg:deb/debian/util-linux-extra@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "Affected code is absent in this exact frontend util-linux source-package version (2.38.1-5+deb12u3). Upstream identifies nsenter --join-cgroup as introduced in util-linux 2.40 and explicitly states Debian 12 util-linux 2.38 predates it. The retained frontend executable is non-SUID and static strings show only the separate --cgroup namespace option, with neither --join-cgroup nor cgroup.procs. This disposition applies only to this component/package/version/CVE tuple; it does not cover backend util-linux 2.41.5.",
+      "severity": "HIGH",
+      "source_package": "util-linux",
+      "subject_digest": "sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1",
+      "vulnerability_id": "CVE-2026-78408"
+    },
+    {
+      "component": "image-webui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-60",
+      "installed_version": "2.38.1-5+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-webui.zip",
+        "archive_sha256": "sha256:ff2488f2b32aad8027a33a90984446b19985e91f4a2390e749f09203951e261a",
+        "member": "trivy-image-webui.json",
+        "member_sha256": "f1e0e15a4966175f8fd08c682f75c02143bf2fd17748a8ff36e5c2b8cf668869"
+      },
+      "package": "util-linux",
+      "primary_sources": [
+        "https://github.com/util-linux/util-linux/security/advisories/GHSA-55fx-f4gg-cfhj"
+      ],
+      "purl": "pkg:deb/debian/util-linux@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "Affected code is absent in this exact frontend util-linux source-package version (2.38.1-5+deb12u3). Upstream identifies nsenter --join-cgroup as introduced in util-linux 2.40 and explicitly states Debian 12 util-linux 2.38 predates it. The retained frontend executable is non-SUID and static strings show only the separate --cgroup namespace option, with neither --join-cgroup nor cgroup.procs. This disposition applies only to this component/package/version/CVE tuple; it does not cover backend util-linux 2.41.5.",
+      "severity": "HIGH",
+      "source_package": "util-linux",
+      "subject_digest": "sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1",
+      "vulnerability_id": "CVE-2026-78408"
+    },
+    {
+      "component": "image-webui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-61",
+      "installed_version": "5.36.0-7+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-webui.zip",
+        "archive_sha256": "sha256:ff2488f2b32aad8027a33a90984446b19985e91f4a2390e749f09203951e261a",
+        "member": "trivy-image-webui.json",
+        "member_sha256": "f1e0e15a4966175f8fd08c682f75c02143bf2fd17748a8ff36e5c2b8cf668869"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-8376"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.36.0-7%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "The exact package-providing OCI layer has ELF64 x86-64 Perl and its matching Config_heavy.pl declares ivsize=8, ptrsize=8 and sizesize=8; the advisory requires a 32-bit Perl build.",
+      "severity": "CRITICAL",
+      "source_package": "perl",
+      "subject_digest": "sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1",
+      "vulnerability_id": "CVE-2026-8376"
+    },
+    {
+      "component": "image-webui",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-62",
+      "installed_version": "5.36.0-7+deb12u3",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-webui.zip",
+        "archive_sha256": "sha256:ff2488f2b32aad8027a33a90984446b19985e91f4a2390e749f09203951e261a",
+        "member": "trivy-image-webui.json",
+        "member_sha256": "f1e0e15a4966175f8fd08c682f75c02143bf2fd17748a8ff36e5c2b8cf668869"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-9538"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.36.0-7%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "reason": "The affected Archive::Tar module is not shipped by this perl-base binary package. The complete OS package inventory contains no other Perl source package or separately packaged affected module, and all recorded installed file lists have zero affected-module matches.",
+      "severity": "HIGH",
+      "source_package": "perl",
+      "subject_digest": "sha256:da6f9fbbbbd2a355b6bbdc6c3cdd60dd514c3c47df35ac890d52980557695fb1",
+      "vulnerability_id": "CVE-2026-9538"
+    },
+    {
+      "component": "image-worker",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-63",
+      "installed_version": "6.5+20250216-2",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-worker.zip",
+        "archive_sha256": "sha256:f1833864ecde4526276884702b0eb74c81126f76fd1873ea2c169afafd92a4ea",
+        "member": "trivy-image-worker.json",
+        "member_sha256": "8899e5580af6b7fefc061d972a1f63f10e93d57235edaedaf9e5f572c8cc3bf3"
+      },
+      "package": "libncursesw6",
+      "primary_sources": [
+        "https://raw.githubusercontent.com/ThomasDickey/ncurses-snapshots/master/progs/infocmp.c",
+        "https://github.com/ThomasDickey/ncurses-snapshots/blob/master/progs/Makefile.in",
+        "https://packages.debian.org/trixie/amd64/ncurses-bin/filelist",
+        "https://security-tracker.debian.org/tracker/CVE-2025-69720"
+      ],
+      "purl": "pkg:deb/debian/libncursesw6@6.5%2B20250216-2?arch=amd64&distro=debian-13.6",
+      "reason": "The described affected function, analyze_string, is a static function in progs/infocmp.c, compiled into the infocmp executable by progs/Makefile.in; it is not part of the libncursesw6 library/data package. Retained InstalledFiles for this exact package contain no infocmp executable or executable program paths. The same image ships infocmp in ncurses-bin, whose CVE-2025-69720 finding is deliberately retained. This is a package-specific code-location exclusion, not an image-wide finding of non-applicability.",
+      "severity": "HIGH",
+      "source_package": "ncurses",
+      "subject_digest": "sha256:240d731cb10be3b21dec0f35b1bc6687dbe1fd3062a30f830fe2c14111cc8e25",
+      "vulnerability_id": "CVE-2025-69720"
+    },
+    {
+      "component": "image-worker",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-64",
+      "installed_version": "6.5+20250216-2",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-worker.zip",
+        "archive_sha256": "sha256:f1833864ecde4526276884702b0eb74c81126f76fd1873ea2c169afafd92a4ea",
+        "member": "trivy-image-worker.json",
+        "member_sha256": "8899e5580af6b7fefc061d972a1f63f10e93d57235edaedaf9e5f572c8cc3bf3"
+      },
+      "package": "libtinfo6",
+      "primary_sources": [
+        "https://raw.githubusercontent.com/ThomasDickey/ncurses-snapshots/master/progs/infocmp.c",
+        "https://github.com/ThomasDickey/ncurses-snapshots/blob/master/progs/Makefile.in",
+        "https://packages.debian.org/trixie/amd64/ncurses-bin/filelist",
+        "https://security-tracker.debian.org/tracker/CVE-2025-69720"
+      ],
+      "purl": "pkg:deb/debian/libtinfo6@6.5%2B20250216-2?arch=amd64&distro=debian-13.6",
+      "reason": "The described affected function, analyze_string, is a static function in progs/infocmp.c, compiled into the infocmp executable by progs/Makefile.in; it is not part of the libtinfo6 library/data package. Retained InstalledFiles for this exact package contain no infocmp executable or executable program paths. The same image ships infocmp in ncurses-bin, whose CVE-2025-69720 finding is deliberately retained. This is a package-specific code-location exclusion, not an image-wide finding of non-applicability.",
+      "severity": "HIGH",
+      "source_package": "ncurses",
+      "subject_digest": "sha256:240d731cb10be3b21dec0f35b1bc6687dbe1fd3062a30f830fe2c14111cc8e25",
+      "vulnerability_id": "CVE-2025-69720"
+    },
+    {
+      "component": "image-worker",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-65",
+      "installed_version": "6.5+20250216-2",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-worker.zip",
+        "archive_sha256": "sha256:f1833864ecde4526276884702b0eb74c81126f76fd1873ea2c169afafd92a4ea",
+        "member": "trivy-image-worker.json",
+        "member_sha256": "8899e5580af6b7fefc061d972a1f63f10e93d57235edaedaf9e5f572c8cc3bf3"
+      },
+      "package": "ncurses-base",
+      "primary_sources": [
+        "https://raw.githubusercontent.com/ThomasDickey/ncurses-snapshots/master/progs/infocmp.c",
+        "https://github.com/ThomasDickey/ncurses-snapshots/blob/master/progs/Makefile.in",
+        "https://packages.debian.org/trixie/amd64/ncurses-bin/filelist",
+        "https://security-tracker.debian.org/tracker/CVE-2025-69720"
+      ],
+      "purl": "pkg:deb/debian/ncurses-base@6.5%2B20250216-2?arch=all&distro=debian-13.6",
+      "reason": "The described affected function, analyze_string, is a static function in progs/infocmp.c, compiled into the infocmp executable by progs/Makefile.in; it is not part of the ncurses-base library/data package. Retained InstalledFiles for this exact package contain no infocmp executable or executable program paths. The same image ships infocmp in ncurses-bin, whose CVE-2025-69720 finding is deliberately retained. This is a package-specific code-location exclusion, not an image-wide finding of non-applicability.",
+      "severity": "HIGH",
+      "source_package": "ncurses",
+      "subject_digest": "sha256:240d731cb10be3b21dec0f35b1bc6687dbe1fd3062a30f830fe2c14111cc8e25",
+      "vulnerability_id": "CVE-2025-69720"
+    },
+    {
+      "component": "image-worker",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-66",
+      "installed_version": "257.13-1~deb13u1",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-worker.zip",
+        "archive_sha256": "sha256:f1833864ecde4526276884702b0eb74c81126f76fd1873ea2c169afafd92a4ea",
+        "member": "trivy-image-worker.json",
+        "member_sha256": "8899e5580af6b7fefc061d972a1f63f10e93d57235edaedaf9e5f572c8cc3bf3"
+      },
+      "package": "libsystemd0",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-16742"
+      ],
+      "purl": "pkg:deb/debian/libsystemd0@257.13-1~deb13u1?arch=amd64&distro=debian-13.6",
+      "reason": "The advisory affects the homed manager authentication path; the exact binary packages contain only client libraries and documentation, and the complete OS package/file inventory contains no homed service, helper, homectl or corresponding systemd service package.",
+      "severity": "HIGH",
+      "source_package": "systemd",
+      "subject_digest": "sha256:240d731cb10be3b21dec0f35b1bc6687dbe1fd3062a30f830fe2c14111cc8e25",
+      "vulnerability_id": "CVE-2026-16742"
+    },
+    {
+      "component": "image-worker",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-67",
+      "installed_version": "257.13-1~deb13u1",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-worker.zip",
+        "archive_sha256": "sha256:f1833864ecde4526276884702b0eb74c81126f76fd1873ea2c169afafd92a4ea",
+        "member": "trivy-image-worker.json",
+        "member_sha256": "8899e5580af6b7fefc061d972a1f63f10e93d57235edaedaf9e5f572c8cc3bf3"
+      },
+      "package": "libudev1",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-16742"
+      ],
+      "purl": "pkg:deb/debian/libudev1@257.13-1~deb13u1?arch=amd64&distro=debian-13.6",
+      "reason": "The advisory affects the homed manager authentication path; the exact binary packages contain only client libraries and documentation, and the complete OS package/file inventory contains no homed service, helper, homectl or corresponding systemd service package.",
+      "severity": "HIGH",
+      "source_package": "systemd",
+      "subject_digest": "sha256:240d731cb10be3b21dec0f35b1bc6687dbe1fd3062a30f830fe2c14111cc8e25",
+      "vulnerability_id": "CVE-2026-16742"
+    },
+    {
+      "component": "image-worker",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-68",
+      "installed_version": "5.40.1-6",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-worker.zip",
+        "archive_sha256": "sha256:f1833864ecde4526276884702b0eb74c81126f76fd1873ea2c169afafd92a4ea",
+        "member": "trivy-image-worker.json",
+        "member_sha256": "8899e5580af6b7fefc061d972a1f63f10e93d57235edaedaf9e5f572c8cc3bf3"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-42496"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+      "reason": "The affected Archive::Tar module is not shipped by this perl-base binary package. The complete OS package inventory contains no other Perl source package or separately packaged affected module, and all recorded installed file lists have zero affected-module matches.",
+      "severity": "CRITICAL",
+      "source_package": "perl",
+      "subject_digest": "sha256:240d731cb10be3b21dec0f35b1bc6687dbe1fd3062a30f830fe2c14111cc8e25",
+      "vulnerability_id": "CVE-2026-42496"
+    },
+    {
+      "component": "image-worker",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-69",
+      "installed_version": "5.40.1-6",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-worker.zip",
+        "archive_sha256": "sha256:f1833864ecde4526276884702b0eb74c81126f76fd1873ea2c169afafd92a4ea",
+        "member": "trivy-image-worker.json",
+        "member_sha256": "8899e5580af6b7fefc061d972a1f63f10e93d57235edaedaf9e5f572c8cc3bf3"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-42497"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+      "reason": "The affected Archive::Tar module is not shipped by this perl-base binary package. The complete OS package inventory contains no other Perl source package or separately packaged affected module, and all recorded installed file lists have zero affected-module matches.",
+      "severity": "HIGH",
+      "source_package": "perl",
+      "subject_digest": "sha256:240d731cb10be3b21dec0f35b1bc6687dbe1fd3062a30f830fe2c14111cc8e25",
+      "vulnerability_id": "CVE-2026-42497"
+    },
+    {
+      "component": "image-worker",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-70",
+      "installed_version": "5.40.1-6",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-worker.zip",
+        "archive_sha256": "sha256:f1833864ecde4526276884702b0eb74c81126f76fd1873ea2c169afafd92a4ea",
+        "member": "trivy-image-worker.json",
+        "member_sha256": "8899e5580af6b7fefc061d972a1f63f10e93d57235edaedaf9e5f572c8cc3bf3"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-48962"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+      "reason": "The affected IO::Compress / File::GlobMapper module is not shipped by this perl-base binary package. The complete OS package inventory contains no other Perl source package or separately packaged affected module, and all recorded installed file lists have zero affected-module matches.",
+      "severity": "HIGH",
+      "source_package": "perl",
+      "subject_digest": "sha256:240d731cb10be3b21dec0f35b1bc6687dbe1fd3062a30f830fe2c14111cc8e25",
+      "vulnerability_id": "CVE-2026-48962"
+    },
+    {
+      "component": "image-worker",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-71",
+      "installed_version": "5.40.1-6",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-worker.zip",
+        "archive_sha256": "sha256:f1833864ecde4526276884702b0eb74c81126f76fd1873ea2c169afafd92a4ea",
+        "member": "trivy-image-worker.json",
+        "member_sha256": "8899e5580af6b7fefc061d972a1f63f10e93d57235edaedaf9e5f572c8cc3bf3"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-57433"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+      "reason": "The affected Storable module is not shipped by this perl-base binary package. The complete OS package inventory contains no other Perl source package or separately packaged affected module, and all recorded installed file lists have zero affected-module matches.",
+      "severity": "HIGH",
+      "source_package": "perl",
+      "subject_digest": "sha256:240d731cb10be3b21dec0f35b1bc6687dbe1fd3062a30f830fe2c14111cc8e25",
+      "vulnerability_id": "CVE-2026-57433"
+    },
+    {
+      "component": "image-worker",
+      "disposition": "not_applicable",
+      "id": "TASK-13013.7.29-OS-72",
+      "installed_version": "5.40.1-6",
+      "inventory_evidence": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-worker.zip",
+        "archive_sha256": "sha256:f1833864ecde4526276884702b0eb74c81126f76fd1873ea2c169afafd92a4ea",
+        "member": "trivy-image-worker.json",
+        "member_sha256": "8899e5580af6b7fefc061d972a1f63f10e93d57235edaedaf9e5f572c8cc3bf3"
+      },
+      "package": "perl-base",
+      "primary_sources": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-9538"
+      ],
+      "purl": "pkg:deb/debian/perl-base@5.40.1-6?arch=amd64&distro=debian-13.6",
+      "reason": "The affected Archive::Tar module is not shipped by this perl-base binary package. The complete OS package inventory contains no other Perl source package or separately packaged affected module, and all recorded installed file lists have zero affected-module matches.",
+      "severity": "HIGH",
+      "source_package": "perl",
+      "subject_digest": "sha256:240d731cb10be3b21dec0f35b1bc6687dbe1fd3062a30f830fe2c14111cc8e25",
+      "vulnerability_id": "CVE-2026-9538"
+    }
+  ],
+  "task": "TASK-13013.7.29",
+  "verification": {
+    "bandit": {
+      "errors": 0,
+      "finding_type": "B101 LOW: intentional pytest assertions",
+      "findings": 8,
+      "log_sha256": "f92f5106d46fa15965a7e8dc46d46dfc33d7f8c7d78e34363b1c14a7602e78a4",
+      "other_findings": 0,
+      "scope": "new regression test only; no production Python changed"
+    },
+    "black": "passed",
+    "final_tests": {
+      "log": "/private/tmp/task-13013-7-applicability.8kX3cp/tests-final.log",
+      "log_sha256": "987c650bd8772267ce5b729af62b15dd54b5f65fbef68fb1954e073b633b6c8c",
+      "passed": 237,
+      "scope": [
+        "test_os_package_dispositions.py",
+        "test_exception_policy.py",
+        "test_chroma_dispositions.py",
+        "test_dependency_review.py",
+        "test_license_first_workflow_contracts.py"
+      ]
+    },
+    "protected_input_hashes": {
+      ".github/supply-chain/vulnerability-exceptions.schema.json": "0f36741f71d326f86d675eaf97984a69fd03cc66b8d8380f6234ceeae30a1eed",
+      ".github/workflows/publish-docker.yml": "1fcbf84525a62221fb04b15031f0df33fb76d686c2e6ed3c9188bdc2029676ba",
+      ".github/workflows/publish-ghcr-main.yml": "76725210fbf47e15d3527eacf2584d0ae000eef9965407d69d925052d1f00ac1",
+      ".github/workflows/sbom.yml": "5dad2bd88b20ee009412c9aed8ec25558bf52dc5f9ce0b7aa78d043cadd87634",
+      "Docs/Evidence/TASK-13013.7.23-applicability-dispositions.json": "d0fcaff69d7f248628ddb1d199ef016b3d45797ac1062d4ecd9ca6544d0ac039",
+      "Helper_Scripts/Supply_Chain/exception_policy.py": "9bf192fa6c8c4e48c22a816d82229de0177f9b3ae54711fe0596f1d43eb6ed96",
+      "Helper_Scripts/Supply_Chain/runtime_probe.py": "decdde660b68345f1d51a3350724bfc337bf30c6cfd36860c2c549058c4c624b",
+      "pyproject.toml": "9689bb626d595033bffb43f18e6103a06f1f62c98a8e0f698ecb1b6acb03c87a",
+      "uv.lock": "d565706e62c808e55fa03e2861ce4795603c5d42a4d7f487a93b89f3899ce9bd"
+    },
+    "red": {
+      "failed": 73,
+      "log_sha256": "be450fa8bb23138c18618fdd9add3919451bdada9fa567980f65b5d1a99a9ccc",
+      "passed": 1
+    },
+    "ruff": "passed",
+    "unrelated_handoff_sha256": "92cd1391dc6c1ca43982f712bc13c787da04e994f1d95c9bcf592520365b7a09"
+  }
+}

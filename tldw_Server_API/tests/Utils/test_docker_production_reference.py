@@ -1,8 +1,12 @@
 from pathlib import Path
 
+import pytest
 import yaml
 
+pytestmark = pytest.mark.unit
+
 COMPOSE = Path("Dockerfiles/docker-compose.production.yml")
+MONITORING_COMPOSE = Path("Dockerfiles/Monitoring/docker-compose.production.yml")
 CADDYFILE = Path("Dockerfiles/Production/Caddyfile")
 ENV_EXAMPLE = Path("Dockerfiles/production.env.example")
 
@@ -42,6 +46,9 @@ EXPECTED_ENV_NAMES = {
     "CADDY_IMAGE",
     "POSTGRES_IMAGE",
     "REDIS_IMAGE",
+    "PROMETHEUS_IMAGE",
+    "ALERTMANAGER_IMAGE",
+    "GRAFANA_IMAGE",
     "TLDW_BACKUP_DIR",
 }
 EXPECTED_SERVICES = {"preflight", "caddy", "app", "postgres", "redis"}
@@ -184,11 +191,39 @@ def test_stateful_services_require_external_credentials() -> None:
 def test_images_are_required_external_inputs() -> None:
     services = _compose()["services"]
 
-    assert services["preflight"]["image"] == ("${TLDW_APP_IMAGE:?Set immutable TLDW_APP_IMAGE}")
-    assert services["app"]["image"] == ("${TLDW_APP_IMAGE:?Set immutable TLDW_APP_IMAGE}")
-    assert services["caddy"]["image"] == ("${CADDY_IMAGE:?Set exact CADDY_IMAGE version or digest}")
-    assert services["postgres"]["image"] == ("${POSTGRES_IMAGE:?Set exact POSTGRES_IMAGE version or digest}")
-    assert services["redis"]["image"] == ("${REDIS_IMAGE:?Set exact REDIS_IMAGE version or digest}")
+    assert services["preflight"]["image"] == (
+        "${TLDW_APP_IMAGE:?Set TLDW_APP_IMAGE to version tag plus @sha256 digest}"
+    )
+    assert services["app"]["image"] == (
+        "${TLDW_APP_IMAGE:?Set TLDW_APP_IMAGE to version tag plus @sha256 digest}"
+    )
+    assert services["caddy"]["image"] == (
+        "${CADDY_IMAGE:?Set CADDY_IMAGE to version tag plus @sha256 digest}"
+    )
+    assert services["postgres"]["image"] == (
+        "${POSTGRES_IMAGE:?Set POSTGRES_IMAGE to version tag plus @sha256 digest}"
+    )
+    assert services["redis"]["image"] == (
+        "${REDIS_IMAGE:?Set REDIS_IMAGE to version tag plus @sha256 digest}"
+    )
+
+
+def test_monitoring_images_require_tag_plus_digest_inputs() -> None:
+    """The companion stack uses the same explicit immutable-image contract."""
+    services = yaml.safe_load(MONITORING_COMPOSE.read_text(encoding="utf-8"))["services"]
+
+    assert services["metrics-credential-init"]["image"] == (
+        "${TLDW_APP_IMAGE:?Set TLDW_APP_IMAGE to version tag plus @sha256 digest}"
+    )
+    assert services["prometheus"]["image"] == (
+        "${PROMETHEUS_IMAGE:?Set PROMETHEUS_IMAGE to version tag plus @sha256 digest}"
+    )
+    assert services["alertmanager"]["image"] == (
+        "${ALERTMANAGER_IMAGE:?Set ALERTMANAGER_IMAGE to version tag plus @sha256 digest}"
+    )
+    assert services["grafana"]["image"] == (
+        "${GRAFANA_IMAGE:?Set GRAFANA_IMAGE to version tag plus @sha256 digest}"
+    )
 
 
 def test_topology_has_no_builds_container_names_or_docker_socket() -> None:

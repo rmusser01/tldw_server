@@ -1,0 +1,101 @@
+name: Expat Native Candidate Qualification
+
+on:
+  push:
+    branches: [codex/task-13013-7-supply-chain-design]
+    paths:
+      - '.github/workflows/expat-candidate.yml'
+      - 'Dockerfiles/candidates/expat/**'
+      - 'Dockerfiles/candidates/ffmpeg/debian.sources'
+      - 'Helper_Scripts/Supply_Chain/expat_candidate.py'
+      - 'tldw_Server_API/tests/Supply_Chain/test_expat*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: expat-system-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  system:
+    name: Native system parser qualification (not dual-copy admission)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Qualify system candidate
+        shell: bash
+        run: bash Dockerfiles/candidates/expat/qualify.sh controller "${RUNNER_TEMP}/expat-system-evidence"
+      - name: Upload evidence including failures
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: expat-system-candidate-${{ github.run_id }}
+          path: ${{ runner.temp }}/expat-system-evidence/**
+          if-no-files-found: error
+          retention-days: 14
+
+  combined-inputs:
+    name: Verify combined candidate inputs (not image qualification)
+    needs: [system, python]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: expat-system-candidate-${{ github.run_id }}
+          path: ${{ runner.temp }}/expat-combined-downloads/system
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: expat-python-candidate-${{ github.run_id }}
+          path: ${{ runner.temp }}/expat-combined-downloads/python
+      - name: Verify qualified inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          mkdir -p "$RUNNER_TEMP/expat-combined-inputs"
+          python3 Dockerfiles/candidates/expat/combined-inputs.py \
+            "$RUNNER_TEMP/expat-combined-downloads/system" \
+            "$RUNNER_TEMP/expat-combined-downloads/python" \
+            --commit "$GITHUB_SHA" \
+            > "$RUNNER_TEMP/expat-combined-inputs/inputs.json" \
+            2> "$RUNNER_TEMP/expat-combined-inputs/verification.log"
+      - name: Retain input verification result
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: expat-combined-inputs-${{ github.run_id }}
+          path: ${{ runner.temp }}/expat-combined-inputs/**
+          if-no-files-found: error
+          retention-days: 14
+
+  python:
+    name: Native bundled Python parser qualification (not combined admission)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Qualify bundled Python candidate
+        shell: bash
+        run: bash Dockerfiles/candidates/expat/python-qualify.sh controller "${RUNNER_TEMP}/expat-python-evidence"
+      - name: Upload evidence including failures
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: expat-python-candidate-${{ github.run_id }}
+          path: ${{ runner.temp }}/expat-python-evidence/**
+          if-no-files-found: error
+          retention-days: 14

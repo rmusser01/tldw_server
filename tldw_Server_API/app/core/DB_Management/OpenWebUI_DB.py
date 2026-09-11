@@ -8,6 +8,10 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from tldw_Server_API.app.core.DB_Management.sqlite_schema_helpers import (
+    ordinary_sqlite_table_names,
+    sqlite_import_read_authorizer,
+)
 
 SQLITE_MAGIC = b"SQLite format 3\x00"
 
@@ -89,6 +93,12 @@ def open_validated_openwebui_db(file_path: str | Path) -> Iterator[sqlite3.Conne
     conn: sqlite3.Connection | None = None
     try:
         conn = sqlite3.connect(uri, uri=True)
+        # Nested virtual-table initialization can bypass the read authorizer.
+        conn.execute("PRAGMA trusted_schema = OFF")
+        schema_trust = conn.execute("PRAGMA trusted_schema").fetchone()
+        if schema_trust is None or schema_trust[0] != 0:
+            raise sqlite3.DatabaseError("Unable to disable SQLite schema trust")
+        conn.set_authorizer(sqlite_import_read_authorizer({*TABLE_INFO_QUERIES, "json_each"}))
         conn.row_factory = sqlite3.Row
         try:
             conn.enable_load_extension(False)
@@ -116,11 +126,8 @@ def validate_openwebui_file_schema(conn: sqlite3.Connection) -> None:
 
 
 def _validate_required_schema(conn: sqlite3.Connection, required_schema: dict[str, set[str]]) -> None:
-    """Validate that a source database contains the required tables and columns."""
-    table_rows = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table'",
-    ).fetchall()
-    tables = {str(row["name"]) for row in table_rows}
+    """Require ordinary source tables; virtual tables can execute uploaded views."""
+    tables = ordinary_sqlite_table_names(conn)
     missing_tables = sorted(set(required_schema) - tables)
     if missing_tables:
         missing = ", ".join(missing_tables)

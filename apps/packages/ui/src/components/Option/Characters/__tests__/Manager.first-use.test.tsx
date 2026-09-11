@@ -335,6 +335,10 @@ const findEditSubmitButton = async (timeout = 15000) =>
 describe("CharactersManager first-use onboarding", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    tldwClientMock.createCharacter.mockReset().mockImplementation(
+      async (_payload?: Record<string, unknown>) =>
+        ({ id: "char-1" }) as { id: string | number }
+    )
     ensureLocalStorageApi().clear()
     window.history.replaceState({}, "", "/")
     useNavigateMock.mockReturnValue(navigateMock)
@@ -402,8 +406,8 @@ describe("CharactersManager first-use onboarding", () => {
     scope: ReturnType<typeof within>,
     worldBookName: string
   ) => {
-    const field = scope
-      .getByText("World book attachments")
+    const field = (await scope
+      .findByText("World book attachments"))
       .closest(".ant-form-item")
     expect(field).not.toBeNull()
 
@@ -874,11 +878,11 @@ describe("CharactersManager first-use onboarding", () => {
 
     await user.click(createScope.getByRole("button", { name: "Show advanced fields" }))
 
-    expect(createScope.getByRole("button", { name: "Prompt control" })).toBeInTheDocument()
+    expect(await createScope.findByRole("button", { name: "Prompt control" })).toBeInTheDocument()
     expect(createScope.getByRole("button", { name: "Generation settings" })).toBeInTheDocument()
     expect(createScope.getByRole("button", { name: "Metadata" })).toBeInTheDocument()
     expect(
-      createScope.getByText(
+      await createScope.findByText(
         "Personality: adjectives and traits injected into context to shape voice and behavior."
       )
     ).toBeInTheDocument()
@@ -887,7 +891,7 @@ describe("CharactersManager first-use onboarding", () => {
     await user.click(createScope.getByRole("button", { name: "Generation settings" }))
     expect(createScope.getByText("Generation temperature")).toBeInTheDocument()
 
-    await user.click(createScope.getByRole("button", { name: "Metadata" }))
+    await user.click(await createScope.findByRole("button", { name: "Metadata" }))
     expect(createScope.getByText("Extensions (JSON)")).toBeInTheDocument()
     expect(createScope.getByText("Expression packs available after save")).toBeInTheDocument()
     expect(createScope.getByText("Expression images")).toBeInTheDocument()
@@ -1325,7 +1329,7 @@ describe("CharactersManager first-use onboarding", () => {
     )
 
     await user.click(createScope.getByRole("button", { name: "Show advanced fields" }))
-    await user.click(createScope.getByRole("button", { name: "Metadata" }))
+    await user.click(await createScope.findByRole("button", { name: "Metadata" }))
     await selectCharacterWorldBook(user, createScope, "Lore Atlas")
 
     await user.click(createScope.getByRole("button", { name: "Create character" }))
@@ -1420,7 +1424,7 @@ describe("CharactersManager first-use onboarding", () => {
     )
 
     await user.click(createScope.getByRole("button", { name: "Show advanced fields" }))
-    await user.click(createScope.getByRole("button", { name: "Metadata" }))
+    await user.click(await createScope.findByRole("button", { name: "Metadata" }))
     await selectCharacterWorldBook(user, createScope, "Lore Atlas")
 
     await user.click(createScope.getByRole("button", { name: "Create character" }))

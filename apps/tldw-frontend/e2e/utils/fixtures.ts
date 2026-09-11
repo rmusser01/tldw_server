@@ -88,6 +88,11 @@ export const test = base.extend<WorkflowFixtures>({
       origin: appOrigin,
     })
     await seedAuth(page)
+    // Workflow journeys exercise a returning user; first-visit tutorials have
+    // separate coverage. Web Plasmo local storage uses this unprefixed key.
+    await page.addInitScript(() => {
+      localStorage.setItem("notes-tutorial-shown", JSON.stringify("1"))
+    })
     startApiCapture(page)
     await use(page)
     // Teardown: attach API call log on test failure for debugging

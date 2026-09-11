@@ -3,6 +3,7 @@ import pytest
 import json
 from pathlib import Path
 from unittest.mock import patch, mock_open
+import runpy
 
 from tldw_Server_API.app.core.Chat.prompt_template_manager import (
     PromptTemplate,
@@ -12,6 +13,22 @@ from tldw_Server_API.app.core.Chat.prompt_template_manager import (
     DEFAULT_RAW_PASSTHROUGH_TEMPLATE,
     _loaded_templates  # For clearing cache in tests
 )
+
+
+@pytest.mark.unit
+def test_import_does_not_require_writable_package_directory(monkeypatch):
+    import tldw_Server_API.app.core.Chat.prompt_template_manager as module
+
+    original_mkdir = Path.mkdir
+
+    def read_only_mkdir(path, *args, **kwargs):
+        if path == module.PROMPT_TEMPLATES_DIR:
+            raise PermissionError("installed package directory is read-only")
+        return original_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", read_only_mkdir)
+    loaded = runpy.run_path(module.__file__)
+    assert loaded["load_template"]("raw_passthrough").name == "raw_passthrough"
 
 
 # Fixture to clear the template cache before each test

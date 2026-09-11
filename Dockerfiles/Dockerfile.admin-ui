@@ -2,7 +2,14 @@
 # - Builds as a standalone Next.js app
 # - Ships a minimal runtime image
 
-FROM oven/bun:1.3.2-debian AS builder
+FROM oven/bun:1.3.2-debian@sha256:ff851006c8b322761d53593e7a78c92d09ec0a6bc09a55f81c9861e614761d9a AS bun-tool
+
+
+FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS builder
+
+# Bun performs the frozen lockfile install. Next.js itself runs under Node;
+# executing Next 16 through Bun can fail while collecting server routes.
+COPY --from=bun-tool /usr/local/bin/bun /usr/local/bin/bun
 
 ENV NEXT_TELEMETRY_DISABLED=1
 
@@ -33,10 +40,10 @@ ENV NEXT_PUBLIC_DEFAULT_AUTH_MODE=${NEXT_PUBLIC_DEFAULT_AUTH_MODE}
 ENV NEXT_PUBLIC_ALLOW_ADMIN_API_KEY_LOGIN=${NEXT_PUBLIC_ALLOW_ADMIN_API_KEY_LOGIN}
 ENV NEXT_PUBLIC_BILLING_ENABLED=${NEXT_PUBLIC_BILLING_ENABLED}
 
-RUN bun run build
+RUN npm run build
 
 
-FROM node:20-bookworm-slim AS runtime
+FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS runtime
 
 ARG APP_VERSION=0.0.0
 ENV NODE_ENV=production \
@@ -46,6 +53,8 @@ ENV NODE_ENV=production \
     APP_VERSION=${APP_VERSION}
 
 WORKDIR /app
+
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 
 RUN useradd -m -u 10003 adminui
 

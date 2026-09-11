@@ -21,6 +21,11 @@ const backendRuntimeWatchIgnoreSource = backendRuntimeWatchIgnoreRoots
   .map((root) => `^${escapeRegExp(root)}(?:/|$)`)
   .join('|');
 const liveTierDistDir = process.env.TLDW_NEXT_DIST_DIR;
+const requestedBuildCpus = Number(process.env.TLDW_NEXT_BUILD_CPUS);
+const buildCpus =
+  Number.isInteger(requestedBuildCpus) && requestedBuildCpus > 0
+    ? requestedBuildCpus
+    : undefined;
 if (
   liveTierDistDir &&
   !/^\.next-live-tier-[A-Za-z0-9._-]+$/.test(liveTierDistDir)
@@ -88,8 +93,17 @@ const contentSecurityPolicy = [
 ].join('; ');
 
 const nextConfig = {
+  agentRules: false,
   reactStrictMode: true,
   reactCompiler: false,
+  ...(buildCpus
+    ? {
+        experimental: {
+          cpus: buildCpus,
+          webpackMemoryOptimizations: true,
+        },
+      }
+    : {}),
   ...(liveTierDistDir ? { distDir: liveTierDistDir } : {}),
   // Preserve backend API paths exactly in quickstart mode. FastAPI routes such as
   // POST /api/v1/chats/ are slash-sensitive and otherwise bounce through redirects

@@ -1641,10 +1641,10 @@ function UsersPageContent() {
                                   {(() => {
                                     const DORMANT_THRESHOLD_DAYS = 90;
                                     const now = Date.now();
-                                    const lastLoginMs = user.last_login ? Date.parse(user.last_login) : 0;
-                                    const daysSinceLogin = !user.last_login || !Number.isFinite(lastLoginMs)
-                                      ? Infinity
-                                      : (now - lastLoginMs) / (1000 * 60 * 60 * 24);
+                                    if (!user.last_login) return null;
+                                    const lastLoginMs = Date.parse(user.last_login);
+                                    if (!Number.isFinite(lastLoginMs)) return null;
+                                    const daysSinceLogin = (now - lastLoginMs) / (1000 * 60 * 60 * 24);
                                     return daysSinceLogin > DORMANT_THRESHOLD_DAYS ? (
                                       <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
                                         Dormant

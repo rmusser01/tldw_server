@@ -31,8 +31,8 @@ from apscheduler.triggers.interval import IntervalTrigger
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from jose import jwt as jose_jwt
-from jose.exceptions import JWSError, JWTError
+from tldw_Server_API.app.core.Utils import jwt_compat as jwt
+from tldw_Server_API.app.core.Utils.jwt_compat import JWTError
 from loguru import logger
 from redis import asyncio as redis_async
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -77,7 +77,6 @@ _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS = (
     UnicodeDecodeError,
     json.JSONDecodeError,
     JWTError,
-    JWSError,
     RedisError,
     RedisConnectionError,
     InvalidSessionError,
@@ -961,7 +960,7 @@ class SessionManager:
         if not token:
             return None, None
         try:
-            claims = jose_jwt.get_unverified_claims(token)
+            claims = jwt.get_unverified_claims(token)
             if claims is None:
                 return None, None
             jti = claims.get("jti")
@@ -980,7 +979,7 @@ class SessionManager:
         if not token:
             return None
         try:
-            claims = jose_jwt.get_unverified_claims(token)
+            claims = jwt.get_unverified_claims(token)
             return claims if isinstance(claims, dict) else None
         except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS:
             return None
@@ -1585,8 +1584,7 @@ class SessionManager:
             jti_value = jti
             if not jti_value:
                 try:
-                    from jose import jwt as _jwt  # Lazy import to avoid top-level dependency
-                    claims = _jwt.get_unverified_claims(token)
+                    claims = jwt.get_unverified_claims(token)
                     jti_value = claims.get("jti")
                 except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as exc:
                     logger.warning(f"Failed to extract JTI from token; treating as revoked: {exc}")

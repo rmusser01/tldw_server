@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "tldw release evidence manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "repository",
+    "source_commit",
+    "release_tag",
+    "workflow_run",
+    "platform",
+    "policy_sha256",
+    "scanner",
+    "project_images",
+    "reference_images",
+    "files",
+    "decision"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "repository": {"type": "string", "minLength": 1},
+    "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "release_tag": {"type": "string", "minLength": 1},
+    "workflow_run": {"type": "string", "minLength": 1},
+    "platform": {"type": "string", "const": "linux/amd64"},
+    "policy_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "scanner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "image",
+        "database_updated_at",
+        "database_downloaded_at",
+        "scan_started_at"
+      ],
+      "properties": {
+        "name": {"type": "string", "const": "trivy"},
+        "version": {"type": "string", "minLength": 1},
+        "image": {
+          "type": "string",
+          "pattern": "^[^@\\s]+:[^@\\s]+@sha256:[0-9a-f]{64}$"
+        },
+        "database_updated_at": {"type": "string", "format": "date-time"},
+        "database_downloaded_at": {"type": "string", "format": "date-time"},
+        "scan_started_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "project_images": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {"$ref": "#/$defs/imageEvidence"}
+    },
+    "reference_images": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {"$ref": "#/$defs/imageEvidence"}
+    },
+    "files": {
+      "type": "object",
+      "minProperties": 45,
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    },
+    "decision": {"type": "string", "const": "pass"}
+  },
+  "$defs": {
+    "imageEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "ownership",
+        "platform",
+        "subject_digest",
+        "platform_manifest_digest",
+        "reference",
+        "dockerfile",
+        "publication",
+        "sbom_file",
+        "scan_file",
+        "decision_file",
+        "provenance_ref"
+      ],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "ownership": {
+          "type": "string",
+          "enum": ["project-built", "third-party-reference"]
+        },
+        "platform": {"type": "string", "const": "linux/amd64"},
+        "subject_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "platform_manifest_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "reference": {
+          "type": "string",
+          "pattern": "^[^@\\s]+:[^@\\s]+@sha256:[0-9a-f]{64}$"
+        },
+        "dockerfile": {"type": ["string", "null"]},
+        "publication": {
+          "type": "string",
+          "enum": ["promoted", "build-and-scan-only"]
+        },
+        "sbom_file": {"type": "string", "minLength": 1},
+        "scan_file": {"type": "string", "minLength": 1},
+        "decision_file": {"type": "string", "minLength": 1},
+        "provenance_ref": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

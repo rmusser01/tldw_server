@@ -1,0 +1,175 @@
+name: Util-linux Native Candidate Qualification
+
+on:
+  push:
+    branches: [codex/task-13013-7-supply-chain-design]
+    paths:
+      - '.github/workflows/util-linux-candidate.yml'
+      - 'Dockerfiles/candidates/util-linux/**'
+      - 'Dockerfiles/candidates/ffmpeg/debian.sources'
+      - 'tldw_Server_API/tests/Supply_Chain/test_util_linux_candidate.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: util-linux-candidate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    name: Native amd64 source-package qualification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout candidate inputs
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Run native qualification
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="${RUNNER_TEMP}/util-linux-candidate-evidence"
+          identity_dir="${evidence_dir}/identity"
+          mkdir -p "${identity_dir}"
+
+          checked_out_commit="$(git rev-parse HEAD)"
+          host_kernel="$(uname -s)"
+          host_arch="$(uname -m)"
+          {
+            printf 'checked_out_commit=%s\n' "${checked_out_commit}"
+            printf 'runner_kernel=%s\n' "${host_kernel}"
+            printf 'runner_architecture=%s\n' "${host_arch}"
+          } > "${identity_dir}/runner.txt"
+          if [[ "${host_kernel}" != Linux || "${host_arch}" != x86_64 ]]; then
+            printf 'This qualification requires a native x86_64 Linux runner; observed %s/%s.\n' \
+              "${host_kernel}" "${host_arch}" >&2
+            exit 1
+          fi
+
+          docker_arch="$(docker info --format '{{.Architecture}}')"
+          printf 'docker_daemon_architecture=%s\n' "${docker_arch}" \
+            >> "${identity_dir}/runner.txt"
+          if [[ "${docker_arch}" != x86_64 && "${docker_arch}" != amd64 ]]; then
+            printf 'This qualification requires a native amd64 Docker daemon; observed %s.\n' \
+              "${docker_arch}" >&2
+            exit 1
+          fi
+
+          base_tag="tldw-util-linux-candidate-base:${GITHUB_RUN_ID}"
+          prepared_tag="tldw-util-linux-candidate-prepared:${GITHUB_RUN_ID}"
+          docker build \
+            --platform linux/amd64 \
+            --file Dockerfiles/candidates/util-linux/Dockerfile \
+            --tag "${base_tag}" \
+            .
+          image_arch="$(docker image inspect --format '{{.Architecture}}' "${base_tag}")"
+          base_image_id="$(docker image inspect --format '{{.Id}}' "${base_tag}")"
+          {
+            printf 'base_image_id=%s\n' "${base_image_id}"
+            printf 'base_image_architecture=%s\n' "${image_arch}"
+          } >> "${identity_dir}/runner.txt"
+          [[ "${image_arch}" == amd64 ]] || {
+            printf 'Candidate image is not native amd64: %s.\n' "${image_arch}" >&2
+            exit 1
+          }
+
+          prep_container="tldw-util-linux-prep-${GITHUB_RUN_ID}"
+          prep_container_id="$(docker create --name "${prep_container}" "${base_image_id}" prepare)"
+          set +e
+          docker start --attach "${prep_container_id}"
+          prep_status=$?
+          set -e
+          if ! docker cp "${prep_container_id}:/work/evidence/." "${evidence_dir}/"; then
+            printf 'Preparation evidence copy failed; retained container: %s\n' "${prep_container_id}" >&2
+            exit 1
+          fi
+          if (( prep_status != 0 )); then
+            printf 'Preparation failed with exit %s; retained container: %s\n' \
+              "${prep_status}" "${prep_container_id}" >&2
+            exit "${prep_status}"
+          fi
+          docker commit "${prep_container_id}" "${prepared_tag}" > /dev/null
+          prepared_image_id="$(docker image inspect --format '{{.Id}}' "${prepared_tag}")"
+          prepared_image_arch="$(docker image inspect --format '{{.Architecture}}' "${prepared_tag}")"
+          {
+            printf 'prepared_image_id=%s\n' "${prepared_image_id}"
+            printf 'prepared_image_architecture=%s\n' "${prepared_image_arch}"
+          } >> "${identity_dir}/runner.txt"
+          [[ "${prepared_image_arch}" == amd64 ]] || {
+            printf 'Prepared image is not native amd64: %s.\n' "${prepared_image_arch}" >&2
+            exit 1
+          }
+          docker rm "${prep_container_id}" > /dev/null
+
+          build_container="tldw-util-linux-build-${GITHUB_RUN_ID}"
+          build_container_id="$(docker create \
+            --name "${build_container}" \
+            --network none \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --user 1000:1000 \
+            "${prepared_image_id}" build)"
+          set +e
+          docker start --attach "${build_container_id}"
+          build_status=$?
+          set -e
+          if ! docker cp "${build_container_id}:/work/evidence/." "${evidence_dir}/"; then
+            printf 'Build evidence copy failed; retained container: %s\n' "${build_container_id}" >&2
+            exit 1
+          fi
+          set +e
+          bash Dockerfiles/candidates/util-linux/qualify.sh verify-evidence \
+            "${evidence_dir}" "${build_status}"
+          evidence_status=$?
+          set -e
+          if (( evidence_status != 0 )); then
+            printf 'The container did not emit required qualification evidence.\n' >&2
+            if (( build_status != 0 )); then
+              exit "${build_status}"
+            fi
+            exit "${evidence_status}"
+          fi
+          if (( build_status != 0 )); then
+            printf 'Build/test failed with exit %s after evidence collection; retained container: %s\n' \
+              "${build_status}" "${build_container_id}" >&2
+            exit "${build_status}"
+          fi
+          docker rm "${build_container_id}" > /dev/null
+
+          install_container="tldw-util-linux-install-${GITHUB_RUN_ID}"
+          install_container_id="$(docker create \
+            --name "${install_container}" \
+            --network none \
+            --security-opt no-new-privileges:true \
+            --user 0:0 \
+            "${prepared_image_id}" install)"
+          docker cp "${evidence_dir}/artifacts/binary/." "${install_container_id}:/candidate/"
+          set +e
+          docker start --attach "${install_container_id}"
+          install_status=$?
+          set -e
+          if ! docker cp "${install_container_id}:/work/evidence/." "${evidence_dir}/"; then
+            printf 'Install evidence copy failed; retained container: %s\n' "${install_container_id}" >&2
+            exit 1
+          fi
+          if (( install_status != 0 )); then
+            printf 'Fresh package-set check failed with exit %s; retained container: %s\n' \
+              "${install_status}" "${install_container_id}" >&2
+            exit "${install_status}"
+          fi
+          bash Dockerfiles/candidates/util-linux/qualify.sh verify-install-evidence "${evidence_dir}"
+          docker rm "${install_container_id}" > /dev/null
+
+      - name: Upload qualification evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: util-linux-native-candidate-${{ github.run_id }}
+          path: ${{ runner.temp }}/util-linux-candidate-evidence/**
+          if-no-files-found: error
+          retention-days: 14

@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 from fastapi import HTTPException
-from jose import JWTError
+from tldw_Server_API.app.core.Utils.jwt_compat import JWTError
 
 from tldw_Server_API.app.core.MCP_unified.auth import jwt_manager
 from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import JWTManager

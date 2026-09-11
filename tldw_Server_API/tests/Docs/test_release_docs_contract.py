@@ -22,6 +22,16 @@ from Helper_Scripts.release import (  # noqa: E402
     update_release_notes_entry_point,
 )
 
+SUPPLY_CHAIN_RUNBOOK = REPO_ROOT / "Docs/Development/Software_Supply_Chain.md"
+RELEASE_PROCESS = REPO_ROOT / "Docs/Development/Release_Process.md"
+PYPI_GUIDE = REPO_ROOT / "Docs/Development/PyPI_Publishing.md"
+PINNED_SUPPLY_CHAIN_TOOLS = (
+    "ghcr.io/astral-sh/uv:0.12.7@sha256:95f2aa1fe59274951cfe9b0cbc7972e879ff1004bc8945d130a32eb0dbd85945",
+    "ghcr.io/cdxgen/cdxgen:v13@sha256:0be75639a833b59d1ba29b3c8ac00dfd2e41e7568d56b6c039007caadebebc0d",
+    "docker.io/cyclonedx/cyclonedx-cli:0.33.1@sha256:252c2e26f468c25fea1e63ecde1bc3198ad6e9dbb57f5ed3236bddcb2281b3a7",
+    "ghcr.io/aquasecurity/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969",
+)
+
 
 def _workflow(relative_path: str) -> dict[str, object]:
     # BaseLoader reads trusted local workflow text without constructing Python objects.
@@ -357,3 +367,96 @@ def test_release_process_doc_is_authoritative_operator_path() -> None:
 
     assert "Docs/Development/Release_Process.md" in release_checklist_text
     assert "broad readiness checklist" in release_checklist_text.lower()
+
+
+def test_supply_chain_runbook_pins_tools_locks_and_source_evidence() -> None:
+    text = SUPPLY_CHAIN_RUNBOOK.read_text(encoding="utf-8")
+
+    for tool in PINNED_SUPPLY_CHAIN_TOOLS:
+        assert tool in text
+    for command in (
+        "uv lock --check",
+        "bun install --frozen-lockfile",
+    ):
+        assert command in text
+    for sbom in (
+        "sbom-python-root.cdx.json",
+        "sbom-apps-workspace.cdx.json",
+        "sbom-admin-ui.cdx.json",
+        "sbom-source-aggregate.cdx.json",
+    ):
+        assert sbom in text
+
+
+def test_supply_chain_runbook_documents_policy_and_exception_lifecycle() -> None:
+    text = SUPPLY_CHAIN_RUNBOOK.read_text(encoding="utf-8")
+
+    assert "zero unexcepted Critical or High" in text
+    assert "ignore-unfixed=false" in text
+    assert "7 days" in text
+    assert "30 days" in text
+    for field in (
+        "`owner`",
+        "`rationale`",
+        "`mitigation`",
+        "`approval`",
+        "`created_on`",
+        "`expires_on`",
+    ):
+        assert field in text
+    assert "renew" in text.lower()
+    assert "past clean scan" in text.lower()
+    assert "future safety" in text.lower()
+
+
+def test_supply_chain_runbook_covers_every_image_and_publication_boundary() -> None:
+    text = SUPPLY_CHAIN_RUNBOOK.read_text(encoding="utf-8")
+
+    for name in (
+        "app",
+        "worker",
+        "audio-worker",
+        "webui",
+        "admin-ui",
+        "caddy",
+        "postgres",
+        "redis",
+        "prometheus",
+        "alertmanager",
+        "grafana",
+    ):
+        assert f"`{name}`" in text
+    assert "`linux/amd64`" in text
+    assert "build-and-scan-only" in text
+    assert "WebUI and Admin UI" in text
+    assert "third-party provenance" in text.lower()
+    assert "do not" in text.lower()
+
+
+def test_supply_chain_runbook_explains_digest_and_attestation_verification() -> None:
+    text = SUPPLY_CHAIN_RUNBOOK.read_text(encoding="utf-8")
+
+    assert "tag@sha256:" in text
+    assert "subject/index digest" in text
+    assert "child manifest digest" in text
+    assert "gh attestation verify oci://" in text
+    assert "--repo rmusser01/tldw_server" in text
+    assert "--signer-workflow" in text
+    assert "release-manifest.json" in text
+    assert "SHA256SUMS.release" in text
+
+
+def test_release_and_pypi_guides_describe_current_admission_flow() -> None:
+    release_text = RELEASE_PROCESS.read_text(encoding="utf-8")
+    pypi_text = PYPI_GUIDE.read_text(encoding="utf-8")
+
+    assert "existing draft GitHub Release" in release_text
+    assert "publish <tag>" in release_text
+    assert "full-version" in release_text
+    assert "floating aliases" in release_text
+    assert "Software_Supply_Chain.md" in release_text
+    assert "attestations: true" in pypi_text
+    assert "Trusted Publishing" in pypi_text
+    assert "SHA256SUMS" in pypi_text
+    assert "pypi-attestations verify pypi" in pypi_text
+    assert "--repository https://github.com/rmusser01/tldw_server" in pypi_text

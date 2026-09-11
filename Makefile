@@ -271,20 +271,20 @@ show-api-key:
 
 pypi-build:
 	@command -v $(PYTHON) >/dev/null 2>&1 || (echo "[pypi-build] $(PYTHON) not found." && exit 1)
-	@$(PYTHON) -m pip show build >/dev/null 2>&1 || (echo "[pypi-build] Missing 'build'. Install with: $(PYTHON) -m pip install build" && exit 1)
+	@$(PYTHON) -c "import build" >/dev/null 2>&1 || (echo "[pypi-build] Missing 'build' in the selected Python environment." && exit 1)
 	@echo "[pypi-build] Cleaning previous artifacts..."
 	@rm -rf build dist *.egg-info tldw_server.egg-info
 	@echo "[pypi-build] Building sdist + wheel ($(PYPI_BUILD_ARGS))..."
 	@$(PYTHON) -m build $(PYPI_BUILD_ARGS)
 
 pypi-check: pypi-build
-	@$(PYTHON) -m pip show twine >/dev/null 2>&1 || (echo "[pypi-check] Missing 'twine'. Install with: $(PYTHON) -m pip install twine" && exit 1)
+	@$(PYTHON) -c "import twine" >/dev/null 2>&1 || (echo "[pypi-check] Missing 'twine' in the selected Python environment." && exit 1)
 	@echo "[pypi-check] Validating distributions..."
 	@$(PYTHON) -m twine check dist/*
 	@$(MAKE) pypi-check-contents
 
 pypi-check-contents:
-	@$(PYTHON) -m pip show loguru >/dev/null 2>&1 || (echo "[pypi-check] Missing 'loguru'. Install with: $(PYTHON) -m pip install loguru" && exit 1)
+	@$(PYTHON) -c "import loguru" >/dev/null 2>&1 || (echo "[pypi-check] Missing 'loguru' in the selected Python environment." && exit 1)
 	@echo "[pypi-check] Validating backend/API-only artifact contents..."
 	@$(PYTHON) Helper_Scripts/Packaging/check_pypi_artifacts.py --dist-dir dist
 
