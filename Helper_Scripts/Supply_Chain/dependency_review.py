@@ -2,7 +2,8 @@
 
 The action accepts advisory-wide allowances. Every added occurrence of an advisory
 must therefore match an exact, active source approval before the advisory is passed
-to it. Revalidate its complete ``dependency-changes`` output after the action runs.
+to it. Optional lockfile-only approvals use ``dependency-review-python-root``
+so they cannot waive findings or become unused approvals in base runtime scans. Revalidate its complete ``dependency-changes`` output after the action runs.
 """
 
 from __future__ import annotations
@@ -100,7 +101,7 @@ def derive_allow_ghsas(changes: object, *, policy: ExceptionPolicy, today: date)
                 and change["name"] == name
                 and change["package_url"] == item.purl == f"pkg:pypi/{name}@{version}"
                 and change["version"] == item.installed_version == version
-                and item.component == "source-python-root"
+                and item.component in {"source-python-root", "dependency-review-python-root"}
                 and item.vulnerability_id == cve
                 and item.severity == severity.upper()
                 and item.created_on <= today <= item.expires_on
