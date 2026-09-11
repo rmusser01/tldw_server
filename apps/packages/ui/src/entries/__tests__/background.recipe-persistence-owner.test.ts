@@ -231,6 +231,89 @@ describe("background recipe authority protocol", () => {
     ).toBe("scoped")
   })
 
+  it("rejects an oversized dispatch ID before mutation or marker creation", async () => {
+    const { RecipePersistenceRegistry } = await import(
+      "@/services/recipe-persistence-registry"
+    )
+    const markScoped = vi.spyOn(
+      RecipePersistenceRegistry.prototype,
+      "markScoped"
+    )
+    const owner = (await send({ type: "tldw:recipe-owner:resolve" })) as {
+      ownerId: string
+    }
+    const fetchSpy = vi.fn(async () => json({ id: "remote" }))
+    vi.stubGlobal("fetch", fetchSpy)
+    const result = await send({
+      type: "tldw:request",
+      payload: {
+        path: "/api/v1/prompts/",
+        method: "POST",
+        body: {},
+        recipePersistence: {
+          mode: "require",
+          expectedOwnerId: owner.ownerId,
+          localId: "x".repeat(513)
+        }
+      }
+    })
+    expect(result).toMatchObject({
+      ok: false,
+      recipePersistence: { state: "not_dispatched", actualOwnerId: null }
+    })
+    expect(fetchSpy).not.toHaveBeenCalled()
+    // Call-through spy: invalid IDs cannot be read via the public protocol, so
+    // observe the real registry's mutation boundary without replacing it.
+    expect(markScoped).not.toHaveBeenCalled()
+  })
+
+  it("keeps a maximum-length dispatched ID readable and clearable", async () => {
+    const owner = (await send({ type: "tldw:recipe-owner:resolve" })) as {
+      ownerId: string
+    }
+    const id = "x".repeat(512)
+    vi.stubGlobal("fetch", async () => json({ id: "remote" }))
+    expect(
+      await send({
+        type: "tldw:request",
+        payload: {
+          path: "/api/v1/prompts/",
+          method: "POST",
+          body: {},
+          recipePersistence: {
+            mode: "require",
+            expectedOwnerId: owner.ownerId,
+            localId: id
+          }
+        }
+      })
+    ).toMatchObject({
+      ok: true,
+      recipePersistence: { state: "dispatched", actualOwnerId: owner.ownerId }
+    })
+    expect(
+      await send({
+        type: "tldw:recipe-uncertainty:read",
+        id,
+        ownerId: owner.ownerId
+      })
+    ).toBe("scoped")
+    expect(
+      await send({
+        type: "tldw:recipe-uncertainty:clear-scoped",
+        id,
+        ownerId: owner.ownerId
+      })
+    ).toEqual({ ok: true })
+    expect(
+      await send({
+        type: "tldw:recipe-uncertainty:read",
+        id,
+        ownerId: owner.ownerId
+      })
+    ).toBe("clear")
+  })
+
   it("resolves a bearer through the snapshot-bound local current-user endpoint, never messaging itself", async () => {
     harness.values.set("tldwConfig", {
       serverUrl: "https://api.example.test/base",

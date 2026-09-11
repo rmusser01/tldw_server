@@ -9,6 +9,7 @@ import { apiSend } from "@/services/api-send";
 import { tldwRequest } from "@/services/tldw/request-core";
 import { RecipePersistenceRegistry } from "@/services/recipe-persistence-registry";
 import {
+  assertRecipeDispatchMarker,
   getRecipeAuthenticatedPrincipal,
   isRecipePersistenceMessage,
   resolveRecipeOwnerWithConfig,
@@ -1708,7 +1709,10 @@ export default defineBackground({
         return await tldwRequest(requestPayload, {
           getAuthenticatedPrincipal: getRecipeAuthenticatedPrincipal,
           dispatchAuthority: {
-            markDispatched: (id, ownerId) => recipeRegistry.markScoped(id, ownerId),
+            markDispatched: (id, ownerId) => {
+              assertRecipeDispatchMarker(id, ownerId);
+              recipeRegistry.markScoped(id, ownerId);
+            },
           },
           // IMPORTANT: getConfig must fetch fresh config each time it's called
           // (not pre-fetch once), because the config may not be seeded yet when

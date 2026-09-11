@@ -146,6 +146,36 @@ describe("direct recipe authority", () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
+  it("rejects an oversized dispatch ID before mutation or marker creation", async () => {
+    const authority = await import("@/services/recipe-persistence-uncertainty")
+    const { RecipePersistenceRegistry } = await import(
+      "@/services/recipe-persistence-registry"
+    )
+    const { apiSend } = await import("@/services/api-send")
+    const owner = (await authority.resolveRecipePersistenceOwnerView())!
+    const markScoped = vi.spyOn(
+      RecipePersistenceRegistry.prototype,
+      "markScoped"
+    )
+    const fetchSpy = vi.fn(async () => json({ id: "remote" }))
+    vi.stubGlobal("fetch", fetchSpy)
+    const result = await apiSend({
+      path: "/api/v1/prompts/",
+      method: "POST",
+      recipePersistence: {
+        mode: "require",
+        expectedOwnerId: owner.ownerId,
+        localId: "x".repeat(513)
+      }
+    })
+    expect(result.recipePersistence).toEqual({
+      state: "not_dispatched",
+      actualOwnerId: null
+    })
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(markScoped).not.toHaveBeenCalled()
+  })
+
   it("does not use the direct mutation authority when extension messaging is missing", async () => {
     const authority = await import("@/services/recipe-persistence-uncertainty")
     const owner = (await authority.resolveRecipePersistenceOwnerView())!

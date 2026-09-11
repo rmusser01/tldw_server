@@ -23,6 +23,12 @@ const isOwnerId = (value: unknown): value is string =>
 const isLocalId = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0 && value.length <= 512
 
+/** Dispatch markers must remain addressable by the authority's read/clear protocol. */
+export function assertRecipeDispatchMarker(id: string, ownerId: string): void {
+  if (!isLocalId(id) || !isOwnerId(ownerId))
+    throw new Error("Invalid recipe dispatch marker")
+}
+
 export type RecipePersistenceMessage =
   | { type: "tldw:recipe-owner:resolve" }
   | { type: "tldw:recipe-uncertainty:read"; id: string; ownerId: string | null }
@@ -135,8 +141,7 @@ export const directRecipeRequestAuthority = {
   getAuthenticatedPrincipal: getRecipeAuthenticatedPrincipal,
   dispatchAuthority: {
     markDispatched: (id: string, ownerId: string): void => {
-      if (!isLocalId(id) || !isOwnerId(ownerId))
-        throw new Error("Invalid recipe dispatch marker")
+      assertRecipeDispatchMarker(id, ownerId)
       directRegistry.markScoped(id, ownerId)
     }
   }
