@@ -46,7 +46,9 @@ jobs:
         github.event_name != 'workflow_run'
       )
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: ${{ matrix.backend && 60 || 30 }}
+    env:
+      TRIVY_IMAGE: ghcr.io/aquasecurity/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
     strategy:
       fail-fast: false
       matrix:
@@ -103,15 +105,158 @@ jobs:
           tags: tldw-container-check:${{ matrix.name }}
 
       - name: Verify backend local package imports
+        id: backend_image
         if: matrix.backend
         env:
           IMAGE_REF: tldw-container-check:${{ matrix.name }}
         run: |
+          set -euo pipefail
           image_id="$(docker image inspect --format '{{.Id}}' "$IMAGE_REF")"
+          [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf 'image_id=%s\n' "$image_id" >> "$GITHUB_OUTPUT"
           docker run --rm --network none --read-only \
             --cap-drop ALL --security-opt no-new-privileges \
             --entrypoint python "$image_id" -I -c \
             "import mcp_unified; import tldw_profile_core"
+
+      - name: Prepare backend scanner evidence
+        if: matrix.backend
+        timeout-minutes: 12
+        env:
+          IMAGE_ID: ${{ steps.backend_image.outputs.image_id }}
+          EVIDENCE_DIR: ${{ runner.temp }}/backend-evidence
+          SCANNER_CACHE: ${{ runner.temp }}/backend-scanner
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR" "$SCANNER_CACHE"
+          docker image inspect "$IMAGE_ID" | jq --arg source_sha "$(git rev-parse HEAD)" \
+            '.[0] | {image_id: .Id, os: .Os, architecture: .Architecture,
+              variant: (.Variant // ""), source_sha: $source_sha}' > "$EVIDENCE_DIR/image.json"
+          docker pull "$TRIVY_IMAGE"
+          # Network acquisition has no access to the Docker daemon or repository.
+          for database in --download-db-only --download-java-db-only; do
+            docker run --rm --read-only --cap-drop ALL \
+              --security-opt no-new-privileges:true --tmpfs /tmp:rw,nosuid,nodev,size=256m \
+              --volume "$SCANNER_CACHE:/cache:rw" \
+              "$TRIVY_IMAGE" image --cache-dir /cache --timeout 5m "$database"
+          done
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from datetime import datetime, timedelta, timezone
+          from pathlib import Path
+
+          cache = Path(os.environ["SCANNER_CACHE"])
+          now = datetime.now(timezone.utc)
+          databases = {}
+          for name, filename in (("db", "trivy.db"), ("java-db", "trivy-java.db")):
+              metadata = json.loads((cache / name / "metadata.json").read_text())
+              updated = datetime.fromisoformat(metadata["UpdatedAt"].replace("Z", "+00:00"))
+              if updated.tzinfo is None or not -timedelta(minutes=5) <= now - updated <= timedelta(hours=24):
+                  raise SystemExit(f"Scanner database is stale or future-dated: {name}")
+              digest = hashlib.sha256()
+              with (cache / name / filename).open("rb") as database:
+                  for chunk in iter(lambda: database.read(1024 * 1024), b""):
+                      digest.update(chunk)
+              databases[name] = {**metadata, "sha256": digest.hexdigest()}
+          (Path(os.environ["EVIDENCE_DIR"]) / "scanner.json").write_text(json.dumps({
+              "image": os.environ["TRIVY_IMAGE"], "databases": databases,
+              "prepared_at": now.isoformat(),
+          }, indent=2) + "\n")
+          PY
+
+      - name: Collect backend SBOM and vulnerabilities
+        if: matrix.backend
+        timeout-minutes: 20
+        env:
+          IMAGE_ID: ${{ steps.backend_image.outputs.image_id }}
+          EVIDENCE_DIR: ${{ runner.temp }}/backend-evidence
+          SCANNER_CACHE: ${{ runner.temp }}/backend-scanner
+        run: |
+          set -euo pipefail
+          # Use the loaded image by immutable config ID; never export a second image archive.
+          trivy() {
+            docker run --rm --network none --read-only --cap-drop ALL \
+              --security-opt no-new-privileges:true --tmpfs /tmp:rw,nosuid,nodev,size=1g \
+              --volume /var/run/docker.sock:/var/run/docker.sock:ro \
+              --volume "$SCANNER_CACHE:/cache:rw" \
+              --volume "$EVIDENCE_DIR:/evidence:rw" --workdir /evidence \
+              "$TRIVY_IMAGE" image --image-src docker --cache-dir /cache \
+              --skip-db-update --skip-java-db-update --offline-scan \
+              --timeout 9m --scanners vuln --list-all-pkgs --ignore-unfixed=false \
+              --exit-code 0 "$@" "$IMAGE_ID"
+          }
+          trivy --format json --output /evidence/vulnerabilities.json
+          trivy --format cyclonedx --output /evidence/sbom.cdx.json
+
+      - name: Verify and hash backend evidence
+        if: ${{ always() && matrix.backend }}
+        timeout-minutes: 5
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/backend-evidence
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          from datetime import datetime, timedelta, timezone
+          from pathlib import Path
+
+          root = Path(os.environ["EVIDENCE_DIR"])
+          root.mkdir(parents=True, exist_ok=True)
+          required = ("image.json", "scanner.json", "vulnerabilities.json", "sbom.cdx.json")
+          hashes = {name: hashlib.sha256((root / name).read_bytes()).hexdigest()
+                    for name in required if (root / name).is_file()}
+          # Retain partial evidence and its hashes even when a producer failed.
+          (root / "SHA256SUMS").write_text("".join(f"{digest}  {name}\n" for name, digest in hashes.items()))
+          if set(hashes) != set(required):
+              raise SystemExit("Missing required backend evidence")
+          identity = json.loads((root / "image.json").read_text())
+          scanner = json.loads((root / "scanner.json").read_text())
+          report = json.loads((root / "vulnerabilities.json").read_text())
+          sbom = json.loads((root / "sbom.cdx.json").read_text())
+          if not re.fullmatch(r"sha256:[0-9a-f]{64}", identity["image_id"]):
+              raise SystemExit("Invalid immutable image identity")
+          if not re.fullmatch(r"[0-9a-f]{40}", identity["source_sha"]) or not identity["os"] or not identity["architecture"]:
+              raise SystemExit("Missing source or platform identity")
+          if report.get("Metadata", {}).get("ImageID") != identity["image_id"]:
+              raise SystemExit("Trivy scanned a different image")
+          if not any(result.get("Packages") for result in report.get("Results", [])):
+              raise SystemExit("Trivy report lacks package inventory")
+          if sbom.get("bomFormat") != "CycloneDX" or not sbom.get("components"):
+              raise SystemExit("Missing CycloneDX component inventory")
+          now = datetime.now(timezone.utc)
+          if scanner["image"] != os.environ["TRIVY_IMAGE"]:
+              raise SystemExit("Scanner identity does not match the pinned tool")
+          for name in ("db", "java-db"):
+              database = scanner["databases"][name]
+              updated = datetime.fromisoformat(database["UpdatedAt"].replace("Z", "+00:00"))
+              if updated.tzinfo is None or not -timedelta(minutes=5) <= now - updated <= timedelta(hours=24):
+                  raise SystemExit(f"Scanner database is stale or future-dated: {name}")
+              if not re.fullmatch(r"[0-9a-f]{64}", database["sha256"]):
+                  raise SystemExit("Invalid database hash")
+          manifest = {
+              "scope": "Raw backend candidate evidence; no vulnerability admission decision",
+              "image": identity, "scanner": scanner, "reports": hashes,
+              "verified_at": now.isoformat(),
+          }
+          manifest_path = root / "manifest.json"
+          manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+          with (root / "SHA256SUMS").open("a") as sums:
+              sums.write(f"{hashlib.sha256(manifest_path.read_bytes()).hexdigest()}  manifest.json\n")
+          PY
+
+      - name: Upload backend evidence
+        if: ${{ always() && matrix.backend }}
+        timeout-minutes: 5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: backend-candidate-evidence-${{ matrix.name }}
+          path: ${{ runner.temp }}/backend-evidence/
+          if-no-files-found: error
+          retention-days: 14
 
   container-build-check:
     name: container-build-check

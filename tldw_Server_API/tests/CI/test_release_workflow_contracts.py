@@ -1,3 +1,9 @@
+import hashlib
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -173,3 +179,120 @@ def test_frontend_required_enforces_shared_hooks_and_preserves_full_lint() -> No
     assert hooks["working-directory"] == "apps/tldw-frontend"
     assert hooks["run"] == "bun scripts/check-shared-hooks.mjs"
     assert not hooks.get("continue-on-error", False)
+
+
+def test_backend_scan_is_pinned_offline_and_does_not_publish_or_filter_findings() -> None:
+    """A scanner downgrade, network fallback or partial upload must fail the contract."""
+    job = _load(".github/workflows/container-build-check.yml")["jobs"]["build"]
+    steps = job["steps"]
+    prepare = _get_step(steps, "Prepare backend scanner evidence")
+    scan = _get_step(steps, "Collect backend SBOM and vulnerabilities")
+    finalize = _get_step(steps, "Verify and hash backend evidence")
+    upload = _get_step(steps, "Upload backend evidence")
+    assert steps.index(prepare) > steps.index(_get_step(steps, "Verify backend local package imports"))
+    assert job["env"]["TRIVY_IMAGE"] == (
+        "ghcr.io/aquasecurity/trivy:0.74.0@sha256:" "62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969"
+    )
+    assert prepare["if"] == scan["if"] == "matrix.backend"
+    assert "docker.sock" not in prepare["run"]
+    assert "--download-db-only" in prepare["run"]
+    for required in (
+        "--network none",
+        "--read-only",
+        "--cap-drop ALL",
+        "no-new-privileges",
+        "--image-src docker",
+        "--skip-db-update",
+        "--scanners vuln",
+        "--list-all-pkgs",
+        "--ignore-unfixed=false",
+        '"$IMAGE_ID"',
+    ):
+        assert required in scan["run"]
+    assert scan["env"]["IMAGE_ID"] == "${{ steps.backend_image.outputs.image_id }}"
+    assert "--severity" not in scan["run"]
+    assert "--input" not in scan["run"]
+    assert "docker save" not in scan["run"]
+    assert 1 <= scan["timeout-minutes"] <= 20
+    for step in (prepare, scan, finalize, upload):
+        assert not step.get("continue-on-error", False)
+    assert finalize["if"] == upload["if"] == "${{ always() && matrix.backend }}"
+    assert upload["uses"] == "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+    assert upload["with"]["if-no-files-found"] == "error"
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        None,
+        "stale",
+        "future",
+        "wrong_image",
+        "empty_packages",
+        "missing_sbom",
+        "wrong_scanner",
+        "invalid_source",
+        "empty_sbom",
+        "naive_time",
+    ],
+)
+def test_backend_evidence_verifier_rejects_invalid_artifacts(tmp_path: Path, defect: str | None) -> None:
+    """Execute the actual workflow verifier against independent artifact fixtures."""
+    steps = _load(".github/workflows/container-build-check.yml")["jobs"]["build"]["steps"]
+    step = _get_step(steps, "Verify and hash backend evidence")
+    script = step["run"].split("python - <<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
+    image_id = "sha256:" + "a" * 64
+    now = datetime.now(timezone.utc)
+    age = timedelta(hours=25) if defect == "stale" else timedelta(minutes=-10 if defect == "future" else 1)
+    identity = {
+        "image_id": image_id,
+        "source_sha": "bad" if defect == "invalid_source" else "b" * 40,
+        "os": "linux",
+        "architecture": "amd64",
+    }
+    scanner_pin = "scanner@sha256:" + "c" * 64
+    timestamp = (now - age).replace(tzinfo=None) if defect == "naive_time" else now - age
+    scanner = {
+        "image": "wrong" if defect == "wrong_scanner" else scanner_pin,
+        "databases": {name: {"UpdatedAt": timestamp.isoformat(), "sha256": "d" * 64} for name in ("db", "java-db")},
+    }
+    report = {
+        "Metadata": {"ImageID": "wrong" if defect == "wrong_image" else image_id},
+        "Results": [
+            {
+                "Packages": [] if defect == "empty_packages" else [{"Name": "example", "Version": "1"}],
+                "Vulnerabilities": [{"VulnerabilityID": "CVE-example", "Severity": "CRITICAL"}],
+            }
+        ],
+    }
+    files = {
+        "image.json": identity,
+        "scanner.json": scanner,
+        "vulnerabilities.json": report,
+        "sbom.cdx.json": {
+            "bomFormat": "CycloneDX",
+            "components": [] if defect == "empty_sbom" else [{"name": "example", "version": "1"}],
+        },
+    }
+    for name, payload in files.items():
+        if defect != "missing_sbom" or name != "sbom.cdx.json":
+            (tmp_path / name).write_text(json.dumps(payload))
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        env={**os.environ, "EVIDENCE_DIR": str(tmp_path), "TRIVY_IMAGE": scanner_pin},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert (result.returncode == 0) is (defect is None), result.stderr
+    if defect is None:
+        manifest = json.loads((tmp_path / "manifest.json").read_text())
+        assert manifest["image"]["image_id"] == image_id
+        assert (
+            manifest["reports"]["vulnerabilities.json"]
+            == hashlib.sha256((tmp_path / "vulnerabilities.json").read_bytes()).hexdigest()
+        )
+        assert (
+            json.loads((tmp_path / "vulnerabilities.json").read_text())["Results"][0]["Vulnerabilities"]
+            == report["Results"][0]["Vulnerabilities"]
+        )

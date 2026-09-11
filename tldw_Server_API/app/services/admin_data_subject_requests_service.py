@@ -511,22 +511,25 @@ async def _erase_embeddings(user_id: int) -> int:
         try:
             manager = _get_chroma_manager_for_user(user_id)
         except Exception as exc:
-            # Check whether a chroma_storage directory exists for this user.
-            # If it does, data might be present and we must not silently succeed.
-            from tldw_Server_API.app.core.config import settings as app_settings
+            # Match the manager's normalization without creating storage. As in
+            # preview, only confirmed absence makes an unavailable store empty.
+            try:
+                from tldw_Server_API.app.core.config import settings as app_settings
 
-            user_db_base = app_settings.get("USER_DB_BASE_DIR")
-            if not user_db_base:
-                project_root = Path(__file__).resolve().parents[3]
-                user_db_base = str(project_root / "Databases" / "user_databases")
-            chroma_dir = Path(user_db_base) / str(user_id) / "chroma_storage"
-            if chroma_dir.exists():
-                raise RuntimeError(
-                    f"ChromaDB unavailable for user {user_id} but chroma_storage "
-                    f"directory exists — cannot confirm erasure: {exc}"
-                ) from exc
-            # No storage directory → nothing to erase
-            return 0
+                user_db_base = app_settings.get("USER_DB_BASE_DIR") or (
+                    Path(__file__).resolve().parents[3] / "Databases" / "user_databases"
+                )
+                chroma_dir = (
+                    DatabasePaths.resolve_user_base_directory(user_id, base_dir_override=user_db_base)
+                    / "chroma_storage"
+                )
+                try:
+                    chroma_dir.stat()
+                except FileNotFoundError:
+                    return 0
+            except Exception as storage_exc:
+                raise RuntimeError("DSR embedding storage availability could not be determined") from storage_exc
+            raise RuntimeError("DSR embedding store unavailable; cannot confirm erasure") from exc
 
         try:
             collections = manager.list_collections()

@@ -4,7 +4,7 @@ title: 'Re-enable frontend type-safety and lint gates, harden persisted stores'
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-09-10 21:00'
+updated_date: '2026-09-11 14:42'
 labels:
   - tech-debt
   - high
@@ -88,4 +88,6 @@ PR2761 fourth batch independently reviewed: notification account-switch recovery
 PR2761 bounded RAG hook boundary plan: reproduced exactly128 react-hooks/refs diagnostics in RagSearchBar. Its searchInputRef is declared/returned by useRagSearchState but only attached/read by RagSearchBar. Move the DOM ref into its owning component and remove it from the general search-state return object; preserve all state/search behavior and existing effect timing. Verify input autofocus lifecycle with focused characterizations, scoped compiler-rule ESLint, existing RAG suites, and typecheck. No rule ignores/disables, global rule flips, release metadata, commits, pushes, builds, installs, or subagents.
 
 PR2761 RAG input-ref boundary verified: moved the UI-only InputRef into RagSearchBar and removed it from useRagSearchState return, preserving focus effect/dependencies and all search state. Exactly128 scoped refs errors reproduced before; final component/hook/test four-rule lint exits0 with25 existing warnings. Four runtime characterizations plus seven existing RAG tests pass (11 total); full WebUI nonincremental typecheck and separate new-test typecheck pass; diff check passes. Bandit invoked from project venv reports three TypeScript AST parser errors, not a successful scan. Evidence: Docs/Evidence/PR2761-rag-input-ref.md. No suppressions, global rules, dependencies, release metadata, commits, or pushes changed; broader AC2/AC3 remain open. Source frozen for parent review/integration.
+
+PR2761 release-specific read-only reconciliation at08946442af: required lint, nonincremental typecheck, shared-hook and five-module strict-boundary gates pass. AC1 permits separate typechecking; AC2 requires incremental strictness plus tracked expansion, not blanket immediate strict:true. AC3 remains open: four compiler-era hook rules disabled,265 findings across138files; all source/config hashes match recordedinventory. Against frozen dev6c4bdcbc,257findings are in133untouchedfiles and8in5followupfiles; no new runtime defect demonstrated by this inventory. Proposed release scope decision (NOT YET APPROVED): retain all current gates, publish no frontend binaries, leave global four-rule enforcement in this owning task without claiming full compiler-rule compliance forv0.1.42. Release plan4.2 requires explicit requester acceptance before this dependency is scope-cleared.
 <!-- SECTION:NOTES:END -->

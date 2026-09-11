@@ -1,0 +1,72 @@
+{
+  "verified_head": "08946442af85f58f8078c2e3df1e4dc42bb40876",
+  "counts": {
+    "SKIPPED": 38,
+    "SUCCESS": 75
+  },
+  "required_gates": [
+    {
+      "link": "https://github.com/rmusser01/tldw_server/actions/runs/34564977708/job/103157964853",
+      "name": "frontend-required",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/rmusser01/tldw_server/actions/runs/34564977702/job/103156978483",
+      "name": "container-build-check",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/rmusser01/tldw_server/actions/runs/34564982305/job/103155413906",
+      "name": "e2e-required",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/rmusser01/tldw_server/actions/runs/34564977686/job/103155386853",
+      "name": "coverage-required",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/rmusser01/tldw_server/runs/103155383138",
+      "name": "CodeQL",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/rmusser01/tldw_server/actions/runs/34564977687/job/103155229483",
+      "name": "security-required",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/rmusser01/tldw_server/actions/runs/34564977698/job/103155243462",
+      "name": "backend-required",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "",
+      "name": "frontend-license-policy/trusted/main",
+      "state": "SUCCESS"
+    }
+  ],
+  "human_summary": {
+    "status": "waived_by_requester",
+    "scope": "PR2761 only",
+    "request": "continue, the human summary aint happening for this, this is too large of a pr for that to make sense",
+    "repository_wide_policy_changed": false
+  },
+  "other_risk_waivers": [],
+  "planned_followup": "Normalized DSR erasure fix, controlled recovery evidence, and exact-backend-image security inventory; fresh CI required after source changes.",
+  "continuation_verification": {
+    "dsr": {
+      "tests_passed": 61,
+      "independent_review": "approved",
+      "evidence": "Docs/Evidence/PR2761-dsr-recovery-profile.md"
+    },
+    "backend_inventory": {
+      "agent_selection_passed": 38,
+      "root_workflow_tests_passed": 21,
+      "independent_review": "approved",
+      "style": "Black, Ruff, Actionlint syntax passed",
+      "bandit": "Inline verifier zero findings/errors; tests retain assertions and trusted sys.executable subprocess warnings without suppression",
+      "runtime": "Hosted Docker-daemon collection pending; no vulnerability admission decision"
+    }
+  }
+}

@@ -7,61 +7,73 @@
 
 ## Current release status
 
-### Current-dev continuation (2026-09-11 UTC)
+### Continuation and explicit summary waiver (2026-09-11)
 
-The requester confirmed promotion of current remote `dev` followed by a release.
-Reuse this candidate and TASK-13013.3. Freeze the additional dev input at
-`6c4bdcbc48f4fe4bab7019d59ad8cf962ab240da` (PRs #2940 and #2941), retaining
-all existing release fixes and the approved legal dates.
+The requester instructed: “continue, the human summary aint happening for this,
+this is too large of a pr for that to make sense”. This explicitly waives the
+human-written Change summary requirement **for PR2761 only**. Record the waiver
+as a requester decision; do not present agent prose as human-authored or change
+the repository-wide policy. It does not waive other release risks or approval
+of a materially changed publication scope.
 
-1. Integrate the frozen dev input without rewriting history; verify the Buddy
-   portability and lifecycle tests. Status: Complete.
-2. Investigate current-head frontend failures, refresh source/manifest and
-   release notes, and run focused release/security checks. Status: In Progress.
-3. Push the complete source/metadata batch to PR #2761, obtain fresh CI, and
-   retain draft status until all recorded gates and human review are satisfied.
-   Status: In Progress; follow-up security batch verified, fresh CI pending.
+Verified head **08946442af85f58f8078c2e3df1e4dc42bb40876** has **75 passing
+checks, 38 skips, no failed or pending checks, and zero open CodeQL alerts**.
+All current required backend, security, coverage, frontend, E2E, container and
+trusted-license checks pass. CodeQL remediation TASK13013.3.1 is Done, with
+424 individually verified dispositions and source repairs. See
+[final CodeQL result](../../Evidence/PR2761-codeql-final-result.json).
 
-At the initial `43165c8c82` snapshot, 72 checks pass, none remain pending, and Characters Harness,
-frontend unit shard 5, frontend-required and CodeQL fail. Characters Harness
-times out in the import-completion test; shard 5 fails to find the post-copy
-pack-refresh error in VisualPackEditor. CodeQL reports 7 critical and 414 high
-changed-code alerts. These findings are unresolved, not waived.
-
-The clean merge includes Buddy attribution validation/portability and the new
-route lifecycle regression. Current verification: 44 backend portability tests
-pass with one skip; the lifecycle test passes; all 65 VisualPackEditor tests
-pass; the isolated Characters import-completion test passes. Full Characters
-harness verification is running. Ruff is clean and Bandit reports zero findings
-on the integrated Python scope. The release/docs/CI helper selection passes 79
-tests; the strict docs test fails in the installed Git-revision plugin while
-creating a multiprocessing semaphore (`SemLock`, errno 28), both inside and
-outside the sandbox. This is the existing host limitation; the standard test and
-build remain unchanged and must pass remotely.
-
-The CodeQL review resolved 422 individually evidenced false positives or synthetic-test findings, including the requester-approved 416 remaining global dispositions. Actual UAT persistence, snapshot/Research session alias, Whisper and checkpoint probe repairs are committed with regression tests. Main checkpoint ownership findings remain undismissed. See [current remediation status](2026-09-11-pr2761-codeql-remediation-plan.md) and [disposition ledger](../../Evidence/PR2761-codeql-dispositions.md); hosted analyzer closure is still pending.
-
-The requester reports no existing deployment. An installed-version rollback
-baseline is therefore not applicable to this deployment; this does not waive
-fresh-install, candidate recovery, migration-compatibility documentation,
-security, lifecycle, supply-chain, capacity or human-review requirements.
-
-**Release is not ready to merge or publish.** The candidate same-image backup/restore smoke now passes; the published rollback baseline is broken. See [recovery evidence](../../Evidence/PR2761-candidate-recovery.md). This document is the active execution plan for [PR #2761](https://github.com/rmusser01/tldw_server/pull/2761), including unfinished work. The July design is historical; its source/date values are superseded here.
-
-| Item | Recorded state |
+| Item | Current state |
 | --- | --- |
-| Integrated release code and verified blocker fixes | `968ad1aaf95fccac966cfb31a8ac981508befb88`; final CodeQL path repairs included |
-| Latest observed CI head | `f7c8af3af397a0eeec355a1cea333996d2e8287c`; 73 checks pass, one frontend aggregate runs, 38 skip and CodeQL fails. Verified follow-up source requires a new current-head scan. |
-| Protected source snapshot | `968ad1aaf95fccac966cfb31a8ac981508befb88`, 7,117 files; manifest `e38f39788bdbf6ee691a27cc91357e0d92a6b21a47355d745409938ea6e66f76` |
-| PR branch / target | `codex/release-main-0.1.42` → `main` |
-| PR state at inspection | Draft; no merge or publication performed |
-| Remote CI snapshot | On `6150040801`, container aggregate/all five images, E2E, backend/security/license and all eight frontend shards pass; frontend aggregate and coverage still run. Completed CodeQL inventory: 447 open instances, all on `6150040801` (7 critical, 437 high, 3 medium). Its failed changed-code aggregate reports 424 alerts; that is a different measure from all open PR instances. |
-| Latest metadata checks | 37 passed, one local docs-build test deselected due host multiprocessing failure; unchanged standard test/build passes remotely. Other scoped verification is recorded below. |
-| Standard docs evidence | Unchanged standard build and docs suite pass in CI [run 34491682436](https://github.com/rmusser01/tldw_server/actions/runs/34491682436/job/102919740634). |
-| Latest observed GitHub publication | v0.1.38; no remote v0.1.39–v0.1.42 tags |
-| Primary checkout | `dev`, unchanged; its local `a27ecb12f0` tracking commit is outside this release freeze |
+| Frozen dev input | `6c4bdcbc48f4fe4bab7019d59ad8cf962ab240da` through PR2941; do not silently add later dev work |
+| Verified application source | `2e037be4452ddae74807ab672fec94a88c030cc0` before this continuation's DSR repair |
+| Protected source record | `2e037be4452ddae74807ab672fec94a88c030cc0`; 7,117 files; manifest `e38f39788bdbf6ee691a27cc91357e0d92a6b21a47355d745409938ea6e66f76` |
+| Release / Countdown dates | Approved 2026-09-10 / 2028-09-10T12:00:00Z; final publication-date decision remains separate |
+| PR | `codex/release-main-0.1.42` → `main`; draft; no merge/tag/publication |
+| Human Change summary | Explicitly waived by requester for this PR |
+| Existing deployment | None, per requester; deployed-version rollback target is not applicable |
 
-CI counts are an observation, not a permanent state. Documentation follow-ups advance the PR head; always retrieve its current SHA and require results for that SHA before merge. The next work is **Stage 4.1: complete fresh-head CI/security review**, alongside the isolated backup/upgrade/restore rehearsal and remaining dependency work in Stage 4. No gate is waived by this plan.
+Remaining work is assessed against a defined release profile, not assumed to
+require completion of every broad backlog initiative. TASK12116 explicitly
+allows incremental strictness; its remaining four-rule hook enforcement has
+265 unchanged inventoried findings, which do not by themselves establish 265
+runtime release regressions. Any decision to exclude the remaining enforcement
+contract must be recorded explicitly; current gates remain enabled.
+
+Current supply-chain PR2869 is `ee856c75839e9d2746127cec733b5b0ddd2bffb3`,
+substantially newer than the historical observations below. It has verified
+source scans and several image admissions, but app/audio image findings remain.
+Its five image artifacts were inspected read-only: app and audio-worker each
+have 155 unexcepted rows (153 FFmpeg and two libxml2); worker and both frontend
+images pass that branch's admission policy. Its exceptions and image results
+do not transfer automatically to this branch's floating dependencies. This
+continuation adds raw security inventory for the exact backend images built
+by this candidate, without accepting findings or changing publication policy.
+
+The lifecycle review reproduced a normalized embedding-storage false-success
+case in erasure; the minimal repair passed 61 tests and independent review under
+TASK13013.8. Selected notes recovery is demonstrated with real SQLite stores
+and the existing replacement-request API after original work has stopped,
+retaining conflict rejection and durable successful-request linkage. Operators
+must preserve an external recovery receipt before executing because failed
+execution may replace request notes. See
+[the tested recovery profile](../../Evidence/PR2761-dsr-recovery-profile.md).
+No automatic retry or universal-erasure claim is introduced.
+
+Publication inventory: 0.1.42 has no GitHub tag/release or PyPI files, and the
+public app container tag returns not found. Worker and audio-worker registry
+reads return authorization errors; the current GitHub token lacks
+`read:packages`, so those responses do not establish tag absence. Main merge
+triggers publication workflows and cannot serve as an intermediate staging
+step while artifact qualification remains open.
+
+Capacity still requires a final exact artifact. The old 7GiB disk stop is
+historical: the current host has 351GiB free and an ARM Docker VM. A native
+amd64 run remains preferable for the intended amd64 profile. Do not use old,
+different-source images or unexecuted preparation as a passing capacity result.
+
+This section supersedes stale current-head, CodeQL, deployment-baseline and
+summary-placeholder statements in the historical execution notes below.
 
 ## Stage 1: Recover and freeze
 **Goal:** Restore the existing release branch and identify the current inputs.
@@ -247,8 +259,8 @@ update and was never recorded as passing.
 ### 4.1 Current-head CI and local docs failure — agent
 
 - [x] Inspect the failed [CodeQL check](https://github.com/rmusser01/tldw_server/runs/102918248263), retain its failure details, and determine whether it is a code, configuration, permission, or infrastructure failure. The snapshot alone does not establish the cause.
-- [ ] Read all current-head check results and fix actionable regressions. Do not cancel required checks to manufacture readiness. After changes, push and revalidate the new head.
-- [ ] Record success and run URLs for `backend-required`, `security-required`, `coverage-required`, `frontend-required`, `e2e-required`, `container-build-check`, and `frontend-license-policy/trusted/main`; capture remaining failing review/security checks as well.
+- [x] Read all current-head check results and fix actionable regressions. Do not cancel required checks to manufacture readiness. After changes, push and revalidate the new head.
+- [x] Record success and run URLs for `backend-required`, `security-required`, `coverage-required`, `frontend-required`, `e2e-required`, `container-build-check`, and `frontend-license-policy/trusted/main`; capture remaining failing review/security checks as well.
 - [x] Re-run `test_strict_local_build_preserves_canonical_site_sources` and the unchanged strict MkDocs command on a host or CI runner that can allocate multiprocessing semaphores. Attach successful evidence for the candidate. The serial build is useful evidence but does not close this failed test.
 
 Read-only status commands:
@@ -285,7 +297,7 @@ Inspect existing child work and merged evidence before starting duplicate implem
 
 - [ ] Reconcile repository 0.1.39–0.1.41 metadata with GitHub, PyPI and container publication inventories. Record each existing version, source commit, artifact digest, and publication status. Do not invent missing releases or recreate tags merely to match documentation.
 - [ ] Confirm 0.1.42 is unused across the intended publication targets before publication. If any artifact already exists, establish its provenance and follow recovery instead of overwriting it.
-- [ ] Select a verified deployed rollback version and its immutable image/package identity. `v0.1.38` being GitHub's latest release does not prove it is the deployed rollback target.
+- [x] Deployed rollback target is not applicable: requester confirms no existing deployment. Preserve same-image recovery and migration limitations; do not claim a working published0.1.38 baseline.
 - [ ] Assess authentication, conversation, notes-sync, presentation, personal-context and webhook schema changes from that target to the candidate; record configuration changes and incompatible downgrade paths.
 - [ ] Rehearse backup, upgrade/health verification, and restore using representative data. Cover databases, uploaded content and configuration. Record backup checksums, restore commands and results. Do not assume an older binary can read migrated databases.
 - [x] Complete a separately scoped candidate same-image SQLite/Redis backup/restore smoke: authenticated account/note/conversation/attachment checks, config-byte equality, Redis RDB→AOF recovery, and all 12 databases passing integrity before and after. [Evidence](../../Evidence/PR2761-candidate-recovery.md). The published 0.1.38 startup failure still blocks the cross-version item above.
@@ -296,11 +308,11 @@ Use [Production Reference Deployment](../../Deployment/Production_Reference_Depl
 
 ### 4.4 Human review — requester
 
-- [ ] Write the PR's `Change summary` in the requester's own words, explaining what changed and why the implementation choices were made, per [the repository policy](../AI_GENERATED_PR_CHANGE_SUMMARY_POLICY_2026_04_17.md). The current placeholder does not satisfy this gate.
+- [x] Requester explicitly waived the human-written Change summary requirement for PR2761 on2026-09-11; record the waiver rather than fabricated human authorship. Repository-wide policy remains unchanged.
 - [ ] Review the completed [0.1.42 legal record](../../../LICENSES/releases/0.1.42/release.json), [Countdown grant](../../../LICENSES/releases/0.1.42/PolyForm-Countdown-1.0.0.txt), source revision and manifest. The `today/now` response authorized refreshing dates; it did not record final legal-file review or waive other release gates.
 - [ ] If release day changes before publication, obtain revised release/Countdown dates and refresh every dated surface, manifest verification and review as required by the original design.
 
-**Exit evidence:** Requester-owned PR summary and an explicit review record covering the final legal record and source snapshot. Agent-generated copy cannot substitute for either.
+**Exit evidence:** Recorded requester waiver of the Change summary plus an explicit review record covering the final legal record and source snapshot. The summary waiver does not imply legal-file review.
 
 ## Stage 5: Merge, publish, verify and sync
 **Goal:** Publish exactly the reviewed candidate and prove source/artifact/rollback lineage.
