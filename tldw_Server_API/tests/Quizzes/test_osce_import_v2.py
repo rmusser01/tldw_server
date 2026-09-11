@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from copy import deepcopy
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -25,6 +26,10 @@ from tldw_Server_API.app.api.v1.schemas.quizzes import QuizExportV2  # noqa: E40
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (  # noqa: E402
     User,
     get_request_user,
+)
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig  # noqa: E402
+from tldw_Server_API.app.core.DB_Management.backends.factory import (  # noqa: E402
+    DatabaseBackendFactory,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (  # noqa: E402
     CharactersRAGDB,
@@ -195,7 +200,7 @@ def _question_entry() -> dict[str, Any]:
     }
 
 
-def _v2_payload(*entries: dict[str, Any]) -> dict[str, Any]:
+def _v2_payload(*entries: Any) -> dict[str, Any]:
     return {
         "export_format": "tldw.quiz.export.v2",
         "exported_at": "2026-09-10T12:00:00Z",
@@ -258,6 +263,32 @@ def test_v2_contract_is_strict_and_discriminated() -> None:
     invalid["quizzes"][1]["stations"][0]["candidate_notes"] = "must not be portable"
     with pytest.raises(ValidationError):
         QuizExportV2.model_validate(invalid)
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("quiz", "name"), "n" * 256),
+        (("quiz", "description"), "d" * 2001),
+        (("quiz", "workspace_id"), "w" * 129),
+        (("quiz", "workspace_tag"), "t" * 256),
+        (("quiz", "client_id"), "c" * 256),
+        (("quiz", "created_at"), "a" * 65),
+        (("quiz", "source_bundle_json", 0, "source_id"), "s" * 513),
+    ],
+)
+def test_v2_contract_bounds_portable_metadata(
+    path: tuple[str | int, ...],
+    value: str,
+) -> None:
+    payload = _v2_payload(_osce_entry(_station_export()))
+    target: Any = payload["quizzes"][0]
+    for component in path[:-1]:
+        target = target[component]
+    target[path[-1]] = value
+
+    with pytest.raises(ValidationError):
+        QuizExportV2.model_validate(payload)
 
 
 def test_v2_mixed_import_rekeys_osce_and_downgrades_untrusted_state(
@@ -416,6 +447,84 @@ def test_invalid_v2_osce_entry_does_not_leave_quiz_shell_and_valid_sibling_succe
     ).fetchone()["count"] == 0
 
 
+def test_v2_raw_entry_failures_are_isolated_and_count_raw_questions(
+    client: TestClient,
+) -> None:
+    invalid_questions = _question_entry()
+    invalid_questions["quiz"]["name"] = "Q" * 300 + "private-name-tail"
+    invalid_questions["questions"] = [
+        invalid_questions["questions"][0],
+        {"question_type": "private-invalid-type", "question_text": "private question"},
+    ]
+    malformed_questions = _question_entry()
+    malformed_questions["quiz"]["name"] = "Malformed questions"
+    malformed_questions["questions"] = "private non-list question data"
+
+    response = client.post(
+        "/api/v1/quizzes/import/json",
+        json=_v2_payload(
+            "private non-mapping entry /private/import.json",
+            invalid_questions,
+            malformed_questions,
+            _question_entry(),
+        ),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["imported_quizzes"] == 1
+    assert payload["failed_quizzes"] == 3
+    assert payload["imported_questions"] == 1
+    assert payload["failed_questions"] == 2
+    assert [item["source_index"] for item in payload["items"]] == [3]
+    assert [error["error"] for error in payload["errors"]] == [
+        "Invalid v2 quiz export entry",
+        "Invalid question quiz export entry",
+        "Invalid question quiz export entry",
+    ]
+    assert payload["errors"][0]["quiz_name"] is None
+    assert len(payload["errors"][1]["quiz_name"]) == 255
+    assert payload["errors"][2]["quiz_name"] == "Malformed questions"
+    assert "private" not in str(payload).lower()
+
+
+def test_v2_workspace_and_persistence_errors_are_fixed_and_bounded(
+    client: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    missing_workspace = _question_entry()
+    missing_workspace["quiz"]["name"] = "Missing workspace"
+    missing_workspace["quiz"]["workspace_id"] = "private-workspace-id"
+
+    def fail_create_quiz(**_kwargs: Any) -> int:
+        raise CharactersRAGDBError(
+            "private persistence detail /private/import.db with sk-import-secret"
+        )
+
+    persistence_failure = _question_entry()
+    persistence_failure["quiz"]["name"] = "Persistence failure"
+    monkeypatch.setattr(quizzes_db, "create_quiz", fail_create_quiz)
+
+    response = client.post(
+        "/api/v1/quizzes/import/json",
+        json=_v2_payload(missing_workspace, persistence_failure),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["imported_quizzes"] == 0
+    assert payload["failed_quizzes"] == 2
+    assert payload["failed_questions"] == 2
+    assert [error["error"] for error in payload["errors"]] == [
+        "Failed to import question quiz",
+        "Failed to import question quiz",
+    ]
+    assert "private-workspace-id" not in str(payload)
+    assert "/private/import.db" not in str(payload)
+    assert "sk-import-secret" not in str(payload)
+
+
 def test_second_station_failure_rolls_back_quiz_and_all_stations(
     client: TestClient,
     quizzes_db: CharactersRAGDB,
@@ -460,3 +569,83 @@ def test_second_station_failure_rolls_back_quiz_and_all_stations(
     assert quizzes_db.execute_query(
         "SELECT COUNT(*) AS count FROM osce_stations"
     ).fetchone()["count"] == 0
+
+
+@pytest.mark.timeout(120)
+def test_postgres_v2_import_ignores_owner_and_provenance_claims(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    owner_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    attacker_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    owner = CharactersRAGDB(
+        Path(":memory:"),
+        client_id="postgres-import-owner",
+        backend=owner_backend,
+    )
+    attacker = CharactersRAGDB(
+        Path(":memory:"),
+        client_id="postgres-import-attacker",
+        backend=attacker_backend,
+    )
+
+    def override_get_db():
+        yield owner
+
+    async def override_user():
+        return User(
+            id=101,
+            username="postgres-import-owner",
+            email="postgres-import-owner@example.com",
+            is_active=True,
+            roles=["admin"],
+            is_admin=True,
+        )
+
+    try:
+        TestConfig.setup_test_environment()
+        fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_get_db
+        fastapi_app.dependency_overrides[get_request_user] = override_user
+        entry = _osce_entry(_station_export())
+        entry["quiz"]["workspace_tag"] = "workspace:postgres-import"
+        entry["quiz"]["client_id"] = "unknown"
+        entry["stations"][0]["provenance"] = {
+            "client_id": "postgres-import-attacker",
+            "verification": "attacker-claimed",
+        }
+
+        with TestClient(fastapi_app, headers=AUTH_HEADERS) as test_client:
+            response = test_client.post(
+                "/api/v1/quizzes/import/json",
+                json=_v2_payload(entry),
+            )
+
+        assert response.status_code == 200, response.text
+        item = response.json()["items"][0]
+        quiz_id = item["quiz_id"]
+        station_id = item["station_ids"][0]
+        stored_quiz = owner.get_quiz(quiz_id)
+        stored_station = owner.get_osce_station(quiz_id, station_id)
+        assert stored_quiz is not None
+        assert stored_quiz["client_id"] == owner.client_id
+        assert stored_quiz["client_id"] not in {"unknown", attacker.client_id}
+        assert stored_station is not None
+        assert stored_station["origin"] == "manual"
+        assert stored_station["provenance"] is None
+        assert stored_station["source_bundle"] == []
+        assert stored_station["verification_state"] == "manually_authored"
+        assert owner.list_quizzes(
+            workspace_tag="workspace:postgres-import",
+            activity_type="osce",
+            include_workspace_items=True,
+        )["count"] == 1
+        assert attacker.get_quiz(quiz_id) is None
+        assert attacker.list_quizzes(
+            workspace_tag="workspace:postgres-import",
+            activity_type="osce",
+            include_workspace_items=True,
+        ) == {"items": [], "count": 0}
+    finally:
+        fastapi_app.dependency_overrides.clear()
+        TestConfig.reset_settings()
+        attacker.close_all_connections()
+        owner.close_all_connections()

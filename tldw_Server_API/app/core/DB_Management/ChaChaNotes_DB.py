@@ -40632,6 +40632,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         sort_order: str = "desc",
         limit: int = 50,
         offset: int = 0,
+        workspace_tag: str | None = None,
     ) -> dict[str, Any]:
         """List quizzes with pagination and optional filters."""
         where_clauses = ["1=1"]
@@ -40649,6 +40650,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             params.append(workspace_id)
         elif not include_workspace_items:
             where_clauses.append("workspace_id IS NULL")
+        if workspace_tag is not None:
+            where_clauses.append("workspace_tag = ?")
+            params.append(workspace_tag)
         if activity_type is not None:
             where_clauses.append("activity_type = ?")
             params.append(self._normalize_quiz_activity(activity_type))

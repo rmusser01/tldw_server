@@ -525,15 +525,15 @@ class QuizImportRequest(BaseModel):
 
 class QuizExportSourceV2(StrictModel):
     source_type: Annotated[QuizSourceType, Field(strict=False)]
-    source_id: str = Field(min_length=1)
+    source_id: str = Field(min_length=1, max_length=512)
 
 
 class QuizExportMetadataV2(StrictModel):
     id: Any | None = None
-    name: str = Field(min_length=1)
-    description: str | None = None
-    workspace_id: str | None = None
-    workspace_tag: str | None = None
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=2000)
+    workspace_id: str | None = Field(default=None, max_length=128)
+    workspace_tag: str | None = Field(default=None, max_length=255)
     media_id: int | None = Field(default=None, ge=1)
     source_bundle_json: list[QuizExportSourceV2] | None = None
     activity_type: Literal["questions", "osce"] | None = None
@@ -543,16 +543,21 @@ class QuizExportMetadataV2(StrictModel):
     time_limit_seconds: int | None = Field(default=None, ge=1)
     passing_score: int | None = Field(default=None, ge=0, le=100)
     deleted: bool | None = None
-    client_id: str | None = None
+    client_id: str | None = Field(default=None, max_length=255)
     version: int | None = Field(default=None, ge=1)
-    created_at: str | None = None
-    last_modified: str | None = None
+    created_at: str | None = Field(default=None, max_length=64)
+    last_modified: str | None = Field(default=None, max_length=64)
 
 
 class QuizExportCitationV2(SourceCitation):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     source_type: Annotated[QuizSourceType, Field(strict=False)] | None = None
+    source_id: str | None = Field(default=None, min_length=1, max_length=512)
+    label: str | None = Field(default=None, max_length=200)
+    quote: str | None = Field(default=None, max_length=1000)
+    chunk_id: str | None = Field(default=None, min_length=1, max_length=512)
+    source_url: str | None = Field(default=None, min_length=1, max_length=2048)
 
 
 class QuizExportQuestionV2(QuizImportQuestion):
@@ -563,10 +568,10 @@ class QuizExportQuestionV2(QuizImportQuestion):
     question_type: Annotated[QuestionType, Field(strict=False)]
     source_citations: list[QuizExportCitationV2] | None = None
     deleted: bool | None = None
-    client_id: str | None = None
+    client_id: str | None = Field(default=None, max_length=255)
     version: int | None = Field(default=None, ge=1)
-    created_at: str | None = None
-    last_modified: str | None = None
+    created_at: str | None = Field(default=None, max_length=64)
+    last_modified: str | None = Field(default=None, max_length=64)
 
 
 class OsceChecklistItemExportV2(OsceChecklistItemCreate):
@@ -602,11 +607,11 @@ class OsceStationExportV2(StrictModel):
     provenance: dict[str, Any] | None = None
     source_bundle: list[QuizExportSourceV2] = Field(default_factory=list)
     verification_state: Annotated[OsceVerificationState, Field(strict=False)] | None = None
-    verification_timestamp: str | None = None
+    verification_timestamp: str | None = Field(default=None, max_length=64)
     verification_summary: str | None = Field(default=None, max_length=2000)
     deleted: bool | None = None
-    created_at: str | None = None
-    updated_at: str | None = None
+    created_at: str | None = Field(default=None, max_length=64)
+    updated_at: str | None = Field(default=None, max_length=64)
 
 
 class QuestionQuizExportV2(StrictModel):
@@ -652,7 +657,7 @@ class QuizImportV2Request(StrictModel):
 
     export_format: Literal["tldw.quiz.export.v2"]
     exported_at: Annotated[datetime, Field(strict=False)]
-    quizzes: list[dict[str, Any]]
+    quizzes: list[Any]
 
 
 def _quiz_import_payload_kind(value: Any) -> str:

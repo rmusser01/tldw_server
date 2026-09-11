@@ -80,6 +80,11 @@ router = APIRouter(prefix="/quizzes", tags=["quizzes"])
 QUIZ_EXPORT_FORMAT = "tldw.quiz.export.v1"
 QUIZ_EXPORT_FORMAT_V2 = "tldw.quiz.export.v2"
 _QUIZ_EXPORT_V2_ENTRY_ADAPTER = TypeAdapter(QuizExportV2Entry)
+_INVALID_V2_ENTRY_ERROR = "Invalid v2 quiz export entry"
+_INVALID_V2_QUESTION_ENTRY_ERROR = "Invalid question quiz export entry"
+_INVALID_V2_OSCE_ENTRY_ERROR = "Invalid OSCE quiz export entry"
+_V2_QUESTION_IMPORT_ERROR = "Failed to import question quiz"
+_V2_OSCE_IMPORT_ERROR = "Failed to import OSCE quiz"
 
 
 def _ensure_workspace_exists(db: CharactersRAGDB, workspace_id: Optional[str]) -> None:
@@ -99,14 +104,21 @@ def _format_import_error(exc: Exception, *, default_detail: str) -> str:
     return f"{default_detail}: {detail}"
 
 
-def _bounded_import_name(entry: Mapping[str, Any]) -> str | None:
+def _bounded_import_name(entry: Any) -> str | None:
+    if not isinstance(entry, Mapping):
+        return None
     quiz = entry.get("quiz")
     if not isinstance(quiz, Mapping):
         return None
     name = quiz.get("name")
     if not isinstance(name, str):
         return None
-    return name[:256]
+    return name[:255]
+
+
+def _raw_entry_list_count(entry: Mapping[str, Any], field: str) -> int:
+    value = entry.get(field)
+    return len(value) if isinstance(value, list) else 0
 
 
 def _v2_question_import_entry(entry: QuestionQuizExportV2) -> QuizImportEntry:
@@ -282,20 +294,35 @@ def import_quizzes_json(
     errors: list[QuizImportError] = []
 
     for source_index, raw_entry in enumerate(payload.quizzes):
+        is_v2_question = False
         if isinstance(payload, QuizImportV2Request):
             quiz_name = _bounded_import_name(raw_entry)
+            if not isinstance(raw_entry, Mapping):
+                failed_quizzes += 1
+                errors.append(
+                    QuizImportError(
+                        source_index=source_index,
+                        quiz_name=None,
+                        error=_INVALID_V2_ENTRY_ERROR,
+                    )
+                )
+                continue
+
             raw_activity = raw_entry.get("activity_type")
-            raw_stations = raw_entry.get("stations")
-            entry_station_count = len(raw_stations) if isinstance(raw_stations, list) else 0
+            entry_station_count = _raw_entry_list_count(raw_entry, "stations")
+            entry_question_count = _raw_entry_list_count(raw_entry, "questions")
             try:
                 v2_entry = _QUIZ_EXPORT_V2_ENTRY_ADAPTER.validate_python(raw_entry)
             except ValidationError:
                 failed_quizzes += 1
                 if raw_activity == "osce":
                     failed_stations += entry_station_count
-                    detail = "Invalid OSCE quiz export entry"
+                    detail = _INVALID_V2_OSCE_ENTRY_ERROR
+                elif raw_activity == "questions":
+                    failed_questions += entry_question_count
+                    detail = _INVALID_V2_QUESTION_ENTRY_ERROR
                 else:
-                    detail = "Invalid question quiz export entry"
+                    detail = _INVALID_V2_ENTRY_ERROR
                 errors.append(
                     QuizImportError(
                         source_index=source_index,
@@ -316,7 +343,7 @@ def import_quizzes_json(
                         QuizImportError(
                             source_index=source_index,
                             quiz_name=v2_entry.quiz.name,
-                            error="Failed to import OSCE quiz",
+                            error=_V2_OSCE_IMPORT_ERROR,
                         )
                     )
                     continue
@@ -337,6 +364,7 @@ def import_quizzes_json(
                 )
                 continue
             entry = _v2_question_import_entry(v2_entry)
+            is_v2_question = True
         else:
             entry = raw_entry
 
@@ -347,11 +375,17 @@ def import_quizzes_json(
             imported_quizzes += 1
         except (HTTPException, InputError, ConflictError, CharactersRAGDBError) as exc:
             failed_quizzes += 1
+            if is_v2_question:
+                failed_questions += len(entry.questions)
             errors.append(
                 QuizImportError(
                     source_index=source_index,
                     quiz_name=quiz_name,
-                    error=_format_import_error(exc, default_detail="Failed to create quiz"),
+                    error=(
+                        _V2_QUESTION_IMPORT_ERROR
+                        if is_v2_question
+                        else _format_import_error(exc, default_detail="Failed to create quiz")
+                    ),
                 )
             )
             continue
@@ -376,7 +410,11 @@ def import_quizzes_json(
                         source_index=source_index,
                         quiz_name=quiz_name,
                         question_index=question_index,
-                        error=_format_import_error(exc, default_detail="Failed to create question"),
+                        error=(
+                            _V2_QUESTION_IMPORT_ERROR
+                            if is_v2_question
+                            else _format_import_error(exc, default_detail="Failed to create question")
+                        ),
                     )
                 )
 

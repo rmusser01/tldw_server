@@ -5,6 +5,7 @@ from typing import Any, Callable
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.implementations import quizzes_module
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.quizzes_module import (
@@ -473,6 +474,78 @@ def test_quiz_list_requests_question_activity_and_exposes_activity_metadata(
     assert db.activity_type == "questions"
     assert result["total"] == 1
     assert result["quizzes"][0]["activity_type"] == "questions"
+
+
+def test_quiz_list_filters_real_database_by_workspace_activity_and_page(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    db_path = str(tmp_path / "mcp-quiz-list.db")
+    seed = CharactersRAGDB(db_path, client_id="mcp-list-owner")
+    first_id = seed.create_quiz(
+        name="First question quiz",
+        workspace_tag="workspace:target",
+    )
+    second_id = seed.create_quiz(
+        name="Second question quiz",
+        workspace_tag="workspace:target",
+    )
+    seed.create_quiz(
+        name="OSCE quiz",
+        workspace_tag="workspace:target",
+        activity_type="osce",
+    )
+    deleted_id = seed.create_quiz(
+        name="Deleted question quiz",
+        workspace_tag="workspace:target",
+    )
+    seed.delete_quiz(deleted_id)
+    seed.create_quiz(
+        name="Other workspace quiz",
+        workspace_tag="workspace:other",
+    )
+    seed.close_all_connections()
+
+    module = QuizzesModule(ModuleConfig(name="quizzes", description="Quizzes module"))
+    context = _Context()
+    monkeypatch.setattr(
+        module,
+        "_open_db",
+        lambda _context: CharactersRAGDB(db_path, client_id="mcp-list-owner"),
+    )
+
+    first_page = module._list_quizzes_sync(
+        context,
+        None,
+        None,
+        "workspace:target",
+        1,
+        0,
+    )
+    second_page = module._list_quizzes_sync(
+        context,
+        None,
+        None,
+        "workspace:target",
+        1,
+        1,
+    )
+
+    assert first_page["total"] == 2
+    assert first_page["has_more"] is True
+    assert first_page["next_offset"] == 1
+    assert second_page["total"] == 2
+    assert second_page["has_more"] is False
+    assert second_page["next_offset"] is None
+    assert {
+        first_page["quizzes"][0]["id"],
+        second_page["quizzes"][0]["id"],
+    } == {first_id, second_id}
+    assert all(
+        quiz["workspace_tag"] == "workspace:target"
+        and quiz["activity_type"] == "questions"
+        for quiz in first_page["quizzes"] + second_page["quizzes"]
+    )
 
 
 @pytest.mark.parametrize(
