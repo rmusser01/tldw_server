@@ -39351,6 +39351,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def _quiz_not_found(quiz_id: int) -> ConflictError:
         return ConflictError("Quiz not found", entity="quizzes", identifier=quiz_id)
 
+    def _get_quiz_row_for_mutation(self, conn: Any, quiz_id: int) -> Any:
+        """Read an active quiz, locking it on PostgreSQL for content mutations."""
+        deleted_clause = "deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "deleted = 0"
+        lock_clause = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        return conn.execute(
+            "SELECT id, version, activity_type, total_questions, total_stations, "
+            "time_limit_seconds, passing_score FROM quizzes "
+            f"WHERE id = ? AND {deleted_clause}{lock_clause}",  # nosec B608
+            (quiz_id,),
+        ).fetchone()
+
     def _require_quiz_activity(self, quiz_id: int, activity_type: str) -> dict[str, Any]:
         quiz = self.get_quiz(quiz_id)
         if quiz is None or quiz["activity_type"] != activity_type:
@@ -39580,11 +39591,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
-                row = conn.execute(
-                    "SELECT version, activity_type, total_questions, total_stations, "
-                    "time_limit_seconds, passing_score FROM quizzes WHERE id = ? AND deleted = 0",
-                    (quiz_id,),
-                ).fetchone()
+                row = self._get_quiz_row_for_mutation(conn, quiz_id)
                 if not row:
                     return False
                 current_version = int(row["version"])
@@ -39701,10 +39708,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         normalized_hint_penalty = max(0, int(hint_penalty_points or 0))
         try:
             with self.transaction() as conn:
-                quiz_row = conn.execute(
-                    "SELECT id, activity_type FROM quizzes WHERE id = ? AND deleted = 0",
-                    (quiz_id,),
-                ).fetchone()
+                quiz_row = self._get_quiz_row_for_mutation(conn, quiz_id)
                 if not quiz_row or str(quiz_row["activity_type"]) != "questions":
                     raise self._quiz_not_found(quiz_id)
                 insert_sql = (
@@ -40023,7 +40027,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 row_data = dict(row)
                 quiz_id = int(row_data["quiz_id"])
                 quiz_row = conn.execute(
-                    "SELECT activity_type FROM quizzes WHERE id = ? AND deleted = 0",
+                    "SELECT activity_type FROM quizzes WHERE id = ?",
                     (quiz_id,),
                 ).fetchone()
                 if not quiz_row or str(quiz_row["activity_type"]) != "questions":

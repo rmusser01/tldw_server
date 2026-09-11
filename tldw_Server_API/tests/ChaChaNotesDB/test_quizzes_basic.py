@@ -355,6 +355,27 @@ def test_normal_attempt_start_and_submit_reject_osce_quizzes():
             db.submit_attempt(attempt["id"], [{"question_id": question_id, "user_answer": "true"}])
 
 
+def test_question_attempt_can_be_submitted_after_quiz_soft_delete():
+    with _temp_chacha_db() as db:
+        quiz_id = db.create_quiz(name="Questions")
+        question_id = db.create_question(
+            quiz_id=quiz_id,
+            question_type="true_false",
+            question_text="True?",
+            correct_answer="true",
+        )
+        attempt = db.start_attempt(quiz_id)
+
+        assert db.delete_quiz(quiz_id) is True
+        result = db.submit_attempt(
+            attempt["id"],
+            [{"question_id": question_id, "user_answer": "true"}],
+        )
+
+        assert result["score"] == 1
+        assert result["answers"][0]["is_correct"] is True
+
+
 def test_soft_quiz_delete_hides_osce_stations():
     with _temp_chacha_db() as db:
         quiz_id = db.create_quiz(name="OSCE", activity_type="osce")

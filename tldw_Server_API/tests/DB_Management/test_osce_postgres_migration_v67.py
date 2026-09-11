@@ -29,6 +29,49 @@ class _FakeBackend:
         return True
 
 
+class _RecordingCursor:
+    def fetchone(self) -> dict[str, object]:
+        return {
+            "id": 42,
+            "version": 1,
+            "activity_type": "questions",
+            "total_questions": 0,
+            "total_stations": 0,
+            "time_limit_seconds": None,
+            "passing_score": None,
+        }
+
+
+class _RecordingConnection:
+    def __init__(self) -> None:
+        self.queries: list[tuple[str, tuple[object, ...]]] = []
+
+    def execute(self, query: str, params: tuple[object, ...]) -> _RecordingCursor:
+        self.queries.append((query, params))
+        return _RecordingCursor()
+
+
+def test_postgres_quiz_content_mutations_lock_the_quiz_row() -> None:
+    db = CharactersRAGDB.__new__(CharactersRAGDB)
+    db._backend = _FakeBackend()
+    db._uses_shared_content_backend = False
+    db._local = SimpleNamespace()
+    connection = _RecordingConnection()
+
+    row = db._get_quiz_row_for_mutation(connection, 42)
+
+    assert row["activity_type"] == "questions"
+    assert connection.queries == [
+        (
+            "SELECT id, version, activity_type, total_questions, total_stations, "
+            "time_limit_seconds, passing_score FROM quizzes WHERE id = ? AND deleted = FALSE FOR UPDATE",
+            (42,),
+        )
+    ]
+    assert "_get_quiz_row_for_mutation" in CharactersRAGDB.update_quiz.__code__.co_names
+    assert "_get_quiz_row_for_mutation" in CharactersRAGDB.create_question.__code__.co_names
+
+
 def test_postgres_initializer_routes_schema_v66_through_v67(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
