@@ -1293,8 +1293,6 @@ jobs:
           - name: media-core-documents
             paths: >-
               tldw_Server_API/tests/Media/test_document*.py
-              tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py
-              tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_pdf_text_normalization.py
           - name: media-core-api
             paths: >-
@@ -1766,7 +1764,6 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
-              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -2795,8 +2792,6 @@ jobs:
           - name: media-core-documents
             paths: >-
               tldw_Server_API/tests/Media/test_document*.py
-              tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py
-              tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_pdf_text_normalization.py
           - name: media-core-api
             paths: >-
@@ -2958,7 +2953,6 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
-              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
           - name: chat-character-integration-chat
             paths: >-
@@ -3268,7 +3262,6 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
-              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -4168,8 +4161,6 @@ jobs:
           - name: media-core-documents
             paths: >-
               tldw_Server_API/tests/Media/test_document*.py
-              tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py
-              tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_pdf_text_normalization.py
           - name: media-core-api
             paths: >-
@@ -4331,7 +4322,6 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
-              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
           - name: chat-character-integration-chat
             paths: >-
@@ -4641,7 +4631,6 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
-              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -5464,8 +5453,6 @@ jobs:
           - name: media-core-documents
             paths: >-
               tldw_Server_API/tests/Media/test_document*.py
-              tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py
-              tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_pdf_text_normalization.py
           - name: media-core-api
             paths: >-
@@ -5627,7 +5614,6 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
-              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
           - name: chat-character-integration-chat
             paths: >-
@@ -5937,7 +5923,6 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
-              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -6766,8 +6751,6 @@ jobs:
           - name: media-core-documents
             paths: >-
               tldw_Server_API/tests/Media/test_document*.py
-              tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py
-              tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_pdf_text_normalization.py
           - name: media-core-api
             paths: >-
@@ -6929,7 +6912,6 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
-              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
           - name: chat-character-integration-chat
             paths: >-
@@ -7239,7 +7221,6 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
-              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
