@@ -1,3 +1,5 @@
+"""Strict public API contracts for OSCE station authoring and practice."""
+
 from __future__ import annotations
 
 from enum import Enum
@@ -7,36 +9,57 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import (
+    OffsetPaginationMeta,
+    default_offset_pagination_aliases,
+)
+
 
 class StrictModel(BaseModel):
+    """Base model that rejects unknown fields and implicit coercion."""
+
     model_config = ConfigDict(extra="forbid", strict=True)
 
 
 class QuizActivityType(str, Enum):
+    """Persisted quiz activity discriminator."""
+
     QUESTIONS = "questions"
     OSCE = "osce"
 
 
 class OsceVerificationState(str, Enum):
+    """Verification lifecycle for evidence-bearing station content."""
+
     SOURCE_VERIFIED = "source_verified"
     MODIFIED_AFTER_VERIFICATION = "modified_after_verification"
     MANUALLY_AUTHORED = "manually_authored"
 
 
 class OsceAttemptState(str, Enum):
+    """Allowed lifecycle states for an OSCE practice attempt."""
+
     IN_PROGRESS = "in_progress"
     SELF_ASSESSMENT = "self_assessment"
     COMPLETED = "completed"
 
 
 class OsceCitationSourceType(str, Enum):
+    """Source kinds supported by strict OSCE citations."""
+
     MEDIA = "media"
     DOCUMENT = "document"
     URL = "url"
     NOTE = "note"
+    FLASHCARD_DECK = "flashcard_deck"
+    FLASHCARD_CARD = "flashcard_card"
+    QUIZ_ATTEMPT = "quiz_attempt"
+    QUIZ_ATTEMPT_QUESTION = "quiz_attempt_question"
 
 
 class OsceStationOrigin(str, Enum):
+    """Server-managed origin of a persisted OSCE station."""
+
     GENERATED = "generated"
     MANUAL = "manual"
 
@@ -52,6 +75,8 @@ OsceLifecycleState = Annotated[OsceAttemptState, Field(strict=False)]
 
 
 class OsceCitation(StrictModel):
+    """Source citation with locators constrained by source kind."""
+
     source_type: OsceCitationSource
     source_id: BoundedSourceId
     label: Annotated[str, StringConstraints(max_length=200)] | None = None
@@ -80,6 +105,10 @@ class OsceCitation(StrictModel):
             OsceCitationSourceType.DOCUMENT: {"chunk_id", "page_number"},
             OsceCitationSourceType.URL: {"source_url"},
             OsceCitationSourceType.NOTE: {"chunk_id"},
+            OsceCitationSourceType.FLASHCARD_DECK: {"chunk_id"},
+            OsceCitationSourceType.FLASHCARD_CARD: {"chunk_id"},
+            OsceCitationSourceType.QUIZ_ATTEMPT: {"chunk_id"},
+            OsceCitationSourceType.QUIZ_ATTEMPT_QUESTION: {"chunk_id"},
         }[self.source_type]
         inconsistent = populated - allowed
         if inconsistent:
@@ -96,34 +125,48 @@ class OsceCitation(StrictModel):
 
 
 class OscePatientContext(StrictModel):
+    """Evidence-bearing simulated-patient context."""
+
     text: Annotated[str, StringConstraints(min_length=1, max_length=10000)]
     citations: list[OsceCitation] = Field(default_factory=list)
 
 
 class OsceChecklistItemCreate(StrictModel):
+    """Checklist item accepted during station creation."""
+
     label: Annotated[str, StringConstraints(min_length=1, max_length=1000)]
     rationale: Annotated[str, StringConstraints(max_length=2000)] | None = None
     citations: list[OsceCitation] = Field(default_factory=list)
 
 
 class OsceChecklistItemUpdate(OsceChecklistItemCreate):
+    """Checklist replacement item with an optional server identity."""
+
     id: OsceUuid | None = None
 
 
 class OsceChecklistItemStored(OsceChecklistItemCreate):
+    """Persisted checklist item with a required server identity."""
+
     id: OsceUuid
 
 
 class OsceRubricLevelCreate(StrictModel):
+    """Rubric level accepted during station creation."""
+
     label: BoundedLabel
     description: Annotated[str, StringConstraints(min_length=1, max_length=2000)]
 
 
 class OsceRubricLevelUpdate(OsceRubricLevelCreate):
+    """Rubric replacement level with an optional server identity."""
+
     id: OsceUuid | None = None
 
 
 class OsceRubricLevelStored(OsceRubricLevelCreate):
+    """Persisted rubric level with a required server identity."""
+
     id: OsceUuid
 
 
@@ -134,6 +177,8 @@ def _reject_duplicate_level_labels(levels: list[Any]) -> None:
 
 
 class OsceRubricDomainCreate(StrictModel):
+    """Ordered rubric domain accepted during station creation."""
+
     label: BoundedLabel
     levels: list[OsceRubricLevelCreate] = Field(min_length=2, max_length=6)
 
@@ -144,6 +189,8 @@ class OsceRubricDomainCreate(StrictModel):
 
 
 class OsceRubricDomainUpdate(StrictModel):
+    """Rubric replacement domain with optional nested identities."""
+
     id: OsceUuid | None = None
     label: BoundedLabel
     levels: list[OsceRubricLevelUpdate] = Field(min_length=2, max_length=6)
@@ -155,6 +202,8 @@ class OsceRubricDomainUpdate(StrictModel):
 
 
 class OsceRubricDomainStored(StrictModel):
+    """Persisted rubric domain with required nested identities."""
+
     id: OsceUuid
     label: BoundedLabel
     levels: list[OsceRubricLevelStored] = Field(min_length=2, max_length=6)
@@ -166,15 +215,21 @@ class OsceRubricDomainStored(StrictModel):
 
 
 class OsceKeyPointCreate(StrictModel):
+    """Evidence-bearing key point accepted during station creation."""
+
     text: Annotated[str, StringConstraints(min_length=1, max_length=2000)]
     citations: list[OsceCitation] = Field(default_factory=list)
 
 
 class OsceKeyPointUpdate(OsceKeyPointCreate):
+    """Key-point replacement with an optional server identity."""
+
     id: OsceUuid | None = None
 
 
 class OsceKeyPointStored(OsceKeyPointCreate):
+    """Persisted key point with a required server identity."""
+
     id: OsceUuid
 
 
@@ -200,6 +255,8 @@ def _reject_duplicate_nested_ids(content: Any) -> None:
 
 
 class OsceStationCreateContent(StrictModel):
+    """Complete editable content required to create one station."""
+
     schema_version: Literal["osce.station.v1"] = "osce.station.v1"
     title: Annotated[str, StringConstraints(min_length=1, max_length=200)]
     candidate_instructions: Annotated[str, StringConstraints(min_length=1, max_length=4000)]
@@ -212,6 +269,8 @@ class OsceStationCreateContent(StrictModel):
 
 
 class OsceStationUpdateContent(StrictModel):
+    """Partial station content whose supplied collections replace atomically."""
+
     schema_version: Literal["osce.station.v1"] | None = None
     title: Annotated[str, StringConstraints(min_length=1, max_length=200)] | None = None
     candidate_instructions: Annotated[
@@ -245,6 +304,8 @@ class OsceStationUpdateContent(StrictModel):
 
 
 class OsceStationStoredContent(StrictModel):
+    """Fully materialized station content with server-owned nested IDs."""
+
     schema_version: Literal["osce.station.v1"] = "osce.station.v1"
     title: Annotated[str, StringConstraints(min_length=1, max_length=200)]
     candidate_instructions: Annotated[str, StringConstraints(min_length=1, max_length=4000)]
@@ -262,11 +323,38 @@ class OsceStationStoredContent(StrictModel):
 
 
 class OsceStationCreateRequest(StrictModel):
+    """Request envelope for manually creating an ordered station."""
+
     content: OsceStationCreateContent
     order_index: int = Field(default=0, ge=0)
 
 
+class OsceStationPatchRequest(StrictModel):
+    """Optimistic request envelope for a partial station update."""
+
+    expected_version: int = Field(ge=1)
+    content: OsceStationUpdateContent
+    order_index: int | None = Field(default=None, ge=0)
+
+
+class _OsceOffsetPage(StrictModel):
+    """Shared offset pagination fields for OSCE list responses."""
+
+    count: int = Field(ge=0)
+    has_more: bool | None = None
+    next_offset: int | None = Field(default=None, ge=0)
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def populate_pagination_aliases(self) -> _OsceOffsetPage:
+        """Populate legacy top-level pagination aliases."""
+
+        return default_offset_pagination_aliases(self)
+
+
 class OsceStationSummary(StrictModel):
+    """Compact station metadata that omits marking-guide content."""
+
     id: int = Field(ge=1)
     quiz_id: int = Field(ge=1)
     title: Annotated[str, StringConstraints(min_length=1, max_length=200)]
@@ -280,7 +368,15 @@ class OsceStationSummary(StrictModel):
     updated_at: BoundedTimestamp
 
 
+class OsceStationSummaryPage(_OsceOffsetPage):
+    """Paginated station summaries without authoring content."""
+
+    items: list[OsceStationSummary]
+
+
 class OsceStationAuthoringResponse(StrictModel):
+    """Full station detail available through authoring routes."""
+
     id: int = Field(ge=1)
     quiz_id: int = Field(ge=1)
     content: OsceStationStoredContent
@@ -301,10 +397,14 @@ ChecklistSelection = Literal["met", "not_met"]
 
 
 class OsceAttemptCreate(StrictModel):
+    """Retry-safe attempt creation request."""
+
     client_attempt_id: OsceUuid
 
 
 class OsceAttemptPatch(StrictModel):
+    """Optimistic phase-appropriate attempt update."""
+
     expected_version: int = Field(ge=1)
     notes: Annotated[str, StringConstraints(max_length=10000)] | None = None
     checklist_selections: dict[OsceUuid, ChecklistSelection] | None = None
@@ -312,21 +412,29 @@ class OsceAttemptPatch(StrictModel):
 
 
 class OsceAttemptTransition(StrictModel):
+    """Optimistic attempt lifecycle transition request."""
+
     expected_version: int = Field(ge=1)
 
 
 class OsceCandidateCitation(StrictModel):
+    """Candidate-safe citation projection without source locators or quotes."""
+
     source_type: OsceCitationSource
     source_id: BoundedSourceId
     label: Annotated[str, StringConstraints(max_length=200)] | None = None
 
 
 class OsceCandidatePatientContext(StrictModel):
+    """Candidate-visible patient context with sanitized citations."""
+
     text: Annotated[str, StringConstraints(min_length=1, max_length=10000)]
     citations: list[OsceCandidateCitation] = Field(default_factory=list)
 
 
 class OsceCandidateStation(StrictModel):
+    """Candidate-phase station projection without a marking guide."""
+
     schema_version: Literal["osce.station.v1"] = "osce.station.v1"
     title: Annotated[str, StringConstraints(min_length=1, max_length=200)]
     candidate_instructions: Annotated[str, StringConstraints(min_length=1, max_length=4000)]
@@ -336,6 +444,8 @@ class OsceCandidateStation(StrictModel):
 
 
 class OsceCandidateAttemptResponse(StrictModel):
+    """Attempt response available before self-assessment begins."""
+
     id: int = Field(ge=1)
     quiz_id: int = Field(ge=1)
     station_id: int = Field(ge=1)
@@ -350,6 +460,8 @@ class OsceCandidateAttemptResponse(StrictModel):
 
 
 class OsceRevealedAttemptResponse(StrictModel):
+    """Attempt response after the learner reveals the marking guide."""
+
     id: int = Field(ge=1)
     quiz_id: int = Field(ge=1)
     station_id: int = Field(ge=1)
@@ -369,6 +481,8 @@ class OsceRevealedAttemptResponse(StrictModel):
 
 
 class OsceRubricResult(StrictModel):
+    """Selected rubric level for one domain in a completed attempt."""
+
     domain_id: OsceUuid
     domain_label: BoundedLabel
     level_id: OsceUuid
@@ -376,6 +490,8 @@ class OsceRubricResult(StrictModel):
 
 
 class OsceAttemptSummary(StrictModel):
+    """Note-free attempt summary for resume and results lists."""
+
     id: int = Field(ge=1)
     quiz_id: int = Field(ge=1)
     station_id: int = Field(ge=1)
@@ -391,3 +507,9 @@ class OsceAttemptSummary(StrictModel):
     checklist_met_count: int | None = Field(default=None, ge=0, le=50)
     checklist_total: int | None = Field(default=None, ge=1, le=50)
     rubric_results: list[OsceRubricResult] = Field(default_factory=list, max_length=12)
+
+
+class OsceAttemptSummaryPage(_OsceOffsetPage):
+    """Paginated attempt summaries without notes or station guides."""
+
+    items: list[OsceAttemptSummary]

@@ -11,6 +11,8 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+pytestmark = pytest.mark.unit
+
 from tldw_Server_API.app.api.v1.schemas.osce import OsceStationStoredContent
 from tldw_Server_API.app.services.osce_practice import (
     materialize_station_content,

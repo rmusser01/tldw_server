@@ -51,6 +51,7 @@ class _RecordingConnection:
         return _RecordingCursor()
 
 
+@pytest.mark.unit
 def test_postgres_quiz_content_mutations_lock_the_quiz_row() -> None:
     db = CharactersRAGDB.__new__(CharactersRAGDB)
     db._backend = _FakeBackend()
@@ -74,6 +75,7 @@ def test_postgres_quiz_content_mutations_lock_the_quiz_row() -> None:
     assert "_get_quiz_row_for_mutation" in CharactersRAGDB.create_question.__code__.co_names
 
 
+@pytest.mark.unit
 def test_postgres_initializer_routes_schema_v66_through_v67(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -104,6 +106,7 @@ def test_postgres_initializer_routes_schema_v66_through_v67(
         db._initialize_schema_postgres()
 
 
+@pytest.mark.unit
 def test_postgres_v67_ddl_has_columns_tables_constraints_and_indexes() -> None:
     sql = " ".join(CharactersRAGDB._MIGRATION_SQL_V66_TO_V67_POSTGRES.split())
 

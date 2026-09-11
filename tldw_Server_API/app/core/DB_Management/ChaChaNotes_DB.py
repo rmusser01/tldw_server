@@ -40625,7 +40625,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         q: str | None = None,
         media_id: int | None = None,
         workspace_id: str | None = None,
-        activity_type: Any = None,
+        activity_type: Any = "questions",
         include_workspace_items: bool = False,
         include_deleted: bool = False,
         sort_by: str = "last_modified",
@@ -40653,7 +40653,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if workspace_tag is not None:
             where_clauses.append("workspace_tag = ?")
             params.append(workspace_tag)
-        if activity_type is not None:
+        if activity_type not in {None, "all"}:
             where_clauses.append("activity_type = ?")
             params.append(self._normalize_quiz_activity(activity_type))
         if q:

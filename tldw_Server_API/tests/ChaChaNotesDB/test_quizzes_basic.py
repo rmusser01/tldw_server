@@ -296,11 +296,27 @@ def test_quiz_size_sort_uses_activity_relevant_count():
 
         items = db.list_quizzes(
             include_workspace_items=True,
+            activity_type="all",
             sort_by="size",
             sort_order="desc",
         )["items"]
         assert [item["id"] for item in items] == [osce_id, questions_id]
         assert items[0]["total_questions"] == 0
+
+
+def test_list_quizzes_defaults_to_questions_and_explicit_all_includes_osce():
+    with _temp_chacha_db() as db:
+        question_id = db.create_quiz(name="Questions")
+        osce_id = db.create_quiz(name="OSCE", activity_type="osce")
+
+        default_items = db.list_quizzes(include_workspace_items=True)["items"]
+        all_items = db.list_quizzes(
+            include_workspace_items=True,
+            activity_type="all",
+        )["items"]
+
+        assert [item["id"] for item in default_items] == [question_id]
+        assert {item["id"] for item in all_items} == {question_id, osce_id}
 
 
 def test_question_paths_reject_osce_quizzes():

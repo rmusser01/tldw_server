@@ -639,6 +639,11 @@ async def test_generate_rejects_osce_request_with_stable_message() -> None:
 async def test_quizzes_tool_catalog_does_not_register_osce_tools() -> None:
     module = QuizzesModule(ModuleConfig(name="quizzes", description="Quizzes module"))
 
-    names = {tool["name"] for tool in await module.get_tools()}
+    tools = await module.get_tools()
+    names = {tool["name"] for tool in tools}
+    generate = next(tool for tool in tools if tool["name"] == "quizzes.generate")
 
     assert not any("osce" in name for name in names)
+    assert generate["inputSchema"]["properties"]["activity_type"]["enum"] == [
+        "questions"
+    ]

@@ -304,7 +304,7 @@ class QuizzesModule(BaseModule):
                         "model": {"type": "string", "description": "LLM model to use for generation"},
                         "activity_type": {
                             "type": "string",
-                            "enum": ["questions", "osce"],
+                            "enum": ["questions"],
                             "default": "questions",
                         },
                     },

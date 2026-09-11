@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -228,13 +229,13 @@ def quizzes_db(tmp_path) -> CharactersRAGDB:
 
 
 @pytest.fixture
-def client(quizzes_db: CharactersRAGDB):
+def client(quizzes_db: CharactersRAGDB) -> Iterator[TestClient]:
     TestConfig.setup_test_environment()
 
-    def override_get_db():
+    def override_get_db() -> Iterator[CharactersRAGDB]:
         yield quizzes_db
 
-    async def override_user():
+    async def override_user() -> User:
         return User(
             id=1,
             username="testuser",
@@ -588,10 +589,10 @@ def test_postgres_v2_import_ignores_owner_and_provenance_claims(
         backend=attacker_backend,
     )
 
-    def override_get_db():
+    def override_get_db() -> Iterator[CharactersRAGDB]:
         yield owner
 
-    async def override_user():
+    async def override_user() -> User:
         return User(
             id=101,
             username="postgres-import-owner",

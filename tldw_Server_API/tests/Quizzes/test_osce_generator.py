@@ -12,12 +12,14 @@ from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
     ArtifactVerificationResult,
     ArtifactVerificationUnit,
 )
-from tldw_Server_API.app.services import osce_generator, quiz_generator
-from tldw_Server_API.app.services.osce_generator import (
+from tldw_Server_API.app.core.exceptions import (
     OsceCitationError,
     OsceMalformedOutputError,
     OsceProviderError,
     OsceVerificationError,
+)
+from tldw_Server_API.app.services import osce_generator, quiz_generator
+from tldw_Server_API.app.services.osce_generator import (
     build_osce_generation_prompt,
     build_osce_verification_units,
     generate_osce_stations_from_sources,

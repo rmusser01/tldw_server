@@ -194,6 +194,49 @@ class ClaimsAnalyticsExportError(RuntimeError):
         self.http_status = http_status
 
 
+class OsceGenerationError(ValueError):
+    """Base class for bounded OSCE generation failures."""
+
+    code = "osce_malformed_output"
+
+    def __init__(self, private_detail: object | None = None) -> None:
+        super().__init__(str(private_detail) if private_detail else self.code)
+
+
+class OsceProviderError(OsceGenerationError):
+    """An OSCE generation provider call failed."""
+
+    code = "osce_provider_failure"
+
+
+class OsceMalformedOutputError(OsceGenerationError):
+    """An OSCE generation provider returned malformed output."""
+
+    code = "osce_malformed_output"
+
+
+class OsceUnsupportedContractError(OsceGenerationError):
+    """An OSCE generation request or response uses an unsupported contract."""
+
+    code = "osce_unsupported_contract"
+
+
+class OsceCitationError(OsceGenerationError):
+    """Generated OSCE evidence citations are missing or inconsistent."""
+
+    code = "osce_citation_failure"
+
+
+class OsceVerificationError(OsceGenerationError):
+    """Generated OSCE evidence could not be verified safely."""
+
+    code = "osce_verification_failure"
+
+
+class OsceStationIdentityError(ValueError):
+    """A nested OSCE station identity violates reconciliation rules."""
+
+
 class NotesOrganizationValidationError(ValueError):
     """Validation failure with a stable Notes organization Sync error code."""
 

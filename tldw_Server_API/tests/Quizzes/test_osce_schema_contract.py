@@ -91,7 +91,7 @@ def valid_stored_station_payload(valid_station_payload: dict) -> dict:
     return payload
 
 
-def test_station_create_accepts_valid_manual_content(valid_station_payload):
+def test_station_create_accepts_valid_manual_content(valid_station_payload) -> None:
     station = OsceStationCreateContent.model_validate(valid_station_payload)
 
     assert station.schema_version == "osce.station.v1"
@@ -128,7 +128,7 @@ def test_station_create_rejects_text_and_duration_outside_bounds(
     valid_station_payload,
     path,
     value,
-):
+) -> None:
     payload = deepcopy(valid_station_payload)
     target = payload
     for segment in path[:-1]:
@@ -166,7 +166,7 @@ def test_station_create_rejects_collection_outside_bounds(
     valid_station_payload,
     field,
     items,
-):
+) -> None:
     payload = {**valid_station_payload, field: items}
 
     with pytest.raises(ValidationError):
@@ -177,7 +177,7 @@ def test_station_create_rejects_collection_outside_bounds(
 def test_station_create_rejects_rubric_level_count_outside_bounds(
     valid_station_payload,
     level_count,
-):
+) -> None:
     payload = deepcopy(valid_station_payload)
     payload["rubric_domains"][0]["levels"] = [
         {"label": f"Level {index}", "description": "Description"}
@@ -202,14 +202,14 @@ def test_station_create_rejects_scoring_advisory_and_unknown_fields(
     valid_station_payload,
     field,
     value,
-):
+) -> None:
     payload = {**valid_station_payload, field: value}
 
     with pytest.raises(ValidationError):
         OsceStationCreateContent.model_validate(payload)
 
 
-def test_station_create_rejects_protected_nested_ids(valid_station_payload):
+def test_station_create_rejects_protected_nested_ids(valid_station_payload) -> None:
     payload = deepcopy(valid_station_payload)
     payload["checklist_items"][0]["id"] = str(CHECKLIST_ID)
 
@@ -217,7 +217,9 @@ def test_station_create_rejects_protected_nested_ids(valid_station_payload):
         OsceStationCreateContent.model_validate(payload)
 
 
-def test_station_update_accepts_missing_and_server_owned_nested_ids(valid_stored_station_payload):
+def test_station_update_accepts_missing_and_server_owned_nested_ids(
+    valid_stored_station_payload,
+) -> None:
     payload = deepcopy(valid_stored_station_payload)
     payload["checklist_items"].append(
         {"id": None, "label": "Checks understanding", "citations": []}
@@ -230,17 +232,17 @@ def test_station_update_accepts_missing_and_server_owned_nested_ids(valid_stored
     assert station.checklist_items[1].id is None
 
 
-def test_station_update_rejects_explicit_null_for_non_nullable_content():
+def test_station_update_rejects_explicit_null_for_non_nullable_content() -> None:
     with pytest.raises(ValidationError, match="cannot be null"):
         OsceStationUpdateContent.model_validate({"checklist_items": None})
 
 
-def test_station_stored_requires_nested_ids(valid_station_payload):
+def test_station_stored_requires_nested_ids(valid_station_payload) -> None:
     with pytest.raises(ValidationError):
         OsceStationStoredContent.model_validate(valid_station_payload)
 
 
-def test_station_stored_uses_stored_nested_shapes(valid_stored_station_payload):
+def test_station_stored_uses_stored_nested_shapes(valid_stored_station_payload) -> None:
     station = OsceStationStoredContent.model_validate(valid_stored_station_payload)
 
     assert isinstance(station.checklist_items[0], OsceChecklistItemStored)
@@ -251,7 +253,7 @@ def test_station_stored_uses_stored_nested_shapes(valid_stored_station_payload):
 
 def test_station_stored_rejects_duplicate_uuid_across_nested_families(
     valid_stored_station_payload,
-):
+) -> None:
     payload = deepcopy(valid_stored_station_payload)
     payload["expected_key_points"][0]["id"] = CHECKLIST_ID
 
@@ -259,7 +261,9 @@ def test_station_stored_rejects_duplicate_uuid_across_nested_families(
         OsceStationStoredContent.model_validate(payload)
 
 
-def test_station_stored_rejects_malformed_nested_uuid(valid_stored_station_payload):
+def test_station_stored_rejects_malformed_nested_uuid(
+    valid_stored_station_payload,
+) -> None:
     payload = deepcopy(valid_stored_station_payload)
     payload["checklist_items"][0]["id"] = "not-a-uuid"
 
@@ -267,7 +271,9 @@ def test_station_stored_rejects_malformed_nested_uuid(valid_stored_station_paylo
         OsceStationStoredContent.model_validate_json(json.dumps(payload, default=str))
 
 
-def test_station_create_rejects_duplicate_rubric_level_labels(valid_station_payload):
+def test_station_create_rejects_duplicate_rubric_level_labels(
+    valid_station_payload,
+) -> None:
     payload = deepcopy(valid_station_payload)
     payload["rubric_domains"][0]["levels"][1]["label"] = "needs DEVELOPMENT"
 
@@ -275,14 +281,18 @@ def test_station_create_rejects_duplicate_rubric_level_labels(valid_station_payl
         OsceStationCreateContent.model_validate(payload)
 
 
-def test_station_create_rejects_unsupported_schema_version(valid_station_payload):
+def test_station_create_rejects_unsupported_schema_version(
+    valid_station_payload,
+) -> None:
     payload = {**valid_station_payload, "schema_version": "osce.station.v2"}
 
     with pytest.raises(ValidationError):
         OsceStationCreateContent.model_validate(payload)
 
 
-def test_station_create_strictly_rejects_numeric_string_duration(valid_station_payload):
+def test_station_create_strictly_rejects_numeric_string_duration(
+    valid_station_payload,
+) -> None:
     payload = {**valid_station_payload, "recommended_duration_seconds": "480"}
 
     with pytest.raises(ValidationError):
@@ -290,7 +300,7 @@ def test_station_create_strictly_rejects_numeric_string_duration(valid_station_p
 
 
 @pytest.mark.parametrize("field", ["checklist_count", "rubric_domain_count"])
-def test_station_summary_counts_accept_one_and_reject_zero(field):
+def test_station_summary_counts_accept_one_and_reject_zero(field) -> None:
     payload = {
         "id": 1,
         "quiz_id": 2,
@@ -313,7 +323,7 @@ def test_station_summary_counts_accept_one_and_reject_zero(field):
         OsceStationSummary.model_validate(payload)
 
 
-def test_attempt_summary_checklist_total_accepts_one_and_rejects_zero():
+def test_attempt_summary_checklist_total_accepts_one_and_rejects_zero() -> None:
     payload = {
         "id": 1,
         "quiz_id": 2,
@@ -350,15 +360,35 @@ def test_attempt_summary_checklist_total_accepts_one_and_rejects_zero():
             "source_url": "https://example.com/source",
         },
         {"source_type": "note", "source_id": "note-1"},
+        {
+            "source_type": "flashcard_deck",
+            "source_id": "7",
+            "chunk_id": "card-uuid",
+        },
+        {
+            "source_type": "flashcard_card",
+            "source_id": "card-uuid",
+            "chunk_id": "card-uuid",
+        },
+        {
+            "source_type": "quiz_attempt",
+            "source_id": "9",
+            "chunk_id": "9:3",
+        },
+        {
+            "source_type": "quiz_attempt_question",
+            "source_id": "9:3",
+            "chunk_id": "9:3",
+        },
     ],
 )
-def test_osce_citation_accepts_source_specific_locators(payload):
+def test_osce_citation_accepts_source_specific_locators(payload) -> None:
     citation = OsceCitation.model_validate_json(json.dumps(payload))
 
     assert isinstance(citation.source_type, OsceCitationSourceType)
 
 
-def test_osce_wire_enums_and_uuids_parse_from_decoded_json_values():
+def test_osce_wire_enums_and_uuids_parse_from_decoded_json_values() -> None:
     citation = OsceCitation.model_validate(
         {"source_type": "note", "source_id": "note-1"}
     )
@@ -388,16 +418,21 @@ def test_osce_wire_enums_and_uuids_parse_from_decoded_json_values():
             "source_id": "note-1",
             "source_url": "https://example.com/source",
         },
+        {
+            "source_type": "flashcard_card",
+            "source_id": "card-uuid",
+            "timestamp_seconds": 1.0,
+        },
         {"source_type": "unknown", "source_id": "1"},
         {},
     ],
 )
-def test_osce_citation_rejects_invalid_or_inconsistent_locator(payload):
+def test_osce_citation_rejects_invalid_or_inconsistent_locator(payload) -> None:
     with pytest.raises(ValidationError):
         OsceCitation.model_validate_json(json.dumps(payload))
 
 
-def test_osce_citation_enforces_string_bounds():
+def test_osce_citation_enforces_string_bounds() -> None:
     payload = {
         "source_type": "note",
         "source_id": "x" * 513,
@@ -409,7 +444,7 @@ def test_osce_citation_enforces_string_bounds():
         OsceCitation.model_validate_json(json.dumps(payload))
 
 
-def test_attempt_patch_accepts_tri_state_checklist_values():
+def test_attempt_patch_accepts_tri_state_checklist_values() -> None:
     patch = OsceAttemptPatch.model_validate(
         {
             "expected_version": 2,
@@ -426,7 +461,7 @@ def test_attempt_patch_accepts_tri_state_checklist_values():
     }
 
 
-def test_attempt_patch_rejects_scoring_and_invalid_checklist_values():
+def test_attempt_patch_rejects_scoring_and_invalid_checklist_values() -> None:
     with pytest.raises(ValidationError):
         OsceAttemptPatch.model_validate(
             {
@@ -439,7 +474,7 @@ def test_attempt_patch_rejects_scoring_and_invalid_checklist_values():
 
 @pytest.mark.parametrize("model_type", [QuizCreate, QuizUpdate])
 @pytest.mark.parametrize("field", ["passing_score", "time_limit_seconds"])
-def test_osce_quiz_write_rejects_question_only_settings(model_type, field):
+def test_osce_quiz_write_rejects_question_only_settings(model_type, field) -> None:
     payload = {"activity_type": "osce", field: None}
     if model_type is QuizCreate:
         payload["name"] = "OSCE practice"
@@ -448,7 +483,7 @@ def test_osce_quiz_write_rejects_question_only_settings(model_type, field):
         model_type.model_validate(payload)
 
 
-def test_question_quiz_contract_defaults_remain_compatible():
+def test_question_quiz_contract_defaults_remain_compatible() -> None:
     created = QuizCreate.model_validate({"name": "Recall"})
     response = QuizResponse.model_validate(
         {
@@ -467,7 +502,7 @@ def test_question_quiz_contract_defaults_remain_compatible():
     assert response.total_stations == 0
 
 
-def test_quiz_response_accepts_osce_activity_metadata():
+def test_quiz_response_accepts_osce_activity_metadata() -> None:
     response = QuizResponse.model_validate(
         {
             "id": 1,

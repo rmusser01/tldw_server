@@ -1,5 +1,5 @@
 from collections.abc import Mapping
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
@@ -53,6 +53,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.exceptions import OsceGenerationError, OsceProviderError
 from tldw_Server_API.app.core.Flashcards.study_assistant import (
     build_quiz_attempt_question_context,
     generate_study_assistant_reply,
@@ -63,10 +64,6 @@ from tldw_Server_API.app.core.StudySuggestions.jobs import (
     STUDY_SUGGESTIONS_REFRESH_JOB_TYPE,
     build_study_suggestions_job_payload,
     study_suggestions_jobs_queue,
-)
-from tldw_Server_API.app.services.osce_generator import (
-    OsceGenerationError,
-    OsceProviderError,
 )
 from tldw_Server_API.app.services.quiz_generator import (
     QuizClaimVerificationError,
@@ -228,10 +225,11 @@ def list_quizzes(
     media_id: Optional[int] = None,
     workspace_id: Optional[str] = None,
     include_workspace_items: bool = False,
+    activity_type: Literal["questions", "osce", "all"] = Query("questions"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
-):
+) -> QuizListResponse:
     """List quizzes with pagination and optional filters."""
     try:
         payload = db.list_quizzes(
@@ -239,6 +237,7 @@ def list_quizzes(
             media_id=media_id,
             workspace_id=workspace_id,
             include_workspace_items=include_workspace_items,
+            activity_type=activity_type,
             limit=limit,
             offset=offset,
         )

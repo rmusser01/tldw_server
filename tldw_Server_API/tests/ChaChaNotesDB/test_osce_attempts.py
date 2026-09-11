@@ -10,6 +10,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 from tldw_Server_API.app.api.v1.schemas.osce import OsceStationStoredContent
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory

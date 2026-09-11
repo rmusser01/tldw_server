@@ -14,14 +14,14 @@ from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
-from tldw_Server_API.app.services import osce_generator, quiz_generator
-from tldw_Server_API.app.services.osce_generator import (
+from tldw_Server_API.app.core.exceptions import (
     OsceCitationError,
     OsceGenerationError,
     OsceProviderError,
     OsceUnsupportedContractError,
     OsceVerificationError,
 )
+from tldw_Server_API.app.services import osce_generator, quiz_generator
 
 pytestmark = pytest.mark.integration
 
@@ -71,6 +71,52 @@ def _row_counts(db: CharactersRAGDB) -> tuple[int, int]:
         db.execute_query("SELECT COUNT(*) AS count FROM osce_stations").fetchone()["count"]
     )
     return quiz_count, station_count
+
+
+def _create_shared_source(
+    db: CharactersRAGDB,
+    source_type: str,
+) -> tuple[dict[str, str], str]:
+    if source_type == "flashcard_deck":
+        deck_id = db.add_deck(name="Anticoagulation")
+        card_uuid = db.add_flashcard(
+            {
+                "deck_id": deck_id,
+                "front": "Warfarin monitoring",
+                "back": "Regular INR monitoring is required.",
+            }
+        )
+        return {"source_type": source_type, "source_id": str(deck_id)}, card_uuid
+    if source_type == "flashcard_card":
+        card_uuid = db.add_flashcard(
+            {
+                "front": "Warfarin monitoring",
+                "back": "Regular INR monitoring is required.",
+            }
+        )
+        return {"source_type": source_type, "source_id": card_uuid}, card_uuid
+
+    quiz_id = db.create_quiz(name="Anticoagulation review")
+    question_id = db.create_question(
+        quiz_id=quiz_id,
+        question_type="multiple_choice",
+        question_text="Which test monitors warfarin treatment?",
+        correct_answer=0,
+        options=["INR", "HbA1c"],
+        explanation="Regular INR monitoring is required.",
+    )
+    attempt = db.start_attempt(quiz_id)
+    db.submit_attempt(
+        attempt["id"],
+        [{"question_id": question_id, "user_answer": 1}],
+    )
+    attempt_id = int(attempt["id"])
+    if source_type == "quiz_attempt":
+        return {"source_type": source_type, "source_id": str(attempt_id)}, (
+            f"{attempt_id}:{question_id}"
+        )
+    source_id = f"{attempt_id}:{question_id}"
+    return {"source_type": source_type, "source_id": source_id}, source_id
 
 
 @pytest.mark.asyncio
@@ -126,6 +172,40 @@ async def test_enabled_osce_generation_persists_exact_count_with_active_db_ident
     assert result["quiz"]["client_id"] == quizzes_db.client_id
     assert result["quiz"]["client_id"] != "unknown"
     assert all(station["verification_state"] == "source_verified" for station in result["osce_stations"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "source_type",
+    [
+        "flashcard_deck",
+        "flashcard_card",
+        "quiz_attempt",
+        "quiz_attempt_question",
+    ],
+)
+async def test_osce_generation_accepts_every_shared_quiz_source_with_chunk_locator(
+    source_type: str,
+    monkeypatch: pytest.MonkeyPatch,
+    enabled_osce_profile: None,
+    quizzes_db: CharactersRAGDB,
+    media_db: MediaDatabase,
+) -> None:
+    monkeypatch.setenv("TEST_MODE", "1")
+    source, expected_chunk_id = _create_shared_source(quizzes_db, source_type)
+
+    result = await quiz_generator.generate_quiz_from_sources(
+        db=quizzes_db,
+        media_db=media_db,
+        sources=[source],
+        generation_profile="osce_scenario",
+        num_stations=1,
+    )
+
+    citation = result["osce_stations"][0]["content"]["patient_context"]["citations"][0]
+    assert citation["source_type"] == source_type
+    assert citation["source_id"] == source["source_id"]
+    assert citation["chunk_id"] == expected_chunk_id
 
 
 @pytest.mark.asyncio

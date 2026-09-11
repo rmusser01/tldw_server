@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -54,13 +55,13 @@ def owner_db(tmp_path) -> CharactersRAGDB:
 
 
 @pytest.fixture
-def client(owner_db: CharactersRAGDB):
+def client(owner_db: CharactersRAGDB) -> Iterator[TestClient]:
     TestConfig.setup_test_environment()
 
-    def override_get_db():
+    def override_get_db() -> Iterator[CharactersRAGDB]:
         yield owner_db
 
-    async def override_user():
+    async def override_user() -> User:
         return User(
             id=1,
             username="owner",
@@ -170,7 +171,7 @@ def test_station_list_calls_compact_projection_for_every_internal_row(
     original_projection = endpoint_globals["project_station_summary"]
     projected_ids: list[int] = []
 
-    def recording_projection(row: dict[str, Any]):
+    def recording_projection(row: dict[str, Any]) -> Any:
         projected_ids.append(int(row["id"]))
         return original_projection(row)
 
@@ -218,7 +219,7 @@ def test_cross_user_detail_and_mutation_resources_are_404(
     assert attempt is not None
     other_db = CharactersRAGDB(str(tmp_path / "other.db"), client_id="other")
 
-    def override_other_db():
+    def override_other_db() -> Iterator[CharactersRAGDB]:
         yield other_db
 
     fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_other_db
@@ -297,10 +298,10 @@ def test_postgres_station_routes_hide_every_foreign_owner_path(
             quiz_id, materialize_station_content(station_content("Delete")), origin="manual"
         )
 
-        def override_attacker_db():
+        def override_attacker_db() -> Iterator[CharactersRAGDB]:
             yield attacker
 
-        async def override_attacker_user():
+        async def override_attacker_user() -> User:
             return User(
                 id=2,
                 username="other-user",
@@ -371,10 +372,10 @@ def test_postgres_quiz_http_crud_is_owner_scoped_and_cascade_safe(
         ),
     }
 
-    def override_active_db():
+    def override_active_db() -> Iterator[CharactersRAGDB]:
         yield active["db"]
 
-    async def override_active_user():
+    async def override_active_user() -> User:
         return active["user"]
 
     try:
@@ -532,10 +533,10 @@ def test_postgres_question_and_attempt_http_routes_scope_children_to_owner(
         ),
     }
 
-    def override_active_db():
+    def override_active_db() -> Iterator[CharactersRAGDB]:
         yield active["db"]
 
-    async def override_active_user():
+    async def override_active_user() -> User:
         return active["user"]
 
     try:

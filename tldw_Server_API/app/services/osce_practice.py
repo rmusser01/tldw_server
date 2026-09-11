@@ -27,10 +27,7 @@ from tldw_Server_API.app.api.v1.schemas.osce import (
     OsceStationUpdateContent,
     OsceVerificationState,
 )
-
-
-class OsceStationIdentityError(ValueError):
-    """Raised when an update violates server-owned nested identity."""
+from tldw_Server_API.app.core.exceptions import OsceStationIdentityError
 
 
 @dataclass(frozen=True)

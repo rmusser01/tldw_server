@@ -4,13 +4,15 @@ from uuid import UUID, uuid4
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 from tldw_Server_API.app.api.v1.schemas.osce import (
     OsceStationCreateContent,
     OsceStationStoredContent,
     OsceStationUpdateContent,
 )
+from tldw_Server_API.app.core.exceptions import OsceStationIdentityError
 from tldw_Server_API.app.services.osce_practice import (
-    OsceStationIdentityError,
     evidence_fingerprint,
     materialize_station_content,
     project_station_summary,

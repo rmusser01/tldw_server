@@ -24,6 +24,14 @@ from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
     ArtifactVerificationUnit,
     verify_generated_artifact_against_sources,
 )
+from tldw_Server_API.app.core.exceptions import (
+    OsceCitationError,
+    OsceGenerationError,
+    OsceMalformedOutputError,
+    OsceProviderError,
+    OsceUnsupportedContractError,
+    OsceVerificationError,
+)
 from tldw_Server_API.app.core.RAG.rag_service.types import Document
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.services.osce_practice import materialize_station_content
@@ -34,35 +42,6 @@ MAX_OSCE_VERIFICATION_UNITS = 80
 # Bound sequential verifier fan-out to one fifth of the full artifact unit budget.
 MAX_OSCE_VERIFICATION_GROUPS = 16
 _SUPPORTED_SOURCE_TYPES = {member.value for member in OsceCitationSourceType}
-
-
-class OsceGenerationError(ValueError):
-    """Base class for bounded OSCE generation failures."""
-
-    code = "osce_malformed_output"
-
-    def __init__(self, private_detail: object | None = None):
-        super().__init__(str(private_detail) if private_detail else self.code)
-
-
-class OsceProviderError(OsceGenerationError):
-    code = "osce_provider_failure"
-
-
-class OsceMalformedOutputError(OsceGenerationError):
-    code = "osce_malformed_output"
-
-
-class OsceUnsupportedContractError(OsceGenerationError):
-    code = "osce_unsupported_contract"
-
-
-class OsceCitationError(OsceGenerationError):
-    code = "osce_citation_failure"
-
-
-class OsceVerificationError(OsceGenerationError):
-    code = "osce_verification_failure"
 
 
 @dataclass(frozen=True)
@@ -176,6 +155,10 @@ def _canonicalize_citation(
         OsceCitationSourceType.MEDIA,
         OsceCitationSourceType.DOCUMENT,
         OsceCitationSourceType.NOTE,
+        OsceCitationSourceType.FLASHCARD_DECK,
+        OsceCitationSourceType.FLASHCARD_CARD,
+        OsceCitationSourceType.QUIZ_ATTEMPT,
+        OsceCitationSourceType.QUIZ_ATTEMPT_QUESTION,
     }:
         canonical["chunk_id"] = chunk_id[:512]
 
@@ -798,12 +781,6 @@ async def generate_osce_stations_from_sources(
 
 __all__ = [
     "GeneratedOsceBundle",
-    "OsceCitationError",
-    "OsceGenerationError",
-    "OsceMalformedOutputError",
-    "OsceProviderError",
-    "OsceUnsupportedContractError",
-    "OsceVerificationError",
     "build_osce_generation_prompt",
     "build_osce_verification_units",
     "generate_osce_stations_from_sources",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import Iterator
 from typing import Any
 from uuid import uuid4
 
@@ -133,13 +134,13 @@ def quizzes_db(tmp_path) -> CharactersRAGDB:
 
 
 @pytest.fixture
-def client(quizzes_db: CharactersRAGDB):
+def client(quizzes_db: CharactersRAGDB) -> Iterator[TestClient]:
     TestConfig.setup_test_environment()
 
-    def override_get_db():
+    def override_get_db() -> Iterator[CharactersRAGDB]:
         yield quizzes_db
 
-    async def override_user():
+    async def override_user() -> User:
         return User(
             id=1,
             username="testuser",

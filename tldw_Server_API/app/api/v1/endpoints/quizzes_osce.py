@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import Field, model_validator
+from pydantic import Field
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     get_chacha_db_for_user,
@@ -18,19 +18,15 @@ from tldw_Server_API.app.api.v1.schemas.osce import (
     OsceAttemptPatch,
     OsceAttemptState,
     OsceAttemptSummary,
+    OsceAttemptSummaryPage,
     OsceAttemptTransition,
     OsceCandidateAttemptResponse,
     OsceRevealedAttemptResponse,
     OsceStationAuthoringResponse,
     OsceStationCreateRequest,
+    OsceStationPatchRequest,
     OsceStationStoredContent,
-    OsceStationSummary,
-    OsceStationUpdateContent,
-    StrictModel,
-)
-from tldw_Server_API.app.api.v1.schemas.pagination import (
-    OffsetPaginationMeta,
-    default_offset_pagination_aliases,
+    OsceStationSummaryPage,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
@@ -39,8 +35,8 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.exceptions import OsceStationIdentityError
 from tldw_Server_API.app.services.osce_practice import (
-    OsceStationIdentityError,
     materialize_station_content,
     project_candidate_attempt,
     project_revealed_attempt,
@@ -49,37 +45,6 @@ from tldw_Server_API.app.services.osce_practice import (
 )
 
 router = APIRouter(tags=["quizzes"])
-
-
-class OsceStationPatchRequest(StrictModel):
-    """Optimistic station update envelope."""
-
-    expected_version: int = Field(ge=1)
-    content: OsceStationUpdateContent
-    order_index: int | None = Field(default=None, ge=0)
-
-
-class _OsceOffsetPage(StrictModel):
-    count: int = Field(ge=0)
-    has_more: bool | None = None
-    next_offset: int | None = Field(default=None, ge=0)
-    pagination: OffsetPaginationMeta
-
-    @model_validator(mode="after")
-    def populate_pagination_aliases(self) -> _OsceOffsetPage:
-        return default_offset_pagination_aliases(self)
-
-
-class OsceStationSummaryPage(_OsceOffsetPage):
-    """Paginated station summaries without authoring content."""
-
-    items: list[OsceStationSummary]
-
-
-class OsceAttemptSummaryPage(_OsceOffsetPage):
-    """Paginated attempt summaries without notes or station guides."""
-
-    items: list[OsceAttemptSummary]
 
 
 OsceAttemptResponse = Annotated[
