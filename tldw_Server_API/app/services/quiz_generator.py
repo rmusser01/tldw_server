@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
+from tldw_Server_API.app.api.v1.schemas.osce import OsceStationAuthoringResponse
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_api_key
@@ -20,11 +21,16 @@ from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
 )
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from tldw_Server_API.app.core.exceptions import BadRequestError
+from tldw_Server_API.app.core.exceptions import BadRequestError, OsceVerificationError
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.RAG.rag_service.types import Document
 from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.services.osce_generator import (
+    build_osce_verification_units,
+    generate_osce_stations_from_sources,
+)
+from tldw_Server_API.app.services.osce_practice import utc_now
 from tldw_Server_API.app.services.quiz_source_resolver import resolve_quiz_sources
 
 if TYPE_CHECKING:
@@ -60,6 +66,8 @@ _QUIZ_GENERATION_PROFILES: list[dict[str, Any]] = [
         "label": "Standard Recall",
         "description": "Balanced source-grounded recall and application questions.",
         "status": "available",
+        "output_kind": "questions",
+        "default_num_stations": None,
         "default_num_questions": 10,
         "default_difficulty": "mixed",
         "default_question_types": DEFAULT_QUESTION_TYPES,
@@ -71,6 +79,8 @@ _QUIZ_GENERATION_PROFILES: list[dict[str, Any]] = [
         "label": "Mixed Assessment",
         "description": "A broader mix of recall, interpretation, and applied understanding.",
         "status": "available",
+        "output_kind": "questions",
+        "default_num_stations": None,
         "default_num_questions": 10,
         "default_difficulty": "mixed",
         "default_question_types": DEFAULT_QUESTION_TYPES,
@@ -82,6 +92,8 @@ _QUIZ_GENERATION_PROFILES: list[dict[str, Any]] = [
         "label": "Best of Five",
         "description": "Single-best-answer questions with five plausible options.",
         "status": "available",
+        "output_kind": "questions",
+        "default_num_stations": None,
         "default_num_questions": 5,
         "default_difficulty": "mixed",
         "default_question_types": ["multiple_choice"],
@@ -96,6 +108,8 @@ _QUIZ_GENERATION_PROFILES: list[dict[str, Any]] = [
         "label": "EMQ",
         "description": "Extended matching questions with shared option banks.",
         "status": "available",
+        "output_kind": "questions",
+        "default_num_stations": None,
         "default_num_questions": 5,
         "default_difficulty": "mixed",
         "default_question_types": ["multiple_choice"],
@@ -110,6 +124,8 @@ _QUIZ_GENERATION_PROFILES: list[dict[str, Any]] = [
         "label": "Assertion / Reasoning",
         "description": "Assertion and reason pairs with concise evidence-backed rationales.",
         "status": "available",
+        "output_kind": "questions",
+        "default_num_stations": None,
         "default_num_questions": 5,
         "default_difficulty": "mixed",
         "default_question_types": ["multiple_choice"],
@@ -127,8 +143,10 @@ _QUIZ_GENERATION_PROFILES: list[dict[str, Any]] = [
         "id": "osce_scenario",
         "label": "OSCE Scenario",
         "description": "Scenario practice with checklist and rubric feedback.",
-        "status": "planned",
-        "default_num_questions": 3,
+        "status": "available",
+        "output_kind": "osce_stations",
+        "default_num_stations": 1,
+        "default_num_questions": 1,
         "default_difficulty": "mixed",
         "default_question_types": ["fill_blank"],
         "allowed_question_types": ["fill_blank"],
@@ -148,6 +166,14 @@ class QuizClaimVerificationError(ValueError):
     def __init__(self, claim_verification: dict[str, Any]):
         super().__init__("Quiz claim verification failed")
         self.claim_verification = claim_verification
+
+
+class QuizGenerationRequestError(BadRequestError):
+    """Raised for stable quiz-generation request failures."""
+
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(code)
 
 
 QUIZ_GENERATION_PROMPT = """You are a quiz generator. Based on the following content, generate {num_questions} quiz questions.
@@ -240,7 +266,7 @@ def _normalize_question_type(value: Any) -> str | None:
     return aliases.get(text, text)
 
 
-def _normalize_generation_profile(value: Any) -> str:
+def _normalize_generation_profile_id(value: Any) -> str:
     raw = getattr(value, "value", value)
     text = str(raw or DEFAULT_GENERATION_PROFILE).strip().lower().replace("-", "_")
     aliases = {
@@ -258,8 +284,18 @@ def _normalize_generation_profile(value: Any) -> str:
     profile = _PROFILE_BY_ID.get(profile_id)
     if profile is None:
         raise BadRequestError(f"Unknown quiz generation profile: {raw}")
-    if profile["status"] != "available":
-        raise BadRequestError(f"Quiz generation profile '{profile_id}' is not available yet")
+    return profile_id
+
+
+def ensure_generation_profile_available(profile: Any) -> None:
+    profile_id = _normalize_generation_profile_id(profile)
+    if _PROFILE_BY_ID[profile_id]["status"] != "available":
+        raise QuizGenerationRequestError("generation_profile_unavailable")
+
+
+def _normalize_generation_profile(value: Any) -> str:
+    profile_id = _normalize_generation_profile_id(value)
+    ensure_generation_profile_available(profile_id)
     return profile_id
 
 
@@ -1687,6 +1723,7 @@ async def generate_quiz_from_sources(
     media_db: MediaDatabase,
     sources: Sequence[Any],
     num_questions: int = 10,
+    num_stations: int = 1,
     question_types: list[Any] | None = None,
     generation_profile: Any = DEFAULT_GENERATION_PROFILE,
     difficulty: str = "mixed",
@@ -1728,6 +1765,75 @@ async def generate_quiz_from_sources(
         normalized_sources=normalized_sources,
         primary_media_id=primary_media_id,
     )
+
+    if normalized_profile == "osce_scenario":
+        bundle = await generate_osce_stations_from_sources(
+            evidence=evidence,
+            normalized_sources=normalized_sources,
+            num_stations=num_stations,
+            difficulty=difficulty,
+            focus_topics=focus_topics or [],
+            model=model,
+            api_provider=api_provider,
+            verification_provider=claims_verification_provider,
+            verification_model=claims_verification_model,
+        )
+        verification_timestamp = utc_now()
+        verification_units = build_osce_verification_units(bundle.stations)
+        station_rows = [
+            {
+                "content": station.model_dump(mode="json"),
+                "order_index": index,
+                "origin": "generated",
+                "provenance": bundle.provenance,
+                "source_bundle": normalized_sources,
+                "verification_state": "source_verified",
+                "verification_timestamp": verification_timestamp,
+                "verification_summary": (
+                    f"Verified {len(verification_units)} evidence units against "
+                    f"{len(normalized_sources)} canonical sources."
+                ),
+            }
+            for index, station in enumerate(bundle.stations)
+        ]
+        try:
+            quiz, persisted_stations = await asyncio.to_thread(
+                db.create_quiz_with_osce_stations_atomic,
+                {
+                    "name": f"OSCE: {quiz_title}" if quiz_title else "OSCE: Mixed Sources",
+                    "description": "Auto-generated source-backed OSCE practice stations",
+                    "workspace_id": workspace_id,
+                    "workspace_tag": workspace_tag,
+                    "media_id": primary_media_id,
+                    "source_bundle_json": normalized_sources,
+                    "activity_type": "osce",
+                    "generation_profile": normalized_profile,
+                },
+                station_rows,
+            )
+        except Exception as exc:
+            logger.warning(
+                "OSCE atomic persistence failed client={} exception={}",
+                str(db.client_id)[:128],
+                type(exc).__name__,
+            )
+            raise OsceVerificationError() from exc
+        projected_stations = [
+            OsceStationAuthoringResponse.model_validate(
+                {
+                    field_name: station[field_name]
+                    for field_name in OsceStationAuthoringResponse.model_fields
+                }
+            ).model_dump(mode="json")
+            for station in persisted_stations
+        ]
+        return {
+            "output_kind": "osce_stations",
+            "quiz": quiz,
+            "questions": [],
+            "osce_stations": projected_stations,
+            "claim_verification": bundle.verification_result.to_dict(),
+        }
 
     if _should_use_deterministic_test_mode():
         questions = _build_test_mode_questions(
@@ -1771,6 +1877,8 @@ async def generate_quiz_from_sources(
             workspace_tag=workspace_tag,
         )
         result["claim_verification"] = claim_verification_payload
+        result["output_kind"] = "questions"
+        result["osce_stations"] = []
         return result
 
     content = _build_content_from_evidence(evidence)
@@ -1853,6 +1961,8 @@ async def generate_quiz_from_sources(
         workspace_tag=workspace_tag,
     )
     result["claim_verification"] = claim_verification_payload
+    result["output_kind"] = "questions"
+    result["osce_stations"] = []
     return result
 
 

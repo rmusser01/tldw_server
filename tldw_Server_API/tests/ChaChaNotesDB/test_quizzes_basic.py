@@ -1,5 +1,6 @@
 import contextlib
 import gc
+import json
 import os
 import shutil
 import sqlite3
@@ -8,9 +9,18 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from tldw_Server_API.app.core.DB_Management.backends.factory import reset_managed_sqlite_backends
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+import pytest
 
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
+from tldw_Server_API.app.core.DB_Management.backends.factory import (
+    DatabaseBackendFactory,
+    reset_managed_sqlite_backends,
+)
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    ConflictError,
+    InputError,
+)
 
 _TEMP_CLEANUP_ATTEMPTS = 50
 
@@ -207,6 +217,207 @@ def test_fill_blank_accepts_delimited_alternates():
         )
         assert result["score"] == 1
         assert result["answers"][0]["is_correct"] is True
+
+
+def test_quiz_activity_fields_roundtrip_and_legacy_create_defaults_to_questions():
+    with _temp_chacha_db() as db:
+        questions_id = db.create_quiz(name="Questions")
+        osce_id = db.create_quiz(
+            name="OSCE",
+            activity_type="osce",
+            generation_profile="osce_scenario",
+        )
+
+        questions = db.get_quiz(questions_id)
+        osce = db.get_quiz(osce_id)
+        assert questions is not None
+        assert questions["activity_type"] == "questions"
+        assert questions["generation_profile"] is None
+        assert questions["total_stations"] == 0
+        assert osce is not None
+        assert osce["activity_type"] == "osce"
+        assert osce["generation_profile"] == "osce_scenario"
+        assert osce["total_questions"] == 0
+        assert osce["total_stations"] == 0
+
+
+@pytest.mark.parametrize("setting", ["passing_score", "time_limit_seconds"])
+def test_osce_quiz_rejects_question_only_settings(setting: str):
+    with _temp_chacha_db() as db:
+        with pytest.raises(InputError, match=setting):
+            db.create_quiz(name="OSCE", activity_type="osce", **{setting: 10})
+
+        quiz_id = db.create_quiz(name="OSCE", activity_type="osce")
+        with pytest.raises(InputError, match=setting):
+            db.update_quiz(quiz_id, {setting: 10})
+
+
+def test_quiz_activity_change_requires_empty_quiz_and_preserves_optimistic_locking():
+    with _temp_chacha_db() as db:
+        empty_id = db.create_quiz(name="Empty")
+        empty = db.get_quiz(empty_id)
+        assert empty is not None
+        assert db.update_quiz(
+            empty_id,
+            {"activity_type": "osce", "expected_version": empty["version"]},
+        ) is True
+        switched = db.get_quiz(empty_id)
+        assert switched is not None
+        assert switched["activity_type"] == "osce"
+        assert switched["total_questions"] == 0
+
+        question_quiz_id = db.create_quiz(name="Has questions")
+        db.create_question(
+            quiz_id=question_quiz_id,
+            question_type="true_false",
+            question_text="True?",
+            correct_answer="true",
+        )
+        with pytest.raises(ConflictError, match="activity type"):
+            db.update_quiz(question_quiz_id, {"activity_type": "osce"})
+
+        station_quiz_id = db.create_quiz(name="Has stations", activity_type="osce")
+        with db.transaction() as conn:
+            conn.execute("UPDATE quizzes SET total_stations = 1 WHERE id = ?", (station_quiz_id,))
+        with pytest.raises(ConflictError, match="activity type"):
+            db.update_quiz(station_quiz_id, {"activity_type": "questions"})
+
+
+def test_quiz_size_sort_uses_activity_relevant_count():
+    with _temp_chacha_db() as db:
+        questions_id = db.create_quiz(name="Questions")
+        osce_id = db.create_quiz(name="OSCE", activity_type="osce")
+        with db.transaction() as conn:
+            conn.execute("UPDATE quizzes SET total_questions = 2 WHERE id = ?", (questions_id,))
+            conn.execute(
+                "UPDATE quizzes SET total_questions = 99, total_stations = 4 WHERE id = ?",
+                (osce_id,),
+            )
+
+        items = db.list_quizzes(
+            include_workspace_items=True,
+            activity_type="all",
+            sort_by="size",
+            sort_order="desc",
+        )["items"]
+        assert [item["id"] for item in items] == [osce_id, questions_id]
+        assert items[0]["total_questions"] == 0
+
+
+def test_list_quizzes_defaults_to_questions_and_explicit_all_includes_osce():
+    with _temp_chacha_db() as db:
+        question_id = db.create_quiz(name="Questions")
+        osce_id = db.create_quiz(name="OSCE", activity_type="osce")
+
+        default_items = db.list_quizzes(include_workspace_items=True)["items"]
+        all_items = db.list_quizzes(
+            include_workspace_items=True,
+            activity_type="all",
+        )["items"]
+
+        assert [item["id"] for item in default_items] == [question_id]
+        assert {item["id"] for item in all_items} == {question_id, osce_id}
+
+
+def test_question_paths_reject_osce_quizzes():
+    with _temp_chacha_db() as db:
+        quiz_id = db.create_quiz(name="OSCE", activity_type="osce")
+        with pytest.raises(ConflictError, match="Quiz not found"):
+            db.create_question(
+                quiz_id=quiz_id,
+                question_type="true_false",
+                question_text="True?",
+                correct_answer="true",
+            )
+        with pytest.raises(ConflictError, match="Quiz not found"):
+            db.list_questions(quiz_id)
+
+        now = db._get_current_utc_timestamp_iso()
+        with db.transaction() as conn:
+            question_id = conn.execute(
+                """
+                INSERT INTO quiz_questions(
+                    quiz_id, question_type, question_text, correct_answer,
+                    created_at, last_modified
+                ) VALUES (?, 'true_false', 'Injected question', 'true', ?, ?)
+                """,
+                (quiz_id, now, now),
+            ).lastrowid
+
+        with pytest.raises(ConflictError, match="Quiz not found"):
+            db.get_question(question_id)
+        with pytest.raises(ConflictError, match="Quiz not found"):
+            db.update_question(question_id, {"question_text": "Updated"})
+        with pytest.raises(ConflictError, match="Quiz not found"):
+            db.delete_question(question_id)
+
+
+def test_normal_attempt_start_and_submit_reject_osce_quizzes():
+    with _temp_chacha_db() as db:
+        osce_id = db.create_quiz(name="OSCE", activity_type="osce")
+        with pytest.raises(ConflictError, match="Quiz not found"):
+            db.start_attempt(osce_id)
+
+        questions_id = db.create_quiz(name="Questions")
+        question_id = db.create_question(
+            quiz_id=questions_id,
+            question_type="true_false",
+            question_text="True?",
+            correct_answer="true",
+        )
+        attempt = db.start_attempt(questions_id)
+        with db.transaction() as conn:
+            conn.execute(
+                "UPDATE quizzes SET activity_type = 'osce', total_questions = 0 WHERE id = ?",
+                (questions_id,),
+            )
+        with pytest.raises(ConflictError, match="Quiz not found"):
+            db.submit_attempt(attempt["id"], [{"question_id": question_id, "user_answer": "true"}])
+
+
+def test_question_attempt_can_be_submitted_after_quiz_soft_delete():
+    with _temp_chacha_db() as db:
+        quiz_id = db.create_quiz(name="Questions")
+        question_id = db.create_question(
+            quiz_id=quiz_id,
+            question_type="true_false",
+            question_text="True?",
+            correct_answer="true",
+        )
+        attempt = db.start_attempt(quiz_id)
+
+        assert db.delete_quiz(quiz_id) is True
+        result = db.submit_attempt(
+            attempt["id"],
+            [{"question_id": question_id, "user_answer": "true"}],
+        )
+
+        assert result["score"] == 1
+        assert result["answers"][0]["is_correct"] is True
+
+
+def test_soft_quiz_delete_hides_osce_stations():
+    with _temp_chacha_db() as db:
+        quiz_id = db.create_quiz(name="OSCE", activity_type="osce")
+        now = db._get_current_utc_timestamp_iso()
+        with db.transaction() as conn:
+            station_id = conn.execute(
+                """
+                INSERT INTO osce_stations(
+                    quiz_id, schema_version, content_json, order_index, origin,
+                    verification_state, created_at, updated_at
+                ) VALUES (?, 'osce.station.v1', '{}', 0, 'manual', 'manually_authored', ?, ?)
+                """,
+                (quiz_id, now, now),
+            ).lastrowid
+
+        assert db.delete_quiz(quiz_id) is True
+        row = db.get_connection().execute(
+            "SELECT deleted FROM osce_stations WHERE id = ?",
+            (station_id,),
+        ).fetchone()
+        assert row is not None
+        assert row["deleted"] == 1
 
 
 def test_hint_penalty_applies_only_when_hint_used_on_correct_answer():
@@ -460,42 +671,31 @@ def test_quiz_schema_migration_v23_to_v24_supports_matching():
             )
             conn.commit()
 
-        migrated_db = CharactersRAGDB(db_path, client_id="migration-check")
-        try:
-            conn = migrated_db.get_connection()
+        migrator = object.__new__(CharactersRAGDB)
+        migrator.db_path_str = db_path
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            migrator._migrate_from_v23_to_v24(conn)
             version_row = conn.execute(
                 "SELECT version FROM db_schema_version WHERE schema_name = ?",
                 (CharactersRAGDB._SCHEMA_NAME,),
             ).fetchone()
             assert version_row is not None
-            assert int(version_row["version"]) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
+            assert int(version_row["version"]) == 24
 
             table_sql_row = conn.execute(
                 "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'quiz_questions'"
             ).fetchone()
             assert table_sql_row is not None
-            table_sql = str(table_sql_row["sql"])
-            assert "'matching'" in table_sql
-
-            quiz_id = migrated_db.create_quiz(name="Migrated matching quiz")
-            question_id = migrated_db.create_question(
-                quiz_id=quiz_id,
-                question_type="matching",
-                question_text="Match terms",
-                options=["CPU", "RAM"],
-                correct_answer={"CPU": "Processor", "RAM": "Memory"},
-                points=2,
-                order_index=0,
+            assert "'matching'" in str(table_sql_row["sql"])
+            conn.execute(
+                """
+                INSERT INTO quiz_questions(
+                    quiz_id, question_type, question_text, correct_answer
+                ) VALUES (?, 'matching', 'Match terms', ?)
+                """,
+                (seed_quiz_id, json.dumps({"CPU": "Processor"})),
             )
-            attempt = migrated_db.start_attempt(quiz_id)
-            result = migrated_db.submit_attempt(
-                attempt["id"],
-                [{"question_id": question_id, "user_answer": {"cpu": "processor", "ram": "memory"}}],
-            )
-            assert result["score"] == 2
-            assert result["answers"][0]["is_correct"] is True
-        finally:
-            _close_temp_chacha_db(migrated_db, db_path)
 
 
 def test_quiz_schema_migration_v24_to_v25_supports_hint_metadata():
@@ -586,15 +786,17 @@ def test_quiz_schema_migration_v24_to_v25_supports_hint_metadata():
             )
             conn.commit()
 
-        migrated_db = CharactersRAGDB(db_path, client_id="migration-check")
-        try:
-            conn = migrated_db.get_connection()
+        migrator = object.__new__(CharactersRAGDB)
+        migrator.db_path_str = db_path
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            migrator._migrate_from_v24_to_v25(conn)
             version_row = conn.execute(
                 "SELECT version FROM db_schema_version WHERE schema_name = ?",
                 (CharactersRAGDB._SCHEMA_NAME,),
             ).fetchone()
             assert version_row is not None
-            assert int(version_row["version"]) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
+            assert int(version_row["version"]) == 25
 
             columns = {
                 row["name"] if isinstance(row, sqlite3.Row) else row[1]
@@ -602,26 +804,187 @@ def test_quiz_schema_migration_v24_to_v25_supports_hint_metadata():
             }
             assert "hint" in columns
             assert "hint_penalty_points" in columns
+            conn.execute(
+                """
+                INSERT INTO quiz_questions(
+                    quiz_id, question_type, question_text, correct_answer,
+                    hint, hint_penalty_points
+                ) VALUES (?, 'true_false', 'Migrated hint?', 'true', ?, ?)
+                """,
+                (seed_quiz_id, "Hint text", 2),
+            )
 
-            quiz_id = migrated_db.create_quiz(name="Migrated hint quiz")
-            question_id = migrated_db.create_question(
-                quiz_id=quiz_id,
-                question_type="multiple_choice",
-                question_text="Capital of France?",
-                options=["Berlin", "Paris", "Rome"],
-                correct_answer=1,
-                hint="Think Eiffel Tower.",
-                hint_penalty_points=2,
-                points=4,
-                order_index=0,
-            )
-            attempt = migrated_db.start_attempt(quiz_id)
-            result = migrated_db.submit_attempt(
+
+def test_sqlite_quiz_client_id_defaults_to_instance_and_preserves_explicit_values():
+    with _temp_chacha_db(client_id="sqlite-owner") as db:
+        default_id = db.create_quiz(name="Default owner")
+        explicit_id = db.create_quiz(name="Explicit owner", client_id="sqlite-explicit")
+
+        assert db.get_quiz(default_id)["client_id"] == "sqlite-owner"
+        assert db.get_quiz(explicit_id)["client_id"] == "sqlite-explicit"
+
+        assert db.update_quiz(
+            explicit_id,
+            {"name": "Changed explicit owner"},
+            client_id="sqlite-updater",
+        )
+        assert db.get_quiz(explicit_id)["client_id"] == "sqlite-updater"
+
+
+@pytest.mark.timeout(90)
+def test_postgres_quiz_domain_operations_are_owner_scoped(
+    pg_database_config: DatabaseConfig,
+):
+    owner_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    attacker_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    owner = CharactersRAGDB(Path(":memory:"), client_id="quiz-owner", backend=owner_backend)
+    attacker = CharactersRAGDB(
+        Path(":memory:"), client_id="quiz-attacker", backend=attacker_backend
+    )
+    try:
+        noop_id = owner.create_quiz(name="No-op target")
+        update_id = owner.create_quiz(name="Update target")
+        soft_delete_id = owner.create_quiz(name="Soft-delete target")
+        hard_delete_id = owner.create_quiz(name="Hard-delete target")
+        legacy_id = owner.create_quiz(name="Quarantined legacy")
+        owner.execute_query(
+            "UPDATE quizzes SET client_id = ? WHERE id = ?",
+            ("unknown", legacy_id),
+        )
+
+        assert attacker.list_quizzes(include_workspace_items=True) == {
+            "items": [],
+            "count": 0,
+        }
+        assert not attacker.update_quiz(noop_id, {"expected_version": 1})
+        assert not attacker.update_quiz(update_id, {"name": "Captured"})
+        assert not attacker.delete_quiz(soft_delete_id, expected_version=1)
+        assert not attacker.delete_quiz(hard_delete_id, hard_delete=True)
+
+        assert owner.update_quiz(
+            update_id,
+            {"name": "Owner update"},
+            client_id="attempted-owner-rewrite",
+        )
+
+        rows = owner.execute_query(
+            "SELECT id, name, deleted, client_id FROM quizzes "
+            "WHERE id IN (?, ?, ?, ?, ?) ORDER BY id",
+            (noop_id, update_id, soft_delete_id, hard_delete_id, legacy_id),
+        ).fetchall()
+        by_id = {int(row["id"]): row for row in rows}
+        assert by_id[noop_id]["name"] == "No-op target"
+        assert by_id[update_id]["name"] == "Owner update"
+        assert by_id[update_id]["client_id"] == owner.client_id
+        assert not bool(by_id[soft_delete_id]["deleted"])
+        assert not bool(by_id[hard_delete_id]["deleted"])
+        assert by_id[soft_delete_id]["client_id"] == owner.client_id
+        assert by_id[hard_delete_id]["client_id"] == owner.client_id
+        assert by_id[legacy_id]["client_id"] == "unknown"
+        assert owner.get_quiz(legacy_id, include_deleted=True) is None
+        assert legacy_id not in {
+            item["id"]
+            for item in owner.list_quizzes(
+                include_workspace_items=True,
+                include_deleted=True,
+            )["items"]
+        }
+    finally:
+        attacker.close_all_connections()
+        owner.close_all_connections()
+
+
+@pytest.mark.timeout(90)
+def test_postgres_question_and_attempt_operations_are_parent_owner_scoped(
+    pg_database_config: DatabaseConfig,
+):
+    owner_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    attacker_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    owner = CharactersRAGDB(Path(":memory:"), client_id="child-owner", backend=owner_backend)
+    attacker = CharactersRAGDB(
+        Path(":memory:"), client_id="child-attacker", backend=attacker_backend
+    )
+    try:
+        quiz_id = owner.create_quiz(name="Owned questions")
+        other_quiz_id = owner.create_quiz(name="Other owned quiz")
+        update_id = owner.create_question(
+            quiz_id,
+            "true_false",
+            "Update target?",
+            "true",
+        )
+        delete_id = owner.create_question(
+            quiz_id,
+            "true_false",
+            "Delete target?",
+            "true",
+        )
+        attempt = owner.start_attempt(quiz_id)
+
+        assert attacker.get_question(update_id) is None
+        with pytest.raises(ConflictError, match="Quiz not found"):
+            attacker.list_questions(quiz_id)
+        assert not attacker.update_question(
+            update_id,
+            {"question_text": "Captured"},
+        )
+        assert not attacker.delete_question(delete_id, expected_version=1)
+        assert not owner.update_question(
+            update_id,
+            {"question_text": "Wrong parent"},
+            quiz_id=other_quiz_id,
+        )
+        assert not owner.delete_question(
+            delete_id,
+            expected_version=1,
+            quiz_id=other_quiz_id,
+        )
+
+        assert attacker.get_attempt(attempt["id"], include_answers=True) is None
+        assert attacker.list_attempts() == {"items": [], "count": 0}
+        assert attacker.list_attempts(quiz_id=quiz_id) == {"items": [], "count": 0}
+        with pytest.raises(ConflictError, match="Attempt not found"):
+            attacker.submit_attempt(
                 attempt["id"],
-                [{"question_id": question_id, "user_answer": 1, "hint_used": True}],
+                [{"question_id": update_id, "user_answer": "false"}],
             )
-            assert result["score"] == 2
-            assert result["answers"][0]["hint_used"] is True
-            assert result["answers"][0]["hint_penalty_points"] == 2
-        finally:
-            _close_temp_chacha_db(migrated_db, db_path)
+
+        assert not attacker.update_quiz(quiz_id, {})
+        assert owner.update_quiz(quiz_id, {})
+        assert owner.update_question(
+            update_id,
+            {"question_text": "Owner changed"},
+            quiz_id=quiz_id,
+        )
+        assert owner.delete_question(delete_id, expected_version=1, quiz_id=quiz_id)
+
+        quiz_row = owner.execute_query(
+            "SELECT total_questions, client_id FROM quizzes WHERE id = ?",
+            (quiz_id,),
+        ).fetchone()
+        question_rows = owner.execute_query(
+            "SELECT id, question_text, deleted, client_id FROM quiz_questions "
+            "WHERE id IN (?, ?) ORDER BY id",
+            (update_id, delete_id),
+        ).fetchall()
+        attempt_row = owner.execute_query(
+            "SELECT completed_at, score, answers, client_id FROM quiz_attempts WHERE id = ?",
+            (attempt["id"],),
+        ).fetchone()
+
+        assert quiz_row is not None
+        assert int(quiz_row["total_questions"]) == 1
+        assert quiz_row["client_id"] == owner.client_id
+        by_question_id = {int(row["id"]): row for row in question_rows}
+        assert by_question_id[update_id]["question_text"] == "Owner changed"
+        assert by_question_id[update_id]["client_id"] == owner.client_id
+        assert bool(by_question_id[delete_id]["deleted"])
+        assert by_question_id[delete_id]["client_id"] == owner.client_id
+        assert attempt_row is not None
+        assert attempt_row["completed_at"] is None
+        assert attempt_row["score"] is None
+        assert attempt_row["answers"] in ([], "[]")
+        assert attempt_row["client_id"] == owner.client_id
+    finally:
+        attacker.close_all_connections()
+        owner.close_all_connections()

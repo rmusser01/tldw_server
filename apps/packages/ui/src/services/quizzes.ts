@@ -9,6 +9,7 @@ import type {
   StudyAssistantRespondRequest,
   StudyAssistantRespondResponse
 } from "@/services/flashcards"
+import type { OsceStationAuthoringResponse, OsceStationCreateContent } from "@/services/osce"
 
 const quizzesClient = createResourceClient({
   basePath: "/api/v1/quizzes" as AllowedPath
@@ -46,15 +47,14 @@ export type QuizGenerationProfile =
   | "emq"
   | "assertion_reasoning"
   | "osce_scenario"
-export type AvailableQuizGenerationProfile = Exclude<
-  QuizGenerationProfile,
-  "osce_scenario"
->
+export type AvailableQuizGenerationProfile = QuizGenerationProfile
 export type QuizGenerationProfileDefinition = {
   id: QuizGenerationProfile
   label: string
   description: string
   status: "available" | "planned"
+  output_kind: "questions" | "osce_stations"
+  default_num_stations: number | null
   default_num_questions: number
   default_difficulty: "easy" | "medium" | "hard" | "mixed"
   default_question_types: QuestionType[]
@@ -65,6 +65,8 @@ export const QUIZ_GENERATION_PROFILES: QuizGenerationProfileDefinition[] = [
     label: "Standard Recall",
     description: "Balanced source-grounded recall and application questions.",
     status: "available",
+    output_kind: "questions",
+    default_num_stations: null,
     default_num_questions: 10,
     default_difficulty: "mixed",
     default_question_types: ["multiple_choice", "true_false", "fill_blank"]
@@ -74,6 +76,8 @@ export const QUIZ_GENERATION_PROFILES: QuizGenerationProfileDefinition[] = [
     label: "Mixed Assessment",
     description: "A broader mix of recall, interpretation, and applied understanding.",
     status: "available",
+    output_kind: "questions",
+    default_num_stations: null,
     default_num_questions: 10,
     default_difficulty: "mixed",
     default_question_types: ["multiple_choice", "true_false", "fill_blank"]
@@ -83,6 +87,8 @@ export const QUIZ_GENERATION_PROFILES: QuizGenerationProfileDefinition[] = [
     label: "Best of Five",
     description: "Single-best-answer questions with five plausible options.",
     status: "available",
+    output_kind: "questions",
+    default_num_stations: null,
     default_num_questions: 5,
     default_difficulty: "mixed",
     default_question_types: ["multiple_choice"]
@@ -92,6 +98,8 @@ export const QUIZ_GENERATION_PROFILES: QuizGenerationProfileDefinition[] = [
     label: "EMQ",
     description: "Extended matching questions with shared option banks.",
     status: "available",
+    output_kind: "questions",
+    default_num_stations: null,
     default_num_questions: 5,
     default_difficulty: "mixed",
     default_question_types: ["multiple_choice"]
@@ -101,9 +109,22 @@ export const QUIZ_GENERATION_PROFILES: QuizGenerationProfileDefinition[] = [
     label: "Assertion / Reasoning",
     description: "Assertion and reason pairs with concise evidence-backed rationales.",
     status: "available",
+    output_kind: "questions",
+    default_num_stations: null,
     default_num_questions: 5,
     default_difficulty: "mixed",
     default_question_types: ["multiple_choice"]
+  },
+  {
+    id: "osce_scenario",
+    label: "OSCE Scenario",
+    description: "Source-grounded clinical practice stations.",
+    status: "available",
+    output_kind: "osce_stations",
+    default_num_stations: 1,
+    default_num_questions: 1,
+    default_difficulty: "mixed",
+    default_question_types: []
   }
 ]
 export type AnswerValue = number | string | number[] | Record<string, string>
@@ -118,14 +139,16 @@ export type QuizGenerateSource = {
   source_type: QuizGenerateSourceType
   source_id: string
 }
+export type SourceCitationType = QuizGenerateSourceType | "document" | "url"
 export type SourceCitation = {
-  source_type?: QuizGenerateSourceType | null
+  source_type?: SourceCitationType | null
   source_id?: string | null
   label?: string | null
   quote?: string | null
   media_id?: number | null
   chunk_id?: string | null
   timestamp_seconds?: number | null
+  page_number?: number | null
   source_url?: string | null
 }
 
@@ -139,6 +162,9 @@ export type Quiz = {
   media_id?: number | null
   source_bundle_json?: QuizGenerateSource[] | null
   total_questions: number
+  activity_type: "questions" | "osce"
+  generation_profile?: QuizGenerationProfile | null
+  total_stations: number
   time_limit_seconds?: number | null
   passing_score?: number | null
   deleted: boolean
@@ -223,6 +249,7 @@ export type QuizCreate = {
   source_bundle_json?: QuizGenerateSource[] | null
   time_limit_seconds?: number | null
   passing_score?: number | null
+  activity_type?: "questions" | "osce"
 }
 
 export type QuizUpdate = {
@@ -235,6 +262,7 @@ export type QuizUpdate = {
   time_limit_seconds?: number | null
   passing_score?: number | null
   expected_version?: number | null
+  activity_type?: "questions" | "osce" | null
 }
 
 export type QuestionCreate = {
@@ -271,11 +299,9 @@ export type QuestionUpdate = {
 }
 
 // AI generation request
-type QuizGenerateRequestBase = {
-  generation_profile?: AvailableQuizGenerationProfile
-  num_questions?: number
-  question_types?: QuestionType[]
-  question_plan?: QuizQuestionPlanItem[]
+export type QuestionQuizGenerationProfile = Exclude<QuizGenerationProfile, "osce_scenario">
+
+type QuizGenerateRequestOptions = {
   difficulty?: "easy" | "medium" | "hard" | "mixed"
   focus_topics?: string[]
   model?: string
@@ -286,17 +312,37 @@ type QuizGenerateRequestBase = {
   workspace_tag?: string | null
 }
 
-type QuizGenerateRequestWithMedia = QuizGenerateRequestBase & {
+type QuestionQuizGenerateRequest = QuizGenerateRequestOptions & {
+  generation_profile?: QuestionQuizGenerationProfile
+  num_questions?: number
+  num_stations?: never
+  question_types?: QuestionType[]
+  question_plan?: QuizQuestionPlanItem[]
+}
+
+type OsceQuizGenerateRequest = QuizGenerateRequestOptions & {
+  generation_profile: "osce_scenario"
+  num_stations?: number
+  num_questions?: never
+  question_types?: never
+  question_plan?: never
+}
+
+type QuizGenerateRequestWithMedia = {
   media_id: number
   sources?: QuizGenerateSource[]
 }
 
-type QuizGenerateRequestWithSources = QuizGenerateRequestBase & {
+type QuizGenerateRequestWithSources = {
   sources: QuizGenerateSource[]
   media_id?: number
 }
 
-export type QuizGenerateRequest = QuizGenerateRequestWithMedia | QuizGenerateRequestWithSources
+export type QuizGenerateRequest = (
+  QuestionQuizGenerateRequest | OsceQuizGenerateRequest
+) & (
+  QuizGenerateRequestWithMedia | QuizGenerateRequestWithSources
+)
 
 export type QuizRemediationGenerateRequest = {
   attemptId: number
@@ -386,6 +432,7 @@ export type AttemptListResponse = {
 
 // List params
 export type QuizListParams = {
+  activity_type?: "questions" | "osce" | "all"
   media_id?: number | null
   q?: string | null
   workspace_id?: string | null
@@ -409,8 +456,10 @@ export type AttemptListParams = {
 }
 
 export type QuizGenerateResponse = {
+  output_kind: "questions" | "osce_stations"
   quiz: Quiz
   questions: QuestionAdmin[]
+  osce_stations: OsceStationAuthoringResponse[]
   claim_verification?: Record<string, unknown> | null
 }
 
@@ -435,22 +484,53 @@ export type QuizImportEntry = {
   questions: QuizImportQuestion[]
 }
 
-export type QuizImportRequest = {
-  export_format?: string | null
-  quizzes: QuizImportEntry[]
+export type QuizImportV2QuestionEntry = {
+  activity_type: "questions"
+  quiz: QuizCreate & Record<string, unknown>
+  questions: Array<QuizImportQuestion & Record<string, unknown>>
 }
+
+export type QuizImportV2OsceStation = {
+  content: OsceStationCreateContent
+  order_index?: number
+  origin?: "generated" | "manual"
+  provenance?: Record<string, unknown> | null
+  source_bundle?: QuizGenerateSource[]
+  verification_state?: "source_verified" | "modified_after_verification" | "manually_authored"
+  verification_timestamp?: string | null
+  verification_summary?: string | null
+  [key: string]: unknown
+}
+
+export type QuizImportV2OsceEntry = {
+  activity_type: "osce"
+  quiz: QuizCreate & Record<string, unknown>
+  stations: QuizImportV2OsceStation[]
+}
+
+export type QuizImportRequest =
+  | { export_format?: "tldw.quiz.export.v1" | null; quizzes: QuizImportEntry[] }
+  | {
+      export_format: "tldw.quiz.export.v2"
+      exported_at: string
+      quizzes: Array<QuizImportV2QuestionEntry | QuizImportV2OsceEntry>
+    }
 
 export type QuizImportItemResult = {
   source_index: number
   quiz_id: number
   imported_questions: number
   failed_questions: number
+  imported_stations: number
+  failed_stations: number
+  station_ids: number[]
 }
 
 export type QuizImportError = {
   source_index: number
   quiz_name?: string | null
   question_index?: number | null
+  station_index?: number | null
   error: string
 }
 
@@ -459,6 +539,8 @@ export type QuizImportResponse = {
   failed_quizzes: number
   imported_questions: number
   failed_questions: number
+  imported_stations: number
+  failed_stations: number
   items: QuizImportItemResult[]
   errors: QuizImportError[]
 }
@@ -467,6 +549,7 @@ export type QuizImportResponse = {
 
 export async function listQuizzes(params: QuizListParams = {}): Promise<QuizListResponse> {
   return await quizzesClient.list<QuizListResponse>({
+    activity_type: params.activity_type ?? "all",
     media_id: params.media_id,
     q: params.q,
     workspace_id: params.workspace_id,

@@ -24,7 +24,9 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("../../hooks", () => ({
   useCreateQuizMutation: vi.fn(),
-  useCreateQuestionMutation: vi.fn()
+  useCreateQuestionMutation: vi.fn(),
+  useCreateOsceStationMutation: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
+  useUpdateOsceStationMutation: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false }))
 }))
 
 describe("CreateTab draft safety", () => {
@@ -87,6 +89,43 @@ describe("CreateTab draft safety", () => {
     expect(screen.getByDisplayValue("Recovered question?")).toBeInTheDocument()
   }, 15000)
 
+  it("discards persisted and pending question drafts when switching to OSCE", async () => {
+    window.localStorage.setItem(
+      "quiz-create-draft-v1",
+      JSON.stringify({
+        name: "Recovered Quiz",
+        description: "Recovered description",
+        timeLimit: 15,
+        passingScore: 80,
+        questions: [{
+          key: "discarded-question",
+          question_type: "multiple_choice",
+          question_text: "Do not restore me",
+          options: ["A", "B"],
+          correct_answer: 0,
+          explanation: ""
+        }],
+        updatedAt: Date.now()
+      })
+    )
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true)
+    const firstRender = render(<CreateTab onNavigateToTake={() => {}} />)
+    expect(screen.getByText("Saved draft found")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("radio", { name: "OSCE" }))
+
+    expect(confirmSpy).toHaveBeenCalledWith(
+      "Switch activity type and discard the current activity content?"
+    )
+    expect(window.localStorage.getItem("quiz-create-draft-v1")).toBeNull()
+    expect(screen.queryByText("Saved draft found")).not.toBeInTheDocument()
+
+    firstRender.unmount()
+    render(<CreateTab onNavigateToTake={() => {}} />)
+    expect(screen.queryByText("Saved draft found")).not.toBeInTheDocument()
+    expect(screen.queryByDisplayValue("Do not restore me")).not.toBeInTheDocument()
+  })
+
   it("signals dirty state and blocks browser unload while dirty", () => {
     const onDirtyStateChange = vi.fn()
 
@@ -125,7 +164,7 @@ describe("CreateTab draft safety", () => {
 
     expect(
       screen.getByText(
-        "Draft autosave unavailable — your progress will not be preserved if you leave."
+        "Draft autosave unavailable: your progress will not be preserved if you leave."
       )
     ).toBeInTheDocument()
 

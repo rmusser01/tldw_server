@@ -1,7 +1,9 @@
-from typing import Any, Optional
+from collections.abc import Mapping
+from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
+from pydantic import TypeAdapter, ValidationError
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
@@ -21,15 +23,21 @@ from tldw_Server_API.app.api.v1.schemas.quizzes import (
     QuestionAdminResponse,
     QuestionCreate,
     QuestionListResponse,
+    QuestionQuizExportV2,
     QuestionUpdate,
     QuizCreate,
+    QuizExportV2Entry,
     QuizGenerateRequest,
     QuizGenerateResponse,
     QuizGenerationProfileDefinition,
+    QuizImportEntry,
     QuizImportError,
     QuizImportItemResult,
-    QuizImportRequest,
+    QuizImportPayload,
+    QuizImportQuestion,
+    QuizImportQuiz,
     QuizImportResponse,
+    QuizImportV2Request,
     QuizListResponse,
     QuizRemediationConversionListResponse,
     QuizRemediationConvertRequest,
@@ -45,6 +53,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.exceptions import OsceGenerationError, OsceProviderError
 from tldw_Server_API.app.core.Flashcards.study_assistant import (
     build_quiz_attempt_question_context,
     generate_study_assistant_reply,
@@ -58,6 +67,7 @@ from tldw_Server_API.app.core.StudySuggestions.jobs import (
 )
 from tldw_Server_API.app.services.quiz_generator import (
     QuizClaimVerificationError,
+    QuizGenerationRequestError,
     QuizProvenanceValidationError,
     generate_quiz_from_sources,
     get_quiz_generation_profiles,
@@ -65,6 +75,13 @@ from tldw_Server_API.app.services.quiz_generator import (
 
 router = APIRouter(prefix="/quizzes", tags=["quizzes"])
 QUIZ_EXPORT_FORMAT = "tldw.quiz.export.v1"
+QUIZ_EXPORT_FORMAT_V2 = "tldw.quiz.export.v2"
+_QUIZ_EXPORT_V2_ENTRY_ADAPTER = TypeAdapter(QuizExportV2Entry)
+_INVALID_V2_ENTRY_ERROR = "Invalid v2 quiz export entry"
+_INVALID_V2_QUESTION_ENTRY_ERROR = "Invalid question quiz export entry"
+_INVALID_V2_OSCE_ENTRY_ERROR = "Invalid OSCE quiz export entry"
+_V2_QUESTION_IMPORT_ERROR = "Failed to import question quiz"
+_V2_OSCE_IMPORT_ERROR = "Failed to import OSCE quiz"
 
 
 def _ensure_workspace_exists(db: CharactersRAGDB, workspace_id: Optional[str]) -> None:
@@ -82,6 +99,38 @@ def _format_import_error(exc: Exception, *, default_detail: str) -> str:
     if detail == default_detail:
         return default_detail
     return f"{default_detail}: {detail}"
+
+
+def _bounded_import_name(entry: Any) -> str | None:
+    if not isinstance(entry, Mapping):
+        return None
+    quiz = entry.get("quiz")
+    if not isinstance(quiz, Mapping):
+        return None
+    name = quiz.get("name")
+    if not isinstance(name, str):
+        return None
+    return name[:255]
+
+
+def _raw_entry_list_count(entry: Mapping[str, Any], field: str) -> int:
+    value = entry.get(field)
+    return len(value) if isinstance(value, list) else 0
+
+
+def _v2_question_import_entry(entry: QuestionQuizExportV2) -> QuizImportEntry:
+    quiz_fields = set(QuizImportQuiz.model_fields)
+    question_fields = set(QuizImportQuestion.model_fields)
+    quiz = QuizImportQuiz.model_validate(
+        entry.quiz.model_dump(mode="json", include=quiz_fields)
+    )
+    questions = [
+        QuizImportQuestion.model_validate(
+            question.model_dump(mode="json", include=question_fields)
+        )
+        for question in entry.questions
+    ]
+    return QuizImportEntry(quiz=quiz, questions=questions)
 
 
 @router.get(
@@ -176,10 +225,11 @@ def list_quizzes(
     media_id: Optional[int] = None,
     workspace_id: Optional[str] = None,
     include_workspace_items: bool = False,
+    activity_type: Literal["questions", "osce", "all"] = Query("questions"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
-):
+) -> QuizListResponse:
     """List quizzes with pagination and optional filters."""
     try:
         payload = db.list_quizzes(
@@ -187,6 +237,7 @@ def list_quizzes(
             media_id=media_id,
             workspace_id=workspace_id,
             include_workspace_items=include_workspace_items,
+            activity_type=activity_type,
             limit=limit,
             offset=offset,
         )
@@ -211,7 +262,7 @@ def create_quiz(payload: QuizCreate, db: CharactersRAGDB = Depends(get_chacha_db
     """Create a new quiz."""
     try:
         _ensure_workspace_exists(db, payload.workspace_id)
-        quiz_id = db.create_quiz(**payload.model_dump())
+        quiz_id = db.create_quiz(**payload.model_dump(exclude_unset=True))
         quiz = db.get_quiz(quiz_id)
         if not quiz:
             raise HTTPException(status_code=500, detail="Failed to load created quiz")
@@ -222,21 +273,100 @@ def create_quiz(payload: QuizCreate, db: CharactersRAGDB = Depends(get_chacha_db
 
 @router.post("/import/json", response_model=QuizImportResponse)
 def import_quizzes_json(
-    payload: QuizImportRequest,
+    payload: QuizImportPayload,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ):
     """Import quizzes from the JSON export format."""
-    if payload.export_format and payload.export_format != QUIZ_EXPORT_FORMAT:
+    if payload.export_format and payload.export_format not in {
+        QUIZ_EXPORT_FORMAT,
+        QUIZ_EXPORT_FORMAT_V2,
+    }:
         raise HTTPException(status_code=400, detail="Unsupported quiz export format")
 
     imported_quizzes = 0
     failed_quizzes = 0
     imported_questions = 0
     failed_questions = 0
+    imported_stations = 0
+    failed_stations = 0
     items: list[QuizImportItemResult] = []
     errors: list[QuizImportError] = []
 
-    for source_index, entry in enumerate(payload.quizzes):
+    for source_index, raw_entry in enumerate(payload.quizzes):
+        is_v2_question = False
+        if isinstance(payload, QuizImportV2Request):
+            quiz_name = _bounded_import_name(raw_entry)
+            if not isinstance(raw_entry, Mapping):
+                failed_quizzes += 1
+                errors.append(
+                    QuizImportError(
+                        source_index=source_index,
+                        quiz_name=None,
+                        error=_INVALID_V2_ENTRY_ERROR,
+                    )
+                )
+                continue
+
+            raw_activity = raw_entry.get("activity_type")
+            entry_station_count = _raw_entry_list_count(raw_entry, "stations")
+            entry_question_count = _raw_entry_list_count(raw_entry, "questions")
+            try:
+                v2_entry = _QUIZ_EXPORT_V2_ENTRY_ADAPTER.validate_python(raw_entry)
+            except ValidationError:
+                failed_quizzes += 1
+                if raw_activity == "osce":
+                    failed_stations += entry_station_count
+                    detail = _INVALID_V2_OSCE_ENTRY_ERROR
+                elif raw_activity == "questions":
+                    failed_questions += entry_question_count
+                    detail = _INVALID_V2_QUESTION_ENTRY_ERROR
+                else:
+                    detail = _INVALID_V2_ENTRY_ERROR
+                errors.append(
+                    QuizImportError(
+                        source_index=source_index,
+                        quiz_name=quiz_name,
+                        error=detail,
+                    )
+                )
+                continue
+
+            if v2_entry.activity_type == "osce":
+                try:
+                    _ensure_workspace_exists(db, v2_entry.quiz.workspace_id)
+                    result = db.import_osce_quiz_entry_atomic(v2_entry)
+                except (HTTPException, InputError, ConflictError, CharactersRAGDBError, ValidationError):
+                    failed_quizzes += 1
+                    failed_stations += len(v2_entry.stations)
+                    errors.append(
+                        QuizImportError(
+                            source_index=source_index,
+                            quiz_name=v2_entry.quiz.name,
+                            error=_V2_OSCE_IMPORT_ERROR,
+                        )
+                    )
+                    continue
+
+                station_ids = result["station_ids"]
+                imported_quizzes += 1
+                imported_stations += len(station_ids)
+                items.append(
+                    QuizImportItemResult(
+                        source_index=source_index,
+                        quiz_id=int(result["quiz"]["id"]),
+                        imported_questions=0,
+                        failed_questions=0,
+                        imported_stations=len(station_ids),
+                        failed_stations=0,
+                        station_ids=station_ids,
+                    )
+                )
+                continue
+            entry = _v2_question_import_entry(v2_entry)
+            is_v2_question = True
+        else:
+            entry = raw_entry
+
         quiz_name = entry.quiz.name
         try:
             _ensure_workspace_exists(db, entry.quiz.workspace_id)
@@ -244,11 +374,17 @@ def import_quizzes_json(
             imported_quizzes += 1
         except (HTTPException, InputError, ConflictError, CharactersRAGDBError) as exc:
             failed_quizzes += 1
+            if is_v2_question:
+                failed_questions += len(entry.questions)
             errors.append(
                 QuizImportError(
                     source_index=source_index,
                     quiz_name=quiz_name,
-                    error=_format_import_error(exc, default_detail="Failed to create quiz"),
+                    error=(
+                        _V2_QUESTION_IMPORT_ERROR
+                        if is_v2_question
+                        else _format_import_error(exc, default_detail="Failed to create quiz")
+                    ),
                 )
             )
             continue
@@ -273,7 +409,11 @@ def import_quizzes_json(
                         source_index=source_index,
                         quiz_name=quiz_name,
                         question_index=question_index,
-                        error=_format_import_error(exc, default_detail="Failed to create question"),
+                        error=(
+                            _V2_QUESTION_IMPORT_ERROR
+                            if is_v2_question
+                            else _format_import_error(exc, default_detail="Failed to create question")
+                        ),
                     )
                 )
 
@@ -283,6 +423,9 @@ def import_quizzes_json(
                 quiz_id=quiz_id,
                 imported_questions=entry_imported_questions,
                 failed_questions=entry_failed_questions,
+                imported_stations=0,
+                failed_stations=0,
+                station_ids=[],
             )
         )
 
@@ -291,6 +434,8 @@ def import_quizzes_json(
         failed_quizzes=failed_quizzes,
         imported_questions=imported_questions,
         failed_questions=failed_questions,
+        imported_stations=imported_stations,
+        failed_stations=failed_stations,
         items=items,
         errors=errors,
     )
@@ -374,6 +519,11 @@ def list_questions(
                 count=len(items),
             ),
         )
+    except ConflictError as exc:
+        raise map_db_error_to_http(
+            exc,
+            conflict_status_code=404,
+        ) from exc
     except (InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to list questions") from exc
 
@@ -387,7 +537,7 @@ def create_question(
     """Add a question to a quiz."""
     try:
         question_id = db.create_question(quiz_id=quiz_id, **question.model_dump())
-        item = db.get_question(question_id)
+        item = db.get_question(question_id, quiz_id=quiz_id)
         if not item:
             raise HTTPException(status_code=500, detail="Failed to load created question")
         return item
@@ -409,10 +559,14 @@ def update_question(
 ):
     """Update a question."""
     try:
-        ok = db.update_question(question_id, updates.model_dump(exclude_unset=True))
+        ok = db.update_question(
+            question_id,
+            updates.model_dump(exclude_unset=True),
+            quiz_id=quiz_id,
+        )
         if not ok:
             raise HTTPException(status_code=404, detail="Question not found")
-        item = db.get_question(question_id)
+        item = db.get_question(question_id, quiz_id=quiz_id)
         if not item:
             raise HTTPException(status_code=404, detail="Question not found")
         return item
@@ -430,7 +584,12 @@ def delete_question(
 ):
     """Delete a question."""
     try:
-        ok = db.delete_question(question_id, expected_version=expected_version, hard_delete=hard)
+        ok = db.delete_question(
+            question_id,
+            expected_version=expected_version,
+            hard_delete=hard,
+            quiz_id=quiz_id,
+        )
         if not ok:
             raise HTTPException(status_code=404, detail="Question not found")
         return {"status": "deleted"}
@@ -702,6 +861,7 @@ async def generate_quiz(
             media_db=media_db,
             sources=sources,
             num_questions=request.num_questions,
+            num_stations=request.num_stations,
             question_types=request.question_types,
             question_plan=request.question_plan,
             generation_profile=request.generation_profile,
@@ -715,6 +875,11 @@ async def generate_quiz(
             workspace_tag=request.workspace_tag,
         )
         return result
+    except QuizGenerationRequestError as e:
+        raise HTTPException(status_code=400, detail={"code": e.code}) from e
+    except OsceGenerationError as e:
+        status_code = 502 if isinstance(e, OsceProviderError) else 422
+        raise HTTPException(status_code=status_code, detail={"code": e.code}) from e
     except QuizClaimVerificationError as e:
         raise HTTPException(
             status_code=422,
@@ -736,3 +901,10 @@ async def generate_quiz(
         raise map_db_error_to_http(exc, default_detail="Failed to generate quiz") from exc
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+# Keep the OSCE API slice beneath the established quizzes router so router
+# registry ownership and the public /api/v1/quizzes prefix remain unchanged.
+from tldw_Server_API.app.api.v1.endpoints import quizzes_osce  # noqa: E402
+
+router.include_router(quizzes_osce.router)

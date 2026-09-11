@@ -1,6 +1,6 @@
 # Advanced Quiz Customization PRD
 
-Status: Proposed
+Status: In Progress
 Owner: Product / WebUI / API
 Created: 2026-07-10
 Tracking: TASK-12102
@@ -304,6 +304,14 @@ display.
 
 Add scenario/checklist/rubric model and self-marked flow. Add advisory
 LLM-feedback only after rubric persistence and review UX are stable.
+
+Implementation status: available. The server and shared WebUI now
+implement generated and manual station authoring, immutable attempt snapshots,
+candidate-safe practice, checklist/rubric self-assessment, no-score results,
+and v2 JSON portability. The `osce_scenario` generation profile is available in
+the server catalog and bundled frontend fallback after backend, WebUI,
+PostgreSQL migration, OpenAPI, browser, and security qualification in
+TASK-12102.3.5.6. Automated or advisory LLM scoring is not part of this release.
 
 ### Phase 6: Documentation And Evaluation
 

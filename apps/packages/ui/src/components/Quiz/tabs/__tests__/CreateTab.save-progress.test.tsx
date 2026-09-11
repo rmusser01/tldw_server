@@ -34,7 +34,8 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("../../hooks", () => ({
   useCreateQuizMutation: vi.fn(),
-  useCreateQuestionMutation: vi.fn()
+  useCreateQuestionMutation: vi.fn(),
+  useCreateOsceStationMutation: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false }))
 }))
 
 describe("CreateTab save pipeline", () => {
