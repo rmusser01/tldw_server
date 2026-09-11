@@ -761,7 +761,8 @@ export async function autoSyncPrompt(
       recipeOwnership,
       error:
         "No Prompt Studio project available for auto-sync. Configure a default project in Prompt Studio settings.",
-      syncStatus: "pending"
+      syncStatus: "pending",
+      failureKind: "transient"
     }
   }
 

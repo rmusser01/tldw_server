@@ -308,6 +308,54 @@ const startBackground = async () => {
 };
 
 describe("builder through real sync, Prompt Studio, apiSend and request-core", () => {
+  it.each([
+    ["direct", "create"],
+    ["direct", "update"],
+    ["background", "create"],
+    ["background", "update"],
+  ])(
+    "%s %s retains project-less local changes and shows pending recovery without fetching",
+    async (adapter, operation) => {
+      if (adapter === "background") await startBackground();
+      seed(operation);
+      mocks.defaultProjectId = null;
+      const user = userEvent.setup();
+      renderBuilder(ownerScope);
+      if (operation === "update") await selectSaved(user);
+      await user.selectOptions(
+        screen.getByRole("combobox", { name: "Output format" }),
+        "markdown",
+      );
+
+      await clickWrite(user, operation);
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", {
+            name:
+              operation === "create" ? "Save as new recipe" : "Update recipe",
+          }),
+        ).toBeEnabled(),
+      );
+
+      expect(mocks.fetch).not.toHaveBeenCalled();
+      expect(mocks.rows.get("dispatch-id")).toMatchObject({
+        id: "dispatch-id",
+        syncStatus: "pending",
+        structuredPromptDefinition: {
+          assembly_config: { render_format: "markdown" },
+        },
+      });
+      expect(
+        await screen.findByText(
+          "Recipe saved locally and will sync when the server is available.",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        await readRecipePersistenceUncertainty("dispatch-id", ownerScope),
+      ).toBe("clear");
+    },
+  );
+
   it.each(["direct", "background"])(
     "%s performs zero project GET/POST for project-less v2 under a stale owner",
     async (adapter) => {
