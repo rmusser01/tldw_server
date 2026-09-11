@@ -7353,8 +7353,6 @@ CREATE INDEX idx_osce_attempts_station_state_modified
   ON osce_practice_attempts(station_id, state, last_modified_at DESC);
 CREATE INDEX idx_osce_attempts_quiz_state_modified
   ON osce_practice_attempts(quiz_id, state, last_modified_at DESC);
-CREATE UNIQUE INDEX idx_osce_attempts_station_client
-  ON osce_practice_attempts(station_id, client_attempt_id);
 
 UPDATE db_schema_version
    SET version = 67
@@ -7418,8 +7416,6 @@ CREATE INDEX idx_osce_attempts_station_state_modified
   ON osce_practice_attempts(station_id, state, last_modified_at DESC);
 CREATE INDEX idx_osce_attempts_quiz_state_modified
   ON osce_practice_attempts(quiz_id, state, last_modified_at DESC);
-CREATE UNIQUE INDEX idx_osce_attempts_station_client
-  ON osce_practice_attempts(station_id, client_attempt_id);
 
 UPDATE db_schema_version
    SET version = 67
@@ -39410,6 +39406,456 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (total, now, self.client_id, quiz_id),
         )
         return total
+
+    @staticmethod
+    def _normalize_osce_station_content(content: Any) -> dict[str, Any]:
+        if hasattr(content, "model_dump"):
+            payload = content.model_dump(mode="json")
+        elif isinstance(content, Mapping):
+            payload = dict(content)
+        else:
+            raise InputError("OSCE station content must be a validated mapping")
+        if payload.get("schema_version") != "osce.station.v1":
+            raise InputError("Unsupported OSCE station schema_version")
+        return payload
+
+    @staticmethod
+    def _normalize_osce_station_origin(origin: Any) -> str:
+        value = getattr(origin, "value", origin)
+        normalized = str(value or "").strip().lower()
+        if normalized not in {"generated", "manual"}:
+            raise InputError("OSCE station origin must be 'generated' or 'manual'")
+        return normalized
+
+    @staticmethod
+    def _normalize_osce_verification_state(state: Any, *, origin: str) -> str:
+        value = getattr(state, "value", state)
+        normalized = str(
+            value or ("manually_authored" if origin == "manual" else "source_verified")
+        ).strip().lower()
+        allowed = {"source_verified", "modified_after_verification", "manually_authored"}
+        if normalized not in allowed:
+            raise InputError("Invalid OSCE station verification_state")
+        return normalized
+
+    @staticmethod
+    def _osce_json_string(value: Any) -> str | None:
+        if value is None:
+            return None
+        if hasattr(value, "model_dump"):
+            value = value.model_dump(mode="json")
+        if isinstance(value, str):
+            try:
+                json.loads(value)
+            except json.JSONDecodeError as exc:
+                raise InputError("OSCE structured metadata must contain valid JSON") from exc
+            return value
+        return json.dumps(value, ensure_ascii=True, default=str)
+
+    @staticmethod
+    def _osce_timestamp(value: Any) -> Any:
+        if isinstance(value, datetime):
+            return value.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        return value
+
+    def _deserialize_osce_station_row(self, row: Any) -> dict[str, Any] | None:
+        item = self._deserialize_row_fields(
+            row,
+            ["content_json", "provenance_json", "source_bundle_json"],
+        )
+        if not item:
+            return None
+        item["content"] = item.pop("content_json")
+        item["provenance"] = item.pop("provenance_json", None)
+        source_bundle = item.pop("source_bundle_json", None)
+        item["source_bundle"] = source_bundle if isinstance(source_bundle, list) else []
+        item["deleted"] = bool(item.get("deleted"))
+        for field in ("verification_timestamp", "created_at", "updated_at"):
+            item[field] = self._osce_timestamp(item.get(field))
+        return item
+
+    def _get_osce_station_row(
+        self,
+        conn: Any,
+        quiz_id: int,
+        station_id: int,
+        *,
+        include_deleted: bool = False,
+        lock: bool = False,
+    ) -> Any:
+        deleted_clause = "" if include_deleted else (
+            "AND deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "AND deleted = 0"
+        )
+        lock_clause = " FOR UPDATE" if lock and self.backend_type == BackendType.POSTGRESQL else ""
+        return conn.execute(
+            "SELECT id, quiz_id, schema_version, content_json, order_index, version, origin, "
+            "provenance_json, source_bundle_json, verification_state, verification_timestamp, "
+            "verification_summary, deleted, created_at, updated_at FROM osce_stations "
+            f"WHERE id = ? AND quiz_id = ? {deleted_clause}{lock_clause}",  # nosec B608
+            (station_id, quiz_id),
+        ).fetchone()
+
+    def _insert_osce_station_row(
+        self,
+        conn: Any,
+        quiz_id: int,
+        station_data: Mapping[str, Any],
+        *,
+        now: str,
+    ) -> int:
+        content = self._normalize_osce_station_content(station_data["content"])
+        origin = self._normalize_osce_station_origin(station_data.get("origin"))
+        verification_state = self._normalize_osce_verification_state(
+            station_data.get("verification_state"),
+            origin=origin,
+        )
+        order_index = int(station_data.get("order_index", 0))
+        if order_index < 0:
+            raise InputError("OSCE station order_index must be non-negative")
+        verification_summary = station_data.get("verification_summary")
+        if verification_summary is not None and len(str(verification_summary)) > 2000:
+            raise InputError("OSCE verification_summary exceeds 2000 characters")
+        insert_sql = (
+            "INSERT INTO osce_stations(quiz_id, schema_version, content_json, order_index, version, "
+            "origin, provenance_json, source_bundle_json, verification_state, verification_timestamp, "
+            "verification_summary, deleted, created_at, updated_at) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        params = (
+            quiz_id,
+            content["schema_version"],
+            self._osce_json_string(content),
+            order_index,
+            1,
+            origin,
+            self._osce_json_string(station_data.get("provenance")),
+            self._osce_json_string(
+                station_data.get("source_bundle", station_data.get("source_bundle_json"))
+            ),
+            verification_state,
+            station_data.get("verification_timestamp"),
+            verification_summary,
+            False,
+            now,
+            now,
+        )
+        if self.backend_type == BackendType.POSTGRESQL:
+            row = conn.execute(insert_sql + " RETURNING id", params).fetchone()
+            station_id = int(row["id"]) if row else None
+        else:
+            station_id = int(conn.execute(insert_sql, params).lastrowid)
+        if station_id is None:
+            raise CharactersRAGDBError("Failed to determine OSCE station ID after insert")  # noqa: TRY003
+        return station_id
+
+    def _recount_quiz_stations(self, conn: Any, quiz_id: int) -> int:
+        deleted_clause = "deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "deleted = 0"
+        row = conn.execute(
+            f"SELECT COUNT(*) AS count FROM osce_stations WHERE quiz_id = ? AND {deleted_clause}",  # nosec B608
+            (quiz_id,),
+        ).fetchone()
+        total = int(row["count"]) if row else 0
+        conn.execute(
+            "UPDATE quizzes SET total_questions = 0, total_stations = ?, last_modified = ?, "
+            "version = version + 1, client_id = ? WHERE id = ?",
+            (total, self._get_current_utc_timestamp_iso(), self.client_id, quiz_id),
+        )
+        return total
+
+    def create_osce_station(
+        self,
+        quiz_id: int,
+        content: Any,
+        *,
+        order_index: int = 0,
+        origin: Any,
+        provenance: Any = None,
+        source_bundle: Any = None,
+        verification_state: Any = None,
+        verification_timestamp: str | None = None,
+        verification_summary: str | None = None,
+    ) -> dict[str, Any]:
+        """Create one station and update the owning quiz count atomically."""
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                quiz_row = self._get_quiz_row_for_mutation(conn, quiz_id)
+                if not quiz_row or str(quiz_row["activity_type"]) != "osce":
+                    raise self._quiz_not_found(quiz_id)
+                station_id = self._insert_osce_station_row(
+                    conn,
+                    quiz_id,
+                    {
+                        "content": content,
+                        "order_index": order_index,
+                        "origin": origin,
+                        "provenance": provenance,
+                        "source_bundle": source_bundle,
+                        "verification_state": verification_state,
+                        "verification_timestamp": verification_timestamp,
+                        "verification_summary": verification_summary,
+                    },
+                    now=now,
+                )
+                self._recount_quiz_stations(conn, quiz_id)
+                row = self._get_osce_station_row(conn, quiz_id, station_id)
+                station = self._deserialize_osce_station_row(row)
+                if station is None:
+                    raise CharactersRAGDBError("Failed to read created OSCE station")  # noqa: TRY003
+                return station
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to create OSCE station: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to create OSCE station: {exc}") from exc  # noqa: TRY003
+
+    def get_osce_station(
+        self,
+        quiz_id: int,
+        station_id: int,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
+        """Return one station only when it belongs to the supplied OSCE quiz."""
+        self._require_quiz_activity(quiz_id, "osce")
+        row = self._get_osce_station_row(
+            self.get_connection(),
+            quiz_id,
+            station_id,
+            include_deleted=include_deleted,
+        )
+        return self._deserialize_osce_station_row(row)
+
+    def list_osce_stations(
+        self,
+        quiz_id: int,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        include_deleted: bool = False,
+    ) -> dict[str, Any]:
+        """List stations in deterministic authoring order."""
+        self._require_quiz_activity(quiz_id, "osce")
+        if limit < 1 or offset < 0:
+            raise InputError("OSCE station pagination values are invalid")
+        deleted_clause = "" if include_deleted else (
+            "AND deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "AND deleted = 0"
+        )
+        query = (
+            "SELECT id, quiz_id, schema_version, content_json, order_index, version, origin, "
+            "provenance_json, source_bundle_json, verification_state, verification_timestamp, "
+            "verification_summary, deleted, created_at, updated_at FROM osce_stations "
+            f"WHERE quiz_id = ? {deleted_clause} ORDER BY order_index ASC, id ASC LIMIT ? OFFSET ?"  # nosec B608
+        )
+        count_query = f"SELECT COUNT(*) AS count FROM osce_stations WHERE quiz_id = ? {deleted_clause}"  # nosec B608
+        rows = self.execute_query(query, (quiz_id, limit, offset)).fetchall()
+        items = [self._deserialize_osce_station_row(row) for row in rows]
+        count_row = self.execute_query(count_query, (quiz_id,)).fetchone()
+        return {
+            "items": [item for item in items if item is not None],
+            "count": int(count_row["count"]) if count_row else 0,
+        }
+
+    def update_osce_station(
+        self,
+        quiz_id: int,
+        station_id: int,
+        content: Any,
+        *,
+        expected_version: int,
+        order_index: int | None = None,
+        verification_state: Any = None,
+        verification_timestamp: str | None = None,
+        verification_summary: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Replace validated station content using optimistic locking."""
+        content_payload = self._normalize_osce_station_content(content)
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                quiz_row = self._get_quiz_row_for_mutation(conn, quiz_id)
+                if not quiz_row or str(quiz_row["activity_type"]) != "osce":
+                    raise self._quiz_not_found(quiz_id)
+                row = self._get_osce_station_row(conn, quiz_id, station_id, lock=True)
+                if not row:
+                    return None
+                current = self._deserialize_osce_station_row(row)
+                if current is None:
+                    return None
+                if int(current["version"]) != expected_version:
+                    raise ConflictError(
+                        "Version mismatch updating OSCE station",
+                        entity="osce_stations",
+                        identifier=station_id,
+                    )
+                next_order = int(current["order_index"] if order_index is None else order_index)
+                if next_order < 0:
+                    raise InputError("OSCE station order_index must be non-negative")
+                next_state = self._normalize_osce_verification_state(
+                    verification_state or current["verification_state"],
+                    origin=current["origin"],
+                )
+                next_timestamp = (
+                    current["verification_timestamp"]
+                    if verification_timestamp is None
+                    else verification_timestamp
+                )
+                next_summary = (
+                    current["verification_summary"]
+                    if verification_summary is None
+                    else verification_summary
+                )
+                if next_summary is not None and len(str(next_summary)) > 2000:
+                    raise InputError("OSCE verification_summary exceeds 2000 characters")
+                deleted_clause = (
+                    "deleted = FALSE"
+                    if self.backend_type == BackendType.POSTGRESQL
+                    else "deleted = 0"
+                )
+                conn.execute(
+                    "UPDATE osce_stations SET schema_version = ?, content_json = ?, order_index = ?, "
+                    "verification_state = ?, verification_timestamp = ?, verification_summary = ?, "
+                    "version = version + 1, updated_at = ? WHERE id = ? AND quiz_id = ? "
+                    f"AND {deleted_clause}",  # nosec B608
+                    (
+                        content_payload["schema_version"],
+                        self._osce_json_string(content_payload),
+                        next_order,
+                        next_state,
+                        next_timestamp,
+                        next_summary,
+                        now,
+                        station_id,
+                        quiz_id,
+                    ),
+                )
+                updated_row = self._get_osce_station_row(conn, quiz_id, station_id)
+                return self._deserialize_osce_station_row(updated_row)
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to update OSCE station: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to update OSCE station: {exc}") from exc  # noqa: TRY003
+
+    def delete_osce_station(
+        self,
+        quiz_id: int,
+        station_id: int,
+        *,
+        expected_version: int | None = None,
+    ) -> bool:
+        """Soft-delete one station and update the owning quiz count atomically."""
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                quiz_row = self._get_quiz_row_for_mutation(conn, quiz_id)
+                if not quiz_row or str(quiz_row["activity_type"]) != "osce":
+                    raise self._quiz_not_found(quiz_id)
+                row = self._get_osce_station_row(
+                    conn,
+                    quiz_id,
+                    station_id,
+                    include_deleted=True,
+                    lock=True,
+                )
+                if not row:
+                    return False
+                if bool(row["deleted"]):
+                    return True
+                current_version = int(row["version"])
+                if expected_version is not None and current_version != expected_version:
+                    raise ConflictError(
+                        "Version mismatch deleting OSCE station",
+                        entity="osce_stations",
+                        identifier=station_id,
+                    )
+                deleted_clause = "deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "deleted = 0"
+                result = conn.execute(
+                    "UPDATE osce_stations SET deleted = ?, version = version + 1, updated_at = ? "
+                    f"WHERE id = ? AND quiz_id = ? AND {deleted_clause}",  # nosec B608
+                    (True, now, station_id, quiz_id),
+                )
+                if result.rowcount:
+                    self._recount_quiz_stations(conn, quiz_id)
+                return result.rowcount > 0
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to delete OSCE station: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to delete OSCE station: {exc}") from exc  # noqa: TRY003
+
+    def create_quiz_with_osce_stations_atomic(
+        self,
+        quiz_data: dict[str, Any],
+        stations: Sequence[dict[str, Any]],
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Persist one OSCE quiz and all validated stations atomically."""
+        data = dict(quiz_data)
+        activity_type = self._normalize_quiz_activity(data.get("activity_type", "osce"))
+        if activity_type != "osce":
+            raise InputError("Atomic OSCE persistence requires activity_type 'osce'")
+        if data.get("passing_score") is not None or data.get("time_limit_seconds") is not None:
+            raise InputError("Question-only settings are not supported for OSCE quizzes")
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                insert_quiz_sql = (
+                    "INSERT INTO quizzes(name, description, workspace_tag, workspace_id, media_id, source_bundle_json, "
+                    "activity_type, generation_profile, total_questions, total_stations, time_limit_seconds, passing_score, "
+                    "deleted, client_id, version, created_at, last_modified) "
+                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                )
+                quiz_params = (
+                    data["name"],
+                    data.get("description"),
+                    data.get("workspace_tag"),
+                    data.get("workspace_id"),
+                    data.get("media_id"),
+                    self._osce_json_string(data.get("source_bundle_json")),
+                    "osce",
+                    self._normalize_quiz_generation_profile(data.get("generation_profile")),
+                    0,
+                    0,
+                    None,
+                    None,
+                    False,
+                    data.get("client_id") or self.client_id,
+                    1,
+                    now,
+                    now,
+                )
+                if self.backend_type == BackendType.POSTGRESQL:
+                    quiz_row = conn.execute(insert_quiz_sql + " RETURNING id", quiz_params).fetchone()
+                    quiz_id = int(quiz_row["id"]) if quiz_row else None
+                else:
+                    quiz_id = int(conn.execute(insert_quiz_sql, quiz_params).lastrowid)
+                if quiz_id is None:
+                    raise CharactersRAGDBError("Failed to determine quiz ID after insert")  # noqa: TRY003
+
+                station_ids = [
+                    self._insert_osce_station_row(conn, quiz_id, station, now=now)
+                    for station in stations
+                ]
+                self._recount_quiz_stations(conn, quiz_id)
+                persisted_quiz_row = conn.execute(
+                    "SELECT id, name, description, workspace_tag, workspace_id, media_id, source_bundle_json, "
+                    "activity_type, generation_profile, total_questions, total_stations, time_limit_seconds, "
+                    "passing_score, deleted, client_id, version, created_at, last_modified "
+                    "FROM quizzes WHERE id = ?",
+                    (quiz_id,),
+                ).fetchone()
+                quiz = self._deserialize_quiz_row(persisted_quiz_row)
+                if quiz is None:
+                    raise CharactersRAGDBError("Failed to read created OSCE quiz")  # noqa: TRY003
+                persisted_stations: list[dict[str, Any]] = []
+                for station_id in station_ids:
+                    row = self._get_osce_station_row(conn, quiz_id, station_id)
+                    station = self._deserialize_osce_station_row(row)
+                    if station is None:
+                        raise CharactersRAGDBError("Failed to read created OSCE station")  # noqa: TRY003
+                    persisted_stations.append(station)
+                return quiz, persisted_stations
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to create OSCE quiz bundle: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to create OSCE quiz bundle: {exc}") from exc  # noqa: TRY003
 
     def create_quiz(
         self,

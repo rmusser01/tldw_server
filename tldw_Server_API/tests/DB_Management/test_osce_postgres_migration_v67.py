@@ -122,7 +122,7 @@ def test_postgres_v67_ddl_has_columns_tables_constraints_and_indexes() -> None:
         "CREATE INDEX idx_osce_stations_quiz_active_order ON osce_stations(quiz_id, deleted, order_index)",
         "CREATE INDEX idx_osce_attempts_station_state_modified ON osce_practice_attempts(station_id, state, last_modified_at DESC)",
         "CREATE INDEX idx_osce_attempts_quiz_state_modified ON osce_practice_attempts(quiz_id, state, last_modified_at DESC)",
-        "CREATE UNIQUE INDEX idx_osce_attempts_station_client ON osce_practice_attempts(station_id, client_attempt_id)",
+        "UNIQUE (station_id, client_attempt_id)",
     ):
         assert clause in sql
 
@@ -167,8 +167,8 @@ def _assert_live_postgres_osce_schema(backend: object) -> None:
         "idx_osce_stations_quiz_active_order",
         "idx_osce_attempts_station_state_modified",
         "idx_osce_attempts_quiz_state_modified",
-        "idx_osce_attempts_station_client",
     }.issubset({row["indexname"] for row in indexes})
+    assert "idx_osce_attempts_station_client" not in {row["indexname"] for row in indexes}
 
     constraints = backend.execute(  # type: ignore[attr-defined]
         """
@@ -183,6 +183,7 @@ def _assert_live_postgres_osce_schema(backend: object) -> None:
     definitions = " ".join(str(row["definition"]) for row in constraints)
     assert "activity_type" in definitions
     assert "questions" in definitions and "osce" in definitions
+    assert "UNIQUE (station_id, client_attempt_id)" in definitions
     assert "FOREIGN KEY (quiz_id) REFERENCES quizzes(id) ON DELETE CASCADE" in definitions
     assert "FOREIGN KEY (station_id) REFERENCES osce_stations(id) ON DELETE CASCADE" in definitions
 

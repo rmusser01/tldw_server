@@ -15,7 +15,6 @@ EXPECTED_OSCE_INDEXES = {
     "idx_osce_stations_quiz_active_order",
     "idx_osce_attempts_station_state_modified",
     "idx_osce_attempts_quiz_state_modified",
-    "idx_osce_attempts_station_client",
 }
 
 
@@ -98,6 +97,7 @@ def _assert_sqlite_osce_schema(db: CharactersRAGDB) -> None:
         "CHECK (length(candidate_notes) <= 10000)",
         "CHECK (frozen_elapsed_seconds IS NULL OR frozen_elapsed_seconds >= 0)",
         "CHECK (version >= 1)",
+        "UNIQUE (station_id, client_attempt_id)",
     ):
         assert clause in attempt_sql
 
