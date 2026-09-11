@@ -27,6 +27,10 @@ const FILTER_PRESETS_STORAGE_KEY = "tldw-prompt-filter-presets-v1"
 const FILTER_PRESET_HINT_DISMISSED_KEY =
   "tldw-prompt-hint-dismissed-filter-presets"
 const FILTER_PRESET_HINT_SHOWN_KEY = "tldw-prompt-hint-shown-filter-presets"
+const recipeOwner = {
+  ownerId: `recipe-owner:sha256:${"a".repeat(64)}`,
+  authorizationRevision: `recipe-authorization:sha256:${"a".repeat(64)}`
+}
 
 type PromptSyncMockResult = {
   success: boolean
@@ -93,7 +97,14 @@ const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   setSelectedQuickPrompt: vi.fn(),
   setSelectedSystemPrompt: vi.fn(),
-  setSystemPrompt: vi.fn()
+  setSystemPrompt: vi.fn(),
+  resolveRecipePersistenceOwnerView: vi.fn()
+}))
+
+vi.mock("@/services/recipe-persistence-uncertainty", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/recipe-persistence-uncertainty")>()),
+  resolveRecipePersistenceOwnerView: () =>
+    mocks.resolveRecipePersistenceOwnerView()
 }))
 
 vi.mock("react-i18next", () => ({
@@ -548,6 +559,7 @@ describe("PromptBody server search and pagination", () => {
       apiKey: "key-a"
     }
     state.canonicalConnectionLoading = false
+    mocks.resolveRecipePersistenceOwnerView.mockResolvedValue(recipeOwner)
     mocks.shouldAutoSyncWorkspacePrompts.mockResolvedValue(false)
     mocks.fetchPromptCapabilities.mockResolvedValue({
       availability: "available",
@@ -1341,7 +1353,9 @@ describe("PromptBody server search and pagination", () => {
 
     await waitFor(() => {
       expect(mocks.savePrompt).toHaveBeenCalledTimes(1)
-      expect(mocks.autoSyncPrompt).toHaveBeenCalledWith("saved-id")
+      expect(mocks.autoSyncPrompt).toHaveBeenCalledWith("saved-id", undefined, {
+        expectedOwnerId: recipeOwner.ownerId
+      })
       expect(warningSpy).toHaveBeenCalled()
     })
     const warning = warningSpy.mock.calls.at(-1)?.[0] as
@@ -1922,7 +1936,9 @@ describe("PromptBody server search and pagination", () => {
     fireEvent.click(screen.getByTestId("mock-sync-status-retry"))
 
     await waitFor(() => {
-      expect(mocks.pushToStudio).toHaveBeenCalledWith("pending-retry", 77)
+      expect(mocks.pushToStudio).toHaveBeenCalledWith("pending-retry", 77, {
+        expectedOwnerId: recipeOwner.ownerId
+      })
     })
     await waitFor(() => {
       expect(screen.queryByTestId("prompts-batch-sync-status")).not.toBeInTheDocument()
@@ -1932,7 +1948,9 @@ describe("PromptBody server search and pagination", () => {
     fireEvent.click(screen.getByTestId("mock-retry-sync-pending-retry"))
 
     await waitFor(() => {
-      expect(mocks.pushToStudio).toHaveBeenCalledWith("pending-retry", 77)
+      expect(mocks.pushToStudio).toHaveBeenCalledWith("pending-retry", 77, {
+        expectedOwnerId: recipeOwner.ownerId
+      })
     })
   })
 
