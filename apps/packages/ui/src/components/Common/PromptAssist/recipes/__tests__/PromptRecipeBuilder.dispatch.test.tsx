@@ -1,4 +1,8 @@
-import { autoSyncPrompt, pullFromStudio } from "@/services/prompt-sync";
+import {
+  autoSyncPrompt,
+  pullFromStudio,
+  pushToStudio,
+} from "@/services/prompt-sync";
 import {
   clearRecipePersistenceScoped,
   forgetRecipePersistenceUnknown,
@@ -24,6 +28,8 @@ const mocks = vi.hoisted(() => ({
   config: {} as Record<string, unknown>,
   resolveConfig: vi.fn(),
   beforeConfig: vi.fn(),
+  beforeDefaults: vi.fn(),
+  beforePendingUpdate: vi.fn(),
   defaultProjectId: 42 as number | null,
   fetch: vi.fn(),
   extension: false,
@@ -106,10 +112,13 @@ vi.mock("@/services/tldw/runtime-auth-override", () => ({
   getRuntimeSingleUserApiKeyOverride: () => mocks.runtimeKey,
 }));
 vi.mock("@/services/prompt-studio-settings", () => ({
-  getPromptStudioDefaults: async () => ({
-    defaultProjectId: mocks.defaultProjectId,
-    autoSyncWorkspacePrompts: true,
-  }),
+  getPromptStudioDefaults: async () => {
+    await mocks.beforeDefaults();
+    return {
+      defaultProjectId: mocks.defaultProjectId,
+      autoSyncWorkspacePrompts: true,
+    };
+  },
   setPromptStudioDefaults: vi.fn(),
 }));
 vi.mock("@/db/dexie/chat", () => ({ PageAssistDatabase: class {} }));
@@ -120,7 +129,16 @@ vi.mock("@/db/dexie/schema", () => ({
         await mocks.beforeRead();
         return mocks.rows.get(id);
       },
-      update: async (id: string, fields: object) => {
+      update: async (
+        id: string,
+        fields: object | ((row: Record<string, unknown>) => void | boolean),
+      ) => {
+        if (
+          typeof fields === "function" ||
+          ("syncStatus" in fields && fields.syncStatus === "pending")
+        ) {
+          await mocks.beforePendingUpdate();
+        }
         if (
           "syncStatus" in fields &&
           fields.syncStatus === "error" &&
@@ -129,7 +147,11 @@ vi.mock("@/db/dexie/schema", () => ({
           throw new Error("durable sync-error storage unavailable");
         }
         if (!mocks.rows.has(id)) return 0;
-        mocks.rows.set(id, { ...mocks.rows.get(id), ...fields });
+        const row = { ...mocks.rows.get(id) };
+        if (typeof fields === "function") {
+          if (fields(row) === false) return 0;
+        } else Object.assign(row, fields);
+        mocks.rows.set(id, row);
         return 1;
       },
       add: async (row: { id: string }) => mocks.rows.set(row.id, row),
@@ -308,6 +330,159 @@ const startBackground = async () => {
 };
 
 describe("builder through real sync, Prompt Studio, apiSend and request-core", () => {
+  it.each([
+    ["direct", "create"],
+    ["background", "create"],
+    ["direct", "update"],
+    ["background", "update"],
+  ])(
+    "%s %s retains the exact local row when project-less sync reports concurrent durable ambiguity",
+    async (adapter, operation) => {
+      if (adapter === "background") await startBackground();
+      seed(operation);
+      mocks.defaultProjectId = null;
+      mocks.markerFails = false;
+      const user = userEvent.setup();
+      const view = renderBuilder(ownerScope);
+      if (operation === "update") await selectSaved(user);
+      await user.selectOptions(
+        screen.getByRole("combobox", { name: "Output format" }),
+        "markdown",
+      );
+      const reached = deferred();
+      const release = deferred();
+      mocks.beforeDefaults
+        .mockResolvedValueOnce(undefined)
+        .mockImplementationOnce(async () => {
+          reached.resolve();
+          await release.promise;
+        });
+      await clickWrite(user, operation);
+      await reached.promise;
+      expect(mocks.fetch).not.toHaveBeenCalled();
+      await pushToStudio("dispatch-id", 42, { expectedOwnerId: ownerScope });
+      expect(mocks.rows.get("dispatch-id").syncStatus).toBe("error");
+      release.resolve();
+
+      await screen.findByText(
+        /Could not (?:save|update) the recipe|server outcome could not be verified/i,
+      );
+      expect.soft(mocks.rows.get("dispatch-id")).toMatchObject({
+        id: "dispatch-id",
+        syncStatus: "error",
+        structuredPromptDefinition: {
+          assembly_config: { render_format: "markdown" },
+        },
+      });
+      expect(
+        await screen.findByText(/server outcome could not be verified/i),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", {
+          name: operation === "create" ? "Save as new recipe" : "Update recipe",
+        }),
+      ).toBeDisabled();
+      expect(
+        screen.queryByText(
+          "Recipe saved locally and will sync when the server is available.",
+        ),
+      ).not.toBeInTheDocument();
+      expect(promptMutations()).toHaveLength(1);
+      view.unmount();
+
+      vi.resetModules();
+      if (adapter === "background") await startBackground();
+      const restartedSync = await import("@/services/prompt-sync");
+      const restartedRegistry = await import(
+        "@/services/recipe-persistence-uncertainty"
+      );
+      expect(
+        await restartedRegistry.readRecipePersistenceUncertainty(
+          "dispatch-id",
+          ownerScope,
+        ),
+      ).toBe("clear");
+      expect(
+        await restartedSync.autoSyncPrompt("dispatch-id", 42, {
+          expectedOwnerId: ownerScope,
+        }),
+      ).toMatchObject({ success: false, syncStatus: "error" });
+      expect(promptMutations()).toHaveLength(1);
+    },
+  );
+
+  it.each([
+    ["direct", "defaults"],
+    ["background", "defaults"],
+    ["direct", "local pending write"],
+    ["background", "local pending write"],
+  ])(
+    "%s project-less completion paused at %s preserves concurrent ambiguity across restart",
+    async (adapter, pauseAt) => {
+      if (adapter === "background") await startBackground();
+      seed("update");
+      mocks.defaultProjectId = null;
+      mocks.markerFails = false;
+      const reached = deferred();
+      const release = deferred();
+      const pause = async () => {
+        reached.resolve();
+        await release.promise;
+      };
+      if (pauseAt === "defaults")
+        mocks.beforeDefaults.mockImplementationOnce(pause);
+      else mocks.beforePendingUpdate.mockImplementationOnce(pause);
+
+      const pending = autoSyncPrompt("dispatch-id", undefined, {
+        expectedOwnerId: ownerScope,
+      });
+      await reached.promise;
+      expect(mocks.fetch).not.toHaveBeenCalled();
+      const ambiguous = await pushToStudio("dispatch-id", 42, {
+        expectedOwnerId: ownerScope,
+      });
+      expect(ambiguous).toMatchObject({
+        success: false,
+        syncStatus: "error",
+        recipeOwnership: {
+          dispatch: { state: "dispatched", actualOwnerId: ownerScope },
+        },
+      });
+      expect(mocks.rows.get("dispatch-id").syncStatus).toBe("error");
+      expect(promptMutations()).toHaveLength(1);
+
+      release.resolve();
+      const result = await pending;
+      expect.soft(result).toMatchObject({
+        success: false,
+        failureKind: "validation",
+        syncStatus: "error",
+        recipeOwnership: { dispatch: { state: "not_dispatched" } },
+      });
+      expect.soft(mocks.rows.get("dispatch-id").syncStatus).toBe("error");
+      expect(
+        await readRecipePersistenceUncertainty("dispatch-id", ownerScope),
+      ).toBe("scoped");
+
+      vi.resetModules();
+      if (adapter === "background") await startBackground();
+      const restartedSync = await import("@/services/prompt-sync");
+      const restartedRegistry = await import(
+        "@/services/recipe-persistence-uncertainty"
+      );
+      expect(
+        await restartedRegistry.readRecipePersistenceUncertainty(
+          "dispatch-id",
+          ownerScope,
+        ),
+      ).toBe("clear");
+      await restartedSync.autoSyncPrompt("dispatch-id", 42, {
+        expectedOwnerId: ownerScope,
+      });
+      expect(promptMutations()).toHaveLength(1);
+    },
+  );
+
   it.each([
     ["direct", "create"],
     ["direct", "update"],

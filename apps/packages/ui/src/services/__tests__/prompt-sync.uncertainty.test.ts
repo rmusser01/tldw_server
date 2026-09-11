@@ -33,10 +33,17 @@ vi.mock("@/db/dexie/schema", () => ({
   db: {
     prompts: {
       get: async (id: string) => mocks.rows.get(id),
-      update: async (id: string, fields: object) => {
+      update: async (
+        id: string,
+        fields: object | ((row: Record<string, unknown>) => void | boolean)
+      ) => {
         await mocks.reconcile()
         if (!mocks.rows.has(id)) return 0
-        mocks.rows.set(id, { ...mocks.rows.get(id), ...fields })
+        const row = { ...mocks.rows.get(id) }
+        if (typeof fields === "function") {
+          if (fields(row) === false) return 0
+        } else Object.assign(row, fields)
+        mocks.rows.set(id, row)
         return 1
       },
       add: async (row: { id: string }) => {

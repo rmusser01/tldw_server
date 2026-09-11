@@ -751,10 +751,32 @@ export async function autoSyncPrompt(
       )
 
   if (!isValidProjectId(projectId)) {
-    await db.prompts.update(localId, {
-      syncStatus: "pending",
-      updatedAt: Date.now()
-    })
+    let durableError = false
+    await db.prompts.update(
+      localId,
+      isRecipe
+        ? (current) => {
+            // Check and write in Dexie's one readwrite transaction: settings
+            // resolution may have overlapped another operation's ambiguity.
+            if (current.syncStatus === "error") {
+              durableError = true
+              return false
+            }
+            current.syncStatus = "pending"
+            current.updatedAt = Date.now()
+          }
+        : { syncStatus: "pending", updatedAt: Date.now() }
+    )
+    if (durableError) {
+      return {
+        success: false,
+        localId,
+        recipeOwnership,
+        error: "Recipe has an unresolved durable error",
+        syncStatus: "error",
+        failureKind: "validation"
+      }
+    }
     return {
       success: false,
       localId,

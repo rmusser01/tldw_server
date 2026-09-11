@@ -228,6 +228,12 @@ export function PromptRecipeBuilder({
         }
         throw uncertainSyncFailure;
       }
+      // Another operation may own this durable lock even when this attempt
+      // never dispatched. Neither Save deletion nor Update rollback is safe.
+      if (!result.success && result.syncStatus === "error") {
+        setUnresolvedId(id);
+        throw uncertainSyncFailure;
+      }
       return acceptSyncResult(result);
     },
     [persistenceScope],
