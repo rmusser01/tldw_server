@@ -58,6 +58,105 @@ describe("recipe request snapshot", () => {
     })
   })
 
+  it("removes a caller organization header when configuration has no organization", () => {
+    const result = resolveRecipeRequestSnapshot({
+      config: {
+        serverUrl: "https://api.example.test",
+        authMode: "single-user",
+        authSource: "manual",
+        apiKey: "manual-key"
+      },
+      path: "/api/v1/prompts/",
+      method: "POST",
+      headers: { "x-TlDw-OrG-Id": "stale-org" }
+    })
+
+    expect(result.snapshot.headers).toEqual({ "X-API-KEY": "manual-key" })
+  })
+
+  it("replaces mixed-case caller organization headers with the configured organization", () => {
+    const result = resolveRecipeRequestSnapshot({
+      config: {
+        serverUrl: "https://api.example.test",
+        authMode: "single-user",
+        authSource: "manual",
+        apiKey: "manual-key",
+        orgId: 7
+      },
+      path: "/api/v1/prompts/",
+      method: "POST",
+      headers: { "x-TlDw-OrG-Id": "stale-org" }
+    })
+
+    expect(result.snapshot.headers).toEqual({
+      "X-API-KEY": "manual-key",
+      "X-TLDW-Org-Id": "7"
+    })
+  })
+
+  it("excludes configured and caller organizations from cookie ownership", () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    const withConfiguredOrg = resolveRecipeRequestSnapshot({
+      config: {
+        serverUrl: window.location.origin,
+        authMode: "single-user",
+        authSource: "cookie-session",
+        orgId: 7
+      },
+      path: "/api/v1/prompts/",
+      method: "POST",
+      headers: { "X-TLDW-ORG-ID": "stale-org" },
+      authenticatedPrincipalId: "cookie-user",
+      cookieSessionRevision: "session-a"
+    })
+    const withoutOrg = resolveRecipeRequestSnapshot({
+      config: {
+        serverUrl: window.location.origin,
+        authMode: "single-user",
+        authSource: "cookie-session"
+      },
+      path: "/api/v1/prompts/",
+      method: "POST",
+      authenticatedPrincipalId: "cookie-user",
+      cookieSessionRevision: "session-a"
+    })
+
+    expect(withConfiguredOrg.snapshot.headers).toEqual({})
+    expect(withConfiguredOrg.view?.ownerId).toBe(withoutOrg.view?.ownerId)
+  })
+
+  it("uses the configured organization for runtime-key headers and ownership", () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    const result = resolveRecipeRequestSnapshot({
+      config: {
+        serverUrl: window.location.origin,
+        authMode: "single-user",
+        authSource: "cookie-session",
+        orgId: 7
+      },
+      path: "/api/v1/prompts/",
+      method: "POST",
+      headers: { "x-tldw-org-id": "stale-org" },
+      runtimeApiKey: "runtime-key"
+    })
+    const withoutOrg = resolveRecipeRequestSnapshot({
+      config: {
+        serverUrl: window.location.origin,
+        authMode: "single-user",
+        authSource: "cookie-session"
+      },
+      path: "/api/v1/prompts/",
+      method: "POST",
+      runtimeApiKey: "runtime-key"
+    })
+
+    expect(result.snapshot.headers).toEqual({
+      "X-API-KEY": "runtime-key",
+      "X-TLDW-Org-Id": "7"
+    })
+    expect(result.view?.ownerId).not.toBe(withoutOrg.view?.ownerId)
+  })
+
   it("gives an eligible runtime key precedence over cookie and configured credentials", () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
     const runtime = resolveRecipeRequestSnapshot({

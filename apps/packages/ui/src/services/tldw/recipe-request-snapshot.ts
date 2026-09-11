@@ -224,7 +224,8 @@ const deleteManagedAuthHeaders = (headers: Record<string, string>): void => {
     if (
       normalized === "x-api-key" ||
       normalized === "authorization" ||
-      normalized === "x-csrf-token"
+      normalized === "x-csrf-token" ||
+      normalized === "x-tldw-org-id"
     ) {
       delete headers[key]
     }
@@ -272,26 +273,30 @@ export const resolveRecipeRequestSnapshot = (
     !shouldSkipAuth &&
     normalizedRuntimeKey.length > 0 &&
     !isPlaceholderApiKey(normalizedRuntimeKey)
+  const configuredOrgId = String(config.orgId ?? "").trim() || null
+  const effectiveOrgId =
+    !hostedMode && !shouldSkipAuth && (!cookieSession || runtimeKeyEligible)
+      ? configuredOrgId
+      : null
   let credentials: RequestCredentials | undefined
   let view: RecipePersistenceOwnerView | null = null
   let authenticationError: SnapshotAuthenticationError | undefined
 
+  deleteManagedAuthHeaders(headers)
   if (runtimeKeyEligible) {
-    deleteManagedAuthHeaders(headers)
     headers["X-API-KEY"] = normalizedRuntimeKey
     view = deriveRecipePersistenceOwner(
       {
         effectiveBase,
         authMode: "single-user",
         authSource: "runtime_api_key",
-        orgId: config.orgId == null ? null : String(config.orgId),
+        orgId: effectiveOrgId,
         principalKind: "api_key",
         principal: normalizedRuntimeKey
       },
       normalizedRuntimeKey
     )
   } else if (cookieSession && !shouldSkipAuth) {
-    deleteManagedAuthHeaders(headers)
     if (isUnsafeMethod(input.method) && input.csrfToken) {
       headers["X-CSRF-Token"] = input.csrfToken
     }
@@ -303,7 +308,7 @@ export const resolveRecipeRequestSnapshot = (
           effectiveBase,
           authMode: "multi-user",
           authSource: "cookie_session",
-          orgId: config.orgId == null ? null : String(config.orgId),
+          orgId: effectiveOrgId,
           principalKind: "user",
           principal
         },
@@ -311,7 +316,6 @@ export const resolveRecipeRequestSnapshot = (
       )
     }
   } else if (!hostedMode && !shouldSkipAuth) {
-    deleteManagedAuthHeaders(headers)
     const authSourceSupported =
       config.authSource == null ||
       config.authSource === "" ||
@@ -340,7 +344,7 @@ export const resolveRecipeRequestSnapshot = (
               effectiveBase,
               authMode: "single-user",
               authSource: "manual_api_key",
-              orgId: config.orgId == null ? null : String(config.orgId),
+              orgId: effectiveOrgId,
               principalKind: "api_key",
               principal: key
             },
@@ -364,7 +368,7 @@ export const resolveRecipeRequestSnapshot = (
               effectiveBase,
               authMode: "multi-user",
               authSource: "manual_bearer",
-              orgId: config.orgId == null ? null : String(config.orgId),
+              orgId: effectiveOrgId,
               principalKind: "user",
               principal
             },
@@ -375,8 +379,8 @@ export const resolveRecipeRequestSnapshot = (
     }
   }
 
-  if (!cookieSession && !shouldSkipAuth && config.orgId != null) {
-    headers["X-TLDW-Org-Id"] = String(config.orgId)
+  if (effectiveOrgId) {
+    headers["X-TLDW-Org-Id"] = effectiveOrgId
   }
   if (!ownerEligible) view = null
 

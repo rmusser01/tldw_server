@@ -199,6 +199,54 @@ describe("request dispatch scope capture", () => {
     })
   })
 
+  it("does not bind a changed principal to credentials captured before principal resolution", async () => {
+    const alice = config("https://a.test", "alice")
+    const bob = config("https://a.test", "bob")
+    const bobCapture = await tldwRequest(
+      { ...payload, recipePersistence: { mode: "capture" } },
+      {
+        getConfig: async () => bob,
+        getAuthenticatedPrincipal: async () => "bob",
+        fetchFn: vi.fn().mockResolvedValue(response(200))
+      }
+    )
+    let activeConfig = alice
+    const fetchFn = vi.fn().mockResolvedValue(response(200))
+    const markDispatched = vi.fn()
+
+    const result = await tldwRequest(
+      {
+        ...payload,
+        recipePersistence: {
+          mode: "require",
+          expectedOwnerId: bobCapture.recipePersistence!.actualOwnerId!,
+          localId: "local-recipe-1"
+        }
+      },
+      {
+        getConfig: async () => ({ ...activeConfig }),
+        getAuthenticatedPrincipal: async (snapshot?: {
+          headers: Readonly<Record<string, string>>
+        }) => {
+          activeConfig = bob
+          return snapshot?.headers.Authorization ===
+            `Bearer ${alice.accessToken}`
+            ? "alice"
+            : "bob"
+        },
+        dispatchAuthority: { markDispatched },
+        fetchFn
+      }
+    )
+
+    expect(markDispatched).not.toHaveBeenCalled()
+    expect(fetchFn).not.toHaveBeenCalled()
+    expect(result.recipePersistence).toEqual({
+      state: "not_dispatched",
+      actualOwnerId: null
+    })
+  })
+
   it("marks the exact local ID once immediately before the request and keeps the marker after success", async () => {
     const events: string[] = []
     const fetchFn = vi.fn().mockImplementation(async () => {
@@ -341,6 +389,35 @@ describe("request dispatch scope capture", () => {
     expect(fetchFn.mock.calls[1][1].headers.Authorization).toBe(
       `Bearer ${updated.accessToken}`
     )
+  })
+
+  it("does not retry an unowned captured write after bearer and organization change", async () => {
+    const initial = { ...config(), orgId: "org-a" }
+    const updated = { ...config("https://a.test", "bob", 2), orgId: "org-b" }
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(response(401))
+      .mockResolvedValueOnce(response(200))
+
+    const result = await tldwRequest(
+      { ...payload, recipePersistence: { mode: "capture" } },
+      {
+        getConfig: vi
+          .fn()
+          .mockResolvedValueOnce(initial)
+          .mockResolvedValue(updated),
+        getAuthenticatedPrincipal: async () => null,
+        fetchFn,
+        refreshAuth: async () => {}
+      }
+    )
+
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    expect(result).toMatchObject({ ok: false, status: 412 })
+    expect(result.recipePersistence).toEqual({
+      state: "dispatched",
+      actualOwnerId: null
+    })
   })
 
   it.each([

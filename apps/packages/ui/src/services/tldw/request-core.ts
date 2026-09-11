@@ -9,6 +9,7 @@ import {
   type RecipePersistenceDispatch,
   type RecipePersistenceRequestPolicy,
   type RecipeRequestSnapshotResolution,
+  type RecipeRequestTransportSnapshot,
   isUnsafeMethod,
   resolveBrowserRequestTransport,
   resolveRecipeRequestSnapshot
@@ -49,7 +50,9 @@ type TldwRequestRuntime = {
   refreshAuth?: () => Promise<void>
   fetchFn?: typeof fetch
   useRuntimeAuthOverride?: boolean
-  getAuthenticatedPrincipal?: () => Promise<string | number | null>
+  getAuthenticatedPrincipal?: (
+    snapshot: RecipeRequestTransportSnapshot
+  ) => Promise<string | number | null>
   dispatchAuthority?: RecipeDispatchAuthority
 }
 
@@ -345,25 +348,33 @@ const performTldwRequest = async (
       : String(getRuntimeSingleUserApiKeyOverride() || "").trim()
   let recipeSnapshot: RecipeRequestSnapshotResolution | null = null
   if (payload.recipePersistence) {
-    const needsAuthenticatedPrincipal =
-      cfg?.authMode === "multi-user" || cfg?.authSource === "cookie-session"
-    const authenticatedPrincipal =
-      needsAuthenticatedPrincipal && runtime.getAuthenticatedPrincipal
-        ? await runtime.getAuthenticatedPrincipal()
-        : null
-    recipeSnapshot = resolveRecipeRequestSnapshot({
+    const snapshotInput = {
       config: cfg,
       path: String(normalizedPath),
       method,
       headers: h,
       noAuth,
       runtimeApiKey,
-      authenticatedPrincipalId: authenticatedPrincipal,
       csrfToken: readBrowserCookie("csrf_token"),
       pageOrigin,
       absoluteAuthAllowed: sameOriginAbsoluteUrl,
       cookieSessionTransport: cookieSession
-    })
+    }
+    recipeSnapshot = resolveRecipeRequestSnapshot(snapshotInput)
+    const needsAuthenticatedPrincipal =
+      recipeSnapshot.snapshot.credentials === "same-origin" ||
+      Object.keys(recipeSnapshot.snapshot.headers).some(
+        (key) => key.toLowerCase() === "authorization"
+      )
+    if (needsAuthenticatedPrincipal && runtime.getAuthenticatedPrincipal) {
+      const authenticatedPrincipal = await runtime.getAuthenticatedPrincipal(
+        recipeSnapshot.snapshot
+      )
+      recipeSnapshot = resolveRecipeRequestSnapshot({
+        ...snapshotInput,
+        authenticatedPrincipalId: authenticatedPrincipal
+      })
+    }
     url = recipeSnapshot.snapshot.url as PathOrUrl
     for (const key of Object.keys(h)) delete h[key]
     Object.assign(h, recipeSnapshot.snapshot.headers)
@@ -566,15 +577,9 @@ const performTldwRequest = async (
       let retryHeaders: Record<string, string>
       let retryCredentials: RequestCredentials | undefined
       if (recipeSnapshot) {
-        const needsAuthenticatedPrincipal =
-          updated?.authMode === "multi-user" ||
-          updated?.authSource === "cookie-session"
-        const authenticatedPrincipal =
-          needsAuthenticatedPrincipal && runtime.getAuthenticatedPrincipal
-            ? await runtime.getAuthenticatedPrincipal()
-            : null
-        const updatedSnapshot = resolveRecipeRequestSnapshot({
-          config: updated,
+        const updatedConfig = updated ? { ...updated } : updated
+        const updatedSnapshotInput = {
+          config: updatedConfig,
           path: String(normalizedPath),
           method,
           headers: h,
@@ -583,14 +588,29 @@ const performTldwRequest = async (
             runtime.useRuntimeAuthOverride === false
               ? ""
               : String(getRuntimeSingleUserApiKeyOverride() || "").trim(),
-          authenticatedPrincipalId: authenticatedPrincipal,
           csrfToken: readBrowserCookie("csrf_token"),
           pageOrigin,
           absoluteAuthAllowed: sameOriginAbsoluteUrl,
           cookieSessionTransport: cookieSession
-        })
+        }
+        let updatedSnapshot = resolveRecipeRequestSnapshot(updatedSnapshotInput)
+        const needsAuthenticatedPrincipal =
+          updatedSnapshot.snapshot.credentials === "same-origin" ||
+          Object.keys(updatedSnapshot.snapshot.headers).some(
+            (key) => key.toLowerCase() === "authorization"
+          )
+        if (needsAuthenticatedPrincipal && runtime.getAuthenticatedPrincipal) {
+          const authenticatedPrincipal =
+            await runtime.getAuthenticatedPrincipal(updatedSnapshot.snapshot)
+          updatedSnapshot = resolveRecipeRequestSnapshot({
+            ...updatedSnapshotInput,
+            authenticatedPrincipalId: authenticatedPrincipal
+          })
+        }
         if (
           updatedSnapshot.authenticationError ||
+          !recipeSnapshot.view?.ownerId ||
+          !updatedSnapshot.view?.ownerId ||
           updatedSnapshot.snapshot.url !== recipeSnapshot.snapshot.url ||
           updatedSnapshot.snapshot.effectiveBase !==
             recipeSnapshot.snapshot.effectiveBase ||
