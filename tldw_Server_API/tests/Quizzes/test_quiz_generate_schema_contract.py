@@ -7,6 +7,7 @@ from tldw_Server_API.app.api.v1.schemas.quizzes import (
     QuestionPublicResponse,
     QuestionUpdate,
     QuizGenerateRequest,
+    QuizGenerateResponse,
     QuizGenerationProfile,
     QuizImportQuestion,
     SourceCitation,
@@ -127,15 +128,101 @@ def test_quiz_generate_request_accepts_generation_profile():
     assert payload.generation_profile == QuizGenerationProfile.BEST_OF_FIVE
 
 
-def test_quiz_generate_request_rejects_planned_generation_profile():
-    with pytest.raises(ValidationError, match="osce_scenario"):
+def test_quiz_generate_request_parses_planned_osce_profile_for_runtime_guarding():
+    request = QuizGenerateRequest.model_validate(
+        {
+            "sources": [{"source_type": "note", "source_id": "note-1"}],
+            "generation_profile": "osce_scenario",
+        }
+    )
+
+    assert request.generation_profile == QuizGenerationProfile.OSCE_SCENARIO
+    assert request.num_stations == 1
+
+
+@pytest.mark.parametrize("num_stations", [1, 10])
+def test_osce_generation_accepts_station_count_bounds(num_stations):
+    request = QuizGenerateRequest.model_validate(
+        {
+            "sources": [{"source_type": "note", "source_id": "note-1"}],
+            "generation_profile": "osce_scenario",
+            "num_stations": num_stations,
+        }
+    )
+
+    assert request.num_stations == num_stations
+
+
+@pytest.mark.parametrize("num_stations", [0, 11])
+def test_osce_generation_rejects_station_count_outside_bounds(num_stations):
+    with pytest.raises(ValidationError):
         QuizGenerateRequest.model_validate(
             {
-                "num_questions": 5,
                 "sources": [{"source_type": "note", "source_id": "note-1"}],
                 "generation_profile": "osce_scenario",
+                "num_stations": num_stations,
             }
         )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("num_questions", 2),
+        ("question_types", ["multiple_choice"]),
+        (
+            "question_plan",
+            [{"question_type": "multiple_choice", "count": 1}],
+        ),
+    ],
+)
+def test_osce_generation_rejects_question_only_fields(field, value):
+    payload = {
+        "sources": [{"source_type": "note", "source_id": "note-1"}],
+        "generation_profile": "osce_scenario",
+        field: value,
+    }
+
+    with pytest.raises(ValidationError):
+        QuizGenerateRequest.model_validate(payload)
+
+
+def test_question_generation_defaults_remain_compatible():
+    request = QuizGenerateRequest.model_validate(
+        {"sources": [{"source_type": "note", "source_id": "note-1"}]}
+    )
+
+    assert request.generation_profile == QuizGenerationProfile.STANDARD_RECALL
+    assert request.num_questions == 10
+
+
+def test_question_generation_rejects_explicit_station_count():
+    with pytest.raises(ValidationError):
+        QuizGenerateRequest.model_validate(
+            {
+                "sources": [{"source_type": "note", "source_id": "note-1"}],
+                "num_stations": 2,
+            }
+        )
+
+
+def test_question_generation_response_defaults_remain_compatible():
+    response = QuizGenerateResponse.model_validate(
+        {
+            "quiz": {
+                "id": 1,
+                "name": "Recall",
+                "total_questions": 0,
+                "deleted": False,
+                "client_id": "test",
+                "version": 1,
+            }
+        }
+    )
+
+    assert response.output_kind == "questions"
+    assert response.questions == []
+    assert response.osce_stations == []
 
 
 def test_available_generation_profiles_match_non_planned_catalog_profiles() -> None:

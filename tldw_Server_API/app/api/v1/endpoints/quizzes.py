@@ -211,7 +211,7 @@ def create_quiz(payload: QuizCreate, db: CharactersRAGDB = Depends(get_chacha_db
     """Create a new quiz."""
     try:
         _ensure_workspace_exists(db, payload.workspace_id)
-        quiz_id = db.create_quiz(**payload.model_dump())
+        quiz_id = db.create_quiz(**payload.model_dump(exclude_unset=True))
         quiz = db.get_quiz(quiz_id)
         if not quiz:
             raise HTTPException(status_code=500, detail="Failed to load created quiz")

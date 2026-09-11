@@ -11,6 +11,7 @@ from .flashcards import (
     DeckSchedulerType,
     _coerce_scheduler_settings_envelope,
 )
+from .osce import OsceStationAuthoringResponse, QuizActivityType
 
 
 def _default_offset_pagination_aliases(response):
@@ -113,6 +114,16 @@ class QuizCreate(BaseModel):
     )
     time_limit_seconds: Optional[int] = Field(None, ge=1, description="Optional time limit in seconds")
     passing_score: Optional[int] = Field(None, ge=0, le=100, description="Passing score percentage")
+    activity_type: QuizActivityType = QuizActivityType.QUESTIONS
+
+    @model_validator(mode="after")
+    def reject_osce_question_settings(self) -> "QuizCreate":
+        if self.activity_type is QuizActivityType.OSCE:
+            supplied = self.model_fields_set & {"passing_score", "time_limit_seconds"}
+            if supplied:
+                fields = ", ".join(sorted(supplied))
+                raise ValueError(f"OSCE quizzes do not accept question settings: {fields}")
+        return self
 
 
 class QuizUpdate(BaseModel):
@@ -127,6 +138,16 @@ class QuizUpdate(BaseModel):
     time_limit_seconds: Optional[int] = Field(None, ge=1)
     passing_score: Optional[int] = Field(None, ge=0, le=100)
     expected_version: Optional[int] = None
+    activity_type: Optional[QuizActivityType] = None
+
+    @model_validator(mode="after")
+    def reject_osce_question_settings(self) -> "QuizUpdate":
+        if self.activity_type is QuizActivityType.OSCE:
+            supplied = self.model_fields_set & {"passing_score", "time_limit_seconds"}
+            if supplied:
+                fields = ", ".join(sorted(supplied))
+                raise ValueError(f"OSCE quizzes do not accept question settings: {fields}")
+        return self
 
 
 class QuizResponse(BaseModel):
@@ -138,6 +159,9 @@ class QuizResponse(BaseModel):
     media_id: Optional[int] = None
     source_bundle_json: Optional[list[QuizGenerateSource]] = None
     total_questions: int
+    activity_type: QuizActivityType = QuizActivityType.QUESTIONS
+    generation_profile: Optional[QuizGenerationProfile] = None
+    total_stations: int = Field(default=0, ge=0)
     time_limit_seconds: Optional[int] = None
     passing_score: Optional[int] = None
     deleted: bool
@@ -382,8 +406,9 @@ class QuizRemediationConvertResponse(BaseModel):
 class QuizGenerateRequest(BaseModel):
     media_id: Optional[int] = Field(None, ge=1)
     sources: Optional[list[QuizGenerateSource]] = Field(None, min_length=1)
-    generation_profile: AvailableQuizGenerationProfile = AvailableQuizGenerationProfile.STANDARD_RECALL
+    generation_profile: QuizGenerationProfile = QuizGenerationProfile.STANDARD_RECALL
     num_questions: int = Field(10, ge=1, le=100)
+    num_stations: int = Field(1, ge=1, le=10)
     question_types: Optional[list[QuestionType]] = None
     question_plan: Optional[list[QuizQuestionPlanItem]] = Field(None, min_length=1)
     difficulty: str = Field("mixed", description="easy, medium, hard, mixed")
@@ -399,6 +424,18 @@ class QuizGenerateRequest(BaseModel):
     def validate_media_id_or_sources(self) -> "QuizGenerateRequest":
         if self.media_id is None and not self.sources:
             raise ValueError("Either media_id or sources must be provided")
+        if self.generation_profile is QuizGenerationProfile.OSCE_SCENARIO:
+            supplied = self.model_fields_set & {
+                "num_questions",
+                "question_types",
+                "question_plan",
+            }
+            if supplied:
+                fields = ", ".join(sorted(supplied))
+                raise ValueError(f"OSCE generation does not accept question settings: {fields}")
+            return self
+        if "num_stations" in self.model_fields_set:
+            raise ValueError("num_stations is only valid for OSCE generation")
         if self.question_plan is not None:
             if "num_questions" not in self.model_fields_set:
                 raise ValueError("num_questions must be provided when question_plan is used")
@@ -425,8 +462,10 @@ class QuizGenerateRequest(BaseModel):
 
 
 class QuizGenerateResponse(BaseModel):
+    output_kind: Literal["questions", "osce_stations"] = "questions"
     quiz: QuizResponse
-    questions: list[QuestionAdminResponse]
+    questions: list[QuestionAdminResponse] = Field(default_factory=list)
+    osce_stations: list[OsceStationAuthoringResponse] = Field(default_factory=list)
     claim_verification: Optional[dict[str, Any]] = None
 
 
