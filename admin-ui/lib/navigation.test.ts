@@ -15,8 +15,8 @@ describe('navigation information architecture', () => {
       'Identity & Access',
       'AI & Models',
       'Operations',
-      'Cost & Usage',
       'Security & Compliance',
+      'Cost & Usage',
       'Integrations',
       'Advanced',
     ]);
@@ -31,7 +31,9 @@ describe('navigation information architecture', () => {
     expect(operations?.items.map((item) => item.href)).toContain('/monitoring');
     expect(operations?.items.map((item) => item.href)).toContain('/dependencies');
     expect(operations?.items.map((item) => item.href)).toContain('/incidents');
-    expect(costUsage?.items.map((item) => item.href)).toContain('/resource-governor');
+    expect(costUsage?.items.map((item) => item.href)).toContain('/usage');
+    expect(costUsage?.items.map((item) => item.href)).toContain('/budgets');
+    expect(securityCompliance?.items.map((item) => item.href)).toContain('/resource-governor');
     expect(securityCompliance?.items.map((item) => item.href)).toContain('/security');
     expect(advanced?.items.map((item) => item.href)).toContain('/config');
 

@@ -111,15 +111,16 @@ export default function DebugPage() {
   };
 
   const handleResolvePermissions = async () => {
-    if (!permUserIdInput.trim()) {
-      setPermError('Please enter a user ID');
+    const parsedUserId = parsePositiveUserId(permUserIdInput);
+    if (parsedUserId === null) {
+      setPermError('Enter a valid positive user ID');
       return;
     }
     try {
       setPermLoading(true);
       setPermError('');
       setPermResult(null);
-      const result = await api.debugResolvePermissions(permUserIdInput.trim());
+      const result = await api.debugResolvePermissions(String(parsedUserId));
       setPermResult(result as Record<string, unknown>);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to resolve permissions';
