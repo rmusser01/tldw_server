@@ -1,7 +1,8 @@
+from datetime import datetime
 from enum import Enum
-from typing import Any, Literal, Optional
+from typing import Annotated, Any, Literal, Optional, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, model_validator
 
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
@@ -11,7 +12,18 @@ from .flashcards import (
     DeckSchedulerType,
     _coerce_scheduler_settings_envelope,
 )
-from .osce import OsceStationAuthoringResponse, QuizActivityType
+from .osce import (
+    OsceChecklistItemCreate,
+    OsceKeyPointCreate,
+    OsceRubricDomainCreate,
+    OsceRubricLevelCreate,
+    OsceStationAuthoringResponse,
+    OsceStationCreateContent,
+    OsceStationOrigin,
+    OsceVerificationState,
+    QuizActivityType,
+    StrictModel,
+)
 
 
 def _default_offset_pagination_aliases(response):
@@ -511,11 +523,161 @@ class QuizImportRequest(BaseModel):
     quizzes: list[QuizImportEntry]
 
 
+class QuizExportSourceV2(StrictModel):
+    source_type: Annotated[QuizSourceType, Field(strict=False)]
+    source_id: str = Field(min_length=1)
+
+
+class QuizExportMetadataV2(StrictModel):
+    id: Any | None = None
+    name: str = Field(min_length=1)
+    description: str | None = None
+    workspace_id: str | None = None
+    workspace_tag: str | None = None
+    media_id: int | None = Field(default=None, ge=1)
+    source_bundle_json: list[QuizExportSourceV2] | None = None
+    activity_type: Literal["questions", "osce"] | None = None
+    generation_profile: Annotated[QuizGenerationProfile, Field(strict=False)] | None = None
+    total_questions: int | None = Field(default=None, ge=0)
+    total_stations: int | None = Field(default=None, ge=0)
+    time_limit_seconds: int | None = Field(default=None, ge=1)
+    passing_score: int | None = Field(default=None, ge=0, le=100)
+    deleted: bool | None = None
+    client_id: str | None = None
+    version: int | None = Field(default=None, ge=1)
+    created_at: str | None = None
+    last_modified: str | None = None
+
+
+class QuizExportCitationV2(SourceCitation):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    source_type: Annotated[QuizSourceType, Field(strict=False)] | None = None
+
+
+class QuizExportQuestionV2(QuizImportQuestion):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    id: Any | None = None
+    quiz_id: Any | None = None
+    question_type: Annotated[QuestionType, Field(strict=False)]
+    source_citations: list[QuizExportCitationV2] | None = None
+    deleted: bool | None = None
+    client_id: str | None = None
+    version: int | None = Field(default=None, ge=1)
+    created_at: str | None = None
+    last_modified: str | None = None
+
+
+class OsceChecklistItemExportV2(OsceChecklistItemCreate):
+    id: Any | None = None
+
+
+class OsceRubricLevelExportV2(OsceRubricLevelCreate):
+    id: Any | None = None
+
+
+class OsceRubricDomainExportV2(OsceRubricDomainCreate):
+    id: Any | None = None
+    levels: list[OsceRubricLevelExportV2] = Field(min_length=2, max_length=6)
+
+
+class OsceKeyPointExportV2(OsceKeyPointCreate):
+    id: Any | None = None
+
+
+class OsceStationContentExportV2(OsceStationCreateContent):
+    checklist_items: list[OsceChecklistItemExportV2] = Field(min_length=1, max_length=50)
+    rubric_domains: list[OsceRubricDomainExportV2] = Field(min_length=1, max_length=12)
+    expected_key_points: list[OsceKeyPointExportV2] = Field(min_length=1, max_length=50)
+
+
+class OsceStationExportV2(StrictModel):
+    id: Any | None = None
+    quiz_id: Any | None = None
+    content: OsceStationContentExportV2
+    order_index: int = Field(default=0, ge=0)
+    version: int | None = Field(default=None, ge=1)
+    origin: Annotated[OsceStationOrigin, Field(strict=False)] | None = None
+    provenance: dict[str, Any] | None = None
+    source_bundle: list[QuizExportSourceV2] = Field(default_factory=list)
+    verification_state: Annotated[OsceVerificationState, Field(strict=False)] | None = None
+    verification_timestamp: str | None = None
+    verification_summary: str | None = Field(default=None, max_length=2000)
+    deleted: bool | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class QuestionQuizExportV2(StrictModel):
+    activity_type: Literal["questions"]
+    quiz: QuizExportMetadataV2
+    questions: list[QuizExportQuestionV2] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_nested_activity(self) -> "QuestionQuizExportV2":
+        if self.quiz.activity_type not in {None, "questions"}:
+            raise ValueError("question export quiz metadata has incompatible activity_type")
+        return self
+
+
+class OsceQuizExportV2(StrictModel):
+    activity_type: Literal["osce"]
+    quiz: QuizExportMetadataV2
+    stations: list[OsceStationExportV2] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_nested_activity(self) -> "OsceQuizExportV2":
+        if self.quiz.activity_type not in {None, "osce"}:
+            raise ValueError("OSCE export quiz metadata has incompatible activity_type")
+        if self.quiz.time_limit_seconds is not None or self.quiz.passing_score is not None:
+            raise ValueError("OSCE export quiz metadata contains question-only settings")
+        return self
+
+
+QuizExportV2Entry: TypeAlias = Annotated[
+    QuestionQuizExportV2 | OsceQuizExportV2,
+    Field(discriminator="activity_type"),
+]
+
+
+class QuizExportV2(StrictModel):
+    export_format: Literal["tldw.quiz.export.v2"]
+    exported_at: Annotated[datetime, Field(strict=False)]
+    quizzes: list[QuizExportV2Entry]
+
+
+class QuizImportV2Request(StrictModel):
+    """Strict v2 envelope whose entries are validated independently for batch isolation."""
+
+    export_format: Literal["tldw.quiz.export.v2"]
+    exported_at: Annotated[datetime, Field(strict=False)]
+    quizzes: list[dict[str, Any]]
+
+
+def _quiz_import_payload_kind(value: Any) -> str:
+    if isinstance(value, QuizImportV2Request):
+        return "v2"
+    if isinstance(value, dict) and value.get("export_format") == "tldw.quiz.export.v2":
+        return "v2"
+    return "v1"
+
+
+QuizImportPayload: TypeAlias = Annotated[
+    Annotated[QuizImportV2Request, Tag("v2")]
+    | Annotated[QuizImportRequest, Tag("v1")],
+    Discriminator(_quiz_import_payload_kind),
+]
+
+
 class QuizImportItemResult(BaseModel):
     source_index: int = Field(..., ge=0, description="Index of the input quiz entry")
     quiz_id: int
     imported_questions: int = Field(..., ge=0)
     failed_questions: int = Field(..., ge=0)
+    imported_stations: int = Field(default=0, ge=0)
+    failed_stations: int = Field(default=0, ge=0)
+    station_ids: list[int] = Field(default_factory=list)
 
 
 class QuizImportError(BaseModel):
@@ -530,5 +692,7 @@ class QuizImportResponse(BaseModel):
     failed_quizzes: int = Field(..., ge=0)
     imported_questions: int = Field(..., ge=0)
     failed_questions: int = Field(..., ge=0)
+    imported_stations: int = Field(default=0, ge=0)
+    failed_stations: int = Field(default=0, ge=0)
     items: list[QuizImportItemResult] = Field(default_factory=list)
     errors: list[QuizImportError] = Field(default_factory=list)

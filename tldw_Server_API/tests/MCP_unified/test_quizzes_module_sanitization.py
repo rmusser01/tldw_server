@@ -11,9 +11,9 @@ from tldw_Server_API.app.core.MCP_unified.modules.implementations.quizzes_module
     QuizzesModule,
 )
 
-
 _SENSITIVE_CLOSE_ERROR = "db close leaked /private/quizzes.db with sk-quiz-close"
 _SENSITIVE_GENERATION_ERROR = "quiz generation leaked /private/generation.txt with sk-quiz-gen"
+_UNSUPPORTED_ACTIVITY_ERROR = "This MCP quiz operation supports question quizzes only"
 
 
 @dataclass
@@ -94,6 +94,71 @@ class _GeneratedQuizDB:
         if self._create_question is not None:
             return self._create_question(**kwargs)
         return 606
+
+
+class _OsceTargetDB(_CloseFailsDB):
+    def __init__(self) -> None:
+        self.mutations: list[str] = []
+
+    def get_quiz(self, quiz_id: int, **_kwargs: Any) -> dict[str, Any]:
+        return {
+            "id": quiz_id,
+            "name": "Private OSCE",
+            "activity_type": "osce",
+            "total_questions": 0,
+            "total_stations": 1,
+            "stations": [
+                {
+                    "candidate_notes": "private candidate notes",
+                    "checklist_items": [{"rationale": "private marking guide"}],
+                }
+            ],
+        }
+
+    def get_question(self, question_id: int, **_kwargs: Any) -> dict[str, Any]:
+        return {"id": question_id, "quiz_id": 101, "question_text": "Impossible legacy row"}
+
+    def get_attempt(self, attempt_id: int, **_kwargs: Any) -> dict[str, Any]:
+        return {"id": attempt_id, "quiz_id": 101}
+
+    def create_question(self, **_kwargs: Any) -> int:
+        self.mutations.append("create_question")
+        return 202
+
+    def update_question(self, **_kwargs: Any) -> bool:
+        self.mutations.append("update_question")
+        return True
+
+    def delete_question(self, **_kwargs: Any) -> bool:
+        self.mutations.append("delete_question")
+        return True
+
+    def start_attempt(self, **_kwargs: Any) -> dict[str, Any]:
+        self.mutations.append("start_attempt")
+        return {"id": 303}
+
+    def submit_attempt(self, **_kwargs: Any) -> dict[str, Any]:
+        self.mutations.append("submit_attempt")
+        return {"score": 100}
+
+
+class _MixedQuizListDB(_CloseFailsDB):
+    def __init__(self) -> None:
+        self.activity_type: str | None = None
+
+    def list_quizzes(self, **kwargs: Any) -> dict[str, Any]:
+        self.activity_type = kwargs.get("activity_type")
+        return {
+            "items": [
+                {
+                    "id": 10,
+                    "name": "Questions",
+                    "activity_type": "questions",
+                    "total_questions": 1,
+                }
+            ],
+            "count": 1,
+        }
 
 
 _QuizInvocation = Callable[[QuizzesModule, _Context], dict[str, Any]]
@@ -393,3 +458,114 @@ def test_generated_question_creation_failure_log_is_sanitized(
     assert _SENSITIVE_GENERATION_ERROR not in rendered_logs
     assert "/private/generation.txt" not in rendered_logs
     assert "sk-quiz-gen" not in rendered_logs
+
+
+def test_quiz_list_requests_question_activity_and_exposes_activity_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = QuizzesModule(ModuleConfig(name="quizzes", description="Quizzes module"))
+    context = _Context()
+    db = _MixedQuizListDB()
+    monkeypatch.setattr(module, "_open_db", lambda _context: db)
+
+    result = module._list_quizzes_sync(context, None, None, None, 10, 0)
+
+    assert db.activity_type == "questions"
+    assert result["total"] == 1
+    assert result["quizzes"][0]["activity_type"] == "questions"
+
+
+@pytest.mark.parametrize(
+    "invoke",
+    [
+        pytest.param(lambda module, context: module._get_quiz_sync(context, 101), id="get-quiz"),
+        pytest.param(
+            lambda module, context: module._list_questions_sync(context, {"quiz_id": 101}),
+            id="list-questions",
+        ),
+        pytest.param(
+            lambda module, context: module._create_question_sync(
+                context,
+                {
+                    "quiz_id": 101,
+                    "question_type": "true_false",
+                    "question_text": "Question?",
+                    "correct_answer": True,
+                },
+            ),
+            id="create-question",
+        ),
+        pytest.param(
+            lambda module, context: module._update_question_sync(
+                context,
+                {"question_id": 202, "updates": {"question_text": "Updated?"}},
+            ),
+            id="update-question",
+        ),
+        pytest.param(
+            lambda module, context: module._delete_question_sync(
+                context,
+                {"question_id": 202},
+            ),
+            id="delete-question",
+        ),
+        pytest.param(
+            lambda module, context: module._start_attempt_sync(context, {"quiz_id": 101}),
+            id="start-attempt",
+        ),
+        pytest.param(
+            lambda module, context: module._submit_attempt_sync(
+                context,
+                {"attempt_id": 303, "answers": []},
+            ),
+            id="submit-attempt",
+        ),
+        pytest.param(
+            lambda module, context: module._list_attempts_sync(context, {"quiz_id": 101}),
+            id="list-attempts",
+        ),
+        pytest.param(
+            lambda module, context: module._get_attempt_sync(context, {"attempt_id": 303}),
+            id="get-attempt",
+        ),
+    ],
+)
+def test_question_oriented_mcp_operations_reject_osce_without_leaking_guides(
+    monkeypatch: pytest.MonkeyPatch,
+    invoke: _QuizInvocation,
+) -> None:
+    module = QuizzesModule(ModuleConfig(name="quizzes", description="Quizzes module"))
+    context = _Context()
+    db = _OsceTargetDB()
+    monkeypatch.setattr(module, "_open_db", lambda _context: db)
+
+    with pytest.raises(ValueError) as exc_info:
+        invoke(module, context)
+
+    assert str(exc_info.value) == _UNSUPPORTED_ACTIVITY_ERROR
+    assert "private candidate notes" not in str(exc_info.value)
+    assert "private marking guide" not in str(exc_info.value)
+    assert db.mutations == []
+
+
+@pytest.mark.asyncio
+async def test_generate_rejects_osce_request_with_stable_message() -> None:
+    module = QuizzesModule(ModuleConfig(name="quizzes", description="Quizzes module"))
+
+    with pytest.raises(ValueError) as exc_info:
+        await module.execute_tool(
+            "quizzes.generate",
+            {"media_id": 1, "activity_type": "osce"},
+            _Context(),
+        )
+
+    assert str(exc_info.value) == _UNSUPPORTED_ACTIVITY_ERROR
+
+
+@pytest.mark.asyncio
+async def test_quizzes_tool_catalog_does_not_register_osce_tools() -> None:
+    module = QuizzesModule(ModuleConfig(name="quizzes", description="Quizzes module"))
+
+    names = {tool["name"] for tool in await module.get_tools()}
+
+    assert not any("osce" in name for name in names)

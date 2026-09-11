@@ -56,6 +56,7 @@ from typing import TYPE_CHECKING, Any, Callable, ClassVar, Protocol, TypeAlias  
 from loguru import logger  # noqa: E402
 
 if TYPE_CHECKING:
+    from tldw_Server_API.app.api.v1.schemas.quizzes import OsceQuizExportV2
     from tldw_Server_API.app.core.Sharing.clone_models import WorkspaceCloneSnapshot
 
 try:  # Prefer psycopg v3 sql helper, fall back to psycopg2 if available
@@ -40485,6 +40486,47 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise CharactersRAGDBError(f"Failed to create OSCE quiz bundle: {exc}") from exc  # noqa: TRY003
         except BackendDatabaseError as exc:
             raise CharactersRAGDBError(f"Failed to create OSCE quiz bundle: {exc}") from exc  # noqa: TRY003
+
+    def import_osce_quiz_entry_atomic(
+        self,
+        entry: OsceQuizExportV2 | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Validate, rekey, downgrade, and atomically persist one portable OSCE entry."""
+        from tldw_Server_API.app.api.v1.schemas.quizzes import OsceQuizExportV2
+        from tldw_Server_API.app.services.osce_practice import materialize_station_content
+
+        validated = OsceQuizExportV2.model_validate(entry)
+        stations = [
+            {
+                "content": materialize_station_content(station.content),
+                "order_index": station.order_index,
+                "origin": "manual",
+                "provenance": None,
+                "source_bundle": [],
+                "verification_state": "manually_authored",
+                "verification_timestamp": None,
+                "verification_summary": None,
+            }
+            for station in sorted(validated.stations, key=lambda item: item.order_index)
+        ]
+        quiz, persisted_stations = self.create_quiz_with_osce_stations_atomic(
+            {
+                "name": validated.quiz.name,
+                "description": validated.quiz.description,
+                "workspace_tag": validated.quiz.workspace_tag,
+                "workspace_id": validated.quiz.workspace_id,
+                "media_id": validated.quiz.media_id,
+                "source_bundle_json": None,
+                "activity_type": "osce",
+                "generation_profile": None,
+            },
+            stations,
+        )
+        return {
+            "quiz": quiz,
+            "stations": persisted_stations,
+            "station_ids": [int(station["id"]) for station in persisted_stations],
+        }
 
     def create_quiz(
         self,

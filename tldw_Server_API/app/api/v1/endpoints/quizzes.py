@@ -1,7 +1,9 @@
+from collections.abc import Mapping
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
+from pydantic import TypeAdapter, ValidationError
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
@@ -21,15 +23,21 @@ from tldw_Server_API.app.api.v1.schemas.quizzes import (
     QuestionAdminResponse,
     QuestionCreate,
     QuestionListResponse,
+    QuestionQuizExportV2,
     QuestionUpdate,
     QuizCreate,
+    QuizExportV2Entry,
     QuizGenerateRequest,
     QuizGenerateResponse,
     QuizGenerationProfileDefinition,
+    QuizImportEntry,
     QuizImportError,
     QuizImportItemResult,
-    QuizImportRequest,
+    QuizImportPayload,
+    QuizImportQuestion,
+    QuizImportQuiz,
     QuizImportResponse,
+    QuizImportV2Request,
     QuizListResponse,
     QuizRemediationConversionListResponse,
     QuizRemediationConvertRequest,
@@ -70,6 +78,8 @@ from tldw_Server_API.app.services.quiz_generator import (
 
 router = APIRouter(prefix="/quizzes", tags=["quizzes"])
 QUIZ_EXPORT_FORMAT = "tldw.quiz.export.v1"
+QUIZ_EXPORT_FORMAT_V2 = "tldw.quiz.export.v2"
+_QUIZ_EXPORT_V2_ENTRY_ADAPTER = TypeAdapter(QuizExportV2Entry)
 
 
 def _ensure_workspace_exists(db: CharactersRAGDB, workspace_id: Optional[str]) -> None:
@@ -87,6 +97,31 @@ def _format_import_error(exc: Exception, *, default_detail: str) -> str:
     if detail == default_detail:
         return default_detail
     return f"{default_detail}: {detail}"
+
+
+def _bounded_import_name(entry: Mapping[str, Any]) -> str | None:
+    quiz = entry.get("quiz")
+    if not isinstance(quiz, Mapping):
+        return None
+    name = quiz.get("name")
+    if not isinstance(name, str):
+        return None
+    return name[:256]
+
+
+def _v2_question_import_entry(entry: QuestionQuizExportV2) -> QuizImportEntry:
+    quiz_fields = set(QuizImportQuiz.model_fields)
+    question_fields = set(QuizImportQuestion.model_fields)
+    quiz = QuizImportQuiz.model_validate(
+        entry.quiz.model_dump(mode="json", include=quiz_fields)
+    )
+    questions = [
+        QuizImportQuestion.model_validate(
+            question.model_dump(mode="json", include=question_fields)
+        )
+        for question in entry.questions
+    ]
+    return QuizImportEntry(quiz=quiz, questions=questions)
 
 
 @router.get(
@@ -227,21 +262,84 @@ def create_quiz(payload: QuizCreate, db: CharactersRAGDB = Depends(get_chacha_db
 
 @router.post("/import/json", response_model=QuizImportResponse)
 def import_quizzes_json(
-    payload: QuizImportRequest,
+    payload: QuizImportPayload,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ):
     """Import quizzes from the JSON export format."""
-    if payload.export_format and payload.export_format != QUIZ_EXPORT_FORMAT:
+    if payload.export_format and payload.export_format not in {
+        QUIZ_EXPORT_FORMAT,
+        QUIZ_EXPORT_FORMAT_V2,
+    }:
         raise HTTPException(status_code=400, detail="Unsupported quiz export format")
 
     imported_quizzes = 0
     failed_quizzes = 0
     imported_questions = 0
     failed_questions = 0
+    imported_stations = 0
+    failed_stations = 0
     items: list[QuizImportItemResult] = []
     errors: list[QuizImportError] = []
 
-    for source_index, entry in enumerate(payload.quizzes):
+    for source_index, raw_entry in enumerate(payload.quizzes):
+        if isinstance(payload, QuizImportV2Request):
+            quiz_name = _bounded_import_name(raw_entry)
+            raw_activity = raw_entry.get("activity_type")
+            raw_stations = raw_entry.get("stations")
+            entry_station_count = len(raw_stations) if isinstance(raw_stations, list) else 0
+            try:
+                v2_entry = _QUIZ_EXPORT_V2_ENTRY_ADAPTER.validate_python(raw_entry)
+            except ValidationError:
+                failed_quizzes += 1
+                if raw_activity == "osce":
+                    failed_stations += entry_station_count
+                    detail = "Invalid OSCE quiz export entry"
+                else:
+                    detail = "Invalid question quiz export entry"
+                errors.append(
+                    QuizImportError(
+                        source_index=source_index,
+                        quiz_name=quiz_name,
+                        error=detail,
+                    )
+                )
+                continue
+
+            if v2_entry.activity_type == "osce":
+                try:
+                    _ensure_workspace_exists(db, v2_entry.quiz.workspace_id)
+                    result = db.import_osce_quiz_entry_atomic(v2_entry)
+                except (HTTPException, InputError, ConflictError, CharactersRAGDBError, ValidationError):
+                    failed_quizzes += 1
+                    failed_stations += len(v2_entry.stations)
+                    errors.append(
+                        QuizImportError(
+                            source_index=source_index,
+                            quiz_name=v2_entry.quiz.name,
+                            error="Failed to import OSCE quiz",
+                        )
+                    )
+                    continue
+
+                station_ids = result["station_ids"]
+                imported_quizzes += 1
+                imported_stations += len(station_ids)
+                items.append(
+                    QuizImportItemResult(
+                        source_index=source_index,
+                        quiz_id=int(result["quiz"]["id"]),
+                        imported_questions=0,
+                        failed_questions=0,
+                        imported_stations=len(station_ids),
+                        failed_stations=0,
+                        station_ids=station_ids,
+                    )
+                )
+                continue
+            entry = _v2_question_import_entry(v2_entry)
+        else:
+            entry = raw_entry
+
         quiz_name = entry.quiz.name
         try:
             _ensure_workspace_exists(db, entry.quiz.workspace_id)
@@ -288,6 +386,9 @@ def import_quizzes_json(
                 quiz_id=quiz_id,
                 imported_questions=entry_imported_questions,
                 failed_questions=entry_failed_questions,
+                imported_stations=0,
+                failed_stations=0,
+                station_ids=[],
             )
         )
 
@@ -296,6 +397,8 @@ def import_quizzes_json(
         failed_quizzes=failed_quizzes,
         imported_questions=imported_questions,
         failed_questions=failed_questions,
+        imported_stations=imported_stations,
+        failed_stations=failed_stations,
         items=items,
         errors=errors,
     )
