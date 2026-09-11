@@ -184,9 +184,10 @@ describe("OSCE Generate and Create controls", () => {
     expect(navigateManage).toHaveBeenCalledTimes(1)
   })
 
-  it("reuses the created OSCE quiz shell when station creation is retried", async () => {
+  it("reuses the created OSCE quiz shell after a definitive station rejection", async () => {
+    const rejected = Object.assign(new Error("station rejected"), { status: 422 })
     const stationCreate = vi.fn()
-      .mockRejectedValueOnce(new Error("station save failed"))
+      .mockRejectedValueOnce(rejected)
       .mockResolvedValueOnce({ id: 81, quiz_id: 80 })
     vi.mocked(useCreateOsceStationMutation).mockReturnValue({
       mutateAsync: stationCreate,
@@ -208,6 +209,31 @@ describe("OSCE Generate and Create controls", () => {
     await waitFor(() => expect(stationCreate).toHaveBeenCalledTimes(2))
     expect(useCreateQuizMutation().mutateAsync).toHaveBeenCalledTimes(1)
     expect(navigateManage).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ["network failure", new TypeError("Failed to fetch")],
+    ["request timeout", Object.assign(new Error("timed out"), { status: 408 })],
+    ["server failure", Object.assign(new Error("unavailable"), { status: 503 })]
+  ])("fails closed after ambiguous station creation: %s", async (_label, failure) => {
+    const stationCreate = vi.fn().mockRejectedValue(failure)
+    vi.mocked(useCreateOsceStationMutation).mockReturnValue({
+      mutateAsync: stationCreate,
+      isPending: false
+    } as never)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}>
+      <CreateTab onNavigateToTake={() => {}} onNavigateToManage={() => {}} />
+    </QueryClientProvider>)
+    fillOsceCreateForm()
+
+    fireEvent.click(screen.getByRole("button", { name: "Save station" }))
+
+    expect(await screen.findByText(/Station creation status is unknown/i)).toBeInTheDocument()
+    expect(screen.getByText(/inspect Manage/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Save station" })).toBeDisabled()
+    expect(stationCreate).toHaveBeenCalledTimes(1)
+    expect(useCreateQuizMutation().mutateAsync).toHaveBeenCalledTimes(1)
   })
 
   it("does not blindly recreate an OSCE shell after an ambiguous create response", async () => {

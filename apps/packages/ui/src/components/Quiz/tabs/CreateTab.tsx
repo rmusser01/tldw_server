@@ -166,6 +166,7 @@ export const CreateTab: React.FC<CreateTabProps> = ({
   const [osceEditorDirty, setOsceEditorDirty] = React.useState(false)
   const [createdOsceQuizId, setCreatedOsceQuizId] = React.useState<number | null>(null)
   const [osceQuizCreationUncertain, setOsceQuizCreationUncertain] = React.useState(false)
+  const [osceStationCreationUncertain, setOsceStationCreationUncertain] = React.useState(false)
   const [messageApi, contextHolder] = message.useMessage()
   const [pendingDraft, setPendingDraft] = React.useState<QuizCreateDraft | null>(null)
   const [draftStorageUnavailable, setDraftStorageUnavailable] = React.useState(false)
@@ -191,7 +192,7 @@ export const CreateTab: React.FC<CreateTabProps> = ({
     if (nextActivityType === activityType) return
 
     const hasIncompatibleDraft = activityType === "questions"
-      ? questions.length > 0
+      ? questions.length > 0 || pendingDraft != null
       : osceEditorDirty
     if (hasIncompatibleDraft && !window.confirm(
       "Switch activity type and discard the current activity content?"
@@ -199,7 +200,11 @@ export const CreateTab: React.FC<CreateTabProps> = ({
       return
     }
 
-    if (activityType === "questions") setQuestions([])
+    if (activityType === "questions") {
+      setQuestions([])
+      clearCreateDraft()
+      setPendingDraft(null)
+    }
     setOsceEditorDirty(false)
     setActivityType(nextActivityType)
   }
@@ -639,6 +644,9 @@ export const CreateTab: React.FC<CreateTabProps> = ({
     if (osceQuizCreationUncertain) {
       throw new Error("Quiz creation status is unknown. Check Manage before trying again to avoid a duplicate quiz.")
     }
+    if (osceStationCreationUncertain) {
+      throw new Error("Station creation status is unknown. Inspect Manage before creating another station.")
+    }
 
     let quizId = createdOsceQuizId
     if (quizId == null) {
@@ -656,16 +664,23 @@ export const CreateTab: React.FC<CreateTabProps> = ({
       }
     }
 
-    const station = await createOsceStationMutation.mutateAsync({
-      quizId,
-      request: { content, order_index: orderIndex }
-    })
+    let station: OsceStationAuthoringResponse
+    try {
+      station = await createOsceStationMutation.mutateAsync({
+        quizId,
+        request: { content, order_index: orderIndex }
+      })
+    } catch (error) {
+      if (isAmbiguousCreateFailure(error)) setOsceStationCreationUncertain(true)
+      throw error
+    }
     messageApi.success(
       t("option:quiz.createOsceSuccess", { defaultValue: "OSCE created successfully." })
     )
     form.resetFields()
     setCreatedOsceQuizId(null)
     setOsceQuizCreationUncertain(false)
+    setOsceStationCreationUncertain(false)
     setOsceEditorDirty(false)
     onDirtyStateChange?.(false)
     onNavigateToManage?.()
@@ -1257,7 +1272,7 @@ export const CreateTab: React.FC<CreateTabProps> = ({
             <Alert
               type="info"
               showIcon
-              title={`Quiz shell #${createdOsceQuizId} created. Station retries will reuse it.`}
+              title={`Quiz shell #${createdOsceQuizId} created.`}
             />
           ) : null}
           {osceQuizCreationUncertain ? (
@@ -1267,9 +1282,17 @@ export const CreateTab: React.FC<CreateTabProps> = ({
               title="Quiz creation status is unknown. Check Manage before trying again to avoid a duplicate quiz."
             />
           ) : null}
+          {osceStationCreationUncertain ? (
+            <Alert
+              type="warning"
+              showIcon
+              title="Station creation status is unknown. Inspect Manage before creating another station to avoid a duplicate."
+            />
+          ) : null}
           <OsceStationEditor
             onCreate={handleCreateOsceStation}
             onDirtyStateChange={setOsceEditorDirty}
+            saveBlocked={osceQuizCreationUncertain || osceStationCreationUncertain}
           />
         </section>
       )}

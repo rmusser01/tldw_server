@@ -19,6 +19,7 @@ import {
   Space,
   Spin,
   Tag,
+  Tooltip,
   Typography,
   message
 } from "antd"
@@ -62,9 +63,14 @@ import type {
   QuizImportRequest,
   SourceCitation
 } from "@/services/quizzes"
-import { getOsceStation, listAllOsceStations } from "@/services/osce"
+import {
+  getOsceStation,
+  listAllOsceStations,
+  type OsceStationSummary
+} from "@/services/osce"
 import {
   useAllOsceStationsQuery,
+  useDeleteOsceStationMutation,
   useOsceStationQuery,
 } from "../hooks/useOsceQueries"
 import { OsceStationEditor } from "../osce/OsceStationEditor"
@@ -534,6 +540,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const [selectedOsceStationId, setSelectedOsceStationId] = React.useState<number | null>(null)
   const [creatingOsceStation, setCreatingOsceStation] = React.useState(false)
   const [osceEditorDirty, setOsceEditorDirty] = React.useState(false)
+  const [deletingOsceStationId, setDeletingOsceStationId] = React.useState<number | null>(null)
   const [editModalOpen, setEditModalOpen] = React.useState(false)
   const [questionModalOpen, setQuestionModalOpen] = React.useState(false)
   const [questionDraft, setQuestionDraft] = React.useState<QuestionDraft | null>(null)
@@ -672,6 +679,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const createQuestionMutation = useCreateQuestionMutation()
   const updateQuestionMutation = useUpdateQuestionMutation()
   const deleteQuestionMutation = useDeleteQuestionMutation()
+  const deleteOsceStationMutation = useDeleteOsceStationMutation()
 
   const osceStationsQuery = useAllOsceStationsQuery(
     managingOsceQuiz?.id,
@@ -732,6 +740,12 @@ export const ManageTab: React.FC<ManageTabProps> = ({
       (left, right) => left.order_index - right.order_index
     ),
     [osceStationsQuery.data]
+  )
+  const nextOsceStationOrderIndex = React.useMemo(
+    () => sortedOsceStations.length === 0
+      ? 0
+      : Math.max(...sortedOsceStations.map((station) => station.order_index)) + 1,
+    [sortedOsceStations]
   )
 
   React.useEffect(() => {
@@ -860,6 +874,32 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     setCreatingOsceStation(false)
     setSelectedOsceStationId(stationId)
     setOsceEditorDirty(false)
+  }
+
+  const deleteOsceStationFromManager = async (station: OsceStationSummary) => {
+    const deletingSelectedStation = selectedOsceStationId === station.id
+    if (deletingSelectedStation && !confirmDiscardOsceDraft()) return
+    if (!window.confirm(`Delete station "${station.title}"? This cannot be undone.`)) return
+    if (!managingOsceQuiz) return
+
+    setDeletingOsceStationId(station.id)
+    try {
+      await deleteOsceStationMutation.mutateAsync({
+        quizId: managingOsceQuiz.id,
+        stationId: station.id,
+        expectedVersion: station.version
+      })
+      if (deletingSelectedStation) {
+        setSelectedOsceStationId(null)
+        setOsceEditorDirty(false)
+      }
+      await Promise.allSettled([osceStationsQuery.refetch(), refetch()])
+      messageApi.success("Station deleted.")
+    } catch {
+      messageApi.error("Failed to delete station.")
+    } finally {
+      setDeletingOsceStationId(null)
+    }
   }
 
   const handleUndoQuizDelete = () => {
@@ -1988,23 +2028,38 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                 className="min-w-0"
                 renderItem={(station) => (
                   <List.Item className="!px-0">
-                    <button
-                      type="button"
-                      onClick={() => selectOsceStation(station.id)}
-                      className="w-full min-w-0 border-l-2 border-border px-3 py-2 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                      aria-pressed={selectedOsceStationId === station.id}
-                    >
-                      <span className="block truncate font-medium text-text">{station.title}</span>
-                      <span className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-text-muted">
-                        <span>{Math.round(station.recommended_duration_seconds / 60)} min</span>
-                        <span>{station.checklist_count} checklist items</span>
-                        <span>{station.rubric_domain_count} rubric domains</span>
-                      </span>
-                      <span className="mt-2 inline-flex items-center gap-1 text-xs text-text">
-                        {osceVerificationIcon(station.verification_state)}
-                        {osceVerificationLabel(station.verification_state)}
-                      </span>
-                    </button>
+                    <div className="flex w-full min-w-0 items-start gap-1">
+                      <button
+                        type="button"
+                        onClick={() => selectOsceStation(station.id)}
+                        className="min-w-0 flex-1 border-l-2 border-border px-3 py-2 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                        aria-label={`Edit station ${station.title}`}
+                        aria-pressed={selectedOsceStationId === station.id}
+                      >
+                        <span className="block truncate font-medium text-text">{station.title}</span>
+                        <span className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-text-muted">
+                          <span>{Math.round(station.recommended_duration_seconds / 60)} min</span>
+                          <span>{station.checklist_count} checklist items</span>
+                          <span>{station.rubric_domain_count} rubric domains</span>
+                        </span>
+                        <span className="mt-2 inline-flex items-center gap-1 text-xs text-text">
+                          {osceVerificationIcon(station.verification_state)}
+                          {osceVerificationLabel(station.verification_state)}
+                        </span>
+                      </button>
+                      <Tooltip title={`Delete station ${station.title}`}>
+                        <Button
+                          type="text"
+                          danger
+                          icon={<DeleteOutlined aria-hidden />}
+                          aria-label={`Delete station ${station.title}`}
+                          loading={deletingOsceStationId === station.id}
+                          disabled={deletingOsceStationId != null}
+                          onClick={() => void deleteOsceStationFromManager(station)}
+                          className="h-11 w-11 shrink-0"
+                        />
+                      </Tooltip>
+                    </div>
                   </List.Item>
                 )}
               />
@@ -2014,7 +2069,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                   <OsceStationEditor
                     key={`new-${managingOsceQuiz.id}`}
                     quizId={managingOsceQuiz.id}
-                    orderIndex={sortedOsceStations.length}
+                    orderIndex={nextOsceStationOrderIndex}
                     onDirtyStateChange={setOsceEditorDirty}
                     onSaved={(station) => {
                       setCreatingOsceStation(false)

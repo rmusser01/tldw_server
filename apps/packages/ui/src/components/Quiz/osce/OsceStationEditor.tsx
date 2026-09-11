@@ -56,6 +56,7 @@ export interface OsceStationEditorProps {
   ) => Promise<OsceStationAuthoringResponse>
   onSaved?: (station: OsceStationAuthoringResponse) => void
   onDirtyStateChange?: (dirty: boolean) => void
+  saveBlocked?: boolean
 }
 
 const newCitation = (): OsceCitation => ({
@@ -366,7 +367,8 @@ export const OsceStationEditor: React.FC<OsceStationEditorProps> = ({
   orderIndex = 0,
   onCreate,
   onSaved,
-  onDirtyStateChange
+  onDirtyStateChange,
+  saveBlocked = false
 }) => {
   const { t } = useTranslation(["option", "common"])
   const [messageApi, contextHolder] = message.useMessage()
@@ -904,7 +906,7 @@ export const OsceStationEditor: React.FC<OsceStationEditorProps> = ({
           icon={<SaveOutlined aria-hidden />}
           aria-label="Save station"
           loading={saving}
-          disabled={!dirty || validationErrors.length > 0 || saving || conflictServer != null}
+          disabled={saveBlocked || !dirty || validationErrors.length > 0 || saving || conflictServer != null}
           onClick={handleSave}
         >
           Save station

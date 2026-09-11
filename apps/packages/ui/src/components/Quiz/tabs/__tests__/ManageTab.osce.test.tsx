@@ -7,7 +7,11 @@ import {
   useDeleteQuizMutation, useQuestionsQuery, useQuizzesQuery,
   useUpdateQuestionMutation, useUpdateQuizMutation
 } from "../../hooks"
-import { useAllOsceStationsQuery, useOsceStationQuery } from "../../hooks/useOsceQueries"
+import {
+  useAllOsceStationsQuery,
+  useDeleteOsceStationMutation,
+  useOsceStationQuery
+} from "../../hooks/useOsceQueries"
 import { importQuizzesJson } from "@/services/quizzes"
 import { getOsceStation, listAllOsceStations } from "@/services/osce"
 
@@ -23,7 +27,22 @@ vi.mock("../../hooks/useOsceQueries", () => ({
   useAllOsceStationsQuery: vi.fn(),
   useOsceStationQuery: vi.fn(),
   useCreateOsceStationMutation: vi.fn(),
+  useDeleteOsceStationMutation: vi.fn(),
   useUpdateOsceStationMutation: vi.fn()
+}))
+vi.mock("../../osce/OsceStationEditor", () => ({
+  OsceStationEditor: ({
+    orderIndex,
+    onDirtyStateChange
+  }: {
+    orderIndex?: number
+    onDirtyStateChange?: (dirty: boolean) => void
+  }) => (
+    <div data-testid="osce-station-editor">
+      <span data-testid="osce-station-order-index">{orderIndex}</span>
+      <button type="button" onClick={() => onDirtyStateChange?.(true)}>Mark station dirty</button>
+    </div>
+  )
 }))
 vi.mock("@/services/tldw", () => ({
   tldwClient: { getConfig: vi.fn(async () => ({ authMode: "single-user" })), getMediaDetails: vi.fn() },
@@ -40,6 +59,11 @@ vi.mock("@/services/osce", async () => ({
 }))
 
 describe("ManageTab OSCE authoring", () => {
+  const quizRefetch = vi.fn()
+  const stationListRefetch = vi.fn()
+  const stationDetailRefetch = vi.fn()
+  const deleteStation = vi.fn()
+
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(useQuizzesQuery).mockReturnValue({
@@ -47,17 +71,32 @@ describe("ManageTab OSCE authoring", () => {
         id: 8, name: "Clinical communication", description: "Practice", activity_type: "osce",
         total_questions: 0, total_stations: 1, passing_score: null, time_limit_seconds: null,
         media_id: null, deleted: false, client_id: "test", version: 2
-      }], count: 1 }, isLoading: false, refetch: vi.fn()
+      }], count: 1 }, isLoading: false, refetch: quizRefetch
     } as never)
     vi.mocked(useQuestionsQuery).mockReturnValue({ data: { items: [], count: 0 }, isLoading: false } as never)
-    vi.mocked(useOsceStationQuery).mockReturnValue({ data: undefined, isLoading: false } as never)
+    vi.mocked(useOsceStationQuery).mockImplementation((_quizId, stationId) => ({
+      data: stationId == null ? undefined : {
+        id: stationId,
+        quiz_id: 8,
+        content: { schema_version: "osce.station.v1", title: "Explain anticoagulant safety" },
+        order_index: 0,
+        version: 2
+      },
+      isLoading: false,
+      refetch: stationDetailRefetch
+    } as never))
     vi.mocked(useAllOsceStationsQuery).mockReturnValue({
       data: [{
         id: 9, quiz_id: 8, title: "Explain anticoagulant safety", recommended_duration_seconds: 480,
         order_index: 0, version: 2, checklist_count: 4, rubric_domain_count: 2,
         verification_state: "source_verified", created_at: "2026-09-11", updated_at: "2026-09-11"
-      }], isLoading: false
+      }], isLoading: false, refetch: stationListRefetch
     } as never)
+    vi.mocked(useDeleteOsceStationMutation).mockReturnValue({
+      mutateAsync: deleteStation,
+      isPending: false
+    } as never)
+    deleteStation.mockResolvedValue(undefined)
     vi.mocked(importQuizzesJson).mockResolvedValue({
       imported_quizzes: 1, failed_quizzes: 0,
       imported_questions: 0, failed_questions: 0,
@@ -155,5 +194,74 @@ describe("ManageTab OSCE authoring", () => {
     await waitFor(() => expect(getOsceStation).toHaveBeenCalledTimes(201))
     expect(listAllOsceStations).toHaveBeenCalledWith(8)
     expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
+  })
+
+  it("cancels confirmed station deletion without changing selection", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(false)
+    render(<ManageTab onNavigateToCreate={() => {}} onNavigateToGenerate={() => {}} onStartQuiz={() => {}} />)
+    fireEvent.click(screen.getByRole("button", { name: "Manage stations" }))
+    fireEvent.click(screen.getByRole("button", { name: "Edit station Explain anticoagulant safety" }))
+    expect(await screen.findByTestId("osce-station-editor")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete station Explain anticoagulant safety" }))
+
+    expect(deleteStation).not.toHaveBeenCalled()
+    expect(screen.getByTestId("osce-station-editor")).toBeInTheDocument()
+  })
+
+  it("deletes the selected station after dirty-draft and delete confirmations", async () => {
+    vi.spyOn(window, "confirm").mockReturnValueOnce(true).mockReturnValueOnce(true)
+    render(<ManageTab onNavigateToCreate={() => {}} onNavigateToGenerate={() => {}} onStartQuiz={() => {}} />)
+    fireEvent.click(screen.getByRole("button", { name: "Manage stations" }))
+    fireEvent.click(screen.getByRole("button", { name: "Edit station Explain anticoagulant safety" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Mark station dirty" }))
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete station Explain anticoagulant safety" }))
+
+    await waitFor(() => expect(deleteStation).toHaveBeenCalledWith({
+      quizId: 8,
+      stationId: 9,
+      expectedVersion: 2
+    }))
+    expect(window.confirm).toHaveBeenNthCalledWith(1, "Discard unsaved station changes?")
+    expect(window.confirm).toHaveBeenNthCalledWith(
+      2,
+      'Delete station "Explain anticoagulant safety"? This cannot be undone.'
+    )
+    await waitFor(() => expect(screen.queryByTestId("osce-station-editor")).not.toBeInTheDocument())
+    expect(stationListRefetch).toHaveBeenCalled()
+    expect(quizRefetch).toHaveBeenCalled()
+  })
+
+  it("preserves the selected station when deletion fails", async () => {
+    deleteStation.mockRejectedValueOnce(new Error("delete failed"))
+    vi.spyOn(window, "confirm").mockReturnValue(true)
+    render(<ManageTab onNavigateToCreate={() => {}} onNavigateToGenerate={() => {}} onStartQuiz={() => {}} />)
+    fireEvent.click(screen.getByRole("button", { name: "Manage stations" }))
+    fireEvent.click(screen.getByRole("button", { name: "Edit station Explain anticoagulant safety" }))
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete station Explain anticoagulant safety" }))
+
+    expect(await screen.findByText("Failed to delete station.")).toBeInTheDocument()
+    expect(screen.getByTestId("osce-station-editor")).toBeInTheDocument()
+    expect(stationListRefetch).not.toHaveBeenCalled()
+  })
+
+  it("uses max existing order index plus one for a new station", async () => {
+    vi.mocked(useAllOsceStationsQuery).mockReturnValue({
+      data: [
+        { id: 9, quiz_id: 8, title: "First", order_index: 0 },
+        { id: 10, quiz_id: 8, title: "Imported A", order_index: 5 },
+        { id: 11, quiz_id: 8, title: "Imported B", order_index: 5 }
+      ],
+      isLoading: false,
+      refetch: stationListRefetch
+    } as never)
+    render(<ManageTab onNavigateToCreate={() => {}} onNavigateToGenerate={() => {}} onStartQuiz={() => {}} />)
+    fireEvent.click(screen.getByRole("button", { name: "Manage stations" }))
+
+    fireEvent.click(screen.getByRole("button", { name: "Add station" }))
+
+    expect(await screen.findByTestId("osce-station-order-index")).toHaveTextContent("6")
   })
 })

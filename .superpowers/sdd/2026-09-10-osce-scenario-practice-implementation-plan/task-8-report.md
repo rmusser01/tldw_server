@@ -81,3 +81,33 @@ Concerns:
 - The OSCE generation profile remains planned/hidden unless the server catalog explicitly marks it available.
 - Task 9 practice, autosave, and results behavior was not started.
 - The first unconstrained full Quiz run produced load-related five-second timeouts. The timed-out tests passed in focused reruns, and the complete suite passed with `--maxWorkers=2`.
+
+## Review Fix Round 2
+
+Status: complete from review-fix-round-1 head `1a3a032962`; committed separately as `fix(webui): close OSCE authoring retry and delete gaps`.
+
+RED evidence:
+
+- Initial three-file regression run: 8 failed and 14 passed. The failures demonstrated that ambiguous station creates remained retryable, recovered question drafts survived an OSCE switch, Manage had no station-delete action, and new station order used list length instead of the maximum stored order.
+
+GREEN evidence:
+
+- Expanded Task 8 suite: 5 files, 36 tests passed.
+- Dedicated Take suite: 7 files, 64 tests passed.
+- QuizPlayground navigation suite: 1 file, 23 tests passed.
+- Full Quiz component suite with `--maxWorkers=2`: 38 files, 267 tests passed.
+- Full frontend lint: exit 0 with the unchanged 169-warning baseline and no errors; `eslint --quiet` also exits 0.
+- Frontend typecheck remains blocked by 80 existing diagnostics across six Presentation Studio, presentation E2E, and skills-certification files. No diagnostic references a changed Quiz or OSCE path.
+- `git diff --check`: passed. Bandit remains not applicable because no Python changed.
+
+Fixes:
+
+- Classify the request client's concrete `error.status` shape so missing status, 408, and 5xx station-create failures fail closed after a confirmed shell. The local station draft remains visible, Save is disabled, and the author is directed to inspect Manage before creating another station. Definitive 4xx rejection remains retryable against the retained shell.
+- Clear persisted, pending-recovery, and in-memory question content after a confirmed Questions-to-OSCE switch, preventing discarded questions from returning on remount.
+- Add an accessible station delete control in Manage with unsaved-draft and destructive-action confirmation, expected-version deletion, cache-backed refresh, success selection clearing, and failure-state preservation.
+- Compute new station order as the maximum existing `order_index` plus one, with zero for an empty station list, so sparse or colliding imported indexes are handled safely.
+
+Concerns:
+
+- The OSCE generation profile remains planned/hidden unless the server catalog explicitly marks it available.
+- Task 9 practice, autosave, and results behavior was not started.
