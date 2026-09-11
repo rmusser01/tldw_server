@@ -213,6 +213,7 @@ describe("OSCE Generate and Create controls", () => {
 
   it.each([
     ["network failure", new TypeError("Failed to fetch")],
+    ["production transport failure", Object.assign(new Error("network unavailable"), { status: 0 })],
     ["request timeout", Object.assign(new Error("timed out"), { status: 408 })],
     ["server failure", Object.assign(new Error("unavailable"), { status: 503 })]
   ])("fails closed after ambiguous station creation: %s", async (_label, failure) => {
@@ -236,9 +237,11 @@ describe("OSCE Generate and Create controls", () => {
     expect(useCreateQuizMutation().mutateAsync).toHaveBeenCalledTimes(1)
   })
 
-  it("does not blindly recreate an OSCE shell after an ambiguous create response", async () => {
+  it("does not recreate an OSCE shell after the production status-zero transport error", async () => {
     vi.mocked(useCreateQuizMutation).mockReturnValue({
-      mutateAsync: vi.fn(async () => { throw new TypeError("Failed to fetch") }),
+      mutateAsync: vi.fn(async () => {
+        throw Object.assign(new Error("network unavailable"), { status: 0 })
+      }),
       isPending: false
     } as never)
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })

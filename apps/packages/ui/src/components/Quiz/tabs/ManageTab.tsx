@@ -876,6 +876,16 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     setOsceEditorDirty(false)
   }
 
+  const prepareManagedOsceQuizDeletion = (quizIds: Set<number>): boolean => {
+    if (!managingOsceQuiz || !quizIds.has(managingOsceQuiz.id)) return true
+    if (!confirmDiscardOsceDraft()) return false
+    setManagingOsceQuiz(null)
+    setSelectedOsceStationId(null)
+    setCreatingOsceStation(false)
+    setOsceEditorDirty(false)
+    return true
+  }
+
   const deleteOsceStationFromManager = async (station: OsceStationSummary) => {
     const deletingSelectedStation = selectedOsceStationId === station.id
     if (deletingSelectedStation && !confirmDiscardOsceDraft()) return
@@ -945,6 +955,8 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   }
 
   const handleDelete = (quiz: Quiz) => {
+    if (!prepareManagedOsceQuizDeletion(new Set([quiz.id]))) return
+
     // Cancel any existing pending deletion
     if (pendingQuizDeletion.current) {
       clearTimeout(pendingQuizDeletion.current.timeoutId)
@@ -1066,6 +1078,9 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const executeBulkDelete = async () => {
     const selectedQuizzes = quizzes.filter((quiz) => selectedQuizIds.has(quiz.id))
     if (selectedQuizzes.length === 0) {
+      return
+    }
+    if (!prepareManagedOsceQuizDeletion(new Set(selectedQuizzes.map((quiz) => quiz.id)))) {
       return
     }
 
@@ -2083,7 +2098,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                   <Skeleton active paragraph={{ rows: 8 }} />
                 ) : osceStationQuery.data ? (
                   <OsceStationEditor
-                    key={`${osceStationQuery.data.id}-${osceStationQuery.data.version}`}
+                    key={osceStationQuery.data.id}
                     quizId={managingOsceQuiz.id}
                     station={osceStationQuery.data}
                     onDirtyStateChange={setOsceEditorDirty}
@@ -2303,6 +2318,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                   danger
                   icon={<DeleteOutlined />}
                   onClick={() => handleDelete(quiz)}
+                  aria-label={`Delete quiz ${quiz.name}`}
                 >
                   {t("option:quiz.delete", { defaultValue: "Delete" })}
                 </Button>

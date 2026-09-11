@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import React from "react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ManageTab } from "../ManageTab"
@@ -33,16 +34,29 @@ vi.mock("../../hooks/useOsceQueries", () => ({
 vi.mock("../../osce/OsceStationEditor", () => ({
   OsceStationEditor: ({
     orderIndex,
-    onDirtyStateChange
+    onDirtyStateChange,
+    station
   }: {
     orderIndex?: number
     onDirtyStateChange?: (dirty: boolean) => void
-  }) => (
-    <div data-testid="osce-station-editor">
-      <span data-testid="osce-station-order-index">{orderIndex}</span>
-      <button type="button" onClick={() => onDirtyStateChange?.(true)}>Mark station dirty</button>
-    </div>
-  )
+    station?: { content?: { title?: string } }
+  }) => {
+    const [title, setTitle] = React.useState(station?.content?.title ?? "")
+    return (
+      <div data-testid="osce-station-editor">
+        <span data-testid="osce-station-order-index">{orderIndex}</span>
+        <input
+          aria-label="Managed station draft"
+          value={title}
+          onChange={(event) => {
+            setTitle(event.target.value)
+            onDirtyStateChange?.(true)
+          }}
+        />
+        <button type="button" onClick={() => onDirtyStateChange?.(true)}>Mark station dirty</button>
+      </div>
+    )
+  }
 }))
 vi.mock("@/services/tldw", () => ({
   tldwClient: { getConfig: vi.fn(async () => ({ authMode: "single-user" })), getMediaDetails: vi.fn() },
@@ -63,9 +77,14 @@ describe("ManageTab OSCE authoring", () => {
   const stationListRefetch = vi.fn()
   const stationDetailRefetch = vi.fn()
   const deleteStation = vi.fn()
+  const deleteQuiz = vi.fn()
+  let stationVersion = 2
+  let stationTitle = "Explain anticoagulant safety"
 
   beforeEach(() => {
     vi.clearAllMocks()
+    stationVersion = 2
+    stationTitle = "Explain anticoagulant safety"
     vi.mocked(useQuizzesQuery).mockReturnValue({
       data: { items: [{
         id: 8, name: "Clinical communication", description: "Practice", activity_type: "osce",
@@ -78,9 +97,9 @@ describe("ManageTab OSCE authoring", () => {
       data: stationId == null ? undefined : {
         id: stationId,
         quiz_id: 8,
-        content: { schema_version: "osce.station.v1", title: "Explain anticoagulant safety" },
+        content: { schema_version: "osce.station.v1", title: stationTitle },
         order_index: 0,
-        version: 2
+        version: stationVersion
       },
       isLoading: false,
       refetch: stationDetailRefetch
@@ -121,7 +140,11 @@ describe("ManageTab OSCE authoring", () => {
     })
     const idle = { mutateAsync: vi.fn(), isPending: false } as never
     vi.mocked(useCreateQuizMutation).mockReturnValue(idle)
-    vi.mocked(useDeleteQuizMutation).mockReturnValue(idle)
+    vi.mocked(useDeleteQuizMutation).mockReturnValue({
+      mutateAsync: deleteQuiz,
+      isPending: false
+    } as never)
+    deleteQuiz.mockResolvedValue(undefined)
     vi.mocked(useUpdateQuizMutation).mockReturnValue(idle)
     vi.mocked(useCreateQuestionMutation).mockReturnValue(idle)
     vi.mocked(useUpdateQuestionMutation).mockReturnValue(idle)
@@ -263,5 +286,89 @@ describe("ManageTab OSCE authoring", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add station" }))
 
     expect(await screen.findByTestId("osce-station-order-index")).toHaveTextContent("6")
+  })
+
+  it("does not remount a dirty station editor when the same station version refreshes", async () => {
+    const view = render(<ManageTab onNavigateToCreate={() => {}} onNavigateToGenerate={() => {}} onStartQuiz={() => {}} />)
+    fireEvent.click(screen.getByRole("button", { name: "Manage stations" }))
+    fireEvent.click(screen.getByRole("button", { name: "Edit station Explain anticoagulant safety" }))
+    fireEvent.change(await screen.findByLabelText("Managed station draft"), {
+      target: { value: "Local draft" }
+    })
+
+    stationVersion = 3
+    stationTitle = "Server refresh"
+    view.rerender(<ManageTab onNavigateToCreate={() => {}} onNavigateToGenerate={() => {}} onStartQuiz={() => {}} />)
+
+    expect(screen.getByLabelText("Managed station draft")).toHaveValue("Local draft")
+  })
+
+  it("cancels deleting the managed quiz when its station draft is dirty", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(false)
+    render(<ManageTab onNavigateToCreate={() => {}} onNavigateToGenerate={() => {}} onStartQuiz={() => {}} />)
+    fireEvent.click(screen.getByRole("button", { name: "Manage stations" }))
+    fireEvent.click(screen.getByRole("button", { name: "Edit station Explain anticoagulant safety" }))
+    fireEvent.change(await screen.findByLabelText("Managed station draft"), {
+      target: { value: "Local draft" }
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete quiz Clinical communication" }))
+
+    expect(window.confirm).toHaveBeenCalledWith("Discard unsaved station changes?")
+    expect(screen.getByRole("button", { name: "Delete quiz Clinical communication" })).toBeInTheDocument()
+    expect(screen.getByLabelText("Managed station draft")).toHaveValue("Local draft")
+    expect(deleteQuiz).not.toHaveBeenCalled()
+  })
+
+  it("proceeds with managed quiz deletion after discarding the dirty station draft", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true)
+    render(<ManageTab onNavigateToCreate={() => {}} onNavigateToGenerate={() => {}} onStartQuiz={() => {}} />)
+    fireEvent.click(screen.getByRole("button", { name: "Manage stations" }))
+    fireEvent.click(screen.getByRole("button", { name: "Edit station Explain anticoagulant safety" }))
+    fireEvent.change(await screen.findByLabelText("Managed station draft"), {
+      target: { value: "Local draft" }
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete quiz Clinical communication" }))
+
+    expect(screen.queryByTestId("osce-station-editor")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Delete quiz Clinical communication" })).not.toBeInTheDocument()
+  })
+
+  it("cancels bulk deletion when it includes the managed quiz with a dirty station draft", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(false)
+    render(<ManageTab onNavigateToCreate={() => {}} onNavigateToGenerate={() => {}} onStartQuiz={() => {}} />)
+    fireEvent.click(screen.getByRole("button", { name: "Manage stations" }))
+    fireEvent.click(screen.getByRole("button", { name: "Edit station Explain anticoagulant safety" }))
+    fireEvent.change(await screen.findByLabelText("Managed station draft"), {
+      target: { value: "Local draft" }
+    })
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select quiz {{name}}" }))
+    fireEvent.click(screen.getByTestId("manage-bulk-delete"))
+    const popconfirm = (await screen.findByText("Delete selected quizzes?")).closest(".ant-popover")
+    expect(popconfirm).not.toBeNull()
+    fireEvent.click(within(popconfirm as HTMLElement).getByRole("button", { name: /^Delete$/i }))
+
+    expect(deleteQuiz).not.toHaveBeenCalled()
+    expect(screen.getByLabelText("Managed station draft")).toHaveValue("Local draft")
+    expect(screen.getByRole("button", { name: "Delete quiz Clinical communication" })).toBeInTheDocument()
+  })
+
+  it("proceeds with bulk deletion after discarding the managed quiz station draft", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true)
+    render(<ManageTab onNavigateToCreate={() => {}} onNavigateToGenerate={() => {}} onStartQuiz={() => {}} />)
+    fireEvent.click(screen.getByRole("button", { name: "Manage stations" }))
+    fireEvent.click(screen.getByRole("button", { name: "Edit station Explain anticoagulant safety" }))
+    fireEvent.change(await screen.findByLabelText("Managed station draft"), {
+      target: { value: "Local draft" }
+    })
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select quiz {{name}}" }))
+    fireEvent.click(screen.getByTestId("manage-bulk-delete"))
+    const popconfirm = (await screen.findByText("Delete selected quizzes?")).closest(".ant-popover")
+    expect(popconfirm).not.toBeNull()
+    fireEvent.click(within(popconfirm as HTMLElement).getByRole("button", { name: /^Delete$/i }))
+
+    await waitFor(() => expect(deleteQuiz).toHaveBeenCalledWith({ quizId: 8, version: 2 }))
+    expect(screen.queryByTestId("osce-station-editor")).not.toBeInTheDocument()
   })
 })

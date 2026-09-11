@@ -111,3 +111,34 @@ Concerns:
 
 - The OSCE generation profile remains planned/hidden unless the server catalog explicitly marks it available.
 - Task 9 practice, autosave, and results behavior was not started.
+
+## Review Fix Round 3
+
+Status: complete from review-fix-round-2 head `8f2eee0223`; committed separately as `fix(webui): preserve OSCE authoring state`.
+
+RED evidence:
+
+- Initial three-file regression run: 9 failed and 21 passed. The failures reproduced status-zero shell/station retry exposure, duplicate custom-create requests, dirty editor resets on same-station refresh, and missing dirty-draft guards for single and bulk parent-quiz deletion.
+
+GREEN evidence:
+
+- Focused round-3 suite: 3 files, 31 tests passed.
+- Expanded Task 8 suite: 5 files, 45 tests passed.
+- Dedicated Take suite: 7 files, 64 tests passed.
+- QuizPlayground navigation suite: 1 file, 23 tests passed.
+- Full Quiz component suite with `--maxWorkers=2`: 38 files, 276 tests passed.
+- Full frontend lint: exit 0 with the unchanged 169-warning baseline and no errors; `eslint --quiet` also exits 0.
+- Frontend typecheck remains blocked by 80 existing diagnostics across six Presentation Studio, presentation E2E, and skills-certification files. No diagnostic references a changed Task 8, Quiz, or OSCE path.
+- `git diff --check`: passed. Bandit remains not applicable because no Python changed.
+
+Fixes:
+
+- Treat the production request client's `status: 0` transport failure as ambiguous for quiz-shell and station creation, preserving fail-closed behavior while keeping definitive 4xx station rejections retryable against the retained shell.
+- Add a synchronous local save lock plus visible pending state around every station editor save path, including custom `onCreate`, so rapid repeated activation cannot start concurrent POSTs.
+- Preserve dirty local station content and its acknowledged version across same-station background refreshes, allowing explicit save to reach normal 409 recovery. Clean refreshes and station identity changes still adopt server content.
+- Guard single and bulk parent-quiz deletion when the active managed OSCE quiz has a dirty station draft. Cancellation leaves the quiz and draft intact; confirmation clears the manager and permits deletion.
+
+Concerns:
+
+- The OSCE generation profile remains planned/hidden unless the server catalog explicitly marks it available.
+- Task 9 practice, autosave, and results behavior was not started.

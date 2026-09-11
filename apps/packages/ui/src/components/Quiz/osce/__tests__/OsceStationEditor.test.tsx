@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -99,6 +99,104 @@ describe("OsceStationEditor", () => {
       expect.objectContaining({ expected_version: 4, content: expect.objectContaining({ title: "Updated title" }) })
     ))
     await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(false))
+  })
+
+  it("allows only one custom create request during rapid double activation", async () => {
+    let resolveCreate: ((value: typeof station) => void) | undefined
+    const onCreate = vi.fn(() => new Promise<typeof station>((resolve) => {
+      resolveCreate = resolve
+    }))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <OsceStationEditor initialContent={station.content} onCreate={onCreate} />
+      </QueryClientProvider>
+    )
+    fireEvent.change(screen.getByLabelText("Station title"), { target: { value: "Local draft" } })
+    const saveButton = screen.getByRole("button", { name: "Save station" })
+
+    act(() => {
+      saveButton.click()
+      saveButton.click()
+    })
+
+    expect(onCreate).toHaveBeenCalledTimes(1)
+    expect(saveButton).toBeDisabled()
+    await act(async () => {
+      resolveCreate?.({ ...station, content: { ...station.content, title: "Local draft" } })
+    })
+  })
+
+  it("preserves a dirty draft across same-station prop refresh and reaches conflict recovery", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = render(
+      <QueryClientProvider client={client}>
+        <OsceStationEditor quizId={7} station={station} />
+      </QueryClientProvider>
+    )
+    vi.mocked(updateOsceStation).mockRejectedValue(
+      Object.assign(new Error("conflict"), { status: 409 })
+    )
+    const serverRefresh = {
+      ...station,
+      version: 5,
+      content: { ...station.content, title: "Server refresh" }
+    }
+    vi.mocked(getOsceStation).mockResolvedValue(serverRefresh)
+    fireEvent.change(screen.getByLabelText("Station title"), { target: { value: "Local draft" } })
+
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <OsceStationEditor quizId={7} station={serverRefresh} />
+      </QueryClientProvider>
+    )
+
+    expect(screen.getByLabelText("Station title")).toHaveValue("Local draft")
+    fireEvent.click(screen.getByRole("button", { name: "Save station" }))
+    await waitFor(() => expect(updateOsceStation).toHaveBeenCalledWith(
+      7,
+      9,
+      expect.objectContaining({
+        expected_version: 4,
+        content: expect.objectContaining({ title: "Local draft" })
+      })
+    ))
+    expect(await screen.findByText("This station changed on the server.")).toBeInTheDocument()
+  })
+
+  it("adopts server content when clean or when station identity changes", () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = render(
+      <QueryClientProvider client={client}>
+        <OsceStationEditor quizId={7} station={station} />
+      </QueryClientProvider>
+    )
+    const cleanRefresh = {
+      ...station,
+      version: 5,
+      content: { ...station.content, title: "Clean server refresh" }
+    }
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <OsceStationEditor quizId={7} station={cleanRefresh} />
+      </QueryClientProvider>
+    )
+    expect(screen.getByLabelText("Station title")).toHaveValue("Clean server refresh")
+
+    fireEvent.change(screen.getByLabelText("Station title"), { target: { value: "Dirty first station" } })
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <OsceStationEditor
+          quizId={7}
+          station={{
+            ...cleanRefresh,
+            id: 10,
+            content: { ...station.content, title: "Different station" }
+          }}
+        />
+      </QueryClientProvider>
+    )
+    expect(screen.getByLabelText("Station title")).toHaveValue("Different station")
   })
 
   it("preserves a local draft on 409 and requires confirmation before retrying against the latest version", async () => {

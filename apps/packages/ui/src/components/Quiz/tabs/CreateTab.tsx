@@ -105,7 +105,7 @@ const isFormValidationError = (error: unknown): boolean => {
 const isAmbiguousCreateFailure = (error: unknown): boolean => {
   if (!error || typeof error !== "object") return true
   const status = Number((error as { status?: unknown }).status)
-  return !Number.isFinite(status) || status === 408 || status >= 500
+  return !Number.isFinite(status) || status === 0 || status === 408 || status >= 500
 }
 
 const readCreateDraft = (): QuizCreateDraft | null => {

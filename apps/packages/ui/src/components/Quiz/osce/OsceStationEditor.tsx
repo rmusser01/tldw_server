@@ -383,14 +383,24 @@ export const OsceStationEditor: React.FC<OsceStationEditorProps> = ({
   const [conflictServer, setConflictServer] = React.useState<OsceStationAuthoringResponse | null>(null)
   const [overwriteVersion, setOverwriteVersion] = React.useState<number | null>(null)
   const [confirmOverwrite, setConfirmOverwrite] = React.useState(false)
+  const [localSaveInFlight, setLocalSaveInFlight] = React.useState(false)
+  const saveInFlightRef = React.useRef(false)
+  const stationIdentityRef = React.useRef<number | null>(station?.id ?? null)
   const createMutation = useCreateOsceStationMutation()
   const updateMutation = useUpdateOsceStationMutation()
   const dirty = serializeDraft(draft) !== serializeDraft(acknowledged)
+  const dirtyRef = React.useRef(dirty)
+  dirtyRef.current = dirty
   const validationErrors = React.useMemo(() => validateDraft(draft), [draft])
-  const saving = createMutation.isPending || updateMutation.isPending
+  const saving = localSaveInFlight || createMutation.isPending || updateMutation.isPending
 
   React.useEffect(() => {
+    const nextStationIdentity = station?.id ?? null
+    const stationChanged = stationIdentityRef.current !== nextStationIdentity
+    if (!stationChanged && dirtyRef.current) return
+
     const next = cloneDraft(station?.content ?? initialContent ?? createEmptyOsceStationDraft())
+    stationIdentityRef.current = nextStationIdentity
     setDraft(next)
     setAcknowledged(next)
     setCurrentVersion(station?.version ?? null)
@@ -427,7 +437,9 @@ export const OsceStationEditor: React.FC<OsceStationEditorProps> = ({
   }
 
   const performSave = async (expectedVersion?: number) => {
-    if (validationErrors.length > 0) return
+    if (validationErrors.length > 0 || saveInFlightRef.current) return
+    saveInFlightRef.current = true
+    setLocalSaveInFlight(true)
     try {
       let saved: OsceStationAuthoringResponse
       if (station && quizId != null) {
@@ -467,6 +479,9 @@ export const OsceStationEditor: React.FC<OsceStationEditorProps> = ({
         }
       }
       messageApi.error(errorMessage(error))
+    } finally {
+      saveInFlightRef.current = false
+      setLocalSaveInFlight(false)
     }
   }
 
