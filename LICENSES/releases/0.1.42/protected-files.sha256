@@ -5242,6 +5242,7 @@ c07f8f5f93e7503f39133757c295e343b9d9b6edb22ab91fa7c7287b1f5d67b1  apps/packages/
 497186047273f42d504c2dfa7d763e7a4647bc94508fea39901a32d3f812c1d6  apps/packages/ui/src/routes/__tests__/sidepanel-note-capture.test.ts
 9f1d030fdbb9fe54b8606d93dcb1beef237afad0e71bd0cfafd31da2a64a8cca  apps/packages/ui/src/routes/__tests__/sidepanel-persona-locale-keys.test.ts
 eb089acbe6607bd817446320ed1b96bda1b1a67afe6b3fd764961db4938b693e  apps/packages/ui/src/routes/__tests__/sidepanel-persona.blocker.test.tsx
+c5d0e4debe4a904d9cb341194a8e2015bf6aaf02fdfdd7d7b9c2f50d4ec6758d  apps/packages/ui/src/routes/__tests__/sidepanel-persona.buddy-lifecycle.test.tsx
 cd6abf0ef9b91fa0f126d0b628f1ed9b46c00f9e23fc32c56ff7da2de3fe8e72  apps/packages/ui/src/routes/__tests__/sidepanel-persona.command-handoff.test.tsx
 2943d2c3efbb72c7dd5b8ec426f0de611d2af5dabf4409d9ca5bb80b868a6571  apps/packages/ui/src/routes/__tests__/sidepanel-persona.imports.guard.test.ts
 ac8e3c3cdc8dac451c847a468946462dff0e5cca1f2eb30de01024c2391eba7f  apps/packages/ui/src/routes/__tests__/sidepanel-persona.test.tsx

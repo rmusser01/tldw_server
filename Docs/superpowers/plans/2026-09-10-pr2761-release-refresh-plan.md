@@ -48,9 +48,9 @@ security, lifecycle, supply-chain, capacity or human-review requirements.
 
 | Item | Recorded state |
 | --- | --- |
-| Integrated release code and verified blocker fixes | `23dd07bf23a89101dee737b62898b403cb9bef70` |
+| Integrated release code and verified blocker fixes | `1f435b26ce505fe70d9fbee58a8bd1751a457401` |
 | Latest observed CI head | `0929b44a5af3bed60142550719f610d048bec3e2`; 65 checks pass, eight run, 37 skip and CodeQL fails. Backend/security/container pass; remaining frontend/coverage/E2E lanes run. Further source changes require fresh-head CI. |
-| Protected source snapshot | `23dd07bf23a89101dee737b62898b403cb9bef70`, 7,110 files |
+| Protected source snapshot | `1f435b26ce505fe70d9fbee58a8bd1751a457401`, 7,111 files |
 | PR branch / target | `codex/release-main-0.1.42` → `main` |
 | PR state at inspection | Draft; no merge or publication performed |
 | Remote CI snapshot | On `6150040801`, container aggregate/all five images, E2E, backend/security/license and all eight frontend shards pass; frontend aggregate and coverage still run. Completed CodeQL inventory: 447 open instances, all on `6150040801` (7 critical, 437 high, 3 medium). Its failed changed-code aggregate reports 424 alerts; that is a different measure from all open PR instances. |
