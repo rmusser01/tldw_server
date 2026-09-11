@@ -884,6 +884,9 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
 
     for job_name in matrix_jobs:
         shards = workflow["jobs"][job_name]["strategy"]["matrix"]["shard"]
+        for shard in shards:
+            paths = shard["paths"].split()
+            assert len(paths) == len(set(paths)), f"{job_name}/{shard['name']} repeats a test path"
         shard_names = {shard["name"] for shard in shards}
         rag_new_shards = {
             "rag-new-integration-agentic",
@@ -1131,8 +1134,6 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         }
         assert shard_path_sets["media-core-documents"] == {
             "tldw_Server_API/tests/Media/test_document*.py",
-            "tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py",
-            "tldw_Server_API/tests/Media/test_pdf_summary_service_prompt.py",
             "tldw_Server_API/tests/Media/test_pdf_text_normalization.py",
         }
         assert shard_path_sets["media-core-api"] == {
