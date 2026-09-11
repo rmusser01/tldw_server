@@ -55,19 +55,31 @@ describe("apiSend timeout fallback policy", () => {
     mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200 })
     const { apiSend } = await importApiSend()
     const result = await apiSend({
-      path: "/api/v1/prompt-studio/prompts/create", method: "POST",
-      capturePersistenceScope: true
+      path: "/api/v1/prompt-studio/prompts/create",
+      method: "POST",
+      recipePersistence: { mode: "capture" }
     })
     expect(mocks.tldwRequest).not.toHaveBeenCalled()
-    expect(result).toMatchObject({ ok: false, persistenceScope: null })
+    expect(result).toMatchObject({
+      ok: false,
+      recipePersistence: { state: "unknown", actualOwnerId: null }
+    })
   })
 
   it("does not coalesce captured reconciliation with an unowned GET", async () => {
     let finish!: (value: unknown) => void
-    mocks.sendMessage.mockReturnValue(new Promise(resolve => { finish = resolve }))
+    mocks.sendMessage.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve
+      })
+    )
     const { apiSend } = await importApiSend()
     const first = apiSend({ path: "/api/v1/health", method: "GET" })
-    const second = apiSend({ path: "/api/v1/health", method: "GET", capturePersistenceScope: true })
+    const second = apiSend({
+      path: "/api/v1/health",
+      method: "GET",
+      recipePersistence: { mode: "capture" }
+    })
     expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
     finish({ ok: true, status: 200 })
     await Promise.all([first, second])
@@ -76,7 +88,11 @@ describe("apiSend timeout fallback policy", () => {
   it("falls back to direct request for GET timeout", async () => {
     vi.useFakeTimers()
     mocks.sendMessage.mockImplementation(() => new Promise(() => undefined))
-    mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
 
     const { apiSend } = await importApiSend()
     const pending = apiSend({ path: "/api/v1/health", method: "GET" })
@@ -110,7 +126,11 @@ describe("apiSend timeout fallback policy", () => {
   })
 
   it("does not coalesce unsafe POST requests", async () => {
-    mocks.sendMessage.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
+    mocks.sendMessage.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
 
     const { apiSend } = await importApiSend()
     await Promise.all([
@@ -132,7 +152,11 @@ describe("apiSend timeout fallback policy", () => {
   it("does not fall back to direct request for POST timeout", async () => {
     vi.useFakeTimers()
     mocks.sendMessage.mockImplementation(() => new Promise(() => undefined))
-    mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
 
     const { apiSend } = await importApiSend()
     const pending = apiSend({
@@ -140,7 +164,9 @@ describe("apiSend timeout fallback policy", () => {
       method: "POST",
       body: { q: "hello" }
     })
-    const assertion = expect(pending).rejects.toThrow("Extension messaging timeout")
+    const assertion = expect(pending).rejects.toThrow(
+      "Extension messaging timeout"
+    )
 
     await vi.advanceTimersByTimeAsync(10001)
 
@@ -174,7 +200,11 @@ describe("apiSend timeout fallback policy", () => {
       }
       return null
     })
-    mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
 
     const { apiSend } = await importApiSend()
     await apiSend({
@@ -219,7 +249,11 @@ describe("apiSend timeout fallback policy", () => {
           }
         : null
     )
-    mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
 
     const { apiSend } = await importApiSend()
     await apiSend({ path: "/api/v1/health", method: "GET" })
@@ -231,5 +265,35 @@ describe("apiSend timeout fallback policy", () => {
       apiKey: "api-send-session-key"
     })
     expect(persistentConfig).not.toHaveProperty("apiKey")
+  })
+
+  it("forwards Prompt Studio recipe policy only as client-local metadata", async () => {
+    mocks.runtimeId = null
+    mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200 })
+    const { createPrompt, getPrompt, updatePrompt } =
+      await import("@/services/prompt-studio")
+    const required = {
+      recipePersistence: {
+        mode: "require" as const,
+        expectedOwnerId: `recipe-owner:sha256:${"a".repeat(64)}`,
+        localId: "local-recipe-1"
+      }
+    }
+
+    await createPrompt({ project_id: 1, name: "Recipe" }, required)
+    await updatePrompt(2, { change_description: "Update" }, required)
+    await getPrompt(2, { recipePersistence: { mode: "capture" } })
+
+    expect(mocks.tldwRequest.mock.calls.map(([request]) => request)).toEqual([
+      expect.objectContaining(required),
+      expect.objectContaining(required),
+      expect.objectContaining({
+        recipePersistence: { mode: "capture" }
+      })
+    ])
+    for (const [request] of mocks.tldwRequest.mock.calls) {
+      expect(request).not.toHaveProperty("capturePersistenceScope")
+      expect(request).not.toHaveProperty("requirePersistenceScope")
+    }
   })
 })
