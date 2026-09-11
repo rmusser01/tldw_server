@@ -41,7 +41,7 @@ vi.mock("@/db/dexie/schema", () => ({
         if (!mocks.rows.has(id)) return 0
         const row = { ...mocks.rows.get(id) }
         if (typeof fields === "function") {
-          if (fields(row) === false) return 0
+          if (fields(row) === false) return 1
         } else Object.assign(row, fields)
         mocks.rows.set(id, row)
         return 1
@@ -89,6 +89,35 @@ const seed = (linked = false) =>
   })
 
 describe("owner-aware sync and exact reconciliation", () => {
+  it("linking cannot replace a concurrent durable error with pending or new references", async () => {
+    seed(true)
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    mocks.get.mockImplementationOnce(async () => {
+      await gate
+      return response()
+    })
+    const linking = sync.linkPrompts("exact-id", 101)
+    await vi.waitFor(() => expect(mocks.get).toHaveBeenCalled())
+    mocks.update.mockImplementationOnce(async () => {
+      await registry.markRecipePersistenceScoped("exact-id", ownerB)
+      return { ...response(), ok: false, status: 0, data: undefined }
+    })
+    await sync.pushToStudio("exact-id", 42, { expectedOwnerId: ownerB })
+    const locked = structuredClone(mocks.rows.get("exact-id"))
+    expect(locked.syncStatus).toBe("error")
+    release()
+    expect.soft(await linking).toMatchObject({
+      success: false,
+      syncStatus: "error",
+      recipeWriteBlocked: true,
+      failureKind: "validation"
+    })
+    expect(mocks.rows.get("exact-id")).toEqual(locked)
+  })
+
   it.each(["manual", "auto"])(
     "%s refuses a durable error after the registry restarts clear",
     async (mode) => {

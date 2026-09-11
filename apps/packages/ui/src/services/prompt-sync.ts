@@ -58,6 +58,8 @@ export type SyncResult = {
   error?: string
   syncStatus: PromptSyncStatus
   failureKind?: "validation" | "invalid_server_payload" | "transient"
+  /** Shared recovery state prevents retry/rollback, independently of this dispatch. */
+  recipeWriteBlocked?: true
 }
 
 export type RecipeSyncOwnership = Readonly<{
@@ -79,6 +81,66 @@ const notDispatched = (localId: string): RecipeSyncOwnership => ({
   localId,
   dispatch: { state: "not_dispatched", actualOwnerId: null }
 })
+
+const durableRecipeBlock = (localId: string): SyncResult => ({
+  success: false,
+  localId,
+  recipeOwnership: notDispatched(localId),
+  recipeWriteBlocked: true,
+  error: "Recipe has an unresolved durable error",
+  syncStatus: "error",
+  failureKind: "validation"
+})
+
+/** A blocked authority read is not evidence that this attempt dispatched. */
+const readRecipeWriteBlock = async (
+  localId: string,
+  expectedOwnerId: string,
+  recipeOwnership = notDispatched(localId)
+): Promise<SyncResult | null> => {
+  let error = "Recipe has an unresolved operation"
+  try {
+    if (
+      (await readRecipePersistenceUncertainty(localId, expectedOwnerId)) ===
+      "clear"
+    )
+      return null
+  } catch {
+    error = "Recipe uncertainty authority is unavailable"
+  }
+  // The authority await may have overlapped another writer. Status is display
+  // data; the explicit block remains authoritative even if this read fails.
+  const current = await db.prompts.get(localId).catch(() => undefined)
+  return {
+    ...durableRecipeBlock(localId),
+    recipeOwnership,
+    ...(current?.serverId ? { serverId: current.serverId } : {}),
+    error,
+    syncStatus: current?.syncStatus || "error"
+  }
+}
+
+/** Every v2 pending transition checks the current lock inside its write transaction. */
+const markLocalPending = async (
+  localId: string,
+  isRecipe: boolean,
+  fields: Partial<LocalPrompt>
+): Promise<boolean> => {
+  let durableError = false
+  await db.prompts.update(
+    localId,
+    isRecipe
+      ? (current) => {
+          if (current.syncStatus === "error") {
+            durableError = true
+            return false
+          }
+          Object.assign(current, fields, { syncStatus: "pending" })
+        }
+      : { ...fields, syncStatus: "pending" }
+  )
+  return durableError
+}
 
 const clearReconciledOwner = async (ownership: RecipeSyncOwnership | null) => {
   if (
@@ -477,8 +539,7 @@ async function persistServerPrompt(
       : localToServerUpdatePayload(local)
     isRecipe = payload.prompt_schema_version === 2
     if (isRecipe) {
-      if (local.syncStatus === "error")
-        return failure("Recipe has an unresolved durable error", "validation")
+      if (local.syncStatus === "error") return durableRecipeBlock(localId)
       if (!input?.expectedOwnerId)
         return failure("Recipe persistence owner is required", "validation")
       policy = {
@@ -486,21 +547,8 @@ async function persistServerPrompt(
         expectedOwnerId: input.expectedOwnerId,
         localId
       }
-      try {
-        if (
-          (await readRecipePersistenceUncertainty(
-            localId,
-            input.expectedOwnerId
-          )) !== "clear"
-        ) {
-          return failure("Recipe has an unresolved operation", "validation")
-        }
-      } catch {
-        return failure(
-          "Recipe uncertainty authority is unavailable",
-          "validation"
-        )
-      }
+      const blocked = await readRecipeWriteBlock(localId, input.expectedOwnerId)
+      if (blocked) return blocked
     } else {
       policy = { mode: "capture" }
     }
@@ -531,6 +579,15 @@ async function persistServerPrompt(
       }
     }
     if (recipeOwnership.dispatch.state === "not_dispatched") {
+      if (isRecipe && input) {
+        // A late authority reservation can reject after sync's clear preflight.
+        const blocked = await readRecipeWriteBlock(
+          localId,
+          input.expectedOwnerId,
+          recipeOwnership
+        )
+        if (blocked) return blocked
+      }
       return failure(
         response.error || "Prompt was not dispatched",
         "validation"
@@ -692,14 +749,7 @@ export async function autoSyncPrompt(
 
   const isRecipe = identity.promptSchemaVersion === 2
   if (isRecipe && local.syncStatus === "error") {
-    return {
-      success: false,
-      localId,
-      recipeOwnership,
-      error: "Recipe has an unresolved durable error",
-      syncStatus: "error",
-      failureKind: "validation"
-    }
+    return durableRecipeBlock(localId)
   }
   if (isRecipe && !input?.expectedOwnerId) {
     return {
@@ -713,32 +763,8 @@ export async function autoSyncPrompt(
   }
 
   if (isRecipe && input) {
-    try {
-      if (
-        (await readRecipePersistenceUncertainty(
-          localId,
-          input.expectedOwnerId
-        )) !== "clear"
-      ) {
-        return {
-          success: false,
-          localId,
-          recipeOwnership,
-          error: "Recipe has an unresolved operation",
-          syncStatus: local.syncStatus || "local",
-          failureKind: "validation"
-        }
-      }
-    } catch {
-      return {
-        success: false,
-        localId,
-        recipeOwnership,
-        error: "Recipe uncertainty authority is unavailable",
-        syncStatus: local.syncStatus || "local",
-        failureKind: "validation"
-      }
-    }
+    const blocked = await readRecipeWriteBlock(localId, input.expectedOwnerId)
+    if (blocked) return blocked
   }
   const projectId = isRecipe
     ? isValidProjectId(preferredProjectId)
@@ -751,32 +777,8 @@ export async function autoSyncPrompt(
       )
 
   if (!isValidProjectId(projectId)) {
-    let durableError = false
-    await db.prompts.update(
-      localId,
-      isRecipe
-        ? (current) => {
-            // Check and write in Dexie's one readwrite transaction: settings
-            // resolution may have overlapped another operation's ambiguity.
-            if (current.syncStatus === "error") {
-              durableError = true
-              return false
-            }
-            current.syncStatus = "pending"
-            current.updatedAt = Date.now()
-          }
-        : { syncStatus: "pending", updatedAt: Date.now() }
-    )
-    if (durableError) {
-      return {
-        success: false,
-        localId,
-        recipeOwnership,
-        error: "Recipe has an unresolved durable error",
-        syncStatus: "error",
-        failureKind: "validation"
-      }
-    }
+    if (await markLocalPending(localId, isRecipe, { updatedAt: Date.now() }))
+      return durableRecipeBlock(localId)
     return {
       success: false,
       localId,
@@ -794,11 +796,13 @@ export async function autoSyncPrompt(
     result.failureKind === "transient" &&
     (!isRecipe || result.recipeOwnership?.dispatch.state === "not_dispatched")
   ) {
-    await db.prompts.update(localId, {
-      syncStatus: "pending",
-      studioProjectId: projectId,
-      updatedAt: Date.now()
-    })
+    if (
+      await markLocalPending(localId, isRecipe, {
+        studioProjectId: projectId,
+        updatedAt: Date.now()
+      })
+    )
+      return durableRecipeBlock(localId)
   }
   return result
 }
@@ -968,7 +972,7 @@ export async function linkPrompts(
         syncStatus: "local"
       }
     }
-    getLocalPromptComparablePayload(local)
+    const identity = getLocalPromptComparablePayload(local)
 
     const response = await getServerPrompt(serverId)
     const serverPrompt = unwrapResponseData<ServerPrompt>(response)
@@ -987,14 +991,16 @@ export async function linkPrompts(
     getServerPromptComparablePayload(serverPrompt)
 
     // Link by updating local with server reference
-    await db.prompts.update(localId, {
-      serverId,
-      studioProjectId: serverPrompt.project_id,
-      studioPromptId: serverId,
-      serverUpdatedAt: serverPrompt.updated_at,
-      syncStatus: "pending", // Pending because content may differ
-      lastSyncedAt: Date.now()
-    })
+    if (
+      await markLocalPending(localId, identity.promptSchemaVersion === 2, {
+        serverId,
+        studioProjectId: serverPrompt.project_id,
+        studioPromptId: serverId,
+        serverUpdatedAt: serverPrompt.updated_at,
+        lastSyncedAt: Date.now()
+      })
+    )
+      return durableRecipeBlock(localId)
 
     return {
       success: true,

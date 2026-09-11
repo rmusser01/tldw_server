@@ -149,7 +149,7 @@ vi.mock("@/db/dexie/schema", () => ({
         if (!mocks.rows.has(id)) return 0;
         const row = { ...mocks.rows.get(id) };
         if (typeof fields === "function") {
-          if (fields(row) === false) return 0;
+          if (fields(row) === false) return 1;
         } else Object.assign(row, fields);
         mocks.rows.set(id, row);
         return 1;
@@ -330,6 +330,156 @@ const startBackground = async () => {
 };
 
 describe("builder through real sync, Prompt Studio, apiSend and request-core", () => {
+  it.each([
+    ["create", "scoped", false],
+    ["update", "scoped", false],
+    ["create", "unavailable", false],
+    ["update", "unavailable", false],
+    ["create", "scoped", true],
+    ["update", "scoped", true],
+    ["create", "unavailable", true],
+    ["update", "unavailable", true],
+  ] as const)(
+    "background %s retains recovery after delayed %s authority (durable write fails: %s)",
+    async (operation, authorityResult, markerFails) => {
+      await startBackground();
+      seed(operation);
+      mocks.markerFails = markerFails;
+      mocks.defaultProjectId = null;
+      const user = userEvent.setup();
+      const view = renderBuilder(ownerScope);
+      if (operation === "update") await selectSaved(user);
+      await user.selectOptions(
+        screen.getByRole("combobox", { name: "Output format" }),
+        "markdown",
+      );
+      const reached = deferred();
+      const release = deferred();
+      const deliver = mocks.sendMessage.getMockImplementation()!;
+      let pauseNextRead = true;
+      mocks.sendMessage.mockImplementation(async (message) => {
+        if (pauseNextRead && message.type === "tldw:recipe-uncertainty:read") {
+          pauseNextRead = false;
+          reached.resolve();
+          await release.promise;
+          if (authorityResult === "unavailable")
+            throw new Error("background connection lost");
+        }
+        return deliver(message);
+      });
+      await clickWrite(user, operation);
+      await reached.promise;
+      await pushToStudio("dispatch-id", 42, { expectedOwnerId: ownerScope });
+      const recoveryRow = structuredClone(mocks.rows.get("dispatch-id"));
+      expect(recoveryRow.syncStatus).toBe(
+        markerFails ? (operation === "create" ? "local" : "synced") : "error",
+      );
+      release.resolve();
+      await screen.findByText(
+        /Could not (?:save|update) the recipe|server outcome could not be verified/i,
+      );
+      expect.soft(mocks.rows.get("dispatch-id")).toEqual(recoveryRow);
+      expect
+        .soft(screen.queryByText(/server outcome could not be verified/i))
+        .toBeInTheDocument();
+      expect(
+        await readRecipePersistenceUncertainty("dispatch-id", ownerScope),
+      ).toBe("scoped");
+      expect(promptMutations()).toHaveLength(1);
+      view.unmount();
+    },
+  );
+
+  it.each(["scoped", "unavailable"])(
+    "manual background sync returns a fresh lock-aware result after delayed %s authority",
+    async (authorityResult) => {
+      await startBackground();
+      seed("update");
+      mocks.markerFails = false;
+      const reached = deferred();
+      const release = deferred();
+      const deliver = mocks.sendMessage.getMockImplementation()!;
+      let pauseNextRead = true;
+      mocks.sendMessage.mockImplementation(async (message) => {
+        if (pauseNextRead && message.type === "tldw:recipe-uncertainty:read") {
+          pauseNextRead = false;
+          reached.resolve();
+          await release.promise;
+          if (authorityResult === "unavailable")
+            throw new Error("background connection lost");
+        }
+        return deliver(message);
+      });
+      const pending = pushToStudio("dispatch-id", 42, {
+        expectedOwnerId: ownerScope,
+      });
+      await reached.promise;
+      await pushToStudio("dispatch-id", 42, { expectedOwnerId: ownerScope });
+      release.resolve();
+      expect(await pending).toMatchObject({
+        success: false,
+        recipeWriteBlocked: true,
+        syncStatus: "error",
+        failureKind: "validation",
+        recipeOwnership: {
+          dispatch: { state: "not_dispatched", actualOwnerId: null },
+        },
+      });
+      expect(promptMutations()).toHaveLength(1);
+    },
+  );
+
+  it.each(["direct", "background"])(
+    "%s known-project transient fallback preserves concurrent durable ambiguity",
+    async (adapter) => {
+      if (adapter === "background") await startBackground();
+      seed("update");
+      mocks.markerFails = false;
+      const reached = deferred();
+      const release = deferred();
+      mocks.beforeRead
+        .mockResolvedValueOnce(undefined)
+        .mockImplementationOnce(async () => {
+          reached.resolve();
+          await release.promise;
+          throw new Error("transient local read failure");
+        });
+      const pending = autoSyncPrompt("dispatch-id", 42, {
+        expectedOwnerId: ownerScope,
+      });
+      await reached.promise;
+      await pushToStudio("dispatch-id", 42, { expectedOwnerId: ownerScope });
+      expect(mocks.rows.get("dispatch-id").syncStatus).toBe("error");
+      release.resolve();
+      expect.soft(await pending).toMatchObject({
+        success: false,
+        failureKind: "validation",
+        syncStatus: "error",
+        recipeWriteBlocked: true,
+        recipeOwnership: {
+          dispatch: { state: "not_dispatched", actualOwnerId: null },
+        },
+      });
+      expect.soft(mocks.rows.get("dispatch-id").syncStatus).toBe("error");
+      vi.resetModules();
+      if (adapter === "background") await startBackground();
+      const restartedSync = await import("@/services/prompt-sync");
+      const restartedRegistry = await import(
+        "@/services/recipe-persistence-uncertainty"
+      );
+      expect(
+        await restartedRegistry.readRecipePersistenceUncertainty(
+          "dispatch-id",
+          ownerScope,
+        ),
+      ).toBe("clear");
+      await restartedSync.autoSyncPrompt("dispatch-id", 42, {
+        expectedOwnerId: ownerScope,
+      });
+      expect(promptMutations()).toHaveLength(1);
+    },
+  );
+
   it.each([
     ["direct", "create"],
     ["background", "create"],
@@ -582,6 +732,7 @@ describe("builder through real sync, Prompt Studio, apiSend and request-core", (
       release.resolve();
       expect(await operation).toMatchObject({
         success: false,
+        recipeWriteBlocked: true,
         recipeOwnership: { dispatch: { state: "not_dispatched" } },
       });
       expect(promptMutations()).toHaveLength(0);
