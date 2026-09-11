@@ -26,7 +26,10 @@ ACL_PURL = "pkg:deb/debian/libacl1@2.3.2-2%2Bb1?arch=amd64&distro=debian-13.6"
 XML_VERSION = "2.12.7+dfsg+really2.9.14-2.1+deb13u3"
 XML_PURL = "pkg:deb/debian/libxml2@2.12.7%2Bdfsg%2Breally2.9.14-2.1%2Bdeb13u3?arch=amd64&distro=debian-13.6"
 IDENTITIES = (
-    tuple(("source-python-root", f"pkg:pypi/{name}@{version}", version, cve) for name, version, cve, _ghsa in OPTIONAL)
+    tuple(
+        ("dependency-review-python-root", f"pkg:pypi/{name}@{version}", version, cve)
+        for name, version, cve, _ghsa in OPTIONAL
+    )
     + tuple(
         (component, ACL_PURL, "2.3.2-2+b1", "CVE-2026-54369")
         for component in ("image-app", "image-worker", "image-audio-worker")
@@ -192,6 +195,10 @@ def test_exact_new_dispositions_preserve_all_322_prior_records() -> None:
     # TASK42 separately verifies preservation of all 336 records present after TASK40.
     raw["exceptions"] = [r for r in raw["exceptions"] if r not in added and not r["id"].startswith("TASK-13013.7.42-")]
     assert len(raw["exceptions"]) == 322
+    # Reconstruct the historical component before the TASK44 scope-only correction.
+    for record in raw["exceptions"]:
+        if record["id"] == "TASK-13013.7.38-LIGHTNING-01":
+            record["component"] = "source-python-root"
     assert (
         hashlib.sha256((json.dumps(raw, indent=2, sort_keys=True) + "\n").encode()).hexdigest()
         == "011ad751ad8e08db1140c9a7811eb7a0146ff96a4745abe840b8f30ab2bdfb90"

@@ -80,6 +80,10 @@ def test_all_310_prior_records_are_preserved_and_only_12_mount_records_added() -
     assert added == EVIDENCE["supported_dispositions"]
     raw["exceptions"] = [record for record in raw["exceptions"] if record["id"] in EVIDENCE["baseline_record_ids"]]
     assert len(raw["exceptions"]) == 310
+    # Reconstruct the historical component before the TASK44 scope-only correction.
+    for record in raw["exceptions"]:
+        if record["id"] == "TASK-13013.7.38-LIGHTNING-01":
+            record["component"] = "source-python-root"
     assert (
         hashlib.sha256((json.dumps(raw, indent=2, sort_keys=True) + "\n").encode()).hexdigest()
         == EVIDENCE["baseline_policy_sha256"]

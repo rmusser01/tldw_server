@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 _COMPONENTS = frozenset(
     {
         "source-python-root",
+        "dependency-review-python-root",
         "source-apps-workspace",
         "source-admin-ui",
         "image-app",
