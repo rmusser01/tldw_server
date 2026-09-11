@@ -43,7 +43,7 @@ GREEN:
 
 ## Review Fix Round 1
 
-Resolved the review finding that artifact verification received every selected source even when a verification unit cited only one source. OSCE verification now resolves each unit's canonical citations to exact source documents by `source_type`, `source_id`, and `chunk_id` when supplied, groups only identical cited-document sets, and invokes the verifier independently for each group.
+Implemented in commit `2f1ac5f215` (`fix(quizzes): scope OSCE verification to cited sources`). Resolved the review finding that artifact verification received every selected source even when a verification unit cited only one source. OSCE verification now resolves each unit's canonical citations to exact source documents by `source_type`, `source_id`, and `chunk_id` when supplied, groups only identical cited-document sets, and invokes the verifier independently for each group.
 
 Additional hardening:
 
