@@ -56,8 +56,13 @@ from tldw_Server_API.app.core.StudySuggestions.jobs import (
     build_study_suggestions_job_payload,
     study_suggestions_jobs_queue,
 )
+from tldw_Server_API.app.services.osce_generator import (
+    OsceGenerationError,
+    OsceProviderError,
+)
 from tldw_Server_API.app.services.quiz_generator import (
     QuizClaimVerificationError,
+    QuizGenerationRequestError,
     QuizProvenanceValidationError,
     generate_quiz_from_sources,
     get_quiz_generation_profiles,
@@ -716,6 +721,7 @@ async def generate_quiz(
             media_db=media_db,
             sources=sources,
             num_questions=request.num_questions,
+            num_stations=request.num_stations,
             question_types=request.question_types,
             question_plan=request.question_plan,
             generation_profile=request.generation_profile,
@@ -729,6 +735,11 @@ async def generate_quiz(
             workspace_tag=request.workspace_tag,
         )
         return result
+    except QuizGenerationRequestError as e:
+        raise HTTPException(status_code=400, detail={"code": e.code}) from e
+    except OsceGenerationError as e:
+        status_code = 502 if isinstance(e, OsceProviderError) else 422
+        raise HTTPException(status_code=status_code, detail={"code": e.code}) from e
     except QuizClaimVerificationError as e:
         raise HTTPException(
             status_code=422,

@@ -188,6 +188,8 @@ class QuizGenerationProfileDefinition(BaseModel):
     label: str
     description: str
     status: Literal["available", "planned"]
+    output_kind: Literal["questions", "osce_stations"] = "questions"
+    default_num_stations: Optional[int] = Field(None, ge=1, le=10)
     default_num_questions: int = Field(..., ge=1, le=100)
     default_difficulty: Literal["easy", "medium", "hard", "mixed"]
     default_question_types: list[QuestionType]
