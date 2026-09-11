@@ -314,7 +314,7 @@ async function fillTask(builder: Locator, value: string) {
     .fill(value)
 }
 
-function expectPersistedRecipe(
+function expectPersistedClearTaskRecipe(
   request: RecordedRequest,
   expectedObjectiveContent: string
 ) {
@@ -323,7 +323,7 @@ function expectPersistedRecipe(
   const serialized = JSON.stringify(body)
   expect(body.prompt_format).toBe("structured")
   expect(body.prompt_schema_version).toBe(2)
-  expect(body.prompt_definition).toMatchObject({
+  expect(body.prompt_definition).toEqual({
     schema_version: 2,
     format: "structured",
     definition_kind: "single_text_recipe",
@@ -334,23 +334,66 @@ function expectPersistedRecipe(
       block_separator: "\n\n"
     },
     variables: [
-      expect.objectContaining({
+      {
         name: "task",
         label: "Task",
+        description: "The task to complete.",
         required: true,
         default_value: "Extension saved default",
-        input_type: "textarea"
-      })
+        input_type: "textarea",
+        options: null,
+        max_length: null
+      }
     ],
-    blocks: expect.arrayContaining([
-      expect.objectContaining({
+    blocks: [
+      {
         id: "objective",
+        name: "Objective",
+        section_key: "objective",
         role: "user",
+        kind: "objective",
         content: expectedObjectiveContent,
         enabled: true,
+        order: 10,
         is_template: true
-      })
-    ])
+      },
+      {
+        id: "context_inputs",
+        name: "Context / inputs",
+        section_key: "context_inputs",
+        role: "user",
+        kind: "context_inputs",
+        content:
+          "Use the context and inputs provided by the user. If essential information is missing, state what is needed before proceeding.",
+        enabled: true,
+        order: 20,
+        is_template: false
+      },
+      {
+        id: "constraints",
+        name: "Constraints",
+        section_key: "constraints",
+        role: "user",
+        kind: "constraints",
+        content:
+          "Follow every explicit constraint. Preserve supplied names, facts, code, and required formatting; do not invent requirements.",
+        enabled: true,
+        order: 30,
+        is_template: false
+      },
+      {
+        id: "output",
+        name: "Output",
+        section_key: "output",
+        role: "user",
+        kind: "output",
+        content:
+          "Return the requested result directly. Make it clear, complete, and concise.",
+        enabled: true,
+        order: 40,
+        is_template: false
+      }
+    ]
   })
   expect(serialized).not.toContain(RUNTIME_SENTINEL)
   expect(serialized).not.toMatch(
@@ -493,7 +536,7 @@ test.describe("Packaged extension single-text structured recipes", () => {
       await expect(save).toBeEnabled()
       await save.click()
       await expect.poll(() => mock.creates().length).toBe(1)
-      expectPersistedRecipe(
+      expectPersistedClearTaskRecipe(
         mock.creates()[0],
         "Complete this task:\n\n{{task}}"
       )
@@ -508,10 +551,16 @@ test.describe("Packaged extension single-text structured recipes", () => {
         .fill("Extension update: {{task}}")
       await builder.getByRole("button", { name: "Update recipe" }).click()
       await expect.poll(() => mock.updates().length).toBe(1)
-      expectPersistedRecipe(mock.updates()[0], "Extension update: {{task}}")
+      expectPersistedClearTaskRecipe(
+        mock.updates()[0],
+        "Extension update: {{task}}"
+      )
       await builder.getByRole("button", { name: "Save as new recipe" }).click()
       await expect.poll(() => mock.creates().length).toBe(2)
-      expectPersistedRecipe(mock.creates()[1], "Extension update: {{task}}")
+      expectPersistedClearTaskRecipe(
+        mock.creates()[1],
+        "Extension update: {{task}}"
+      )
 
       await source.selectOption({ label: "Clear task" })
       await fillTask(builder, RUNTIME_SENTINEL)
