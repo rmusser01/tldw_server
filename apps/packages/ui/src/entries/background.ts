@@ -1711,7 +1711,7 @@ export default defineBackground({
           dispatchAuthority: {
             markDispatched: (id, ownerId) => {
               assertRecipeDispatchMarker(id, ownerId);
-              recipeRegistry.markScoped(id, ownerId);
+              recipeRegistry.reserve(id, ownerId);
             },
           },
           // IMPORTANT: getConfig must fetch fresh config each time it's called

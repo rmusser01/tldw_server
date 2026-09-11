@@ -140,7 +140,7 @@ export const directRecipeRequestAuthority = {
   dispatchAuthority: {
     markDispatched: (id: string, ownerId: string): void => {
       assertRecipeDispatchMarker(id, ownerId)
-      directRegistry.markScoped(id, ownerId)
+      directRegistry.reserve(id, ownerId)
     }
   }
 }

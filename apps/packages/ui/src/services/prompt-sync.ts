@@ -436,17 +436,18 @@ async function persistServerPrompt(
   createCopy: boolean
 ): Promise<SyncResult> {
   let recipeOwnership: RecipeSyncOwnership | null = notDispatched(localId)
+  let isRecipe = false
   const originalStatus = local.syncStatus || "local"
   const failure = async (
     error: unknown,
     failureKind: SyncResult["failureKind"]
   ): Promise<SyncResult> => {
     const uncertain =
-      local.promptSchemaVersion === 2 &&
+      isRecipe &&
       recipeOwnership?.dispatch.state !== "not_dispatched" &&
       failureKind !== "validation"
     if (uncertain) {
-      // Every caller (including outbox/batch) must leave retryable pending state.
+      // Every caller (including outbox/batch) must replace retryable pending state.
       // Storage failure cannot erase the authority's pre-dispatch marker.
       try {
         await db.prompts.update(localId, { syncStatus: "error" })
@@ -474,7 +475,10 @@ async function persistServerPrompt(
     payload = createCopy
       ? localToServerPayload(local, projectId)
       : localToServerUpdatePayload(local)
-    if (payload.prompt_schema_version === 2) {
+    isRecipe = payload.prompt_schema_version === 2
+    if (isRecipe) {
+      if (local.syncStatus === "error")
+        return failure("Recipe has an unresolved durable error", "validation")
       if (!input?.expectedOwnerId)
         return failure("Recipe persistence owner is required", "validation")
       policy = {
@@ -666,8 +670,9 @@ export async function autoSyncPrompt(
     }
   }
 
+  let identity: ReturnType<typeof parsePromptIdentity>
   try {
-    parsePromptIdentity(
+    identity = parsePromptIdentity(
       local.structuredPromptDefinition,
       local.promptFormat,
       local.promptSchemaVersion
@@ -685,7 +690,18 @@ export async function autoSyncPrompt(
     }
   }
 
-  if (local.promptSchemaVersion === 2 && !input?.expectedOwnerId) {
+  const isRecipe = identity.promptSchemaVersion === 2
+  if (isRecipe && local.syncStatus === "error") {
+    return {
+      success: false,
+      localId,
+      recipeOwnership,
+      error: "Recipe has an unresolved durable error",
+      syncStatus: "error",
+      failureKind: "validation"
+    }
+  }
+  if (isRecipe && !input?.expectedOwnerId) {
     return {
       success: false,
       localId,
@@ -696,7 +712,7 @@ export async function autoSyncPrompt(
     }
   }
 
-  if (local.promptSchemaVersion === 2 && input) {
+  if (isRecipe && input) {
     try {
       if (
         (await readRecipePersistenceUncertainty(
@@ -724,9 +740,15 @@ export async function autoSyncPrompt(
       }
     }
   }
-  const projectId = await resolveAutoSyncProjectId(
-    preferredProjectId ?? local.studioProjectId
-  )
+  const projectId = isRecipe
+    ? isValidProjectId(preferredProjectId)
+      ? preferredProjectId
+      : isValidProjectId(local.studioProjectId)
+        ? local.studioProjectId
+        : (await getPromptStudioDefaults()).defaultProjectId
+    : await resolveAutoSyncProjectId(
+        preferredProjectId ?? local.studioProjectId
+      )
 
   if (!isValidProjectId(projectId)) {
     await db.prompts.update(localId, {
@@ -747,8 +769,7 @@ export async function autoSyncPrompt(
   if (
     !result.success &&
     result.failureKind === "transient" &&
-    (local.promptSchemaVersion !== 2 ||
-      result.recipeOwnership?.dispatch.state === "not_dispatched")
+    (!isRecipe || result.recipeOwnership?.dispatch.state === "not_dispatched")
   ) {
     await db.prompts.update(localId, {
       syncStatus: "pending",

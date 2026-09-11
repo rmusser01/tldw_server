@@ -14,7 +14,42 @@ const payload = {
   prompt_definition: CLEAR_TASK_RECIPE.definition
 }
 const owner = "recipe-owner:sha256:" + "a".repeat(64)
-beforeEach(() => api.mockReset())
+beforeEach(() => {
+  api.mockReset()
+})
+it("rejects a schema-omitting partial update that could inherit v2 on the server", async () => {
+  // @ts-expect-error An update must explicitly identify the target format.
+  const result = await updatePrompt(101, {
+    name: "Renamed",
+    change_description: "Rename"
+  })
+  expect(result).toMatchObject({
+    ok: false,
+    recipePersistence: { state: "not_dispatched", actualOwnerId: null }
+  })
+  expect(api).not.toHaveBeenCalled()
+})
+it("rejects a partial structured update with unknown target schema", async () => {
+  const result = await updatePrompt(101, {
+    prompt_format: "structured",
+    name: "Renamed",
+    change_description: "Rename"
+  })
+  expect(result).toMatchObject({
+    ok: false,
+    recipePersistence: { state: "not_dispatched" }
+  })
+  expect(api).not.toHaveBeenCalled()
+})
+it("preserves an explicitly legacy partial update without owner requirements", async () => {
+  api.mockResolvedValue({ ok: true })
+  await updatePrompt(101, {
+    prompt_format: "legacy",
+    name: "Renamed",
+    change_description: "Rename"
+  })
+  expect(api).toHaveBeenCalledTimes(1)
+})
 it.each(["create", "update"])(
   "%s v2 refuses absent/capture ownership before apiSend",
   async (operation) => {
@@ -76,6 +111,7 @@ it.each(["create", "update"])(
     const v1 = {
       project_id: 42,
       name: "Legacy",
+      prompt_format: "structured" as const,
       change_description: "V1 policy test",
       prompt_schema_version: 1
     }

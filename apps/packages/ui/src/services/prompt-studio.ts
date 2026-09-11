@@ -29,14 +29,19 @@ type RecipePersistenceOptions = {
 
 const missingRecipePolicy = <T>(
   payload: {
+    prompt_format?: PromptFormat
     prompt_schema_version?: number | null
     prompt_definition?: StructuredPromptDefinition | null
   },
-  options?: RecipePersistenceOptions
+  options?: RecipePersistenceOptions,
+  isUpdate = false
 ): ApiSendResponse<T> | null => {
   if (
     (payload.prompt_schema_version !== 2 &&
-      payload.prompt_definition?.schema_version !== 2) ||
+      payload.prompt_definition?.schema_version !== 2 &&
+      (!isUpdate ||
+        payload.prompt_format === "legacy" ||
+        payload.prompt_schema_version === 1)) ||
     options?.recipePersistence.mode === "require"
   )
     return null
@@ -127,7 +132,8 @@ export type PromptUpdatePayload = {
   name?: string
   system_prompt?: string | null
   user_prompt?: string | null
-  prompt_format?: PromptFormat
+  /** Partial updates must identify the target kind; omission can inherit v2. */
+  prompt_format: PromptFormat
   prompt_schema_version?: number | null
   prompt_definition?: StructuredPromptDefinition | null
   few_shot_examples?: FewShotExample[] | null
@@ -461,7 +467,8 @@ export async function updatePrompt(
 ) {
   const rejection = missingRecipePolicy<StandardResponse<Prompt>>(
     payload,
-    options
+    options,
+    true
   )
   if (rejection) return rejection
   const response = await apiSend<StandardResponse<Prompt>>({

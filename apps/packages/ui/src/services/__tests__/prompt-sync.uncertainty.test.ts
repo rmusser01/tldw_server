@@ -8,6 +8,8 @@ const ownerA = "recipe-owner:sha256:" + "a".repeat(64)
 const ownerB = "recipe-owner:sha256:" + "b".repeat(64)
 const mocks = vi.hoisted(() => ({
   defaults: vi.fn(),
+  projects: vi.fn(),
+  createProject: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
   get: vi.fn(),
@@ -18,8 +20,8 @@ vi.mock("@/services/prompt-studio", () => ({
   createPrompt: (...args: unknown[]) => mocks.create(...args),
   updatePrompt: (...args: unknown[]) => mocks.update(...args),
   getPrompt: (...args: unknown[]) => mocks.get(...args),
-  listProjects: async () => ({ data: { data: [{ id: 42 }] } }),
-  createProject: vi.fn()
+  listProjects: (...args: unknown[]) => mocks.projects(...args),
+  createProject: (...args: unknown[]) => mocks.createProject(...args)
 }))
 vi.mock("@/services/prompt-studio-settings", () => ({
   getPromptStudioDefaults: (...args: unknown[]) => mocks.defaults(...args),
@@ -80,6 +82,66 @@ const seed = (linked = false) =>
   })
 
 describe("owner-aware sync and exact reconciliation", () => {
+  it.each(["manual", "auto"])(
+    "%s refuses a durable error after the registry restarts clear",
+    async (mode) => {
+      seed(true)
+      mocks.rows.get("exact-id").syncStatus = "error"
+      const result =
+        mode === "manual"
+          ? await sync.pushToStudio("exact-id", 42, { expectedOwnerId: ownerB })
+          : await sync.autoSyncPrompt("exact-id", 42, {
+              expectedOwnerId: ownerB
+            })
+      expect(result).toMatchObject({
+        success: false,
+        syncStatus: "error",
+        recipeOwnership: { dispatch: { state: "not_dispatched" } }
+      })
+      expect(mocks.update).not.toHaveBeenCalled()
+      expect(mocks.rows.get("exact-id").syncStatus).toBe("error")
+    }
+  )
+
+  it("keeps v2 local-pending without remotely discovering a project", async () => {
+    seed()
+    mocks.rows.get("exact-id").studioProjectId = null
+    mocks.defaults.mockResolvedValue({ defaultProjectId: null })
+    const result = await sync.autoSyncPrompt("exact-id", undefined, {
+      expectedOwnerId: ownerB
+    })
+    expect(result).toMatchObject({
+      success: false,
+      syncStatus: "pending",
+      recipeOwnership: { dispatch: { state: "not_dispatched" } }
+    })
+    expect(mocks.create).not.toHaveBeenCalled()
+    expect(mocks.projects).not.toHaveBeenCalled()
+    expect(mocks.createProject).not.toHaveBeenCalled()
+    expect(mocks.rows.get("exact-id").studioProjectId).toBeNull()
+  })
+
+  it.each([undefined, 1, 99])(
+    "rejects inconsistent local v2 outer version %s before project or prompt requests",
+    async (outerVersion) => {
+      seed()
+      mocks.rows.get("exact-id").promptSchemaVersion = outerVersion
+      mocks.rows.get("exact-id").studioProjectId = null
+      const result = await sync.autoSyncPrompt("exact-id", undefined, {
+        expectedOwnerId: ownerB
+      })
+      expect(result).toMatchObject({
+        success: false,
+        failureKind: "validation",
+        recipeOwnership: { dispatch: { state: "not_dispatched" } }
+      })
+      expect(mocks.defaults).not.toHaveBeenCalled()
+      expect(mocks.projects).not.toHaveBeenCalled()
+      expect(mocks.createProject).not.toHaveBeenCalled()
+      expect(mocks.create).not.toHaveBeenCalled()
+    }
+  )
+
   it.each(["exact", "by server ID"])(
     "pull %s retains scoped state if the local row disappears during reconciliation",
     async (mode) => {
@@ -118,6 +180,7 @@ describe("owner-aware sync and exact reconciliation", () => {
       defaultProjectId: 42,
       autoSyncWorkspacePrompts: true
     })
+    mocks.projects.mockResolvedValue({ data: { data: [{ id: 42 }] } })
     mocks.reconcile.mockResolvedValue(undefined)
     for (const id of ["exact-id", "other-id", "new-id"]) {
       await registry.forgetRecipePersistenceUnknown(id)

@@ -16,6 +16,13 @@ export class RecipePersistenceRegistry {
     ids.add(id)
   }
 
+  /** Check and install synchronously within the one dispatch authority. */
+  reserve(id: string, ownerId: string): void {
+    if (this.read(id, ownerId) !== "clear")
+      throw new Error("Recipe has an unresolved operation")
+    this.markScoped(id, ownerId)
+  }
+
   markUnknown(id: string): void {
     this.unknown.add(id)
   }

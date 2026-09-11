@@ -351,7 +351,11 @@ describe("apiSend timeout fallback policy", () => {
     }
 
     await createPrompt({ project_id: 1, name: "Recipe" }, required)
-    await updatePrompt(2, { change_description: "Update" }, required)
+    await updatePrompt(
+      2,
+      { prompt_format: "legacy", change_description: "Update" },
+      required
+    )
     await getPrompt(2, { recipePersistence: { mode: "capture" } })
 
     expect(mocks.tldwRequest.mock.calls.map(([request]) => request)).toEqual([

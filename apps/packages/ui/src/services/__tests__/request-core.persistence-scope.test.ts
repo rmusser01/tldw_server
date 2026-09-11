@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import { RecipePersistenceRegistry } from "../recipe-persistence-registry"
 import { tldwRequest } from "../tldw/request-core"
 
 const state = vi.hoisted(() => ({ runtimeKey: "" }))
@@ -358,7 +359,10 @@ describe("request dispatch scope capture", () => {
         fetchFn: vi.fn().mockResolvedValue(response(200))
       }
     )
-    const markDispatched = vi.fn()
+    const registry = new RecipePersistenceRegistry()
+    const markDispatched = vi.fn((id: string, ownerId: string) =>
+      registry.reserve(id, ownerId)
+    )
     const result = await tldwRequest(
       {
         ...payload,

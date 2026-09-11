@@ -1,7 +1,6 @@
 import {
   clearRecipePersistenceScoped,
   forgetRecipePersistenceUnknown,
-  markRecipePersistenceScoped,
 } from "@/services/recipe-persistence-uncertainty";
 import * as recipeAuthority from "@/services/recipe-persistence-uncertainty";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -947,7 +946,6 @@ describe("PromptRecipeBuilder", () => {
   });
 
   it("keeps a reopened error-state recipe write-locked while Apply stays local", async () => {
-    await markRecipePersistenceScoped("error-id", ownerA);
     const user = userEvent.setup();
     mocks.getAllPrompts.mockResolvedValue([
       {

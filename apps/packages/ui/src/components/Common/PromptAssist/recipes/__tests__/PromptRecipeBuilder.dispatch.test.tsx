@@ -3,6 +3,7 @@ import {
   clearRecipePersistenceScoped,
   forgetRecipePersistenceUnknown,
   markRecipePersistenceScoped,
+  markRecipePersistenceUnknown,
   readRecipePersistenceUncertainty,
   resolveRecipePersistenceOwnerView,
 } from "@/services/recipe-persistence-uncertainty";
@@ -22,6 +23,8 @@ type BackgroundListener = (
 const mocks = vi.hoisted(() => ({
   config: {} as Record<string, unknown>,
   resolveConfig: vi.fn(),
+  beforeConfig: vi.fn(),
+  defaultProjectId: 42 as number | null,
   fetch: vi.fn(),
   extension: false,
   sendMessage: vi.fn(),
@@ -82,8 +85,13 @@ vi.mock("@/utils/safe-storage", () => ({
     deserialize: (v: unknown) => v,
   },
   createSafeStorage: () => ({
-    get: async (key: string) =>
-      key === "tldwConfig" ? mocks.config : undefined,
+    get: async (key: string) => {
+      if (key === "tldwConfig") {
+        await mocks.beforeConfig();
+        return mocks.config;
+      }
+      return undefined;
+    },
     set: async () => {},
     remove: async () => {},
   }),
@@ -99,7 +107,7 @@ vi.mock("@/services/tldw/runtime-auth-override", () => ({
 }));
 vi.mock("@/services/prompt-studio-settings", () => ({
   getPromptStudioDefaults: async () => ({
-    defaultProjectId: 42,
+    defaultProjectId: mocks.defaultProjectId,
     autoSyncWorkspacePrompts: true,
   }),
   setPromptStudioDefaults: vi.fn(),
@@ -300,6 +308,102 @@ const startBackground = async () => {
 };
 
 describe("builder through real sync, Prompt Studio, apiSend and request-core", () => {
+  it.each(["direct", "background"])(
+    "%s performs zero project GET/POST for project-less v2 under a stale owner",
+    async (adapter) => {
+      if (adapter === "background") await startBackground();
+      seed("update");
+      delete mocks.rows.get("dispatch-id").serverId;
+      mocks.defaultProjectId = null;
+      mocks.config = switchedOwners[0];
+      const result = await autoSyncPrompt("dispatch-id", undefined, {
+        expectedOwnerId: ownerScope,
+      });
+      expect(result).toMatchObject({
+        success: false,
+        syncStatus: "pending",
+        recipeOwnership: { dispatch: { state: "not_dispatched" } },
+      });
+      expect(mocks.fetch).not.toHaveBeenCalled();
+      expect(mocks.rows.get("dispatch-id").syncStatus).toBe("pending");
+    },
+  );
+
+  it.each([
+    ["direct", "scoped"],
+    ["direct", "unknown"],
+    ["background", "scoped"],
+    ["background", "unknown"],
+  ])(
+    "%s atomically rejects %s uncertainty introduced after sync preflight",
+    async (adapter, state) => {
+      if (adapter === "background") await startBackground();
+      seed("update");
+      const reached = deferred();
+      const release = deferred();
+      const pause = async () => {
+        reached.resolve();
+        await release.promise;
+        return mocks.config;
+      };
+      if (adapter === "direct")
+        mocks.resolveConfig.mockImplementationOnce(pause);
+      else mocks.beforeConfig.mockImplementationOnce(pause);
+      const operation = autoSyncPrompt("dispatch-id", 42, {
+        expectedOwnerId: ownerScope,
+      });
+      await reached.promise;
+      if (state === "scoped")
+        await markRecipePersistenceScoped("dispatch-id", ownerScope);
+      else await markRecipePersistenceUnknown("dispatch-id");
+      release.resolve();
+      expect(await operation).toMatchObject({
+        success: false,
+        recipeOwnership: { dispatch: { state: "not_dispatched" } },
+      });
+      expect(promptMutations()).toHaveLength(0);
+      expect(
+        await readRecipePersistenceUncertainty("dispatch-id", ownerScope),
+      ).toBe(state === "scoped" ? "scoped" : "unknown_owner");
+    },
+  );
+
+  it.each(["direct", "background"])(
+    "%s reserves one concurrent exact-ID mutation",
+    async (adapter) => {
+      if (adapter === "background") await startBackground();
+      seed("update");
+      const release = deferred();
+      const reached = deferred();
+      mocks.fetch.mockImplementation(async (url, init) => {
+        if (new URL(String(url)).pathname === "/api/v1/auth/me")
+          return principalResponse(init);
+        reached.resolve();
+        await release.promise;
+        return jsonResponse({ malformed: true });
+      });
+      const first = autoSyncPrompt("dispatch-id", 42, {
+        expectedOwnerId: ownerScope,
+      });
+      const second = autoSyncPrompt("dispatch-id", 42, {
+        expectedOwnerId: ownerScope,
+      });
+      await reached.promise;
+      release.resolve();
+      const results = await Promise.all([first, second]);
+      expect(promptMutations()).toHaveLength(1);
+      expect(
+        results.filter(
+          (result) =>
+            result.recipeOwnership?.dispatch.state === "not_dispatched",
+        ),
+      ).toHaveLength(1);
+      expect(
+        await readRecipePersistenceUncertainty("dispatch-id", ownerScope),
+      ).toBe("scoped");
+    },
+  );
+
   it.each([
     ["direct", "create"],
     ["direct", "update"],
@@ -350,6 +454,7 @@ describe("builder through real sync, Prompt Studio, apiSend and request-core", (
     mocks.extension = false;
     mocks.runtimeKey = null;
     mocks.markerFails = true;
+    mocks.defaultProjectId = 42;
     mocks.resolveConfig.mockImplementation(async () => mocks.config);
     mocks.fetch.mockImplementation(async (url, init) =>
       new URL(String(url)).pathname === "/api/v1/auth/me"

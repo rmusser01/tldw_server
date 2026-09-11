@@ -169,12 +169,17 @@ export function SingleFieldRecipeEditor({
   const forgetButtonRef = useRef<HTMLButtonElement>(null);
   const cancelForgetRef = useRef<HTMLButtonElement>(null);
   const saveButtonRef = useRef<HTMLButtonElement>(null);
+  const recoveryStatusRef = useRef<HTMLParagraphElement>(null);
   const recoveryFocus = useRef<"forget" | "save" | null>(null);
   useEffect(() => {
     if (forgetConfirmation && !forgetPending) cancelForgetRef.current?.focus();
     if (forgetConfirmation || forgetPending) return;
     if (recoveryFocus.current === "forget") forgetButtonRef.current?.focus();
-    if (recoveryFocus.current === "save") saveButtonRef.current?.focus();
+    if (recoveryFocus.current === "save") {
+      if (saveButtonRef.current && !saveButtonRef.current.disabled)
+        saveButtonRef.current.focus();
+      else recoveryStatusRef.current?.focus();
+    }
     recoveryFocus.current = null;
   }, [forgetConfirmation, forgetPending, recoveryStatus]);
 
@@ -538,13 +543,12 @@ export function SingleFieldRecipeEditor({
     if (unknownId) setEncounteredUnknownId(unknownId);
   }, [unknownId]);
   const persistenceWriteLocked =
+    liveSelectedSyncStatus === "error" ||
     Boolean(unknownId) ||
     (unresolvedOperation
       ? unresolvedOperation.state !== "clear"
       : persistenceUncertain) ||
-    (selectedUncertainty !== undefined
-      ? selectedUncertainty !== "clear"
-      : liveSelectedSyncStatus === "error");
+    (selectedUncertainty !== undefined && selectedUncertainty !== "clear");
 
   const confirmForget = async () => {
     if (!forgetConfirmation || !onForgetUnknown || persistencePending.current)
@@ -830,7 +834,11 @@ export function SingleFieldRecipeEditor({
       ) : null}
 
       {recoveryStatus ? (
-        <p role="status" className="text-sm text-text-muted">
+        <p
+          ref={recoveryStatusRef}
+          tabIndex={-1}
+          role="status"
+          className="text-sm text-text-muted">
           {recoveryStatus}
         </p>
       ) : null}

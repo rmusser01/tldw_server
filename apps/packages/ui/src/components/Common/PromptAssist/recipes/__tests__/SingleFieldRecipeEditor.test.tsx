@@ -106,6 +106,68 @@ const deferred = <Value,>() => {
 };
 
 describe("SingleFieldRecipeEditor", () => {
+  it("focuses recovery status after Forget when an empty local source has no enabled Save or block editor", async () => {
+    const user = userEvent.setup();
+    renderEditor({
+      initialSource: savedRecipe({ uncertainty: "unknown_owner" }),
+      persistenceAvailable: false,
+      onForgetUnknown: async () => {},
+    });
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Recipe source" }),
+      "built_in:blank",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Forget unresolved operation" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Confirm forget" }));
+    expect(
+      await screen.findByText(
+        "Unresolved operation forgotten. No server data was changed.",
+      ),
+    ).toHaveFocus();
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    ).toBeDisabled();
+  });
+
+  it("restores focus locally after Forget when a scoped or durable lock still disables Save", async () => {
+    const user = userEvent.setup();
+    function RecoveryEditor() {
+      const [uncertainty, setUncertainty] = React.useState<
+        "unknown_owner" | "scoped"
+      >("unknown_owner");
+      return (
+        <SingleFieldRecipeEditor
+          target="system"
+          persistenceAvailable
+          initialSource={savedRecipe({ uncertainty, syncStatus: "error" })}
+          savedRecipes={[savedRecipe({ uncertainty, syncStatus: "error" })]}
+          onApply={vi.fn()}
+          onSaveAsNew={vi.fn()}
+          onUpdate={vi.fn()}
+          onForgetUnknown={async () => setUncertainty("scoped")}
+        />
+      );
+    }
+    render(<RecoveryEditor />);
+    await user.click(
+      screen.getByRole("button", { name: "Forget unresolved operation" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Confirm forget" }));
+    await screen.findByText(
+      "Unresolved operation forgotten. No server data was changed.",
+    );
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Apply to system prompt" }),
+    ).toBeEnabled();
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).not.toBeDisabled();
+  });
+
   it("keeps unknown-owner writes locked across source changes and uses one cancellable exact-ID recovery confirmation", async () => {
     const user = userEvent.setup();
     const onForgetUnknown = vi.fn().mockResolvedValue(undefined);

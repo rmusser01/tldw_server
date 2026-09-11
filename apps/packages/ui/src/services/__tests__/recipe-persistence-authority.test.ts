@@ -85,6 +85,8 @@ describe("direct recipe authority", () => {
         state: "dispatched",
         actualOwnerId: owner.ownerId
       })
+      if (method === "POST")
+        await authority.clearRecipePersistenceScoped("one", owner.ownerId)
     }
     expect(observed).toEqual(["scoped", "scoped"])
     expect(

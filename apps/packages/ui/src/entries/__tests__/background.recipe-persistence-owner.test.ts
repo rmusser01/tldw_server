@@ -214,6 +214,12 @@ describe("background recipe authority protocol", () => {
         ok: true,
         recipePersistence: { state: "dispatched", actualOwnerId: owner.ownerId }
       })
+      if (method === "POST")
+        await send({
+          type: "tldw:recipe-uncertainty:clear-scoped",
+          id: "one",
+          ownerId: owner.ownerId
+        })
     }
     expect(observations).toEqual([
       { url: "https://api.example.test/base/api/v1/prompts/", state: "scoped" },

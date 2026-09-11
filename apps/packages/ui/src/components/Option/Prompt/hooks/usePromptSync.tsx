@@ -134,12 +134,15 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
   const { mutate: pushToStudioMutation, isPending: isPushing } = useMutation({
     mutationFn: async ({ localId, projectId }: { localId: string; projectId: number }) => {
       const owner = await resolveRecipePersistenceOwnerView()
-      return await pushToStudio(
+      const result = await pushToStudio(
         localId, projectId, owner ? { expectedOwnerId: owner.ownerId } : undefined
       )
+      if (!result.success) {
+        throw new Error(result.error || t("managePrompts.notification.someError"))
+      }
+      return result
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
       setProjectSelectorOpen(false)
       setPromptToSync(null)
       notification.success({
@@ -152,6 +155,10 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
         message: t("managePrompts.sync.pushError", { defaultValue: "Failed to push" }),
         description: error?.message || t("managePrompts.notification.someError")
       })
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
+      queryClient.invalidateQueries({ queryKey: ["getAllPromptsForSelect"] })
     }
   })
 

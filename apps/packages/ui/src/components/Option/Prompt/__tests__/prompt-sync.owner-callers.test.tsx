@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, renderHook, waitFor } from "@testing-library/react"
+import { notification } from "antd"
 import React from "react"
 import { beforeEach, expect, it, vi } from "vitest"
 
@@ -69,6 +70,31 @@ function setup() {
   const deps = { queryClient, isOnline: true, t: (key: string) => key }
   return { queryClient, wrapper, deps }
 }
+it("keeps the project selector open and reports rejection instead of push success", async () => {
+  const { wrapper, deps } = setup()
+  const { result } = renderHook(() => usePromptSync(deps), { wrapper })
+  mocks.push.mockResolvedValue({
+    success: false,
+    localId: "recipe",
+    syncStatus: "error",
+    error: "Unresolved recipe operation"
+  })
+  act(() => {
+    result.current.setProjectSelectorOpen(true)
+    result.current.setPromptToSync("recipe")
+  })
+  act(() =>
+    result.current.pushToStudioMutation({ localId: "recipe", projectId: 42 })
+  )
+  await waitFor(() =>
+    expect(notification.error).toHaveBeenCalledWith(
+      expect.objectContaining({ description: "Unresolved recipe operation" })
+    )
+  )
+  expect(result.current.projectSelectorOpen).toBe(true)
+  expect(result.current.promptToSync).toBe("recipe")
+  expect(notification.success).not.toHaveBeenCalled()
+})
 it("captures current owner for user save and manual push without exposing authorization revision", async () => {
   const { wrapper, deps } = setup()
   const { result } = renderHook(() => usePromptSync(deps), { wrapper })
