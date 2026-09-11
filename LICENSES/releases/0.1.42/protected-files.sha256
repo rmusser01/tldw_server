@@ -7035,7 +7035,8 @@ f56e601d4d3fed7be62c885793611bcc90040e43697ba5d8125a859b6d272282  apps/tldw-fron
 3745ec618b72e263a1f0f134602f78900fd061615a184d426224a7b1b3eec07c  apps/tldw-frontend/public/next.svg
 fad0faf8d9f5f38dd9fc3b7a9951a70c9875c96ebfb1daccb52f538d0845007f  apps/tldw-frontend/public/vercel.svg
 decf1cf7bb22b5c99c4857cfcd5718ce5465c4454166317589c83fc73df74b66  apps/tldw-frontend/public/window.svg
-a48e3e013ff6f5bc861bf96b01e09f2a9c3dcd15781e340c1ea6944481adb78d  apps/tldw-frontend/scripts/__tests__/browser-uat-seed.test.ts
+e013d6a8638aad14615bafa57e91807d52449a561c5ce9f6d07c8d9d0b92b7d4  apps/tldw-frontend/scripts/__tests__/browser-uat-seed.browser.test.mjs
+2cfdd8e1967d8c2c64a1b416f2059108fea1d1f41439b465a3e7fc9bb0e835d5  apps/tldw-frontend/scripts/__tests__/browser-uat-seed.test.ts
 d676e6d137d4dde30bee333e53c6a737af604bdb8627ef30c38ad2a6753dfb19  apps/tldw-frontend/scripts/__tests__/cdp-examine-workflows.proxy-target.test.ts
 a6c90b99dcb2d52df6e8accbf46473b89cfc04a4d63b1a29ee70054167a0b364  apps/tldw-frontend/scripts/__tests__/check-shared-hooks.test.ts
 adfaaf04350d1752c1262f2e29cd84de9f93d0125d434e2d4e29d83432961a1a  apps/tldw-frontend/scripts/__tests__/dev-runtime-uat.test.ts
@@ -7048,7 +7049,7 @@ ef5737878109de17f7b25d52f65c8f08bf3b3cfa799b19bfb2440fe3f45027a5  apps/tldw-fron
 47816e06edb518b0165b9e94f546a240b5d5b7223c07619f96c37ff5c68bffd9  apps/tldw-frontend/scripts/admin-uat-driver.mjs
 5ecf3fd424f9659bec736bf893fdea16a39611c175c8115f598ae5d85f12d696  apps/tldw-frontend/scripts/admin-uat-interactions.mjs
 f56831ff775484bbd51bc24472d1276b1c5621ca6e63c4cba2f8a6cb7645a860  apps/tldw-frontend/scripts/assert-playwright-no-skips.mjs
-d4f04869c4e12de9f00a3c0fb1b5b1a8519e1b02abdae9788593196f4a3b99c9  apps/tldw-frontend/scripts/browser-uat-seed.mjs
+30e1f0525ebb81ca4c1a352efcad8c9b048e4731c996226dc1c7e49447088101  apps/tldw-frontend/scripts/browser-uat-seed.mjs
 6d0ebda68c50196e278f8ec7162d7e122303752355a210344bcb0ec8433f3826  apps/tldw-frontend/scripts/build-with-profile.mjs
 5d8737d872eb348a8713adf8185a2598b30f5cf3bbb4ea13ead12590559e8eae  apps/tldw-frontend/scripts/cdp-examine-workflows.ts
 3f74142344cc10a1b2d264011d72efb8644e5082bbb3572c99350c830e1d923e  apps/tldw-frontend/scripts/chars-uat-driver.mjs

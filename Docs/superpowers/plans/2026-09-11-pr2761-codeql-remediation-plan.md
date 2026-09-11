@@ -18,14 +18,18 @@ the initial Python/JavaScript analyses cover preceding `43165c8c82`.
 **Goal:** Repair demonstrated security failures without changing unrelated behavior.
 **Success Criteria:** Failing behavior tests turn green; relevant neighboring tests and scoped lint/Bandit pass.
 **Tests:** Real loopback redirect tests, temporary-directory snapshot escape tests, and further source-specific boundary tests.
-**Status:** Initial batch verified; rescan follow-up repairs in progress.
+**Status:** Initial and rescan follow-up repairs verified; hosted rescan pending.
 
 The current-source scan exposed operator-key persistence in the shared UAT
 initializer and a session-directory alias in snapshot listing/quota. The UAT
 helper now uses document-memory storage, verified against native Chromium
 storage; snapshot directories reject symlinks before canonicalization.
-Research writers are receiving the equivalent cross-session directory check.
-Fresh scan traces remain individually reviewed before classification.
+Research writers have the equivalent cross-session directory check. Whisper
+again treats tilde-prefixed model input literally under its managed root, with
+no OS account lookup. Shared containment comparisons preserve original path
+spelling; checkpoint lexical checks precede filesystem resolution and retain
+the canonical postcheck. Fresh scan traces remain individually reviewed before
+classification.
 
 Independent ownership: Python path/file boundaries; Python HTTP/XPath/hash/regex
 boundaries; frontend transport/storage/DOM boundaries; Actions event and checkout
@@ -43,6 +47,9 @@ with the earlier alert 2671, this is 417 verified dispositions (405 false
 positives, 12 synthetic-test findings). See the
 [disposition ledger](../../Evidence/PR2761-codeql-dispositions.md).
 Real defects and main checkpoint alerts 2281/2282 remain excluded.
+Three later PR-only false positives, 2675/2676/2679, were independently reviewed
+and resolved with committed proof. The ledger totals 420 dispositions. New real
+rescan findings 2673/2674/2677/2678 were repaired, not dismissed.
 
 Do not disable queries, lower thresholds, delete legitimate behavior/tests, or
 blanket-dismiss alerts. Apply individual false-positive dispositions only after
@@ -54,5 +61,13 @@ must be repaired and rescanned. Unproven findings remain open.
 **Success Criteria:** Every finding is repaired or individually resolved; all required checks refer to the final source; release PR accurately records remaining non-CodeQL gates.
 **Tests:** Focused suites, lint/Bandit, source/manifest equality, required CI and complete Python/JavaScript/Actions scans.
 **Status:** In Progress; source/evidence commits and protected manifest refresh underway.
+
+The verified follow-up source is `3f9866a860033b70b3434319fadfdd37b12819a2`.
+Its protected manifest covers 7,117 files, SHA-256
+`e38f39788bdbf6ee691a27cc91357e0d92a6b21a47355d745409938ea6e66f76`.
+Release date and Countdown start are unchanged. Validation includes 61 UAT
+tests plus the real Chromium storage proof, 105 Whisper tests, 150 combined
+path tests, independent review and scoped lint/security checks; counts overlap.
+Final-source hosted analysis remains necessary before claiming alert closure.
 
 No main merge or publication until the separate release gates are satisfied.
