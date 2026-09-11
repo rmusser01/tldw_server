@@ -41,8 +41,8 @@ These failures supersede the earlier candidate's passing CI for readiness.
 | Item | Current state |
 | --- | --- |
 | Frozen dev input | `6c4bdcbc48f4fe4bab7019d59ad8cf962ab240da` through PR2941; do not silently add later dev work |
-| Continuation application source | `860039371bf77b665db780d1e226e463c9b59671`; focused tests and independent review pass; fresh remote CI required |
-| Protected source record | `860039371bf77b665db780d1e226e463c9b59671`; 7,117 files; unchanged manifest `e38f39788bdbf6ee691a27cc91357e0d92a6b21a47355d745409938ea6e66f76`; 11 licensing tests pass |
+| Continuation application source | `bba4b8c8a8baf02ce2b6a5f2a544052aa0ed2c5f`; focused tests and independent review pass; fresh remote CI required |
+| Protected source record | `bba4b8c8a8baf02ce2b6a5f2a544052aa0ed2c5f`; 7,117 files; unchanged manifest `e38f39788bdbf6ee691a27cc91357e0d92a6b21a47355d745409938ea6e66f76`; 11 licensing tests pass |
 | Release / Countdown dates | Approved 2026-09-10 / 2028-09-10T12:00:00Z; final publication-date decision remains separate |
 | PR | `codex/release-main-0.1.42` → `main`; draft; no merge/tag/publication |
 | Human Change summary | Explicitly waived by requester for this PR |
