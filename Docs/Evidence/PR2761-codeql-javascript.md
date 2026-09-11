@@ -266,7 +266,10 @@ so installing before app boot covers their later writes. The browser fixture
 uses application-shaped storage calls, not a full app boot or the real
 `saveManualSingleUserCredential` method; SSE/WS compatibility is a source-based
 assessment, not a live-server UAT claim. No request interception or app/network
-behavior was changed. No alert was dismissed; analyzer closure needs a fresh scan.
+behavior was changed. Storage alerts 2673/2674 were not dismissed; their analyzer
+closure needs a fresh scan. After independent review, request alerts 2675/2676
+were resolved individually as false positives; see the
+[disposition ledger](PR2761-codeql-dispositions.md).
 
 Verification on the current candidate:
 

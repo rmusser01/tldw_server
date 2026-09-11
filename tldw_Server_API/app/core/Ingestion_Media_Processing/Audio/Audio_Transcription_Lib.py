@@ -690,7 +690,7 @@ def _resolve_audio_input_path_for_provider(
 def _resolve_whisper_model_path(path: Path, base_dir: Path) -> Path:
     """Constrain model directories before probing them or following links."""
     root = base_dir.resolve(strict=False)
-    candidate = path.expanduser()
+    candidate = path
     if not candidate.is_absolute():
         candidate = root / candidate
     candidate = Path(os.path.abspath(candidate))

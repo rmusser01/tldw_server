@@ -14,6 +14,14 @@ positives and 12 synthetic-test findings**.
 | Python | 154 | 2 |
 | JavaScript | 10 | 10 |
 
+Two subsequent PR-only request alerts, **2675 and 2676**, were independently
+reviewed against all eight SARIF flows and resolved individually after their
+proof was committed in `86a09da9e1`. Integer normalization precedes the fixed
+job-run API path; initial/retry origin and credential guards remain enforced.
+Both GitHub instance lists contain only PR2761. The ledger therefore now has
+**419** dispositions, including these two additional false positives. These
+were separate verified actions, not additions to the original approval list.
+
 The [per-alert ledger](PR2761-codeql-dispositions.csv) records the actual GitHub
 rule, reason, timestamp and submitted explanation. Before each update, the
 executor checked the alert identity, rule, source path and effective state;

@@ -186,3 +186,41 @@ def test_offline_cache_miss_never_delegates_to_loader(model_env, monkeypatch):
     with pytest.raises(ValueError, match="could not be loaded"):
         atlib.WhisperModel("tiny", local_files_only=True)
     assert model_env.delegates == []
+
+
+@pytest.mark.parametrize("account_exists", [False, True])
+def test_model_identifier_does_not_query_system_accounts(model_env, monkeypatch, account_exists):
+    pwd = pytest.importorskip("pwd")
+    lookups = []
+
+    def lookup(account):
+        lookups.append(account)
+        if not account_exists:
+            raise KeyError(account)
+        return SimpleNamespace(pw_dir=str(model_env.cwd))
+
+    monkeypatch.setattr(pwd, "getpwnam", lookup)
+    with pytest.raises(ValueError):
+        atlib.validate_whisper_model_identifier("~probe-account/model")
+    assert lookups == []
+
+
+def test_model_directory_with_literal_tilde_stays_under_managed_root(model_env):
+    local = model_env.root / "~probe-account" / "model"
+    local.mkdir(parents=True)
+    assert atlib._normalize_whisper_model_identifier("~probe-account/model") == str(local)
+
+
+@pytest.mark.parametrize("identifier", ["org/model", "Systran/faster-whisper-large-v3"])
+def test_hub_identifier_never_reaches_absolute_path_existence_probe(model_env, monkeypatch, identifier):
+    exists_calls = []
+    original_exists = Path.exists
+
+    def track_exists(path):
+        exists_calls.append(path)
+        return original_exists(path)
+
+    monkeypatch.setattr(Path, "exists", track_exists)
+    assert atlib.check_model_exists(identifier) is False
+    assert exists_calls == []
+    assert model_env.downloads == []
