@@ -132,7 +132,7 @@ afterEach(() => {
 })
 
 vi.mock("../tabs/CreateTab", () => ({
-  CreateTab: ({ onNavigateToTake, onDirtyStateChange }: any) => (
+  CreateTab: ({ onNavigateToTake, onNavigateToManage, onDirtyStateChange }: any) => (
     <div>
       <button
         type="button"
@@ -147,6 +147,9 @@ vi.mock("../tabs/CreateTab", () => ({
       </button>
       <button type="button" onClick={() => onDirtyStateChange?.(true)}>
         Mock Mark Create Dirty
+      </button>
+      <button type="button" onClick={() => onNavigateToManage?.()}>
+        Mock Create Review
       </button>
     </div>
   )
@@ -466,6 +469,15 @@ describe("QuizPlayground navigation intents", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Generate" }))
     fireEvent.click(await screen.findByRole("button", { name: "Mock Generate Review" }))
+
+    expect(screen.getByTestId("active-tab")).toHaveTextContent("manage")
+  })
+
+  it("routes a completed OSCE create action into Manage tab", async () => {
+    render(<QuizPlayground />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Create" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Mock Create Review" }))
 
     expect(screen.getByTestId("active-tab")).toHaveTextContent("manage")
   })

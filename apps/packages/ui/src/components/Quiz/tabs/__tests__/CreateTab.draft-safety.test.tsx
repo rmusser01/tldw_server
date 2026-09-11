@@ -125,7 +125,7 @@ describe("CreateTab draft safety", () => {
 
     expect(
       screen.getByText(
-        "Draft autosave unavailable — your progress will not be preserved if you leave."
+        "Draft autosave unavailable: your progress will not be preserved if you leave."
       )
     ).toBeInTheDocument()
 

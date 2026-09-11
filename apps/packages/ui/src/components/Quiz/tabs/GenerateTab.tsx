@@ -5,6 +5,7 @@ import {
   Card,
   Checkbox,
   Form,
+  Input,
   InputNumber,
   Select,
   Space,
@@ -30,6 +31,7 @@ import {
   listQuizGenerationProfiles,
   type AvailableQuizGenerationProfile,
   type QuestionType,
+  type QuestionQuizGenerationProfile,
   type QuizGenerateSource,
   type QuizGenerationProfile,
   type QuizGenerationProfileDefinition,
@@ -120,7 +122,7 @@ type AvailableGenerationProfileDefinition = Omit<
 const isAvailableGenerationProfile = (
   profile: QuizGenerationProfileDefinition,
 ): profile is AvailableGenerationProfileDefinition =>
-  profile.status === "available" && profile.id !== "osce_scenario";
+  profile.status === "available";
 
 const DEFAULT_GENERATION_PROFILE = QUIZ_GENERATION_PROFILES[0] as AvailableGenerationProfileDefinition;
 
@@ -661,6 +663,11 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
     generationProfiles,
     Form.useWatch("generationProfile", form),
   );
+  const isOsceProfile = selectedGenerationProfile.output_kind === "osce_stations";
+  const selectedStationCount =
+    Form.useWatch("numStations", form) ??
+    selectedGenerationProfile.default_num_stations ??
+    1;
   const profileLocksQuestionShape = !usesQuestionPlanShape(
     selectedGenerationProfile.id,
   );
@@ -1089,18 +1096,18 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
         defaultValue: "Select at least one source to generate a quiz.",
       });
     }
-    if (totalQuestions === 0) {
+    if (!isOsceProfile && totalQuestions === 0) {
       return t("option:quiz.generateBlockedNoQuestions", {
         defaultValue: "Enable at least one question type.",
       });
     }
-    if (totalQuestions > 100) {
+    if (!isOsceProfile && totalQuestions > 100) {
       return t("option:quiz.generateBlockedTooManyQuestions", {
         defaultValue: "Reduce the mix to 100 questions or fewer.",
       });
     }
     return null;
-  }, [hasSelectedSources, totalQuestions, t]);
+  }, [hasSelectedSources, isOsceProfile, totalQuestions, t]);
 
   const canGenerate = !generateBlockReason && !generationInFlight;
 
@@ -1149,6 +1156,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
     (value: QuizGenerationProfile) => {
       const profile = getGenerationProfile(generationProfiles, value);
       form.setFieldValue("difficulty", profile.default_difficulty);
+      form.setFieldValue("numStations", profile.default_num_stations ?? 1);
       setQuestionPlanRows((rows) => {
         if (usesQuestionPlanShape(profile.id)) {
           return DEFAULT_QUESTION_PLAN_ROWS.map((row) => ({ ...row }));
@@ -1348,7 +1356,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
       return;
     }
 
-    if (totalQuestions === 0 || totalQuestions > 100) {
+    if (!isOsceProfile && (totalQuestions === 0 || totalQuestions > 100)) {
       return;
     }
 
@@ -1359,12 +1367,16 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
       setGeneratedPreview(null);
 
       const focusTopics = normalizeFocusTopics(values.focusTopics);
+      const apiProvider = String(values.apiProvider ?? "").trim() || undefined;
+      const verificationProvider =
+        String(values.verificationProvider ?? "").trim() || undefined;
       const generationProfile = getGenerationProfile(
         generationProfiles,
         values.generationProfile,
       );
       const usesQuestionPlan = usesQuestionPlanShape(generationProfile.id);
-      const shouldGenerateStudyMaterials = Boolean(
+      const isOsceGeneration = generationProfile.output_kind === "osce_stations";
+      const shouldGenerateStudyMaterials = !isOsceGeneration && Boolean(
         values.generateStudyMaterials,
       );
       requestAbortController = new AbortController();
@@ -1372,22 +1384,44 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
       setGenerationInFlight(true);
 
       const generated = await generateMutation.mutateAsync({
-        request: {
-          sources: selectedSources,
-          generation_profile: generationProfile.id,
-          num_questions: totalQuestions,
-          ...(usesQuestionPlan
-            ? { question_plan: enabledPlanRows }
-            : { question_types: generationProfile.default_question_types }),
-          difficulty: values.difficulty,
-          focus_topics: focusTopics.length > 0 ? focusTopics : undefined,
-        },
+        request: isOsceGeneration
+          ? {
+              sources: selectedSources,
+              generation_profile: "osce_scenario",
+              num_stations: sanitizeInputNumber(values.numStations, 1, 10) ?? 1,
+              difficulty: values.difficulty,
+              focus_topics: focusTopics.length > 0 ? focusTopics : undefined,
+              api_provider: apiProvider,
+              claims_verification_provider: verificationProvider,
+            }
+          : {
+              sources: selectedSources,
+              generation_profile: generationProfile.id as QuestionQuizGenerationProfile,
+              num_questions: totalQuestions,
+              ...(usesQuestionPlan
+                ? { question_plan: enabledPlanRows }
+                : { question_types: generationProfile.default_question_types }),
+              difficulty: values.difficulty,
+              focus_topics: focusTopics.length > 0 ? focusTopics : undefined,
+              api_provider: apiProvider,
+              claims_verification_provider: verificationProvider,
+            },
         signal: requestAbortController.signal,
       });
       if (requestAbortController.signal.aborted) return;
 
       const generatedQuizName =
         generated.quiz.name || `Quiz #${generated.quiz.id}`;
+
+      if (isOsceGeneration) {
+        messageApi.success(
+          t("option:quiz.generateOsceSuccess", {
+            defaultValue: "OSCE generated. Review the stations in Manage.",
+          }),
+        );
+        onNavigateToManage?.();
+        return;
+      }
       let flashcardsSummary: FlashcardsSummary | null = null;
 
       if (shouldGenerateStudyMaterials) {
@@ -1876,6 +1910,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                 generationProfile: "standard_recall",
                 difficulty: "mixed",
                 focusTopics: [],
+                numStations: 1,
                 generateStudyMaterials: false,
               }}
             >
@@ -1901,6 +1936,23 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                 />
               </Form.Item>
 
+              {isOsceProfile ? (
+                <Form.Item
+                  name="numStations"
+                  label={t("option:quiz.stations", { defaultValue: "Stations" })}
+                  rules={[{ required: true }]}
+                >
+                  <InputNumber
+                    min={1}
+                    max={10}
+                    precision={0}
+                    step={1}
+                    aria-label="Stations"
+                    className="w-full"
+                    disabled={generationInFlight}
+                  />
+                </Form.Item>
+              ) : (
               <div className="mb-6 space-y-3">
                 <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                   <div>
@@ -2090,6 +2142,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                   })}
                 </div>
               </div>
+              )}
 
               <Form.Item
                 name="difficulty"
@@ -2163,7 +2216,26 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                 />
               </Form.Item>
 
-              <div className="space-y-1">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <Form.Item
+                  name="apiProvider"
+                  label={t("option:quiz.generationProvider", {
+                    defaultValue: "Generation provider (optional)",
+                  })}
+                >
+                  <Input allowClear disabled={generationInFlight} />
+                </Form.Item>
+                <Form.Item
+                  name="verificationProvider"
+                  label={t("option:quiz.verificationProvider", {
+                    defaultValue: "Verification provider (optional)",
+                  })}
+                >
+                  <Input allowClear disabled={generationInFlight} />
+                </Form.Item>
+              </div>
+
+              {!isOsceProfile ? <div className="space-y-1">
                 <Form.Item
                   name="generateStudyMaterials"
                   valuePropName="checked"
@@ -2193,7 +2265,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                           "Uses the selected media content to create a companion deck.",
                       })}
                 </p>
-              </div>
+              </div> : null}
             </Form>
           </Card>
 
@@ -2213,10 +2285,12 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                   {selectedSourcesLabel}
                 </dd>
                 <dt className="text-text-subtle">
-                  {t("option:quiz.questions", { defaultValue: "Questions" })}
+                  {isOsceProfile
+                    ? t("option:quiz.stations", { defaultValue: "Stations" })
+                    : t("option:quiz.questions", { defaultValue: "Questions" })}
                 </dt>
                 <dd className="text-right font-medium text-text">
-                  {totalQuestions}
+                  {isOsceProfile ? selectedStationCount : totalQuestions}
                 </dd>
                 <dt className="text-text-subtle">
                   {t("option:quiz.difficulty", { defaultValue: "Difficulty" })}
@@ -2226,16 +2300,16 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                     (option) => option.value === selectedDifficulty,
                   )?.label ?? selectedDifficulty}
                 </dd>
-                <dt className="text-text-subtle">
+                {!isOsceProfile ? <dt className="text-text-subtle">
                   {t("option:quiz.studyMaterials", {
                     defaultValue: "Study materials",
                   })}
-                </dt>
-                <dd className="text-right font-medium text-text">
+                </dt> : null}
+                {!isOsceProfile ? <dd className="text-right font-medium text-text">
                   {shouldGenerateStudyMaterials
                     ? t("common:enabled", { defaultValue: "Enabled" })
                     : t("common:off", { defaultValue: "Off" })}
-                </dd>
+                </dd> : null}
               </dl>
 
               {generateBlockReason ? (
@@ -2285,16 +2359,18 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
               ) : (
                 <Button
                   type="primary"
-                  icon={<RocketOutlined />}
+                  icon={<RocketOutlined aria-hidden />}
                   size="large"
                   onClick={handleGenerate}
                   loading={generationInFlight}
                   disabled={!canGenerate}
                   block
                 >
-                  {t("option:quiz.generateQuiz", {
-                    defaultValue: "Generate Quiz",
-                  })}
+                  {isOsceProfile
+                    ? t("option:quiz.generateOsce", { defaultValue: "Generate OSCE" })
+                    : t("option:quiz.generateQuiz", {
+                        defaultValue: "Generate Quiz",
+                      })}
                 </Button>
               )}
             </div>

@@ -26,6 +26,7 @@ import { useTranslation } from "react-i18next"
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
+  CheckCircleOutlined,
   CopyOutlined,
   DownloadOutlined,
   DeleteOutlined,
@@ -37,6 +38,7 @@ import {
   QuestionCircleOutlined,
   SearchOutlined,
   ShareAltOutlined,
+  WarningOutlined,
   UndoOutlined,
   UploadOutlined
 } from "@ant-design/icons"
@@ -52,7 +54,24 @@ import {
 } from "../hooks"
 import { tldwAuth, tldwClient } from "@/services/tldw"
 import { importQuizzesJson, listQuestions } from "@/services/quizzes"
-import type { AnswerValue, Question, QuestionType, Quiz, SourceCitation } from "@/services/quizzes"
+import type {
+  AnswerValue,
+  Question,
+  QuestionType,
+  Quiz,
+  QuizImportRequest,
+  SourceCitation
+} from "@/services/quizzes"
+import { getOsceStation, listOsceStations } from "@/services/osce"
+import {
+  useOsceStationQuery,
+  useOsceStationsQuery
+} from "../hooks/useOsceQueries"
+import { OsceStationEditor } from "../osce/OsceStationEditor"
+import {
+  buildQuizExport,
+  type QuizExportEntry as PortableQuizExportEntry
+} from "../osce/oscePortability"
 import { normalizeMatchingAnswerMap } from "../utils/matchingAnswer"
 import { summarizeQuizSources } from "../utils/sourceBundle"
 
@@ -131,7 +150,7 @@ const getMediaDisplayName = (details: unknown, mediaId: number): string => {
   )
 }
 
-type QuizExportEntry = {
+type PrintableQuizExportEntry = {
   quiz: Quiz
   questions: Question[]
 }
@@ -163,6 +182,7 @@ type QuizImportEntry = {
 }
 
 const QUIZ_EXPORT_FORMAT = "tldw.quiz.export.v1"
+const QUIZ_EXPORT_FORMAT_V2 = "tldw.quiz.export.v2"
 const ASSIGNMENT_PRIVILEGED_ROLES = new Set(["owner", "admin", "lead"])
 const SUPPORTED_QUESTION_TYPES: QuestionType[] = [
   "multiple_choice",
@@ -171,6 +191,18 @@ const SUPPORTED_QUESTION_TYPES: QuestionType[] = [
   "true_false",
   "fill_blank"
 ]
+
+const osceVerificationLabel = (state: string): string => {
+  if (state === "source_verified") return "Source verified"
+  if (state === "modified_after_verification") return "Modified after verification"
+  return "Manually authored"
+}
+
+const osceVerificationIcon = (state: string) => {
+  if (state === "source_verified") return <CheckCircleOutlined aria-hidden />
+  if (state === "modified_after_verification") return <WarningOutlined aria-hidden />
+  return <EditOutlined aria-hidden />
+}
 
 type ShareAccessState = {
   loading: boolean
@@ -403,7 +435,7 @@ const formatPrintableCorrectAnswer = (question: Question): string => {
   return String(question.correct_answer ?? "")
 }
 
-const buildPrintableQuizHtml = (entry: QuizExportEntry): string => {
+const buildPrintableQuizHtml = (entry: PrintableQuizExportEntry): string => {
   const questionsMarkup = entry.questions
     .map((question, index) => {
       const optionsMarkup =
@@ -496,6 +528,10 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const [showWorkspaceQuizzes, setShowWorkspaceQuizzes] = React.useState(false)
   const [selectedWorkspaceId, setSelectedWorkspaceId] = React.useState<string | null>(null)
   const [editingQuiz, setEditingQuiz] = React.useState<Quiz | null>(null)
+  const [managingOsceQuiz, setManagingOsceQuiz] = React.useState<Quiz | null>(null)
+  const [selectedOsceStationId, setSelectedOsceStationId] = React.useState<number | null>(null)
+  const [creatingOsceStation, setCreatingOsceStation] = React.useState(false)
+  const [osceEditorDirty, setOsceEditorDirty] = React.useState(false)
   const [editModalOpen, setEditModalOpen] = React.useState(false)
   const [questionModalOpen, setQuestionModalOpen] = React.useState(false)
   const [questionDraft, setQuestionDraft] = React.useState<QuestionDraft | null>(null)
@@ -635,6 +671,17 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const updateQuestionMutation = useUpdateQuestionMutation()
   const deleteQuestionMutation = useDeleteQuestionMutation()
 
+  const osceStationsQuery = useOsceStationsQuery(
+    managingOsceQuiz?.id,
+    { limit: 200, offset: 0 },
+    { enabled: managingOsceQuiz != null }
+  )
+  const osceStationQuery = useOsceStationQuery(
+    managingOsceQuiz?.id,
+    selectedOsceStationId,
+    { enabled: managingOsceQuiz != null && selectedOsceStationId != null }
+  )
+
   const questionsQuery = useQuestionsQuery(
     editingQuiz?.id,
     {
@@ -679,6 +726,12 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     [questions]
   )
   const reorderBusy = reorderPendingQuestionId != null || updateQuestionMutation.isPending
+  const sortedOsceStations = React.useMemo(
+    () => [...(osceStationsQuery.data?.items ?? [])].sort(
+      (left, right) => left.order_index - right.order_index
+    ),
+    [osceStationsQuery.data?.items]
+  )
   const mediaIds = React.useMemo(() => (
     Array.from(new Set(
       quizzes
@@ -775,6 +828,33 @@ export const ManageTab: React.FC<ManageTabProps> = ({
       if ("disabled" in element && (element as HTMLButtonElement).disabled) return
       element.focus()
     }, 0)
+  }
+
+  const confirmDiscardOsceDraft = (): boolean => (
+    !osceEditorDirty || window.confirm("Discard unsaved station changes?")
+  )
+
+  const openOsceManager = (quiz: Quiz) => {
+    if (!confirmDiscardOsceDraft()) return
+    setManagingOsceQuiz(quiz)
+    setSelectedOsceStationId(null)
+    setCreatingOsceStation(false)
+    setOsceEditorDirty(false)
+  }
+
+  const closeOsceManager = () => {
+    if (!confirmDiscardOsceDraft()) return
+    setManagingOsceQuiz(null)
+    setSelectedOsceStationId(null)
+    setCreatingOsceStation(false)
+    setOsceEditorDirty(false)
+  }
+
+  const selectOsceStation = (stationId: number) => {
+    if (!confirmDiscardOsceDraft()) return
+    setCreatingOsceStation(false)
+    setSelectedOsceStationId(stationId)
+    setOsceEditorDirty(false)
   }
 
   const handleUndoQuizDelete = () => {
@@ -1006,7 +1086,15 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     URL.revokeObjectURL(url)
   }
 
-  const getQuizExportEntry = async (quiz: Quiz): Promise<QuizExportEntry> => {
+  const getQuizExportEntry = async (quiz: Quiz): Promise<PortableQuizExportEntry> => {
+    if (quiz.activity_type === "osce") {
+      const page = await listOsceStations(quiz.id, { limit: 200, offset: 0 })
+      const stations = await Promise.all(
+        page.items.map((station) => getOsceStation(quiz.id, station.id))
+      )
+      return { activity_type: "osce", quiz, stations }
+    }
+
     const response = await listQuestions(quiz.id, {
       include_answers: true,
       limit: 200,
@@ -1017,50 +1105,14 @@ export const ManageTab: React.FC<ManageTabProps> = ({
       .slice()
       .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
 
-    return { quiz, questions }
+    return { activity_type: "questions", quiz, questions }
   }
-
-  const buildQuizExportPayload = (entries: QuizExportEntry[]) => ({
-    export_format: QUIZ_EXPORT_FORMAT,
-    exported_at: new Date().toISOString(),
-    source: "quiz-manage-tab",
-    quiz_count: entries.length,
-    quizzes: entries.map(({ quiz, questions }) => ({
-      quiz: {
-        id: quiz.id,
-        name: quiz.name,
-        description: quiz.description ?? null,
-        workspace_tag: quiz.workspace_tag ?? null,
-        media_id: quiz.media_id ?? null,
-        time_limit_seconds: quiz.time_limit_seconds ?? null,
-        passing_score: quiz.passing_score ?? null,
-        total_questions: quiz.total_questions,
-        version: quiz.version,
-        created_at: quiz.created_at ?? null,
-        last_modified: quiz.last_modified ?? null
-      },
-      questions: questions.map((question) => ({
-        id: question.id,
-        question_type: question.question_type,
-        question_text: question.question_text,
-        options: question.options ?? null,
-        correct_answer: question.correct_answer,
-        explanation: question.explanation ?? null,
-        hint: question.hint ?? null,
-        hint_penalty_points: question.hint_penalty_points ?? 0,
-        source_citations: question.source_citations ?? null,
-        points: question.points,
-        order_index: question.order_index,
-        tags: question.tags ?? null
-      }))
-    }))
-  })
 
   const handleQuizExport = async (quiz: Quiz) => {
     setSingleExportInFlightQuizId(quiz.id)
     try {
       const entry = await getQuizExportEntry(quiz)
-      downloadJsonFile(`quiz-${quiz.id}-export.json`, buildQuizExportPayload([entry]))
+      downloadJsonFile(`quiz-${quiz.id}-export.json`, buildQuizExport([entry]))
       messageApi.success(
         t("option:quiz.exportSuccess", {
           defaultValue: "Quiz exported successfully."
@@ -1080,7 +1132,18 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const handleQuizPrint = async (quiz: Quiz) => {
     setSinglePrintInFlightQuizId(quiz.id)
     try {
-      const entry = await getQuizExportEntry(quiz)
+      if (quiz.activity_type === "osce") return
+      const response = await listQuestions(quiz.id, {
+        include_answers: true,
+        limit: 200,
+        offset: 0
+      })
+      const entry: PrintableQuizExportEntry = {
+        quiz,
+        questions: (response.items as Question[]).slice().sort(
+          (left, right) => (left.order_index ?? 0) - (right.order_index ?? 0)
+        )
+      }
       const printWindow = window.open("", "_blank", "noopener,noreferrer,width=1024,height=768")
       if (!printWindow) {
         throw new Error("print-window-unavailable")
@@ -1115,7 +1178,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
 
     setBulkExportInFlight(true)
     const failed: string[] = []
-    const exportRows: QuizExportEntry[] = []
+    const exportRows: PortableQuizExportEntry[] = []
 
     try {
       for (const quiz of selectedQuizzes) {
@@ -1128,7 +1191,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
       }
 
       if (exportRows.length > 0) {
-        downloadJsonFile("quizzes-export.json", buildQuizExportPayload(exportRows))
+        downloadJsonFile("quizzes-export.json", buildQuizExport(exportRows))
       }
 
       if (failed.length === 0) {
@@ -1277,7 +1340,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
 
       const payloadRecord = asRecord(payload)
       const exportFormat = asNonEmptyString(payloadRecord?.export_format)
-      if (exportFormat && exportFormat !== QUIZ_EXPORT_FORMAT) {
+      if (exportFormat && exportFormat !== QUIZ_EXPORT_FORMAT && exportFormat !== QUIZ_EXPORT_FORMAT_V2) {
         messageApi.error(
           t("option:quiz.importUnsupportedFormat", {
             defaultValue: "Unsupported quiz export format."
@@ -1286,7 +1349,10 @@ export const ManageTab: React.FC<ManageTabProps> = ({
         return
       }
 
-      const entries = normalizeQuizImportPayload(payload)
+      const isV2 = exportFormat === QUIZ_EXPORT_FORMAT_V2
+      const entries = isV2
+        ? (Array.isArray(payloadRecord?.quizzes) ? payloadRecord.quizzes : [])
+        : normalizeQuizImportPayload(payload)
       if (entries.length === 0) {
         messageApi.error(
           t("option:quiz.importEmpty", {
@@ -1296,24 +1362,32 @@ export const ManageTab: React.FC<ManageTabProps> = ({
         return
       }
 
-      const importResult = await importQuizzesJson({
-        export_format: exportFormat ?? QUIZ_EXPORT_FORMAT,
-        quizzes: entries.map((entry) => ({
-          quiz: entry.quiz,
-          questions: [...entry.questions].sort((a, b) => a.order_index - b.order_index)
-        }))
-      })
+      const importRequest: QuizImportRequest = isV2
+        ? payload as QuizImportRequest
+        : {
+            export_format: QUIZ_EXPORT_FORMAT,
+            quizzes: (entries as QuizImportEntry[]).map((entry) => ({
+              quiz: entry.quiz,
+              questions: [...entry.questions].sort((a, b) => a.order_index - b.order_index)
+            }))
+          }
+      const importResult = await importQuizzesJson(importRequest)
 
       if (importResult.imported_quizzes > 0) {
         refetch()
       }
 
-      if (importResult.imported_quizzes === entries.length && importResult.failed_questions === 0) {
+      if (
+        importResult.imported_quizzes === entries.length &&
+        importResult.failed_questions === 0 &&
+        importResult.failed_stations === 0
+      ) {
         messageApi.success(
           t("option:quiz.importSuccess", {
-            defaultValue: "Imported {{quizzes}} quiz(es) with {{questions}} question(s).",
+            defaultValue: "Imported {{quizzes}} quiz(es), {{questions}} question(s), and {{stations}} station(s).",
             quizzes: importResult.imported_quizzes,
-            questions: importResult.imported_questions
+            questions: importResult.imported_questions,
+            stations: importResult.imported_stations
           })
         )
         return
@@ -1323,7 +1397,10 @@ export const ManageTab: React.FC<ManageTabProps> = ({
         const failedQuizNames = Array.from(
           new Set(
             importResult.errors
-              .filter((error) => typeof error.question_index !== "number")
+              .filter((error) =>
+                typeof error.question_index !== "number" &&
+                typeof error.station_index !== "number"
+              )
               .map((error) => error.quiz_name ?? "")
               .filter((name) => name.trim().length > 0)
           )
@@ -1332,10 +1409,11 @@ export const ManageTab: React.FC<ManageTabProps> = ({
         messageApi.warning(
           t("option:quiz.importPartial", {
             defaultValue:
-              "Imported {{quizzes}} quiz(es). Failed quizzes: {{failedQuizzes}}. Failed questions: {{failedQuestions}}.",
+              "Imported {{quizzes}} quiz(es). Failed quizzes: {{failedQuizzes}}. Failed questions: {{failedQuestions}}. Failed stations: {{failedStations}}.",
             quizzes: importResult.imported_quizzes,
             failedQuizzes: failedQuizNames.length > 0 ? failedQuizNames.join(", ") : t("common:none", { defaultValue: "none" }),
-            failedQuestions: importResult.failed_questions
+            failedQuestions: importResult.failed_questions,
+            failedStations: importResult.failed_stations
           })
         )
         return
@@ -1858,6 +1936,115 @@ export const ManageTab: React.FC<ManageTabProps> = ({
         </Space>
       </div>
 
+      {managingOsceQuiz ? (
+        <section
+          className="min-w-0 border-y border-border-subtle py-4"
+          aria-labelledby="manage-osce-heading"
+        >
+          <div className="mb-4 flex min-h-10 flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h3 id="manage-osce-heading" className="truncate text-lg font-medium text-text">
+                {managingOsceQuiz.name}
+              </h3>
+              <p className="text-sm text-text-muted">Manage stations</p>
+            </div>
+            <Space wrap>
+              <Button
+                icon={<PlusOutlined aria-hidden />}
+                onClick={() => {
+                  if (!confirmDiscardOsceDraft()) return
+                  setSelectedOsceStationId(null)
+                  setCreatingOsceStation(true)
+                  setOsceEditorDirty(false)
+                }}
+              >
+                Add station
+              </Button>
+              <Button onClick={closeOsceManager}>Close</Button>
+            </Space>
+          </div>
+
+          {osceStationsQuery.isLoading ? (
+            <Skeleton active paragraph={{ rows: 3 }} />
+          ) : osceStationsQuery.error ? (
+            <Alert
+              type="error"
+              showIcon
+              title="Failed to load stations."
+              action={<Button onClick={() => void osceStationsQuery.refetch()}>Retry</Button>}
+            />
+          ) : sortedOsceStations.length === 0 && !creatingOsceStation ? (
+            <Empty description="No stations yet" />
+          ) : (
+            <div className="grid min-w-0 grid-cols-1 gap-5 lg:grid-cols-[18rem_minmax(0,1fr)]">
+              <List
+                size="small"
+                dataSource={sortedOsceStations}
+                className="min-w-0"
+                renderItem={(station) => (
+                  <List.Item className="!px-0">
+                    <button
+                      type="button"
+                      onClick={() => selectOsceStation(station.id)}
+                      className="w-full min-w-0 border-l-2 border-border px-3 py-2 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                      aria-pressed={selectedOsceStationId === station.id}
+                    >
+                      <span className="block truncate font-medium text-text">{station.title}</span>
+                      <span className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-text-muted">
+                        <span>{Math.round(station.recommended_duration_seconds / 60)} min</span>
+                        <span>{station.checklist_count} checklist items</span>
+                        <span>{station.rubric_domain_count} rubric domains</span>
+                      </span>
+                      <span className="mt-2 inline-flex items-center gap-1 text-xs text-text">
+                        {osceVerificationIcon(station.verification_state)}
+                        {osceVerificationLabel(station.verification_state)}
+                      </span>
+                    </button>
+                  </List.Item>
+                )}
+              />
+
+              <div className="min-w-0">
+                {creatingOsceStation ? (
+                  <OsceStationEditor
+                    key={`new-${managingOsceQuiz.id}`}
+                    quizId={managingOsceQuiz.id}
+                    orderIndex={sortedOsceStations.length}
+                    onDirtyStateChange={setOsceEditorDirty}
+                    onSaved={(station) => {
+                      setCreatingOsceStation(false)
+                      setSelectedOsceStationId(station.id)
+                      setOsceEditorDirty(false)
+                      void osceStationsQuery.refetch()
+                      void refetch()
+                    }}
+                  />
+                ) : osceStationQuery.isLoading ? (
+                  <Skeleton active paragraph={{ rows: 8 }} />
+                ) : osceStationQuery.data ? (
+                  <OsceStationEditor
+                    key={`${osceStationQuery.data.id}-${osceStationQuery.data.version}`}
+                    quizId={managingOsceQuiz.id}
+                    station={osceStationQuery.data}
+                    onDirtyStateChange={setOsceEditorDirty}
+                    onSaved={() => {
+                      setOsceEditorDirty(false)
+                      void osceStationsQuery.refetch()
+                      void osceStationQuery.refetch()
+                      void refetch()
+                    }}
+                  />
+                ) : (
+                  <div className="py-8 text-center text-sm text-text-muted">
+                    Select a station to edit its authoring content.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </section>
+      ) : null}
+
       {selectedQuizIds.size > 0 && (
         <Alert
           type="info"
@@ -1954,6 +2141,17 @@ export const ManageTab: React.FC<ManageTabProps> = ({
             return (
               <List.Item
               actions={[
+                quiz.activity_type === "osce" ? (
+                  <Button
+                    key="manage-stations"
+                    type="link"
+                    icon={<EditOutlined aria-hidden />}
+                    onClick={() => openOsceManager(quiz)}
+                  >
+                    Manage stations
+                  </Button>
+                ) : null,
+                quiz.activity_type !== "osce" ? (
                 <Button
                   key="start"
                   type="link"
@@ -1964,7 +2162,9 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                   data-testid={`quiz-start-${quiz.id}`}
                 >
                   {t("option:quiz.start", { defaultValue: "Start" })}
-                </Button>,
+                </Button>
+                ) : null,
+                quiz.activity_type !== "osce" ? (
                 <Button
                   key="duplicate"
                   type="link"
@@ -1976,11 +2176,12 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                   data-testid={`quiz-duplicate-${quiz.id}`}
                 >
                   {t("option:quiz.duplicate", { defaultValue: "Duplicate" })}
-                </Button>,
+                </Button>
+                ) : null,
                 <Button
                   key="export"
                   type="link"
-                  icon={<DownloadOutlined />}
+                  icon={<DownloadOutlined aria-hidden />}
                   onClick={() => {
                     void handleQuizExport(quiz)
                   }}
@@ -1989,7 +2190,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                 >
                   {t("option:quiz.export", { defaultValue: "Export" })}
                 </Button>,
-                <Button
+                quiz.activity_type !== "osce" ? <Button
                   key="print"
                   type="link"
                   icon={<PrinterOutlined />}
@@ -2000,8 +2201,8 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                   data-testid={`quiz-print-${quiz.id}`}
                 >
                   {t("option:quiz.print", { defaultValue: "Print" })}
-                </Button>,
-                <Button
+                </Button> : null,
+                quiz.activity_type !== "osce" ? <Button
                   key="share"
                   type="link"
                   icon={<ShareAltOutlined />}
@@ -2024,8 +2225,8 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                   data-testid={`quiz-share-${quiz.id}`}
                 >
                   {t("option:quiz.share", { defaultValue: "Share" })}
-                </Button>,
-                <Button
+                </Button> : null,
+                quiz.activity_type !== "osce" ? <Button
                   key="edit"
                   type="link"
                   icon={<EditOutlined />}
@@ -2035,7 +2236,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                   data-testid={`quiz-edit-${quiz.id}`}
                 >
                   {t("option:quiz.edit", { defaultValue: "Edit" })}
-                </Button>,
+                </Button> : null,
                 <Button
                   key="delete"
                   type="link"
@@ -2095,11 +2296,12 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                       </p>
                     )}
                     <div className="flex gap-2">
-                      <Tag icon={<QuestionCircleOutlined />}>
-                        {quiz.total_questions}{" "}
-                        {t("option:quiz.questions", { defaultValue: "questions" })}
+                      <Tag icon={quiz.activity_type === "osce" ? <EditOutlined /> : <QuestionCircleOutlined />}>
+                        {quiz.activity_type === "osce"
+                          ? `${quiz.total_stations} ${quiz.total_stations === 1 ? "station" : "stations"}`
+                          : `${quiz.total_questions} ${t("option:quiz.questions", { defaultValue: "questions" })}`}
                       </Tag>
-                      {quiz.passing_score && (
+                      {quiz.activity_type !== "osce" && quiz.passing_score && (
                         <Tag color="blue">
                           {t("option:quiz.passingScoreLabel", { defaultValue: "Pass" })}: {quiz.passing_score}%
                         </Tag>

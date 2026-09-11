@@ -431,6 +431,7 @@ export const QuizPlayground: React.FC = () => {
                   key={`create-${tabResetVersion.create}`}
                   onDirtyStateChange={setCreateTabDirty}
                   onNavigateToTake={(intent) => navigateToTake(intent)}
+                  onNavigateToManage={() => setActiveTab("manage")}
                 />
               )
             )

@@ -88,12 +88,17 @@ describe("ManageTab bulk and duplicate actions", () => {
     failed_quizzes: 0,
     imported_questions: 2,
     failed_questions: 0,
+    imported_stations: 0,
+    failed_stations: 0,
     items: [
       {
         source_index: 0,
         quiz_id: 901,
         imported_questions: 2,
-        failed_questions: 0
+        failed_questions: 0,
+        imported_stations: 0,
+        failed_stations: 0,
+        station_ids: []
       }
     ],
     errors: []

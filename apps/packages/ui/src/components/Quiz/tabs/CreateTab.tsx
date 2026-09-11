@@ -9,6 +9,7 @@ import {
   InputNumber,
   Modal,
   Progress,
+  Segmented,
   Select,
   Space,
   Switch,
@@ -27,6 +28,14 @@ import {
 import { useCreateQuizMutation, useCreateQuestionMutation } from "../hooks"
 import type { QuestionType, QuestionCreate } from "@/services/quizzes"
 import type { TakeTabNavigationIntent } from "../navigation"
+import {
+  OsceStationEditor
+} from "../osce/OsceStationEditor"
+import {
+  createOsceStation,
+  type OsceStationAuthoringResponse,
+  type OsceStationCreateContent
+} from "@/services/osce"
 import { normalizeMatchingAnswerMap } from "../utils/matchingAnswer"
 import { checkStorageBeforeWrite, notifyStorageWrite } from "@/utils/storage-guard"
 import { estimateStorageCost } from "@/utils/storage-budget"
@@ -35,6 +44,7 @@ const CREATE_ORIENTATION_DISMISSED_KEY = "tldw_quiz_create_orientation_dismissed
 
 interface CreateTabProps {
   onNavigateToTake: (intent?: TakeTabNavigationIntent) => void
+  onNavigateToManage?: () => void
   onDirtyStateChange?: (dirty: boolean) => void
 }
 
@@ -135,10 +145,16 @@ const clearCreateDraft = (): void => {
   }
 }
 
-export const CreateTab: React.FC<CreateTabProps> = ({ onNavigateToTake, onDirtyStateChange }) => {
+export const CreateTab: React.FC<CreateTabProps> = ({
+  onNavigateToTake,
+  onNavigateToManage,
+  onDirtyStateChange
+}) => {
   const { t } = useTranslation(["option", "common"])
   const [form] = Form.useForm()
   const [questions, setQuestions] = React.useState<QuestionFormData[]>([])
+  const [activityType, setActivityType] = React.useState<"questions" | "osce">("questions")
+  const [osceEditorDirty, setOsceEditorDirty] = React.useState(false)
   const [messageApi, contextHolder] = message.useMessage()
   const [pendingDraft, setPendingDraft] = React.useState<QuizCreateDraft | null>(null)
   const [draftStorageUnavailable, setDraftStorageUnavailable] = React.useState(false)
@@ -157,6 +173,24 @@ export const CreateTab: React.FC<CreateTabProps> = ({ onNavigateToTake, onDirtyS
 
   const createQuizMutation = useCreateQuizMutation()
   const createQuestionMutation = useCreateQuestionMutation()
+
+  const handleActivityTypeChange = (value: string | number): void => {
+    const nextActivityType = value as "questions" | "osce"
+    if (nextActivityType === activityType) return
+
+    const hasIncompatibleDraft = activityType === "questions"
+      ? questions.length > 0
+      : osceEditorDirty
+    if (hasIncompatibleDraft && !window.confirm(
+      "Switch activity type and discard the current activity content?"
+    )) {
+      return
+    }
+
+    if (activityType === "questions") setQuestions([])
+    setOsceEditorDirty(false)
+    setActivityType(nextActivityType)
+  }
 
   const nameValue = Form.useWatch("name", form) as string | undefined
   const descriptionValue = Form.useWatch("description", form) as string | undefined
@@ -194,8 +228,10 @@ export const CreateTab: React.FC<CreateTabProps> = ({ onNavigateToTake, onDirtyS
       }
       return true
     })
-    return hasQuizDetails || hasQuestionData || questions.length > 0
-  }, [descriptionValue, nameValue, passingScoreValue, questions, timeLimitValue])
+    return hasQuizDetails || (activityType === "questions"
+      ? hasQuestionData || questions.length > 0
+      : osceEditorDirty)
+  }, [activityType, descriptionValue, nameValue, osceEditorDirty, passingScoreValue, questions, timeLimitValue])
 
   const currentDraft = React.useMemo<QuizCreateDraft>(() => ({
     name: (nameValue ?? "").trim(),
@@ -221,6 +257,7 @@ export const CreateTab: React.FC<CreateTabProps> = ({ onNavigateToTake, onDirtyS
   }, [isDirty, onDirtyStateChange])
 
   React.useEffect(() => {
+    if (activityType !== "questions") return
     if (pendingDraft) return
     if (!isDirty) {
       clearCreateDraft()
@@ -248,7 +285,7 @@ export const CreateTab: React.FC<CreateTabProps> = ({ onNavigateToTake, onDirtyS
     return () => {
       window.clearTimeout(timeoutId)
     }
-  }, [currentDraft, isDirty, messageApi, pendingDraft])
+  }, [activityType, currentDraft, isDirty, messageApi, pendingDraft])
 
   React.useEffect(() => {
     if (!isDirty) return
@@ -577,6 +614,27 @@ export const CreateTab: React.FC<CreateTabProps> = ({ onNavigateToTake, onDirtyS
     } finally {
       setSaveProgress(null)
     }
+  }
+
+  const handleCreateOsceStation = async (
+    content: OsceStationCreateContent,
+    orderIndex: number
+  ): Promise<OsceStationAuthoringResponse> => {
+    const values = await form.validateFields()
+    const quiz = await createQuizMutation.mutateAsync({
+      name: values.name,
+      description: values.description || undefined,
+      activity_type: "osce"
+    })
+    const station = await createOsceStation(quiz.id, { content, order_index: orderIndex })
+    messageApi.success(
+      t("option:quiz.createOsceSuccess", { defaultValue: "OSCE created successfully." })
+    )
+    form.resetFields()
+    setOsceEditorDirty(false)
+    onDirtyStateChange?.(false)
+    onNavigateToManage?.()
+    return station
   }
 
   const restoreDraft = () => {
@@ -996,7 +1054,7 @@ export const CreateTab: React.FC<CreateTabProps> = ({ onNavigateToTake, onDirtyS
   }
 
   return (
-    <div className="max-w-3xl space-y-6">
+    <div className="max-w-6xl space-y-6">
       {contextHolder}
 
       {pendingDraft && (
@@ -1030,12 +1088,12 @@ export const CreateTab: React.FC<CreateTabProps> = ({ onNavigateToTake, onDirtyS
           onClose={() => setDraftWarningDismissed(true)}
           title={t("option:quiz.draftStorageUnavailable", {
             defaultValue:
-              "Draft autosave unavailable — your progress will not be preserved if you leave."
+              "Draft autosave unavailable: your progress will not be preserved if you leave."
           })}
         />
       )}
 
-      {!orientationDismissed && (
+      {activityType === "questions" && !orientationDismissed && (
         <Alert
           type="info"
           showIcon
@@ -1054,10 +1112,27 @@ export const CreateTab: React.FC<CreateTabProps> = ({ onNavigateToTake, onDirtyS
           })}
           description={t("option:quiz.createOrientationDescription", {
             defaultValue:
-              "Name your quiz, add questions (multiple choice, true/false, fill-in-the-blank, matching, multi-select), set a passing score, and save. Tip: start with 5\u201310 questions."
+              "Name your quiz, add questions (multiple choice, true/false, fill-in-the-blank, matching, multi-select), set a passing score, and save. Tip: start with 5 to 10 questions."
           })}
         />
       )}
+
+      <div className="space-y-2">
+        <Typography.Text strong>
+          {t("option:quiz.activityType", { defaultValue: "Activity type" })}
+        </Typography.Text>
+        <Segmented
+          block
+          value={activityType}
+          options={[
+            { label: "Quiz", value: "questions" },
+            { label: "OSCE", value: "osce" }
+          ]}
+          onChange={handleActivityTypeChange}
+          disabled={isSaving}
+          aria-label="Activity type"
+        />
+      </div>
 
       <Card
         title={t("option:quiz.quizDetails", { defaultValue: "Quiz Details" })}
@@ -1082,7 +1157,7 @@ export const CreateTab: React.FC<CreateTabProps> = ({ onNavigateToTake, onDirtyS
             />
           </Form.Item>
 
-          <div data-testid="create-details-grid" className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {activityType === "questions" ? <div data-testid="create-details-grid" className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Form.Item
               name="timeLimit"
               label={t("option:quiz.timeLimit", { defaultValue: "Time Limit (minutes)" })}
@@ -1096,11 +1171,11 @@ export const CreateTab: React.FC<CreateTabProps> = ({ onNavigateToTake, onDirtyS
             >
               <InputNumber min={1} max={100} className="w-full" placeholder="Optional" />
             </Form.Item>
-          </div>
+          </div> : null}
         </Form>
       </Card>
 
-      <div>
+      {activityType === "questions" ? <div>
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-lg font-medium">
             {t("option:quiz.questionsSection", { defaultValue: "Questions" })} ({questions.length})
@@ -1134,9 +1209,19 @@ export const CreateTab: React.FC<CreateTabProps> = ({ onNavigateToTake, onDirtyS
         ) : (
           questions.map((q, i) => renderQuestionEditor(q, i))
         )}
-      </div>
+      </div> : (
+        <section className="min-w-0 space-y-4" aria-labelledby="station-authoring-heading">
+          <h3 id="station-authoring-heading" className="text-lg font-medium text-text">
+            {t("option:quiz.stationAuthoring", { defaultValue: "Station authoring" })}
+          </h3>
+          <OsceStationEditor
+            onCreate={handleCreateOsceStation}
+            onDirtyStateChange={setOsceEditorDirty}
+          />
+        </section>
+      )}
 
-      <Space className="w-full" orientation="vertical">
+      {activityType === "questions" ? <Space className="w-full" orientation="vertical">
         {saveProgress && (
           <Card size="small">
             <Space orientation="vertical" className="w-full">
@@ -1186,9 +1271,9 @@ export const CreateTab: React.FC<CreateTabProps> = ({ onNavigateToTake, onDirtyS
         >
           {t("option:quiz.saveQuiz", { defaultValue: "Save Quiz" })}
         </Button>
-      </Space>
+      </Space> : null}
 
-      <Modal
+      {activityType === "questions" ? <Modal
         title={t("option:quiz.previewTitle", { defaultValue: "Quiz Preview" })}
         open={previewOpen}
         onCancel={() => setPreviewOpen(false)}
@@ -1218,7 +1303,7 @@ export const CreateTab: React.FC<CreateTabProps> = ({ onNavigateToTake, onDirtyS
               title={`${t("option:quiz.question", { defaultValue: "Question" })} ${index + 1}`}
             >
               <div className="space-y-2">
-                <Typography.Text strong>{question.question_text || "—"}</Typography.Text>
+                <Typography.Text strong>{question.question_text || "Not provided"}</Typography.Text>
                 {renderPreviewQuestion(question, index)}
                 {(question.explanation ?? "").trim() && (
                   <Typography.Text type="secondary" className="block text-sm">
@@ -1242,7 +1327,7 @@ export const CreateTab: React.FC<CreateTabProps> = ({ onNavigateToTake, onDirtyS
             </Card>
           ))}
         </div>
-      </Modal>
+      </Modal> : null}
     </div>
   )
 }
