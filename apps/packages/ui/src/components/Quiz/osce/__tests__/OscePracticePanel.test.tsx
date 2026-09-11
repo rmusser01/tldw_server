@@ -255,9 +255,14 @@ describe("OscePracticePanel", () => {
 
   it("does not replace newer local typing with an older save acknowledgement", async () => {
     let resolveFirst: ((attempt: OsceAttempt) => void) | null = null
-    patch.mockImplementationOnce(() => new Promise<OsceAttempt>((resolve) => {
-      resolveFirst = resolve
-    }))
+    let resolveSecond: ((attempt: OsceAttempt) => void) | null = null
+    patch
+      .mockImplementationOnce(() => new Promise<OsceAttempt>((resolve) => {
+        resolveFirst = resolve
+      }))
+      .mockImplementationOnce(() => new Promise<OsceAttempt>((resolve) => {
+        resolveSecond = resolve
+      }))
 
     render(<OscePracticePanel attemptId={7} userScope="user-42" saveDebounceMs={0} />)
 
@@ -270,7 +275,12 @@ describe("OscePracticePanel", () => {
       resolveFirst?.({ ...candidate, version: 3, notes: "First draft" })
     })
 
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(2))
     expect(notes).toHaveValue("Newer local draft")
+
+    await act(async () => {
+      resolveSecond?.({ ...candidate, version: 4, notes: "Newer local draft" })
+    })
   })
 
   it("requires an explicit choice before reapplying a conflicted draft to refetched state", async () => {

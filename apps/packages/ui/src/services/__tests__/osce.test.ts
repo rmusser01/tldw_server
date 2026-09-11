@@ -21,7 +21,8 @@ import {
   startOsceAttempt,
   updateOsceStation,
   validateOsceCitationLocator,
-  type OsceStationCreateContent
+  type OsceStationCreateContent,
+  type OsceStationStoredContent
 } from "@/services/osce"
 import {
   osceKeys,
@@ -46,6 +47,26 @@ const content: OsceStationCreateContent = {
     ]
   }],
   expected_key_points: [{ text: "Discuss monitoring and warning signs.", citations: [] }]
+}
+
+const storedContent: OsceStationStoredContent = {
+  ...content,
+  checklist_items: content.checklist_items.map((item, index) => ({
+    ...item,
+    id: `check-${index + 1}`
+  })),
+  rubric_domains: content.rubric_domains.map((domain, domainIndex) => ({
+    ...domain,
+    id: `domain-${domainIndex + 1}`,
+    levels: domain.levels.map((level, levelIndex) => ({
+      ...level,
+      id: `level-${domainIndex + 1}-${levelIndex + 1}`
+    }))
+  })),
+  expected_key_points: content.expected_key_points.map((point, index) => ({
+    ...point,
+    id: `point-${index + 1}`
+  }))
 }
 
 describe("OSCE service wire contract", () => {
@@ -229,7 +250,7 @@ describe("quiz portability", () => {
     stations: [{
       id: 9,
       quiz_id: 3,
-      content,
+      content: storedContent,
       order_index: 0,
       version: 2,
       origin: "generated" as const,

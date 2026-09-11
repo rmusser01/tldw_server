@@ -168,7 +168,7 @@ describe("OsceResultsPanel", () => {
       expect.objectContaining({ enabled: true })
     ))
     const detailText = await screen.findByText("I should pause after each warning sign.")
-    const dialog = detailText.closest("[role='dialog']")
+    const dialog = detailText.closest<HTMLElement>("[role='dialog']")
     expect(dialog).not.toBeNull()
     if (!dialog) throw new Error("Practice detail dialog was not rendered")
     expect(dialog).toHaveAccessibleName("Medicine safety practice details")
