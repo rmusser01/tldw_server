@@ -39811,13 +39811,26 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         }
 
     @staticmethod
-    def _osce_attempt_columns() -> str:
-        return (
-            "id, station_id, quiz_id, client_attempt_id, station_snapshot_json, state, "
-            "candidate_notes, checklist_selections_json, rubric_selections_json, started_at, "
-            "self_assessment_started_at, completed_at, frozen_elapsed_seconds, version, "
-            "last_modified_at"
+    def _osce_attempt_columns(table_alias: str | None = None) -> str:
+        prefix = f"{table_alias}." if table_alias else ""
+        columns = (
+            "id",
+            "station_id",
+            "quiz_id",
+            "client_attempt_id",
+            "station_snapshot_json",
+            "state",
+            "candidate_notes",
+            "checklist_selections_json",
+            "rubric_selections_json",
+            "started_at",
+            "self_assessment_started_at",
+            "completed_at",
+            "frozen_elapsed_seconds",
+            "version",
+            "last_modified_at",
         )
+        return ", ".join(f"{prefix}{column}" for column in columns)
 
     def _deserialize_osce_attempt_row(self, row: Any) -> dict[str, Any] | None:
         item = self._deserialize_row_fields(
@@ -39853,6 +39866,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         lock: bool = False,
     ) -> Any:
         lock_clause = " FOR UPDATE" if lock and self.backend_type == BackendType.POSTGRESQL else ""
+        if self.backend_type == BackendType.POSTGRESQL:
+            return conn.execute(
+                f"SELECT {self._osce_attempt_columns('a')} "  # nosec B608
+                "FROM osce_practice_attempts AS a "
+                "JOIN quizzes AS q ON q.id = a.quiz_id "
+                f"WHERE a.id = ? AND q.client_id = ?{lock_clause}",  # nosec B608
+                (attempt_id, self.client_id),
+            ).fetchone()
         return conn.execute(
             f"SELECT {self._osce_attempt_columns()} FROM osce_practice_attempts "  # nosec B608
             f"WHERE id = ?{lock_clause}",  # nosec B608
@@ -39865,6 +39886,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         station_id: int,
         client_attempt_id: str,
     ) -> Any:
+        if self.backend_type == BackendType.POSTGRESQL:
+            return conn.execute(
+                f"SELECT {self._osce_attempt_columns('a')} "  # nosec B608
+                "FROM osce_practice_attempts AS a "
+                "JOIN quizzes AS q ON q.id = a.quiz_id "
+                "WHERE a.station_id = ? AND a.client_attempt_id = ? AND q.client_id = ?",
+                (station_id, client_attempt_id, self.client_id),
+            ).fetchone()
         return conn.execute(
             f"SELECT {self._osce_attempt_columns()} FROM osce_practice_attempts "  # nosec B608
             "WHERE station_id = ? AND client_attempt_id = ?",
@@ -39875,15 +39904,26 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         station_deleted = "s.deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "s.deleted = 0"
         quiz_deleted = "q.deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "q.deleted = 0"
         lock_clause = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        owner_clause = " AND q.client_id = ?" if self.backend_type == BackendType.POSTGRESQL else ""
+        params = (station_id, self.client_id) if owner_clause else (station_id,)
         return conn.execute(
             "SELECT s.id, s.quiz_id, s.schema_version, s.content_json, s.order_index, s.version, "
             "s.origin, s.provenance_json, s.source_bundle_json, s.verification_state, "
             "s.verification_timestamp, s.verification_summary, s.deleted, s.created_at, s.updated_at "
             "FROM osce_stations AS s JOIN quizzes AS q ON q.id = s.quiz_id "
             f"WHERE s.id = ? AND {station_deleted} AND {quiz_deleted} "  # nosec B608
-            f"AND q.activity_type = 'osce'{lock_clause}",  # nosec B608
-            (station_id,),
+            f"AND q.activity_type = 'osce'{owner_clause}{lock_clause}",  # nosec B608
+            params,
         ).fetchone()
+
+    def _osce_attempt_owner_update_clause(self) -> tuple[str, tuple[Any, ...]]:
+        if self.backend_type != BackendType.POSTGRESQL:
+            return "", ()
+        return (
+            " AND EXISTS (SELECT 1 FROM quizzes AS q "
+            "WHERE q.id = osce_practice_attempts.quiz_id AND q.client_id = ?)",
+            (self.client_id,),
+        )
 
     @staticmethod
     def _parse_osce_attempt_timestamp(value: Any) -> datetime:
@@ -39998,23 +40038,30 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         clauses: list[str] = []
         params: list[Any] = []
+        join_clause = ""
+        if self.backend_type == BackendType.POSTGRESQL:
+            join_clause = " JOIN quizzes AS q ON q.id = a.quiz_id"
+            clauses.append("q.client_id = ?")
+            params.append(self.client_id)
         if quiz_id is not None:
-            clauses.append("quiz_id = ?")
+            clauses.append("a.quiz_id = ?")
             params.append(quiz_id)
         if station_id is not None:
-            clauses.append("station_id = ?")
+            clauses.append("a.station_id = ?")
             params.append(station_id)
         if normalized_states:
-            clauses.append(f"state IN ({', '.join('?' for _ in normalized_states)})")
+            clauses.append(f"a.state IN ({', '.join('?' for _ in normalized_states)})")
             params.extend(normalized_states)
         where_clause = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = self.execute_query(
-            f"SELECT {self._osce_attempt_columns()} FROM osce_practice_attempts"  # nosec B608
-            f"{where_clause} ORDER BY last_modified_at DESC, id DESC LIMIT ? OFFSET ?",  # nosec B608
+            f"SELECT {self._osce_attempt_columns('a')} FROM osce_practice_attempts AS a"  # nosec B608
+            f"{join_clause}{where_clause} "  # nosec B608
+            "ORDER BY a.last_modified_at DESC, a.id DESC LIMIT ? OFFSET ?",
             (*params, limit, offset),
         ).fetchall()
         count_row = self.execute_query(
-            f"SELECT COUNT(*) AS count FROM osce_practice_attempts{where_clause}",  # nosec B608
+            f"SELECT COUNT(*) AS count FROM osce_practice_attempts AS a"  # nosec B608
+            f"{join_clause}{where_clause}",  # nosec B608
             tuple(params),
         ).fetchone()
 
@@ -40085,11 +40132,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     require_complete=False,
                 )
                 allowed_state = attempt["state"]
+                owner_clause, owner_params = self._osce_attempt_owner_update_clause()
                 result = conn.execute(
                     "UPDATE osce_practice_attempts SET candidate_notes = ?, "
                     "checklist_selections_json = ?, rubric_selections_json = ?, "
                     "version = version + 1, last_modified_at = ? "
-                    "WHERE id = ? AND version = ? AND state = ?",
+                    f"WHERE id = ? AND version = ? AND state = ?{owner_clause}",  # nosec B608
                     (
                         attempt["candidate_notes"] if notes is None else notes,
                         json.dumps(normalized_checklist, ensure_ascii=True, sort_keys=True),
@@ -40098,6 +40146,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         attempt_id,
                         expected_version,
                         allowed_state,
+                        *owner_params,
                     ),
                 )
                 if result.rowcount != 1:
@@ -40149,6 +40198,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         identifier=attempt_id,
                     )
 
+                owner_clause, owner_params = self._osce_attempt_owner_update_clause()
                 if normalized_target == "self_assessment":
                     started_at = self._parse_osce_attempt_timestamp(attempt["started_at"])
                     transition_time = self._parse_osce_attempt_timestamp(now)
@@ -40157,7 +40207,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         "UPDATE osce_practice_attempts SET state = ?, "
                         "self_assessment_started_at = ?, frozen_elapsed_seconds = ?, "
                         "version = version + 1, last_modified_at = ? "
-                        "WHERE id = ? AND version = ? AND state = ?",
+                        f"WHERE id = ? AND version = ? AND state = ?{owner_clause}",  # nosec B608
                         (
                             normalized_target,
                             now,
@@ -40166,6 +40216,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                             attempt_id,
                             expected_version,
                             current_state,
+                            *owner_params,
                         ),
                     )
                 else:
@@ -40178,7 +40229,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     result = conn.execute(
                         "UPDATE osce_practice_attempts SET state = ?, completed_at = ?, "
                         "version = version + 1, last_modified_at = ? "
-                        "WHERE id = ? AND version = ? AND state = ?",
+                        f"WHERE id = ? AND version = ? AND state = ?{owner_clause}",  # nosec B608
                         (
                             normalized_target,
                             now,
@@ -40186,6 +40237,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                             attempt_id,
                             expected_version,
                             current_state,
+                            *owner_params,
                         ),
                     )
                 if result.rowcount != 1:

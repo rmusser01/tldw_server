@@ -395,9 +395,13 @@ def test_postgres_retry_and_optimistic_attempt_writes(
     first_backend = DatabaseBackendFactory.create_backend(pg_database_config)
     second_backend = DatabaseBackendFactory.create_backend(pg_database_config)
     first_db = CharactersRAGDB(Path(":memory:"), client_id="osce-pg-1", backend=first_backend)
-    second_db = CharactersRAGDB(Path(":memory:"), client_id="osce-pg-2", backend=second_backend)
+    second_db = CharactersRAGDB(Path(":memory:"), client_id="osce-pg-1", backend=second_backend)
     try:
-        quiz_id = first_db.create_quiz(name="Postgres OSCE", activity_type="osce")
+        quiz_id = first_db.create_quiz(
+            name="Postgres OSCE",
+            activity_type="osce",
+            client_id=first_db.client_id,
+        )
         station = first_db.create_osce_station(
             quiz_id, stored_content(), origin="manual"
         )
@@ -421,3 +425,60 @@ def test_postgres_retry_and_optimistic_attempt_writes(
     finally:
         second_db.close_all_connections()
         first_db.close_all_connections()
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(90)
+def test_postgres_attempts_are_scoped_to_the_parent_quiz_owner(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    owner_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    attacker_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    owner = CharactersRAGDB(Path(":memory:"), client_id="osce-owner", backend=owner_backend)
+    attacker = CharactersRAGDB(
+        Path(":memory:"), client_id="osce-other-user", backend=attacker_backend
+    )
+    try:
+        quiz_id = owner.create_quiz(
+            name="Owner OSCE",
+            activity_type="osce",
+            client_id=owner.client_id,
+        )
+        station = owner.create_osce_station(
+            quiz_id, stored_content(), origin="manual"
+        )
+        retry_key = uuid4()
+        readable = owner.start_osce_attempt(station["id"], retry_key)
+        patchable = owner.start_osce_attempt(station["id"], uuid4())
+        transitionable = owner.start_osce_attempt(station["id"], uuid4())
+        assert readable is not None and patchable is not None and transitionable is not None
+
+        unfiltered = attacker.list_osce_attempts()
+        filtered = attacker.list_osce_attempts(
+            quiz_id=quiz_id,
+            station_id=station["id"],
+            states=["in_progress"],
+        )
+        loaded = attacker.get_osce_attempt(readable["id"])
+        patched = attacker.patch_osce_attempt(
+            patchable["id"], expected_version=1, notes="captured"
+        )
+        transitioned = attacker.transition_osce_attempt(
+            transitionable["id"], "self_assessment", expected_version=1
+        )
+        captured_retry = attacker.start_osce_attempt(station["id"], retry_key)
+        unauthorized_start = attacker.start_osce_attempt(station["id"], uuid4())
+
+        assert unfiltered == {"items": [], "count": 0}
+        assert filtered == {"items": [], "count": 0}
+        assert loaded is None
+        assert patched is None
+        assert transitioned is None
+        assert captured_retry is None
+        assert unauthorized_start is None
+        assert owner.get_osce_attempt(patchable["id"])["candidate_notes"] == ""
+        assert owner.get_osce_attempt(transitionable["id"])["state"] == "in_progress"
+        assert owner.list_osce_attempts()["count"] == 3
+    finally:
+        attacker.close_all_connections()
+        owner.close_all_connections()
