@@ -39,7 +39,7 @@ creating a multiprocessing semaphore (`SemLock`, errno 28), both inside and
 outside the sandbox. This is the existing host limitation; the standard test and
 build remain unchanged and must pass remotely.
 
-The CodeQL review resolved 420 individually evidenced false positives or synthetic-test findings, including the requester-approved 416 remaining global dispositions. Actual UAT persistence, snapshot/Research session alias, Whisper and checkpoint probe repairs are committed with regression tests. Main checkpoint ownership findings remain undismissed. See [current remediation status](2026-09-11-pr2761-codeql-remediation-plan.md) and [disposition ledger](../../Evidence/PR2761-codeql-dispositions.md); hosted analyzer closure is still pending.
+The CodeQL review resolved 422 individually evidenced false positives or synthetic-test findings, including the requester-approved 416 remaining global dispositions. Actual UAT persistence, snapshot/Research session alias, Whisper and checkpoint probe repairs are committed with regression tests. Main checkpoint ownership findings remain undismissed. See [current remediation status](2026-09-11-pr2761-codeql-remediation-plan.md) and [disposition ledger](../../Evidence/PR2761-codeql-dispositions.md); hosted analyzer closure is still pending.
 
 The requester reports no existing deployment. An installed-version rollback
 baseline is therefore not applicable to this deployment; this does not waive
@@ -50,9 +50,9 @@ security, lifecycle, supply-chain, capacity or human-review requirements.
 
 | Item | Recorded state |
 | --- | --- |
-| Integrated release code and verified blocker fixes | `3f9866a860033b70b3434319fadfdd37b12819a2`; CodeQL rescan follow-up repairs included |
+| Integrated release code and verified blocker fixes | `968ad1aaf95fccac966cfb31a8ac981508befb88`; final CodeQL path repairs included |
 | Latest observed CI head | `f7c8af3af397a0eeec355a1cea333996d2e8287c`; 73 checks pass, one frontend aggregate runs, 38 skip and CodeQL fails. Verified follow-up source requires a new current-head scan. |
-| Protected source snapshot | `3f9866a860033b70b3434319fadfdd37b12819a2`, 7,117 files; manifest `e38f39788bdbf6ee691a27cc91357e0d92a6b21a47355d745409938ea6e66f76` |
+| Protected source snapshot | `968ad1aaf95fccac966cfb31a8ac981508befb88`, 7,117 files; manifest `e38f39788bdbf6ee691a27cc91357e0d92a6b21a47355d745409938ea6e66f76` |
 | PR branch / target | `codex/release-main-0.1.42` → `main` |
 | PR state at inspection | Draft; no merge or publication performed |
 | Remote CI snapshot | On `6150040801`, container aggregate/all five images, E2E, backend/security/license and all eight frontend shards pass; frontend aggregate and coverage still run. Completed CodeQL inventory: 447 open instances, all on `6150040801` (7 critical, 437 high, 3 medium). Its failed changed-code aggregate reports 424 alerts; that is a different measure from all open PR instances. |

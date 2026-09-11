@@ -81,3 +81,10 @@ execution remains unverified. This follow-up needs its own source/manifest
 binding and hosted scan; no query or model suppression is used.
 
 No main merge or publication until the separate release gates are satisfied.
+
+Final verified path source: `968ad1aaf95fccac966cfb31a8ac981508befb88`.
+Independent review passes 36 focused cases with matching frozen file hashes.
+The 7,117-file protected manifest remains byte-identical; source record and test
+pins are rebound to this commit. Legal dates/digests are unchanged. Hosted
+analysis must now verify this final source, including the earlier unrecognized
+main-shared paths; no global dismissal of their actual main defects is used.
