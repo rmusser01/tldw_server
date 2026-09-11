@@ -695,7 +695,7 @@ f4b68d966a03fc9b43afba0cadd7d4f8a2bb0d32368e769edbb5aff58a93a171  apps/extension
 83c93e899e36683ea90ad9a19c6a3d434d07effbe0d0fb89913073ec34630409  apps/extension/tests/e2e/server-chat-pins.spec.ts
 d234d07f7358a81a178ac6d423dfc59dcbbf7b05a90e91083cb04d5cc029ee88  apps/extension/tests/e2e/server-chats-ux.spec.ts
 b5203fa5194877ced16e13bb48b84400d5619177e1d753767100814144700403  apps/extension/tests/e2e/serverConnectionCard.spec.ts
-41f45177002b57a6f2bcad560ee2c2e3a7babfea28b9894897180a94867d6948  apps/extension/tests/e2e/service-prompts.spec.ts
+8dcdfca6d29ea14a72fa1a69ee53601f82a594ceff60b4f5d915496f38fbb982  apps/extension/tests/e2e/service-prompts.spec.ts
 4c4181d21246619cdbf25499d97021adec438244d216bc89c451277e8b1bee8d  apps/extension/tests/e2e/settings-navigation-ux.spec.ts
 9017d774b561bcd536c725a9ffb114d6e769b6cdb992e691577458ccebf3d654  apps/extension/tests/e2e/setup/build-extension.test.ts
 3db880bec75460336810638086af37a3a5251da1c678df8aa94f47f331cba64e  apps/extension/tests/e2e/setup/build-extension.ts
@@ -717,6 +717,7 @@ ffd8fafa0fff08218aa61f656450f7ddf40b61b2f10e0d381458f4190981a214  apps/extension
 84b7d3646f642d90c5d099ec3c52e80b32ea64ec230fbb48d2889faa5c375f35  apps/extension/tests/e2e/tldw-auth-ux.spec.ts
 565f1aebfa4b5e23d390ca35b639e7a791e6bc65229c3029da6d82348e001f53  apps/extension/tests/e2e/tts-playground.spec.ts
 076363cd01a943d422a36a34b57de6f347d62a6f79fe183fb5821bb4515d28e9  apps/extension/tests/e2e/utils/connection.ts
+827eb9a59d5db098141a057acdef2be582bcc141177149395fadd7fc7553ab2a  apps/extension/tests/e2e/utils/cors.ts
 8180afb0efd2a7eebc2ff7a4df2e30fa98cc5988a11eaff320ba504e34566f69  apps/extension/tests/e2e/utils/extension-build.test.ts
 af8b52078677f6874ad41aa52b7813c159a59bb83cd23765f4787dd9e6b284f8  apps/extension/tests/e2e/utils/extension-build.ts
 3179099681cbf286fe25a6aaf53244e989ad5141e910a7f9ee2949a6d83ce7ee  apps/extension/tests/e2e/utils/extension-common.ts
@@ -770,6 +771,7 @@ f71a2d93f29627b736ad2dc0b4eb7df3b30919847ab2e3fbf087d6c30d6d3b5c  apps/extension
 e678f9f057cadc9b58abf76d8b4b97cab47aaec5cb68f7536ed5146306795e7d  apps/extension/tests/unit/resolve-api-path.test.ts
 1cc014102e30c53217c440162a02f5b2030aa973505aa96a735e1c8b1fc9be2d  apps/extension/tests/unit/review-undo.test.ts
 5b6b24e4d34f9cf61da5f629d81f61441967b16986a25951e9673c823f3fc147  apps/extension/tests/unit/selection-replace.test.ts
+05607a5d3fe213dacd08c71db86f0edb8cfddb936f4dc7cec934b353d0c5d76a  apps/extension/tests/unit/service-prompts-cors.test.ts
 fbcccb487d2da7cd3707a3bbfea63f8ac7d18f37f82ed3c21fe93d2a7c5efcbb  apps/extension/tests/unit/skills-fixture-request-contract.test.ts
 f9f17560622874123a0a2e3fade21a66561677fa08c902d1237ae22b84979539  apps/extension/tests/unit/subtitle-generator.test.ts
 20b7df638cf38f835bec65f4152b898bec329cbfc7dcb3ea2bf4a155d40f7275  apps/extension/tests/unit/sync-public-locales.test.ts
@@ -5663,7 +5665,8 @@ e4d2ef03268466257d041d061be3abbf0a7922f334cbd6a23ec0c27737d09056  apps/packages/
 4ee3aa7e153caddd6e4293aeb98c4a8b75407a4d5c528a6da753bc36fd669a22  apps/packages/ui/src/services/tldw/__tests__/quick-ingest-fallback.test.ts
 275c147733be6fbbe1c86ffd9a05f9714bedd21a702a864ac9b3ad4958830739  apps/packages/ui/src/services/tldw/__tests__/reading-saved-searches.test.ts
 e211ef3fbb082e93cd0cbd58ea7d19a1cfaa4fe4c0e30959f9a9eeb6b4140a1c  apps/packages/ui/src/services/tldw/__tests__/request-core.hosted.test.ts
-10994d011f0df5b5612960cd5c4721d5ef5483b10a021cdd056d964eb1278593  apps/packages/ui/src/services/tldw/__tests__/request-core.quickstart.test.ts
+464ad5ac0f0eca59d0e0b5055f87e01f2b5829b6664fe27cd6f32e45ce2faa63  apps/packages/ui/src/services/tldw/__tests__/request-core.quickstart.test.ts
+4a477d1aafab2d359e4100f554571e35457fe597ce71ead018175f9a0523b0ae  apps/packages/ui/src/services/tldw/__tests__/request-core.redirect-security.test.ts
 dd84ff649d4c79e94408cf41bae2f36ef92f207b65b91e678f433e1ebe0793fc  apps/packages/ui/src/services/tldw/__tests__/request-core.refresh-timeout.test.ts
 c1fc633498d7738e3de34b1a9ffd7b24230d86126ffb329aeb0f4151c703a185  apps/packages/ui/src/services/tldw/__tests__/service-prompt-scope-error.test.ts
 628518decd15b63e173cd39f50974be290e99e2c77aeb7a5c8038756c6f370b9  apps/packages/ui/src/services/tldw/__tests__/setup-onboarding.test.ts
@@ -5736,7 +5739,7 @@ bdba6b826ae8e3e3292c1e9e5e165eba9ded80293bc0bed66387b8fb06a5109b  apps/packages/
 ef4bb97713e51f0542cef7af04ee949bbbcaafb20c639b9bd38e2c95e1d48b8d  apps/packages/ui/src/services/tldw/quick-ingest-fallback.ts
 57d136262ceb849a2f588d711dbf1b54801f9df527380c9e000b8aebf72ed3f6  apps/packages/ui/src/services/tldw/quick-ingest-session-reattach.ts
 e67f9299042263ea24ccd8c7f4c8954968ff8cdf7fc82f7ea00ca4aba7121d66  apps/packages/ui/src/services/tldw/quiz-flashcards-handoff.ts
-180033171d74466ece6a8fd1e4daf4ffe839a9a074a63a5ab8dc54ab87d4526a  apps/packages/ui/src/services/tldw/request-core.ts
+40da9c3a02aa58824506fd746b5c7a49f6dc5a50a13325bf308fd504fda024f8  apps/packages/ui/src/services/tldw/request-core.ts
 2738762e85bd0ed05c5a7a394e67c73365f735d744cc36c872c835cfdb0a3806  apps/packages/ui/src/services/tldw/runtime-auth-override.ts
 f36cdb70c02106f832aa40e1937ecf758dead03df898e7da7329f978a80b55a1  apps/packages/ui/src/services/tldw/server-capabilities.ts
 1bf5451bfdb9775a5f3ebd54cdb2200a45a9c4e94572eede87550bbaff3b348a  apps/packages/ui/src/services/tldw/service-prompt-scope-error.ts
@@ -7032,6 +7035,7 @@ f56e601d4d3fed7be62c885793611bcc90040e43697ba5d8125a859b6d272282  apps/tldw-fron
 3745ec618b72e263a1f0f134602f78900fd061615a184d426224a7b1b3eec07c  apps/tldw-frontend/public/next.svg
 fad0faf8d9f5f38dd9fc3b7a9951a70c9875c96ebfb1daccb52f538d0845007f  apps/tldw-frontend/public/vercel.svg
 decf1cf7bb22b5c99c4857cfcd5718ce5465c4454166317589c83fc73df74b66  apps/tldw-frontend/public/window.svg
+a48e3e013ff6f5bc861bf96b01e09f2a9c3dcd15781e340c1ea6944481adb78d  apps/tldw-frontend/scripts/__tests__/browser-uat-seed.test.ts
 d676e6d137d4dde30bee333e53c6a737af604bdb8627ef30c38ad2a6753dfb19  apps/tldw-frontend/scripts/__tests__/cdp-examine-workflows.proxy-target.test.ts
 a6c90b99dcb2d52df6e8accbf46473b89cfc04a4d63b1a29ee70054167a0b364  apps/tldw-frontend/scripts/__tests__/check-shared-hooks.test.ts
 adfaaf04350d1752c1262f2e29cd84de9f93d0125d434e2d4e29d83432961a1a  apps/tldw-frontend/scripts/__tests__/dev-runtime-uat.test.ts
@@ -7041,9 +7045,10 @@ ef5737878109de17f7b25d52f65c8f08bf3b3cfa799b19bfb2440fe3f45027a5  apps/tldw-fron
 9aa6532bf07b4d904d99b43a1e56912aa1051587adb6b26f94dcb70b70d5567b  apps/tldw-frontend/scripts/__tests__/skills-certification-lifecycle.test.ts
 5b4537ec13007a982ea15927c1696a904dcb22f117e1915347a6dabc9818e67a  apps/tldw-frontend/scripts/__tests__/skills-certification-profile.test.ts
 829703ad3dd19efad84947ac699c59d695c4de496a2f2b1d2de0487c064e6eb3  apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts
-43afce21fe41bd725ca7afe28c78f0330f70a403435b80c089e99f288d00ec06  apps/tldw-frontend/scripts/admin-uat-driver.mjs
-3a0245f4f5fe87b4933c998d5001964dc0609bb74f34cbc723ad84ff622e4a61  apps/tldw-frontend/scripts/admin-uat-interactions.mjs
+47816e06edb518b0165b9e94f546a240b5d5b7223c07619f96c37ff5c68bffd9  apps/tldw-frontend/scripts/admin-uat-driver.mjs
+5ecf3fd424f9659bec736bf893fdea16a39611c175c8115f598ae5d85f12d696  apps/tldw-frontend/scripts/admin-uat-interactions.mjs
 f56831ff775484bbd51bc24472d1276b1c5621ca6e63c4cba2f8a6cb7645a860  apps/tldw-frontend/scripts/assert-playwright-no-skips.mjs
+d4f04869c4e12de9f00a3c0fb1b5b1a8519e1b02abdae9788593196f4a3b99c9  apps/tldw-frontend/scripts/browser-uat-seed.mjs
 6d0ebda68c50196e278f8ec7162d7e122303752355a210344bcb0ec8433f3826  apps/tldw-frontend/scripts/build-with-profile.mjs
 5d8737d872eb348a8713adf8185a2598b30f5cf3bbb4ea13ead12590559e8eae  apps/tldw-frontend/scripts/cdp-examine-workflows.ts
 3f74142344cc10a1b2d264011d72efb8644e5082bbb3572c99350c830e1d923e  apps/tldw-frontend/scripts/chars-uat-driver.mjs
@@ -7071,11 +7076,11 @@ d8a9b2b2393c31519e8dc613a6f962eaf4ac04e461561005a22934bb381c7a95  apps/tldw-fron
 316c42c368920de797a833872f3998c274439ad87616401ae5e8ad6adc25145b  apps/tldw-frontend/scripts/onboarding-uat/processes.mjs
 20ede4e5a9cafa12d3f40a3de13f783fd834c14e821b3015f16bd0f893bc5fb1  apps/tldw-frontend/scripts/onboarding-uat/profile.mjs
 4eb5fc59208027178899150598030b9da72ca8314b330804d514b5b4585511ae  apps/tldw-frontend/scripts/onboarding-uat/run.mjs
-82c4ee6bf78aefa9bbfb7b27d65ab6a70bdb06d634ae1372d2b2247d9054f12d  apps/tldw-frontend/scripts/oversight-live-probe.mjs
+cfb6dc6767486a18fa25e6a5aa8bfe895539578144adf2a8eb6125c49acdfe64  apps/tldw-frontend/scripts/oversight-live-probe.mjs
 52fb076e38d4d80dbc3c0a2fd50923c9897b699f00300da518c7d81d15ec665b  apps/tldw-frontend/scripts/playwright-cookie-lifecycle.mjs
 76369818fa98a9a1d6a57e0cb1c9e7703d076df2a4a86c2a5ed2d3d78e847537  apps/tldw-frontend/scripts/playwright-login.mjs
 01d4c80f40ce6b33627eaf4c917eec903ec0d4ac8cbae4ec8604e1ff61bca3ed  apps/tldw-frontend/scripts/research-workspace-uat-runner.mjs
-f1fd1b4d4781c6bebf63a02d3a311a632a6ae5d464e49acf18d01ef80ef63289  apps/tldw-frontend/scripts/round3-verify.mjs
+81dbdbbd38db35043d038239c1115bd67a1e892c51fade179bf5a3871b2db4cb  apps/tldw-frontend/scripts/round3-verify.mjs
 ec75d097a9e50bcf5849ce5c544a3c73ffa3a2b01d8c66716e1f73e20cd0c15a  apps/tldw-frontend/scripts/shared-research-workspace-cdp-uat.mjs
 e29286861a8a1c739f3f13f942e81f2761615f1028aa6371146bb9caa8c8d548  apps/tldw-frontend/scripts/shared-workspace-task9-cdp-check.mjs
 d1b9d6e1724808e04c9b09e219b19d5c23e53df0247784623ca6d8299cc3cc60  apps/tldw-frontend/scripts/skills-certification/evidence.mjs
@@ -7083,7 +7088,7 @@ b263c5d8ecb9a8cbd631a26a8ab85703366c633407b535ed2949db6aea013047  apps/tldw-fron
 2fb7f18b2ba7095ab3673fc8b1866273de32fd6c6cae5912acefedbb9027e35b  apps/tldw-frontend/scripts/skills-certification/profile.mjs
 c6b9d7a5d8af1cc7b8ea84514fe20eb2faf91a411e5135558cfd1a5f215422d2  apps/tldw-frontend/scripts/skills-certification/run.mjs
 516ef0c9b7f88574e6c9c1bb9f37330ab4299948699c7f84e42cb9cad5142bf5  apps/tldw-frontend/scripts/smoke.mjs
-be15eb9456c76a4a8d6734212abe41202d4333fb1e4a63f88b768c1376562bb3  apps/tldw-frontend/scripts/stats-probe.mjs
+b7a14ffd774fcc2c3507a03d41c6a622d11f7ec410d0b313c585c2191184c9aa  apps/tldw-frontend/scripts/stats-probe.mjs
 d71f4345accdacc8c1ceff4ed862fff2f66a30356f57b76917f2c53da145b19e  apps/tldw-frontend/scripts/ux-audit-cdp.ts
 eac9a0e9424e499bc89e07de5e291157d3b2dfcb890e7151daeaab38207c464a  apps/tldw-frontend/scripts/validate-networking-config.mjs
 9b017aca9660bbb6d120805d2ba5dd12fcd348b0086e6cd94380017c27a43a01  apps/tldw-frontend/scripts/verify-shared-token-sync.mjs

@@ -328,3 +328,60 @@ The existing absolute/relative outside-root, symlink, allowed-root, artifact
 completeness, Hub ID and alias regressions remain applicable. Alert 2672 remains
 an explicitly identified intentional validation probe for maintainer disposition;
 this review does not call it fixed or hide its observable behavior.
+
+## Research read-boundary follow-up
+
+Independent review reproduced an adjacent read leak: a valid recorded artifact
+file replaced by a pre-existing symlink was read without checking the recorded
+path again. All three readers (`read_text`, `read_json`, `read_jsonl`) now use one
+resolver that confines the recorded absolute path to the requested session's
+hashed directory and rejects symlinks through the existing `safe_join` helper.
+The resolver does not create directories during reads. Valid generated/versioned
+paths and missing-file `None` results are preserved.
+
+Nine regressions failed before the change: each reader followed a leaf symlink,
+an outside recorded path, or another session's recorded path. They now pass,
+along with three missing-file controls and the existing round trips. The broader
+artifact/core-hardening/jobs-service/jobs-worker run passes **93 tests**.
+Ruff passes and Bandit reports zero findings with test assertions excluded.
+Evidence: `/tmp/pr2761-path-research-reads-red.log`,
+`/tmp/pr2761-path-research-reads-broader.log`, and
+`/tmp/pr2761-path-research-reads-bandit.json`. Independent review also reports
+75 passing tests across its combined Research/snapshot/security selection.
+
+## Global alert scope: current main comparison
+
+Global dismissal must account for main, not only this PR. The supplied main
+instance snapshot has **137** shared path IDs on
+`d9c245ac14c40df855d1ab6cd19b3c137b16b47b`. Comparison covered all **33** files
+appearing in those PR traces, including upstream endpoints, database root helpers,
+path utilities and service boundaries: 21 files are identical to the Python
+analysis source and 12 differ. Changed traced functions and root configuration
+selection were reviewed individually.
+
+**Do not globally dismiss 2281 or 2282.** The path-only checkpoint directory
+containment is unchanged, but main's resume endpoint lacks the branch-added
+checkpoint owner/admin authorization. A probe executing the exact main endpoint
+body with only checkpoint loading stubbed returns a different user's completed
+checkpoint count (17) to a non-admin principal with `media.read`; the branch body
+returns HTTP 403 `checkpoint_owner_forbidden`. This is a concrete authorization
+scope difference despite the unchanged sink file. Evidence:
+`/tmp/pr2761-main-checkpoint-scope-proof.log`.
+
+The **10 repaired IDs** (2149–2152, 2277–2280, 2334–2335) remain source fixes and
+must not be globally dismissed. Of the remaining shared IDs, **125** have the
+same relevant path boundary on main. Their exact per-group lists and hashes of
+all 33 main source files are in `/tmp/pr2761-main-path-scope.json`; each shared
+record in `/tmp/pr2761-python-path-dispositions.json` now has a `main_scope`
+section. This supports only the stated path-injection disposition, not a blanket
+security verdict on main.
+
+For main audio IDs 2104 and 2275, the supported claim is specifically canonical
+allowed-root containment before provider/conversion reads. Main lacks the
+branch's pre-resolution no-symlink assertion, so an in-root link may be accepted;
+no claim that main rejects every symlink is supported. Audio cleanup still has
+its canonical temporary-root check before deletion. Main's database-root helper
+diff changes administrator configuration/environment precedence, not user-ID
+validation or `safe_join` confinement. Sandbox ownership/workspace guards,
+Skills bundle lifecycle guards, export filename containment and temporary file
+artifact path checks remain equivalent for the shared findings.
