@@ -39781,6 +39781,432 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except BackendDatabaseError as exc:
             raise CharactersRAGDBError(f"Failed to delete OSCE station: {exc}") from exc  # noqa: TRY003
 
+    @staticmethod
+    def _normalize_osce_attempt_state(state: Any) -> str:
+        value = getattr(state, "value", state)
+        normalized = str(value or "").strip().lower()
+        if normalized not in {"in_progress", "self_assessment", "completed"}:
+            raise InputError("Invalid OSCE attempt state")
+        return normalized
+
+    @staticmethod
+    def _normalize_osce_client_attempt_id(client_attempt_id: Any) -> str:
+        try:
+            return str(uuid.UUID(str(client_attempt_id)))
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise InputError("client_attempt_id must be a UUID") from exc
+
+    @staticmethod
+    def _osce_attempt_snapshot(station: Mapping[str, Any]) -> dict[str, Any]:
+        content = dict(station["content"])
+        return {
+            "title": content["title"],
+            "content": content,
+            "origin": station["origin"],
+            "provenance": station.get("provenance"),
+            "source_bundle": list(station.get("source_bundle") or []),
+            "verification_state": station["verification_state"],
+            "verification_timestamp": station.get("verification_timestamp"),
+            "verification_summary": station.get("verification_summary"),
+        }
+
+    @staticmethod
+    def _osce_attempt_columns() -> str:
+        return (
+            "id, station_id, quiz_id, client_attempt_id, station_snapshot_json, state, "
+            "candidate_notes, checklist_selections_json, rubric_selections_json, started_at, "
+            "self_assessment_started_at, completed_at, frozen_elapsed_seconds, version, "
+            "last_modified_at"
+        )
+
+    def _deserialize_osce_attempt_row(self, row: Any) -> dict[str, Any] | None:
+        item = self._deserialize_row_fields(
+            row,
+            [
+                "station_snapshot_json",
+                "checklist_selections_json",
+                "rubric_selections_json",
+            ],
+        )
+        if not item:
+            return None
+        item["station_snapshot"] = item.pop("station_snapshot_json")
+        checklist = item.pop("checklist_selections_json", None)
+        rubric = item.pop("rubric_selections_json", None)
+        item["checklist_selections"] = checklist if isinstance(checklist, dict) else {}
+        item["rubric_selections"] = rubric if isinstance(rubric, dict) else {}
+        for field in (
+            "started_at",
+            "self_assessment_started_at",
+            "completed_at",
+            "last_modified_at",
+        ):
+            item[field] = self._osce_timestamp(item.get(field))
+        item["elapsed_seconds"] = item.get("frozen_elapsed_seconds")
+        return item
+
+    def _get_osce_attempt_row(
+        self,
+        conn: Any,
+        attempt_id: int,
+        *,
+        lock: bool = False,
+    ) -> Any:
+        lock_clause = " FOR UPDATE" if lock and self.backend_type == BackendType.POSTGRESQL else ""
+        return conn.execute(
+            f"SELECT {self._osce_attempt_columns()} FROM osce_practice_attempts "  # nosec B608
+            f"WHERE id = ?{lock_clause}",  # nosec B608
+            (attempt_id,),
+        ).fetchone()
+
+    def _get_osce_attempt_by_retry_key(
+        self,
+        conn: Any,
+        station_id: int,
+        client_attempt_id: str,
+    ) -> Any:
+        return conn.execute(
+            f"SELECT {self._osce_attempt_columns()} FROM osce_practice_attempts "  # nosec B608
+            "WHERE station_id = ? AND client_attempt_id = ?",
+            (station_id, client_attempt_id),
+        ).fetchone()
+
+    def _get_active_osce_station_for_attempt(self, conn: Any, station_id: int) -> Any:
+        station_deleted = "s.deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "s.deleted = 0"
+        quiz_deleted = "q.deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "q.deleted = 0"
+        lock_clause = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        return conn.execute(
+            "SELECT s.id, s.quiz_id, s.schema_version, s.content_json, s.order_index, s.version, "
+            "s.origin, s.provenance_json, s.source_bundle_json, s.verification_state, "
+            "s.verification_timestamp, s.verification_summary, s.deleted, s.created_at, s.updated_at "
+            "FROM osce_stations AS s JOIN quizzes AS q ON q.id = s.quiz_id "
+            f"WHERE s.id = ? AND {station_deleted} AND {quiz_deleted} "  # nosec B608
+            f"AND q.activity_type = 'osce'{lock_clause}",  # nosec B608
+            (station_id,),
+        ).fetchone()
+
+    @staticmethod
+    def _parse_osce_attempt_timestamp(value: Any) -> datetime:
+        if isinstance(value, datetime):
+            parsed = value
+        else:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    @staticmethod
+    def _validate_osce_attempt_selections(
+        attempt: Mapping[str, Any],
+        checklist_selections: Mapping[Any, Any],
+        rubric_selections: Mapping[Any, Any],
+        *,
+        require_complete: bool,
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        from tldw_Server_API.app.services.osce_practice import validate_assessment_selections
+
+        snapshot = attempt["station_snapshot"]
+        content = snapshot.get("content", snapshot)
+        try:
+            return validate_assessment_selections(
+                content,
+                checklist_selections,
+                rubric_selections,
+                require_complete=require_complete,
+            )
+        except ValueError as exc:
+            raise InputError(str(exc)) from exc
+
+    def start_osce_attempt(
+        self,
+        station_id: int,
+        client_attempt_id: Any,
+    ) -> dict[str, Any] | None:
+        """Create one immutable attempt snapshot or return the matching retry."""
+        normalized_client_id = self._normalize_osce_client_attempt_id(client_attempt_id)
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                existing_row = self._get_osce_attempt_by_retry_key(
+                    conn, station_id, normalized_client_id
+                )
+                if existing_row:
+                    return self._deserialize_osce_attempt_row(existing_row)
+
+                station_row = self._get_active_osce_station_for_attempt(conn, station_id)
+                station = self._deserialize_osce_station_row(station_row)
+                if station is None:
+                    return None
+                snapshot_json = self._osce_json_string(self._osce_attempt_snapshot(station))
+                conn.execute(
+                    "INSERT INTO osce_practice_attempts("
+                    "station_id, quiz_id, client_attempt_id, station_snapshot_json, state, "
+                    "candidate_notes, checklist_selections_json, rubric_selections_json, "
+                    "started_at, self_assessment_started_at, completed_at, "
+                    "frozen_elapsed_seconds, version, last_modified_at) "
+                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(station_id, client_attempt_id) DO NOTHING",
+                    (
+                        station_id,
+                        station["quiz_id"],
+                        normalized_client_id,
+                        snapshot_json,
+                        "in_progress",
+                        "",
+                        "{}",
+                        "{}",
+                        now,
+                        None,
+                        None,
+                        None,
+                        1,
+                        now,
+                    ),
+                )
+                row = self._get_osce_attempt_by_retry_key(
+                    conn, station_id, normalized_client_id
+                )
+                attempt = self._deserialize_osce_attempt_row(row)
+                if attempt is None:
+                    raise CharactersRAGDBError("Failed to read created OSCE attempt")  # noqa: TRY003
+                return attempt
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to start OSCE attempt: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to start OSCE attempt: {exc}") from exc  # noqa: TRY003
+
+    def get_osce_attempt(self, attempt_id: int) -> dict[str, Any] | None:
+        """Load an attempt solely from its immutable snapshot."""
+        row = self._get_osce_attempt_row(self.get_connection(), attempt_id)
+        return self._deserialize_osce_attempt_row(row)
+
+    def list_osce_attempts(
+        self,
+        *,
+        quiz_id: int | None = None,
+        station_id: int | None = None,
+        states: Sequence[Any] | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """List compact snapshot-based attempt summaries by recent activity."""
+        if limit < 1 or offset < 0:
+            raise InputError("OSCE attempt pagination values are invalid")
+        normalized_states = [self._normalize_osce_attempt_state(state) for state in states or ()]
+        if len(normalized_states) != len(set(normalized_states)):
+            normalized_states = list(dict.fromkeys(normalized_states))
+
+        clauses: list[str] = []
+        params: list[Any] = []
+        if quiz_id is not None:
+            clauses.append("quiz_id = ?")
+            params.append(quiz_id)
+        if station_id is not None:
+            clauses.append("station_id = ?")
+            params.append(station_id)
+        if normalized_states:
+            clauses.append(f"state IN ({', '.join('?' for _ in normalized_states)})")
+            params.extend(normalized_states)
+        where_clause = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self.execute_query(
+            f"SELECT {self._osce_attempt_columns()} FROM osce_practice_attempts"  # nosec B608
+            f"{where_clause} ORDER BY last_modified_at DESC, id DESC LIMIT ? OFFSET ?",  # nosec B608
+            (*params, limit, offset),
+        ).fetchall()
+        count_row = self.execute_query(
+            f"SELECT COUNT(*) AS count FROM osce_practice_attempts{where_clause}",  # nosec B608
+            tuple(params),
+        ).fetchone()
+
+        from tldw_Server_API.app.services.osce_practice import summarize_osce_attempt
+
+        summaries = []
+        for row in rows:
+            attempt = self._deserialize_osce_attempt_row(row)
+            if attempt is not None:
+                summaries.append(summarize_osce_attempt(attempt).model_dump(mode="json"))
+        return {
+            "items": summaries,
+            "count": int(count_row["count"]) if count_row else 0,
+        }
+
+    def patch_osce_attempt(
+        self,
+        attempt_id: int,
+        *,
+        expected_version: int,
+        notes: str | None = None,
+        checklist_selections: Mapping[Any, Any] | None = None,
+        rubric_selections: Mapping[Any, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Update phase-appropriate fields under strict optimistic locking."""
+        if notes is None and checklist_selections is None and rubric_selections is None:
+            raise InputError("OSCE attempt patch contains no updates")
+        if notes is not None and (not isinstance(notes, str) or len(notes) > 10000):
+            raise InputError("OSCE candidate notes must be a string of at most 10000 characters")
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                row = self._get_osce_attempt_row(conn, attempt_id, lock=True)
+                attempt = self._deserialize_osce_attempt_row(row)
+                if attempt is None:
+                    return None
+                if attempt["state"] == "completed":
+                    raise ConflictError(
+                        "Completed OSCE attempts are immutable",
+                        entity="osce_practice_attempts",
+                        identifier=attempt_id,
+                    )
+                if int(attempt["version"]) != expected_version:
+                    raise ConflictError(
+                        "Version mismatch updating OSCE attempt",
+                        entity="osce_practice_attempts",
+                        identifier=attempt_id,
+                    )
+                if attempt["state"] == "in_progress" and (
+                    checklist_selections is not None or rubric_selections is not None
+                ):
+                    raise InputError("Assessment selections require self-assessment state")
+
+                next_checklist = (
+                    attempt["checklist_selections"]
+                    if checklist_selections is None
+                    else checklist_selections
+                )
+                next_rubric = (
+                    attempt["rubric_selections"]
+                    if rubric_selections is None
+                    else rubric_selections
+                )
+                normalized_checklist, normalized_rubric = self._validate_osce_attempt_selections(
+                    attempt,
+                    next_checklist,
+                    next_rubric,
+                    require_complete=False,
+                )
+                allowed_state = attempt["state"]
+                result = conn.execute(
+                    "UPDATE osce_practice_attempts SET candidate_notes = ?, "
+                    "checklist_selections_json = ?, rubric_selections_json = ?, "
+                    "version = version + 1, last_modified_at = ? "
+                    "WHERE id = ? AND version = ? AND state = ?",
+                    (
+                        attempt["candidate_notes"] if notes is None else notes,
+                        json.dumps(normalized_checklist, ensure_ascii=True, sort_keys=True),
+                        json.dumps(normalized_rubric, ensure_ascii=True, sort_keys=True),
+                        now,
+                        attempt_id,
+                        expected_version,
+                        allowed_state,
+                    ),
+                )
+                if result.rowcount != 1:
+                    raise ConflictError(
+                        "Version mismatch updating OSCE attempt",
+                        entity="osce_practice_attempts",
+                        identifier=attempt_id,
+                    )
+                return self._deserialize_osce_attempt_row(
+                    self._get_osce_attempt_row(conn, attempt_id)
+                )
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to update OSCE attempt: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to update OSCE attempt: {exc}") from exc  # noqa: TRY003
+
+    def transition_osce_attempt(
+        self,
+        attempt_id: int,
+        target_state: Any,
+        *,
+        expected_version: int,
+    ) -> dict[str, Any] | None:
+        """Advance an attempt monotonically or return its already-achieved state."""
+        normalized_target = self._normalize_osce_attempt_state(target_state)
+        if normalized_target == "in_progress":
+            raise InputError("OSCE attempts cannot transition to in_progress")
+        ranks = {"in_progress": 0, "self_assessment": 1, "completed": 2}
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                row = self._get_osce_attempt_row(conn, attempt_id, lock=True)
+                attempt = self._deserialize_osce_attempt_row(row)
+                if attempt is None:
+                    return None
+                current_state = attempt["state"]
+                if ranks[current_state] >= ranks[normalized_target]:
+                    return attempt
+                if int(attempt["version"]) != expected_version:
+                    raise ConflictError(
+                        "Version mismatch transitioning OSCE attempt",
+                        entity="osce_practice_attempts",
+                        identifier=attempt_id,
+                    )
+                if ranks[normalized_target] != ranks[current_state] + 1:
+                    raise ConflictError(
+                        "Invalid OSCE attempt transition",
+                        entity="osce_practice_attempts",
+                        identifier=attempt_id,
+                    )
+
+                if normalized_target == "self_assessment":
+                    started_at = self._parse_osce_attempt_timestamp(attempt["started_at"])
+                    transition_time = self._parse_osce_attempt_timestamp(now)
+                    elapsed_seconds = max(0, int((transition_time - started_at).total_seconds()))
+                    result = conn.execute(
+                        "UPDATE osce_practice_attempts SET state = ?, "
+                        "self_assessment_started_at = ?, frozen_elapsed_seconds = ?, "
+                        "version = version + 1, last_modified_at = ? "
+                        "WHERE id = ? AND version = ? AND state = ?",
+                        (
+                            normalized_target,
+                            now,
+                            elapsed_seconds,
+                            now,
+                            attempt_id,
+                            expected_version,
+                            current_state,
+                        ),
+                    )
+                else:
+                    self._validate_osce_attempt_selections(
+                        attempt,
+                        attempt["checklist_selections"],
+                        attempt["rubric_selections"],
+                        require_complete=True,
+                    )
+                    result = conn.execute(
+                        "UPDATE osce_practice_attempts SET state = ?, completed_at = ?, "
+                        "version = version + 1, last_modified_at = ? "
+                        "WHERE id = ? AND version = ? AND state = ?",
+                        (
+                            normalized_target,
+                            now,
+                            now,
+                            attempt_id,
+                            expected_version,
+                            current_state,
+                        ),
+                    )
+                if result.rowcount != 1:
+                    latest = self._deserialize_osce_attempt_row(
+                        self._get_osce_attempt_row(conn, attempt_id)
+                    )
+                    if latest is not None and ranks[latest["state"]] >= ranks[normalized_target]:
+                        return latest
+                    raise ConflictError(
+                        "Version mismatch transitioning OSCE attempt",
+                        entity="osce_practice_attempts",
+                        identifier=attempt_id,
+                    )
+                return self._deserialize_osce_attempt_row(
+                    self._get_osce_attempt_row(conn, attempt_id)
+                )
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to transition OSCE attempt: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to transition OSCE attempt: {exc}") from exc  # noqa: TRY003
+
     def create_quiz_with_osce_stations_atomic(
         self,
         quiz_data: dict[str, Any],
