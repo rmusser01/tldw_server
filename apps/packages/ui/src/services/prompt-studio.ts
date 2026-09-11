@@ -27,52 +27,25 @@ type RecipePersistenceOptions = {
   recipePersistence: RecipePersistenceRequestPolicy
 }
 
-type LegacyRecipePersistenceOptions = {
-  capturePersistenceScope: boolean
-  requirePersistenceScope?: boolean
-}
-
-type PromptStudioResponse<T> = ApiSendResponse<T> & {
-  /** @deprecated Remove when Task 5 migrates prompt-sync. */
-  persistenceScope?: string | null
-  /** @deprecated Remove when Task 5 migrates prompt-sync. */
-  requestDispatched?: boolean
-}
-
-const withLegacyRecipeDispatch = <T>(
-  response: ApiSendResponse<T>,
-  legacy: boolean
-): PromptStudioResponse<T> => {
-  if (!legacy) return response
-  const dispatch = response.recipePersistence
+const missingRecipePolicy = <T>(
+  payload: {
+    prompt_schema_version?: number | null
+    prompt_definition?: StructuredPromptDefinition | null
+  },
+  options?: RecipePersistenceOptions
+): ApiSendResponse<T> | null => {
+  if (
+    (payload.prompt_schema_version !== 2 &&
+      payload.prompt_definition?.schema_version !== 2) ||
+    options?.recipePersistence.mode === "require"
+  )
+    return null
   return {
-    ...response,
-    persistenceScope: dispatch?.actualOwnerId ?? null,
-    ...(dispatch?.state === "dispatched"
-      ? { requestDispatched: true }
-      : dispatch?.state === "not_dispatched"
-        ? { requestDispatched: false }
-        : {})
+    ok: false,
+    status: 412,
+    error: "Recipe persistence requires an explicit owner policy",
+    recipePersistence: { state: "not_dispatched", actualOwnerId: null }
   }
-}
-
-const normalizeRecipePersistenceOptions = (
-  options?: RecipePersistenceOptions | LegacyRecipePersistenceOptions
-): RecipePersistenceOptions | undefined => {
-  if (!options) return undefined
-  if ("recipePersistence" in options) return options
-  if (options.requirePersistenceScope) {
-    return {
-      recipePersistence: {
-        mode: "require",
-        expectedOwnerId: "",
-        localId: ""
-      }
-    }
-  }
-  return options.capturePersistenceScope
-    ? { recipePersistence: { mode: "capture" } }
-    : undefined
 }
 
 export type ListResponse<T> = StandardResponse<T[]> & {
@@ -442,19 +415,21 @@ export async function listPrompts(
 export async function createPrompt(
   payload: PromptCreatePayload,
   idempotencyKeyOrOptions?: string | null | RecipePersistenceOptions,
-  legacyOptions?: LegacyRecipePersistenceOptions
+  requestOptions?: RecipePersistenceOptions
 ) {
   const idempotencyKey =
     typeof idempotencyKeyOrOptions === "string"
       ? idempotencyKeyOrOptions
-      : idempotencyKeyOrOptions === null
-        ? null
-        : undefined
-  const options = normalizeRecipePersistenceOptions(
+      : undefined
+  const options =
     typeof idempotencyKeyOrOptions === "object" && idempotencyKeyOrOptions
       ? idempotencyKeyOrOptions
-      : legacyOptions
+      : requestOptions
+  const rejection = missingRecipePolicy<StandardResponse<Prompt>>(
+    payload,
+    options
   )
+  if (rejection) return rejection
   const response = await apiSend<StandardResponse<Prompt>>({
     path: "/api/v1/prompt-studio/prompts/create",
     method: "POST",
@@ -462,43 +437,42 @@ export async function createPrompt(
     headers: withIdempotency(idempotencyKey),
     ...options
   })
-  return withLegacyRecipeDispatch(response, Boolean(legacyOptions))
+  return response
 }
 
 export async function getPrompt(
   promptId: number,
-  options?: RecipePersistenceOptions | LegacyRecipePersistenceOptions
+  options?: RecipePersistenceOptions
 ) {
   const response = await apiSend<StandardResponse<Prompt>>({
     path: toAllowedPath(
       `/api/v1/prompt-studio/prompts/get/${encodeURIComponent(promptId)}`
     ),
     method: "GET",
-    ...normalizeRecipePersistenceOptions(options)
+    ...options
   })
-  return withLegacyRecipeDispatch(
-    response,
-    Boolean(options && "capturePersistenceScope" in options)
-  )
+  return response
 }
 
 export async function updatePrompt(
   promptId: number,
   payload: PromptUpdatePayload,
-  options?: RecipePersistenceOptions | LegacyRecipePersistenceOptions
+  options?: RecipePersistenceOptions
 ) {
+  const rejection = missingRecipePolicy<StandardResponse<Prompt>>(
+    payload,
+    options
+  )
+  if (rejection) return rejection
   const response = await apiSend<StandardResponse<Prompt>>({
     path: toAllowedPath(
       `/api/v1/prompt-studio/prompts/update/${encodeURIComponent(promptId)}`
     ),
     method: "PUT",
     body: payload,
-    ...normalizeRecipePersistenceOptions(options)
+    ...options
   })
-  return withLegacyRecipeDispatch(
-    response,
-    Boolean(options && "capturePersistenceScope" in options)
-  )
+  return response
 }
 
 export async function previewPromptDefinition(

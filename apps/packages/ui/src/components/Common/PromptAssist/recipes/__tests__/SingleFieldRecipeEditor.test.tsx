@@ -1,4 +1,3 @@
-import React from "react";
 import {
   act,
   fireEvent,
@@ -8,11 +7,18 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import React from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { SavedRecipeSource } from "../types";
-import { BLANK_RECIPE } from "../built-in-recipes";
 import { SingleFieldRecipeEditor } from "../SingleFieldRecipeEditor";
+import { BLANK_RECIPE } from "../built-in-recipes";
+import type { SavedRecipeSource } from "../types";
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (_key: string, fallback?: string) => fallback ?? _key,
+  }),
+}));
 
 const savedRecipe = (
   overrides: Partial<SavedRecipeSource> = {},
@@ -100,6 +106,70 @@ const deferred = <Value,>() => {
 };
 
 describe("SingleFieldRecipeEditor", () => {
+  it("keeps unknown-owner writes locked across source changes and uses one cancellable exact-ID recovery confirmation", async () => {
+    const user = userEvent.setup();
+    const onForgetUnknown = vi.fn().mockResolvedValue(undefined);
+    renderEditor({
+      initialSource: savedRecipe({ uncertainty: "unknown_owner" }),
+      savedRecipes: [savedRecipe({ uncertainty: "unknown_owner" })],
+      onForgetUnknown,
+    });
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Update recipe" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Apply to system prompt" }),
+    ).toBeEnabled();
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Recipe source" }),
+      "built_in:blank",
+    );
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    ).toBeDisabled();
+    const forget = screen.getByRole("button", {
+      name: "Forget unresolved operation",
+    });
+    await user.click(forget);
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByText(/may already have saved/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onForgetUnknown).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "Forget unresolved operation" }),
+    ).toHaveFocus();
+    await user.click(
+      screen.getByRole("button", { name: "Forget unresolved operation" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Confirm forget" }));
+    await waitFor(() =>
+      expect(onForgetUnknown).toHaveBeenCalledWith("saved-greeting"),
+    );
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    ).toHaveFocus();
+  });
+
+  it("never offers Forget for scoped uncertainty", () => {
+    renderEditor({
+      initialSource: savedRecipe({ uncertainty: "scoped" }),
+      onForgetUnknown: vi.fn(),
+    });
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    ).toBeDisabled();
+    expect(
+      screen.queryByRole("button", { name: "Forget unresolved operation" }),
+    ).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Apply to system prompt" }),
+    ).toBeEnabled();
+  });
+
   it("offers immutable starters and locks every block to the selected target", () => {
     renderEditor({ target: "user_message" });
 

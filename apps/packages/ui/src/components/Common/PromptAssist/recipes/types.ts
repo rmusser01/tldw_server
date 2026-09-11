@@ -30,6 +30,9 @@ export type SavedRecipeSource = {
   id: string;
   name: string;
   definition: unknown;
+  uncertainty?:
+    | import("@/services/recipe-persistence-uncertainty").RecipeUncertaintyState
+    | "unavailable";
   syncStatus?: "local" | "synced" | "pending" | "conflict" | "error";
 };
 

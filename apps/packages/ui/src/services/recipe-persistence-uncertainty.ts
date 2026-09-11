@@ -1,4 +1,3 @@
-import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import type { RecipePersistenceOwnerView } from "@/services/recipe-persistence-owner"
 import {
   RecipePersistenceRegistry,
@@ -11,7 +10,6 @@ import {
 } from "@/services/tldw/recipe-request-snapshot"
 import { readBrowserCookie, tldwRequest } from "@/services/tldw/request-core"
 import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
-import { deriveScopedUserId } from "@/utils/media-navigation-scope"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { browser } from "wxt/browser"
 
@@ -261,42 +259,3 @@ export const forgetRecipePersistenceUnknown = (id: string): Promise<void> =>
   mutate({ type: "tldw:recipe-uncertainty:forget-unknown", id }, () =>
     directRegistry.forgetUnknown(id)
   )
-
-// Deprecated Task 4/5 transition wrappers: preserve synchronous callers' types.
-// These are direct-only compatibility state, never the extension async authority.
-export const getRecipePersistenceScope = async (): Promise<string | null> => {
-  try {
-    const { tldwClient } = await import("@/services/tldw/TldwApiClient")
-    const config = await tldwClient.getConfig()
-    if (
-      !config?.serverUrl?.trim() ||
-      (config.authMode !== "single-user" && config.authMode !== "multi-user") ||
-      deriveScopedUserId({
-        authMode: config.authMode,
-        accessToken: config.accessToken
-      }) === "user:anonymous"
-    )
-      return null
-    return buildChatSurfaceScopeKeyFromConfig(config)
-  } catch {
-    return null
-  }
-}
-export const markRecipePersistenceUncertain = (
-  id: string,
-  ownerId: string | null
-): void => {
-  if (ownerId) directRegistry.markScoped(id, ownerId)
-}
-export const markRecipePersistenceOwnerUnknown = (id: string): void =>
-  directRegistry.markUnknown(id)
-export const clearRecipePersistenceUncertainty = (
-  id: string,
-  ownerId: string | null
-): void => {
-  if (ownerId) directRegistry.clearScoped(id, ownerId)
-}
-export const isRecipePersistenceUncertain = (
-  id: string,
-  ownerId: string | null
-): boolean => !ownerId || directRegistry.read(id, ownerId) !== "clear"

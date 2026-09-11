@@ -2,8 +2,8 @@ import { CLEAR_TASK_RECIPE } from "@/components/Common/PromptAssist/recipes/buil
 import * as serverOnline from "@/hooks/useServerOnline"
 import type { PromptImproveModelSelection } from "@/services/prompt-improvement"
 import {
-  clearRecipePersistenceUncertainty,
-  markRecipePersistenceUncertain
+  clearRecipePersistenceScoped,
+  markRecipePersistenceScoped
 } from "@/services/recipe-persistence-uncertainty"
 import * as recipeAuthority from "@/services/recipe-persistence-uncertainty"
 import {
@@ -395,8 +395,9 @@ const improveNow = async (user: ReturnType<typeof userEvent.setup>) => {
 }
 
 describe("PromptAssistComposerAction entry and request contract", () => {
-  afterEach(() => {
-    clearRecipePersistenceUncertainty("scoped-recipe", ownerA)
+  afterEach(async () => {
+    mocks.runtimeId = undefined
+    await clearRecipePersistenceScoped("scoped-recipe", ownerA)
     clearRuntimeAuthOverride()
     vi.unstubAllGlobals()
     vi.unstubAllEnvs()
@@ -859,7 +860,10 @@ describe("PromptAssistComposerAction entry and request contract", () => {
       success: false,
       failureKind: "invalid_server_payload",
       localId: "scoped-recipe",
-      persistenceScope: ownerA
+      recipeOwnership: {
+        localId: "scoped-recipe",
+        dispatch: { state: "dispatched", actualOwnerId: ownerA }
+      }
     })
     mocks.markPromptSyncError.mockRejectedValue(
       new Error("durable storage unavailable")
@@ -911,7 +915,7 @@ describe("PromptAssistComposerAction entry and request contract", () => {
     "scopes composer recipe ownership to %s, independently of %s",
     async (backend, revision, enabled) => {
       vi.spyOn(serverOnline, "useServerOnline").mockReturnValue(true)
-      markRecipePersistenceUncertain("scoped-recipe", ownerA)
+      await markRecipePersistenceScoped("scoped-recipe", ownerA)
       vi.mocked(
         recipeAuthority.resolveRecipePersistenceOwnerView
       ).mockResolvedValue({

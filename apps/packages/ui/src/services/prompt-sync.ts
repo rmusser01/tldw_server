@@ -5,39 +5,46 @@
  * and server-side Prompt Studio. Manual sync remains available, and
  * workspace prompt saves can auto-sync by default.
  */
-
-import { db } from '@/db/dexie/schema'
-import { PageAssistDatabase } from '@/db/dexie/chat'
-import { generateID } from '@/db/dexie/helpers'
+import { PageAssistDatabase } from "@/db/dexie/chat"
+import { generateID } from "@/db/dexie/helpers"
+import { db } from "@/db/dexie/schema"
 import {
-  Prompt as LocalPrompt,
-  PromptSyncStatus,
   FewShotExample,
-  PromptModule
-} from '@/db/dexie/types'
+  Prompt as LocalPrompt,
+  PromptModule,
+  PromptSyncStatus
+} from "@/db/dexie/types"
+import type { ApiSendResponse } from "@/services/api-send"
 import {
-  createProject,
-  createPrompt as createServerPrompt,
-  updatePrompt as updateServerPrompt,
-  getPrompt as getServerPrompt,
-  listProjects,
-  Prompt as ServerPrompt,
+  Project,
   PromptCreatePayload,
   PromptUpdatePayload,
-  Project,
-  StandardResponse
-} from '@/services/prompt-studio'
-import type { ApiSendResponse } from '@/services/api-send'
-import { unwrapApiResponseData } from '@/services/response-envelope'
+  Prompt as ServerPrompt,
+  StandardResponse,
+  createProject,
+  createPrompt as createServerPrompt,
+  getPrompt as getServerPrompt,
+  listProjects,
+  updatePrompt as updateServerPrompt
+} from "@/services/prompt-studio"
 import {
   getPromptStudioDefaults,
   setPromptStudioDefaults
-} from '@/services/prompt-studio-settings'
+} from "@/services/prompt-studio-settings"
 import {
-  parseStructuredPromptDefinitionForTransport,
-  type ParsedStructuredPromptDefinition
-} from '@/services/structured-prompt-transport'
-import { clearRecipePersistenceUncertainty } from '@/services/recipe-persistence-uncertainty'
+  clearRecipePersistenceScoped,
+  markRecipePersistenceUnknown,
+  readRecipePersistenceUncertainty
+} from "@/services/recipe-persistence-uncertainty"
+import { unwrapApiResponseData } from "@/services/response-envelope"
+import {
+  type ParsedStructuredPromptDefinition,
+  parseStructuredPromptDefinitionForTransport
+} from "@/services/structured-prompt-transport"
+import type {
+  RecipePersistenceDispatch,
+  RecipePersistenceRequestPolicy
+} from "@/services/tldw/recipe-request-snapshot"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -46,12 +53,71 @@ import { clearRecipePersistenceUncertainty } from '@/services/recipe-persistence
 export type SyncResult = {
   success: boolean
   localId: string
-  /** Stable owner reported by the actual transport, or null when unavailable. */
-  persistenceScope: string | null
+  recipeOwnership: RecipeSyncOwnership | null
   serverId?: number
   error?: string
   syncStatus: PromptSyncStatus
-  failureKind?: 'validation' | 'invalid_server_payload' | 'transient'
+  failureKind?: "validation" | "invalid_server_payload" | "transient"
+}
+
+export type RecipeSyncOwnership = Readonly<{
+  dispatch: RecipePersistenceDispatch
+  localId: string
+}>
+
+export type RecipePersistenceInput = Readonly<{ expectedOwnerId: string }>
+
+/** Dispatch evidence alone determines whether a failed write could have mutated. */
+export function classifyRecipeDispatch(dispatch: RecipePersistenceDispatch) {
+  if (dispatch.state === "not_dispatched") return "known_rejection"
+  return dispatch.state === "dispatched" && dispatch.actualOwnerId
+    ? "scoped_uncertain"
+    : "unknown_owner"
+}
+
+const notDispatched = (localId: string): RecipeSyncOwnership => ({
+  localId,
+  dispatch: { state: "not_dispatched", actualOwnerId: null }
+})
+
+const clearReconciledOwner = async (ownership: RecipeSyncOwnership | null) => {
+  if (
+    ownership?.dispatch.state === "dispatched" &&
+    ownership.dispatch.actualOwnerId
+  ) {
+    await clearRecipePersistenceScoped(
+      ownership.localId,
+      ownership.dispatch.actualOwnerId
+    )
+  }
+}
+
+/** Only endpoint-contract rejections known to happen without a mutation qualify.
+ * Bare status codes (including proxy errors) are not sufficient evidence.
+ */
+const isKnownMutationRejection = (
+  response: ApiSendResponse<unknown>
+): boolean => {
+  if (response.ok !== false) return false
+  const detail = (response.data as { detail?: unknown } | null)?.detail
+  if (response.status === 422 && Array.isArray(detail) && detail.length > 0) {
+    return detail.every(
+      (item) =>
+        item &&
+        Array.isArray(item.loc) &&
+        typeof item.msg === "string" &&
+        typeof item.type === "string"
+    )
+  }
+  if (response.status === 403) return detail === "Access denied to this prompt"
+  if (response.status === 401)
+    return (
+      detail === "Not authenticated" ||
+      detail === "Invalid authentication credentials"
+    )
+  if (response.status === 409)
+    return detail === "Prompt with this name already exists in the project"
+  return false
 }
 
 export type ConflictInfo = {
@@ -61,14 +127,14 @@ export type ConflictInfo = {
   serverUpdatedAt: string
 }
 
-export type ConflictResolution = 'keep_local' | 'keep_server' | 'keep_both'
+export type ConflictResolution = "keep_local" | "keep_server" | "keep_both"
 
-const AUTO_SYNC_PROJECT_NAME = 'Workspace Prompts'
+const AUTO_SYNC_PROJECT_NAME = "Workspace Prompts"
 const AUTO_SYNC_PROJECT_DESCRIPTION =
-  'Auto-created project used to persist prompts saved from the Prompts workspace.'
+  "Auto-created project used to persist prompts saved from the Prompts workspace."
 const CURRENT_PROMPT_SYNC_PAYLOAD_VERSION = 1
 
-type PromptFormat = 'legacy' | 'structured'
+type PromptFormat = "legacy" | "structured"
 
 type ComparablePromptPayload = {
   promptFormat: PromptFormat
@@ -82,7 +148,7 @@ type ComparablePromptPayload = {
 }
 
 const isValidProjectId = (value: unknown): value is number =>
-  typeof value === 'number' &&
+  typeof value === "number" &&
   Number.isFinite(value) &&
   Number.isInteger(value) &&
   value > 0
@@ -101,7 +167,7 @@ const unwrapResponseData = <T>(
 }
 
 const toText = (value: unknown): string =>
-  typeof value === 'string' ? value : ''
+  typeof value === "string" ? value : ""
 const toArrayOrNull = <T>(value: unknown): T[] | null =>
   Array.isArray(value) ? (value as T[]) : null
 
@@ -121,13 +187,13 @@ const parsePromptIdentity = (
   )
   if (promptDefinition === null) {
     return {
-      promptFormat: 'legacy',
+      promptFormat: "legacy",
       promptSchemaVersion: null,
       promptDefinition: null
     }
   }
   return {
-    promptFormat: 'structured',
+    promptFormat: "structured",
     promptSchemaVersion: promptDefinition.schema_version,
     promptDefinition
   }
@@ -141,8 +207,8 @@ const getLocalPromptTextsForConflict = (
   const contentFallback = toText(local.content)
 
   return {
-    systemPrompt: explicitSystem || (local.is_system ? contentFallback : ''),
-    userPrompt: explicitUser || (!local.is_system ? contentFallback : '')
+    systemPrompt: explicitSystem || (local.is_system ? contentFallback : ""),
+    userPrompt: explicitUser || (!local.is_system ? contentFallback : "")
   }
 }
 
@@ -158,7 +224,7 @@ const normalizeForStableHash = (value: unknown): unknown => {
     return value.map((item) => normalizeForStableHash(item))
   }
 
-  if (value && typeof value === 'object') {
+  if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>)
         .filter(([, item]) => item !== undefined)
@@ -177,7 +243,7 @@ const promptPayloadHash = (payload: ComparablePromptPayload): string => {
     hash ^= combined.charCodeAt(i)
     hash = (hash * 0x01000193) >>> 0
   }
-  return hash.toString(16).padStart(8, '0')
+  return hash.toString(16).padStart(8, "0")
 }
 
 const getLocalPromptComparablePayload = (
@@ -263,7 +329,7 @@ function localToServerPayload(
     prompt_definition: identity.promptDefinition,
     few_shot_examples: local.fewShotExamples,
     modules_config: local.modulesConfig,
-    change_description: local.changeDescription || 'Initial sync from workspace'
+    change_description: local.changeDescription || "Initial sync from workspace"
   }
 }
 
@@ -285,7 +351,7 @@ function localToServerUpdatePayload(local: LocalPrompt): PromptUpdatePayload {
     prompt_definition: identity.promptDefinition,
     few_shot_examples: local.fewShotExamples,
     modules_config: local.modulesConfig,
-    change_description: local.changeDescription || 'Synced from workspace'
+    change_description: local.changeDescription || "Synced from workspace"
   }
 }
 
@@ -315,7 +381,7 @@ function serverToLocalFields(server: ServerPrompt): Partial<LocalPrompt> {
     changeDescription: server.change_description,
     serverParentVersionId: server.parent_version_id,
     serverUpdatedAt: server.updated_at,
-    syncStatus: 'synced' as PromptSyncStatus,
+    syncStatus: "synced" as PromptSyncStatus,
     lastSyncedAt: Date.now()
   }
 }
@@ -334,7 +400,7 @@ function serverToNewLocalPrompt(server: ServerPrompt): LocalPrompt {
     id: generateID(),
     title: server.name,
     name: server.name,
-    content: server.system_prompt || server.user_prompt || '',
+    content: server.system_prompt || server.user_prompt || "",
     is_system: !!server.system_prompt,
     system_prompt: server.system_prompt,
     user_prompt: server.user_prompt,
@@ -356,98 +422,172 @@ function serverToNewLocalPrompt(server: ServerPrompt): LocalPrompt {
     changeDescription: server.change_description,
     serverParentVersionId: server.parent_version_id,
     serverUpdatedAt: server.updated_at,
-    syncStatus: 'synced',
-    sourceSystem: 'studio',
+    syncStatus: "synced",
+    sourceSystem: "studio",
     lastSyncedAt: now
   }
 }
 
-async function createServerCopy(
+async function persistServerPrompt(
   localId: string,
   local: LocalPrompt,
-  projectId: number
+  projectId: number,
+  input: RecipePersistenceInput | undefined,
+  createCopy: boolean
 ): Promise<SyncResult> {
-  let persistenceScope: string | null = null
-  const failureSyncStatus: PromptSyncStatus = local.serverId
-    ? local.syncStatus || 'conflict'
-    : 'pending'
-  const originalSyncStatus: PromptSyncStatus =
-    local.syncStatus || (local.serverId ? 'conflict' : 'local')
-  let createPayload: PromptCreatePayload
+  let recipeOwnership: RecipeSyncOwnership | null = notDispatched(localId)
+  const originalStatus = local.syncStatus || "local"
+  const failure = async (
+    error: unknown,
+    failureKind: SyncResult["failureKind"]
+  ): Promise<SyncResult> => {
+    const uncertain =
+      local.promptSchemaVersion === 2 &&
+      recipeOwnership?.dispatch.state !== "not_dispatched" &&
+      failureKind !== "validation"
+    if (uncertain) {
+      // Every caller (including outbox/batch) must leave retryable pending state.
+      // Storage failure cannot erase the authority's pre-dispatch marker.
+      try {
+        await db.prompts.update(localId, { syncStatus: "error" })
+      } catch {
+        /* Preserve dispatch evidence. */
+      }
+    }
+    return {
+      success: false,
+      localId,
+      recipeOwnership,
+      ...(local.serverId ? { serverId: local.serverId } : {}),
+      error: error instanceof Error ? error.message : String(error),
+      syncStatus: uncertain
+        ? "error"
+        : failureKind === "validation"
+          ? originalStatus
+          : "pending",
+      failureKind
+    }
+  }
+  let payload: PromptCreatePayload | PromptUpdatePayload
+  let policy: RecipePersistenceRequestPolicy
   try {
-    createPayload = localToServerPayload(local, projectId)
-  } catch (error: unknown) {
-    return {
-      success: false,
-      localId,
-      persistenceScope,
-      error: error instanceof Error ? error.message : 'Push failed',
-      syncStatus: originalSyncStatus,
-      failureKind: 'validation'
+    payload = createCopy
+      ? localToServerPayload(local, projectId)
+      : localToServerUpdatePayload(local)
+    if (payload.prompt_schema_version === 2) {
+      if (!input?.expectedOwnerId)
+        return failure("Recipe persistence owner is required", "validation")
+      policy = {
+        mode: "require",
+        expectedOwnerId: input.expectedOwnerId,
+        localId
+      }
+      try {
+        if (
+          (await readRecipePersistenceUncertainty(
+            localId,
+            input.expectedOwnerId
+          )) !== "clear"
+        ) {
+          return failure("Recipe has an unresolved operation", "validation")
+        }
+      } catch {
+        return failure(
+          "Recipe uncertainty authority is unavailable",
+          "validation"
+        )
+      }
+    } else {
+      policy = { mode: "capture" }
     }
+  } catch (error) {
+    return failure(error, "validation")
   }
-  let response: Awaited<ReturnType<typeof createServerPrompt>>
-  try {
-    response = await createServerPrompt(createPayload, undefined, {
-      capturePersistenceScope: true,
-      requirePersistenceScope: createPayload.prompt_schema_version === 2
-    })
-    persistenceScope = response.persistenceScope || null
-  } catch (error: unknown) {
-    return {
-      success: false,
-      localId,
-      persistenceScope,
-      error: error instanceof Error ? error.message : 'Push failed',
-      syncStatus: failureSyncStatus,
-      failureKind: 'transient'
-    }
-  }
-  const serverPrompt = unwrapResponseData<ServerPrompt>(response)
-  if (!serverPrompt) {
-    return {
-      success: false,
-      localId,
-      persistenceScope,
-      error: 'Failed to create server prompt',
-      syncStatus: failureSyncStatus,
-      failureKind: response.requestDispatched === false ? 'validation' : 'invalid_server_payload'
-    }
-  }
-  let updateFields: Partial<LocalPrompt>
-  try {
-    updateFields = serverToLocalFields(serverPrompt)
-  } catch (error: unknown) {
-    return {
-      success: false,
-      localId,
-      persistenceScope,
-      error:
-        error instanceof Error ? error.message : 'invalid_prompt_definition',
-      syncStatus: originalSyncStatus,
-      failureKind: 'invalid_server_payload'
-    }
-  }
-  updateFields.studioProjectId = projectId
-  try {
-    await db.prompts.update(localId, updateFields)
-  } catch (error: unknown) {
-    return {
-      success: false,
-      localId,
-      persistenceScope,
-      error: error instanceof Error ? error.message : 'Push failed',
-      syncStatus: failureSyncStatus,
-      failureKind: 'transient'
-    }
-  }
-  clearRecipePersistenceUncertainty(localId, persistenceScope)
-  return {
-    success: true,
+
+  // Any exception crossing the transport boundary without dispatch metadata is ambiguous.
+  recipeOwnership = {
     localId,
-    persistenceScope,
-    serverId: serverPrompt.id,
-    syncStatus: 'synced'
+    dispatch: { state: "unknown", actualOwnerId: null }
+  }
+  try {
+    const response = createCopy
+      ? await createServerPrompt(payload as PromptCreatePayload, {
+          recipePersistence: policy
+        })
+      : await updateServerPrompt(
+          local.serverId!,
+          payload as PromptUpdatePayload,
+          { recipePersistence: policy }
+        )
+    recipeOwnership = {
+      localId,
+      dispatch: response.recipePersistence ?? {
+        state: "unknown",
+        actualOwnerId: null
+      }
+    }
+    if (recipeOwnership.dispatch.state === "not_dispatched") {
+      return failure(
+        response.error || "Prompt was not dispatched",
+        "validation"
+      )
+    }
+    if (
+      policy.mode === "require" &&
+      classifyRecipeDispatch(recipeOwnership.dispatch) === "unknown_owner"
+    ) {
+      await markRecipePersistenceUnknown(localId)
+      return failure(
+        "Recipe dispatch owner is unknown",
+        "invalid_server_payload"
+      )
+    }
+    if (isKnownMutationRejection(response)) {
+      await clearReconciledOwner(recipeOwnership)
+      return failure(response.error || "Prompt rejected", "validation")
+    }
+    const serverPrompt =
+      response.ok === false ? null : unwrapResponseData<ServerPrompt>(response)
+    if (!serverPrompt || !isValidProjectId(serverPrompt.id)) {
+      return failure(
+        response.error || "Invalid server prompt response",
+        "invalid_server_payload"
+      )
+    }
+    let fields: Partial<LocalPrompt>
+    try {
+      fields = serverToLocalFields(serverPrompt)
+    } catch (error) {
+      return failure(error, "invalid_server_payload")
+    }
+    if (createCopy) fields.studioProjectId = projectId
+    const updated = await db.prompts.update(localId, fields)
+    if (updated === 0)
+      return failure(
+        "Local prompt disappeared during reconciliation",
+        "transient"
+      )
+    await clearReconciledOwner(recipeOwnership)
+    return {
+      success: true,
+      localId,
+      recipeOwnership,
+      serverId: serverPrompt.id,
+      syncStatus: "synced"
+    }
+  } catch (error) {
+    if (
+      policy.mode === "require" &&
+      classifyRecipeDispatch(recipeOwnership.dispatch) === "unknown_owner"
+    ) {
+      // A failed background message can coexist with its retained scoped dispatch marker.
+      try {
+        await markRecipePersistenceUnknown(localId)
+      } catch {
+        /* Fail closed at the consumer too. */
+      }
+    }
+    return failure(error, "transient")
   }
 }
 
@@ -511,17 +651,18 @@ export async function resolveAutoSyncProjectId(
 
 export async function autoSyncPrompt(
   localId: string,
-  preferredProjectId?: number | null
+  preferredProjectId?: number | null,
+  input?: RecipePersistenceInput
 ): Promise<SyncResult> {
-  const persistenceScope = null
+  const recipeOwnership = notDispatched(localId)
   const local = await db.prompts.get(localId)
   if (!local) {
     return {
       success: false,
       localId,
-      persistenceScope,
-      error: 'Local prompt not found',
-      syncStatus: 'local'
+      recipeOwnership,
+      error: "Local prompt not found",
+      syncStatus: "local"
     }
   }
 
@@ -535,38 +676,82 @@ export async function autoSyncPrompt(
     return {
       success: false,
       localId,
-      persistenceScope,
+      recipeOwnership,
       ...(local.serverId ? { serverId: local.serverId } : {}),
       error:
-        error instanceof Error ? error.message : 'invalid_prompt_definition',
-      syncStatus: local.syncStatus || (local.serverId ? 'conflict' : 'local'),
-      failureKind: 'validation'
+        error instanceof Error ? error.message : "invalid_prompt_definition",
+      syncStatus: local.syncStatus || (local.serverId ? "conflict" : "local"),
+      failureKind: "validation"
     }
   }
 
+  if (local.promptSchemaVersion === 2 && !input?.expectedOwnerId) {
+    return {
+      success: false,
+      localId,
+      recipeOwnership,
+      error: "Recipe persistence owner is required",
+      syncStatus: local.syncStatus || "local",
+      failureKind: "validation"
+    }
+  }
+
+  if (local.promptSchemaVersion === 2 && input) {
+    try {
+      if (
+        (await readRecipePersistenceUncertainty(
+          localId,
+          input.expectedOwnerId
+        )) !== "clear"
+      ) {
+        return {
+          success: false,
+          localId,
+          recipeOwnership,
+          error: "Recipe has an unresolved operation",
+          syncStatus: local.syncStatus || "local",
+          failureKind: "validation"
+        }
+      }
+    } catch {
+      return {
+        success: false,
+        localId,
+        recipeOwnership,
+        error: "Recipe uncertainty authority is unavailable",
+        syncStatus: local.syncStatus || "local",
+        failureKind: "validation"
+      }
+    }
+  }
   const projectId = await resolveAutoSyncProjectId(
     preferredProjectId ?? local.studioProjectId
   )
 
   if (!isValidProjectId(projectId)) {
     await db.prompts.update(localId, {
-      syncStatus: 'pending',
+      syncStatus: "pending",
       updatedAt: Date.now()
     })
     return {
       success: false,
       localId,
-      persistenceScope,
+      recipeOwnership,
       error:
-        'No Prompt Studio project available for auto-sync. Configure a default project in Prompt Studio settings.',
-      syncStatus: 'pending'
+        "No Prompt Studio project available for auto-sync. Configure a default project in Prompt Studio settings.",
+      syncStatus: "pending"
     }
   }
 
-  const result = await pushToStudio(localId, projectId)
-  if (!result.success && result.failureKind === 'transient') {
+  const result = await pushToStudio(localId, projectId, input)
+  if (
+    !result.success &&
+    result.failureKind === "transient" &&
+    (local.promptSchemaVersion !== 2 ||
+      result.recipeOwnership?.dispatch.state === "not_dispatched")
+  ) {
     await db.prompts.update(localId, {
-      syncStatus: 'pending',
+      syncStatus: "pending",
       studioProjectId: projectId,
       updatedAt: Date.now()
     })
@@ -587,117 +772,32 @@ export async function autoSyncPrompt(
  */
 export async function pushToStudio(
   localId: string,
-  projectId: number
+  projectId: number,
+  input?: RecipePersistenceInput
 ): Promise<SyncResult> {
-  let persistenceScope: string | null = null
+  const recipeOwnership = notDispatched(localId)
   let local: LocalPrompt | undefined
   try {
     local = await db.prompts.get(localId)
-  } catch (error: unknown) {
+  } catch (error) {
     return {
       success: false,
       localId,
-      persistenceScope,
-      error: error instanceof Error ? error.message : 'Push failed',
-      syncStatus: 'pending',
-      failureKind: 'transient'
+      recipeOwnership,
+      error: error instanceof Error ? error.message : "Push failed",
+      syncStatus: "pending",
+      failureKind: "transient"
     }
   }
-  if (!local) {
+  if (!local)
     return {
       success: false,
       localId,
-      persistenceScope,
-      error: 'Local prompt not found',
-      syncStatus: 'local'
+      recipeOwnership,
+      error: "Local prompt not found",
+      syncStatus: "local"
     }
-  }
-
-  // If already linked, update existing server prompt
-  if (local.serverId) {
-    let updatePayload: PromptUpdatePayload
-    try {
-      updatePayload = localToServerUpdatePayload(local)
-    } catch (error: unknown) {
-      return {
-        success: false,
-        localId,
-        persistenceScope,
-        serverId: local.serverId,
-        error: error instanceof Error ? error.message : 'Push failed',
-        syncStatus: local.syncStatus || 'local',
-        failureKind: 'validation'
-      }
-    }
-    let response: Awaited<ReturnType<typeof updateServerPrompt>>
-    try {
-      response = await updateServerPrompt(local.serverId, updatePayload, {
-        capturePersistenceScope: true,
-        requirePersistenceScope: updatePayload.prompt_schema_version === 2
-      })
-      persistenceScope = response.persistenceScope || null
-    } catch (error: unknown) {
-      return {
-        success: false,
-        localId,
-        persistenceScope,
-        serverId: local.serverId,
-        error: error instanceof Error ? error.message : 'Push failed',
-        syncStatus: 'pending',
-        failureKind: 'transient'
-      }
-    }
-    const serverPrompt = unwrapResponseData<ServerPrompt>(response)
-    if (!serverPrompt) {
-      return {
-        success: false,
-        localId,
-        persistenceScope,
-        serverId: local.serverId,
-        error: 'Failed to update server prompt',
-        syncStatus: 'pending',
-        failureKind: response.requestDispatched === false ? 'validation' : 'invalid_server_payload'
-      }
-    }
-    let updateFields: Partial<LocalPrompt>
-    try {
-      updateFields = serverToLocalFields(serverPrompt)
-    } catch (error: unknown) {
-      return {
-        success: false,
-        localId,
-        persistenceScope,
-        serverId: local.serverId,
-        error:
-          error instanceof Error ? error.message : 'invalid_prompt_definition',
-        syncStatus: local.syncStatus || 'local',
-        failureKind: 'invalid_server_payload'
-      }
-    }
-    try {
-      await db.prompts.update(localId, updateFields)
-    } catch (error: unknown) {
-      return {
-        success: false,
-        localId,
-        persistenceScope,
-        serverId: local.serverId,
-        error: error instanceof Error ? error.message : 'Push failed',
-        syncStatus: 'pending',
-        failureKind: 'transient'
-      }
-    }
-    clearRecipePersistenceUncertainty(localId, persistenceScope)
-    return {
-      success: true,
-      localId,
-      persistenceScope,
-      serverId: serverPrompt.id,
-      syncStatus: 'synced'
-    }
-  }
-
-  return await createServerCopy(localId, local, projectId)
+  return persistServerPrompt(localId, local, projectId, input, !local.serverId)
 }
 
 /**
@@ -711,20 +811,25 @@ export async function pullFromStudio(
   serverId: number,
   existingLocalId?: string
 ): Promise<SyncResult> {
-  let persistenceScope: string | null = null
+  let recipeOwnership: RecipeSyncOwnership | null = null
   try {
-    const response = await getServerPrompt(serverId, { capturePersistenceScope: true })
-    persistenceScope = response.persistenceScope || null
+    const response = await getServerPrompt(serverId, {
+      recipePersistence: { mode: "capture" }
+    })
+    const dispatch = response.recipePersistence
+    recipeOwnership = dispatch
+      ? { localId: existingLocalId || "", dispatch }
+      : null
     const serverPrompt = unwrapResponseData<ServerPrompt>(response)
 
     if (!serverPrompt) {
       return {
         success: false,
-        localId: existingLocalId || '',
-        persistenceScope,
+        localId: existingLocalId || "",
+        recipeOwnership,
         serverId,
-        error: 'Server prompt not found',
-        syncStatus: 'local'
+        error: "Server prompt not found",
+        syncStatus: "local"
       }
     }
 
@@ -733,55 +838,64 @@ export async function pullFromStudio(
       const local = await db.prompts.get(existingLocalId)
       if (local) {
         const updateFields = serverToLocalFields(serverPrompt)
-        await db.prompts.update(existingLocalId, updateFields)
-        clearRecipePersistenceUncertainty(existingLocalId, persistenceScope)
+        if ((await db.prompts.update(existingLocalId, updateFields)) === 0) {
+          throw new Error("Local prompt disappeared during reconciliation")
+        }
+        recipeOwnership = dispatch
+          ? { localId: existingLocalId, dispatch }
+          : null
+        await clearReconciledOwner(recipeOwnership)
 
         return {
           success: true,
           localId: existingLocalId,
-          persistenceScope,
+          recipeOwnership,
           serverId,
-          syncStatus: 'synced'
+          syncStatus: "synced"
         }
       }
     }
 
     // Check if we already have this prompt locally by serverId
-    const existing = await db.prompts.where('serverId').equals(serverId).first()
+    const existing = await db.prompts.where("serverId").equals(serverId).first()
     if (existing) {
       const updateFields = serverToLocalFields(serverPrompt)
-      await db.prompts.update(existing.id, updateFields)
-      clearRecipePersistenceUncertainty(existing.id, persistenceScope)
+      if ((await db.prompts.update(existing.id, updateFields)) === 0) {
+        throw new Error("Local prompt disappeared during reconciliation")
+      }
+      recipeOwnership = dispatch ? { localId: existing.id, dispatch } : null
+      await clearReconciledOwner(recipeOwnership)
 
       return {
         success: true,
         localId: existing.id,
-        persistenceScope,
+        recipeOwnership,
         serverId,
-        syncStatus: 'synced'
+        syncStatus: "synced"
       }
     }
 
     // Create new local prompt
     const newLocal = serverToNewLocalPrompt(serverPrompt)
     await db.prompts.add(newLocal)
-    clearRecipePersistenceUncertainty(newLocal.id, persistenceScope)
+    recipeOwnership = dispatch ? { localId: newLocal.id, dispatch } : null
+    await clearReconciledOwner(recipeOwnership)
 
     return {
       success: true,
       localId: newLocal.id,
-      persistenceScope,
+      recipeOwnership,
       serverId,
-      syncStatus: 'synced'
+      syncStatus: "synced"
     }
   } catch (error: unknown) {
     return {
       success: false,
-      localId: existingLocalId || '',
-      persistenceScope,
+      localId: existingLocalId || "",
+      recipeOwnership,
       serverId,
-      error: error instanceof Error ? error.message : 'Pull failed',
-      syncStatus: 'local'
+      error: error instanceof Error ? error.message : "Pull failed",
+      syncStatus: "local"
     }
   }
 }
@@ -797,17 +911,17 @@ export async function linkPrompts(
   localId: string,
   serverId: number
 ): Promise<SyncResult> {
-  const persistenceScope = null
+  const recipeOwnership = null
   try {
     const local = await db.prompts.get(localId)
     if (!local) {
       return {
         success: false,
         localId,
-        persistenceScope,
+        recipeOwnership,
         serverId,
-        error: 'Local prompt not found',
-        syncStatus: 'local'
+        error: "Local prompt not found",
+        syncStatus: "local"
       }
     }
     getLocalPromptComparablePayload(local)
@@ -819,10 +933,10 @@ export async function linkPrompts(
       return {
         success: false,
         localId,
-        persistenceScope,
+        recipeOwnership,
         serverId,
-        error: 'Server prompt not found',
-        syncStatus: 'local'
+        error: "Server prompt not found",
+        syncStatus: "local"
       }
     }
 
@@ -834,25 +948,25 @@ export async function linkPrompts(
       studioProjectId: serverPrompt.project_id,
       studioPromptId: serverId,
       serverUpdatedAt: serverPrompt.updated_at,
-      syncStatus: 'pending', // Pending because content may differ
+      syncStatus: "pending", // Pending because content may differ
       lastSyncedAt: Date.now()
     })
 
     return {
       success: true,
       localId,
-      persistenceScope,
+      recipeOwnership,
       serverId,
-      syncStatus: 'pending'
+      syncStatus: "pending"
     }
   } catch (error: unknown) {
     return {
       success: false,
       localId,
-      persistenceScope,
+      recipeOwnership,
       serverId,
-      error: error instanceof Error ? error.message : 'Link failed',
-      syncStatus: 'local'
+      error: error instanceof Error ? error.message : "Link failed",
+      syncStatus: "local"
     }
   }
 }
@@ -861,7 +975,7 @@ export async function linkPrompts(
  * Unlink a local prompt from server (keep local copy).
  */
 export async function unlinkPrompt(localId: string): Promise<SyncResult> {
-  const persistenceScope = null
+  const recipeOwnership = null
   let local: LocalPrompt | undefined
   try {
     local = await db.prompts.get(localId)
@@ -869,9 +983,9 @@ export async function unlinkPrompt(localId: string): Promise<SyncResult> {
       return {
         success: false,
         localId,
-        persistenceScope,
-        error: 'Local prompt not found',
-        syncStatus: 'local'
+        recipeOwnership,
+        error: "Local prompt not found",
+        syncStatus: "local"
       }
     }
 
@@ -880,24 +994,24 @@ export async function unlinkPrompt(localId: string): Promise<SyncResult> {
       studioProjectId: null,
       studioPromptId: null,
       serverUpdatedAt: null,
-      syncStatus: 'local',
-      sourceSystem: 'workspace',
+      syncStatus: "local",
+      sourceSystem: "workspace",
       lastSyncedAt: null
     })
 
     return {
       success: true,
       localId,
-      persistenceScope,
-      syncStatus: 'local'
+      recipeOwnership,
+      syncStatus: "local"
     }
   } catch (error: unknown) {
     return {
       success: false,
       localId,
-      persistenceScope,
-      error: error instanceof Error ? error.message : 'Unlink failed',
-      syncStatus: local?.syncStatus || 'local'
+      recipeOwnership,
+      error: error instanceof Error ? error.message : "Unlink failed",
+      syncStatus: local?.syncStatus || "local"
     }
   }
 }
@@ -917,11 +1031,11 @@ export async function getSyncStatus(localId: string): Promise<{
 }> {
   const local = await db.prompts.get(localId)
   if (!local) {
-    return { status: 'local', hasConflict: false }
+    return { status: "local", hasConflict: false }
   }
 
   if (!local.serverId) {
-    return { status: 'local', hasConflict: false }
+    return { status: "local", hasConflict: false }
   }
 
   // Check for conflict by comparing timestamps and content fingerprints.
@@ -933,7 +1047,7 @@ export async function getSyncStatus(localId: string): Promise<{
     if (!serverPrompt) {
       // Server prompt deleted
       return {
-        status: 'conflict',
+        status: "conflict",
         serverId: local.serverId,
         lastSyncedAt: local.lastSyncedAt || undefined,
         hasConflict: true
@@ -949,14 +1063,14 @@ export async function getSyncStatus(localId: string): Promise<{
       serverVersionChanged && localHasUnsyncedChanges && contentChanged
 
     return {
-      status: hasConflict ? 'conflict' : local.syncStatus || 'synced',
+      status: hasConflict ? "conflict" : local.syncStatus || "synced",
       serverId: local.serverId,
       lastSyncedAt: local.lastSyncedAt || undefined,
       hasConflict
     }
   } catch {
     return {
-      status: local.syncStatus || 'local',
+      status: local.syncStatus || "local",
       serverId: local.serverId,
       lastSyncedAt: local.lastSyncedAt || undefined,
       hasConflict: false
@@ -996,50 +1110,57 @@ export async function getConflictInfo(
  */
 export async function resolveConflict(
   localId: string,
-  resolution: ConflictResolution
+  resolution: ConflictResolution,
+  input?: RecipePersistenceInput
 ): Promise<SyncResult> {
-  const persistenceScope = null
+  const recipeOwnership = null
   const local = await db.prompts.get(localId)
   if (!local || !local.serverId) {
     return {
       success: false,
       localId,
-      persistenceScope,
-      error: 'No conflict to resolve',
-      syncStatus: 'local'
+      recipeOwnership,
+      error: "No conflict to resolve",
+      syncStatus: "local"
     }
   }
 
   switch (resolution) {
-    case 'keep_local':
+    case "keep_local":
       // Push local to server (overwrite server)
-      return await pushToStudio(localId, local.studioProjectId!)
+      return await pushToStudio(localId, local.studioProjectId!, input)
 
-    case 'keep_server':
+    case "keep_server":
       // Pull server to local (overwrite local)
       return await pullFromStudio(local.serverId, localId)
 
-    case 'keep_both':
+    case "keep_both":
       // Validate/create first; preserve the existing link until one final update.
       if (isValidProjectId(local.studioProjectId)) {
-        return await createServerCopy(localId, local, local.studioProjectId)
+        return await persistServerPrompt(
+          localId,
+          local,
+          local.studioProjectId,
+          input,
+          true
+        )
       }
       return {
         success: false,
         localId,
-        persistenceScope,
+        recipeOwnership,
         error:
-          'No valid Prompt Studio project available for keep-both resolution',
-        syncStatus: local.syncStatus || 'conflict'
+          "No valid Prompt Studio project available for keep-both resolution",
+        syncStatus: local.syncStatus || "conflict"
       }
 
     default:
       return {
         success: false,
         localId,
-        persistenceScope,
-        error: 'Invalid resolution',
-        syncStatus: 'conflict'
+        recipeOwnership,
+        error: "Invalid resolution",
+        syncStatus: "conflict"
       }
   }
 }
@@ -1063,8 +1184,8 @@ export async function getAllPromptsWithSyncStatus(): Promise<
 
   return prompts.map((prompt) => ({
     prompt,
-    syncStatus: prompt.syncStatus || 'local',
-    isSynced: prompt.syncStatus === 'synced'
+    syncStatus: prompt.syncStatus || "local",
+    isSynced: prompt.syncStatus === "synced"
   }))
 }
 
@@ -1075,7 +1196,7 @@ export async function getPromptsByProject(
   projectId: number
 ): Promise<LocalPrompt[]> {
   return await db.prompts
-    .where('studioProjectId')
+    .where("studioProjectId")
     .equals(projectId)
     .filter((p) => !p.deletedAt)
     .toArray()

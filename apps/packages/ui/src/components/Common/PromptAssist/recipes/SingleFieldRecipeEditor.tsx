@@ -40,6 +40,8 @@ export type SingleFieldRecipeEditorProps = {
   target: RecipeTarget;
   initialSource?: RecipeSource;
   savedRecipes?: readonly SavedRecipeSource[];
+  unresolvedOperation?: { id: string; state: SavedRecipeSource["uncertainty"] };
+  onForgetUnknown?: (id: string) => Promise<void>;
   persistenceAvailable?: boolean;
   savePersistenceAvailable?: boolean;
   updatePersistenceAvailable?: boolean;
@@ -122,6 +124,8 @@ export function SingleFieldRecipeEditor({
   initialSource = CLEAR_TASK_RECIPE,
   savedRecipes = [],
   persistenceAvailable,
+  unresolvedOperation,
+  onForgetUnknown,
   savePersistenceAvailable = persistenceAvailable,
   updatePersistenceAvailable = persistenceAvailable,
   persistenceUnavailableReason = "Recipe saving requires a supported online server.",
@@ -154,6 +158,25 @@ export function SingleFieldRecipeEditor({
   >(null);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const [persistenceUncertain, setPersistenceUncertain] = useState(false);
+  const [encounteredUnknownId, setEncounteredUnknownId] = useState<
+    string | null
+  >(null);
+  const [forgetConfirmation, setForgetConfirmation] = useState<string | null>(
+    null,
+  );
+  const [forgetPending, setForgetPending] = useState(false);
+  const [recoveryStatus, setRecoveryStatus] = useState<string | null>(null);
+  const forgetButtonRef = useRef<HTMLButtonElement>(null);
+  const cancelForgetRef = useRef<HTMLButtonElement>(null);
+  const saveButtonRef = useRef<HTMLButtonElement>(null);
+  const recoveryFocus = useRef<"forget" | "save" | null>(null);
+  useEffect(() => {
+    if (forgetConfirmation && !forgetPending) cancelForgetRef.current?.focus();
+    if (forgetConfirmation || forgetPending) return;
+    if (recoveryFocus.current === "forget") forgetButtonRef.current?.focus();
+    if (recoveryFocus.current === "save") saveButtonRef.current?.focus();
+    recoveryFocus.current = null;
+  }, [forgetConfirmation, forgetPending, recoveryStatus]);
 
   const sources = useMemo(() => {
     const all: RecipeSource[] = [...BUILT_IN_RECIPES];
@@ -455,18 +478,18 @@ export function SingleFieldRecipeEditor({
                   "The recipe was updated locally, but the server outcome could not be verified. Reconcile this recipe before saving or updating again.",
                 )
             : rollbackFailed
-            ? action === "save"
-              ? t(
-                  "common:promptAssist.recipeSaveRollbackFailed",
-                  "Could not save the recipe, and its local rollback also failed. Refresh the prompt library before retrying.",
-                )
-              : t(
-                  "common:promptAssist.recipeUpdateRollbackFailed",
-                  "Could not update the recipe, and its local rollback also failed. Refresh the prompt library before retrying.",
-                )
-            : action === "save"
-              ? "Could not save the recipe. Try again."
-              : "Could not update the recipe. Try again.",
+              ? action === "save"
+                ? t(
+                    "common:promptAssist.recipeSaveRollbackFailed",
+                    "Could not save the recipe, and its local rollback also failed. Refresh the prompt library before retrying.",
+                  )
+                : t(
+                    "common:promptAssist.recipeUpdateRollbackFailed",
+                    "Could not update the recipe, and its local rollback also failed. Refresh the prompt library before retrying.",
+                  )
+              : action === "save"
+                ? "Could not save the recipe. Try again."
+                : "Could not update the recipe. Try again.",
         );
       }
     } finally {
@@ -499,8 +522,60 @@ export function SingleFieldRecipeEditor({
   const sourceHasConflict =
     state.source.source_kind === "saved" &&
     liveSelectedSyncStatus === "conflict";
+  const selectedUncertainty =
+    refreshedSavedSource?.uncertainty ??
+    (initialSource.source_kind === "saved" &&
+    sourceValue(initialSource) === sourceValue(state.source)
+      ? initialSource.uncertainty
+      : undefined);
+  const unknownId =
+    unresolvedOperation?.state === "unknown_owner"
+      ? unresolvedOperation.id
+      : selectedUncertainty === "unknown_owner"
+        ? state.source.id
+        : encounteredUnknownId;
+  useEffect(() => {
+    if (unknownId) setEncounteredUnknownId(unknownId);
+  }, [unknownId]);
   const persistenceWriteLocked =
-    persistenceUncertain || liveSelectedSyncStatus === "error";
+    Boolean(unknownId) ||
+    (unresolvedOperation
+      ? unresolvedOperation.state !== "clear"
+      : persistenceUncertain) ||
+    (selectedUncertainty !== undefined
+      ? selectedUncertainty !== "clear"
+      : liveSelectedSyncStatus === "error");
+
+  const confirmForget = async () => {
+    if (!forgetConfirmation || !onForgetUnknown || persistencePending.current)
+      return;
+    persistencePending.current = true;
+    setForgetPending(true);
+    try {
+      await onForgetUnknown(forgetConfirmation);
+      setEncounteredUnknownId(null);
+      setPersistenceUncertain(false);
+      setPersistenceError(null);
+      setRecoveryStatus(
+        t(
+          "common:promptAssist.recipeForgotten",
+          "Unresolved operation forgotten. No server data was changed.",
+        ),
+      );
+      recoveryFocus.current = "save";
+      setForgetConfirmation(null);
+    } catch {
+      setRecoveryStatus(
+        t(
+          "common:promptAssist.recipeForgetFailed",
+          "Could not forget this operation. It remains locked; try again.",
+        ),
+      );
+    } finally {
+      persistencePending.current = false;
+      setForgetPending(false);
+    }
+  };
   const saveEnabled =
     savePersistenceAvailable === true &&
     !persistenceWriteLocked &&
@@ -521,8 +596,7 @@ export function SingleFieldRecipeEditor({
       role="region"
       aria-label="Structured recipe builder"
       data-testid="single-field-recipe-editor"
-      className="min-w-0 max-w-full space-y-4"
-    >
+      className="min-w-0 max-w-full space-y-4">
       <div className="flex min-w-0 flex-col gap-3 rounded-xl border border-border bg-surface1 p-4 sm:flex-row sm:items-end sm:justify-between">
         <label className="min-w-0 flex-1">
           <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-text-muted">
@@ -532,8 +606,7 @@ export function SingleFieldRecipeEditor({
             aria-label="Recipe source"
             value={sourceValue(state.source)}
             onChange={(event) => selectSource(event.target.value)}
-            className="min-h-11 w-full min-w-0 rounded-md border border-border bg-background px-3 py-2 text-sm text-text"
-          >
+            className="min-h-11 w-full min-w-0 rounded-md border border-border bg-background px-3 py-2 text-sm text-text">
             <optgroup label="Starters">
               {sources
                 .filter((source) => source.source_kind === "built_in")
@@ -550,8 +623,7 @@ export function SingleFieldRecipeEditor({
                   .map((source) => (
                     <option
                       key={sourceValue(source)}
-                      value={sourceValue(source)}
-                    >
+                      value={sourceValue(source)}>
                       {source.name}
                     </option>
                   ))}
@@ -586,8 +658,7 @@ export function SingleFieldRecipeEditor({
               renderFormat: event.target.value as RecipeRenderFormat,
             })
           }
-          className="min-h-11 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-text"
-        >
+          className="min-h-11 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-text">
           <option value="xml">XML-style sections</option>
           <option value="markdown">Markdown sections</option>
           <option value="freeform">Free-form text</option>
@@ -596,8 +667,7 @@ export function SingleFieldRecipeEditor({
 
       <div
         data-testid="single-field-recipe-workspace"
-        className="grid min-w-0 gap-4 xl:grid-cols-[18rem_minmax(0,1fr)]"
-      >
+        className="grid min-w-0 gap-4 xl:grid-cols-[18rem_minmax(0,1fr)]">
         <BlockListPanel
           blocks={orderedBlocks.map((block) => ({
             ...block,
@@ -696,7 +766,55 @@ export function SingleFieldRecipeEditor({
         </section>
       </div>
 
-      {persistenceWriteLocked && !persistenceError ? (
+      {unknownId ? (
+        <div className="space-y-2" aria-live="polite">
+          <p role="status" className="text-sm text-warn">
+            {t(
+              "common:promptAssist.recipeOwnerUnknown",
+              "The server outcome and responsible connection are unknown. Saving and updating are locked across connections. You can still edit, preview, and apply.",
+            )}
+          </p>
+          {forgetConfirmation ? (
+            <div className="rounded-md border border-border p-3">
+              <p>
+                {t(
+                  "common:promptAssist.recipeForgetRisk",
+                  "The server may already have saved this recipe. Forgetting only removes this local warning; retrying could create a duplicate. No server data will be deleted.",
+                )}
+              </p>
+              <button
+                ref={cancelForgetRef}
+                type="button"
+                className="min-h-11 px-3"
+                disabled={forgetPending}
+                onClick={() => {
+                  recoveryFocus.current = "forget";
+                  setForgetConfirmation(null);
+                }}>
+                {t("common:cancel", "Cancel")}
+              </button>
+              <button
+                type="button"
+                className="min-h-11 px-3"
+                disabled={forgetPending}
+                onClick={() => void confirmForget()}>
+                {t("common:promptAssist.recipeConfirmForget", "Confirm forget")}
+              </button>
+            </div>
+          ) : onForgetUnknown ? (
+            <button
+              ref={forgetButtonRef}
+              type="button"
+              className="min-h-11 px-3"
+              onClick={() => setForgetConfirmation(unknownId)}>
+              {t(
+                "common:promptAssist.recipeForgetOperation",
+                "Forget unresolved operation",
+              )}
+            </button>
+          ) : null}
+        </div>
+      ) : persistenceWriteLocked && !persistenceError ? (
         <p role="status" className="text-sm text-warn">
           {t(
             "common:promptAssist.recipePersistenceUnverified",
@@ -704,14 +822,20 @@ export function SingleFieldRecipeEditor({
           )}
         </p>
       ) : savePersistenceAvailable !== true ||
-      (state.source.source_kind === "saved" &&
-        updatePersistenceAvailable !== true) ? (
+        (state.source.source_kind === "saved" &&
+          updatePersistenceAvailable !== true) ? (
         <p role="status" className="text-sm text-warn">
           {persistenceUnavailableReason}
         </p>
       ) : null}
 
-      {persistenceError ? (
+      {recoveryStatus ? (
+        <p role="status" className="text-sm text-text-muted">
+          {recoveryStatus}
+        </p>
+      ) : null}
+
+      {persistenceError && !unknownId ? (
         <p role="alert" className="text-sm text-danger">
           {persistenceError}
         </p>
@@ -721,12 +845,12 @@ export function SingleFieldRecipeEditor({
         <Button
           variant="outline"
           size="lg"
+          ref={saveButtonRef}
           disabled={!saveEnabled || persistenceAction !== null}
           onClick={() => {
             if (!onSaveAsNew) return;
             void runPersistence("save", () => onSaveAsNew(saveDefinition()));
-          }}
-        >
+          }}>
           Save as new recipe
         </Button>
         {state.source.source_kind === "saved" && !sourceHasConflict ? (
@@ -740,8 +864,7 @@ export function SingleFieldRecipeEditor({
               void runPersistence("update", () =>
                 onUpdate(savedSourceId, saveDefinition()),
               );
-            }}
-          >
+            }}>
             Update recipe
           </Button>
         ) : null}
@@ -751,8 +874,7 @@ export function SingleFieldRecipeEditor({
           disabled={preview.renderedText === null || !variableNamesReady}
           onClick={() => {
             if (preview.renderedText !== null) onApply(preview.renderedText);
-          }}
-        >
+          }}>
           {applyLabel}
         </Button>
       </div>

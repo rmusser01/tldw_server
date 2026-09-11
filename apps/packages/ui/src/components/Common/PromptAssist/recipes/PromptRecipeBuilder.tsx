@@ -16,14 +16,16 @@ import type { Prompt } from "@/db/dexie/types";
 import { useServerOnline } from "@/hooks/useServerOnline";
 import {
   autoSyncPrompt,
+  classifyRecipeDispatch,
   shouldAutoSyncWorkspacePrompts,
 } from "@/services/prompt-sync";
-import {
-  isRecipePersistenceUncertain,
-  markRecipePersistenceUncertain,
-  markRecipePersistenceOwnerUnknown,
-} from "@/services/recipe-persistence-uncertainty";
 import type { PromptCapabilities } from "@/services/prompts-api";
+import {
+  forgetRecipePersistenceUnknown,
+  markRecipePersistenceScoped,
+  markRecipePersistenceUnknown,
+  readRecipePersistenceUncertainty,
+} from "@/services/recipe-persistence-uncertainty";
 import { isFireFoxPrivateMode } from "@/utils/is-private-mode";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React from "react";
@@ -44,7 +46,11 @@ const acceptSyncResult = (
   result: Awaited<ReturnType<typeof autoSyncPrompt>>,
 ) => {
   if (result.success) return false;
-  if (result.failureKind === "transient" && result.syncStatus === "pending") {
+  if (
+    result.failureKind === "transient" &&
+    result.syncStatus === "pending" &&
+    result.recipeOwnership?.dispatch.state === "not_dispatched"
+  ) {
     return true;
   }
   throw new Error(result.error || "recipe_sync_failed");
@@ -69,9 +75,42 @@ export function PromptRecipeBuilder({
   const queryClient = useQueryClient();
   const isOnline = useServerOnline();
   const [syncPendingNotice, setSyncPendingNotice] = React.useState(false);
+  const [unresolvedId, setUnresolvedId] = React.useState<string | null>(null);
   const { data: prompts = [] } = useQuery({
     queryKey: ["getAllPromptsForSelect"],
     queryFn: getAllPrompts,
+  });
+  const recipeIds = React.useMemo(
+    () =>
+      prompts.flatMap((prompt) => {
+        const classification = classifyPromptRecipe(prompt);
+        return classification.kind === "recipe" ? [String(prompt.id)] : [];
+      }),
+    [prompts],
+  );
+  const {
+    data: uncertainty,
+    isFetching: checkingUncertainty,
+    isError: uncertaintyUnavailable,
+  } = useQuery({
+    queryKey: [
+      "recipePersistenceUncertainty",
+      persistenceScope,
+      recipeIds,
+      unresolvedId,
+    ],
+    queryFn: async () =>
+      Object.fromEntries(
+        await Promise.all(
+          [
+            ...new Set([...recipeIds, ...(unresolvedId ? [unresolvedId] : [])]),
+          ].map(async (id) => [
+            id,
+            await readRecipePersistenceUncertainty(id, persistenceScope),
+          ]),
+        ),
+      ),
+    retry: false,
   });
   const persistence = getRecipePersistenceState(isOnline, capabilities);
   const basePersistenceAvailable =
@@ -132,16 +171,23 @@ export function PromptRecipeBuilder({
         }
         const source = cloneSavedRecipeSource(prompt);
         return [
-          isRecipePersistenceUncertain(source.id, persistenceScope)
-            ? { ...source, syncStatus: "error" as const }
-            : source,
+          {
+            ...source,
+            uncertainty:
+              checkingUncertainty || uncertaintyUnavailable
+                ? "unavailable"
+                : uncertainty?.[source.id] ?? "unavailable",
+          },
         ];
       }),
-    [prompts, target, persistenceScope],
+    [prompts, target, uncertainty, checkingUncertainty, uncertaintyUnavailable],
   );
 
   const refreshPromptQueries = React.useCallback(async () => {
     await Promise.allSettled([
+      queryClient.invalidateQueries({
+        queryKey: ["recipePersistenceUncertainty"],
+      }),
       queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] }),
       queryClient.invalidateQueries({ queryKey: ["getAllPromptsForSelect"] }),
     ]);
@@ -150,27 +196,41 @@ export function PromptRecipeBuilder({
   const syncIfEnabled = React.useCallback(
     async (id: string) => {
       if (!(await shouldAutoSyncWorkspacePrompts())) return false;
-      const result = await autoSyncPrompt(id);
-      if (!result.success && result.failureKind === "invalid_server_payload") {
-        if (result.localId === id && result.persistenceScope) {
-          markRecipePersistenceUncertain(id, result.persistenceScope);
-        } else {
-          markRecipePersistenceOwnerUnknown(id);
+      const result = await autoSyncPrompt(id, undefined, {
+        expectedOwnerId: persistenceScope!,
+      });
+      const ownership = result.recipeOwnership;
+      const classification =
+        result.localId !== id || ownership?.localId !== id
+          ? "unknown_owner"
+          : ownership
+            ? classifyRecipeDispatch(ownership.dispatch)
+            : "unknown_owner";
+      if (
+        classification === "unknown_owner" ||
+        (!result.success &&
+          result.failureKind !== "validation" &&
+          classification === "scoped_uncertain")
+      ) {
+        setUnresolvedId(id);
+        if (classification === "unknown_owner") {
+          await markRecipePersistenceUnknown(id).catch(() => undefined);
+        } else if (ownership?.dispatch.actualOwnerId) {
+          await markRecipePersistenceScoped(
+            id,
+            ownership.dispatch.actualOwnerId,
+          ).catch(() => undefined);
         }
         try {
           await markPromptSyncError(id);
-          // Keep the scoped marker: another backend can overwrite the shared
-          // durable status without reconciling this owner's remote outcome.
         } catch {
-          // The remote write is still uncertain, so local rollback is never safe.
+          // The pre-dispatch authority marker already exists; durable storage is secondary.
         }
         throw uncertainSyncFailure;
       }
-      // Authoritative success is cleared by sync under its dispatch scope, which
-      // can differ from this editor's owner if the connection changed mid-save.
       return acceptSyncResult(result);
     },
-    [],
+    [persistenceScope],
   );
 
   const saveAsNew = React.useCallback(
@@ -258,8 +318,7 @@ export function PromptRecipeBuilder({
   return (
     <section
       aria-label={t("common:promptAssist.recipeRegion", "Recipe builder")}
-      className="min-w-0 space-y-4"
-    >
+      className="min-w-0 space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold text-text">
@@ -279,6 +338,22 @@ export function PromptRecipeBuilder({
       <SingleFieldRecipeEditor
         target={target}
         savedRecipes={savedRecipes}
+        unresolvedOperation={
+          unresolvedId
+            ? {
+                id: unresolvedId,
+                state:
+                  checkingUncertainty || uncertaintyUnavailable
+                    ? "unavailable"
+                    : uncertainty?.[unresolvedId] ?? "unavailable",
+              }
+            : undefined
+        }
+        onForgetUnknown={async (id) => {
+          await forgetRecipePersistenceUnknown(id);
+          if (id === unresolvedId) setUnresolvedId(null);
+          await refreshPromptQueries();
+        }}
         savePersistenceAvailable={savePersistenceAvailable}
         updatePersistenceAvailable={updatePersistenceAvailable}
         persistenceUnavailableReason={persistenceUnavailableReason}

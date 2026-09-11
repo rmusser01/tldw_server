@@ -1,41 +1,46 @@
+import { CLEAR_TASK_RECIPE } from "@/components/Common/PromptAssist/recipes/built-in-recipes"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { buildChatSurfaceScopeKeyFromConfig } from "../chat-surface-scope"
 
+import * as sync from "../prompt-sync"
+import * as registry from "../recipe-persistence-uncertainty"
+
+const ownerA = "recipe-owner:sha256:" + "a".repeat(64)
+const ownerB = "recipe-owner:sha256:" + "b".repeat(64)
 const mocks = vi.hoisted(() => ({
-  getConfig: vi.fn(),
+  defaults: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
   get: vi.fn(),
+  reconcile: vi.fn(),
   rows: new Map<string, Record<string, unknown>>()
 }))
-
-vi.mock("@/services/tldw/TldwApiClient", () => ({
-  tldwClient: { getConfig: mocks.getConfig }
-}))
 vi.mock("@/services/prompt-studio", () => ({
-  createPrompt: mocks.create,
-  updatePrompt: mocks.update,
-  getPrompt: mocks.get,
+  createPrompt: (...args: unknown[]) => mocks.create(...args),
+  updatePrompt: (...args: unknown[]) => mocks.update(...args),
+  getPrompt: (...args: unknown[]) => mocks.get(...args),
   listProjects: async () => ({ data: { data: [{ id: 42 }] } }),
   createProject: vi.fn()
 }))
 vi.mock("@/services/prompt-studio-settings", () => ({
-  getPromptStudioDefaults: async () => ({
-    defaultProjectId: 42,
-    autoSyncWorkspacePrompts: true
-  }),
+  getPromptStudioDefaults: (...args: unknown[]) => mocks.defaults(...args),
   setPromptStudioDefaults: vi.fn()
 }))
-vi.mock("@/db/dexie/helpers", () => ({ generateID: () => "generated-id" }))
+vi.mock("@/db/dexie/helpers", () => ({ generateID: () => "new-id" }))
 vi.mock("@/db/dexie/chat", () => ({ PageAssistDatabase: class {} }))
 vi.mock("@/db/dexie/schema", () => ({
   db: {
     prompts: {
       get: async (id: string) => mocks.rows.get(id),
       update: async (id: string, fields: object) => {
+        await mocks.reconcile()
+        if (!mocks.rows.has(id)) return 0
         mocks.rows.set(id, { ...mocks.rows.get(id), ...fields })
+        return 1
       },
-      add: async (row: { id: string }) => mocks.rows.set(row.id, row),
+      add: async (row: { id: string }) => {
+        await mocks.reconcile()
+        mocks.rows.set(row.id, row)
+      },
       where: (field: string) => ({
         equals: (value: unknown) => ({
           first: async () =>
@@ -46,53 +51,91 @@ vi.mock("@/db/dexie/schema", () => ({
   }
 }))
 
-const config = (serverUrl: string, sub: string, exp = 1) => ({
-  serverUrl,
-  authMode: "multi-user" as const,
-  accessToken: `header.${btoa(JSON.stringify({ sub, exp }))}.signature`
+const server = {
+  id: 101,
+  project_id: 42,
+  name: "Reconciled",
+  version_number: 2,
+  updated_at: "2026-09-10T00:00:00Z",
+  prompt_format: "structured",
+  prompt_schema_version: 2,
+  prompt_definition: CLEAR_TASK_RECIPE.definition
+}
+const response = () => ({
+  ok: true,
+  status: 200,
+  data: { success: true, data: server },
+  recipePersistence: { state: "dispatched", actualOwnerId: ownerB }
 })
-const owner = config("https://a.test", "alice")
-const ownerScope = buildChatSurfaceScopeKeyFromConfig(owner)
-const otherConnections = [
-  ["backend", config("https://b.test", "alice")],
-  ["principal", config("https://a.test", "bob")]
-] as const
-const response = {
-  data: {
-    data: {
-      id: 101,
-      project_id: 42,
-      name: "Reconciled",
-      system_prompt: "",
-      user_prompt: "Task",
-      prompt_format: "legacy",
-      prompt_schema_version: null,
-      prompt_definition: null,
-      version_number: 2,
-      updated_at: "2026-09-10T00:00:00Z"
+const seed = (linked = false) =>
+  mocks.rows.set("exact-id", {
+    id: "exact-id",
+    title: "Recipe",
+    syncStatus: linked ? "conflict" : "local",
+    promptFormat: "structured",
+    promptSchemaVersion: 2,
+    structuredPromptDefinition: CLEAR_TASK_RECIPE.definition,
+    studioProjectId: 42,
+    ...(linked ? { serverId: 101 } : {})
+  })
+
+describe("owner-aware sync and exact reconciliation", () => {
+  it.each(["exact", "by server ID"])(
+    "pull %s retains scoped state if the local row disappears during reconciliation",
+    async (mode) => {
+      seed(true)
+      await registry.markRecipePersistenceScoped("exact-id", ownerB)
+      mocks.reconcile.mockImplementationOnce(() =>
+        mocks.rows.delete("exact-id")
+      )
+      expect(
+        await sync.pullFromStudio(
+          101,
+          mode === "exact" ? "exact-id" : undefined
+        )
+      ).toMatchObject({ success: false })
+      expect(
+        await registry.readRecipePersistenceUncertainty("exact-id", ownerB)
+      ).toBe("scoped")
     }
-  }
-}
-
-const transportResponse = async () => {
-  const dispatchConfig = await mocks.getConfig().catch(() => null)
-  return {
-    ...response,
-    persistenceScope: dispatchConfig
-      ? buildChatSurfaceScopeKeyFromConfig(dispatchConfig)
-      : null
-  }
-}
-
-describe("authoritative prompt sync uncertainty cleanup", () => {
-  beforeEach(() => {
-    vi.resetModules()
+  )
+  it("blocks unresolved auto-sync before project discovery and leaves no new remote attempt", async () => {
+    seed()
+    mocks.rows.get("exact-id").studioProjectId = null
+    await registry.markRecipePersistenceScoped("exact-id", ownerB)
+    expect(
+      await sync.autoSyncPrompt("exact-id", undefined, {
+        expectedOwnerId: ownerB
+      })
+    ).toMatchObject({ success: false })
+    expect(mocks.defaults).not.toHaveBeenCalled()
+    expect(mocks.create).not.toHaveBeenCalled()
+  })
+  beforeEach(async () => {
     vi.clearAllMocks()
     mocks.rows.clear()
-    mocks.getConfig.mockResolvedValue(owner)
-    mocks.create.mockImplementation(transportResponse)
-    mocks.update.mockImplementation(transportResponse)
-    mocks.get.mockImplementation(transportResponse)
+    mocks.defaults.mockResolvedValue({
+      defaultProjectId: 42,
+      autoSyncWorkspacePrompts: true
+    })
+    mocks.reconcile.mockResolvedValue(undefined)
+    for (const id of ["exact-id", "other-id", "new-id"]) {
+      await registry.forgetRecipePersistenceUnknown(id)
+      for (const owner of [ownerA, ownerB])
+        await registry.clearRecipePersistenceScoped(id, owner)
+    }
+    mocks.create.mockImplementation(async () => response())
+    mocks.update.mockImplementation(async () => response())
+    mocks.get.mockImplementation(async () => response())
+  })
+
+  it.each([
+    [{ state: "not_dispatched", actualOwnerId: null }, "known_rejection"],
+    [{ state: "dispatched", actualOwnerId: ownerB }, "scoped_uncertain"],
+    [{ state: "dispatched", actualOwnerId: null }, "unknown_owner"],
+    [{ state: "unknown", actualOwnerId: null }, "unknown_owner"]
+  ] as const)("classifies %j as %s", (dispatch, expected) => {
+    expect(sync.classifyRecipeDispatch(dispatch)).toBe(expected)
   })
 
   it.each([
@@ -100,107 +143,265 @@ describe("authoritative prompt sync uncertainty cleanup", () => {
     "manual update",
     "auto create",
     "auto update",
+    "keep_local",
+    "keep_both",
+    "keep_server",
     "pull exact",
-    "pull by server ID",
+    "pull by ID",
     "pull new"
-  ])(
-    "%s clears only its matching backend/principal and exact local ID",
-    async (operation) => {
-      const registry = await import("../recipe-persistence-uncertainty")
-      const sync = await import("../prompt-sync")
-      for (const [, other] of otherConnections) {
-        const otherScope = buildChatSurfaceScopeKeyFromConfig(other)
-        const id = operation === "pull new" ? "generated-id" : "same-id"
-        mocks.rows.clear()
-        if (operation !== "pull new")
-          mocks.rows.set(id, {
-            id,
-            title: "Task",
-            name: "Task",
-            content: "Task",
-            is_system: false,
-            createdAt: 1,
-            syncStatus: "local",
-            ...(operation.includes("update") ||
-            operation === "pull by server ID"
-              ? { serverId: 101 }
-              : {})
-          })
-        registry.markRecipePersistenceUncertain(id, ownerScope)
-        registry.markRecipePersistenceUncertain(id, otherScope)
-        registry.markRecipePersistenceUncertain("unrelated-id", otherScope)
-        mocks.getConfig.mockResolvedValue(other)
-        const run = () =>
-          operation.startsWith("manual")
-            ? sync.pushToStudio(id, 42)
-            : operation.startsWith("auto")
-              ? sync.autoSyncPrompt(id, 42)
-              : sync.pullFromStudio(
-                  101,
-                  operation === "pull exact" ? id : undefined
-                )
-        expect(await run()).toMatchObject({
-          success: true,
-          persistenceScope: otherScope
-        })
-        expect(registry.isRecipePersistenceUncertain(id, ownerScope)).toBe(true)
-        expect(registry.isRecipePersistenceUncertain(id, otherScope)).toBe(
-          false
-        )
-        expect(
-          registry.isRecipePersistenceUncertain("unrelated-id", otherScope)
-        ).toBe(true)
-
-        // Credential refresh belongs to A, not a new uncertainty namespace.
-        mocks.getConfig.mockResolvedValue(config("https://a.test", "alice", 2))
-        expect(await run()).toMatchObject({
-          success: true,
-          persistenceScope: ownerScope
-        })
-        expect(registry.isRecipePersistenceUncertain(id, ownerScope)).toBe(
-          false
-        )
+  ])("%s clears only the reconciled owner and ID", async (operation) => {
+    const id = operation === "pull new" ? "new-id" : "exact-id"
+    if (operation !== "pull new") seed(!operation.includes("create"))
+    await registry.markRecipePersistenceScoped(id, ownerA)
+    if (operation.startsWith("pull") || operation === "keep_server")
+      await registry.markRecipePersistenceScoped(id, ownerB)
+    else {
+      const dispatch = async () => {
+        await registry.markRecipePersistenceScoped(id, ownerB)
+        return response()
       }
+      mocks.create.mockImplementation(dispatch)
+      mocks.update.mockImplementation(dispatch)
+    }
+    await registry.markRecipePersistenceScoped("other-id", ownerB)
+    const input = { expectedOwnerId: ownerB }
+    const result = operation.startsWith("manual")
+      ? await sync.pushToStudio(id, 42, input)
+      : operation.startsWith("auto")
+        ? await sync.autoSyncPrompt(id, 42, input)
+        : operation.startsWith("keep_")
+          ? await sync.resolveConflict(
+              id,
+              operation as sync.ConflictResolution,
+              input
+            )
+          : await sync.pullFromStudio(
+              101,
+              operation === "pull exact" ? id : undefined
+            )
+    expect(result).toMatchObject({
+      success: true,
+      localId: id,
+      recipeOwnership: {
+        localId: id,
+        dispatch: { state: "dispatched", actualOwnerId: ownerB }
+      }
+    })
+    expect(await registry.readRecipePersistenceUncertainty(id, ownerA)).toBe(
+      "scoped"
+    )
+    expect(await registry.readRecipePersistenceUncertainty(id, ownerB)).toBe(
+      "clear"
+    )
+    expect(
+      await registry.readRecipePersistenceUncertainty("other-id", ownerB)
+    ).toBe("scoped")
+  })
+
+  it.each(["create", "update"])(
+    "threads exact owner and ID through %s and refuses missing v2 ownership",
+    async (operation) => {
+      seed(operation === "update")
+      const transport = operation === "create" ? mocks.create : mocks.update
+      expect(await sync.pushToStudio("exact-id", 42)).toMatchObject({
+        success: false,
+        failureKind: "validation",
+        recipeOwnership: {
+          dispatch: { state: "not_dispatched", actualOwnerId: null }
+        }
+      })
+      expect(transport).not.toHaveBeenCalled()
+      await sync.autoSyncPrompt("exact-id", 42, { expectedOwnerId: ownerB })
+      expect(transport.mock.calls[0].at(-1)).toEqual({
+        recipePersistence: {
+          mode: "require",
+          expectedOwnerId: ownerB,
+          localId: "exact-id"
+        }
+      })
     }
   )
 
-  it("does not clear any owned marker when the transport cannot report its scope", async () => {
-    const registry = await import("../recipe-persistence-uncertainty")
-    const { pullFromStudio } = await import("../prompt-sync")
-    mocks.rows.set("same-id", { id: "same-id" })
-    registry.markRecipePersistenceUncertain("same-id", ownerScope)
-    mocks.getConfig.mockRejectedValue(new Error("config unavailable"))
-    expect(await pullFromStudio(101, "same-id")).toMatchObject({
-      success: true,
-      persistenceScope: null
-    })
-    expect(registry.isRecipePersistenceUncertain("same-id", ownerScope)).toBe(
-      true
-    )
-  })
+  it.each([
+    [
+      "malformed 2xx",
+      {
+        ok: true,
+        status: 200,
+        data: { data: { ...server, prompt_schema_version: 999 } }
+      }
+    ],
+    ["connection loss", { ok: false, status: 0, error: "connection lost" }],
+    ["timeout", { ok: false, status: 0, error: "Timeout" }],
+    [
+      "unclassified 5xx",
+      { ok: false, status: 500, data: { detail: "Internal error" } }
+    ],
+    ["untyped 409", { ok: false, status: 409 }]
+  ])(
+    "retains scoped uncertainty after %s without making the row retryable pending",
+    async (_label, failure) => {
+      seed()
+      mocks.create.mockImplementation(async () => {
+        await registry.markRecipePersistenceScoped("exact-id", ownerB)
+        return { ...response(), ...failure }
+      })
+      const result = await sync.autoSyncPrompt("exact-id", 42, {
+        expectedOwnerId: ownerB
+      })
+      expect(result.success).toBe(false)
+      expect(result.recipeOwnership?.dispatch).toEqual({
+        state: "dispatched",
+        actualOwnerId: ownerB
+      })
+      expect(
+        await registry.readRecipePersistenceUncertainty("exact-id", ownerB)
+      ).toBe("scoped")
+      expect(mocks.rows.get("exact-id").syncStatus).toBe("error")
+    }
+  )
 
-  it("clears the dispatch owner, not the connection selected while the response is pending", async () => {
-    const registry = await import("../recipe-persistence-uncertainty")
-    const { pullFromStudio } = await import("../prompt-sync")
-    const other = otherConnections[0][1]
-    const otherScope = buildChatSurfaceScopeKeyFromConfig(other)
-    mocks.rows.set("same-id", { id: "same-id" })
-    registry.markRecipePersistenceUncertain("same-id", ownerScope)
-    registry.markRecipePersistenceUncertain("same-id", otherScope)
-    mocks.get.mockImplementationOnce(async () => {
-      const capturedResponse = await transportResponse()
-      mocks.getConfig.mockResolvedValue(other)
-      return capturedResponse
+  it.each([
+    [
+      422,
+      {
+        detail: [
+          { loc: ["body", "name"], msg: "Field required", type: "missing" }
+        ]
+      }
+    ],
+    [403, { detail: "Access denied to this prompt" }],
+    [409, { detail: "Prompt with this name already exists in the project" }]
+  ])(
+    "clears a typed no-mutation %s rejection before rollback",
+    async (status, data) => {
+      seed()
+      mocks.create.mockImplementation(async () => {
+        await registry.markRecipePersistenceScoped("exact-id", ownerB)
+        return { ...response(), ok: false, status, data }
+      })
+      expect(
+        await sync.pushToStudio("exact-id", 42, { expectedOwnerId: ownerB })
+      ).toMatchObject({ success: false, failureKind: "validation" })
+      expect(
+        await registry.readRecipePersistenceUncertainty("exact-id", ownerB)
+      ).toBe("clear")
+      expect(mocks.rows.get("exact-id").title).toBe("Recipe")
+    }
+  )
+
+  it.each(["write fails", "row disappears"])(
+    "retains the scoped marker when local reconciliation %s",
+    async (mode) => {
+      seed()
+      mocks.create.mockImplementation(async () => {
+        await registry.markRecipePersistenceScoped("exact-id", ownerB)
+        if (mode === "row disappears") mocks.rows.delete("exact-id")
+        else mocks.reconcile.mockRejectedValue(new Error("disk unavailable"))
+        return response()
+      })
+      expect(
+        await sync.pushToStudio("exact-id", 42, { expectedOwnerId: ownerB })
+      ).toMatchObject({ success: false })
+      expect(
+        await registry.readRecipePersistenceUncertainty("exact-id", ownerB)
+      ).toBe("scoped")
+    }
+  )
+
+  it.each(["scoped", "unknown_owner"])(
+    "blocks repeated v2 writes with %s state before dispatch",
+    async (state) => {
+      seed()
+      if (state === "scoped")
+        await registry.markRecipePersistenceScoped("exact-id", ownerB)
+      else await registry.markRecipePersistenceUnknown("exact-id")
+      expect(
+        await sync.autoSyncPrompt("exact-id", 42, { expectedOwnerId: ownerB })
+      ).toMatchObject({
+        success: false,
+        recipeOwnership: {
+          dispatch: { state: "not_dispatched", actualOwnerId: null }
+        }
+      })
+      expect(mocks.create).not.toHaveBeenCalled()
+    }
+  )
+  it("does not automatically retry after a lost connection even if the row had been pending", async () => {
+    seed()
+    mocks.rows.get("exact-id").syncStatus = "pending"
+    mocks.create.mockImplementation(async () => {
+      await registry.markRecipePersistenceScoped("exact-id", ownerB)
+      return { ...response(), ok: false, status: 0, data: undefined }
     })
-    expect(await pullFromStudio(101, "same-id")).toMatchObject({
-      success: true,
-      persistenceScope: ownerScope
+    await sync.autoSyncPrompt("exact-id", 42, { expectedOwnerId: ownerB })
+    expect(mocks.rows.get("exact-id").syncStatus).toBe("error")
+    await sync.autoSyncPrompt("exact-id", 42, { expectedOwnerId: ownerB })
+    expect(mocks.create).toHaveBeenCalledTimes(1)
+  })
+  it("rejects unowned v2 auto sync before even resolving or creating a project", async () => {
+    seed()
+    mocks.rows.get("exact-id").studioProjectId = null
+    expect(await sync.autoSyncPrompt("exact-id")).toMatchObject({
+      success: false,
+      failureKind: "validation"
     })
-    expect(registry.isRecipePersistenceUncertain("same-id", ownerScope)).toBe(
-      false
-    )
-    expect(registry.isRecipePersistenceUncertain("same-id", otherScope)).toBe(
-      true
-    )
+    expect(mocks.defaults).not.toHaveBeenCalled()
+    expect(mocks.create).not.toHaveBeenCalled()
+  })
+  it("fails closed when the registry read is unavailable", async () => {
+    seed()
+    const read = vi
+      .spyOn(registry, "readRecipePersistenceUncertainty")
+      .mockRejectedValueOnce(new Error("background unavailable"))
+    try {
+      expect(
+        await sync.pushToStudio("exact-id", 42, { expectedOwnerId: ownerB })
+      ).toMatchObject({
+        success: false,
+        recipeOwnership: { dispatch: { state: "not_dispatched" } }
+      })
+      expect(mocks.create).not.toHaveBeenCalled()
+    } finally {
+      read.mockRestore()
+    }
+  })
+  it.each([
+    { ok: true, status: 200, data: { data: server } },
+    { ok: false, status: 403, data: { detail: "Access denied to this prompt" } }
+  ])(
+    "unknown dispatch quarantines even an apparently conclusive body",
+    async (body) => {
+      seed()
+      mocks.create.mockResolvedValue({
+        ...body,
+        recipePersistence: { state: "unknown", actualOwnerId: null }
+      })
+      expect(
+        await sync.pushToStudio("exact-id", 42, { expectedOwnerId: ownerB })
+      ).toMatchObject({ success: false, syncStatus: "error" })
+      expect(
+        await registry.readRecipePersistenceUncertainty("exact-id", ownerA)
+      ).toBe("unknown_owner")
+    }
+  )
+  it("pull with no reported owner cannot clear scoped or unknown markers", async () => {
+    seed(true)
+    await registry.markRecipePersistenceScoped("exact-id", ownerA)
+    await registry.markRecipePersistenceUnknown("exact-id")
+    mocks.get.mockResolvedValue({
+      ...response(),
+      recipePersistence: { state: "dispatched", actualOwnerId: null }
+    })
+    expect(await sync.pullFromStudio(101, "exact-id")).toMatchObject({
+      success: true
+    })
+    expect(
+      await registry.readRecipePersistenceUncertainty("exact-id", ownerA)
+    ).toBe("unknown_owner")
+    await registry.forgetRecipePersistenceUnknown("exact-id")
+    expect(
+      await registry.readRecipePersistenceUncertainty("exact-id", ownerA)
+    ).toBe("scoped")
   })
 })

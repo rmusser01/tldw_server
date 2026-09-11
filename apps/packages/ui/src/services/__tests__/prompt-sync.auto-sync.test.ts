@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+const owner = "recipe-owner:sha256:" + "a".repeat(64)
+const input = { expectedOwnerId: owner }
+
 const state = vi.hoisted(() => ({
   defaults: {
     defaultProjectId: null as number | null,
@@ -221,7 +224,7 @@ describe("prompt-sync auto-sync defaults", () => {
       data: { data: { id: 17, name: "Workspace Prompts" } }
     })
     mocks.createPrompt.mockResolvedValue({
-      persistenceScope: null,
+      recipePersistence: { state: "dispatched", actualOwnerId: owner },
       data: {
         data: {
           id: 101,
@@ -299,14 +302,13 @@ describe("prompt-sync auto-sync defaults", () => {
     })
     const { autoSyncPrompt } = await importPromptSync()
 
-    const result = await autoSyncPrompt("local-1")
+    const result = await autoSyncPrompt("local-1", undefined, input)
     expect(result.success).toBe(true)
     expect(result.syncStatus).toBe("synced")
     expect(mocks.createProject).toHaveBeenCalledTimes(1)
     expect(mocks.createPrompt).toHaveBeenCalledWith(
       expect.objectContaining({ project_id: 17, name: "Prompt" }),
-      undefined,
-      { capturePersistenceScope: true, requirePersistenceScope: false }
+      { recipePersistence: { mode: "capture" } }
     )
     expect(state.prompts.get("local-1")).toEqual(
       expect.objectContaining({
@@ -331,7 +333,7 @@ describe("prompt-sync auto-sync defaults", () => {
     mocks.createProject.mockRejectedValueOnce(new Error("forbidden"))
     const { autoSyncPrompt } = await importPromptSync()
 
-    const result = await autoSyncPrompt("local-2")
+    const result = await autoSyncPrompt("local-2", undefined, input)
     expect(result.success).toBe(false)
     expect(result.syncStatus).toBe("pending")
     expect(state.prompts.get("local-2")).toEqual(
@@ -383,7 +385,7 @@ describe("prompt-sync auto-sync defaults", () => {
 
       try {
         const { autoSyncPrompt } = await importPromptSync()
-        const result = await autoSyncPrompt(original.id)
+        const result = await autoSyncPrompt(original.id, undefined, input)
 
         expect(result).toEqual(
           expect.objectContaining({
@@ -427,12 +429,12 @@ describe("prompt-sync auto-sync defaults", () => {
       syncStatus: "local"
     })
     mocks.createPrompt.mockResolvedValueOnce({
-      persistenceScope: null,
+      recipePersistence: { state: "dispatched", actualOwnerId: owner },
       data: { data: null }
     })
     const { pushToStudio } = await importPromptSync()
 
-    const result = await pushToStudio("local-empty-create", 17)
+    const result = await pushToStudio("local-empty-create", 17, input)
 
     expect(result.success).toBe(false)
     expect(result.syncStatus).toBe("pending")
@@ -470,7 +472,7 @@ describe("prompt-sync auto-sync defaults", () => {
       }
       state.prompts.set(original.id, structuredClone(original))
       const serverResponse = {
-        persistenceScope: null,
+        recipePersistence: { state: "dispatched", actualOwnerId: owner },
         data: {
           data: {
             id: 801,
@@ -502,12 +504,12 @@ describe("prompt-sync auto-sync defaults", () => {
         })
       try {
         const { autoSyncPrompt } = await importPromptSync()
-        const result = await autoSyncPrompt(original.id, 17)
+        const result = await autoSyncPrompt(original.id, 17, input)
 
         expect(result).toEqual(
           expect.objectContaining({
             success: false,
-            syncStatus: original.syncStatus
+            syncStatus: "error"
           })
         )
         expect(result.error).not.toContain(sentinel)
@@ -516,8 +518,13 @@ describe("prompt-sync auto-sync defaults", () => {
         error.mockRestore()
       }
 
-      expect(state.prompts.get(original.id)).toEqual(original)
-      expect(mocks.promptUpdate).not.toHaveBeenCalled()
+      expect(state.prompts.get(original.id)).toEqual({
+        ...original,
+        syncStatus: "error"
+      })
+      expect(mocks.promptUpdate).toHaveBeenCalledWith(original.id, {
+        syncStatus: "error"
+      })
       expect(captured.join("\n")).not.toContain(sentinel)
     }
   )
@@ -549,7 +556,7 @@ describe("prompt-sync auto-sync defaults", () => {
       }
 
       const { autoSyncPrompt } = await importPromptSync()
-      const result = await autoSyncPrompt(original.id, 17)
+      const result = await autoSyncPrompt(original.id, 17, input)
 
       expect(result).toEqual(
         expect.objectContaining({ success: false, syncStatus: "pending" })
@@ -578,7 +585,7 @@ describe("prompt-sync auto-sync defaults", () => {
       syncStatus: "conflict"
     })
     mocks.getPrompt.mockResolvedValue({
-      persistenceScope: null,
+      recipePersistence: { state: "dispatched", actualOwnerId: owner },
       data: {
         data: {
           id: 321,
@@ -618,7 +625,7 @@ describe("prompt-sync auto-sync defaults", () => {
       syncStatus: "conflict"
     })
     mocks.updatePrompt.mockResolvedValue({
-      persistenceScope: null,
+      recipePersistence: { state: "dispatched", actualOwnerId: owner },
       data: {
         data: {
           id: 77,
@@ -633,7 +640,11 @@ describe("prompt-sync auto-sync defaults", () => {
     })
 
     const { resolveConflict } = await importPromptSync()
-    const result = await resolveConflict("local-keep-local", "keep_local")
+    const result = await resolveConflict(
+      "local-keep-local",
+      "keep_local",
+      input
+    )
 
     expect(result.success).toBe(true)
     expect(result.syncStatus).toBe("synced")
@@ -642,7 +653,7 @@ describe("prompt-sync auto-sync defaults", () => {
       expect.objectContaining({
         name: "Prompt Local"
       }),
-      { capturePersistenceScope: true, requirePersistenceScope: false }
+      { recipePersistence: { mode: "capture" } }
     )
     expect(state.prompts.get("local-keep-local")).toEqual(
       expect.objectContaining({
@@ -665,7 +676,7 @@ describe("prompt-sync auto-sync defaults", () => {
       syncStatus: "conflict"
     })
     mocks.getPrompt.mockResolvedValue({
-      persistenceScope: null,
+      recipePersistence: { state: "dispatched", actualOwnerId: owner },
       data: {
         data: {
           id: 88,
@@ -680,7 +691,11 @@ describe("prompt-sync auto-sync defaults", () => {
     })
 
     const { resolveConflict } = await importPromptSync()
-    const result = await resolveConflict("local-keep-server", "keep_server")
+    const result = await resolveConflict(
+      "local-keep-server",
+      "keep_server",
+      input
+    )
 
     expect(result.success).toBe(true)
     expect(result.syncStatus).toBe("synced")
@@ -708,7 +723,7 @@ describe("prompt-sync auto-sync defaults", () => {
       syncStatus: "conflict"
     })
     mocks.createPrompt.mockResolvedValue({
-      persistenceScope: null,
+      recipePersistence: { state: "dispatched", actualOwnerId: owner },
       data: {
         data: {
           id: 199,
@@ -723,7 +738,7 @@ describe("prompt-sync auto-sync defaults", () => {
     })
 
     const { resolveConflict } = await importPromptSync()
-    const result = await resolveConflict("local-keep-both", "keep_both")
+    const result = await resolveConflict("local-keep-both", "keep_both", input)
 
     expect(result.success).toBe(true)
     expect(result.syncStatus).toBe("synced")
@@ -737,8 +752,7 @@ describe("prompt-sync auto-sync defaults", () => {
         project_id: 17,
         name: "Prompt Keep Both"
       }),
-      undefined,
-      { capturePersistenceScope: true, requirePersistenceScope: false }
+      { recipePersistence: { mode: "capture" } }
     )
     expect(state.prompts.get("local-keep-both")).toEqual(
       expect.objectContaining({
@@ -775,7 +789,10 @@ describe("prompt-sync auto-sync defaults", () => {
       state.prompts.set(String(original.id), structuredClone(original))
 
       const { resolveConflict } = await importPromptSync()
-      const result = await resolveConflict(String(original.id), "keep_both")
+      const result = await resolveConflict(
+        String(original.id, input),
+        "keep_both"
+      )
 
       expect(result).toEqual(
         expect.objectContaining({
@@ -809,7 +826,7 @@ describe("prompt-sync auto-sync defaults", () => {
       syncStatus: "conflict"
     })
     mocks.createPrompt.mockResolvedValue({
-      persistenceScope: null,
+      recipePersistence: { state: "dispatched", actualOwnerId: owner },
       data: {
         data: {
           id: 399,
@@ -827,7 +844,7 @@ describe("prompt-sync auto-sync defaults", () => {
     })
 
     const { resolveConflict } = await importPromptSync()
-    const result = await resolveConflict("recipe-keep-both", "keep_both")
+    const result = await resolveConflict("recipe-keep-both", "keep_both", input)
 
     expect(result).toEqual(
       expect.objectContaining({
@@ -842,8 +859,13 @@ describe("prompt-sync auto-sync defaults", () => {
         prompt_schema_version: 2,
         prompt_definition: definition
       }),
-      undefined,
-      { capturePersistenceScope: true, requirePersistenceScope: true }
+      {
+        recipePersistence: {
+          mode: "require",
+          expectedOwnerId: owner,
+          localId: "recipe-keep-both"
+        }
+      }
     )
     expect(state.prompts.get("recipe-keep-both")).toEqual(
       expect.objectContaining({
@@ -888,18 +910,18 @@ describe("prompt-sync auto-sync defaults", () => {
         serverUpdatedAt: "2026-02-17T10:00:00Z"
       }
       state.prompts.set(original.id, structuredClone(original))
-      const before = JSON.stringify(state.prompts.get(original.id))
+      const before = structuredClone(state.prompts.get(original.id))
 
       if (failure === "network") {
         mocks.createPrompt.mockRejectedValueOnce(new Error("network failed"))
       } else if (failure === "empty response") {
         mocks.createPrompt.mockResolvedValueOnce({
-          persistenceScope: null,
+          recipePersistence: { state: "dispatched", actualOwnerId: owner },
           data: { data: null }
         })
       } else if (failure === "malicious response") {
         mocks.createPrompt.mockResolvedValueOnce({
-          persistenceScope: null,
+          recipePersistence: { state: "dispatched", actualOwnerId: owner },
           data: {
             data: {
               id: 599,
@@ -921,11 +943,18 @@ describe("prompt-sync auto-sync defaults", () => {
       }
 
       const { resolveConflict } = await importPromptSync()
-      const result = await resolveConflict(original.id, "keep_both")
+      const result = await resolveConflict(original.id, "keep_both", input)
 
       expect(result.success).toBe(false)
-      expect(JSON.stringify(state.prompts.get(original.id))).toBe(before)
-      expect(mocks.promptUpdate).not.toHaveBeenCalled()
+      expect(state.prompts.get(original.id)).toEqual(
+        failure === "validation" ? before : { ...before, syncStatus: "error" }
+      )
+      if (failure === "validation")
+        expect(mocks.promptUpdate).not.toHaveBeenCalled()
+      else
+        expect(mocks.promptUpdate).toHaveBeenCalledWith(original.id, {
+          syncStatus: "error"
+        })
       if (failure === "validation") {
         expect(mocks.createPrompt).not.toHaveBeenCalled()
       }
@@ -948,7 +977,7 @@ describe("prompt-sync auto-sync defaults", () => {
       syncStatus: "pending"
     })
     mocks.getPrompt.mockResolvedValue({
-      persistenceScope: null,
+      recipePersistence: { state: "dispatched", actualOwnerId: owner },
       data: {
         data: {
           id: 701,
@@ -985,7 +1014,7 @@ describe("prompt-sync auto-sync defaults", () => {
       syncStatus: "pending"
     })
     mocks.getPrompt.mockResolvedValue({
-      persistenceScope: null,
+      recipePersistence: { state: "dispatched", actualOwnerId: owner },
       data: {
         data: {
           id: 702,
@@ -1021,7 +1050,7 @@ describe("prompt-sync auto-sync defaults", () => {
       syncStatus: "pending"
     })
     mocks.getPrompt.mockResolvedValue({
-      persistenceScope: null,
+      recipePersistence: { state: "dispatched", actualOwnerId: owner },
       data: {
         data: {
           id: 703,

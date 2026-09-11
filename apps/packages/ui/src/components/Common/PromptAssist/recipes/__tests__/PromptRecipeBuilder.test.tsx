@@ -1,11 +1,19 @@
+import {
+  clearRecipePersistenceScoped,
+  forgetRecipePersistenceUnknown,
+  markRecipePersistenceScoped,
+} from "@/services/recipe-persistence-uncertainty";
+import * as recipeAuthority from "@/services/recipe-persistence-uncertainty";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { clearRecipePersistenceUncertainty } from "@/services/recipe-persistence-uncertainty";
 
 import { PromptRecipeBuilder } from "../PromptRecipeBuilder";
 import { CLEAR_TASK_RECIPE } from "../built-in-recipes";
+
+const ownerA = "recipe-owner:sha256:" + "a".repeat(64);
+const ownerB = "recipe-owner:sha256:" + "b".repeat(64);
 
 const state = vi.hoisted(() => ({ online: true, privateMode: false }));
 const mocks = vi.hoisted(() => ({
@@ -38,7 +46,8 @@ vi.mock("@/db/dexie/helpers", () => ({
   updatePrompt: mocks.updatePrompt,
 }));
 
-vi.mock("@/services/prompt-sync", () => ({
+vi.mock("@/services/prompt-sync", async (importOriginal) => ({
+  ...(await importOriginal()),
   shouldAutoSyncWorkspacePrompts: mocks.shouldAutoSyncWorkspacePrompts,
   autoSyncPrompt: mocks.autoSyncPrompt,
 }));
@@ -106,7 +115,7 @@ const renderBuilder = (
     <QueryClientProvider client={queryClient}>
       <PromptRecipeBuilder
         target="system"
-        persistenceScope="backend-a"
+        persistenceScope={ownerA}
         capabilities={capabilities(true)}
         onApply={onApply}
         onBack={onBack}
@@ -118,35 +127,116 @@ const renderBuilder = (
 };
 
 describe("PromptRecipeBuilder", () => {
-  it.each([null, "mismatched-id"])("fails closed across reopen without a trustworthy dispatch owner (%s)", async mismatch => {
+  it("masks cached clear ownership until a fresh registry read settles on reopen", async () => {
     const user = userEvent.setup();
-    const id = `unknown-owner-${mismatch ?? "missing"}`;
-    mocks.savePrompt.mockImplementation(async fields => {
-      const record = { ...recipeRecord(id, fields.title, "system"), ...fields, syncStatus: "local" };
-      mocks.getAllPrompts.mockResolvedValue([record]);
-      return record;
+    const records = [recipeRecord("system-id", "System saved", "system")];
+    mocks.getAllPrompts.mockResolvedValue(records);
+    const read = createDeferred<"scoped">();
+    const lookup = vi
+      .spyOn(recipeAuthority, "readRecipePersistenceUncertainty")
+      .mockReturnValue(read.promise);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
     });
-    mocks.shouldAutoSyncWorkspacePrompts.mockResolvedValue(true);
-    mocks.autoSyncPrompt.mockResolvedValue({
-      success: false, localId: mismatch ?? id, syncStatus: "pending",
-      failureKind: "invalid_server_payload", persistenceScope: mismatch ? "backend-b" : null
-    });
-    mocks.markPromptSyncError.mockRejectedValue(new Error("storage unavailable"));
-    const first = renderBuilder();
-    await user.click(screen.getByRole("button", { name: "Save as new recipe" }));
-    await screen.findByText(/server outcome.*not.*verified/i);
-    first.unmount();
-    renderBuilder({ persistenceScope: "backend-b" });
-    await screen.findByRole("option", { name: "Untitled recipe" });
-    await user.selectOptions(screen.getByRole("combobox", { name: "Recipe source" }), `saved:${id}`);
-    expect(screen.getByRole("button", { name: "Save as new recipe" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Update recipe" })).toBeDisabled();
-    expect(mocks.autoSyncPrompt).toHaveBeenCalledTimes(1);
+    queryClient.setQueryData(["getAllPromptsForSelect"], records);
+    queryClient.setQueryData(
+      ["recipePersistenceUncertainty", ownerA, ["system-id"], null],
+      { "system-id": "clear" },
+    );
+    try {
+      render(
+        <QueryClientProvider client={queryClient}>
+          <PromptRecipeBuilder
+            target="system"
+            persistenceScope={ownerA}
+            capabilities={capabilities(true)}
+            onApply={() => {}}
+            onBack={() => {}}
+          />
+        </QueryClientProvider>,
+      );
+      await user.selectOptions(
+        screen.getByRole("combobox", { name: "Recipe source" }),
+        "saved:system-id",
+      );
+      expect(
+        screen.getByRole("button", { name: "Save as new recipe" }),
+      ).toBeDisabled();
+      expect(
+        screen.getByRole("button", { name: "Update recipe" }),
+      ).toBeDisabled();
+      await user.click(
+        screen.getByRole("button", { name: "Save as new recipe" }),
+      );
+      expect(mocks.savePrompt).not.toHaveBeenCalled();
+      await act(async () => read.resolve("scoped"));
+      expect(
+        screen.getByRole("button", { name: "Save as new recipe" }),
+      ).toBeDisabled();
+    } finally {
+      read.resolve("scoped");
+      lookup.mockRestore();
+    }
   });
-  afterEach(() => {
-    for (const scope of ["backend-a", "backend-b"]) {
+  it.each([null, "mismatched-id"])(
+    "fails closed across reopen without a trustworthy dispatch owner (%s)",
+    async (mismatch) => {
+      const user = userEvent.setup();
+      const id = `unknown-owner-${mismatch ?? "missing"}`;
+      mocks.savePrompt.mockImplementation(async (fields) => {
+        const record = {
+          ...recipeRecord(id, fields.title, "system"),
+          ...fields,
+          syncStatus: "local",
+        };
+        mocks.getAllPrompts.mockResolvedValue([record]);
+        return record;
+      });
+      mocks.shouldAutoSyncWorkspacePrompts.mockResolvedValue(true);
+      mocks.autoSyncPrompt.mockResolvedValue({
+        success: false,
+        localId: mismatch ?? id,
+        syncStatus: "pending",
+        failureKind: "invalid_server_payload",
+        recipeOwnership: {
+          localId: mismatch ?? id,
+          dispatch: {
+            state: "dispatched",
+            actualOwnerId: mismatch ? ownerB : null,
+          },
+        },
+      });
+      mocks.markPromptSyncError.mockRejectedValue(
+        new Error("storage unavailable"),
+      );
+      const first = renderBuilder();
+      await user.click(
+        screen.getByRole("button", { name: "Save as new recipe" }),
+      );
+      await screen.findByRole("button", {
+        name: "Forget unresolved operation",
+      });
+      first.unmount();
+      renderBuilder({ persistenceScope: ownerB });
+      await screen.findByRole("option", { name: "Untitled recipe" });
+      await user.selectOptions(
+        screen.getByRole("combobox", { name: "Recipe source" }),
+        `saved:${id}`,
+      );
+      expect(
+        screen.getByRole("button", { name: "Save as new recipe" }),
+      ).toBeDisabled();
+      expect(
+        screen.getByRole("button", { name: "Update recipe" }),
+      ).toBeDisabled();
+      expect(mocks.autoSyncPrompt).toHaveBeenCalledTimes(1);
+    },
+  );
+  afterEach(async () => {
+    for (const scope of [ownerA, ownerB]) {
       for (const [id] of mocks.markPromptSyncError.mock.calls) {
-        clearRecipePersistenceUncertainty(id, scope);
+        await clearRecipePersistenceScoped(id, scope);
+        await forgetRecipePersistenceUnknown(id);
       }
     }
   });
@@ -171,7 +261,10 @@ describe("PromptRecipeBuilder", () => {
     mocks.autoSyncPrompt.mockResolvedValue({
       success: true,
       localId: "new-exact-id",
-      persistenceScope: "backend-a",
+      recipeOwnership: {
+        localId: "new-exact-id",
+        dispatch: { state: "dispatched", actualOwnerId: ownerA },
+      },
       syncStatus: "synced",
     });
   });
@@ -217,9 +310,7 @@ describe("PromptRecipeBuilder", () => {
     expect(
       screen.getByRole("button", { name: "Save as new recipe" }),
     ).toBeDisabled();
-    expect(
-      screen.getByRole("button", { name: "Update recipe" }),
-    ).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Update recipe" })).toBeEnabled();
   });
 
   it("treats an old response without authorization as unknown and fail-closed", async () => {
@@ -379,7 +470,10 @@ describe("PromptRecipeBuilder", () => {
     mocks.autoSyncPrompt.mockResolvedValue({
       success: false,
       localId: "new-exact-id",
-      persistenceScope: "backend-a",
+      recipeOwnership: {
+        localId: "new-exact-id",
+        dispatch: { state: "not_dispatched", actualOwnerId: null },
+      },
       syncStatus: "pending",
       failureKind: "transient",
       error: "temporary",
@@ -403,7 +497,7 @@ describe("PromptRecipeBuilder", () => {
     const sync = createDeferred<{
       success: false;
       localId: string;
-      persistenceScope: string;
+      recipeOwnership: import("@/services/prompt-sync").RecipeSyncOwnership;
       syncStatus: "pending";
       failureKind: "invalid_server_payload";
       error: string;
@@ -432,7 +526,10 @@ describe("PromptRecipeBuilder", () => {
       sync.resolve({
         success: false,
         localId: "new-exact-id",
-        persistenceScope: "backend-a",
+        recipeOwnership: {
+          localId: "new-exact-id",
+          dispatch: { state: "dispatched", actualOwnerId: ownerA },
+        },
         syncStatus: "pending",
         failureKind: "invalid_server_payload",
         error: "missing response identity",
@@ -468,7 +565,7 @@ describe("PromptRecipeBuilder", () => {
     const sync = createDeferred<{
       success: false;
       localId: string;
-      persistenceScope: string;
+      recipeOwnership: import("@/services/prompt-sync").RecipeSyncOwnership;
       syncStatus: "pending";
       failureKind: "invalid_server_payload";
       error: string;
@@ -498,7 +595,10 @@ describe("PromptRecipeBuilder", () => {
       sync.resolve({
         success: false,
         localId: "system-id",
-        persistenceScope: "backend-a",
+        recipeOwnership: {
+          localId: "system-id",
+          dispatch: { state: "dispatched", actualOwnerId: ownerA },
+        },
         syncStatus: "pending",
         failureKind: "invalid_server_payload",
         error: "malformed response",
@@ -507,7 +607,9 @@ describe("PromptRecipeBuilder", () => {
     });
 
     expect(
-      await screen.findByText(/updated locally.*server outcome.*not.*verified/i),
+      await screen.findByText(
+        /updated locally.*server outcome.*not.*verified/i,
+      ),
     ).toBeInTheDocument();
     await user.selectOptions(source, "saved:system-id");
     expect(
@@ -532,7 +634,9 @@ describe("PromptRecipeBuilder", () => {
   it("retains an uncertain Save locally, invalidates both queries, and locks retry", async () => {
     const user = userEvent.setup();
     const records = [recipeRecord("system-id", "System saved", "system")];
-    mocks.getAllPrompts.mockImplementation(async () => structuredClone(records));
+    mocks.getAllPrompts.mockImplementation(async () =>
+      structuredClone(records),
+    );
     mocks.savePrompt.mockImplementation(async (fields) => {
       const saved = {
         ...recipeRecord("uncertain-new", fields.title, "system"),
@@ -551,7 +655,10 @@ describe("PromptRecipeBuilder", () => {
     mocks.autoSyncPrompt.mockResolvedValue({
       success: false,
       localId: "uncertain-new",
-      persistenceScope: "backend-a",
+      recipeOwnership: {
+        localId: "uncertain-new",
+        dispatch: { state: "dispatched", actualOwnerId: ownerA },
+      },
       syncStatus: "pending",
       failureKind: "invalid_server_payload",
       error: "missing response identity",
@@ -569,9 +676,9 @@ describe("PromptRecipeBuilder", () => {
     expect(
       await screen.findByText(/saved locally.*server outcome.*not.*verified/i),
     ).toBeInTheDocument();
-    expect(records.find((item) => item.id === "uncertain-new")?.syncStatus).toBe(
-      "error",
-    );
+    expect(
+      records.find((item) => item.id === "uncertain-new")?.syncStatus,
+    ).toBe("error");
     expect(mocks.permanentlyDeletePrompt).not.toHaveBeenCalled();
     expect(mocks.restorePromptSnapshot).not.toHaveBeenCalled();
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["fetchAllPrompts"] });
@@ -592,7 +699,9 @@ describe("PromptRecipeBuilder", () => {
   it("keeps the exact uncertain record locked after marker failure and builder reopen", async () => {
     const user = userEvent.setup();
     const records = [recipeRecord("system-id", "System saved", "system")];
-    mocks.getAllPrompts.mockImplementation(async () => structuredClone(records));
+    mocks.getAllPrompts.mockImplementation(async () =>
+      structuredClone(records),
+    );
     mocks.savePrompt.mockImplementation(async (fields) => {
       const saved = {
         ...recipeRecord("marker-failed-id", fields.title, "system"),
@@ -607,7 +716,10 @@ describe("PromptRecipeBuilder", () => {
     mocks.autoSyncPrompt.mockResolvedValue({
       success: false,
       localId: "marker-failed-id",
-      persistenceScope: "backend-a",
+      recipeOwnership: {
+        localId: "marker-failed-id",
+        dispatch: { state: "dispatched", actualOwnerId: ownerA },
+      },
       syncStatus: "pending",
       failureKind: "invalid_server_payload",
       error: "missing response identity",
@@ -632,7 +744,7 @@ describe("PromptRecipeBuilder", () => {
     first.unmount();
     // A successful reconciliation of this shared local record under B must
     // neither inherit A's lock nor release it when returning to A.
-    const otherBackend = renderBuilder({ persistenceScope: "backend-b" });
+    const otherBackend = renderBuilder({ persistenceScope: ownerB });
     const otherSource = await screen.findByRole("combobox", {
       name: "Recipe source",
     });
@@ -642,7 +754,10 @@ describe("PromptRecipeBuilder", () => {
     mocks.autoSyncPrompt.mockResolvedValueOnce({
       success: true,
       localId: "marker-failed-id",
-      persistenceScope: "backend-a",
+      recipeOwnership: {
+        localId: "marker-failed-id",
+        dispatch: { state: "dispatched", actualOwnerId: ownerA },
+      },
       syncStatus: "synced",
     });
     await user.click(screen.getByRole("button", { name: "Update recipe" }));
@@ -682,7 +797,7 @@ describe("PromptRecipeBuilder", () => {
     expect(mocks.savePrompt).toHaveBeenCalledTimes(1);
     expect(mocks.autoSyncPrompt).toHaveBeenCalledTimes(2);
     reopened.unmount();
-    clearRecipePersistenceUncertainty("marker-failed-id", "backend-a");
+    await clearRecipePersistenceScoped("marker-failed-id", ownerA);
     renderBuilder();
     const reconciledSource = await screen.findByRole("combobox", {
       name: "Recipe source",
@@ -708,7 +823,10 @@ describe("PromptRecipeBuilder", () => {
     mocks.autoSyncPrompt.mockResolvedValue({
       success: false,
       localId: record.id,
-      persistenceScope: "backend-a",
+      recipeOwnership: {
+        localId: record.id,
+        dispatch: { state: "dispatched", actualOwnerId: ownerA },
+      },
       syncStatus: "pending",
       failureKind: "invalid_server_payload",
       error: "missing response identity",
@@ -730,7 +848,7 @@ describe("PromptRecipeBuilder", () => {
     // B's authoritative reconciliation updates the shared local storage field,
     // but it cannot establish whether the remote write under A committed.
     record.syncStatus = "synced";
-    clearRecipePersistenceUncertainty(record.id, "backend-b");
+    await clearRecipePersistenceScoped(record.id, ownerB);
     const reopened = renderBuilder();
     await screen.findByRole("option", { name: "Durable recipe" });
     await user.selectOptions(
@@ -746,7 +864,7 @@ describe("PromptRecipeBuilder", () => {
     expect(mocks.updatePrompt).toHaveBeenCalledTimes(1);
     reopened.unmount();
 
-    clearRecipePersistenceUncertainty(record.id, "backend-a");
+    await clearRecipePersistenceScoped(record.id, ownerA);
     renderBuilder();
     await screen.findByRole("option", { name: "Durable recipe" });
     await user.selectOptions(
@@ -766,7 +884,9 @@ describe("PromptRecipeBuilder", () => {
   it("retains an uncertain Update, marks it error, and locks both writes", async () => {
     const user = userEvent.setup();
     const records = [recipeRecord("system-id", "System saved", "system")];
-    mocks.getAllPrompts.mockImplementation(async () => structuredClone(records));
+    mocks.getAllPrompts.mockImplementation(async () =>
+      structuredClone(records),
+    );
     mocks.updatePrompt.mockImplementation(async (fields) => {
       records[0] = { ...records[0], ...structuredClone(fields) };
       return fields.id;
@@ -779,7 +899,10 @@ describe("PromptRecipeBuilder", () => {
     mocks.autoSyncPrompt.mockResolvedValue({
       success: false,
       localId: "system-id",
-      persistenceScope: "backend-a",
+      recipeOwnership: {
+        localId: "system-id",
+        dispatch: { state: "dispatched", actualOwnerId: ownerA },
+      },
       syncStatus: "pending",
       failureKind: "invalid_server_payload",
       error: "malformed response",
@@ -804,7 +927,9 @@ describe("PromptRecipeBuilder", () => {
     await user.click(screen.getByRole("button", { name: "Update recipe" }));
 
     expect(
-      await screen.findByText(/updated locally.*server outcome.*not.*verified/i),
+      await screen.findByText(
+        /updated locally.*server outcome.*not.*verified/i,
+      ),
     ).toBeInTheDocument();
     expect(records[0].syncStatus).toBe("error");
     expect(mocks.restorePromptSnapshot).not.toHaveBeenCalled();
@@ -822,6 +947,7 @@ describe("PromptRecipeBuilder", () => {
   });
 
   it("keeps a reopened error-state recipe write-locked while Apply stays local", async () => {
+    await markRecipePersistenceScoped("error-id", ownerA);
     const user = userEvent.setup();
     mocks.getAllPrompts.mockResolvedValue([
       {
@@ -888,7 +1014,10 @@ describe("PromptRecipeBuilder", () => {
       .mockResolvedValueOnce({
         success: false,
         localId: "new-1",
-        persistenceScope: "backend-a",
+        recipeOwnership: {
+          localId: "new-1",
+          dispatch: { state: "not_dispatched", actualOwnerId: null },
+        },
         syncStatus: "pending",
         failureKind: "validation",
         error: "invalid",
@@ -896,7 +1025,10 @@ describe("PromptRecipeBuilder", () => {
       .mockResolvedValueOnce({
         success: true,
         localId: "new-2",
-        persistenceScope: "backend-a",
+        recipeOwnership: {
+          localId: "new-2",
+          dispatch: { state: "dispatched", actualOwnerId: ownerA },
+        },
         syncStatus: "synced",
       });
     const { queryClient } = renderBuilder();
@@ -911,10 +1043,7 @@ describe("PromptRecipeBuilder", () => {
       await screen.findByText(/Could not save the recipe/),
     ).toBeInTheDocument();
     expect(records.map((record) => record.id)).toEqual(["system-id"]);
-    expect(mocks.permanentlyDeletePrompt).toHaveBeenCalledWith(
-      "new-1",
-      "backend-a",
-    );
+    expect(mocks.permanentlyDeletePrompt).toHaveBeenCalledWith("new-1", ownerA);
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["fetchAllPrompts"] });
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: ["getAllPromptsForSelect"],
@@ -952,7 +1081,10 @@ describe("PromptRecipeBuilder", () => {
     mocks.autoSyncPrompt.mockResolvedValue({
       success: false,
       localId: "system-id",
-      persistenceScope: "backend-a",
+      recipeOwnership: {
+        localId: "system-id",
+        dispatch: { state: "not_dispatched", actualOwnerId: null },
+      },
       syncStatus: "local",
       failureKind: "validation",
       error: "invalid",
@@ -990,7 +1122,10 @@ describe("PromptRecipeBuilder", () => {
     mocks.autoSyncPrompt.mockResolvedValue({
       success: false,
       localId: "new-exact-id",
-      persistenceScope: "backend-a",
+      recipeOwnership: {
+        localId: "new-exact-id",
+        dispatch: { state: "not_dispatched", actualOwnerId: null },
+      },
       syncStatus: "local",
       failureKind: "validation",
       error: "invalid",

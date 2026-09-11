@@ -1,62 +1,61 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { buildChatSurfaceScopeKeyFromConfig } from "../chat-surface-scope"
 
-const scope = (serverUrl: string, sub: string, exp = 1) =>
-  buildChatSurfaceScopeKeyFromConfig({
-    serverUrl,
-    authMode: "multi-user",
-    accessToken: `header.${btoa(JSON.stringify({ sub, exp }))}.signature`
-  })
+import { deriveRecipePersistenceOwner } from "../recipe-persistence-owner"
 
-describe("recipe uncertainty ownership", () => {
+const view = (server: string, principal: string, revision = "1") =>
+  deriveRecipePersistenceOwner(
+    {
+      effectiveBase: server,
+      authMode: "multi-user",
+      authSource: "manual_bearer",
+      orgId: null,
+      principalKind: "user",
+      principal
+    },
+    revision
+  )
+describe("async recipe uncertainty authority", () => {
   beforeEach(() => vi.resetModules())
-
   it.each([
-    ["backend", scope("https://b.test", "alice")],
-    ["principal", scope("https://a.test", "bob")]
-  ])("isolates the same local ID across a different %s", async (_, other) => {
+    ["backend", "https://b.test", "alice"],
+    ["principal", "https://a.test", "bob"]
+  ])("does not clear another %s", async (_label, server, principal) => {
     const registry = await import("../recipe-persistence-uncertainty")
-    const owner = scope("https://a.test", "alice")
-    registry.markRecipePersistenceUncertain("same-id", owner)
-    expect(registry.isRecipePersistenceUncertain("same-id", other)).toBe(false)
-    registry.clearRecipePersistenceUncertainty("same-id", other)
-    expect(registry.isRecipePersistenceUncertain("same-id", owner)).toBe(true)
-  })
-
-  it("retains the owner across same-sub refresh and clears only the matching ID", async () => {
-    const registry = await import("../recipe-persistence-uncertainty")
-    const original = scope("https://a.test", "alice", 1)
-    const refreshed = scope("https://a.test", "alice", 2)
-    registry.markRecipePersistenceUncertain("same-id", original)
-    registry.markRecipePersistenceUncertain("other-id", original)
-    expect(registry.isRecipePersistenceUncertain("same-id", refreshed)).toBe(
-      true
-    )
-    registry.clearRecipePersistenceUncertainty("same-id", refreshed)
-    expect(registry.isRecipePersistenceUncertain("same-id", original)).toBe(
-      false
-    )
-    expect(registry.isRecipePersistenceUncertain("other-id", original)).toBe(
-      true
-    )
-  })
-
-  it("fails closed without an owner and cannot clear an owned marker", async () => {
-    const registry = await import("../recipe-persistence-uncertainty")
-    const owner = scope("https://a.test", "alice")
-    registry.markRecipePersistenceUncertain("same-id", owner)
-    registry.clearRecipePersistenceUncertainty("same-id", null)
-    expect(registry.isRecipePersistenceUncertain("same-id", owner)).toBe(true)
-    expect(registry.isRecipePersistenceUncertain("unseen-id", null)).toBe(true)
-  })
-
-  it("starts with no markers after a fresh module lifecycle", async () => {
-    const registry = await import("../recipe-persistence-uncertainty")
+    const owner = view("https://a.test", "alice").ownerId
+    const other = view(server, principal).ownerId
+    await registry.markRecipePersistenceScoped("same-id", owner)
+    await registry.clearRecipePersistenceScoped("same-id", other)
     expect(
-      registry.isRecipePersistenceUncertain(
-        "same-id",
-        scope("https://a.test", "alice")
-      )
-    ).toBe(false)
+      await registry.readRecipePersistenceUncertainty("same-id", other)
+    ).toBe("clear")
+    expect(
+      await registry.readRecipePersistenceUncertainty("same-id", owner)
+    ).toBe("scoped")
+  })
+  it("same-principal refresh retains owner and cleanup is exact-ID only", async () => {
+    const registry = await import("../recipe-persistence-uncertainty")
+    const owner = view("https://a.test", "alice", "1").ownerId
+    const refreshed = view("https://a.test", "alice", "2").ownerId
+    await registry.markRecipePersistenceScoped("same-id", owner)
+    await registry.markRecipePersistenceScoped("other-id", owner)
+    await registry.clearRecipePersistenceScoped("same-id", refreshed)
+    expect(
+      await registry.readRecipePersistenceUncertainty("same-id", owner)
+    ).toBe("clear")
+    expect(
+      await registry.readRecipePersistenceUncertainty("other-id", owner)
+    ).toBe("scoped")
+  })
+  it("reads unknown quarantine even without an owner and only exact Forget clears it", async () => {
+    const registry = await import("../recipe-persistence-uncertainty")
+    await registry.markRecipePersistenceUnknown("same-id")
+    await registry.forgetRecipePersistenceUnknown("other-id")
+    expect(
+      await registry.readRecipePersistenceUncertainty("same-id", null)
+    ).toBe("unknown_owner")
+    await registry.forgetRecipePersistenceUnknown("same-id")
+    expect(
+      await registry.readRecipePersistenceUncertainty("same-id", null)
+    ).toBe("clear")
   })
 })

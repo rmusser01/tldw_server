@@ -1702,5 +1702,23 @@
   },
   "promptAssist_recipePersistenceUnverified": {
     "message": "This recipe exists locally, but its server outcome is unverified. Reconcile it before saving or updating again."
+  },
+  "promptAssist_recipeOwnerUnknown": {
+    "message": "The server outcome and responsible connection are unknown. Saving and updating are locked across connections. You can still edit, preview, and apply."
+  },
+  "promptAssist_recipeForgetOperation": {
+    "message": "Forget unresolved operation"
+  },
+  "promptAssist_recipeForgetRisk": {
+    "message": "The server may already have saved this recipe. Forgetting only removes this local warning; retrying could create a duplicate. No server data will be deleted."
+  },
+  "promptAssist_recipeConfirmForget": {
+    "message": "Confirm forget"
+  },
+  "promptAssist_recipeForgotten": {
+    "message": "Unresolved operation forgotten. No server data was changed."
+  },
+  "promptAssist_recipeForgetFailed": {
+    "message": "Could not forget this operation. It remains locked; try again."
   }
 }

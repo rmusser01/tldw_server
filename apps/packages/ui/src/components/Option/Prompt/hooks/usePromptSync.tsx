@@ -1,3 +1,4 @@
+import { resolveRecipePersistenceOwnerView } from "@/services/recipe-persistence-uncertainty"
 import React, { useRef, useState } from "react"
 import { useMutation, type QueryClient } from "@tanstack/react-query"
 import { notification } from "antd"
@@ -78,7 +79,10 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
           }
         }
 
-        const result = await autoSyncPrompt(localId)
+        const owner = await resolveRecipePersistenceOwnerView()
+        const result = await autoSyncPrompt(
+          localId, undefined, owner ? { expectedOwnerId: owner.ownerId } : undefined
+        )
         if (!result.success && notifyOnFailure) {
           notification.warning({
             message: t("managePrompts.sync.syncFailed", {
@@ -129,7 +133,10 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
 
   const { mutate: pushToStudioMutation, isPending: isPushing } = useMutation({
     mutationFn: async ({ localId, projectId }: { localId: string; projectId: number }) => {
-      return await pushToStudio(localId, projectId)
+      const owner = await resolveRecipePersistenceOwnerView()
+      return await pushToStudio(
+        localId, projectId, owner ? { expectedOwnerId: owner.ownerId } : undefined
+      )
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
@@ -233,7 +240,10 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
       localId: string
       resolution: ConflictResolution
     }) => {
-      return await resolveConflict(localId, resolution)
+      const owner = resolution === "keep_server" ? null : await resolveRecipePersistenceOwnerView()
+      return await resolveConflict(
+        localId, resolution, owner ? { expectedOwnerId: owner.ownerId } : undefined
+      )
     },
     onSuccess: (result, variables) => {
       if (!result.success) {
@@ -369,6 +379,9 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
           cancelled: false
         })
 
+        // One opaque owner per user-initiated batch; never persisted in its tasks.
+        const owner = await resolveRecipePersistenceOwnerView()
+        const persistenceInput = owner ? { expectedOwnerId: owner.ownerId } : undefined
         let completed = 0
         let succeeded = 0
         const failed: BatchSyncFailure[] = []
@@ -405,8 +418,8 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
               task.direction === "pull"
                 ? await pullFromStudio(task.serverId!, task.promptId)
                 : task.serverId
-                  ? await pushToStudio(task.promptId, task.preferredProjectId || 1)
-                  : await autoSyncPrompt(task.promptId, task.preferredProjectId)
+                  ? await pushToStudio(task.promptId, task.preferredProjectId || 1, persistenceInput)
+                  : await autoSyncPrompt(task.promptId, task.preferredProjectId, persistenceInput)
 
             if (result.success) {
               succeeded += 1

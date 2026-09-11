@@ -1,11 +1,11 @@
 import { autoSyncPrompt, pullFromStudio } from "@/services/prompt-sync";
 import {
-  clearRecipePersistenceUncertainty,
-  getRecipeAuthenticatedPrincipal,
-  isRecipePersistenceUncertain,
-  markRecipePersistenceUncertain,
+  clearRecipePersistenceScoped,
+  forgetRecipePersistenceUnknown,
+  markRecipePersistenceScoped,
+  readRecipePersistenceUncertainty,
+  resolveRecipePersistenceOwnerView,
 } from "@/services/recipe-persistence-uncertainty";
-import { tldwRequest } from "@/services/tldw/request-core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -14,27 +14,80 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PromptRecipeBuilder } from "../PromptRecipeBuilder";
 import { CLEAR_TASK_RECIPE } from "../built-in-recipes";
 
+type BackgroundListener = (
+  message: unknown,
+  sender: { id: string },
+  reply: (value: unknown) => void,
+) => unknown;
 const mocks = vi.hoisted(() => ({
   config: {} as Record<string, unknown>,
   resolveConfig: vi.fn(),
   fetch: vi.fn(),
   extension: false,
   sendMessage: vi.fn(),
-  rows: new Map<string, any>(),
+  rows: new Map<string, Record<string, unknown>>(),
   beforeRead: vi.fn(),
   markerFails: true,
+  runtimeKey: null as string | null,
+  listeners: new Set<BackgroundListener>(),
 }));
-vi.mock("wxt/browser", () => ({
-  browser: {
-    runtime: {
-      get id() {
-        return mocks.extension ? "test-extension" : undefined;
+vi.mock("@/entries/shared/background-init", () => ({
+  MODEL_WARM_ALARM_NAME: "warm",
+  initBackground: async () => {},
+}));
+vi.mock("@/entries/shared/notification-subscription", () => ({
+  startNotificationSubscription: async () => {},
+}));
+vi.mock("wxt/browser", () => {
+  const event = () => ({ addListener: vi.fn() });
+  return {
+    browser: {
+      runtime: {
+        get id() {
+          return mocks.extension ? "test-extension" : undefined;
+        },
+        getURL: (path: string) => "chrome-extension://test-extension" + path,
+        sendMessage: (...args: unknown[]) => mocks.sendMessage(...args),
+        onConnect: event(),
+        onStartup: event(),
+        onMessage: {
+          addListener: (listener: BackgroundListener) =>
+            mocks.listeners.add(listener),
+        },
       },
-      sendMessage: (...args: unknown[]) => mocks.sendMessage(...args),
+      storage: {
+        local: { get: async () => ({}), set: async () => {} },
+        session: { get: async () => ({}), set: async () => {} },
+        onChanged: event(),
+      },
+      alarms: {
+        clear: async () => true,
+        create: async () => {},
+        onAlarm: event(),
+      },
+      tabs: {
+        query: async () => [],
+        create: vi.fn(),
+        sendMessage: async () => {},
+      },
+      action: { onClicked: event() },
+      contextMenus: { create: vi.fn(), removeAll: vi.fn(), onClicked: event() },
+      i18n: { getMessage: (key: string) => key },
     },
+  };
+});
+vi.mock("@/utils/safe-storage", () => ({
+  safeStorageSerde: {
+    serialize: (v: unknown) => v,
+    deserialize: (v: unknown) => v,
   },
+  createSafeStorage: () => ({
+    get: async (key: string) =>
+      key === "tldwConfig" ? mocks.config : undefined,
+    set: async () => {},
+    remove: async () => {},
+  }),
 }));
-vi.mock("@/utils/safe-storage", () => ({ createSafeStorage: () => ({}) }));
 vi.mock("@/services/tldw/direct-browser-config", () => ({
   resolveDirectBrowserConfig: () => mocks.resolveConfig(),
 }));
@@ -42,7 +95,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: { getConfig: async () => mocks.config },
 }));
 vi.mock("@/services/tldw/runtime-auth-override", () => ({
-  getRuntimeSingleUserApiKeyOverride: () => null,
+  getRuntimeSingleUserApiKeyOverride: () => mocks.runtimeKey,
 }));
 vi.mock("@/services/prompt-studio-settings", () => ({
   getPromptStudioDefaults: async () => ({
@@ -59,8 +112,18 @@ vi.mock("@/db/dexie/schema", () => ({
         await mocks.beforeRead();
         return mocks.rows.get(id);
       },
-      update: async (id: string, fields: object) =>
-        mocks.rows.set(id, { ...mocks.rows.get(id), ...fields }),
+      update: async (id: string, fields: object) => {
+        if (
+          "syncStatus" in fields &&
+          fields.syncStatus === "error" &&
+          mocks.markerFails
+        ) {
+          throw new Error("durable sync-error storage unavailable");
+        }
+        if (!mocks.rows.has(id)) return 0;
+        mocks.rows.set(id, { ...mocks.rows.get(id), ...fields });
+        return 1;
+      },
       add: async (row: { id: string }) => mocks.rows.set(row.id, row),
       where: (field: string) => ({
         equals: (value: unknown) => ({
@@ -129,7 +192,10 @@ const promptMutations = () =>
   promptRequests().filter(([, init]) => init.method !== "GET");
 const principalResponse = (init: RequestInit) => {
   const bearer = new Headers(init.headers).get("Authorization");
-  if (bearer === `Bearer ${owner.accessToken}`)
+  if (
+    bearer === `Bearer ${owner.accessToken}` ||
+    bearer === `Bearer ${config("https://a.test", "alice", 2).accessToken}`
+  )
     return jsonResponse({ id: "authoritative-alice" });
   if (bearer === `Bearer ${switchedOwners[1].accessToken}`)
     return jsonResponse({ id: "authoritative-bob" });
@@ -190,12 +256,99 @@ const selectSaved = async (user: ReturnType<typeof userEvent.setup>) => {
   );
 };
 
-describe("recipe dispatch ownership through real sync and transport", () => {
+const seed = (operation: string) => {
+  if (operation !== "update") return;
+  mocks.rows.set("dispatch-id", {
+    id: "dispatch-id",
+    title: "Dispatch recipe",
+    content: "",
+    is_system: true,
+    createdAt: 1,
+    syncStatus: "synced",
+    serverId: 101,
+    promptFormat: "structured",
+    promptSchemaVersion: 2,
+    structuredPromptDefinition: structuredClone(CLEAR_TASK_RECIPE.definition),
+  });
+};
+const clickWrite = async (
+  user: ReturnType<typeof userEvent.setup>,
+  operation: string,
+) =>
+  user.click(
+    screen.getByRole("button", {
+      name: operation === "create" ? "Save as new recipe" : "Update recipe",
+    }),
+  );
+const startBackground = async () => {
+  mocks.extension = true;
+  mocks.listeners.clear();
+  Object.defineProperty(globalThis, "defineBackground", {
+    configurable: true,
+    value: (v: unknown) => v,
+  });
+  const background = (await import("@/entries/background")).default;
+  background.main();
+  mocks.sendMessage.mockImplementation(
+    (message: unknown) =>
+      new Promise((resolve) => {
+        const listener = [...mocks.listeners][0];
+        if (!listener) throw new Error("Missing real background listener");
+        listener(message, { id: "test-extension" }, resolve);
+      }),
+  );
+};
+
+describe("builder through real sync, Prompt Studio, apiSend and request-core", () => {
+  it.each([
+    ["direct", "create"],
+    ["direct", "update"],
+    ["background", "create"],
+    ["background", "update"],
+  ])(
+    "%s %s clears a typed no-mutation rejection before exact rollback",
+    async (adapter, operation) => {
+      if (adapter === "background") await startBackground();
+      seed(operation);
+      const original = structuredClone(mocks.rows.get("dispatch-id"));
+      mocks.fetch.mockImplementation(async (url, init) =>
+        new URL(String(url)).pathname === "/api/v1/auth/me"
+          ? principalResponse(init)
+          : jsonResponse(
+              {
+                detail: [
+                  {
+                    loc: ["body", "name"],
+                    msg: "Field required",
+                    type: "missing",
+                  },
+                ],
+              },
+              422,
+            ),
+      );
+      const user = userEvent.setup();
+      renderBuilder(ownerScope);
+      if (operation === "update") await selectSaved(user);
+      await clickWrite(user, operation);
+      await screen.findByText(
+        operation === "create"
+          ? "Could not save the recipe. Try again."
+          : "Could not update the recipe. Try again.",
+      );
+      expect(mocks.rows.get("dispatch-id")).toEqual(original);
+      expect(
+        await readRecipePersistenceUncertainty("dispatch-id", ownerScope),
+      ).toBe("clear");
+      expect(promptMutations()).toHaveLength(1);
+    },
+  );
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.rows.clear();
     mocks.config = owner;
     mocks.extension = false;
+    mocks.runtimeKey = null;
     mocks.markerFails = true;
     mocks.resolveConfig.mockImplementation(async () => mocks.config);
     mocks.fetch.mockImplementation(async (url, init) =>
@@ -209,15 +362,218 @@ describe("recipe dispatch ownership through real sync and transport", () => {
     vi.stubGlobal("fetch", mocks.fetch);
     delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE;
   });
-  afterEach(() => {
+  afterEach(async () => {
     cleanup();
-    vi.unstubAllGlobals();
     for (const scope of [ownerScope, ...switchedScopes])
-      clearRecipePersistenceUncertainty("dispatch-id", scope);
+      await clearRecipePersistenceScoped("dispatch-id", scope);
+    await forgetRecipePersistenceUnknown("dispatch-id");
+    vi.unstubAllGlobals();
   });
 
+  for (const adapter of ["direct", "background"]) {
+    for (const operation of ["create", "update"]) {
+      for (const change of ["backend", "principal", "auth-source"]) {
+        it(
+          adapter +
+            " " +
+            operation +
+            ": " +
+            change +
+            " rejects stale A, dispatches B once, and keeps B locked after storage failure/reopen",
+          async () => {
+            if (change === "auth-source")
+              mocks.config = {
+                serverUrl: "https://a.test",
+                authMode: "single-user",
+                apiKey: "source-key",
+                credentialSource: "manual",
+                apiKeyPersistence: "device",
+                apiKeyServerOrigin: "https://a.test",
+              };
+            if (adapter === "background") await startBackground();
+            const originalOwner = (await resolveRecipePersistenceOwnerView())!
+              .ownerId;
+            seed(operation);
+            const originalRow = structuredClone(mocks.rows.get("dispatch-id"));
+            const user = userEvent.setup();
+            const view = renderBuilder(originalOwner);
+            if (operation === "update") await selectSaved(user);
+            const gate = deferred();
+            mocks.beforeRead.mockImplementationOnce(() => gate.promise);
+            await clickWrite(user, operation);
+            await waitFor(() => expect(mocks.beforeRead).toHaveBeenCalled());
+            if (change === "auth-source") mocks.runtimeKey = "source-key";
+            else mocks.config = switchedOwners[change === "backend" ? 0 : 1];
+            gate.resolve();
+            await screen.findByText(
+              operation === "create"
+                ? "Could not save the recipe. Try again."
+                : "Could not update the recipe. Try again.",
+            );
+            expect(promptMutations()).toHaveLength(0);
+            expect(mocks.rows.get("dispatch-id")).toEqual(originalRow);
+            const actualOwner = (await resolveRecipePersistenceOwnerView())!
+              .ownerId;
+            expect(actualOwner).not.toBe(originalOwner);
+            view.unmount();
+            const retry = renderBuilder(actualOwner);
+            if (operation === "update") await selectSaved(user);
+            await clickWrite(user, operation);
+            await screen.findByText(/server outcome.*not.*verified/i);
+            expect(promptMutations()).toHaveLength(1);
+            expect(
+              await readRecipePersistenceUncertainty(
+                "dispatch-id",
+                actualOwner,
+              ),
+            ).toBe("scoped");
+            expect(
+              await readRecipePersistenceUncertainty(
+                "dispatch-id",
+                originalOwner,
+              ),
+            ).toBe("clear");
+            expect(mocks.rows.has("dispatch-id")).toBe(true);
+            expect(mocks.rows.get("dispatch-id")?.syncStatus).not.toBe("error");
+            retry.unmount();
+            const reopened = renderBuilder(actualOwner);
+            await selectSaved(user);
+            await waitFor(() =>
+              expect(
+                screen.getByRole("button", { name: "Save as new recipe" }),
+              ).toBeDisabled(),
+            );
+            expect(
+              screen.getByRole("button", { name: "Update recipe" }),
+            ).toBeDisabled();
+            await user.type(
+              screen.getByRole("textbox", {
+                name: "Current value for Task (not saved)",
+              }),
+              "local task",
+            );
+            expect(
+              screen.getByRole("button", { name: "Apply to system prompt" }),
+            ).toBeEnabled();
+            expect(
+              screen.queryByRole("button", {
+                name: "Forget unresolved operation",
+              }),
+            ).toBeNull();
+            await clickWrite(user, operation);
+            expect(promptMutations()).toHaveLength(1);
+            reopened.unmount();
+            const unrelatedOwner = renderBuilder(originalOwner);
+            await selectSaved(user);
+            await waitFor(() =>
+              expect(
+                screen.getByRole("button", { name: "Save as new recipe" }),
+              ).toBeEnabled(),
+            );
+            unrelatedOwner.unmount();
+            await clearRecipePersistenceScoped("dispatch-id", actualOwner);
+          },
+        );
+      }
+    }
+  }
+
+  it.each(["create", "update"])(
+    "allows same-principal token rotation for %s and clears only after reconciliation",
+    async (operation) => {
+      seed(operation);
+      const user = userEvent.setup();
+      renderBuilder(ownerScope);
+      if (operation === "update") await selectSaved(user);
+      mocks.config = config("https://a.test", "alice", 2);
+      let observedMarker: unknown;
+      mocks.fetch.mockImplementation(async (url, init) => {
+        if (new URL(String(url)).pathname === "/api/v1/auth/me")
+          return principalResponse(init);
+        observedMarker = await readRecipePersistenceUncertainty(
+          "dispatch-id",
+          ownerScope,
+        );
+        return jsonResponse({ success: true, data: serverRecord() });
+      });
+      await clickWrite(user, operation);
+      await waitFor(() =>
+        expect(mocks.rows.get("dispatch-id").serverId).toBe(101),
+      );
+      await waitFor(() => expect(observedMarker).toBe("scoped"));
+      await waitFor(async () =>
+        expect(
+          await readRecipePersistenceUncertainty("dispatch-id", ownerScope),
+        ).toBe("clear"),
+      );
+      expect(promptMutations()).toHaveLength(1);
+    },
+  );
+
+  it.each(["create", "update"])(
+    "quarantines an unknown background %s delivery and Forget sends no remote request",
+    async (operation) => {
+      await startBackground();
+      seed(operation);
+      const deliver = mocks.sendMessage.getMockImplementation()!;
+      mocks.sendMessage.mockImplementation(async (message) => {
+        const value = await deliver(message);
+        if (message.type === "tldw:request")
+          throw new Error("message channel closed");
+        return value;
+      });
+      const user = userEvent.setup();
+      const view = renderBuilder(ownerScope);
+      if (operation === "update") await selectSaved(user);
+      await clickWrite(user, operation);
+      await screen.findByRole("button", {
+        name: "Forget unresolved operation",
+      });
+      expect(
+        await readRecipePersistenceUncertainty(
+          "dispatch-id",
+          switchedScopes[0],
+        ),
+      ).toBe("unknown_owner");
+      expect(promptMutations()).toHaveLength(1);
+      view.unmount();
+      renderBuilder(switchedScopes[0]);
+      await selectSaved(user);
+      await user.click(
+        await screen.findByRole("button", {
+          name: "Forget unresolved operation",
+        }),
+      );
+      expect(screen.getByText(/may already have saved/)).toBeTruthy();
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(
+        await readRecipePersistenceUncertainty(
+          "dispatch-id",
+          switchedScopes[0],
+        ),
+      ).toBe("unknown_owner");
+      await user.click(
+        screen.getByRole("button", { name: "Forget unresolved operation" }),
+      );
+      await user.click(screen.getByRole("button", { name: "Confirm forget" }));
+      await waitFor(async () =>
+        expect(
+          await readRecipePersistenceUncertainty(
+            "dispatch-id",
+            switchedScopes[0],
+          ),
+        ).toBe("clear"),
+      );
+      expect(
+        await readRecipePersistenceUncertainty("dispatch-id", ownerScope),
+      ).toBe("scoped");
+      expect(promptMutations()).toHaveLength(1);
+      expect(mocks.rows.has("dispatch-id")).toBe(true);
+    },
+  );
+
   it.each(["create", "update", "pull"])(
-    "preserves v1 %s with opaque credentials without clearing owned uncertainty",
+    "keeps v1 %s compatible without requiring owner identity",
     async (operation) => {
       const definition = {
         schema_version: 1,
@@ -227,24 +583,28 @@ describe("recipe dispatch ownership through real sync and transport", () => {
         assembly_config: {
           legacy_system_roles: ["system", "developer"],
           legacy_user_roles: ["user"],
-          block_separator: "\n\n",
+          block_separator: "\\n\\n",
         },
       };
-      mocks.config = { ...owner, accessToken: "opaque-v1-token" };
+      mocks.config = { ...owner, accessToken: "opaque-token" };
       mocks.rows.set("dispatch-id", {
         id: "dispatch-id",
-        title: "V1 prompt",
+        title: "V1",
         syncStatus: "local",
         promptFormat: "structured",
         promptSchemaVersion: 1,
         structuredPromptDefinition: definition,
         ...(operation === "update" ? { serverId: 101 } : {}),
       });
-      markRecipePersistenceUncertain("dispatch-id", ownerScope);
+      await markRecipePersistenceScoped("dispatch-id", ownerScope);
       mocks.fetch.mockImplementation(async (url, init) =>
         new URL(String(url)).pathname === "/api/v1/auth/me"
           ? principalResponse(init)
           : jsonResponse({
+              recipePersistence: {
+                state: "not_dispatched",
+                actualOwnerId: null,
+              },
               success: true,
               data: {
                 ...serverRecord(),
@@ -257,188 +617,16 @@ describe("recipe dispatch ownership through real sync and transport", () => {
         operation === "pull"
           ? await pullFromStudio(101, "dispatch-id")
           : await autoSyncPrompt("dispatch-id", 42);
-      expect(result).toMatchObject({ success: true, persistenceScope: null });
-      expect(promptRequests()).toHaveLength(1);
-      expect(promptMutations()).toHaveLength(operation === "pull" ? 0 : 1);
-      expect(isRecipePersistenceUncertain("dispatch-id", ownerScope)).toBe(
-        true,
-      );
-    },
-  );
-
-  it.each(["create", "update"])(
-    "rejects a v2 %s with unknown identity before dispatch as a known failure",
-    async (operation) => {
-      mocks.config = { ...owner, accessToken: "opaque-v2-token" };
-      mocks.rows.set("dispatch-id", {
-        id: "dispatch-id",
-        title: "V2 recipe",
-        syncStatus: "local",
-        promptFormat: "structured",
-        promptSchemaVersion: 2,
-        structuredPromptDefinition: CLEAR_TASK_RECIPE.definition,
-        ...(operation === "update" ? { serverId: 101 } : {}),
-      });
-      expect(await autoSyncPrompt("dispatch-id", 42)).toMatchObject({
-        success: false,
-        failureKind: "validation",
-        persistenceScope: null,
-      });
-      expect(promptRequests()).toHaveLength(0);
-      expect(isRecipePersistenceUncertain("dispatch-id", ownerScope)).toBe(
-        false,
-      );
-    },
-  );
-
-  for (const operation of ["create", "update"] as const) {
-    for (const [index, nextOwner] of switchedOwners.entries()) {
-      it(`${operation}: ${index === 0 ? "backend" : "principal"} switch fails before mutation until legacy sync supplies owner and local ID`, async () => {
-        const user = userEvent.setup();
-        if (operation === "update")
-          mocks.rows.set("dispatch-id", {
-            id: "dispatch-id",
-            title: "Dispatch recipe",
-            content: "",
-            is_system: true,
-            createdAt: 1,
-            syncStatus: "synced",
-            serverId: 101,
-            promptFormat: "structured",
-            promptSchemaVersion: 2,
-            structuredPromptDefinition: structuredClone(
-              CLEAR_TASK_RECIPE.definition,
-            ),
-          });
-        const originalRow = structuredClone(mocks.rows.get("dispatch-id"));
-        const view = renderBuilder(ownerScope);
-        if (operation === "update") await selectSaved(user);
-        const gate = deferred();
-        mocks.beforeRead.mockImplementationOnce(() => gate.promise);
-        await user.click(
-          screen.getByRole("button", {
-            name:
-              operation === "create" ? "Save as new recipe" : "Update recipe",
-          }),
-        );
-        await waitFor(() => expect(mocks.beforeRead).toHaveBeenCalled());
-        mocks.config = nextOwner;
-        gate.resolve();
-        await screen.findByText(
-          operation === "create"
-            ? "Could not save the recipe. Try again."
-            : "Could not update the recipe. Try again.",
-        );
-        const scope = switchedScopes[index];
-        expect(promptRequests()).toHaveLength(0);
-        const authRequest = mocks.fetch.mock.calls.find(
-          ([url]) => new URL(String(url)).pathname === "/api/v1/auth/me",
-        );
-        expect(authRequest?.[0]).toBe(`${nextOwner.serverUrl}/api/v1/auth/me`);
-        expect(new Headers(authRequest?.[1].headers).get("Authorization")).toBe(
-          `Bearer ${nextOwner.accessToken}`,
-        );
-        expect(isRecipePersistenceUncertain("dispatch-id", scope)).toBe(false);
-        expect(isRecipePersistenceUncertain("dispatch-id", ownerScope)).toBe(
-          false,
-        );
-        expect(mocks.rows.get("dispatch-id")).toEqual(originalRow);
-        view.unmount();
-        const actualView = renderBuilder(scope);
-        if (operation === "update") await selectSaved(user);
-        expect(
-          screen.getByRole("button", { name: "Save as new recipe" }),
-        ).toBeEnabled();
-        await user.click(
-          screen.getByRole("button", {
-            name:
-              operation === "create" ? "Save as new recipe" : "Update recipe",
-          }),
-        );
-        await screen.findByText(
-          operation === "create"
-            ? "Could not save the recipe. Try again."
-            : "Could not update the recipe. Try again.",
-        );
-        expect(promptMutations()).toHaveLength(0);
-        expect(isRecipePersistenceUncertain("dispatch-id", scope)).toBe(false);
-        actualView.unmount();
-        const staleView = renderBuilder(ownerScope);
-        if (operation === "update") await selectSaved(user);
-        expect(
-          screen.getByRole("button", { name: "Save as new recipe" }),
-        ).toBeEnabled();
-        staleView.unmount();
-      });
-    }
-  }
-
-  it.each(["create", "update"])(
-    "%s returns the transport owner when config changes during resolution",
-    async (operation) => {
-      mocks.rows.set("dispatch-id", {
-        id: "dispatch-id",
-        title: "Task",
-        syncStatus: "local",
-        ...(operation === "update" ? { serverId: 101 } : {}),
-      });
-      mocks.resolveConfig.mockImplementationOnce(async () => {
-        mocks.config = switchedOwners[0];
-        return mocks.config;
-      });
-      const result = await autoSyncPrompt("dispatch-id", 42);
       expect(result).toMatchObject({
-        failureKind: "invalid_server_payload",
-        persistenceScope: switchedScopes[0],
-        localId: "dispatch-id",
+        success: true,
+        recipeOwnership: {
+          dispatch: { state: "dispatched", actualOwnerId: null },
+        },
       });
-      expect(promptRequests()).toHaveLength(1);
-      expect(promptMutations()).toHaveLength(1);
-      expect(String(promptRequests()[0][0])).toMatch(
-        /^https:\/\/b\.test\/api\/v1\/prompt-studio\/prompts\//,
-      );
+      expect(
+        await readRecipePersistenceUncertainty("dispatch-id", ownerScope),
+      ).toBe("scoped");
+      expect(promptMutations()).toHaveLength(operation === "pull" ? 0 : 1);
     },
   );
-
-  it("returns the extension background dispatch owner, not the page config", async () => {
-    mocks.extension = true;
-    mocks.rows.set("dispatch-id", {
-      id: "dispatch-id",
-      title: "Task",
-      syncStatus: "local",
-    });
-    mocks.sendMessage.mockImplementation(async ({ payload }) =>
-      tldwRequest(payload, {
-        getConfig: async () => switchedOwners[1],
-        useRuntimeAuthOverride: false,
-        getAuthenticatedPrincipal: getRecipeAuthenticatedPrincipal,
-      }),
-    );
-    const result = await autoSyncPrompt("dispatch-id", 42);
-    expect(result).toMatchObject({
-      failureKind: "invalid_server_payload",
-      persistenceScope: switchedScopes[1],
-    });
-    expect(
-      new Headers(promptRequests()[0][1].headers).get("Authorization"),
-    ).toBe(`Bearer ${switchedOwners[1].accessToken}`);
-    expect(promptMutations()).toHaveLength(1);
-  });
-
-  it("does not fall back to direct prompt writes after ambiguous extension delivery", async () => {
-    mocks.extension = true;
-    mocks.rows.set("dispatch-id", {
-      id: "dispatch-id",
-      title: "Task",
-      syncStatus: "local",
-    });
-    mocks.sendMessage.mockRejectedValue(new Error("message channel closed"));
-    expect(await autoSyncPrompt("dispatch-id", 42)).toMatchObject({
-      success: false,
-      failureKind: "invalid_server_payload",
-      persistenceScope: null,
-    });
-    expect(promptMutations()).toHaveLength(0);
-    expect(mocks.fetch).not.toHaveBeenCalled();
-  });
 });
