@@ -201,12 +201,14 @@ describe("OSCE Generate and Create controls", () => {
     </QueryClientProvider>)
     fillOsceCreateForm()
 
-    fireEvent.click(screen.getByRole("button", { name: "Save station" }))
+    const saveButton = screen.getByRole("button", { name: "Save station" })
+    fireEvent.click(saveButton)
     await waitFor(() => expect(stationCreate).toHaveBeenCalledTimes(1))
     expect(screen.getByLabelText("Station title")).toHaveValue("Anticoagulant counselling")
     expect(screen.getByRole("radio", { name: "OSCE" })).toBeDisabled()
     expect(screen.getByLabelText("Quiz Name")).toBeDisabled()
-    fireEvent.click(screen.getByRole("button", { name: "Save station" }))
+    await waitFor(() => expect(saveButton).toBeEnabled())
+    fireEvent.click(saveButton)
 
     await waitFor(() => expect(stationCreate).toHaveBeenCalledTimes(2))
     expect(useCreateQuizMutation().mutateAsync).toHaveBeenCalledTimes(1)

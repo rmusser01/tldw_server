@@ -25,6 +25,7 @@ import {
   getOsceStation,
   isAmbiguousOsceMutationFailure,
   osceRequestErrorStatus,
+  validateOsceCitationLocator,
   type OsceCitation,
   type OsceChecklistItemUpdate,
   type OsceKeyPointUpdate,
@@ -78,16 +79,14 @@ const newCitation = (): OsceCitation => ({
 
 const toQuizSourceCitations = (citations: OsceCitation[]): SourceCitation[] =>
   citations.map((citation) => ({
-    source_type:
-      citation.source_type === "media" || citation.source_type === "note"
-        ? citation.source_type
-        : undefined,
+    source_type: citation.source_type,
     source_id: citation.source_id,
     label: citation.label,
     quote: citation.quote,
     media_id: citation.media_id,
     chunk_id: citation.chunk_id,
     timestamp_seconds: citation.timestamp_seconds,
+    page_number: citation.page_number,
     source_url: citation.source_url
   }))
 
@@ -170,24 +169,9 @@ const validateDraft = (draft: OsceStationDraft): string[] => {
   if (citations.some((citation) => !citation.source_id.trim())) {
     errors.push("Every citation needs a source ID.")
   }
-  if (citations.some((citation) =>
-    citation.source_type === "document" &&
-    citation.page_number != null &&
-    !Number.isInteger(citation.page_number)
-  )) {
-    errors.push("Document citation page numbers must be whole numbers.")
-  }
-  if (citations.some((citation) => {
-    if (citation.source_type !== "url") return false
-    try {
-      const parsed = new URL(citation.source_url ?? "")
-      return parsed.protocol !== "http:" && parsed.protocol !== "https:"
-    } catch {
-      return true
-    }
-  })) {
-    errors.push("URL citations require an absolute HTTP(S) URL.")
-  }
+  errors.push(...new Set(
+    citations.map(validateOsceCitationLocator).filter((error): error is string => error != null)
+  ))
   return errors
 }
 
@@ -249,7 +233,11 @@ const CitationEditor: React.FC<CitationEditorProps> = ({ citations, label, onCha
               { value: "media", label: "Media" },
               { value: "document", label: "Document" },
               { value: "url", label: "URL" },
-              { value: "note", label: "Note" }
+              { value: "note", label: "Note" },
+              { value: "flashcard_deck", label: "Flashcard deck" },
+              { value: "flashcard_card", label: "Flashcard card" },
+              { value: "quiz_attempt", label: "Quiz attempt" },
+              { value: "quiz_attempt_question", label: "Quiz attempt question" }
             ]}
             onChange={(source_type) => updateCitation(index, {
               source_type,

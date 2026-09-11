@@ -174,8 +174,10 @@ export interface OsceSaveQueue {
   enqueueStaged(): Promise<OsceAttempt | null>
   flush(): Promise<void>
   hasPending(): boolean
+  hasConflict(): boolean
   getAcknowledgedVersion(): number
-  replaceAcknowledgedAttempt(attempt: OsceAttempt): void
+  replaceAcknowledgedAttempt(attempt: OsceAttempt): boolean
+  resolveConflict(attempt: OsceAttempt, resolution: "discard" | "reapply"): boolean
 }
 
 type CreateQueueOptions = {
@@ -205,6 +207,7 @@ export const createOsceSaveQueue = ({
   let scheduledRevision = 0
   let pending = 0
   let dirty = false
+  let conflicted = false
   let lastError: unknown = null
   let tail: Promise<void> = Promise.resolve()
 
@@ -225,6 +228,9 @@ export const createOsceSaveQueue = ({
   }
 
   const enqueueStaged = (): Promise<OsceAttempt | null> => {
+    if (conflicted) {
+      return Promise.reject(lastError ?? new Error("OSCE draft conflict requires resolution."))
+    }
     if (scheduledRevision === revision) return tail.then(() => null)
 
     const queuedRevision = revision
@@ -246,6 +252,7 @@ export const createOsceSaveQueue = ({
         if (isCurrentRevision) {
           writable = writableFromAttempt(updated)
           dirty = false
+          conflicted = false
           lastError = null
           clearOsceDraft(userScope, attemptId, { storage })
         } else {
@@ -256,6 +263,7 @@ export const createOsceSaveQueue = ({
         return updated
       } catch (error) {
         lastError = error
+        conflicted = Number((error as { status?: unknown } | null)?.status) === 409
         dirty = true
         persistCurrent()
         throw error
@@ -283,13 +291,36 @@ export const createOsceSaveQueue = ({
       if (lastError) throw lastError
     },
     hasPending: () => pending > 0 || dirty,
+    hasConflict: () => conflicted,
     getAcknowledgedVersion: () => acknowledgedVersion,
     replaceAcknowledgedAttempt(nextAttempt) {
-      if (nextAttempt.id !== attemptId) return
-      if (nextAttempt.version < acknowledgedVersion) return
+      if (nextAttempt.id !== attemptId) return false
+      if (nextAttempt.version < acknowledgedVersion) return false
+      if (dirty || pending > 0 || conflicted) return false
       acknowledged = nextAttempt
       acknowledgedVersion = nextAttempt.version
-      if (!dirty && pending === 0) writable = writableFromAttempt(nextAttempt)
+      writable = writableFromAttempt(nextAttempt)
+      return true
+    },
+    resolveConflict(nextAttempt, resolution) {
+      if (!conflicted || nextAttempt.id !== attemptId || nextAttempt.version < acknowledgedVersion) {
+        return false
+      }
+      acknowledged = nextAttempt
+      acknowledgedVersion = nextAttempt.version
+      lastError = null
+      conflicted = false
+      revision += 1
+      if (resolution === "discard") {
+        writable = writableFromAttempt(nextAttempt)
+        dirty = false
+        scheduledRevision = revision
+        clearOsceDraft(userScope, attemptId, { storage })
+      } else {
+        dirty = true
+        persistCurrent()
+      }
+      return true
     }
   }
 }

@@ -104,15 +104,14 @@ const prepareErrorAlert = (node: HTMLDivElement | null): void => {
 }
 
 const toSourceCitations = (citations: OsceCitation[]): SourceCitation[] => citations.map((citation) => ({
-  source_type: citation.source_type === "media" || citation.source_type === "note"
-    ? citation.source_type
-    : null,
+  source_type: citation.source_type,
   source_id: citation.source_id,
   label: citation.label,
   quote: citation.quote,
   media_id: citation.media_id,
   chunk_id: citation.chunk_id,
   timestamp_seconds: citation.timestamp_seconds,
+  page_number: citation.page_number,
   source_url: citation.source_url
 }))
 
@@ -120,7 +119,7 @@ const mergeDraftIntoAttempt = (
   attempt: OsceAttempt,
   draft: ReturnType<typeof readOsceDraft>
 ): OsceAttempt => {
-  if (!draft) return attempt
+  if (!draft || attempt.state === "completed") return attempt
   if (attempt.state === "in_progress") {
     return { ...attempt, notes: draft.notes }
   }
@@ -158,6 +157,7 @@ export const OscePracticePanel: React.FC<OscePracticePanelProps> = ({
   const [attempt, setAttempt] = React.useState<OsceAttempt | null>(null)
   const [saveStatus, setSaveStatus] = React.useState<SaveStatus>("idle")
   const [saveError, setSaveError] = React.useState<string | null>(null)
+  const [conflictAttempt, setConflictAttempt] = React.useState<OsceAttempt | null>(null)
   const [revealConfirmationOpen, setRevealConfirmationOpen] = React.useState(false)
   const [, setVisualTick] = React.useState(0)
   const queueRef = React.useRef<OsceSaveQueue | null>(null)
@@ -227,6 +227,21 @@ export const OscePracticePanel: React.FC<OscePracticePanelProps> = ({
     const serverAttempt = attemptQuery.data
     if (!serverAttempt) return
     const queueKey = `${userScope}:${serverAttempt.id}`
+    if (serverAttempt.state === "completed") {
+      if (notesTimerRef.current) {
+        clearTimeout(notesTimerRef.current)
+        notesTimerRef.current = null
+      }
+      pendingNotesRef.current = null
+      clearOsceDraft(userScope, serverAttempt.id)
+      queueRef.current = null
+      queueKeyRef.current = queueKey
+      setAttempt(serverAttempt)
+      setConflictAttempt(null)
+      setSaveStatus("saved")
+      setSaveError(null)
+      return
+    }
     if (queueKeyRef.current !== queueKey) {
       const draft = readOsceDraft(userScope, serverAttempt.id)
       setAttempt(mergeDraftIntoAttempt(serverAttempt, draft))
@@ -243,6 +258,7 @@ export const OscePracticePanel: React.FC<OscePracticePanelProps> = ({
         }
       })
       queueKeyRef.current = queueKey
+      setConflictAttempt(null)
       if (draft && isOnline) {
         setSaveStatus("saving")
         void queueRef.current.enqueue({
@@ -256,9 +272,28 @@ export const OscePracticePanel: React.FC<OscePracticePanelProps> = ({
       return
     }
 
-    queueRef.current?.replaceAcknowledgedAttempt(serverAttempt)
-    if (!queueRef.current?.hasPending()) setAttempt(serverAttempt)
+    const queue = queueRef.current
+    const replaced = queue?.replaceAcknowledgedAttempt(serverAttempt) ?? false
+    if (!replaced && queue?.hasConflict()) {
+      setConflictAttempt(serverAttempt)
+      return
+    }
+    if (!queue?.hasPending()) setAttempt(serverAttempt)
   }, [attemptQuery.data, isOnline, userScope])
+
+  React.useEffect(() => {
+    if (saveStatus !== "conflict") return
+    let cancelled = false
+    void attemptQuery.refetch().then((result) => {
+      const latest = result.data
+      if (!cancelled && latest && queueRef.current?.hasConflict()) {
+        setConflictAttempt(latest)
+      }
+    }).catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [attemptQuery.refetch, saveStatus])
 
   React.useEffect(() => {
     const becameOnline = isOnline && !wasOnlineRef.current
@@ -306,6 +341,29 @@ export const OscePracticePanel: React.FC<OscePracticePanelProps> = ({
       void queue.enqueueStaged().catch(reportSaveError)
     }, Math.max(0, saveDebounceMs))
   }, [isOnline, reportSaveError, saveDebounceMs])
+
+  const resolveSaveConflict = React.useCallback(async (resolution: "discard" | "reapply") => {
+    const queue = queueRef.current
+    if (!queue || !conflictAttempt || !queue.resolveConflict(conflictAttempt, resolution)) return
+    setConflictAttempt(null)
+    setSaveError(null)
+    if (resolution === "discard") {
+      if (notesTimerRef.current) {
+        clearTimeout(notesTimerRef.current)
+        notesTimerRef.current = null
+      }
+      pendingNotesRef.current = null
+      setAttempt(conflictAttempt)
+      setSaveStatus("saved")
+      return
+    }
+    setSaveStatus("saving")
+    try {
+      await queue.enqueueStaged()
+    } catch (error) {
+      reportSaveError(error)
+    }
+  }, [conflictAttempt, reportSaveError])
 
   const flushPendingWrites = React.useCallback(async () => {
     if (notesTimerRef.current) {
@@ -410,6 +468,7 @@ export const OscePracticePanel: React.FC<OscePracticePanelProps> = ({
     ? computeLiveElapsedSeconds({ ...timerBaseline, monotonicNowMs: monotonicNow() })
     : 0
   const isRevealed = attempt.state !== "in_progress"
+  const isCompleted = attempt.state === "completed"
   const checklistItems = isRevealed ? attempt.station.checklist_items : []
   const rubricDomains = isRevealed ? attempt.station.rubric_domains : []
   const canComplete = isRevealed &&
@@ -473,9 +532,11 @@ export const OscePracticePanel: React.FC<OscePracticePanelProps> = ({
           id={`osce-notes-${attempt.id}`}
           aria-label="Private practice notes"
           value={attempt.notes}
+          disabled={isCompleted}
           maxLength={10_000}
           autoSize={{ minRows: 4, maxRows: 10 }}
           onChange={(event) => {
+            if (isCompleted) return
             const notes = event.target.value
             setAttempt((current) => current ? { ...current, notes } : current)
             queueNotes(notes)
@@ -493,11 +554,21 @@ export const OscePracticePanel: React.FC<OscePracticePanelProps> = ({
       </div>
 
       {saveError && !revealConfirmationOpen && (
-        <DesignSystemAlert
-          ref={setOuterErrorAlertRef}
-          variant={saveStatus === "conflict" ? "warning" : "error"}
-          title={saveError}
-        />
+        <div className="space-y-2">
+          <DesignSystemAlert
+            ref={setOuterErrorAlertRef}
+            variant={saveStatus === "conflict" ? "warning" : "error"}
+            title={saveError}
+          />
+          {saveStatus === "conflict" && conflictAttempt ? (
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => void resolveSaveConflict("discard")}>Use server changes</Button>
+              <Button type="primary" onClick={() => void resolveSaveConflict("reapply")}>
+                Reapply local draft
+              </Button>
+            </div>
+          ) : null}
+        </div>
       )}
 
       {isRevealed && (
@@ -525,7 +596,9 @@ export const OscePracticePanel: React.FC<OscePracticePanelProps> = ({
                 <Radio.Group
                   aria-label={item.label}
                   value={attempt.checklist_selections[item.id]}
+                  disabled={isCompleted}
                   onChange={(event) => {
+                    if (isCompleted) return
                     const checklistSelections = {
                       ...attempt.checklist_selections,
                       [item.id]: event.target.value
@@ -554,7 +627,9 @@ export const OscePracticePanel: React.FC<OscePracticePanelProps> = ({
                 <Radio.Group
                   aria-label={domain.label}
                   value={attempt.rubric_selections[domain.id]}
+                  disabled={isCompleted}
                   onChange={(event) => {
+                    if (isCompleted) return
                     const rubricSelections = {
                       ...attempt.rubric_selections,
                       [domain.id]: event.target.value

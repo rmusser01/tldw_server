@@ -20,6 +20,7 @@ import {
   patchOsceAttempt,
   startOsceAttempt,
   updateOsceStation,
+  validateOsceCitationLocator,
   type OsceStationCreateContent
 } from "@/services/osce"
 import {
@@ -137,6 +138,30 @@ describe("OSCE service wire contract", () => {
       "OSCE station pagination did not advance"
     )
     expect(mockBgRequest).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("OSCE citation locators", () => {
+  it.each([
+    "flashcard_deck",
+    "flashcard_card",
+    "quiz_attempt",
+    "quiz_attempt_question"
+  ] as const)("accepts chunk evidence for %s citations", (sourceType) => {
+    expect(validateOsceCitationLocator({
+      source_type: sourceType,
+      source_id: "source-1",
+      chunk_id: "chunk-7"
+    })).toBeNull()
+  })
+
+  it("rejects non-chunk locator fields for flashcard and quiz-attempt citations", () => {
+    expect(validateOsceCitationLocator({
+      source_type: "quiz_attempt_question",
+      source_id: "301:12",
+      chunk_id: "answer-2",
+      media_id: 42
+    })).toBe("Invalid locator fields for quiz_attempt_question: media_id.")
   })
 })
 

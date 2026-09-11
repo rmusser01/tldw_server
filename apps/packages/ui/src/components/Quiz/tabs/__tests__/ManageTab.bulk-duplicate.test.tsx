@@ -55,6 +55,25 @@ vi.mock("../../hooks", () => ({
   useDeleteQuestionMutation: vi.fn()
 }))
 
+vi.mock("../../hooks/useOsceQueries", () => ({
+  useAllOsceStationsQuery: vi.fn(() => ({
+    data: [],
+    error: null,
+    isLoading: false,
+    refetch: vi.fn()
+  })),
+  useDeleteOsceStationMutation: vi.fn(() => ({
+    isPending: false,
+    mutateAsync: vi.fn()
+  })),
+  useOsceStationQuery: vi.fn(() => ({
+    data: undefined,
+    error: null,
+    isLoading: false,
+    refetch: vi.fn()
+  }))
+}))
+
 vi.mock("@/services/quizzes", () => ({
   listQuestions: vi.fn(),
   importQuizzesJson: vi.fn()

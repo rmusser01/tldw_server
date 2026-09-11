@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import type { ReactElement } from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { OsceStationEditor } from "../OsceStationEditor"
@@ -60,12 +61,18 @@ const station = {
   updated_at: "2026-09-11T00:00:00Z"
 }
 
-const renderEditor = (onDirtyStateChange = vi.fn()) => {
+const renderWithQueryClient = (ui: ReactElement) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(
-    <QueryClientProvider client={client}>
-      <OsceStationEditor quizId={7} station={station} onDirtyStateChange={onDirtyStateChange} />
-    </QueryClientProvider>
+  return render(ui, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    )
+  })
+}
+
+const renderEditor = (onDirtyStateChange = vi.fn()) => {
+  renderWithQueryClient(
+    <OsceStationEditor quizId={7} station={station} onDirtyStateChange={onDirtyStateChange} />
   )
   return onDirtyStateChange
 }
@@ -112,11 +119,8 @@ describe("OsceStationEditor", () => {
     const onCreate = vi.fn(() => new Promise<typeof station>((resolve) => {
       resolveCreate = resolve
     }))
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    render(
-      <QueryClientProvider client={client}>
-        <OsceStationEditor initialContent={station.content} onCreate={onCreate} />
-      </QueryClientProvider>
+    renderWithQueryClient(
+      <OsceStationEditor initialContent={station.content} onCreate={onCreate} />
     )
     fireEvent.change(screen.getByLabelText("Station title"), { target: { value: "Local draft" } })
     const saveButton = screen.getByRole("button", { name: "Save station" })
@@ -140,11 +144,8 @@ describe("OsceStationEditor", () => {
     ["server error", Object.assign(new Error("unavailable"), { status: 503 })]
   ])("fails closed after ambiguous direct station creation: %s", async (_label, failure) => {
     vi.mocked(createOsceStation).mockRejectedValue(failure)
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    render(
-      <QueryClientProvider client={client}>
-        <OsceStationEditor quizId={7} initialContent={station.content} />
-      </QueryClientProvider>
+    renderWithQueryClient(
+      <OsceStationEditor quizId={7} initialContent={station.content} />
     )
     fireEvent.change(screen.getByLabelText("Station title"), { target: { value: "Preserved draft" } })
 
@@ -162,11 +163,8 @@ describe("OsceStationEditor", () => {
     vi.mocked(createOsceStation)
       .mockRejectedValueOnce(Object.assign(new Error("invalid station"), { status: 422 }))
       .mockResolvedValueOnce({ ...station, content: { ...station.content, title: "Retried draft" } })
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    render(
-      <QueryClientProvider client={client}>
-        <OsceStationEditor quizId={7} initialContent={station.content} />
-      </QueryClientProvider>
+    renderWithQueryClient(
+      <OsceStationEditor quizId={7} initialContent={station.content} />
     )
     fireEvent.change(screen.getByLabelText("Station title"), { target: { value: "Retried draft" } })
 
@@ -180,11 +178,8 @@ describe("OsceStationEditor", () => {
 
   it("keeps citation row identity and focus while the source ID is typed", async () => {
     const user = userEvent.setup()
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    render(
-      <QueryClientProvider client={client}>
-        <OsceStationEditor quizId={7} station={station} />
-      </QueryClientProvider>
+    renderWithQueryClient(
+      <OsceStationEditor quizId={7} station={station} />
     )
     await user.click(screen.getAllByRole("button", { name: "Add citation" })[0])
     const sourceId = screen.getByLabelText("Patient context citation 1 source ID")
@@ -196,11 +191,8 @@ describe("OsceStationEditor", () => {
   })
 
   it("preserves a dirty draft across same-station prop refresh and reaches conflict recovery", async () => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const view = render(
-      <QueryClientProvider client={client}>
-        <OsceStationEditor quizId={7} station={station} />
-      </QueryClientProvider>
+    const view = renderWithQueryClient(
+      <OsceStationEditor quizId={7} station={station} />
     )
     vi.mocked(updateOsceStation).mockRejectedValue(
       Object.assign(new Error("conflict"), { status: 409 })
@@ -213,11 +205,7 @@ describe("OsceStationEditor", () => {
     vi.mocked(getOsceStation).mockResolvedValue(serverRefresh)
     fireEvent.change(screen.getByLabelText("Station title"), { target: { value: "Local draft" } })
 
-    view.rerender(
-      <QueryClientProvider client={client}>
-        <OsceStationEditor quizId={7} station={serverRefresh} />
-      </QueryClientProvider>
-    )
+    view.rerender(<OsceStationEditor quizId={7} station={serverRefresh} />)
 
     expect(screen.getByLabelText("Station title")).toHaveValue("Local draft")
     fireEvent.click(screen.getByRole("button", { name: "Save station" }))
@@ -233,36 +221,27 @@ describe("OsceStationEditor", () => {
   })
 
   it("adopts server content when clean or when station identity changes", () => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const view = render(
-      <QueryClientProvider client={client}>
-        <OsceStationEditor quizId={7} station={station} />
-      </QueryClientProvider>
+    const view = renderWithQueryClient(
+      <OsceStationEditor quizId={7} station={station} />
     )
     const cleanRefresh = {
       ...station,
       version: 5,
       content: { ...station.content, title: "Clean server refresh" }
     }
-    view.rerender(
-      <QueryClientProvider client={client}>
-        <OsceStationEditor quizId={7} station={cleanRefresh} />
-      </QueryClientProvider>
-    )
+    view.rerender(<OsceStationEditor quizId={7} station={cleanRefresh} />)
     expect(screen.getByLabelText("Station title")).toHaveValue("Clean server refresh")
 
     fireEvent.change(screen.getByLabelText("Station title"), { target: { value: "Dirty first station" } })
     view.rerender(
-      <QueryClientProvider client={client}>
-        <OsceStationEditor
-          quizId={7}
-          station={{
-            ...cleanRefresh,
-            id: 10,
-            content: { ...station.content, title: "Different station" }
-          }}
-        />
-      </QueryClientProvider>
+      <OsceStationEditor
+        quizId={7}
+        station={{
+          ...cleanRefresh,
+          id: 10,
+          content: { ...station.content, title: "Different station" }
+        }}
+      />
     )
     expect(screen.getByLabelText("Station title")).toHaveValue("Different station")
   })
@@ -296,20 +275,17 @@ describe("OsceStationEditor", () => {
   })
 
   it("requires absolute HTTP(S) citation URLs", () => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    render(
-      <QueryClientProvider client={client}>
-        <OsceStationEditor
-          quizId={7}
-          initialContent={{
-            ...station.content,
-            patient_context: {
-              ...station.content.patient_context,
-              citations: [{ source_type: "url", source_id: "source-1", source_url: "/relative" }]
-            },
-          }}
-        />
-      </QueryClientProvider>
+    renderWithQueryClient(
+      <OsceStationEditor
+        quizId={7}
+        initialContent={{
+          ...station.content,
+          patient_context: {
+            ...station.content.patient_context,
+            citations: [{ source_type: "url", source_id: "source-1", source_url: "/relative" }]
+          },
+        }}
+      />
     )
 
     fireEvent.change(screen.getByLabelText("Station title"), { target: { value: "Changed title" } })
@@ -322,23 +298,20 @@ describe("OsceStationEditor", () => {
     const onCreate = vi.fn().mockRejectedValue(
       Object.assign(new Error("duplicate rubric level label"), { status: 422 })
     )
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    render(
-      <QueryClientProvider client={client}>
-        <OsceStationEditor
-          onCreate={onCreate}
-          initialContent={{
-            ...station.content,
-            rubric_domains: [{
-              ...station.content.rubric_domains[0],
-              levels: [
-                { ...station.content.rubric_domains[0].levels[0], label: "ß" },
-                { ...station.content.rubric_domains[0].levels[1], label: "ẞ" }
-              ]
-            }]
-          }}
-        />
-      </QueryClientProvider>
+    renderWithQueryClient(
+      <OsceStationEditor
+        onCreate={onCreate}
+        initialContent={{
+          ...station.content,
+          rubric_domains: [{
+            ...station.content.rubric_domains[0],
+            levels: [
+              { ...station.content.rubric_domains[0].levels[0], label: "ß" },
+              { ...station.content.rubric_domains[0].levels[1], label: "ẞ" }
+            ]
+          }]
+        }}
+      />
     )
 
     fireEvent.change(screen.getByLabelText("Station title"), { target: { value: "Changed title" } })
@@ -368,11 +341,8 @@ describe("OsceStationEditor", () => {
       }]
     }
     const onCreate = vi.fn().mockResolvedValue({ ...station, content })
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    render(
-      <QueryClientProvider client={client}>
-        <OsceStationEditor onCreate={onCreate} initialContent={content} />
-      </QueryClientProvider>
+    renderWithQueryClient(
+      <OsceStationEditor onCreate={onCreate} initialContent={content} />
     )
 
     fireEvent.change(screen.getByLabelText("Station title"), { target: { value: "Changed title" } })
@@ -390,26 +360,23 @@ describe("OsceStationEditor", () => {
 
   it("rejects fractional duration and document page values before submission", () => {
     const onCreate = vi.fn()
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    render(
-      <QueryClientProvider client={client}>
-        <OsceStationEditor
-          onCreate={onCreate}
-          initialContent={{
-            ...station.content,
-            recommended_duration_seconds: 480.5,
-            patient_context: {
-              ...station.content.patient_context,
-              citations: [{
-                source_type: "document",
-                source_id: "document-1",
-                chunk_id: "chunk-1",
-                page_number: 2.5
-              }]
-            }
-          }}
-        />
-      </QueryClientProvider>
+    renderWithQueryClient(
+      <OsceStationEditor
+        onCreate={onCreate}
+        initialContent={{
+          ...station.content,
+          recommended_duration_seconds: 480.5,
+          patient_context: {
+            ...station.content.patient_context,
+            citations: [{
+              source_type: "document",
+              source_id: "document-1",
+              chunk_id: "chunk-1",
+              page_number: 2.5
+            }]
+          }
+        }}
+      />
     )
 
     fireEvent.change(screen.getByLabelText("Station title"), { target: { value: "Changed title" } })

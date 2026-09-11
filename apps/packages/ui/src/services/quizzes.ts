@@ -139,14 +139,16 @@ export type QuizGenerateSource = {
   source_type: QuizGenerateSourceType
   source_id: string
 }
+export type SourceCitationType = QuizGenerateSourceType | "document" | "url"
 export type SourceCitation = {
-  source_type?: QuizGenerateSourceType | null
+  source_type?: SourceCitationType | null
   source_id?: string | null
   label?: string | null
   quote?: string | null
   media_id?: number | null
   chunk_id?: string | null
   timestamp_seconds?: number | null
+  page_number?: number | null
   source_url?: string | null
 }
 
@@ -430,6 +432,7 @@ export type AttemptListResponse = {
 
 // List params
 export type QuizListParams = {
+  activity_type?: "questions" | "osce" | "all"
   media_id?: number | null
   q?: string | null
   workspace_id?: string | null
@@ -546,6 +549,7 @@ export type QuizImportResponse = {
 
 export async function listQuizzes(params: QuizListParams = {}): Promise<QuizListResponse> {
   return await quizzesClient.list<QuizListResponse>({
+    activity_type: params.activity_type ?? "all",
     media_id: params.media_id,
     q: params.q,
     workspace_id: params.workspace_id,

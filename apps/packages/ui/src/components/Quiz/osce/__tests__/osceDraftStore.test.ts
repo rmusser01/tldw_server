@@ -148,4 +148,54 @@ describe("OSCE local drafts", () => {
     clearOsceDraft("user-42", 7)
     expect(readOsceDraft("user-42", 7)).toBeNull()
   })
+
+  it("requires explicit conflict resolution before rebasing a dirty draft onto newer server state", async () => {
+    const conflict = Object.assign(new Error("conflict"), { status: 409 })
+    const update = vi.fn()
+      .mockRejectedValueOnce(conflict)
+      .mockResolvedValueOnce(candidateAttempt(4, "Newest local note"))
+    const queue = createOsceSaveQueue({
+      attempt: candidateAttempt(2, "Original note"),
+      userScope: "user-42",
+      update
+    })
+
+    await expect(queue.enqueue({ notes: "Unsaved local note" })).rejects.toBe(conflict)
+    const latestServerAttempt = candidateAttempt(3, "Concurrent server note")
+
+    expect(queue.replaceAcknowledgedAttempt(latestServerAttempt)).toBe(false)
+    queue.stage({ notes: "Newest local note" })
+    await expect(queue.enqueueStaged()).rejects.toBe(conflict)
+    expect(update).toHaveBeenCalledTimes(1)
+
+    queue.resolveConflict(latestServerAttempt, "reapply")
+    await queue.enqueueStaged()
+
+    expect(update).toHaveBeenNthCalledWith(2, 7, expect.objectContaining({
+      expected_version: 3,
+      notes: "Newest local note"
+    }))
+    expect(queue.hasConflict()).toBe(false)
+  })
+
+  it("discards a conflicted local draft only when explicitly requested", async () => {
+    const conflict = Object.assign(new Error("conflict"), { status: 409 })
+    const update = vi.fn().mockRejectedValue(conflict)
+    const queue = createOsceSaveQueue({
+      attempt: candidateAttempt(2, "Original note"),
+      userScope: "user-42",
+      update
+    })
+
+    await expect(queue.enqueue({ notes: "Unsaved local note" })).rejects.toBe(conflict)
+    const latestServerAttempt = candidateAttempt(3, "Concurrent server note")
+    queue.resolveConflict(latestServerAttempt, "discard")
+
+    expect(queue.getAcknowledgedVersion()).toBe(3)
+    expect(queue.hasPending()).toBe(false)
+    expect(queue.hasConflict()).toBe(false)
+    expect(readOsceDraft("user-42", 7)).toBeNull()
+    await queue.flush()
+    expect(update).toHaveBeenCalledTimes(1)
+  })
 })

@@ -7,7 +7,15 @@ export type OsceVerificationState =
   | "modified_after_verification"
   | "manually_authored"
 export type OsceAttemptState = "in_progress" | "self_assessment" | "completed"
-export type OsceCitationSourceType = "media" | "document" | "url" | "note"
+export type OsceCitationSourceType =
+  | "media"
+  | "document"
+  | "url"
+  | "note"
+  | "flashcard_deck"
+  | "flashcard_card"
+  | "quiz_attempt"
+  | "quiz_attempt_question"
 export type OsceStationOrigin = "generated" | "manual"
 export type OsceChecklistSelection = "met" | "not_met"
 
@@ -21,6 +29,49 @@ export type OsceCitation = {
   timestamp_seconds?: number | null
   page_number?: number | null
   source_url?: string | null
+}
+
+const CITATION_LOCATOR_FIELDS = [
+  "media_id",
+  "chunk_id",
+  "timestamp_seconds",
+  "page_number",
+  "source_url"
+] as const
+
+const CITATION_LOCATORS_BY_SOURCE: Record<
+  OsceCitationSourceType,
+  ReadonlySet<(typeof CITATION_LOCATOR_FIELDS)[number]>
+> = {
+  media: new Set(["media_id", "chunk_id", "timestamp_seconds"]),
+  document: new Set(["chunk_id", "page_number"]),
+  url: new Set(["source_url"]),
+  note: new Set(["chunk_id"]),
+  flashcard_deck: new Set(["chunk_id"]),
+  flashcard_card: new Set(["chunk_id"]),
+  quiz_attempt: new Set(["chunk_id"]),
+  quiz_attempt_question: new Set(["chunk_id"])
+}
+
+export const validateOsceCitationLocator = (citation: OsceCitation): string | null => {
+  const invalidFields = CITATION_LOCATOR_FIELDS.filter(
+    (field) => citation[field] != null && !CITATION_LOCATORS_BY_SOURCE[citation.source_type].has(field)
+  )
+  if (invalidFields.length > 0) {
+    return `Invalid locator fields for ${citation.source_type}: ${invalidFields.join(", ")}.`
+  }
+  if (citation.source_type === "document" && citation.page_number != null && !Number.isInteger(citation.page_number)) {
+    return "Document citation page numbers must be whole numbers."
+  }
+  if (citation.source_type === "url") {
+    try {
+      const parsed = new URL(citation.source_url ?? "")
+      if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || !parsed.host) throw new Error()
+    } catch {
+      return "URL citations require an absolute HTTP(S) URL."
+    }
+  }
+  return null
 }
 
 export type OscePatientContext = {

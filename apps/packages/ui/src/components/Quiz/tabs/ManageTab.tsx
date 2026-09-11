@@ -192,6 +192,26 @@ type QuizImportEntry = {
 
 const QUIZ_EXPORT_FORMAT = "tldw.quiz.export.v1"
 const QUIZ_EXPORT_FORMAT_V2 = "tldw.quiz.export.v2"
+const OSCE_EXPORT_DETAIL_CONCURRENCY = 4
+
+const mapWithConcurrency = async <T, R>(
+  items: T[],
+  concurrency: number,
+  transform: (item: T, index: number) => Promise<R>
+): Promise<R[]> => {
+  const results = new Array<R>(items.length)
+  let nextIndex = 0
+  const worker = async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex
+      nextIndex += 1
+      results[index] = await transform(items[index], index)
+    }
+  }
+  const workerCount = Math.min(items.length, Math.max(1, Math.trunc(concurrency)))
+  await Promise.all(Array.from({ length: workerCount }, () => worker()))
+  return results
+}
 const ASSIGNMENT_PRIVILEGED_ROLES = new Set(["owner", "admin", "lead"])
 const SUPPORTED_QUESTION_TYPES: QuestionType[] = [
   "multiple_choice",
@@ -1215,8 +1235,10 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const getQuizExportEntry = async (quiz: Quiz): Promise<PortableQuizExportEntry> => {
     if (quiz.activity_type === "osce") {
       const summaries = await listAllOsceStations(quiz.id)
-      const stations = await Promise.all(
-        summaries.map((station) => getOsceStation(quiz.id, station.id))
+      const stations = await mapWithConcurrency(
+        summaries,
+        OSCE_EXPORT_DETAIL_CONCURRENCY,
+        (station) => getOsceStation(quiz.id, station.id)
       )
       return { activity_type: "osce", quiz, stations }
     }

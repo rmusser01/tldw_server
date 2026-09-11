@@ -232,6 +232,46 @@ describe("ManageTab OSCE authoring", () => {
     expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
   })
 
+  it("bounds concurrent OSCE station detail requests during export", async () => {
+    const summaries = Array.from({ length: 12 }, (_, index) => ({
+      id: index + 1,
+      quiz_id: 8,
+      title: `Station ${index + 1}`,
+      recommended_duration_seconds: 480,
+      order_index: index,
+      version: 1,
+      checklist_count: 1,
+      rubric_domain_count: 1,
+      verification_state: "manually_authored" as const,
+      created_at: "2026-09-11",
+      updated_at: "2026-09-11"
+    }))
+    let activeRequests = 0
+    let maxActiveRequests = 0
+    vi.mocked(listAllOsceStations).mockResolvedValue(summaries)
+    vi.mocked(getOsceStation).mockImplementation(async (quizId, stationId) => {
+      activeRequests += 1
+      maxActiveRequests = Math.max(maxActiveRequests, activeRequests)
+      await new Promise((resolve) => window.setTimeout(resolve, 5))
+      activeRequests -= 1
+      return {
+        id: stationId,
+        quiz_id: quizId,
+        content: { schema_version: "osce.station.v1", title: `Station ${stationId}` },
+        order_index: stationId - 1,
+        version: 1
+      } as never
+    })
+    render(<ManageTab onNavigateToCreate={() => {}} onNavigateToGenerate={() => {}} onStartQuiz={() => {}} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Export" }))
+
+    await waitFor(() => expect(URL.createObjectURL).toHaveBeenCalledTimes(1))
+    expect(getOsceStation).toHaveBeenCalledTimes(12)
+    expect(maxActiveRequests).toBeGreaterThan(1)
+    expect(maxActiveRequests).toBeLessThanOrEqual(4)
+  })
+
   it("cancels confirmed station deletion without changing selection", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(false)
     render(<ManageTab onNavigateToCreate={() => {}} onNavigateToGenerate={() => {}} onStartQuiz={() => {}} />)

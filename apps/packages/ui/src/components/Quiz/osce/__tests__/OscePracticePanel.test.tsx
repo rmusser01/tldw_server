@@ -148,7 +148,7 @@ describe("OscePracticePanel", () => {
       data: candidate,
       isLoading: false,
       isError: false,
-      refetch: vi.fn()
+      refetch: vi.fn().mockResolvedValue({ data: candidate })
     } as any)
     patch.mockImplementation(async (_variables: unknown) => ({ ...candidate, version: 3 }))
     begin.mockResolvedValue(revealed)
@@ -178,7 +178,7 @@ describe("OscePracticePanel", () => {
       },
       isLoading: false,
       isError: false,
-      refetch: vi.fn()
+      refetch: vi.fn().mockResolvedValue({ data: candidate })
     } as any)
 
     render(<OscePracticePanel attemptId={7} userScope="user-42" saveDebounceMs={0} />)
@@ -240,7 +240,7 @@ describe("OscePracticePanel", () => {
       data: { ...candidate, version: 3, notes: "Server note" },
       isLoading: false,
       isError: false,
-      refetch: vi.fn()
+      refetch: vi.fn().mockResolvedValue({ data: { ...candidate, version: 3, notes: "Server note" } })
     } as any)
     patch.mockRejectedValue(Object.assign(new Error("conflict"), { status: 409 }))
 
@@ -273,6 +273,38 @@ describe("OscePracticePanel", () => {
     expect(notes).toHaveValue("Newer local draft")
   })
 
+  it("requires an explicit choice before reapplying a conflicted draft to refetched state", async () => {
+    const conflict = Object.assign(new Error("conflict"), { status: 409 })
+    const latestServerAttempt = { ...candidate, version: 3, notes: "Concurrent server note" }
+    const refetch = vi.fn().mockResolvedValue({ data: latestServerAttempt })
+    vi.mocked(useOsceAttemptQuery).mockReturnValue({
+      data: candidate,
+      isLoading: false,
+      isError: false,
+      refetch
+    } as any)
+    patch
+      .mockRejectedValueOnce(conflict)
+      .mockResolvedValueOnce({ ...latestServerAttempt, version: 4, notes: "Local note" })
+
+    render(<OscePracticePanel attemptId={7} userScope="user-42" saveDebounceMs={0} />)
+    fireEvent.change(screen.getByLabelText("Private practice notes"), {
+      target: { value: "Local note" }
+    })
+
+    expect(await screen.findByRole("button", { name: "Reapply local draft" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Use server changes" })).toBeInTheDocument()
+    expect(refetch).toHaveBeenCalledTimes(1)
+    expect(patch).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole("button", { name: "Reapply local draft" }))
+
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(2))
+    expect(patch).toHaveBeenLastCalledWith(expect.objectContaining({
+      patch: expect.objectContaining({ expected_version: 3, notes: "Local note" })
+    }))
+  })
+
   it("requires a live connection to reveal or complete", () => {
     online.value = false
     render(<OscePracticePanel attemptId={7} userScope="user-42" />)
@@ -286,7 +318,7 @@ describe("OscePracticePanel", () => {
       data: revealed,
       isLoading: false,
       isError: false,
-      refetch: vi.fn()
+      refetch: vi.fn().mockResolvedValue({ data: revealed })
     } as any)
     patch
       .mockResolvedValueOnce({
@@ -321,5 +353,48 @@ describe("OscePracticePanel", () => {
     await user.click(completeButton)
 
     await waitFor(() => expect(complete).toHaveBeenCalledWith({ attemptId: 7, expectedVersion: 5 }))
+  })
+
+  it("ignores stale drafts and keeps completed attempts read-only", async () => {
+    const completedAttempt: OsceAttempt = {
+      ...revealed,
+      state: "completed",
+      version: 6,
+      notes: "Final server note",
+      completed_at: "2026-09-11T10:12:00Z",
+      checklist_selections: { "check-1": "met" },
+      rubric_selections: { "domain-1": "level-2" }
+    }
+    saveOsceDraft("user-42", {
+      attemptId: 7,
+      version: 5,
+      notes: "Stale local note",
+      checklistSelections: { "check-1": "not_met" },
+      rubricSelections: { "domain-1": "level-1" },
+      savedAt: Date.now()
+    })
+    vi.mocked(useOsceAttemptQuery).mockReturnValue({
+      data: completedAttempt,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn().mockResolvedValue({ data: completedAttempt })
+    } as any)
+
+    render(<OscePracticePanel attemptId={7} userScope="user-42" saveDebounceMs={0} />)
+
+    const notes = screen.getByLabelText("Private practice notes")
+    expect(notes).toHaveValue("Final server note")
+    expect(notes).toBeDisabled()
+    expect(screen.getByRole("radio", { name: "Met" })).toBeDisabled()
+    expect(screen.getByRole("radio", { name: /Effective/ })).toBeDisabled()
+    expect(window.localStorage.getItem(osceDraftKey("user-42", 7))).toBeNull()
+
+    fireEvent.change(notes, { target: { value: "Post-completion edit" } })
+    fireEvent.click(screen.getByRole("radio", { name: "Not met" }))
+    fireEvent.click(screen.getByRole("radio", { name: /Needs development/ }))
+
+    await waitFor(() => expect(patch).not.toHaveBeenCalled())
+    expect(notes).toHaveValue("Final server note")
+    expect(window.localStorage.getItem(osceDraftKey("user-42", 7))).toBeNull()
   })
 })
