@@ -7,8 +7,9 @@ import {
   useDeleteQuizMutation, useQuestionsQuery, useQuizzesQuery,
   useUpdateQuestionMutation, useUpdateQuizMutation
 } from "../../hooks"
-import { useOsceStationQuery, useOsceStationsQuery } from "../../hooks/useOsceQueries"
+import { useAllOsceStationsQuery, useOsceStationQuery } from "../../hooks/useOsceQueries"
 import { importQuizzesJson } from "@/services/quizzes"
+import { getOsceStation, listAllOsceStations } from "@/services/osce"
 
 vi.mock("react-i18next", () => ({ useTranslation: () => ({
   t: (_key: string, value?: string | { defaultValue?: string }) => typeof value === "string" ? value : value?.defaultValue ?? _key
@@ -19,7 +20,7 @@ vi.mock("../../hooks", () => ({
   useUpdateQuestionMutation: vi.fn(), useUpdateQuizMutation: vi.fn()
 }))
 vi.mock("../../hooks/useOsceQueries", () => ({
-  useOsceStationsQuery: vi.fn(),
+  useAllOsceStationsQuery: vi.fn(),
   useOsceStationQuery: vi.fn(),
   useCreateOsceStationMutation: vi.fn(),
   useUpdateOsceStationMutation: vi.fn()
@@ -31,6 +32,11 @@ vi.mock("@/services/tldw", () => ({
 vi.mock("@/services/quizzes", async () => ({
   ...(await vi.importActual<typeof import("@/services/quizzes")>("@/services/quizzes")),
   importQuizzesJson: vi.fn()
+}))
+vi.mock("@/services/osce", async () => ({
+  ...(await vi.importActual<typeof import("@/services/osce")>("@/services/osce")),
+  getOsceStation: vi.fn(),
+  listAllOsceStations: vi.fn()
 }))
 
 describe("ManageTab OSCE authoring", () => {
@@ -45,20 +51,34 @@ describe("ManageTab OSCE authoring", () => {
     } as never)
     vi.mocked(useQuestionsQuery).mockReturnValue({ data: { items: [], count: 0 }, isLoading: false } as never)
     vi.mocked(useOsceStationQuery).mockReturnValue({ data: undefined, isLoading: false } as never)
-    vi.mocked(useOsceStationsQuery).mockReturnValue({
-      data: { items: [{
+    vi.mocked(useAllOsceStationsQuery).mockReturnValue({
+      data: [{
         id: 9, quiz_id: 8, title: "Explain anticoagulant safety", recommended_duration_seconds: 480,
         order_index: 0, version: 2, checklist_count: 4, rubric_domain_count: 2,
         verification_state: "source_verified", created_at: "2026-09-11", updated_at: "2026-09-11"
-      }], count: 1, has_more: false, next_offset: null,
-      pagination: { total: 1, offset: 0, limit: 50, returned: 1, has_more: false, next_offset: null }
-      }, isLoading: false
+      }], isLoading: false
     } as never)
     vi.mocked(importQuizzesJson).mockResolvedValue({
       imported_quizzes: 1, failed_quizzes: 0,
       imported_questions: 0, failed_questions: 0,
       imported_stations: 1, failed_stations: 0,
       items: [], errors: []
+    })
+    vi.mocked(listAllOsceStations).mockResolvedValue([])
+    vi.mocked(getOsceStation).mockImplementation(async (quizId, stationId) => ({
+      id: stationId,
+      quiz_id: quizId,
+      content: { schema_version: "osce.station.v1", title: `Station ${stationId}` },
+      order_index: stationId,
+      version: 1
+    }) as never)
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: vi.fn(() => "blob:osce-export")
+    })
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: vi.fn()
     })
     const idle = { mutateAsync: vi.fn(), isPending: false } as never
     vi.mocked(useCreateQuizMutation).mockReturnValue(idle)
@@ -111,5 +131,29 @@ describe("ManageTab OSCE authoring", () => {
     })
 
     await waitFor(() => expect(importQuizzesJson).toHaveBeenCalledWith(payload))
+  })
+
+  it("exports every OSCE station returned by complete pagination", async () => {
+    const summaries = Array.from({ length: 201 }, (_, index) => ({
+      id: index + 1,
+      quiz_id: 8,
+      title: `Station ${index + 1}`,
+      recommended_duration_seconds: 480,
+      order_index: index,
+      version: 1,
+      checklist_count: 1,
+      rubric_domain_count: 1,
+      verification_state: "manually_authored" as const,
+      created_at: "2026-09-11",
+      updated_at: "2026-09-11"
+    }))
+    vi.mocked(listAllOsceStations).mockResolvedValue(summaries)
+    render(<ManageTab onNavigateToCreate={() => {}} onNavigateToGenerate={() => {}} onStartQuiz={() => {}} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Export" }))
+
+    await waitFor(() => expect(getOsceStation).toHaveBeenCalledTimes(201))
+    expect(listAllOsceStations).toHaveBeenCalledWith(8)
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
   })
 })

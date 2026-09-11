@@ -62,10 +62,10 @@ import type {
   QuizImportRequest,
   SourceCitation
 } from "@/services/quizzes"
-import { getOsceStation, listOsceStations } from "@/services/osce"
+import { getOsceStation, listAllOsceStations } from "@/services/osce"
 import {
+  useAllOsceStationsQuery,
   useOsceStationQuery,
-  useOsceStationsQuery
 } from "../hooks/useOsceQueries"
 import { OsceStationEditor } from "../osce/OsceStationEditor"
 import {
@@ -82,6 +82,7 @@ interface ManageTabProps {
   externalSearchQuery?: string | null
   externalSearchToken?: number | null
   onExternalSearchHandled?: () => void
+  onDirtyStateChange?: (dirty: boolean) => void
 }
 
 export const buildQuizManageQueryParams = ({
@@ -518,7 +519,8 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   onStartQuiz,
   externalSearchQuery,
   externalSearchToken,
-  onExternalSearchHandled
+  onExternalSearchHandled,
+  onDirtyStateChange
 }) => {
   const { t } = useTranslation(["option", "common"])
   const [searchQuery, setSearchQuery] = React.useState("")
@@ -671,9 +673,8 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const updateQuestionMutation = useUpdateQuestionMutation()
   const deleteQuestionMutation = useDeleteQuestionMutation()
 
-  const osceStationsQuery = useOsceStationsQuery(
+  const osceStationsQuery = useAllOsceStationsQuery(
     managingOsceQuiz?.id,
-    { limit: 200, offset: 0 },
     { enabled: managingOsceQuiz != null }
   )
   const osceStationQuery = useOsceStationQuery(
@@ -727,11 +728,15 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   )
   const reorderBusy = reorderPendingQuestionId != null || updateQuestionMutation.isPending
   const sortedOsceStations = React.useMemo(
-    () => [...(osceStationsQuery.data?.items ?? [])].sort(
+    () => [...(osceStationsQuery.data ?? [])].sort(
       (left, right) => left.order_index - right.order_index
     ),
-    [osceStationsQuery.data?.items]
+    [osceStationsQuery.data]
   )
+
+  React.useEffect(() => {
+    onDirtyStateChange?.(osceEditorDirty)
+  }, [onDirtyStateChange, osceEditorDirty])
   const mediaIds = React.useMemo(() => (
     Array.from(new Set(
       quizzes
@@ -1088,9 +1093,9 @@ export const ManageTab: React.FC<ManageTabProps> = ({
 
   const getQuizExportEntry = async (quiz: Quiz): Promise<PortableQuizExportEntry> => {
     if (quiz.activity_type === "osce") {
-      const page = await listOsceStations(quiz.id, { limit: 200, offset: 0 })
+      const summaries = await listAllOsceStations(quiz.id)
       const stations = await Promise.all(
-        page.items.map((station) => getOsceStation(quiz.id, station.id))
+        summaries.map((station) => getOsceStation(quiz.id, station.id))
       )
       return { activity_type: "osce", quiz, stations }
     }

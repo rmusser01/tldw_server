@@ -25,16 +25,19 @@ import {
   ArrowDownOutlined,
   MinusCircleOutlined
 } from "@ant-design/icons"
-import { useCreateQuizMutation, useCreateQuestionMutation } from "../hooks"
+import {
+  useCreateOsceStationMutation,
+  useCreateQuizMutation,
+  useCreateQuestionMutation
+} from "../hooks"
 import type { QuestionType, QuestionCreate } from "@/services/quizzes"
 import type { TakeTabNavigationIntent } from "../navigation"
 import {
   OsceStationEditor
 } from "../osce/OsceStationEditor"
-import {
-  createOsceStation,
-  type OsceStationAuthoringResponse,
-  type OsceStationCreateContent
+import type {
+  OsceStationAuthoringResponse,
+  OsceStationCreateContent
 } from "@/services/osce"
 import { normalizeMatchingAnswerMap } from "../utils/matchingAnswer"
 import { checkStorageBeforeWrite, notifyStorageWrite } from "@/utils/storage-guard"
@@ -99,6 +102,12 @@ const isFormValidationError = (error: unknown): boolean => {
   return Array.isArray(maybeValidationError.errorFields)
 }
 
+const isAmbiguousCreateFailure = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") return true
+  const status = Number((error as { status?: unknown }).status)
+  return !Number.isFinite(status) || status === 408 || status >= 500
+}
+
 const readCreateDraft = (): QuizCreateDraft | null => {
   if (typeof window === "undefined") return null
   try {
@@ -155,6 +164,8 @@ export const CreateTab: React.FC<CreateTabProps> = ({
   const [questions, setQuestions] = React.useState<QuestionFormData[]>([])
   const [activityType, setActivityType] = React.useState<"questions" | "osce">("questions")
   const [osceEditorDirty, setOsceEditorDirty] = React.useState(false)
+  const [createdOsceQuizId, setCreatedOsceQuizId] = React.useState<number | null>(null)
+  const [osceQuizCreationUncertain, setOsceQuizCreationUncertain] = React.useState(false)
   const [messageApi, contextHolder] = message.useMessage()
   const [pendingDraft, setPendingDraft] = React.useState<QuizCreateDraft | null>(null)
   const [draftStorageUnavailable, setDraftStorageUnavailable] = React.useState(false)
@@ -173,6 +184,7 @@ export const CreateTab: React.FC<CreateTabProps> = ({
 
   const createQuizMutation = useCreateQuizMutation()
   const createQuestionMutation = useCreateQuestionMutation()
+  const createOsceStationMutation = useCreateOsceStationMutation()
 
   const handleActivityTypeChange = (value: string | number): void => {
     const nextActivityType = value as "questions" | "osce"
@@ -196,7 +208,10 @@ export const CreateTab: React.FC<CreateTabProps> = ({
   const descriptionValue = Form.useWatch("description", form) as string | undefined
   const timeLimitValue = Form.useWatch("timeLimit", form) as number | undefined
   const passingScoreValue = Form.useWatch("passingScore", form) as number | undefined
-  const isSaving = Boolean(saveProgress) || createQuizMutation.isPending || createQuestionMutation.isPending
+  const isSaving = Boolean(saveProgress) || createQuizMutation.isPending ||
+    createQuestionMutation.isPending || createOsceStationMutation.isPending
+  const osceQuizDetailsLocked = activityType === "osce" &&
+    (createdOsceQuizId != null || osceQuizCreationUncertain)
 
   const isDirty = React.useMemo(() => {
     const hasQuizDetails = Boolean(
@@ -621,16 +636,36 @@ export const CreateTab: React.FC<CreateTabProps> = ({
     orderIndex: number
   ): Promise<OsceStationAuthoringResponse> => {
     const values = await form.validateFields()
-    const quiz = await createQuizMutation.mutateAsync({
-      name: values.name,
-      description: values.description || undefined,
-      activity_type: "osce"
+    if (osceQuizCreationUncertain) {
+      throw new Error("Quiz creation status is unknown. Check Manage before trying again to avoid a duplicate quiz.")
+    }
+
+    let quizId = createdOsceQuizId
+    if (quizId == null) {
+      try {
+        const quiz = await createQuizMutation.mutateAsync({
+          name: values.name,
+          description: values.description || undefined,
+          activity_type: "osce"
+        })
+        quizId = quiz.id
+        setCreatedOsceQuizId(quiz.id)
+      } catch (error) {
+        if (isAmbiguousCreateFailure(error)) setOsceQuizCreationUncertain(true)
+        throw error
+      }
+    }
+
+    const station = await createOsceStationMutation.mutateAsync({
+      quizId,
+      request: { content, order_index: orderIndex }
     })
-    const station = await createOsceStation(quiz.id, { content, order_index: orderIndex })
     messageApi.success(
       t("option:quiz.createOsceSuccess", { defaultValue: "OSCE created successfully." })
     )
     form.resetFields()
+    setCreatedOsceQuizId(null)
+    setOsceQuizCreationUncertain(false)
     setOsceEditorDirty(false)
     onDirtyStateChange?.(false)
     onNavigateToManage?.()
@@ -1129,7 +1164,7 @@ export const CreateTab: React.FC<CreateTabProps> = ({
             { label: "OSCE", value: "osce" }
           ]}
           onChange={handleActivityTypeChange}
-          disabled={isSaving}
+          disabled={isSaving || osceQuizDetailsLocked}
           aria-label="Activity type"
         />
       </div>
@@ -1144,7 +1179,10 @@ export const CreateTab: React.FC<CreateTabProps> = ({
             label={t("option:quiz.quizName", { defaultValue: "Quiz Name" })}
             rules={[{ required: true, message: t("option:quiz.nameRequired", { defaultValue: "Please enter a quiz name" }) }]}
           >
-            <Input placeholder={t("option:quiz.namePlaceholder", { defaultValue: "e.g., Biology Chapter 5" })} />
+            <Input
+              disabled={osceQuizDetailsLocked}
+              placeholder={t("option:quiz.namePlaceholder", { defaultValue: "e.g., Biology Chapter 5" })}
+            />
           </Form.Item>
 
           <Form.Item
@@ -1152,6 +1190,7 @@ export const CreateTab: React.FC<CreateTabProps> = ({
             label={t("option:quiz.description", { defaultValue: "Description" })}
           >
             <Input.TextArea
+              disabled={osceQuizDetailsLocked}
               placeholder={t("option:quiz.descriptionPlaceholder", { defaultValue: "Optional description..." })}
               rows={2}
             />
@@ -1214,6 +1253,20 @@ export const CreateTab: React.FC<CreateTabProps> = ({
           <h3 id="station-authoring-heading" className="text-lg font-medium text-text">
             {t("option:quiz.stationAuthoring", { defaultValue: "Station authoring" })}
           </h3>
+          {createdOsceQuizId != null ? (
+            <Alert
+              type="info"
+              showIcon
+              title={`Quiz shell #${createdOsceQuizId} created. Station retries will reuse it.`}
+            />
+          ) : null}
+          {osceQuizCreationUncertain ? (
+            <Alert
+              type="warning"
+              showIcon
+              title="Quiz creation status is unknown. Check Manage before trying again to avoid a duplicate quiz."
+            />
+          ) : null}
           <OsceStationEditor
             onCreate={handleCreateOsceStation}
             onDirtyStateChange={setOsceEditorDirty}

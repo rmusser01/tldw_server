@@ -6,6 +6,7 @@ import {
   deleteOsceStation,
   getOsceAttempt,
   getOsceStation,
+  listAllOsceStations,
   listOsceAttempts,
   listOsceStations,
   patchOsceAttempt,
@@ -23,6 +24,7 @@ export const osceKeys = {
   stationsRoot: (quizId: number) => [...osceKeys.all, "stations", quizId] as const,
   stations: (quizId: number, params: OsceStationListParams = {}) =>
     [...osceKeys.stationsRoot(quizId), params] as const,
+  allStations: (quizId: number) => [...osceKeys.stationsRoot(quizId), "all"] as const,
   station: (quizId: number, stationId: number) =>
     [...osceKeys.stationsRoot(quizId), "detail", stationId] as const,
   attemptsRoot: () => [...osceKeys.all, "attempts"] as const,
@@ -54,6 +56,17 @@ export const useOsceStationsQuery = (
 ) => useQuery({
   queryKey: osceKeys.stations(quizId ?? 0, params),
   queryFn: ({ signal }) => listOsceStations(quizId!, params, { signal }),
+  enabled: (options?.enabled ?? true) && quizId != null,
+  staleTime: 30_000,
+  refetchOnWindowFocus: false
+})
+
+export const useAllOsceStationsQuery = (
+  quizId: number | null | undefined,
+  options?: { enabled?: boolean }
+) => useQuery({
+  queryKey: osceKeys.allStations(quizId ?? 0),
+  queryFn: ({ signal }) => listAllOsceStations(quizId!, { signal }),
   enabled: (options?.enabled ?? true) && quizId != null,
   staleTime: 30_000,
   refetchOnWindowFocus: false

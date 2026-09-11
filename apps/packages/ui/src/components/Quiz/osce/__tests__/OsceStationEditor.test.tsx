@@ -106,7 +106,7 @@ describe("OsceStationEditor", () => {
     vi.mocked(updateOsceStation)
       .mockRejectedValueOnce(Object.assign(new Error("conflict"), { status: 409 }))
       .mockResolvedValueOnce({ ...station, version: 7, content: { ...station.content, title: "Local draft" } })
-    vi.mocked(getOsceStation).mockResolvedValue({ ...station, version: 6, content: { ...station.content, title: "Server title" } })
+    vi.mocked(getOsceStation).mockResolvedValue({ ...station, version: 6, order_index: 3, content: { ...station.content, title: "Server title" } })
 
     fireEvent.change(screen.getByLabelText("Station title"), { target: { value: "Local draft" } })
     fireEvent.click(screen.getByRole("button", { name: "Save station" }))
@@ -121,7 +121,42 @@ describe("OsceStationEditor", () => {
     await waitFor(() => expect(updateOsceStation).toHaveBeenLastCalledWith(
       7,
       9,
-      expect.objectContaining({ expected_version: 6, content: expect.objectContaining({ title: "Local draft" }) })
+      expect.objectContaining({
+        expected_version: 6,
+        order_index: 3,
+        content: expect.objectContaining({ title: "Local draft" })
+      })
     ))
+  })
+
+  it("requires absolute HTTP(S) citation URLs and unique rubric labels", () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <OsceStationEditor
+          quizId={7}
+          initialContent={{
+            ...station.content,
+            patient_context: {
+              ...station.content.patient_context,
+              citations: [{ source_type: "url", source_id: "source-1", source_url: "/relative" }]
+            },
+            rubric_domains: [{
+              ...station.content.rubric_domains[0],
+              levels: [
+                station.content.rubric_domains[0].levels[0],
+                { ...station.content.rubric_domains[0].levels[1], label: "needs DEVELOPMENT" }
+              ]
+            }]
+          }}
+        />
+      </QueryClientProvider>
+    )
+
+    fireEvent.change(screen.getByLabelText("Station title"), { target: { value: "Changed title" } })
+
+    expect(screen.getByText("URL citations require an absolute HTTP(S) URL.")).toBeInTheDocument()
+    expect(screen.getByText("Rubric level labels must be unique within each domain.")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Save station" })).toBeDisabled()
   })
 })

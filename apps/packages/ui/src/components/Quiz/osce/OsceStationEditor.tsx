@@ -150,6 +150,12 @@ const validateDraft = (draft: OsceStationDraft): string[] => {
   ) {
     errors.push("Each rubric domain needs a label and two to six complete ordered levels.")
   }
+  if (draft.rubric_domains.some((domain) => {
+    const labels = domain.levels.map((level) => level.label.trim().toLocaleLowerCase())
+    return new Set(labels).size !== labels.length
+  })) {
+    errors.push("Rubric level labels must be unique within each domain.")
+  }
   if (draft.expected_key_points.length < 1 || draft.expected_key_points.some((point) => !point.text.trim())) {
     errors.push("At least one expected key point is required.")
   }
@@ -160,6 +166,17 @@ const validateDraft = (draft: OsceStationDraft): string[] => {
   ]
   if (citations.some((citation) => !citation.source_id.trim())) {
     errors.push("Every citation needs a source ID.")
+  }
+  if (citations.some((citation) => {
+    if (citation.source_type !== "url") return false
+    try {
+      const parsed = new URL(citation.source_url ?? "")
+      return parsed.protocol !== "http:" && parsed.protocol !== "https:"
+    } catch {
+      return true
+    }
+  })) {
+    errors.push("URL citations require an absolute HTTP(S) URL.")
   }
   return errors
 }
@@ -360,6 +377,7 @@ export const OsceStationEditor: React.FC<OsceStationEditorProps> = ({
   const [draft, setDraft] = React.useState<OsceStationDraft>(initialDraft)
   const [acknowledged, setAcknowledged] = React.useState(initialDraft)
   const [currentVersion, setCurrentVersion] = React.useState(station?.version ?? null)
+  const [currentOrderIndex, setCurrentOrderIndex] = React.useState(station?.order_index ?? orderIndex)
   const [conflictServer, setConflictServer] = React.useState<OsceStationAuthoringResponse | null>(null)
   const [overwriteVersion, setOverwriteVersion] = React.useState<number | null>(null)
   const [confirmOverwrite, setConfirmOverwrite] = React.useState(false)
@@ -374,10 +392,11 @@ export const OsceStationEditor: React.FC<OsceStationEditorProps> = ({
     setDraft(next)
     setAcknowledged(next)
     setCurrentVersion(station?.version ?? null)
+    setCurrentOrderIndex(station?.order_index ?? orderIndex)
     setConflictServer(null)
     setOverwriteVersion(null)
     setConfirmOverwrite(false)
-  }, [initialContent, station?.content, station?.id, station?.version])
+  }, [initialContent, orderIndex, station?.content, station?.id, station?.order_index, station?.version])
 
   React.useEffect(() => {
     onDirtyStateChange?.(dirty)
@@ -398,6 +417,7 @@ export const OsceStationEditor: React.FC<OsceStationEditorProps> = ({
     setDraft(next)
     setAcknowledged(next)
     setCurrentVersion(saved.version)
+    setCurrentOrderIndex(saved.order_index)
     setConflictServer(null)
     setOverwriteVersion(null)
     setConfirmOverwrite(false)
@@ -415,7 +435,7 @@ export const OsceStationEditor: React.FC<OsceStationEditorProps> = ({
           request: {
             expected_version: expectedVersion ?? currentVersion ?? station.version,
             content: draft as OsceStationUpdateContent,
-            order_index: station.order_index
+            order_index: currentOrderIndex
           }
         })
       } else if (onCreate) {
@@ -436,6 +456,7 @@ export const OsceStationEditor: React.FC<OsceStationEditorProps> = ({
           const latest = await getOsceStation(quizId, station.id)
           setConflictServer(latest)
           setCurrentVersion(latest.version)
+          setCurrentOrderIndex(latest.order_index)
           setConfirmOverwrite(false)
           return
         } catch (latestError) {

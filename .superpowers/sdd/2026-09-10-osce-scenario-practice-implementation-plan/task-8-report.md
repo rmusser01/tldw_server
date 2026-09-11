@@ -47,3 +47,37 @@ GREEN:
 - Practice autosave, timer, Take, and Results remain deferred to Task 9.
 - The OSCE fallback/catalog remains planned; Task 8 only exposes controls when a test or server catalog marks the profile available.
 - Repository-wide typecheck remains blocked by unrelated baseline errors listed above.
+
+## Review Fix Round 1
+
+Status: complete from Task 8 head `58f0491602`; committed separately as `fix(webui): harden OSCE authoring workflows`.
+
+RED evidence:
+
+- Expanded Task 8 command: 6 files, 11 failed and 44 passed. Failures covered OSCE launch suppression, partial-create reuse, ambiguous response handling, conflict order preservation, pagination, citation/rubric validation, and Manage reset guarding.
+- The first full Quiz run also identified five older CreateTab suites whose complete hook mocks needed the newly consumed OSCE mutation hook. After those fixtures were corrected, all 13 affected Create tests passed.
+
+GREEN evidence:
+
+- Exact Task 8 focused command: 4 files, 25 tests passed.
+- Take and navigation regressions: 2 files, 31 tests passed.
+- Full Quiz component suite with bounded concurrency: 38 files, 259 tests passed.
+- Full frontend lint: exit 0 with the unchanged 169-warning baseline and no errors. Scoped shared UI lint also reports no errors.
+- Frontend typecheck remains blocked by the existing Presentation Studio and skills-certification diagnostics. No diagnostic references a changed Task 8, Quiz, or OSCE path.
+- `git diff --check`: passed after the final report/task updates.
+- Bandit remains not applicable because this review fix changes TypeScript, TSX, tests, and task documentation only.
+
+Fixes:
+
+- Hid question-attempt Start, Practice, and Review entry points for OSCE rows and blocked direct OSCE auto-start until Task 9 adds its practice route.
+- Retained a confirmed manual OSCE quiz shell ID across station-save retries, routed station creation through the shared mutation/invalidation contract, and locked shell metadata while retrying. Ambiguous shell-create responses now fail closed and direct the author to inspect Manage instead of risking an automatic duplicate; the current API has no create idempotency key that could safely resolve that ambiguity.
+- Carried the latest server `order_index` and version together through conflict recovery.
+- Propagated Manage editor dirtiness to the playground so global reset requires confirmation.
+- Added complete bounded station pagination for Manage and v2 export, including non-advancing-offset and maximum-page failure behavior instead of silent truncation.
+- Aligned citation URL, rubric-label uniqueness, and offset pagination types with the backend/OpenAPI contract.
+
+Concerns:
+
+- The OSCE generation profile remains planned/hidden unless the server catalog explicitly marks it available.
+- Task 9 practice, autosave, and results behavior was not started.
+- The first unconstrained full Quiz run produced load-related five-second timeouts. The timed-out tests passed in focused reruns, and the complete suite passed with `--maxWorkers=2`.

@@ -407,6 +407,10 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
     }
     return items
   }, [directPreviewQuiz, quizzes, sortBy])
+  const autoStartQuiz = startQuizId == null
+    ? null
+    : quizzes.find((quiz) => quiz.id === startQuizId) ??
+      (directPreviewQuiz?.id === startQuizId ? directPreviewQuiz : null)
 
   const {
     storageUnavailable,
@@ -706,10 +710,13 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
     if (lastAutoStartId.current === startQuizId) {
       return
     }
+    if (autoStartQuiz == null) return
     lastAutoStartId.current = startQuizId
-    requestGradedStart(startQuizId)
+    if (autoStartQuiz.activity_type !== "osce") {
+      requestGradedStart(startQuizId)
+    }
     onStartHandled?.()
-  }, [onStartHandled, requestGradedStart, startQuizId])
+  }, [autoStartQuiz, onStartHandled, requestGradedStart, startQuizId])
 
   React.useEffect(() => {
     if (highlightQuizId == null) {
@@ -2651,7 +2658,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
                   : undefined}
                 data-testid={`take-quiz-card-${quiz.id}`}
                 data-highlighted={isHighlighted ? "true" : undefined}
-                actions={[
+                actions={quiz.activity_type === "osce" ? undefined : [
                   <Button
                     key="start"
                     type="primary"

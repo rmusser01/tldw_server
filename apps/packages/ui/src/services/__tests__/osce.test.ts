@@ -14,6 +14,7 @@ import {
   deleteOsceStation,
   getOsceAttempt,
   getOsceStation,
+  listAllOsceStations,
   listOsceAttempts,
   listOsceStations,
   patchOsceAttempt,
@@ -23,6 +24,7 @@ import {
 } from "@/services/osce"
 import {
   osceKeys,
+  useCreateOsceStationMutation,
   useUpdateOsceStationMutation
 } from "@/components/Quiz/hooks/useOsceQueries"
 import { buildQuizExport } from "@/components/Quiz/osce/oscePortability"
@@ -104,9 +106,46 @@ describe("OSCE service wire contract", () => {
 
     await expect(getOsceStation(7, 9)).rejects.toBe(conflict)
   })
+
+  it("loads every station page without silently truncating", async () => {
+    mockBgRequest
+      .mockResolvedValueOnce({
+        items: [{ id: 1 }, { id: 2 }], count: 2, has_more: true, next_offset: 2,
+        pagination: { mode: "offset", total: 3, offset: 0, limit: 2, has_more: true, next_offset: 2 }
+      })
+      .mockResolvedValueOnce({
+        items: [{ id: 3 }], count: 1, has_more: false, next_offset: null,
+        pagination: { mode: "offset", total: 3, offset: 2, limit: 2, has_more: false, next_offset: null }
+      })
+
+    await expect(listAllOsceStations(7, { pageSize: 2 })).resolves.toEqual([
+      { id: 1 }, { id: 2 }, { id: 3 }
+    ])
+    expect(mockBgRequest.mock.calls.map(([request]) => request.path)).toEqual([
+      "/api/v1/quizzes/7/osce-stations?limit=2&offset=0",
+      "/api/v1/quizzes/7/osce-stations?limit=2&offset=2"
+    ])
+  })
+
+  it("fails closed when station pagination does not advance", async () => {
+    mockBgRequest.mockResolvedValueOnce({
+      items: [{ id: 1 }], count: 1, has_more: true, next_offset: 0,
+      pagination: { mode: "offset", total: null, offset: 0, limit: 2, has_more: true, next_offset: 0 }
+    })
+
+    await expect(listAllOsceStations(7, { pageSize: 2 })).rejects.toThrow(
+      "OSCE station pagination did not advance"
+    )
+    expect(mockBgRequest).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe("OSCE query keys and invalidation", () => {
+  beforeEach(() => {
+    mockBgRequest.mockReset()
+    mockBgRequest.mockResolvedValue({})
+  })
+
   it("keeps stable station and repeated-state attempt keys", () => {
     expect(osceKeys.stations(7, { limit: 10, offset: 0 })).toEqual([
       "quizzes", "osce", "stations", 7, { limit: 10, offset: 0 }
@@ -129,6 +168,26 @@ describe("OSCE query keys and invalidation", () => {
     await waitFor(() => {
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ["quizzes:detail", 7] })
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ["quizzes", "osce", "stations", 7] })
+    })
+  })
+
+  it("invalidates quiz and station caches after station creation", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries")
+    mockBgRequest.mockResolvedValueOnce({ id: 9, quiz_id: 7, content, version: 1 })
+    const wrapper = ({ children }: { children: React.ReactNode }) =>
+      React.createElement(QueryClientProvider, { client: queryClient }, children)
+    const { result } = renderHook(() => useCreateOsceStationMutation(), { wrapper })
+
+    await result.current.mutateAsync({ quizId: 7, request: { content, order_index: 0 } })
+
+    await waitFor(() => {
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ["quizzes:list"] })
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ["quizzes:detail", 7] })
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ["quizzes", "osce", "stations", 7] })
+      expect(queryClient.getQueryData(osceKeys.station(7, 9))).toEqual(
+        expect.objectContaining({ id: 9, quiz_id: 7 })
+      )
     })
   })
 })

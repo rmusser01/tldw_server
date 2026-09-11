@@ -4,7 +4,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { GenerateTab } from "../GenerateTab"
 import { CreateTab } from "../CreateTab"
-import { useCreateQuizMutation, useGenerateQuizMutation } from "../../hooks"
+import {
+  useCreateOsceStationMutation,
+  useCreateQuizMutation,
+  useGenerateQuizMutation
+} from "../../hooks"
 import { listQuizGenerationProfiles } from "@/services/quizzes"
 import { createOsceStation } from "@/services/osce"
 import { tldwClient } from "@/services/tldw"
@@ -23,6 +27,7 @@ vi.mock("react-i18next", () => ({
 vi.mock("../../hooks", () => ({
   useGenerateQuizMutation: vi.fn(),
   useCreateQuizMutation: vi.fn(),
+  useCreateOsceStationMutation: vi.fn(),
   useCreateQuestionMutation: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false }))
 }))
 vi.mock("@/services/quizzes", async () => ({
@@ -51,6 +56,20 @@ const renderGenerate = (onNavigateToManage = vi.fn()) => {
   return onNavigateToManage
 }
 
+const fillOsceCreateForm = () => {
+  fireEvent.click(screen.getByRole("radio", { name: "OSCE" }))
+  fireEvent.change(screen.getByLabelText("Quiz Name"), { target: { value: "Safe prescribing OSCE" } })
+  fireEvent.change(screen.getByLabelText("Station title"), { target: { value: "Anticoagulant counselling" } })
+  fireEvent.change(screen.getByLabelText("Candidate instructions"), { target: { value: "Speak with the patient." } })
+  fireEvent.change(screen.getByLabelText("Candidate task"), { target: { value: "Explain safe medicine use." } })
+  fireEvent.change(screen.getByLabelText("Patient context"), { target: { value: "A fictional adult started treatment." } })
+  fireEvent.change(screen.getByLabelText("Checklist item 1"), { target: { value: "Explains monitoring" } })
+  fireEvent.change(screen.getByLabelText("Rubric domain 1"), { target: { value: "Communication" } })
+  fireEvent.change(screen.getByLabelText("Rubric level 1 description in domain 1"), { target: { value: "The explanation is incomplete." } })
+  fireEvent.change(screen.getByLabelText("Rubric level 2 description in domain 1"), { target: { value: "The explanation is clear." } })
+  fireEvent.change(screen.getByLabelText("Expected key point 1"), { target: { value: "Discuss monitoring and warning signs." } })
+}
+
 describe("OSCE Generate and Create controls", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -76,6 +95,10 @@ describe("OSCE Generate and Create controls", () => {
       })), isPending: false
     } as never)
     vi.mocked(useCreateQuizMutation).mockReturnValue({ mutateAsync: vi.fn(async () => ({ id: 80 })), isPending: false } as never)
+    vi.mocked(useCreateOsceStationMutation).mockReturnValue({
+      mutateAsync: vi.fn(async () => ({ id: 81, quiz_id: 80 })),
+      isPending: false
+    } as never)
     vi.mocked(createOsceStation).mockResolvedValue({ id: 81, quiz_id: 80 } as never)
   })
 
@@ -141,17 +164,7 @@ describe("OSCE Generate and Create controls", () => {
       </QueryClientProvider>
     )
 
-    fireEvent.click(screen.getByRole("radio", { name: "OSCE" }))
-    fireEvent.change(screen.getByLabelText("Quiz Name"), { target: { value: "Safe prescribing OSCE" } })
-    fireEvent.change(screen.getByLabelText("Station title"), { target: { value: "Anticoagulant counselling" } })
-    fireEvent.change(screen.getByLabelText("Candidate instructions"), { target: { value: "Speak with the patient." } })
-    fireEvent.change(screen.getByLabelText("Candidate task"), { target: { value: "Explain safe medicine use." } })
-    fireEvent.change(screen.getByLabelText("Patient context"), { target: { value: "A fictional adult started treatment." } })
-    fireEvent.change(screen.getByLabelText("Checklist item 1"), { target: { value: "Explains monitoring" } })
-    fireEvent.change(screen.getByLabelText("Rubric domain 1"), { target: { value: "Communication" } })
-    fireEvent.change(screen.getByLabelText("Rubric level 1 description in domain 1"), { target: { value: "The explanation is incomplete." } })
-    fireEvent.change(screen.getByLabelText("Rubric level 2 description in domain 1"), { target: { value: "The explanation is clear." } })
-    fireEvent.change(screen.getByLabelText("Expected key point 1"), { target: { value: "Discuss monitoring and warning signs." } })
+    fillOsceCreateForm()
     fireEvent.click(screen.getByRole("button", { name: "Save station" }))
 
     await waitFor(() => expect(useCreateQuizMutation().mutateAsync).toHaveBeenCalledWith({
@@ -159,13 +172,60 @@ describe("OSCE Generate and Create controls", () => {
       description: undefined,
       activity_type: "osce"
     }))
-    await waitFor(() => expect(createOsceStation).toHaveBeenCalledWith(
-      80,
+    await waitFor(() => expect(useCreateOsceStationMutation().mutateAsync).toHaveBeenCalledWith(
       expect.objectContaining({
+        quizId: 80,
+        request: expect.objectContaining({
         order_index: 0,
         content: expect.objectContaining({ title: "Anticoagulant counselling" })
+        })
       })
     ))
     expect(navigateManage).toHaveBeenCalledTimes(1)
+  })
+
+  it("reuses the created OSCE quiz shell when station creation is retried", async () => {
+    const stationCreate = vi.fn()
+      .mockRejectedValueOnce(new Error("station save failed"))
+      .mockResolvedValueOnce({ id: 81, quiz_id: 80 })
+    vi.mocked(useCreateOsceStationMutation).mockReturnValue({
+      mutateAsync: stationCreate,
+      isPending: false
+    } as never)
+    const navigateManage = vi.fn()
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}>
+      <CreateTab onNavigateToTake={() => {}} onNavigateToManage={navigateManage} />
+    </QueryClientProvider>)
+    fillOsceCreateForm()
+
+    fireEvent.click(screen.getByRole("button", { name: "Save station" }))
+    await waitFor(() => expect(stationCreate).toHaveBeenCalledTimes(1))
+    expect(screen.getByRole("radio", { name: "OSCE" })).toBeDisabled()
+    expect(screen.getByLabelText("Quiz Name")).toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: "Save station" }))
+
+    await waitFor(() => expect(stationCreate).toHaveBeenCalledTimes(2))
+    expect(useCreateQuizMutation().mutateAsync).toHaveBeenCalledTimes(1)
+    expect(navigateManage).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not blindly recreate an OSCE shell after an ambiguous create response", async () => {
+    vi.mocked(useCreateQuizMutation).mockReturnValue({
+      mutateAsync: vi.fn(async () => { throw new TypeError("Failed to fetch") }),
+      isPending: false
+    } as never)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}>
+      <CreateTab onNavigateToTake={() => {}} />
+    </QueryClientProvider>)
+    fillOsceCreateForm()
+
+    fireEvent.click(screen.getByRole("button", { name: "Save station" }))
+    expect(await screen.findByText(/Quiz creation status is unknown/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Save station" }))
+
+    expect(useCreateQuizMutation().mutateAsync).toHaveBeenCalledTimes(1)
+    expect(useCreateOsceStationMutation().mutateAsync).not.toHaveBeenCalled()
   })
 })

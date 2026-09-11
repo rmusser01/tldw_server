@@ -87,6 +87,7 @@ export const QuizPlayground: React.FC = () => {
     initialGenerateRequested ? "generate" : "take"
   )
   const [createTabDirty, setCreateTabDirty] = React.useState(false)
+  const [manageTabDirty, setManageTabDirty] = React.useState(false)
   const [takeTabIntent, setTakeTabIntent] = React.useState<TakeTabNavigationIntent | null>(() =>
     initialAssessmentIntent
       ? {
@@ -228,6 +229,14 @@ export const QuizPlayground: React.FC = () => {
   }, [])
 
   const handleResetActiveTab = React.useCallback(() => {
+    if (activeTab === "manage" && manageTabDirty) {
+      const shouldReset = window.confirm(
+        t("option:quiz.unsavedManageResetConfirm", {
+          defaultValue: "You have unsaved OSCE station changes. Reset Manage tab?"
+        })
+      )
+      if (!shouldReset) return
+    }
     if (typeof window !== "undefined") {
       if (activeTab === "take") {
         window.sessionStorage.removeItem(TAKE_QUIZ_LIST_PREFS_KEY)
@@ -242,11 +251,14 @@ export const QuizPlayground: React.FC = () => {
     if (activeTab === "create") {
       setCreateTabDirty(false)
     }
+    if (activeTab === "manage") {
+      setManageTabDirty(false)
+    }
     setTabResetVersion((current) => ({
       ...current,
       [activeTab]: current[activeTab] + 1
     }))
-  }, [activeTab])
+  }, [activeTab, manageTabDirty, t])
 
   const handleTabChange = React.useCallback((nextTabRaw: string) => {
     const nextTab = nextTabRaw as QuizTabKey
@@ -454,6 +466,7 @@ export const QuizPlayground: React.FC = () => {
                   onExternalSearchHandled={() => {
                     setManageSearchIntent(null)
                   }}
+                  onDirtyStateChange={setManageTabDirty}
                   onNavigateToCreate={() => setActiveTab("create")}
                   onNavigateToGenerate={() => setActiveTab("generate")}
                   onStartQuiz={(quizId) => {

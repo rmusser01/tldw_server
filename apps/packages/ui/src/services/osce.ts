@@ -124,10 +124,10 @@ export type OsceStationAuthoringResponse = {
 }
 
 export type OscePagination = {
-  total: number
+  mode: "offset"
+  total: number | null
   offset: number
   limit: number
-  returned: number
   has_more: boolean
   next_offset: number | null
 }
@@ -249,6 +249,42 @@ export const listOsceStations = (
   appendNumber(query, "offset", params.offset)
   const suffix = query.size > 0 ? `?${query.toString()}` : ""
   return request(`/api/v1/quizzes/${quizId}/osce-stations${suffix}`, "GET", undefined, options?.signal)
+}
+
+export const listAllOsceStations = async (
+  quizId: number,
+  options: { pageSize?: number; maxPages?: number; signal?: AbortSignal } = {}
+): Promise<OsceStationSummary[]> => {
+  const pageSize = Math.max(1, Math.min(200, Math.trunc(options.pageSize ?? 200)))
+  const maxPages = Math.max(1, Math.trunc(options.maxPages ?? 1_000))
+  const stations: OsceStationSummary[] = []
+  const seenOffsets = new Set<number>()
+  let offset = 0
+
+  for (let pageNumber = 0; pageNumber < maxPages; pageNumber += 1) {
+    if (seenOffsets.has(offset)) {
+      throw new Error("OSCE station pagination did not advance.")
+    }
+    seenOffsets.add(offset)
+
+    const page = await listOsceStations(
+      quizId,
+      { limit: pageSize, offset },
+      { signal: options.signal }
+    )
+    stations.push(...page.items)
+
+    const hasMore = page.has_more ?? page.pagination.has_more
+    if (!hasMore) return stations
+
+    const nextOffset = page.next_offset ?? page.pagination.next_offset
+    if (nextOffset == null || !Number.isInteger(nextOffset) || nextOffset <= offset) {
+      throw new Error("OSCE station pagination did not advance.")
+    }
+    offset = nextOffset
+  }
+
+  throw new Error(`OSCE station pagination exceeded ${maxPages} pages.`)
 }
 
 export const getOsceStation = (
