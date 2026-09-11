@@ -39325,6 +39325,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             item["total_questions"] = 0
         else:
             item["total_stations"] = 0
+        for field in ("created_at", "last_modified"):
+            item[field] = self._osce_timestamp(item.get(field))
         return item
 
     @staticmethod
@@ -40443,7 +40445,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         passing_score: int | None = None,
         activity_type: Any = "questions",
         generation_profile: Any = None,
-        client_id: str = "unknown",
+        client_id: str | None = None,
     ) -> int:
         """Create a new quiz and return its ID."""
         now = self._get_current_utc_timestamp_iso()
@@ -40539,6 +40541,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """List quizzes with pagination and optional filters."""
         where_clauses = ["1=1"]
         params: list[Any] = []
+        if self.backend_type == BackendType.POSTGRESQL:
+            where_clauses.append("client_id = ?")
+            params.append(self.client_id)
         if not include_deleted:
             where_clauses.append("deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "deleted = 0")
         if media_id is not None:
@@ -40588,7 +40593,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except CharactersRAGDBError:  # noqa: TRY203
             raise
 
-    def update_quiz(self, quiz_id: int, updates: dict[str, Any], client_id: str = "unknown") -> bool:
+    def update_quiz(
+        self,
+        quiz_id: int,
+        updates: dict[str, Any],
+        client_id: str | None = None,
+    ) -> bool:
         """Update quiz fields, returns True if successful."""
         updates = dict(updates)
         expected_version = updates.pop("expected_version", None)
@@ -40610,7 +40620,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 return True
             try:
                 with self.transaction() as conn:
-                    row = conn.execute("SELECT version FROM quizzes WHERE id = ? AND deleted = 0", (quiz_id,)).fetchone()
+                    row = self._get_quiz_row_for_mutation(conn, quiz_id)
                     if not row:
                         return False
                     if int(row["version"]) != expected_version:
@@ -40665,10 +40675,22 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         value = self._ensure_json_string_from_mixed(value)
                     set_parts.append(f"{key} = ?")
                     params.append(value)
-                set_parts.extend(["last_modified = ?", "version = version + 1", "client_id = ?"])
-                params.extend([now, client_id or self.client_id])
-                params_final = params + [quiz_id]
-                query = f"UPDATE quizzes SET {', '.join(set_parts)} WHERE id = ? AND deleted = 0"  # nosec B608
+                set_parts.extend(["last_modified = ?", "version = version + 1"])
+                params.append(now)
+                if self.backend_type == BackendType.POSTGRESQL:
+                    params_final = params + [quiz_id, self.client_id]
+                    query = (
+                        f"UPDATE quizzes SET {', '.join(set_parts)} "  # nosec B608
+                        "WHERE id = ? AND deleted = FALSE AND client_id = ?"
+                    )
+                else:
+                    set_parts.append("client_id = ?")
+                    params.append(client_id or self.client_id)
+                    params_final = params + [quiz_id]
+                    query = (
+                        f"UPDATE quizzes SET {', '.join(set_parts)} "  # nosec B608
+                        "WHERE id = ? AND deleted = 0"
+                    )
                 rc = conn.execute(query, tuple(params_final)).rowcount
                 return rc > 0
         except sqlite3.Error as e:
@@ -40679,33 +40701,75 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
-                row = conn.execute("SELECT id, version, deleted FROM quizzes WHERE id = ?", (quiz_id,)).fetchone()
+                if self.backend_type == BackendType.POSTGRESQL:
+                    row = conn.execute(
+                        "SELECT id, version, deleted FROM quizzes "
+                        "WHERE id = ? AND client_id = ? FOR UPDATE",
+                        (quiz_id, self.client_id),
+                    ).fetchone()
+                else:
+                    row = conn.execute(
+                        "SELECT id, version, deleted FROM quizzes WHERE id = ?",
+                        (quiz_id,),
+                    ).fetchone()
                 if not row:
                     return False
                 cur_ver = int(row["version"])
                 deleted = int(row["deleted"])
                 if hard_delete:
-                    conn.execute("DELETE FROM quizzes WHERE id = ?", (quiz_id,))
-                    return True
+                    if self.backend_type == BackendType.POSTGRESQL:
+                        rc = conn.execute(
+                            "DELETE FROM quizzes WHERE id = ? AND client_id = ?",
+                            (quiz_id, self.client_id),
+                        ).rowcount
+                    else:
+                        rc = conn.execute("DELETE FROM quizzes WHERE id = ?", (quiz_id,)).rowcount
+                    return rc > 0
                 if deleted:
                     return True
                 if expected_version is not None and cur_ver != expected_version:
                     raise ConflictError("Version mismatch deleting quiz", entity="quizzes", identifier=quiz_id)  # noqa: TRY003
-                rc = conn.execute(
-                    "UPDATE quizzes SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND deleted = 0",
-                    (now, cur_ver + 1, self.client_id, quiz_id),
-                ).rowcount
+                if self.backend_type == BackendType.POSTGRESQL:
+                    rc = conn.execute(
+                        "UPDATE quizzes SET deleted = TRUE, last_modified = ?, version = ? "
+                        "WHERE id = ? AND deleted = FALSE AND client_id = ?",
+                        (now, cur_ver + 1, quiz_id, self.client_id),
+                    ).rowcount
+                else:
+                    rc = conn.execute(
+                        "UPDATE quizzes SET deleted = 1, last_modified = ?, version = ?, "
+                        "client_id = ? WHERE id = ? AND deleted = 0",
+                        (now, cur_ver + 1, self.client_id, quiz_id),
+                    ).rowcount
                 if rc:
-                    conn.execute(
-                        "UPDATE quiz_questions SET deleted = 1, last_modified = ?, version = version + 1, client_id = ? "
-                        "WHERE quiz_id = ? AND deleted = 0",
-                        (now, self.client_id, quiz_id),
-                    )
-                    conn.execute(
-                        "UPDATE osce_stations SET deleted = 1, updated_at = ?, version = version + 1 "
-                        "WHERE quiz_id = ? AND deleted = 0",
-                        (now, quiz_id),
-                    )
+                    if self.backend_type == BackendType.POSTGRESQL:
+                        conn.execute(
+                            "UPDATE quiz_questions SET deleted = TRUE, last_modified = ?, "
+                            "version = version + 1, client_id = ? "
+                            "WHERE quiz_id = ? AND deleted = FALSE "
+                            "AND EXISTS (SELECT 1 FROM quizzes AS q "
+                            "WHERE q.id = quiz_questions.quiz_id AND q.client_id = ?)",
+                            (now, self.client_id, quiz_id, self.client_id),
+                        )
+                        conn.execute(
+                            "UPDATE osce_stations SET deleted = TRUE, updated_at = ?, "
+                            "version = version + 1 WHERE quiz_id = ? AND deleted = FALSE "
+                            "AND EXISTS (SELECT 1 FROM quizzes AS q "
+                            "WHERE q.id = osce_stations.quiz_id AND q.client_id = ?)",
+                            (now, quiz_id, self.client_id),
+                        )
+                    else:
+                        conn.execute(
+                            "UPDATE quiz_questions SET deleted = 1, last_modified = ?, "
+                            "version = version + 1, client_id = ? "
+                            "WHERE quiz_id = ? AND deleted = 0",
+                            (now, self.client_id, quiz_id),
+                        )
+                        conn.execute(
+                            "UPDATE osce_stations SET deleted = 1, updated_at = ?, "
+                            "version = version + 1 WHERE quiz_id = ? AND deleted = 0",
+                            (now, quiz_id),
+                        )
                 return rc > 0
         except sqlite3.Error as e:
             raise CharactersRAGDBError(f"Failed to delete quiz: {e}") from e  # noqa: TRY003

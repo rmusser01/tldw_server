@@ -11,7 +11,11 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.backends.factory import reset_managed_sqlite_backends
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
+from tldw_Server_API.app.core.DB_Management.backends.factory import (
+    DatabaseBackendFactory,
+    reset_managed_sqlite_backends,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     ConflictError,
@@ -793,3 +797,82 @@ def test_quiz_schema_migration_v24_to_v25_supports_hint_metadata():
                 """,
                 (seed_quiz_id, "Hint text", 2),
             )
+
+
+def test_sqlite_quiz_client_id_defaults_to_instance_and_preserves_explicit_values():
+    with _temp_chacha_db(client_id="sqlite-owner") as db:
+        default_id = db.create_quiz(name="Default owner")
+        explicit_id = db.create_quiz(name="Explicit owner", client_id="sqlite-explicit")
+
+        assert db.get_quiz(default_id)["client_id"] == "sqlite-owner"
+        assert db.get_quiz(explicit_id)["client_id"] == "sqlite-explicit"
+
+        assert db.update_quiz(
+            explicit_id,
+            {"name": "Changed explicit owner"},
+            client_id="sqlite-updater",
+        )
+        assert db.get_quiz(explicit_id)["client_id"] == "sqlite-updater"
+
+
+@pytest.mark.timeout(90)
+def test_postgres_quiz_domain_operations_are_owner_scoped(
+    pg_database_config: DatabaseConfig,
+):
+    owner_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    attacker_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    owner = CharactersRAGDB(Path(":memory:"), client_id="quiz-owner", backend=owner_backend)
+    attacker = CharactersRAGDB(
+        Path(":memory:"), client_id="quiz-attacker", backend=attacker_backend
+    )
+    try:
+        noop_id = owner.create_quiz(name="No-op target")
+        update_id = owner.create_quiz(name="Update target")
+        soft_delete_id = owner.create_quiz(name="Soft-delete target")
+        hard_delete_id = owner.create_quiz(name="Hard-delete target")
+        legacy_id = owner.create_quiz(name="Quarantined legacy")
+        owner.execute_query(
+            "UPDATE quizzes SET client_id = ? WHERE id = ?",
+            ("unknown", legacy_id),
+        )
+
+        assert attacker.list_quizzes(include_workspace_items=True) == {
+            "items": [],
+            "count": 0,
+        }
+        assert not attacker.update_quiz(noop_id, {"expected_version": 1})
+        assert not attacker.update_quiz(update_id, {"name": "Captured"})
+        assert not attacker.delete_quiz(soft_delete_id, expected_version=1)
+        assert not attacker.delete_quiz(hard_delete_id, hard_delete=True)
+
+        assert owner.update_quiz(
+            update_id,
+            {"name": "Owner update"},
+            client_id="attempted-owner-rewrite",
+        )
+
+        rows = owner.execute_query(
+            "SELECT id, name, deleted, client_id FROM quizzes "
+            "WHERE id IN (?, ?, ?, ?, ?) ORDER BY id",
+            (noop_id, update_id, soft_delete_id, hard_delete_id, legacy_id),
+        ).fetchall()
+        by_id = {int(row["id"]): row for row in rows}
+        assert by_id[noop_id]["name"] == "No-op target"
+        assert by_id[update_id]["name"] == "Owner update"
+        assert by_id[update_id]["client_id"] == owner.client_id
+        assert not bool(by_id[soft_delete_id]["deleted"])
+        assert not bool(by_id[hard_delete_id]["deleted"])
+        assert by_id[soft_delete_id]["client_id"] == owner.client_id
+        assert by_id[hard_delete_id]["client_id"] == owner.client_id
+        assert by_id[legacy_id]["client_id"] == "unknown"
+        assert owner.get_quiz(legacy_id, include_deleted=True) is None
+        assert legacy_id not in {
+            item["id"]
+            for item in owner.list_quizzes(
+                include_workspace_items=True,
+                include_deleted=True,
+            )["items"]
+        }
+    finally:
+        attacker.close_all_connections()
+        owner.close_all_connections()

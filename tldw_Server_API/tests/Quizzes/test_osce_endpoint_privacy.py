@@ -347,3 +347,164 @@ def test_postgres_station_routes_hide_every_foreign_owner_path(
         TestConfig.reset_settings()
         attacker.close_all_connections()
         owner.close_all_connections()
+
+
+@pytest.mark.timeout(120)
+def test_postgres_quiz_http_crud_is_owner_scoped_and_cascade_safe(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    owner_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    attacker_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    owner = CharactersRAGDB(Path(":memory:"), client_id="http-owner", backend=owner_backend)
+    attacker = CharactersRAGDB(
+        Path(":memory:"), client_id="http-attacker", backend=attacker_backend
+    )
+    active: dict[str, Any] = {
+        "db": owner,
+        "user": User(
+            id=101,
+            username="http-owner",
+            email="http-owner@example.com",
+            is_active=True,
+            roles=["admin"],
+            is_admin=True,
+        ),
+    }
+
+    def override_active_db():
+        yield active["db"]
+
+    async def override_active_user():
+        return active["user"]
+
+    try:
+        TestConfig.setup_test_environment()
+        fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_active_db
+        fastapi_app.dependency_overrides[get_request_user] = override_active_user
+        with TestClient(fastapi_app, headers=AUTH_HEADERS) as test_client:
+            owner_ids = {}
+            for label in [
+                "read",
+                "update",
+                "foreign-soft-delete",
+                "foreign-hard-delete",
+                "owner-soft-delete",
+                "owner-hard-delete",
+            ]:
+                response = test_client.post(
+                    "/api/v1/quizzes",
+                    json={"name": f"Owner {label}"},
+                )
+                assert response.status_code == 200, response.text
+                owner_ids[label] = response.json()["id"]
+
+            osce_id = owner.create_quiz(name="Owner OSCE", activity_type="osce")
+            station = owner.create_osce_station(
+                osce_id,
+                materialize_station_content(station_content("Cascade target")),
+                origin="manual",
+            )
+
+            active["db"] = attacker
+            active["user"] = User(
+                id=202,
+                username="http-attacker",
+                email="http-attacker@example.com",
+                is_active=True,
+                roles=["admin"],
+                is_admin=True,
+            )
+            attacker_create = test_client.post(
+                "/api/v1/quizzes",
+                json={"name": "Attacker quiz"},
+            )
+            assert attacker_create.status_code == 200
+            attacker_id = attacker_create.json()["id"]
+
+            attacker_list = test_client.get(
+                "/api/v1/quizzes",
+                params={"include_workspace_items": True},
+            )
+            foreign_get = test_client.get(f"/api/v1/quizzes/{owner_ids['read']}")
+            foreign_update = test_client.patch(
+                f"/api/v1/quizzes/{owner_ids['update']}",
+                json={"name": "Captured", "expected_version": 1},
+            )
+            foreign_soft_delete = test_client.delete(
+                f"/api/v1/quizzes/{owner_ids['foreign-soft-delete']}",
+                params={"expected_version": 1},
+            )
+            foreign_hard_delete = test_client.delete(
+                f"/api/v1/quizzes/{owner_ids['foreign-hard-delete']}",
+                params={"hard": True},
+            )
+            foreign_osce_delete = test_client.delete(
+                f"/api/v1/quizzes/{osce_id}",
+                params={"expected_version": 1},
+            )
+
+            active["db"] = owner
+            active["user"] = User(
+                id=101,
+                username="http-owner",
+                email="http-owner@example.com",
+                is_active=True,
+                roles=["admin"],
+                is_admin=True,
+            )
+            owner_update = test_client.patch(
+                f"/api/v1/quizzes/{owner_ids['update']}",
+                json={"name": "Owner updated", "expected_version": 1},
+            )
+            owner_soft_delete = test_client.delete(
+                f"/api/v1/quizzes/{owner_ids['owner-soft-delete']}",
+                params={"expected_version": 1},
+            )
+            owner_hard_delete = test_client.delete(
+                f"/api/v1/quizzes/{owner_ids['owner-hard-delete']}",
+                params={"hard": True},
+            )
+            owner_list = test_client.get(
+                "/api/v1/quizzes",
+                params={"include_workspace_items": True},
+            )
+
+        assert attacker_list.status_code == 200
+        assert {item["id"] for item in attacker_list.json()["items"]} == {attacker_id}
+        assert [
+            foreign_get.status_code,
+            foreign_update.status_code,
+            foreign_soft_delete.status_code,
+            foreign_hard_delete.status_code,
+            foreign_osce_delete.status_code,
+        ] == [404] * 5
+        assert owner_update.status_code == 200
+        assert owner_update.json()["client_id"] == owner.client_id
+        assert owner_soft_delete.status_code == 200
+        assert owner_hard_delete.status_code == 200
+        assert attacker_id not in {item["id"] for item in owner_list.json()["items"]}
+
+        rows = owner.execute_query(
+            "SELECT id, name, deleted, client_id FROM quizzes ORDER BY id"
+        ).fetchall()
+        by_id = {int(row["id"]): row for row in rows}
+        assert by_id[owner_ids["update"]]["name"] == "Owner updated"
+        assert by_id[owner_ids["update"]]["client_id"] == owner.client_id
+        assert not bool(by_id[owner_ids["foreign-soft-delete"]]["deleted"])
+        assert not bool(by_id[owner_ids["foreign-hard-delete"]]["deleted"])
+        assert by_id[owner_ids["foreign-soft-delete"]]["client_id"] == owner.client_id
+        assert by_id[owner_ids["foreign-hard-delete"]]["client_id"] == owner.client_id
+        assert bool(by_id[owner_ids["owner-soft-delete"]]["deleted"])
+        assert owner_ids["owner-hard-delete"] not in by_id
+        assert not bool(by_id[osce_id]["deleted"])
+        station_row = owner.execute_query(
+            "SELECT deleted FROM osce_stations WHERE id = ?",
+            (station["id"],),
+        ).fetchone()
+        assert station_row is not None
+        assert not bool(station_row["deleted"])
+    finally:
+        fastapi_app.dependency_overrides.clear()
+        TestConfig.reset_settings()
+        attacker.close_all_connections()
+        owner.close_all_connections()

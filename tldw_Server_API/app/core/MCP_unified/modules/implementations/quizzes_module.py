@@ -529,11 +529,17 @@ class QuizzesModule(BaseModule):
         chacha_path = context.db_paths.get("chacha")
         if not chacha_path:
             raise ValueError("ChaChaNotes DB path not available in context")
-        return CharactersRAGDB(db_path=chacha_path, client_id=f"mcp_quizzes_{self.config.name}")
+        return CharactersRAGDB(db_path=chacha_path, client_id=self._get_client_id(context))
 
     def _get_client_id(self, context: Any) -> str:
         try:
-            return context.client_id or "mcp_quizzes"
+            user_id = getattr(context, "user_id", None)
+            if user_id is not None and str(user_id).strip():
+                return str(user_id)
+            client_id = getattr(context, "client_id", None)
+            if client_id is not None and str(client_id).strip():
+                return str(client_id)
+            return "mcp_quizzes"
         except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
             return "mcp_quizzes"
 
