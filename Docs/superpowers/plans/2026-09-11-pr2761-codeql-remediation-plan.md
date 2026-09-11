@@ -114,3 +114,8 @@ Python analysis 1759364372 on 49cce1 cleared the ten prior snapshot/Research/
 checkpoint alerts. It retains three now-repaired Whisper alerts and introduces
 2686/2687 in administrative shared-workspace root validation; those exact
 traces are under independent review and remain open.
+
+Follow-up source committed as `2e037be4452ddae74807ab672fec94a88c030cc0`.
+The protected-source record is rebound to this commit; all 7,117 protected
+files and the manifest digest remain unchanged. Legal dates and digests remain
+unchanged. Eleven licensing tests, licensing Ruff and Bandit pass.
