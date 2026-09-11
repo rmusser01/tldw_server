@@ -128,7 +128,7 @@ jobs:
           SCANNER_CACHE: ${{ runner.temp }}/backend-scanner
         run: |
           set -euo pipefail
-          mkdir -p "$EVIDENCE_DIR" "$SCANNER_CACHE"
+          install -d -m 700 "$EVIDENCE_DIR" "$SCANNER_CACHE"
           docker image inspect "$IMAGE_ID" | jq --arg source_sha "$(git rev-parse HEAD)" \
             '.[0] | {image_id: .Id, os: .Os, architecture: .Architecture,
               variant: (.Variant // ""), source_sha: $source_sha}' > "$EVIDENCE_DIR/image.json"
@@ -136,6 +136,7 @@ jobs:
           # Network acquisition has no access to the Docker daemon or repository.
           for database in --download-db-only --download-java-db-only; do
             docker run --rm --read-only --cap-drop ALL \
+              --user "$(id -u):$(id -g)" \
               --security-opt no-new-privileges:true --tmpfs /tmp:rw,nosuid,nodev,size=256m \
               --volume "$SCANNER_CACHE:/cache:rw" \
               "$TRIVY_IMAGE" image --cache-dir /cache --timeout 5m "$database"
@@ -175,9 +176,11 @@ jobs:
           SCANNER_CACHE: ${{ runner.temp }}/backend-scanner
         run: |
           set -euo pipefail
+          docker_socket_gid="$(stat -c '%g' /var/run/docker.sock)"
           # Use the loaded image by immutable config ID; never export a second image archive.
           trivy() {
             docker run --rm --network none --read-only --cap-drop ALL \
+              --user "$(id -u):$(id -g)" --group-add "$docker_socket_gid" \
               --security-opt no-new-privileges:true --tmpfs /tmp:rw,nosuid,nodev,size=1g \
               --volume /var/run/docker.sock:/var/run/docker.sock:ro \
               --volume "$SCANNER_CACHE:/cache:rw" \

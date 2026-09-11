@@ -23,6 +23,21 @@ trusted-license checks pass. CodeQL remediation TASK13013.3.1 is Done, with
 424 individually verified dispositions and source repairs. See
 [final CodeQL result](../../Evidence/PR2761-codeql-final-result.json).
 
+The next candidate `d8002fd4b400a2148edaa7d8df929512263d399c` completed CI
+with **69 passes, 38 skips and six failed checks**; CodeQL passed. Three
+backend jobs failed scanner preparation because its container user could not
+write `/cache/db`, preventing vulnerability reports and failing the container
+aggregate. The SQLite Jobs batch test crossed a one-second lease boundary
+between acquisitions and correctly reclaimed an earlier job; normal test lease
+durations now pass 36 focused tests and independent review without changing
+production behavior. The
+frontend ratchet reported one regression among otherwise inherited admin-test
+failures. Its unretained full diagnostics prevent establishing the precise
+fingerprint difference; four existing reports will now upload on failure for
+the next run. All 18 focused frontend workflow tests and independent review
+pass; the strict comparison remains unchanged.
+These failures supersede the earlier candidate's passing CI for readiness.
+
 | Item | Current state |
 | --- | --- |
 | Frozen dev input | `6c4bdcbc48f4fe4bab7019d59ad8cf962ab240da` through PR2941; do not silently add later dev work |

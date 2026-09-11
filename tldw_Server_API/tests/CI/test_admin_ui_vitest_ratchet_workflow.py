@@ -119,6 +119,30 @@ def test_admin_ui_unit_gate_uses_fail_closed_exact_base_ratchet() -> None:
 
 
 @pytest.mark.unit
+def test_admin_ui_ratchet_retains_exact_reports_after_failure() -> None:
+    """Keep failed comparisons diagnosable without uploading unrelated runner data."""
+
+    workflow = yaml.safe_load(Path(".github/workflows/frontend-required.yml").read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["frontend-required"]["steps"]
+    named_steps = {step.get("name"): step for step in steps}
+    upload = named_steps["Upload admin-ui ratchet reports"]
+
+    assert upload["if"] == "${{ always() && needs.changes.outputs.admin_ui_changed == 'true' }}"
+    assert upload["uses"] == "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+    assert upload["with"]["path"].splitlines() == [
+        "${{ runner.temp }}/admin-ui-unit-head.json",
+        "${{ runner.temp }}/admin-ui-unit-base.json",
+        "${{ runner.temp }}/admin-ui-unit-head-safety.json",
+        "${{ runner.temp }}/admin-ui-unit-base-safety.json",
+    ]
+    assert upload["with"]["if-no-files-found"] == "warn"
+    assert upload["with"]["name"] == "admin-ui-ratchet-reports"
+    assert upload["with"]["retention-days"] == 14
+    assert steps.index(named_steps["Run admin-ui unit tests"]) < steps.index(upload)
+    assert steps.index(upload) < steps.index(named_steps["Run admin-ui real-backend e2e"])
+
+
+@pytest.mark.unit
 def test_admin_ui_real_backend_projects_run_in_separate_next_processes() -> None:
     """Prevent real-backend projects from sharing one concurrent Next workspace."""
 

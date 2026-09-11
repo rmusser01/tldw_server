@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import shlex
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -219,6 +220,59 @@ def test_backend_scan_is_pinned_offline_and_does_not_publish_or_filter_findings(
     assert finalize["if"] == upload["if"] == "${{ always() && matrix.backend }}"
     assert upload["uses"] == "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
     assert upload["with"]["if-no-files-found"] == "error"
+
+
+@pytest.mark.parametrize("phase", ["Prepare backend scanner evidence", "Collect backend SBOM and vulnerabilities"])
+def test_backend_scanner_uses_mount_owner_and_only_scan_gets_socket_group(tmp_path: Path, phase: str) -> None:
+    """Execute shell argument expansion with a runner UID distinct from the socket GID."""
+    workflow = _load(".github/workflows/container-build-check.yml")
+    step = _get_step(workflow["jobs"]["build"]["steps"], phase)
+    script = step["run"].split("python - <<'PY'", 1)[0]
+    evidence = tmp_path / "evidence"
+    cache = tmp_path / "cache"
+    command_log = tmp_path / "docker-args"
+    fixture_commands = r"""
+    id() { case "$1" in -u) printf '1001\n';; -g) printf '123\n';; *) return 1;; esac; }
+    stat() { test "$*" = '-c %g /var/run/docker.sock' && printf '987\n'; }
+    git() { printf 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n'; }
+    jq() { cat >/dev/null; printf '{}\n'; }
+    docker() {
+      printf '%q ' "$@" >> "$COMMAND_LOG"
+      printf '\n' >> "$COMMAND_LOG"
+      if test "$1" = image; then printf '[]\n'; fi
+    }
+    """
+    result = subprocess.run(
+        ["/bin/bash", "-c", fixture_commands + script],
+        env={
+            **os.environ,
+            "EVIDENCE_DIR": str(evidence),
+            "SCANNER_CACHE": str(cache),
+            "COMMAND_LOG": str(command_log),
+            "IMAGE_ID": "sha256:" + "a" * 64,
+            "TRIVY_IMAGE": workflow["jobs"]["build"]["env"]["TRIVY_IMAGE"],
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    runs = [args for line in command_log.read_text().splitlines() if (args := shlex.split(line))[0] == "run"]
+    assert len(runs) == 2
+    for args in runs:
+        assert "--user" in args, "Scanner must use the owner of its runner-created mounts"
+        assert args[args.index("--user") + 1] == "1001:123"
+        assert "--read-only" in args
+        assert args[args.index("--cap-drop") + 1] == "ALL"
+        if phase.startswith("Collect"):
+            assert args[args.index("--group-add") + 1] == "987"
+            assert args[args.index("--network") + 1] == "none"
+        else:
+            assert "--group-add" not in args
+            assert not any("docker.sock" in value for value in args)
+    if phase.startswith("Prepare"):
+        assert evidence.stat().st_mode & 0o777 == 0o700
+        assert cache.stat().st_mode & 0o777 == 0o700
 
 
 @pytest.mark.parametrize(

@@ -905,6 +905,19 @@ jobs:
             --package-repo-path admin-ui \
             --changed-files "$CHANGED_FILES_PATH"
 
+      - name: Upload admin-ui ratchet reports
+        if: ${{ always() && needs.changes.outputs.admin_ui_changed == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: admin-ui-ratchet-reports
+          path: |
+            ${{ runner.temp }}/admin-ui-unit-head.json
+            ${{ runner.temp }}/admin-ui-unit-base.json
+            ${{ runner.temp }}/admin-ui-unit-head-safety.json
+            ${{ runner.temp }}/admin-ui-unit-base-safety.json
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Run admin-ui real-backend e2e
         if: needs.changes.outputs.admin_ui_changed == 'true'
         working-directory: admin-ui
