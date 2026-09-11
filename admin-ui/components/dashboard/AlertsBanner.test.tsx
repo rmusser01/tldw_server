@@ -92,31 +92,30 @@ describe('AlertsBanner', () => {
       />
     );
 
-    expect(screen.getByTestId('top-alert-message').textContent).toBe(
-      'Database connection pool exhausted'
-    );
+    expect(screen.getByRole('alert').textContent).toContain('Database connection pool exhausted');
+    expect(screen.queryByText(/Low priority/)).not.toBeInTheDocument();
   });
 
-  it('renders Acknowledge All button when onAcknowledge is provided', () => {
+  it('renders Acknowledge All button when onAcknowledgeAll is provided', () => {
     const handleAck = vi.fn();
     render(
       <AlertsBanner
         alerts={[{ severity: 'warning', id: '1' }]}
-        onAcknowledge={handleAck}
+        onAcknowledgeAll={handleAck}
       />
     );
 
-    const btn = screen.getByTestId('acknowledge-alerts-btn');
+    const btn = screen.getByRole('button', { name: 'Acknowledge All' });
     expect(btn).toBeInTheDocument();
     fireEvent.click(btn);
     expect(handleAck).toHaveBeenCalledTimes(1);
   });
 
-  it('does not render Acknowledge All button when onAcknowledge is not provided', () => {
+  it('does not render Acknowledge All button when onAcknowledgeAll is not provided', () => {
     render(
       <AlertsBanner alerts={[{ severity: 'warning' }]} />
     );
 
-    expect(screen.queryByTestId('acknowledge-alerts-btn')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Acknowledge All' })).not.toBeInTheDocument();
   });
 });

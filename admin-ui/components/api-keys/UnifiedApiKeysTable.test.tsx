@@ -31,8 +31,10 @@ describe('UnifiedApiKeysTable', () => {
             lastUsedAt: '2026-02-17T01:00:00Z',
             expiresAt: null,
             status: 'active',
-            requestCount24h: 10,
-            errorRate24h: 0.1,
+            requestCount24h: null,
+            errorRate24h: null,
+            totalTokens: null,
+            estimatedCostUsd: null,
           },
           {
             keyId: '102',
@@ -46,6 +48,8 @@ describe('UnifiedApiKeysTable', () => {
             status: 'revoked',
             requestCount24h: null,
             errorRate24h: null,
+            totalTokens: null,
+            estimatedCostUsd: null,
           },
           {
             keyId: '103',
@@ -59,6 +63,8 @@ describe('UnifiedApiKeysTable', () => {
             status: 'expired',
             requestCount24h: null,
             errorRate24h: null,
+            totalTokens: null,
+            estimatedCostUsd: null,
           },
         ]}
       />
@@ -93,6 +99,8 @@ describe('UnifiedApiKeysTable', () => {
             status: 'active',
             requestCount24h: 42,
             errorRate24h: 0.05,
+            totalTokens: null,
+            estimatedCostUsd: null,
           },
         ]}
       />
@@ -120,6 +128,8 @@ describe('UnifiedApiKeysTable', () => {
             status: 'active',
             requestCount24h: null,
             errorRate24h: null,
+            totalTokens: null,
+            estimatedCostUsd: null,
           },
         ]}
         selectedRowIds={new Set<string>()}
@@ -151,6 +161,8 @@ describe('UnifiedApiKeysTable', () => {
             status: 'active',
             requestCount24h: 10,
             errorRate24h: 0.1,
+            totalTokens: null,
+            estimatedCostUsd: null,
           },
         ]}
       />

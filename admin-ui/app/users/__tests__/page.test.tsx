@@ -253,6 +253,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();
+  vi.restoreAllMocks();
 });
 
 describe('UsersPage', () => {
@@ -303,6 +304,21 @@ describe('UsersPage', () => {
 
     await screen.findByText('Bob');
     expect(screen.queryAllByText('Dormant')).toHaveLength(0);
+  });
+
+  it.each([
+    ['invalid timestamp', 'not-a-date', false],
+    ['recent login', '2026-02-16T12:00:00Z', false],
+    ['90-day boundary', '2025-11-19T12:00:00Z', false],
+    ['older login', '2025-11-18T12:00:00Z', true],
+  ])('marks dormancy only from a valid older login: %s', async (_scenario, lastLogin, dormant) => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-02-17T12:00:00Z'));
+    apiMock.getUsers.mockResolvedValue([makeUser({ last_login: lastLogin })] as never);
+
+    render(<UsersPage />);
+    const row = (await screen.findByRole('checkbox', { name: 'Select user Alice' })).closest('tr');
+    expect(row).not.toBeNull();
+    expect(within(row as HTMLElement).queryByText('Dormant') !== null).toBe(dormant);
   });
 
   it('sends combined search and filter params to user API', async () => {
