@@ -33,27 +33,32 @@ account can use**."
 
 ## Acceptance Criteria (the what)
 
-- [ ] Preview and definition create/update validate `input.provider` when
-      present: a provider that is neither in the configured listing (after
-      admin overrides: enabled) nor covered by the owner's BYOK secret is
-      a validation **error** (`input.provider` unusable), so authoring
-      refuses with the reason instead of a future failed run
-- [ ] An admin-override-disabled provider, or a model outside the
+- [x] Preview and definition create/update validate `input.provider` when
+      present: a provider not in the configured listing (after admin
+      overrides: enabled) is a validation **error** (`input.provider`
+      unusable), so authoring refuses with the reason instead of a future
+      failed run. (Scope amendment: no BYOK exemption in this task — the
+      scheduled executor threads no owner credentials, so BYOK-covered
+      providers cannot run scheduled work today; accepting them at
+      authoring would lie. BYOK-for-scheduled-execution is a phase-2
+      design alongside server issue #2805.)
+- [x] An admin-override-disabled provider, or a model outside the
       override's `allowed_models`, is a validation **error** (admin policy
       is a hard bound, not a warning)
-- [ ] A set `input.model` that is not in the resolved provider's known
+- [x] A set `input.model` that is not in the resolved provider's known
       model list is a validation **warning** only (model lists drift and
       passthrough providers accept new names; the preview surfaces it, the
       definition still saves)
-- [ ] Blank/whitespace keys keep today's behavior (fall through to config
+- [x] Blank/whitespace keys keep today's behavior (fall through to config
       defaults; no new errors)
-- [ ] The bound check runs at preview, create, and update — the three
+- [x] The bound check runs at preview, create, and update — the three
       authoring surfaces — and the validation result is recorded in the
       preview's `validation_errors`/`warnings` like existing findings
-- [ ] Tests cover: usable provider passes; unconfigured provider errors;
-      BYOK-covered provider passes without server config; disabled
-      provider errors; model-not-allowed errors; unknown model warns;
-      blank keys unaffected
+- [x] Tests cover: usable provider passes; unconfigured provider errors;
+      disabled provider errors; model-not-allowed errors (attributed to
+      `input.model`); unknown model warns; blank keys unaffected;
+      listing-read failure does not brick authoring; legacy previews
+      hard-fail at create/update when the target becomes unusable
 
 ## Implementation Plan (the how)
 
@@ -74,7 +79,28 @@ account can use**."
 
 ## Implementation Notes
 
-(added after implementation)
+- `_bound_execution_target_findings` (module-level in the automation
+  service) coerces `input.provider`/`input.model` with the executor's
+  blank-fallthrough semantics and produces `(errors, warnings)` in the
+  shared `_field_error` / preview-warning-string shapes. Hard codes:
+  `unusable`, `provider_disabled`, `model_not_allowed`; soft:
+  `unknown_model` (warning only — model lists drift).
+- Usability source: `get_configured_providers(include_deprecated=True)`
+  (deferred import — the listing lives in the API layer) passed through
+  `apply_llm_provider_overrides_to_listing`, plus
+  `validate_provider_override(resolved, model)` for admin hard policy.
+  A listing read failure returns no findings rather than bricking
+  authoring; run-time failure semantics are unchanged.
+- Wiring: `_normalize_preview` appends the findings (preview turns
+  invalid on hard codes); `_create_definition`/`_update_definition` call
+  `_require_execution_target_bound` so previews authored before the bound
+  existed (or when the target became unusable between preview and
+  consume) hard-fail with new error code `execution_target_unusable`,
+  mapped to 422 `scheduled_task_execution_target_unusable` in the
+  control plane's error table.
+- Field attribution follows the error code: `model_not_allowed` lands on
+  `input.model`, `provider_disabled`/`unusable` on `input.provider`
+  (pinned-key discipline caught by the test matrix).
 
 ADR required: no — implements chatbook ADR-077's AC#7 clause within the
 existing scheduled-tasks control-plane design; no new boundary.
